@@ -26,7 +26,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "zod": "^4.0.10",
+    "zod": "3.25.67",
     "uuid": "^11.1.0"
   },
   "devDependencies": {

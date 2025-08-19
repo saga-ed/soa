@@ -9,6 +9,7 @@ import type {
 } from '@saga-soa/trpc-types';
 
 export const ENDPOINTS: Endpoint[] = [
+  // Project endpoints
   {
     id: 'project.getAllProjects',
     name: 'Get All Projects',
@@ -63,6 +64,8 @@ export const ENDPOINTS: Endpoint[] = [
     sampleInput: { id: '1' } as GetProjectInput,
     url: '/saga-soa/v1/trpc/project.deleteProject'
   },
+  
+  // Run endpoints
   {
     id: 'run.getAllRuns',
     name: 'Get All Runs',
@@ -119,5 +122,34 @@ export const ENDPOINTS: Endpoint[] = [
     inputType: 'GetRunInput',
     sampleInput: { id: '1' } as GetRunInput,
     url: '/saga-soa/v1/trpc/run.deleteRun'
+  },
+
+  // PubSub endpoints
+  {
+    id: 'pubsub.ping',
+    name: 'Send Ping Message',
+    method: 'POST',
+    description: 'Send a ping message and receive automatic pong response',
+    inputType: 'PingMessageInput',
+    sampleInput: { message: 'Hello from web client!' },
+    url: '/saga-soa/v1/trpc/pubsub.ping'
+  },
+  {
+    id: 'pubsub.getEventDefinitions',
+    name: 'Get Event Definitions',
+    method: 'GET',
+    description: 'Get available pubsub event definitions and schemas',
+    inputType: null,
+    sampleInput: null,
+    url: '/saga-soa/v1/trpc/pubsub.getEventDefinitions'
+  },
+  {
+    id: 'pubsub.getChannelInfo',
+    name: 'Get Channel Information',
+    method: 'GET',
+    description: 'Get information about the pingpong channel',
+    inputType: null,
+    sampleInput: null,
+    url: '/saga-soa/v1/trpc/pubsub.getChannelInfo'
   }
 ]; 

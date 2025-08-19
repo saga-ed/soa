@@ -15,7 +15,7 @@ export default {
   
   // Parsing configuration
   parsing: {
-    endpointPattern: /(\w+):\s*t(?:[\s\n]*\.input\((\w+Schema)\))?[\s\S]*?\.(query|mutation)\(/g,
+    endpointPattern: /^\s*(\w+):\s*t\s*(?:\.input\((\w+Schema)\))?\s*\.(query|mutation)\(/gm,
     routerMethodPattern: /createRouter\(\s*\)\s*\{[\s\S]*?return\s+router\(\s*\{([\s\S]*?)\}\s*\)\s*;?\s*\}/
   },
 

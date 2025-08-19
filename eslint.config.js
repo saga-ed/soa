@@ -17,7 +17,12 @@ export default [
       'prefer-const': 'warn',
       'no-var': 'warn',
       'no-console': 'off', // Allow console in examples
-      'no-unused-vars': 'warn',
+      'no-unused-vars': 'off', // Turn off base rule to avoid conflicts
+      '@typescript-eslint/no-unused-vars': ['warn', {
+        'argsIgnorePattern': '^_',
+        'varsIgnorePattern': '^_',
+        'caughtErrorsIgnorePattern': '^_'
+      }],
     },
   },
   {

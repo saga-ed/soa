@@ -18,7 +18,10 @@ export type EndpointId =
   | 'run.getRunById'
   | 'run.createRun'
   | 'run.updateRun'
-  | 'run.deleteRun';
+  | 'run.deleteRun'
+  | 'pubsub.ping'
+  | 'pubsub.getEventDefinitions'
+  | 'pubsub.getChannelInfo';
 
 export interface Endpoint {
   id: EndpointId;

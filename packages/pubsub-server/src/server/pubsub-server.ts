@@ -79,7 +79,14 @@ export class PubSubServer implements IPubSubServer {
           correlationId: z.string().optional()
         }))
         .mutation(async ({ input, ctx }) => {
-          return this.pubSubService.sendEvent(input, ctx);
+          // Ensure the input matches SendEventInput type
+          const sendEventInput: SendEventInput = {
+            name: input.name,
+            payload: input.payload,
+            clientEventId: input.clientEventId,
+            correlationId: input.correlationId
+          };
+          return this.pubSubService.sendEvent(sendEventInput, ctx);
         }),
 
       subscribe: t.procedure

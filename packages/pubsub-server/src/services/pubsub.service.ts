@@ -3,8 +3,9 @@ import { TYPES } from '../types/index.js';
 import type { 
   EventDefinition, 
   EventEnvelope,
-  ActionCtx 
+  EventName
 } from '@saga-soa/pubsub-core';
+import { isCSEEvent } from '@saga-soa/pubsub-core';
 import type { PubSubAdapter } from '../adapters/base-adapter.js';
 import type { 
   Logger,
@@ -59,8 +60,7 @@ export class PubSubService {
       // Check authorization
       const authCheck = await this.eventService.checkAuthorization(
         eventDef,
-        ctx.user,
-        ctx as ActionCtx
+        ctx.user
       );
 
       if (!authCheck.authorized) {
@@ -112,39 +112,48 @@ export class PubSubService {
 
       // Execute action if present
       let result: any;
-      let emittedEvents: EventEnvelope[] = [];
 
-      if (eventDef.action) {
+      if (isCSEEvent(eventDef)) {
+        // Create action context for dependency injection
+        const actionContext = {
+          requestId: input.clientEventId || crypto.randomUUID(),
+          emitSSE: async (eventName: EventName, payload: any, options?: { 
+            channel?: string; 
+            correlationId?: string; 
+            meta?: Record<string, unknown> 
+          }) => {
+            await this.emitSSE(eventName, payload, {
+              channel: options?.channel || eventDef.channel,
+              correlationId: options?.correlationId || input.correlationId,
+              meta: options?.meta
+            });
+          },
+          logger: this.logger
+        };
+
         const actionResult = await this.eventService.executeAction(
           eventDef,
           input.payload,
-          ctx as ActionCtx,
-          { clientEventId: input.clientEventId }
+          input.clientEventId || crypto.randomUUID(),
+          actionContext
         );
         result = actionResult.result;
-        emittedEvents = actionResult.emittedEvents;
       }
 
       // Publish the main event
       await this.adapter.publish(event);
 
-      // Publish any emitted events
-      for (const emittedEvent of emittedEvents) {
-        await this.adapter.publish(emittedEvent);
-      }
-
       this.logger.info('Event sent successfully', {
         eventName: input.name,
         eventId: event.id,
         channel: eventDef.channel,
-        hasAction: !!eventDef.action,
-        emittedCount: emittedEvents.length
+        hasAction: isCSEEvent(eventDef)
       });
 
       return {
         status: 'success',
         result,
-        emittedEvents: [event, ...emittedEvents]
+        emittedEvents: [event]
       };
 
     } catch (error) {
@@ -256,6 +265,55 @@ export class PubSubService {
           error: error instanceof Error ? error.message : 'Unknown error'
         }
       };
+    }
+  }
+
+  /**
+   * Emit an SSE event directly (used by actions to emit response events)
+   * @param eventName - The name of the SSE event to emit
+   * @param payload - The event payload
+   * @param options - Emission options
+   */
+  async emitSSE(
+    eventName: EventName,
+    payload: any,
+    options: {
+      channel: string;
+      correlationId?: string;
+      meta?: Record<string, unknown>;
+    }
+  ): Promise<void> {
+    try {
+      // Create event envelope for the SSE event
+      const envelope = this.eventService.createEventEnvelope(
+        eventName,
+        options.channel,
+        payload,
+        {
+          correlationId: options.correlationId,
+          source: 'action',
+          type: 'sse-response',
+          ...options.meta
+        }
+      );
+
+      // Publish the SSE event directly to subscribers
+      await this.adapter.publish(envelope);
+
+      this.logger.info('SSE event emitted successfully', {
+        eventName,
+        eventId: envelope.id,
+        channel: options.channel,
+        correlationId: options.correlationId
+      });
+    } catch (error) {
+      this.logger.error('Failed to emit SSE event', {
+        eventName,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        channel: options.channel,
+        correlationId: options.correlationId
+      });
+      throw error;
     }
   }
 

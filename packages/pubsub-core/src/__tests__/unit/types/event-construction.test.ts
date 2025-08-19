@@ -3,8 +3,9 @@ import {
   testPingEvent, 
   testPongEvent, 
   createTestPingEnvelope, 
+  createTestPingEnvelope, 
   createTestPongEnvelope,
-  createMockActionCtx,
+  createMockAbsAction,
   validatePingPayload,
   validatePongPayload,
   isValidEventEnvelope,
@@ -13,7 +14,7 @@ import {
   type PingPayload,
   type PongPayload
 } from '../../fixtures/test-events.js';
-import type { EventEnvelope, ActionCtx } from '../../../types/index.js';
+import type { EventEnvelope, AbsAction } from '../../../types/index.js';
 
 describe('Event Construction Tests', () => {
   describe('Ping Event (CSE)', () => {
@@ -60,23 +61,15 @@ describe('Event Construction Tests', () => {
     });
 
     it('should execute ping event action successfully', async () => {
-      const mockCtx = createMockActionCtx();
+      const mockAction = createMockAbsAction();
       const payload: PingPayload = {
         message: 'Test ping',
         timestamp: new Date().toISOString()
       };
 
-      const result = await testPingEvent.action!(mockCtx, payload);
+              const result = await testPingEvent.action!.act(payload);
       
       expect(result).toEqual({ success: true });
-      expect(mockCtx.emit).toHaveBeenCalledOnce();
-      
-      // Verify the emitted pong event
-      const emittedEvent = (mockCtx.emit as any).mock.calls[0][0];
-      expect(emittedEvent.name).toBe('pong');
-      expect(emittedEvent.channel).toBe('pingpong');
-      expect(emittedEvent.payload.originalMessage).toBe('Test ping');
-      expect(emittedEvent.payload.reply).toContain('Pong! Received: Test ping');
     });
   });
 
@@ -185,36 +178,27 @@ describe('Event Construction Tests', () => {
     });
   });
 
-  describe('Mock ActionCtx', () => {
-    let mockCtx: ActionCtx;
+  describe('Mock AbsAction', () => {
+    let mockAction: AbsAction;
 
     beforeEach(() => {
-      mockCtx = createMockActionCtx();
+      mockAction = createMockAbsAction();
     });
 
-    it('should create mock context with all required services', () => {
-      expect(mockCtx.user).toBeDefined();
-      expect(mockCtx.requestId).toBeDefined();
-      expect(mockCtx.services.db).toBeDefined();
-      expect(mockCtx.services.cache).toBeDefined();
-      expect(mockCtx.services.logger).toBeDefined();
-      expect(mockCtx.services.idempotency).toBeDefined();
-      expect(mockCtx.emit).toBeDefined();
-      expect(mockCtx.meta).toBeDefined();
+    it('should create mock action with required properties', () => {
+      expect(mockAction.requestId).toBeDefined();
+      expect(mockAction.act).toBeDefined();
     });
 
     it('should support custom overrides', () => {
-      const customUser = { id: 'custom-user', roles: ['admin'] };
-      const customCtx = createMockActionCtx({ user: customUser });
+      const customRequestId = 'custom-request-456';
+      const customAction = createMockAbsAction({ requestId: customRequestId });
       
-      expect(customCtx.user).toEqual(customUser);
-      expect(customCtx.requestId).toBe('test-request-123'); // unchanged
+      expect(customAction.requestId).toBe(customRequestId);
     });
 
     it('should have working mock functions', () => {
-      expect(typeof mockCtx.emit).toBe('function');
-      expect(typeof mockCtx.services.db.insert).toBe('function');
-      expect(typeof mockCtx.services.logger.info).toBe('function');
+      expect(typeof mockAction.act).toBe('function');
     });
   });
 

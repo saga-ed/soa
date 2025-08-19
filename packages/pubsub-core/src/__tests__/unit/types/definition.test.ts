@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import type { EventDefinition, ActionCtx } from '../../types/definition.js';
+import type { EventDefinition, AbsAction } from '../../types/index.js';
 
 describe('EventDefinition', () => {
   it('should support basic event definition', () => {
@@ -36,8 +36,12 @@ describe('EventDefinition', () => {
     const definition: EventDefinition<{ orderId: string }, { success: boolean }> = {
       name: 'orders:created',
       channel: 'orders',
-      action: async (ctx: ActionCtx, payload) => {
-        return { success: true };
+      direction: 'CSE',
+      action: {
+        requestId: crypto.randomUUID(),
+        async act(payload) {
+          return { success: true };
+        }
       }
     };
 

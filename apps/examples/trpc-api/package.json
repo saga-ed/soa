@@ -6,21 +6,26 @@
   "main": "dist/main.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "dev": "tsup --watch --onSuccess \"node dist/main.js\"",
     "build": "pnpm run build:types && tsup",
     "build:types": "cd trpc-types && pnpm run build",
+    "build:main": "tsup",
+    "dev": "tsup --watch --onSuccess \"node dist/main.js\"",
     "start": "node dist/main.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "check-types": "tsc --noEmit",
     "lint": "eslint \"src/**/*.ts\" --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "test": "vitest run",
     "clean": "rm -rf dist"
   },
-    "dependencies": {
+  "dependencies": {
     "@saga-soa/api-core": "workspace:*",
     "@saga-soa/db": "workspace:*",
     "@saga-soa/logger": "workspace:^",
+    "@saga-soa/pubsub-core": "workspace:^",
+    "@saga-soa/pubsub-server": "workspace:^",
     "@saga-soa/trpc-types": "workspace:*",
     "@trpc/client": "^11.4.3",
     "@trpc/server": "^11.0.0",
@@ -32,7 +37,7 @@
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2",
     "uuid": "^11.1.0",
-    "zod": "^3.22.2"
+    "zod": "3.25.67"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

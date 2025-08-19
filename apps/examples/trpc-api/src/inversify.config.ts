@@ -10,6 +10,10 @@ import type { IMongoConnMgr }             from '@saga-soa/db';
 import type { TRPCServerConfig }          from '@saga-soa/api-core/trpc-server-schema';
 import type { ExpressServerConfig }       from '@saga-soa/api-core/express-server-schema';
 
+// Import pubsub server components
+import { PubSubService, EventService, ChannelService, InMemoryAdapter, TYPES } from '@saga-soa/pubsub-server';
+import type { PubSubAdapter }             from '@saga-soa/pubsub-server';
+
 export const container = new Container();
 
 // Logger configuration
@@ -40,6 +44,7 @@ const trpcConfig: TRPCServerConfig = {
 // Bind logger
 container.bind<PinoLoggerConfig>('PinoLoggerConfig').toConstantValue(loggerConfig);
 container.bind<ILogger>('ILogger').to(PinoLogger).inSingletonScope();
+container.bind(TYPES.Logger).to(PinoLogger).inSingletonScope();
 
 // Bind ExpressServer configuration
 container.bind<ExpressServerConfig>('ExpressServerConfig').toConstantValue(expressConfig);
@@ -56,3 +61,9 @@ container.bind(TRPCServer).toSelf().inSingletonScope();
 
 // Bind ControllerLoader
 container.bind(ControllerLoader).toSelf().inSingletonScope();
+
+// Bind PubSub Server components (order matters for dependencies)
+container.bind<PubSubAdapter>(TYPES.PubSubAdapter).to(InMemoryAdapter).inSingletonScope();
+container.bind(TYPES.EventService).to(EventService).inSingletonScope();
+container.bind(TYPES.ChannelService).to(ChannelService).inSingletonScope();
+container.bind('PubSubService').to(PubSubService).inSingletonScope();

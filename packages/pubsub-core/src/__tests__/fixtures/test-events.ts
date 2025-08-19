@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { vi } from 'vitest';
-import type { EventDefinition, EventEnvelope, ActionCtx } from '../../types/index.js';
+import type { EventDefinition, EventEnvelope, AbsAction, CSEEvent, SSEEvent } from '../../types/index.js';
+import { createEventEnvelope } from '../../types/index.js';
 
 // Payload schemas for ping and pong events
 export const pingPayloadSchema = z.object({
@@ -18,75 +19,40 @@ export const pongPayloadSchema = z.object({
 export type PingPayload = z.infer<typeof pingPayloadSchema>;
 export type PongPayload = z.infer<typeof pongPayloadSchema>;
 
-// Mock ActionCtx for testing
-export const createMockActionCtx = (overrides?: Partial<ActionCtx>): ActionCtx => ({
-  user: { id: 'test-user', roles: ['user'] },
+// Mock AbsAction for testing
+export const createMockAbsAction = (overrides?: Partial<AbsAction>): AbsAction => ({
   requestId: 'test-request-123',
-  services: {
-    db: {
-      insert: vi.fn(),
-      find: vi.fn(),
-      update: vi.fn(),
-      delete: vi.fn()
-    },
-    cache: {
-      get: vi.fn(),
-      set: vi.fn(),
-      delete: vi.fn()
-    },
-    logger: {
-      info: vi.fn(),
-      error: vi.fn(),
-      warn: vi.fn(),
-      debug: vi.fn()
-    },
-    idempotency: {
-      check: vi.fn(),
-      runIfNotProcessed: vi.fn()
-    }
-  },
-  emit: vi.fn(),
-  meta: {},
+  act: vi.fn().mockResolvedValue(undefined),
   ...overrides
 });
 
 // Test ping event definition (CSE - Client Sent Event)
-export const testPingEvent: EventDefinition<PingPayload, { success: boolean }> = {
-  name: 'ping',
-  channel: 'pingpong',
-  payloadSchema: pingPayloadSchema,
-  direction: 'CSE',
-  description: 'Test ping event that triggers a pong response',
-  version: 1,
-  action: async (ctx, payload) => {
-    // Mock action that emits a pong response
-    const pongPayload: PongPayload = {
-      reply: `Pong! Received: ${payload.message}`,
-      originalMessage: payload.message,
-      timestamp: new Date().toISOString()
-    };
-
-    await ctx.emit({
-      id: crypto.randomUUID(),
-      name: 'pong',
-      channel: 'pingpong',
-      payload: pongPayload,
-      timestamp: new Date().toISOString()
-    });
-    
-    return { success: true };
-  }
+export const testPingEvent: CSEEvent<PingPayload, { success: boolean }> = {
+    name: 'ping',
+    channel: 'pingpong',
+    payloadSchema: pingPayloadSchema,
+    direction: 'CSE',
+    description: 'Test ping event that triggers a pong response',
+    version: 1,
+    action: {
+        requestId: crypto.randomUUID(),
+        async act(payload) {
+            // Mock action that returns success
+            // The server will add the requestId to the response
+            return { success: true };
+        }
+    }
 };
 
 // Test pong event definition (SSE - Server Sent Event)
-export const testPongEvent: EventDefinition<PongPayload> = {
-  name: 'pong',
-  channel: 'pingpong',
-  payloadSchema: pongPayloadSchema,
-  direction: 'SSE',
-  description: 'Test pong event sent in response to ping',
-  version: 1
-  // No action needed for SSE events
+export const testPongEvent: SSEEvent<PongPayload> = {
+    name: 'pong',
+    channel: 'pingpong',
+    payloadSchema: pongPayloadSchema,
+    direction: 'SSE',
+    description: 'Test pong event sent in response to ping',
+    version: 1
+    // No action property allowed - TypeScript enforces this!
 };
 
 // Helper functions to create test event envelopes

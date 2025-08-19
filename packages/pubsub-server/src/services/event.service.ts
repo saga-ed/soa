@@ -3,9 +3,13 @@ import { TYPES } from '../types/index.js';
 import type { 
   EventDefinition, 
   EventEnvelope, 
-  ActionCtx, 
-  ActionOpts 
+  AbsAction,
+  ActionContext,
+  CSEEvent,
+  SSEEvent,
+  EventName
 } from '@saga-soa/pubsub-core';
+import { isCSEEvent } from '@saga-soa/pubsub-core';
 import type { Logger } from '../types/index.js';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -43,37 +47,36 @@ export class EventService {
   async executeAction(
     eventDef: EventDefinition,
     payload: any,
-    ctx: ActionCtx,
-    opts: ActionOpts = {}
-  ): Promise<{ result: any; emittedEvents: EventEnvelope[] }> {
-    const emittedEvents: EventEnvelope[] = [];
-
-    if (!eventDef.action) {
-      return { result: undefined, emittedEvents: [] };
+    requestId: string,
+    context?: ActionContext
+  ): Promise<{ result: any }> {
+    // Only CSE events have actions - SSE events are pure data carriers
+    if (!isCSEEvent(eventDef)) {
+      return { result: undefined };
     }
 
     try {
-      // Create enhanced context with emit function
-      const enhancedCtx: ActionCtx = {
-        ...ctx,
-        emit: async (event: EventEnvelope) => {
-          emittedEvents.push(event);
-          this.logger.info('Action emitted event', { 
-            eventName: event.name, 
-            eventId: event.id 
-          });
-        }
-      };
+      // Check if the action exists (it's now optional)
+      if (!eventDef.action) {
+        return { result: undefined };
+      }
 
-      // Execute the action
-      const result = await eventDef.action(enhancedCtx, payload, opts);
+      // Execute the action using the AbsAction interface
+      // Pass context if provided, otherwise call with just payload for backward compatibility
+      const result = context 
+        ? await eventDef.action.act(payload, context)
+        : await eventDef.action.act(payload);
       
       this.logger.info('Action executed successfully', { 
         eventName: eventDef.name, 
         result 
       });
 
-      return { result, emittedEvents };
+      // Add the requestId to the result as required by the new design
+      // Create a new object with the result and requestId
+      const resultWithRequestId = Object.assign({}, result, { requestId });
+      
+      return { result: resultWithRequestId };
     } catch (error) {
       this.logger.error('Action execution failed', { 
         eventName: eventDef.name, 
@@ -101,39 +104,10 @@ export class EventService {
 
   async checkAuthorization(
     eventDef: EventDefinition,
-    user: any,
-    ctx: ActionCtx
+    user: any
   ): Promise<{ authorized: boolean; error?: string }> {
-    if (!eventDef.authScope) {
-      return { authorized: true };
-    }
-
-    if (typeof eventDef.authScope === 'string') {
-      // Simple string-based auth check
-      if (!user || !user.roles.includes(eventDef.authScope)) {
-        return { 
-          authorized: false, 
-          error: `User does not have required scope: ${eventDef.authScope}` 
-        };
-      }
-    } else if (typeof eventDef.authScope === 'function') {
-      // Function-based auth check
-      try {
-        const authorized = await eventDef.authScope(ctx);
-        if (!authorized) {
-          return { 
-            authorized: false, 
-            error: 'User not authorized for this event' 
-          };
-        }
-      } catch (error) {
-        return { 
-          authorized: false, 
-          error: `Authorization check failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
-        };
-      }
-    }
-
+    // For now, all events are authorized
+    // Authorization can be implemented at the application level using DI
     return { authorized: true };
   }
 } 

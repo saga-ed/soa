@@ -12,8 +12,8 @@
     "clean": "rm -rf .next"
   },
   "dependencies": {
-    "@saga/ui": "workspace:*",
     "@saga-soa/trpc-types": "workspace:*",
+    "@saga/ui": "workspace:*",
     "@trpc/client": "^11.0.0",
     "next": "^15.3.0",
     "react": "^19.1.0",

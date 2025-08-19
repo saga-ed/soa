@@ -23,7 +23,7 @@
     "pino": "^8.15.0",
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2",
-    "zod": "^3.22.2"
+    "zod": "3.25.67"
   },
   "devDependencies": {
     "@saga/typescript-config": "workspace:*",

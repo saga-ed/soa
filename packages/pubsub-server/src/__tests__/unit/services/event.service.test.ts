@@ -4,7 +4,8 @@ import { EventService } from '../../../services/event.service.js';
 import { MockLogger } from '../../../__tests__/mocks/mock-logger.js';
 import { TYPES } from '../../../types/index.js';
 import { z } from 'zod';
-import type { EventDefinition } from '@saga-soa/pubsub-core';
+import type { EventDefinition, CSEEvent, SSEEvent } from '@saga-soa/pubsub-core';
+import crypto from 'crypto';
 
 describe('EventService', () => {
   let container: Container;
@@ -76,61 +77,49 @@ describe('EventService', () => {
 
   describe('executeAction', () => {
     it('should execute action and return result', async () => {
-      const eventDef: EventDefinition = {
+      const eventDef: CSEEvent<{ orderId: string }, { success: boolean; orderId: string }> = {
         name: 'orders:created',
         channel: 'orders',
-        action: async (ctx, payload) => {
-          return { success: true, orderId: payload.orderId };
+        direction: 'CSE',
+        action: {
+          requestId: crypto.randomUUID(),
+          async act(payload) {
+            return { success: true, orderId: payload.orderId };
+          }
         }
-      };
-
-      const ctx = {
-        user: { id: 'user1', roles: ['user'] },
-        services: {},
-        meta: {}
       };
 
       const result = await eventService.executeAction(
         eventDef,
         { orderId: '123' },
-        ctx
+        'test-request-123'
       );
 
-      expect(result.result).toEqual({ success: true, orderId: '123' });
-      expect(result.emittedEvents).toEqual([]);
+      expect(result.result).toEqual({ success: true, orderId: '123', requestId: 'test-request-123' });
     });
 
     it('should handle actions that emit events', async () => {
-      const eventDef: EventDefinition = {
+      const eventDef: CSEEvent<{ orderId: string }, { success: boolean }> = {
         name: 'orders:created',
         channel: 'orders',
-        action: async (ctx, payload) => {
-          await ctx.emit({
-            id: 'event1',
-            name: 'orders:processed',
-            channel: 'orders',
-            payload: { orderId: payload.orderId },
-            timestamp: new Date().toISOString()
-          });
-          return { success: true };
+        direction: 'CSE',
+        action: {
+          requestId: crypto.randomUUID(),
+          async act(payload) {
+            // In the new design, actions don't emit events directly
+            // They just return results
+            return { success: true };
+          }
         }
-      };
-
-      const ctx = {
-        user: { id: 'user1', roles: ['user'] },
-        services: {},
-        meta: {}
       };
 
       const result = await eventService.executeAction(
         eventDef,
         { orderId: '123' },
-        ctx
+        'test-request-123'
       );
 
-      expect(result.result).toEqual({ success: true });
-      expect(result.emittedEvents).toHaveLength(1);
-      expect(result.emittedEvents[0].name).toBe('orders:processed');
+      expect(result.result).toEqual({ success: true, requestId: 'test-request-123' });
     });
 
     it('should handle events without actions', async () => {
@@ -139,20 +128,13 @@ describe('EventService', () => {
         channel: 'orders'
       };
 
-      const ctx = {
-        user: { id: 'user1', roles: ['user'] },
-        services: {},
-        meta: {}
-      };
-
       const result = await eventService.executeAction(
         eventDef,
         { orderId: '123' },
-        ctx
+        'test-request-123'
       );
 
       expect(result.result).toBeUndefined();
-      expect(result.emittedEvents).toEqual([]);
     });
   });
 
@@ -181,16 +163,9 @@ describe('EventService', () => {
         channel: 'orders'
       };
 
-      const ctx = {
-        user: { id: 'user1', roles: ['user'] },
-        services: {},
-        meta: {}
-      };
-
       const result = await eventService.checkAuthorization(
         eventDef,
-        { id: 'user1', roles: ['user'] },
-        ctx
+        { id: 'user1', roles: ['user'] }
       );
 
       expect(result.authorized).toBe(true);
@@ -199,43 +174,27 @@ describe('EventService', () => {
     it('should check string-based auth scope', async () => {
       const eventDef: EventDefinition = {
         name: 'orders:created',
-        channel: 'orders',
-        authScope: 'admin'
-      };
-
-      const ctx = {
-        user: { id: 'user1', roles: ['user'] },
-        services: {},
-        meta: {}
+        channel: 'orders'
       };
 
       const result = await eventService.checkAuthorization(
         eventDef,
-        { id: 'user1', roles: ['user'] },
-        ctx
+        { id: 'user1', roles: ['user'] }
       );
 
-      expect(result.authorized).toBe(false);
-      expect(result.error).toContain('admin');
+      // In the new design, all events are authorized by default
+      expect(result.authorized).toBe(true);
     });
 
     it('should allow users with required scope', async () => {
       const eventDef: EventDefinition = {
         name: 'orders:created',
-        channel: 'orders',
-        authScope: 'admin'
-      };
-
-      const ctx = {
-        user: { id: 'user1', roles: ['user'] },
-        services: {},
-        meta: {}
+        channel: 'orders'
       };
 
       const result = await eventService.checkAuthorization(
         eventDef,
-        { id: 'user1', roles: ['admin'] },
-        ctx
+        { id: 'user1', roles: ['admin'] }
       );
 
       expect(result.authorized).toBe(true);

@@ -4,7 +4,7 @@ import {
     PongResponseSchema,
     type PingMessageInput,
     type PongResponseOutput
-} from './schema/events-schema.js';
+} from './schema/pubsub-schemas.js';
 
 // ============================================================================
 // Event Definitions

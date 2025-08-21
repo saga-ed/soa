@@ -2,7 +2,7 @@ import { injectable, inject } from 'inversify';
 import { AbstractTRPCController, router } from '@saga-soa/api-core/abstract-trpc-controller';
 import type { ILogger } from '@saga-soa/logger';
 import { events, createPingEnvelope } from './events.js';
-import { PingMessageSchema, type PingMessageInput } from './schema/events-schema.js';
+import { PingMessageSchema, type PingMessageInput } from './schema/pubsub-schemas.js';
 
 // Import pubsub server functionality
 import { PubSubService, TYPES, ChannelService } from '@saga-soa/pubsub-server';

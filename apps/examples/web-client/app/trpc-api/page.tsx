@@ -322,6 +322,34 @@ export default function TRPCAPIPage() {
           <p className={styles.subtitle}>
             Comprehensive testing interface for the enhanced tRPC API pubsub functionality
           </p>
+          
+          {/* Navigation */}
+          <div className={styles.section}>
+            <div className={styles.connectionStatusRow}>
+              <h2 className={styles.sectionTitle}>🔧 Testing Tools</h2>
+              <div className={styles.connectionControlsRow}>
+                <a
+                  href="/trpc-api/endpoints"
+                  className={`${styles.button} ${styles.buttonPrimary}`}
+                  style={{ 
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}
+                >
+                  🧪 Endpoint Tester
+                </a>
+              </div>
+            </div>
+            <div className={styles.infoBox}>
+              <p className={styles.infoText}>
+                <strong className={styles.infoTextStrong}>Endpoint Tester:</strong> Use the endpoint tester 
+                to try all tRPC API endpoints with dropdown selection, code generation, and response inspection. 
+                Perfect for testing project, run, and pubsub endpoints with both cURL and tRPC client modes.
+              </p>
+            </div>
+          </div>
         </div>
 
         {/* Connection Status */}

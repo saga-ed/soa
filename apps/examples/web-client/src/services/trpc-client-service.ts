@@ -51,6 +51,15 @@ export class TrpcClientService implements ServiceInterface {
         case 'run.deleteRun':
           result = await this.client.run.deleteRun.mutate(JSON.parse(input));
           break;
+        case 'pubsub.ping':
+          result = await this.client.pubsub.ping.mutate(JSON.parse(input));
+          break;
+        case 'pubsub.getEventDefinitions':
+          result = await this.client.pubsub.getEventDefinitions.query();
+          break;
+        case 'pubsub.getChannelInfo':
+          result = await this.client.pubsub.getChannelInfo.query();
+          break;
         default:
           throw new Error(`Unknown endpoint: ${endpoint.id}`);
       }
@@ -92,6 +101,12 @@ export class TrpcClientService implements ServiceInterface {
         return `const result = await trpc.run.updateRun.mutate(${inputStr});`;
       case 'run.deleteRun':
         return `const result = await trpc.run.deleteRun.mutate(${inputStr});`;
+      case 'pubsub.ping':
+        return `const result = await trpc.pubsub.ping.mutate(${inputStr});`;
+      case 'pubsub.getEventDefinitions':
+        return `const result = await trpc.pubsub.getEventDefinitions.query();`;
+      case 'pubsub.getChannelInfo':
+        return `const result = await trpc.pubsub.getChannelInfo.query();`;
       default:
         return `// Unknown endpoint: ${endpoint.id}`;
     }

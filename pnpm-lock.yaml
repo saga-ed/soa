@@ -346,6 +346,37 @@ importers:
         specifier: 5.8.2
         version: 5.8.2
 
+  build-tools/zod2ts:
+    dependencies:
+      commander:
+        specifier: ^12.0.0
+        version: 12.1.0
+      zod:
+        specifier: 3.25.67
+        version: 3.25.67
+      zod-to-ts:
+        specifier: ^1.2.0
+        version: 1.2.0(typescript@5.8.3)(zod@3.25.67)
+    devDependencies:
+      '@saga/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/typescript-config
+      '@types/node':
+        specifier: 24.0.12
+        version: 24.0.12
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.0(@swc/core@1.12.6(@swc/helpers@0.5.17))(jiti@2.5.1)(postcss@8.5.6)(tsx@4.20.3)(typescript@5.8.3)(yaml@2.8.0)
+      tsx:
+        specifier: ^4.20.3
+        version: 4.20.3
+      typescript:
+        specifier: ^5.8.3
+        version: 5.8.3
+      vitest:
+        specifier: ^1.5.0
+        version: 1.6.1(@types/node@24.0.12)(lightningcss@1.30.1)
+
   packages/api-core:
     dependencies:
       '@apollo/server':
@@ -12531,6 +12562,24 @@ snapshots:
 
   vary@1.1.2: {}
 
+  vite-node@1.6.1(@types/node@24.0.12)(lightningcss@1.30.1):
+    dependencies:
+      cac: 6.7.14
+      debug: 4.4.1
+      pathe: 1.1.2
+      picocolors: 1.1.1
+      vite: 5.4.19(@types/node@24.0.12)(lightningcss@1.30.1)
+    transitivePeerDependencies:
+      - '@types/node'
+      - less
+      - lightningcss
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - supports-color
+      - terser
+
   vite-node@1.6.1(@types/node@24.2.0)(lightningcss@1.30.1):
     dependencies:
       cac: 6.7.14
@@ -12623,6 +12672,16 @@ snapshots:
       fsevents: 2.3.3
       lightningcss: 1.30.1
 
+  vite@5.4.19(@types/node@24.0.12)(lightningcss@1.30.1):
+    dependencies:
+      esbuild: 0.21.5
+      postcss: 8.5.6
+      rollup: 4.44.0
+    optionalDependencies:
+      '@types/node': 24.0.12
+      fsevents: 2.3.3
+      lightningcss: 1.30.1
+
   vite@5.4.19(@types/node@24.2.0)(lightningcss@1.30.1):
     dependencies:
       esbuild: 0.21.5
@@ -12652,6 +12711,40 @@ snapshots:
       '@types/node': 24.3.1
       fsevents: 2.3.3
       lightningcss: 1.30.1
+
+  vitest@1.6.1(@types/node@24.0.12)(lightningcss@1.30.1):
+    dependencies:
+      '@vitest/expect': 1.6.1
+      '@vitest/runner': 1.6.1
+      '@vitest/snapshot': 1.6.1
+      '@vitest/spy': 1.6.1
+      '@vitest/utils': 1.6.1
+      acorn-walk: 8.3.4
+      chai: 4.5.0
+      debug: 4.4.1
+      execa: 8.0.1
+      local-pkg: 0.5.1
+      magic-string: 0.30.17
+      pathe: 1.1.2
+      picocolors: 1.1.1
+      std-env: 3.9.0
+      strip-literal: 2.1.1
+      tinybench: 2.9.0
+      tinypool: 0.8.4
+      vite: 5.4.19(@types/node@24.0.12)(lightningcss@1.30.1)
+      vite-node: 1.6.1(@types/node@24.0.12)(lightningcss@1.30.1)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/node': 24.0.12
+    transitivePeerDependencies:
+      - less
+      - lightningcss
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - supports-color
+      - terser
 
   vitest@1.6.1(@types/node@24.2.0)(lightningcss@1.30.1):
     dependencies:

@@ -105,10 +105,36 @@ export class Zod2tsGenerator {
         '--output-dir', outputDir
       ];
       
-      // Use tsx to run the TypeScript source directly
-      const child = spawn('npx', ['tsx', zod2tsPath, ...args], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: this.basePath
+      // Use the zod2ts binary directly instead of tsx
+      // Try multiple possible paths to find the zod2ts binary
+      const possiblePaths = [
+        path.resolve(this.basePath, '../../../build-tools/zod2ts/bin/zod2ts'),  // For apps/examples/trpc-api/trpc-types
+        path.resolve(this.basePath, '../../../../build-tools/zod2ts/bin/zod2ts'),  // For deeper nesting
+        path.resolve(this.basePath, '../../build-tools/zod2ts/bin/zod2ts'),  // Alternative
+        '/home/skelly/dev/saga-soa/build-tools/zod2ts/bin/zod2ts',  // Absolute fallback
+      ];
+      
+      let zod2tsBinary: string | null = null;
+      for (const testPath of possiblePaths) {
+        try {
+          await fs.access(testPath);
+          zod2tsBinary = testPath;
+          break;
+        } catch {
+          // Continue to next path
+        }
+      }
+      
+      if (!zod2tsBinary) {
+        resolve({ 
+          success: false, 
+          error: `Could not find zod2ts binary. Tried paths: ${possiblePaths.join(', ')}` 
+        });
+        return;
+      }
+      
+      const child = spawn('node', [zod2tsBinary, ...args], {
+        stdio: ['pipe', 'pipe', 'pipe']
       });
       
       let stdout = '';
@@ -134,7 +160,7 @@ export class Zod2tsGenerator {
         } else {
           resolve({ 
             success: false, 
-            error: stderr || `Process exited with code ${code}` 
+            error: stderr || stdout || `Process exited with code ${code}` 
           });
         }
       });

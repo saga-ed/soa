@@ -7,3 +7,4 @@ packages:
   - 'apps/examples/web-client'
   - 'apps/web'
   - 'packages/*'
+  - 'build-tools/*'

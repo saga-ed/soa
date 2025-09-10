@@ -18,12 +18,13 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@saga/eslint-config": "workspace:*",
+    "@eslint/eslintrc": "^3.3.1",
     "@saga/typescript-config": "workspace:*",
     "@types/node": "^22.15.3",
     "@types/react": "19.1.0",
     "@types/react-dom": "19.1.1",
-    "eslint": "^9.28.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^15.4.0",
     "typescript": "5.8.2"
   }
 }

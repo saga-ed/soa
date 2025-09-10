@@ -281,6 +281,9 @@ importers:
       '@saga-soa/trpc-codegen':
         specifier: workspace:*
         version: link:../../../../packages/trpc-codegen
+      '@saga-soa/zod2ts':
+        specifier: workspace:*
+        version: link:../../../../build-tools/zod2ts
       '@trpc/client':
         specifier: ^11.4.3
         version: 11.4.3(@trpc/server@11.4.3(typescript@5.8.2))(typescript@5.8.2)

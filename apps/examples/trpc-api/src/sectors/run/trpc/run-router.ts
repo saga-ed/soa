@@ -5,9 +5,9 @@ import {
   CreateRunSchema,
   UpdateRunSchema,
   GetRunSchema,
-  type CreateRunInput,
-  type UpdateRunInput,
-  type GetRunInput,
+  type CreateRunZ,
+  type UpdateRunZ,
+  type GetRunZ,
 } from './schema/run-schemas.js';
 import { RunHelper } from './run-helper.js';
 
@@ -31,7 +31,7 @@ export class RunController extends AbstractTRPCController {
       }),
 
       // Get run by ID
-      getRunById: t.input(GetRunSchema).query(({ input }: { input: GetRunInput }) => {
+      getRunById: t.input(GetRunSchema).query(({ input }: { input: GetRunZ }) => {
         const run = this.runHelper.getRunById(input.id);
         if (!run) {
           throw new Error('Run not found');
@@ -40,12 +40,12 @@ export class RunController extends AbstractTRPCController {
       }),
 
       // Create run
-      createRun: t.input(CreateRunSchema).mutation(({ input }: { input: CreateRunInput }) => {
+      createRun: t.input(CreateRunSchema).mutation(({ input }: { input: CreateRunZ }) => {
         return this.runHelper.createRun(input);
       }),
 
       // Update run
-      updateRun: t.input(UpdateRunSchema).mutation(({ input }: { input: UpdateRunInput }) => {
+      updateRun: t.input(UpdateRunSchema).mutation(({ input }: { input: UpdateRunZ }) => {
         const updatedRun = this.runHelper.updateRun(input);
         if (!updatedRun) {
           throw new Error('Run not found');
@@ -54,7 +54,7 @@ export class RunController extends AbstractTRPCController {
       }),
 
       // Delete run
-      deleteRun: t.input(GetRunSchema).mutation(({ input }: { input: GetRunInput }) => {
+      deleteRun: t.input(GetRunSchema).mutation(({ input }: { input: GetRunZ }) => {
         const success = this.runHelper.deleteRun(input.id);
         if (!success) {
           throw new Error('Run not found');

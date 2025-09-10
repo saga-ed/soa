@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@saga-soa/trpc-codegen": "workspace:*",
+    "@saga-soa/zod2ts": "workspace:*",
     "@trpc/client": "^11.4.3",
     "@trpc/server": "^11.0.0",
     "@types/node": "^24.0.12",

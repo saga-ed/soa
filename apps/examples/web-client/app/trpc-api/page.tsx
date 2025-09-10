@@ -14,19 +14,6 @@ interface PingEvent {
   timestamp: string;
 }
 
-interface PongResponse {
-  id: string;
-  name: string;
-  channel: string;
-  payload: {
-    reply: string;
-    originalMessage: string;
-    timestamp: string;
-  };
-  timestamp: string;
-}
-
-
 interface EventHistory {
   id: string;
   type: 'ping' | 'pong';

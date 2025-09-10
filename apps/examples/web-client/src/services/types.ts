@@ -1,11 +1,11 @@
 import type {
-  CreateProjectInput,
-  UpdateProjectInput,
-  GetProjectInput,
-  CreateRunInput,
-  UpdateRunInput,
-  GetRunInput,
-  GetRunsByProjectInput
+  CreateProject,
+  UpdateProject,
+  GetProject,
+  CreateRun,
+  UpdateRun,
+  GetRun,
+  GetRunsByProject
 } from '@saga-soa/trpc-types';
 
 export type EndpointId = 
@@ -45,11 +45,11 @@ export interface ServiceInterface {
 }
 
 export type {
-  CreateProjectInput,
-  UpdateProjectInput,
-  GetProjectInput,
-  CreateRunInput,
-  UpdateRunInput,
-  GetRunInput,
-  GetRunsByProjectInput
+  CreateProject,
+  UpdateProject,
+  GetProject,
+  CreateRun,
+  UpdateRun,
+  GetRun,
+  GetRunsByProject
 }; 

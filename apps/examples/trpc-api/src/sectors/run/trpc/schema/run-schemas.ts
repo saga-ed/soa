@@ -26,7 +26,7 @@ export const GetRunsByProjectSchema = z.object({
 });
 
 // TypeScript types derived from schemas
-export type CreateRunInput = z.infer<typeof CreateRunSchema>;
-export type UpdateRunInput = z.infer<typeof UpdateRunSchema>;
-export type GetRunInput = z.infer<typeof GetRunSchema>;
-export type GetRunsByProjectInput = z.infer<typeof GetRunsByProjectSchema>;
+export type CreateRunZ = z.infer<typeof CreateRunSchema>;
+export type UpdateRunZ = z.infer<typeof UpdateRunSchema>;
+export type GetRunZ = z.infer<typeof GetRunSchema>;
+export type GetRunsByProjectZ = z.infer<typeof GetRunsByProjectSchema>;

@@ -5,9 +5,9 @@ import {
   CreateProjectSchema,
   UpdateProjectSchema,
   GetProjectSchema,
-  type CreateProjectInput,
-  type UpdateProjectInput,
-  type GetProjectInput,
+  type CreateProjectZ,
+  type UpdateProjectZ,
+  type GetProjectZ,
 } from './schema/project-schemas.js';
 import { ProjectHelper } from './project-helper.js';
 
@@ -31,7 +31,7 @@ export class ProjectController extends AbstractTRPCController {
       }),
 
       // Get project by ID
-      getProjectById: t.input(GetProjectSchema).query(({ input }: { input: GetProjectInput }) => {
+      getProjectById: t.input(GetProjectSchema).query(({ input }: { input: GetProjectZ }) => {
         const project = this.projectHelper.getProjectById(input.id);
         if (!project) {
           throw new Error('Project not found');
@@ -42,14 +42,14 @@ export class ProjectController extends AbstractTRPCController {
       // Create project
       createProject: t
         .input(CreateProjectSchema)
-        .mutation(({ input }: { input: CreateProjectInput }) => {
+        .mutation(({ input }: { input: CreateProjectZ }) => {
           return this.projectHelper.createProject(input);
         }),
 
       // Update project
       updateProject: t
         .input(UpdateProjectSchema)
-        .mutation(({ input }: { input: UpdateProjectInput }) => {
+        .mutation(({ input }: { input: UpdateProjectZ }) => {
           const updatedProject = this.projectHelper.updateProject(input);
           if (!updatedProject) {
             throw new Error('Project not found');
@@ -58,7 +58,7 @@ export class ProjectController extends AbstractTRPCController {
         }),
 
       // Delete project
-      deleteProject: t.input(GetProjectSchema).mutation(({ input }: { input: GetProjectInput }) => {
+      deleteProject: t.input(GetProjectSchema).mutation(({ input }: { input: GetProjectZ }) => {
         const success = this.projectHelper.deleteProject(input.id);
         if (!success) {
           throw new Error('Project not found');

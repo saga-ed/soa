@@ -11,13 +11,13 @@
     "@saga-soa/config": "workspace:*",
     "@saga/typescript-config": "workspace:*",
     "@types/node": "^24.0.3",
-    "mongodb-memory-server": "^10.1.4",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3"
   },
   "dependencies": {
     "inversify": "^6.2.2",
     "mongodb": "^5.7.0",
+    "mongodb-memory-server": "^10.1.4",
     "reflect-metadata": "^0.2.2",
     "zod": "3.25.67"
   },

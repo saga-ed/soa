@@ -58,7 +58,7 @@ export class SchemaExtractor {
 
       try {
         // Generate TypeScript type using the type generator
-        const typeDefinition = this.typeGenerator.generateType(zodSchema, finalTypeName);
+        const typeDefinition = await this.typeGenerator.generateType(zodSchema, finalTypeName);
 
         // Write the type to a file
         const outputPath = generateOutputPath(outputDir, finalTypeName);

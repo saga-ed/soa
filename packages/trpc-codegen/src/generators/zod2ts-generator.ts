@@ -47,8 +47,16 @@ export class Zod2tsGenerator {
             generatedFiles.push(sectorIndexPath);
             
           } else {
+            console.error(`❌ Failed to generate types for sector ${sector.name}:`, result.error);
+            // Still create an empty index file for consistency
+            const sectorIndexPath = await this.generateSectorIndex(sector.name, sectorTypesDir, []);
+            generatedFiles.push(sectorIndexPath);
           }
         } catch (error) {
+          console.error(`❌ Error generating types for sector ${sector.name}:`, error);
+          // Still create an empty index file for consistency
+          const sectorIndexPath = await this.generateSectorIndex(sector.name, sectorTypesDir, []);
+          generatedFiles.push(sectorIndexPath);
         }
       }
       

@@ -15,7 +15,11 @@
     "dep:list": "pnpm syncpack list",
     "dep:fix": "pnpm syncpack fix",
     "check": "turbo run build --no-cache --force && pnpm test",
-    "generate-types": "cd packages/trpc-types && pnpm generate-types"
+    "generate-types": "cd packages/trpc-types && pnpm generate-types",
+    "ci:check": "node scripts/local-ci-checks.js",
+    "ci:check:all": "node scripts/local-ci-checks.js all",
+    "ci:check:changed": "node scripts/local-ci-checks.js",
+    "quick:check": "node scripts/quick-check.js"
   },
   "devDependencies": {
     "prettier": "^3.5.3",

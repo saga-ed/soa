@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+# Get the directory where this script is located (absolute path)
+# This handles symlinks by resolving to the actual file location
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+
+# Execute the JavaScript file with node, passing all arguments
+exec node "$SCRIPT_DIR/trpc-codegen.js" "$@" 

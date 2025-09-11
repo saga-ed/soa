@@ -21,12 +21,6 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@saga-soa/api-core": "workspace:*",
-    "@saga-soa/db": "workspace:*",
-    "@saga-soa/logger": "workspace:^",
-    "@saga-soa/pubsub-core": "workspace:^",
-    "@saga-soa/pubsub-server": "workspace:^",
-    "@saga-soa/trpc-types": "workspace:*",
     "@trpc/client": "^11.4.3",
     "@trpc/server": "^11.0.0",
     "@types/mongodb": "^4.0.7",
@@ -37,7 +31,13 @@
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2",
     "uuid": "^11.1.0",
-    "zod": "3.25.67"
+    "zod": "3.25.67",
+    "@hipponot/api-core": "workspace:*",
+    "@hipponot/db": "workspace:*",
+    "@hipponot/logger": "workspace:^",
+    "@hipponot/pubsub-core": "workspace:^",
+    "@hipponot/pubsub-server": "workspace:^",
+    "@hipponot/trpc-types": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

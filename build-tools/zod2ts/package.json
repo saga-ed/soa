@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/zod2ts",
+  "name": "@hipponot/zod2ts",
   "version": "1.0.0",
   "type": "module",
   "scripts": {

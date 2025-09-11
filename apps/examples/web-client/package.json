@@ -12,12 +12,12 @@
     "clean": "rm -rf .next"
   },
   "dependencies": {
-    "@saga-soa/trpc-types": "workspace:*",
     "@saga/ui": "workspace:*",
     "@trpc/client": "^11.0.0",
     "next": "^15.3.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "@hipponot/trpc-types": "workspace:*"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",

@@ -7,10 +7,10 @@ This directory contains services that demonstrate how to interact with the Saga 
 ### 1. TrpcClientService
 **Canonical tRPC Client Pattern**
 
-This service demonstrates the **canonical way** to access tRPC APIs using the `@trpc/client` library with type safety provided by `@saga-soa/trpc-types`.
+This service demonstrates the **canonical way** to access tRPC APIs using the `@trpc/client` library with type safety provided by `@hipponot/trpc-types`.
 
 #### Key Features:
-- **Type Safety**: Full TypeScript support using `@saga-soa/trpc-types`
+- **Type Safety**: Full TypeScript support using `@hipponot/trpc-types`
 - **No Server Dependencies**: Only depends on types, not the actual server implementation
 - **Real tRPC Client**: Uses `@trpc/client` with `httpBatchLink` for optimal performance
 - **Error Handling**: Proper error handling and response formatting
@@ -18,7 +18,7 @@ This service demonstrates the **canonical way** to access tRPC APIs using the `@
 #### Usage Pattern:
 ```typescript
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
-import type { AppRouter } from '@saga-soa/trpc-types';
+import type { AppRouter } from '@hipponot/trpc-types';
 
 const client = createTRPCClient<AppRouter>({
   links: [
@@ -62,7 +62,7 @@ const response = await fetch('http://localhost:5000/saga-soa/v1/trpc/project.get
 
 The web-client demonstrates the proper separation of concerns:
 
-1. **`@saga-soa/trpc-types`**: Pure type definitions (no server dependencies)
+1. **`@hipponot/trpc-types`**: Pure type definitions (no server dependencies)
 2. **`@trpc/client`**: Standard tRPC client library
 3. **Server Implementation**: Separate package with actual API implementation
 
@@ -96,4 +96,4 @@ The `/trpc-api` page provides an interactive demonstration of both approaches:
 - **tRPC Client Mode**: Uses the canonical `@trpc/client` approach
 - **cURL Mode**: Uses HTTP requests with curl commands
 
-This demonstrates how the same API can be accessed using different methods while maintaining type safety through `@saga-soa/trpc-types`. 
+This demonstrates how the same API can be accessed using different methods while maintaining type safety through `@hipponot/trpc-types`. 

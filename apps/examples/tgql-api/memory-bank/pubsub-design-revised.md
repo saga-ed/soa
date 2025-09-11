@@ -119,7 +119,7 @@ export interface ActionCtx {
 **package.json**
 ```json
 {
-  "name": "@saga-soa/pubsub-core",
+  "name": "@hipponot/pubsub-core",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -150,7 +150,7 @@ export interface ActionCtx {
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@saga-soa/typescript-config": "workspace:*",
+    "@hipponot/typescript-config": "workspace:*",
     "@types/uuid": "^10.0.0",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
@@ -196,7 +196,7 @@ export default defineConfig({
 **package.json**
 ```json
 {
-  "name": "@saga-soa/pubsub-server",
+  "name": "@hipponot/pubsub-server",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -223,15 +223,15 @@ export default defineConfig({
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@saga-soa/pubsub-core": "workspace:*",
-    "@saga-soa/api-core": "workspace:*",
-    "@saga-soa/logger": "workspace:*",
+    "@hipponot/pubsub-core": "workspace:*",
+    "@hipponot/api-core": "workspace:*",
+    "@hipponot/logger": "workspace:*",
     "@trpc/server": "^11.0.0",
     "inversify": "^6.2.2",
     "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
-    "@saga-soa/typescript-config": "workspace:*",
+    "@hipponot/typescript-config": "workspace:*",
     "@types/node": "latest",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
@@ -269,7 +269,7 @@ import { inject, injectable } from 'inversify';
 import { TYPES } from '../types';
 import type { EventService } from './event.service';
 import type { ChannelService } from './channel.service';
-import type { PubSubAdapter } from '@saga-soa/pubsub-core';
+import type { PubSubAdapter } from '@hipponot/pubsub-core';
 
 @injectable()
 export class PubSubService {
@@ -367,8 +367,8 @@ export default defineConfig({
 ```ts
 // apps/examples/trpc-api/src/sectors/pubsub/
 import { injectable } from 'inversify';
-import { AbstractTRPCController } from '@saga-soa/api-core';
-import { PubSubService } from '@saga-soa/pubsub-server';
+import { AbstractTRPCController } from '@hipponot/api-core';
+import { PubSubService } from '@hipponot/pubsub-server';
 
 @injectable()
 export class PubSubController extends AbstractTRPCController {
@@ -386,7 +386,7 @@ export class PubSubController extends AbstractTRPCController {
 ```ts
 // apps/examples/trpc-api/src/sectors/orders/events.ts
 import { z } from 'zod';
-import type { EventDefinition } from '@saga-soa/pubsub-core';
+import type { EventDefinition } from '@hipponot/pubsub-core';
 
 export const orderCreatedSchema = z.object({
   orderId: z.string(),

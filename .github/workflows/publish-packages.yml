@@ -335,21 +335,21 @@ jobs:
             # List published packages
             echo "$PUBLISHED_PACKAGES" | jq -r '.[]' | while read -r package; do
               if [ -n "$package" ] && [ "$package" != "" ]; then
-                echo "- \`@saga-soa/$package\`" >> $GITHUB_STEP_SUMMARY
+                echo "- \`@hipponot/$package\`" >> $GITHUB_STEP_SUMMARY
               fi
             done
             
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Installation" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-            echo "# Configure npm to use GitHub Packages for @saga-soa scope" >> $GITHUB_STEP_SUMMARY
-            echo "npm config set @saga-soa:registry https://npm.pkg.github.com" >> $GITHUB_STEP_SUMMARY
+            echo "# Configure npm to use GitHub Packages for @hipponot scope" >> $GITHUB_STEP_SUMMARY
+            echo "npm config set @hipponot:registry https://npm.pkg.github.com" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "# Install packages" >> $GITHUB_STEP_SUMMARY
             
             echo "$PUBLISHED_PACKAGES" | jq -r '.[]' | while read -r package; do
               if [ -n "$package" ] && [ "$package" != "" ]; then
-                echo "npm install @saga-soa/$package" >> $GITHUB_STEP_SUMMARY
+                echo "npm install @hipponot/$package" >> $GITHUB_STEP_SUMMARY
               fi
             done
             

@@ -1,4 +1,4 @@
-# @saga-soa/pubsub-client
+# @hipponot/pubsub-client
 
 A TypeScript client library for pubsub functionality using tRPC, providing type-safe event publishing and subscription capabilities.
 
@@ -14,13 +14,13 @@ A TypeScript client library for pubsub functionality using tRPC, providing type-
 ## Installation
 
 ```bash
-pnpm add @saga-soa/pubsub-client
+pnpm add @hipponot/pubsub-client
 ```
 
 ## Quick Start
 
 ```typescript
-import { TRPCPubSubClient } from '@saga-soa/pubsub-client';
+import { TRPCPubSubClient } from '@hipponot/pubsub-client';
 
 // Create client instance
 const client = new TRPCPubSubClient({
@@ -200,7 +200,7 @@ pnpm run test
 The pubsub-client is designed to work seamlessly with the saga-soa ecosystem:
 
 1. **tRPC Integration**: Uses tRPC for type-safe API communication
-2. **Event System**: Leverages @saga-soa/pubsub-core for event definitions
+2. **Event System**: Leverages @hipponot/pubsub-core for event definitions
 3. **Real-time**: Supports both HTTP and WebSocket/SSE connections
 4. **Type Safety**: Full TypeScript support with proper type inference
 

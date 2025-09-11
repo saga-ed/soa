@@ -11,7 +11,7 @@
   - Proper package structure within workspace
 
 ### 2. ✅ Core Package Implementation
-- **Package**: `@saga-soa/pubsub-core`
+- **Package**: `@hipponot/pubsub-core`
 - **Status**: Fully implemented and tested
 - **Location**: `packages/pubsub-core/`
 - **Features**:

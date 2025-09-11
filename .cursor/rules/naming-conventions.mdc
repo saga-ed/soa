@@ -17,4 +17,4 @@ import { add }                                      from @saga/math/add
 - Error type naming
 
 If you are unsure about a naming decision, refer to memory-bank/01.naming-conventions.md and follow its guidance.
-import { IConfigManager, MockConfigManager }        from '@saga-soa/config';
+import { IConfigManager, MockConfigManager }        from '@hipponot/config';

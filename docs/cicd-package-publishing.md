@@ -184,7 +184,7 @@ gh run view <run-id> --log
 gh api repos/:owner/:repo/packages
 
 # View package versions
-npm view @saga-soa/api-core versions --json
+npm view @hipponot/api-core versions --json
 ```
 
 ### Common Issues

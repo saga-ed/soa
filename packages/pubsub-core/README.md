@@ -1,4 +1,4 @@
-# @saga-soa/pubsub-core
+# @hipponot/pubsub-core
 
 Core types, interfaces, and utilities for the saga-soa pub/sub infrastructure.
 
@@ -21,7 +21,7 @@ This package is part of the saga-soa workspace and should be used as a workspace
 ```json
 {
   "dependencies": {
-    "@saga-soa/pubsub-core": "workspace:*"
+    "@hipponot/pubsub-core": "workspace:*"
   }
 }
 ```
@@ -31,7 +31,7 @@ This package is part of the saga-soa workspace and should be used as a workspace
 ### Basic Event Types
 
 ```typescript
-import type { EventEnvelope, EventName } from '@saga-soa/pubsub-core';
+import type { EventEnvelope, EventName } from '@hipponot/pubsub-core';
 
 // Define event names with type safety
 type OrderEvents = 'orders:created' | 'orders:updated' | 'orders:cancelled';
@@ -50,7 +50,7 @@ const event: EventEnvelope<'orders:created'> = {
 
 ```typescript
 import { z } from 'zod';
-import type { EventDefinition } from '@saga-soa/pubsub-core';
+import type { EventDefinition } from '@hipponot/pubsub-core';
 
 const orderSchema = z.object({
   orderId: z.string(),
@@ -76,7 +76,7 @@ export const orderCreated: EventDefinition<
 ### Adapter Interface
 
 ```typescript
-import type { PubSubAdapter, EventEnvelope } from '@saga-soa/pubsub-core';
+import type { PubSubAdapter, EventEnvelope } from '@hipponot/pubsub-core';
 
 class MyCustomAdapter implements PubSubAdapter {
   async publish(event: EventEnvelope): Promise<void> {

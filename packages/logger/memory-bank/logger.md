@@ -1,4 +1,4 @@
-# @saga-soa/logger
+# @hipponot/logger
 
 This package provides a configurable logging solution for the saga-soa project. It is built on top of Pino for high-performance, structured logging.
 

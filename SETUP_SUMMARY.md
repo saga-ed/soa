@@ -10,7 +10,7 @@
   - Dependency-aware building and publishing
   - Support for manual version bumps
   - Only publishes changed packages
-  - Proper `@saga-soa` scope configuration
+  - Proper `@hipponot` scope configuration
 
 ### 2. Package Configuration
 - **Updated**: All 12 packages in `packages/` directory

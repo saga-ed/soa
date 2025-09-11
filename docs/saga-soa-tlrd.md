@@ -6,7 +6,7 @@
 
 ## 🏗️ Core Architecture
 
-### Shared Infrastructure (`@saga-soa/api-core`)
+### Shared Infrastructure (`@hipponot/api-core`)
 
 The platform's backbone is the `api-core` package, which provides:
 
@@ -68,19 +68,19 @@ sectors/
 
 ## 🛠️ Shared Services
 
-### Configuration (`@saga-soa/config`)
+### Configuration (`@hipponot/config`)
 
 - Zod-based schema validation
 - Environment-specific configuration
 - Type-safe configuration management
 
-### Database (`@saga-soa/db`)
+### Database (`@hipponot/db`)
 
 - MongoDB, SQL, Redis support
 - Connection pooling and management
 - Mock providers for testing
 
-### Logging (`@saga-soa/logger`)
+### Logging (`@hipponot/logger`)
 
 - Structured logging with Pino
 - Request/response correlation

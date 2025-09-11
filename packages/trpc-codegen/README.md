@@ -14,7 +14,7 @@ A powerful code generation tool for tRPC APIs that automatically discovers secto
 ## Installation
 
 ```bash
-pnpm add -D @saga-soa/trpc-codegen
+pnpm add -D @hipponot/trpc-codegen
 ```
 
 ## Usage
@@ -101,7 +101,7 @@ If no config file is found, the tool uses these defaults:
   },
   generation: {
     outputDir: './generated',
-    packageName: '@saga-soa/trpc-types',
+    packageName: '@hipponot/trpc-types',
     routerName: 'AppRouter'
   },
   parsing: {

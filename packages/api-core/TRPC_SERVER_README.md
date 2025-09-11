@@ -16,7 +16,7 @@ The `TRPCServer` class provides a centralized, injectable way to manage tRPC rou
 ### 1. Configuration
 
 ```typescript
-import { TRPCServerSchema } from '@saga-soa/api-core/trpc-server-schema';
+import { TRPCServerSchema } from '@hipponot/api-core/trpc-server-schema';
 
 const trpcConfig = TRPCServerSchema.parse({
   configType: 'TRPC_SERVER',
@@ -30,7 +30,7 @@ const trpcConfig = TRPCServerSchema.parse({
 
 ```typescript
 import { Container } from 'inversify';
-import { TRPCServer } from '@saga-soa/api-core/trpc-server';
+import { TRPCServer } from '@hipponot/api-core/trpc-server';
 
 const container = new Container();
 
@@ -94,7 +94,7 @@ trpcServer.addRouters({
 ### 5. Express Integration
 
 ```typescript
-import { ExpressServer } from '@saga-soa/api-core/express-server';
+import { ExpressServer } from '@hipponot/api-core/express-server';
 
 // Initialize Express server
 const expressServer = container.get(ExpressServer);
@@ -214,7 +214,7 @@ const appRouter = trpcAppRouter.getRouter();
 The `TRPCAppRouter` is fully testable using the `MockLogger`:
 
 ```typescript
-import { MockLogger } from '@saga-soa/logger/mocks';
+import { MockLogger } from '@hipponot/logger/mocks';
 
 container.bind('ILogger').to(MockLogger);
 const trpcAppRouter = container.get(TRPCAppRouter);

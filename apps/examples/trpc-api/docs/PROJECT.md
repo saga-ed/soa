@@ -120,7 +120,7 @@ const routerSections = sectorInfos.map(sector => {
 ```typescript
 // web-client usage
 import { createTRPCClient } from '@trpc/client';
-import type { AppRouter } from '@saga-soa/trpc-types';
+import type { AppRouter } from '@hipponot/trpc-types';
 
 const client = createTRPCClient<AppRouter>({...});
 

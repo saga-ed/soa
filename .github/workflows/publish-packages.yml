@@ -9,6 +9,7 @@ on:
       - "build-tools/**"
       - "turbo.json"
       - "pnpm-workspace.yaml"
+  pull_request:
   release:
     types: [published]
   workflow_dispatch:

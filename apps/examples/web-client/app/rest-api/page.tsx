@@ -1,4 +1,4 @@
-import { Button } from '@saga/ui/button';
+import { Button } from '@hipponot/ui/button';
 import Link from 'next/link';
 import styles from '../page.module.css';
 
@@ -10,7 +10,7 @@ export default function RestApiPage() {
         <p className={styles.description}>
           This page demonstrates integration with the REST API example from saga-soa.
         </p>
-        
+
         <div className={styles.content}>
           <h2>Available Endpoints</h2>
           <ul>
@@ -19,7 +19,7 @@ export default function RestApiPage() {
             <li><code>GET /saga-soa/hello-mongo/test-route</code> - Hello Mongo REST endpoint</li>
             <li><code>GET /health</code> - Health check endpoint</li>
           </ul>
-          
+
           <p>
             The REST API example demonstrates:
           </p>

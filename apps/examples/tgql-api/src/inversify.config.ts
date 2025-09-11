@@ -38,6 +38,8 @@ const gqlConfig: GQLServerConfig = {
   name: 'GraphQL API',
   enablePlayground: true, // Enable GraphQL playground
   playgroundPath: '/playground', // Optional: custom playground path
+  emitSchema: true, // Enable schema emission
+  schemaDir: './generated', // Directory for generated schema files
 };
 
 container.bind<PinoLoggerConfig>('PinoLoggerConfig').toConstantValue(loggerConfig);

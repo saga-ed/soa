@@ -1,6 +1,6 @@
 # Testing Improvement Plan
 
-## @saga/db
+## @hipponot/db
 
 - Increase negative/failure scenario coverage
 - No integration tests for real DBs at this time

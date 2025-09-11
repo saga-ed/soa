@@ -1,7 +1,7 @@
-The exports field in package.json allows more granular support of exports. For example to import only the math function from the package @saga/math you can use the below if it is listed in the package.json exports.
+The exports field in package.json allows more granular support of exports. For example to import only the math function from the package @hipponot/math you can use the below if it is listed in the package.json exports.
 
 ```
-import { add } from @saga/math/add
+import { add } from @hipponot/math/add
 ```
 
 Similarly the `imports` field enables subpaths imports relative to the root package (resiliency to refactors that move files) .. more reading needed here
@@ -18,7 +18,7 @@ Its seems that is still possible to access code across package boundaries (Commo
 You can quickly add dependencies to multiple sub-projects
 
 ```
-pnpm add jest --save-dev --recursive --filter=web --filter=@saga/ui --filter=docs
+pnpm add jest --save-dev --recursive --filter=web --filter=@hipponot/ui --filter=docs
 ```
 
 The only dependencies that belong in the workspace root are tools for managing the repository (turbo, husky, or lint-staged)

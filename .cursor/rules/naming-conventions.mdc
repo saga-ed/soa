@@ -12,7 +12,7 @@ import { MockConfigManager }                        from './mock-config-manager'
 - Variable and constant naming
 - Generic type parameters
 - Decorator naming
-import { add }                                      from @saga/math/add
+import { add }                                      from @hipponot/math/add
 - Environment variable naming
 - Error type naming
 

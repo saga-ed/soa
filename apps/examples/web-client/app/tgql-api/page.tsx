@@ -1,4 +1,4 @@
-import { Button } from '@saga/ui/button';
+import { Button } from '@hipponot/ui/button';
 import Link from 'next/link';
 import styles from '../page.module.css';
 
@@ -10,7 +10,7 @@ export default function GraphqlApiPage() {
         <p className={styles.description}>
           This page demonstrates integration with the GraphQL API example from saga-soa.
         </p>
-        
+
         <div className={styles.content}>
           <h2>Available Queries & Mutations</h2>
           <ul>
@@ -21,7 +21,7 @@ export default function GraphqlApiPage() {
             <li><code>session</code> - Get session by ID</li>
             <li><code>createSession</code> - Create new session</li>
           </ul>
-          
+
           <p>
             The GraphQL API example demonstrates:
           </p>

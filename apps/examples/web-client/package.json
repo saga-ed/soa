@@ -12,7 +12,7 @@
     "clean": "rm -rf .next"
   },
   "dependencies": {
-    "@saga/ui": "workspace:*",
+    "@hipponot/ui": "workspace:*",
     "@trpc/client": "^11.0.0",
     "next": "^15.3.0",
     "react": "^19.1.0",
@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
-    "@saga/typescript-config": "workspace:*",
+    "@hipponot/typescript-config": "workspace:*",
     "@types/node": "^22.15.3",
     "@types/react": "19.1.0",
     "@types/react-dom": "19.1.1",

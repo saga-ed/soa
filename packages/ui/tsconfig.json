@@ -1,5 +1,5 @@
 {
-  "extends": "@saga/typescript-config/react-library.json",
+  "extends": "@hipponot/typescript-config/react-library.json",
   "compilerOptions": {
     "outDir": "dist"
   },

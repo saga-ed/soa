@@ -1,5 +1,7 @@
 import 'reflect-metadata';
-import { ExpressServer, GQLServer, AbstractRestController, AbstractGQLController } from '@hipponot/api-core';
+import { ExpressServer } from '@hipponot/api-core/express-server';
+import { GQLServer } from '@hipponot/api-core/gql-server';
+import { AbstractRestController, AbstractGQLController } from '@hipponot/api-core';
 import { ControllerLoader } from '@hipponot/api-core/utils/controller-loader';
 import { container } from './inversify.config.js';
 import type { ILogger } from '@hipponot/logger';
@@ -29,7 +31,7 @@ async function start() {
   );
 
   // Get the ExpressServer instance from DI
-  const expressServer = container.get(ExpressServer);
+  const expressServer = container.get<ExpressServer>(ExpressServer);
   // Initialize and register REST controllers
   await expressServer.init(container, restControllers);
   const app = expressServer.getApp();
@@ -44,14 +46,14 @@ async function start() {
   );
 
   // Get the GQLServer instance from DI and initialize it
-  const gqlServer = container.get(GQLServer);
+  const gqlServer = container.get<GQLServer>(GQLServer);
   await gqlServer.init(container, gqlResolvers);
 
   // Mount the GraphQL server to the Express app with basePath
   gqlServer.mountToApp(app, '/saga-soa/v1');
 
   // Add a simple health check (at root level for easy access)
-  app.get('/health', (req, res) => {
+  app.get('/health', (req: any, res: any) => {
     res.json({ status: 'ok', service: 'GraphQL API' });
   });
 

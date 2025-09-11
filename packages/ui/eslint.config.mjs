@@ -1,4 +1,4 @@
-import { config } from "@saga/eslint-config/react-internal";
+import { config } from "@hipponot/eslint-config/react-internal";
 
 /** @type {import("eslint").Linter.Config} */
 export default config;

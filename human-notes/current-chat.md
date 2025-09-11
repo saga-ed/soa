@@ -694,7 +694,7 @@ Now that the directories are created, I will create the `package.json` file for 
   },
   "devDependencies": {
     "@hipponot/config": "workspace:*",
-    "@saga/typescript-config": "workspace:*",
+    "@hipponot/typescript-config": "workspace:*",
     "@types/jest": "^29.5.3",
     "@types/node": "latest",
     "jest": "^29.6.2",
@@ -709,7 +709,7 @@ Next, I'll create the `tsconfig.json` for the logger package, extending the base
 
 ```jsonc
 {
-  "extends": "@saga/typescript-config/base.json",
+  "extends": "@hipponot/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
   },
@@ -868,7 +868,7 @@ The linter is complaining about the decorator. This is a common TypeScript confi
 
 ```jsonc
 {
-  "extends": "@saga/typescript-config/base.json",
+  "extends": "@hipponot/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
     "experimentalDecorators": true,
@@ -976,7 +976,7 @@ I will now restore these files with the latest, correct content as previously de
 
 ```jsonc
 {
-  "extends": "@saga/typescript-config/base.json",
+  "extends": "@hipponot/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
     "experimentalDecorators": true,

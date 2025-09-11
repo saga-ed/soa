@@ -1,5 +1,5 @@
 import Image, { type ImageProps } from 'next/image';
-import { Button } from '@saga/ui/button';
+import { Button } from '@hipponot/ui/button';
 import styles from './page.module.css';
 
 type Props = Omit<ImageProps, 'src'> & {
@@ -31,7 +31,7 @@ export default function Home() {
           height={38}
           priority
         />
-        
+
         <h1 className={styles.title}>Saga SOA Web Client</h1>
         <p className={styles.description}>
           A Next.js web client demonstrating integration with saga-soa API examples.
@@ -47,7 +47,7 @@ export default function Home() {
                 View REST API Example →
               </a>
             </div>
-            
+
             <div className={styles.apiCard}>
               <h3>tRPC API</h3>
               <p>Type-safe API with end-to-end type safety</p>
@@ -55,7 +55,7 @@ export default function Home() {
                 View tRPC API Example →
               </a>
             </div>
-            
+
             <div className={styles.apiCard}>
               <h3>TypeGraphQL API</h3>
               <p>TypeGraphQL schema with resolver-based architecture</p>

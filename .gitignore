@@ -73,10 +73,3 @@ test-results/
 playwright-report/
 .nyc_output/
 
-# Generated Binaries & CLIs
-bin/zod2ts
-bin/tgql-codegen  
-bin/trpc-codegen
-# Package bin directories
-packages/*/bin/
-build-tools/*/bin/

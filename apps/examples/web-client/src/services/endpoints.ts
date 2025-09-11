@@ -1,11 +1,11 @@
 import type { Endpoint } from './types';
 import type {
-  CreateProject,
-  UpdateProject,
-  GetProject,
-  CreateRun,
-  UpdateRun,
-  GetRun
+  CreateProjectZ as CreateProject,
+  UpdateProjectZ as UpdateProject,
+  GetProjectZ as GetProject,
+  CreateRunZ as CreateRun,
+  UpdateRunZ as UpdateRun,
+  GetRunZ as GetRun
 } from '@hipponot/trpc-types';
 
 export const ENDPOINTS: Endpoint[] = [
@@ -130,8 +130,8 @@ export const ENDPOINTS: Endpoint[] = [
     name: 'Send Ping Message',
     method: 'POST',
     description: 'Send a ping message and receive automatic pong response',
-    inputType: 'PingMessage',
-    sampleInput: { message: 'Hello from web client!' },
+    inputType: 'PingMessageZ',
+    sampleInput: { message: 'Hello from web client!', timestamp: new Date().toISOString() },
     url: '/saga-soa/v1/trpc/pubsub.ping'
   },
   {

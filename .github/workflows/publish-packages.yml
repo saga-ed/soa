@@ -170,10 +170,10 @@ jobs:
           CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
           echo "Calculating dependency layers for: $CHANGED_PACKAGES"
 
-          # Create a script to analyze workspace dependencies
-          cat > analyze_deps.js << 'EOF'
-          const fs = require('fs');
-          const path = require('path');
+            # Create a script to analyze workspace dependencies
+            cat > analyze_deps.mjs << 'EOF'
+            import fs from 'fs';
+            import path from 'path';
 
           function getPackageDependencies(packageName) {
             const packagePath = path.join('packages', packageName, 'package.json');
@@ -236,8 +236,8 @@ jobs:
           console.log(`total-layers=${layers.length}`);
           EOF
 
-          # Run the analysis
-          node analyze_deps.js "$CHANGED_PACKAGES" >> $GITHUB_OUTPUT
+            # Run the analysis
+            node analyze_deps.mjs "$CHANGED_PACKAGES" >> $GITHUB_OUTPUT
 
           # Debug output
           echo "=== Dependency Layers ==="

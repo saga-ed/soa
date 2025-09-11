@@ -1,11 +1,11 @@
 import type {
-  CreateProject,
-  UpdateProject,
-  GetProject,
-  CreateRun,
-  UpdateRun,
-  GetRun,
-  GetRunsByProject
+  CreateProjectZ as CreateProject,
+  UpdateProjectZ as UpdateProject,
+  GetProjectZ as GetProject,
+  CreateRunZ as CreateRun,
+  UpdateRunZ as UpdateRun,
+  GetRunZ as GetRun,
+  GetRunsByProjectZ as GetRunsByProject
 } from '@hipponot/trpc-types';
 
 export type EndpointId = 

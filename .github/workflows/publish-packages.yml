@@ -95,7 +95,7 @@ jobs:
               CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
             else
               # Get changed packages using Turborepo
-              CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sed 's|packages/||' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
+              CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
             fi
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # For manual triggers, get packages changed since last tag or main
@@ -105,7 +105,7 @@ jobs:
             else
               BASE_REF="origin/main"
             fi
-            CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sed 's|packages/||' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
+            CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
           else
             # Default: check all packages
             CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
@@ -163,16 +163,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run lint for affected packages
-        run: pnpm turbo run lint --filter=packages/${{ matrix.package }}...
+        run: pnpm turbo run lint --filter=${{ matrix.package }}...
 
       - name: Run type checking for affected packages
-        run: pnpm turbo run check-types --filter=packages/${{ matrix.package }}...
+        run: pnpm turbo run check-types --filter=${{ matrix.package }}...
 
       - name: Build affected packages (includes dependencies)
-        run: pnpm turbo run build --filter=packages/${{ matrix.package }}...
+        run: pnpm turbo run build --filter=${{ matrix.package }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=packages/${{ matrix.package }}...
+        run: pnpm turbo run test --filter=${{ matrix.package }}...
 
   version-and-publish:
     name: Version and Publish Packages

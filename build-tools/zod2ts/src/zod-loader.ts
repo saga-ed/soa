@@ -19,10 +19,10 @@ export class ZodSchemaLoader {
 
       // Create a module-like environment and evaluate the modified content
       const moduleExports = {};
-      
+
       // Transform ES module exports to work in function scope
       const transformedContent = this.transformESModuleExports(modifiedContent);
-      
+
       const moduleScope = {
         exports: moduleExports,
         module: { exports: moduleExports },
@@ -114,7 +114,7 @@ export class ZodSchemaLoader {
 
     // Actually, let's do this more cleanly
     transformed = content;
-    
+
     // Replace export const with const + assignment
     transformed = transformed.replace(
       /export\s+const\s+(\w+)\s*=\s*([^;]+);?/g,

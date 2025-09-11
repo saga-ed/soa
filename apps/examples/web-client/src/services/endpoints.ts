@@ -64,7 +64,7 @@ export const ENDPOINTS: Endpoint[] = [
     sampleInput: { id: '1' } as GetProject,
     url: '/saga-soa/v1/trpc/project.deleteProject'
   },
-  
+
   // Run endpoints
   {
     id: 'run.getAllRuns',

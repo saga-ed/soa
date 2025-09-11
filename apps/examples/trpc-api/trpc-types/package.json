@@ -41,6 +41,6 @@
     "typescript": "5.8.2",
     "vitest": "^1.5.0",
     "@hipponot/trpc-codegen": "workspace:*",
-    "@hipponot/zod2ts": "workspace:*"
+    "@saga-soa/zod2ts": "workspace:*"
   }
 }

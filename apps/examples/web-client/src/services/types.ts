@@ -8,7 +8,7 @@ import type {
   GetRunsByProjectZ as GetRunsByProject
 } from '@hipponot/trpc-types';
 
-export type EndpointId = 
+export type EndpointId =
   | 'project.getAllProjects'
   | 'project.getProjectById'
   | 'project.createProject'

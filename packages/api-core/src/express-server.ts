@@ -2,7 +2,7 @@ import express, { Application } from 'express';
 import cors from 'cors';
 import { injectable, inject } from 'inversify';
 import type { ExpressServerConfig } from './express-server-schema.js';
-import type { ILogger } from '@saga-soa/logger';
+import type { ILogger } from '@hipponot/logger';
 import { useContainer, useExpressServer } from 'routing-controllers';
 import { Container } from 'inversify';
 import { SectorsController } from './sectors-controller.js';

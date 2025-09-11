@@ -7,7 +7,7 @@ export default {
   },
   generation: {
     outputDir: './generated',
-    packageName: '@saga-soa/tgql-types',
+    packageName: '@hipponot/tgql-types',
     schemaName: 'AppSchema'
   },
   sdl: {

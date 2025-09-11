@@ -1,6 +1,6 @@
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import type { Endpoint, ApiResponse, ServiceInterface } from './types';
-import type { AppRouter } from '@saga-soa/trpc-types';
+import type { AppRouter } from '@hipponot/trpc-types';
 
 export class TrpcClientService implements ServiceInterface {
   private client: ReturnType<typeof createTRPCClient<AppRouter>>;

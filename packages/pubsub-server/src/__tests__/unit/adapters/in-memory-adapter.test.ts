@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { InMemoryAdapter } from '../../../adapters/in-memory-adapter.js';
-import type { EventEnvelope } from '@saga-soa/pubsub-core';
+import type { EventEnvelope } from '@hipponot/pubsub-core';
 
 describe('InMemoryAdapter', () => {
   let adapter: InMemoryAdapter;

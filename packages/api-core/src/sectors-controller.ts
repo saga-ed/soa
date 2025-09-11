@@ -8,7 +8,7 @@ import {
 } from 'routing-controllers';
 import type { Request, Response } from 'express';
 import { injectable, inject } from 'inversify';
-import type { ILogger } from '@saga-soa/logger';
+import type { ILogger } from '@hipponot/logger';
 import { AbstractRestController } from './abstract-rest-controller.js';
 
 const SECTOR = 'sectors';

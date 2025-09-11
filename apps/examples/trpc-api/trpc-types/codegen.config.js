@@ -9,7 +9,7 @@ export default {
   // Generation configuration  
   generation: {
     outputDir: './generated',
-    packageName: '@saga-soa/trpc-types',
+    packageName: '@hipponot/trpc-types',
     routerName: 'AppRouter'
   },
   

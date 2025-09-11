@@ -1,7 +1,7 @@
 import { injectable, inject, Container }                        from 'inversify';
 import { initTRPC, type AnyRouter, type CreateContextCallback } from '@trpc/server';
 import { createExpressMiddleware }                              from '@trpc/server/adapters/express';
-import type { ILogger }                                         from '@saga-soa/logger';
+import type { ILogger }                                         from '@hipponot/logger';
 import type { TRPCServerConfig }                                from './trpc-server-schema.js';
 
 @injectable()

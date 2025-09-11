@@ -1,5 +1,5 @@
 import type { AnyTRPCRouter } from '@trpc/server';
-import type { EventDefinition, EventEnvelope, ChannelConfig } from '@saga-soa/pubsub-core';
+import type { EventDefinition, EventEnvelope, ChannelConfig } from '@hipponot/pubsub-core';
 import type { PubSubAdapter } from '../adapters/base-adapter.js';
 
 export interface PubSubServerOptions {

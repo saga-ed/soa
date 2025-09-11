@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import 'reflect-metadata';
 import type { Request, Response } from 'express';
 import { injectable, inject, Container } from 'inversify';
-import type { ILogger } from '@saga-soa/logger';
+import type { ILogger } from '@hipponot/logger';
 import { TestSector } from './test-sector.js';
 import { fetch } from 'undici';
 import { useContainer, createExpressServer } from 'routing-controllers';

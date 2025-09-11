@@ -1,8 +1,8 @@
 import 'reflect-metadata';
-import { ExpressServer, GQLServer, AbstractRestController, AbstractGQLController } from '@saga-soa/api-core';
-import { ControllerLoader } from '@saga-soa/api-core/utils/controller-loader';
+import { ExpressServer, GQLServer, AbstractRestController, AbstractGQLController } from '@hipponot/api-core';
+import { ControllerLoader } from '@hipponot/api-core/utils/controller-loader';
 import { container } from './inversify.config.js';
-import type { ILogger } from '@saga-soa/logger';
+import type { ILogger } from '@hipponot/logger';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import express from 'express';

@@ -80,8 +80,8 @@ export class Zod2tsGenerator {
         path.resolve(this.basePath, '../../build-tools/zod2ts/src/index.ts'),  // For apps/api/types in saga-soa
         path.resolve(this.basePath, '../../../build-tools/zod2ts/src/index.ts'),  // For deeper nesting
         path.resolve(this.basePath, '../../../../build-tools/zod2ts/src/index.ts'),  // Alternative
-        path.resolve(this.basePath, 'node_modules/@saga-soa/zod2ts/src/index.ts'),  // Via node_modules link (saga-sm)
-        path.resolve(this.basePath, '../node_modules/@saga-soa/zod2ts/src/index.ts'),  // Via parent node_modules link
+        path.resolve(this.basePath, 'node_modules/@hipponot/zod2ts/src/index.ts'),  // Via node_modules link (saga-sm)
+        path.resolve(this.basePath, '../node_modules/@hipponot/zod2ts/src/index.ts'),  // Via parent node_modules link
         '/home/skelly/dev/saga-soa/build-tools/zod2ts/src/index.ts',  // Absolute fallback
       ];
       
@@ -115,8 +115,8 @@ export class Zod2tsGenerator {
         path.resolve(this.basePath, '../../../build-tools/zod2ts/bin/zod2ts'),  // For apps/examples/trpc-api/trpc-types
         path.resolve(this.basePath, '../../../../build-tools/zod2ts/bin/zod2ts'),  // For deeper nesting
         path.resolve(this.basePath, '../../build-tools/zod2ts/bin/zod2ts'),  // Alternative
-        path.resolve(this.basePath, 'node_modules/@saga-soa/zod2ts/bin/zod2ts'),  // Via node_modules link (saga-sm)
-        path.resolve(this.basePath, '../node_modules/@saga-soa/zod2ts/bin/zod2ts'),  // Via parent node_modules link
+        path.resolve(this.basePath, 'node_modules/@hipponot/zod2ts/bin/zod2ts'),  // Via node_modules link (saga-sm)
+        path.resolve(this.basePath, '../node_modules/@hipponot/zod2ts/bin/zod2ts'),  // Via parent node_modules link
         '/home/skelly/dev/saga-soa/build-tools/zod2ts/bin/zod2ts',  // Absolute fallback
       ];
       

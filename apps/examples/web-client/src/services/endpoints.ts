@@ -6,7 +6,7 @@ import type {
   CreateRun,
   UpdateRun,
   GetRun
-} from '@saga-soa/trpc-types';
+} from '@hipponot/trpc-types';
 
 export const ENDPOINTS: Endpoint[] = [
   // Project endpoints

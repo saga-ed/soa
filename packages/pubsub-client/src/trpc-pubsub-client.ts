@@ -1,4 +1,4 @@
-import type { EventEnvelope, EventName, CSEEventWithResponse, SSEEvent } from '@saga-soa/pubsub-core';
+import type { EventEnvelope, EventName, CSEEventWithResponse, SSEEvent } from '@hipponot/pubsub-core';
 import type { AnyRouter } from '@trpc/server';
 import type { CreateTRPCClientOptions } from '@trpc/client';
 import { createTRPCClient } from '@trpc/client';

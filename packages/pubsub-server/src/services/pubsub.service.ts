@@ -4,8 +4,8 @@ import type {
   EventDefinition, 
   EventEnvelope,
   EventName
-} from '@saga-soa/pubsub-core';
-import { isCSEEvent } from '@saga-soa/pubsub-core';
+} from '@hipponot/pubsub-core';
+import { isCSEEvent } from '@hipponot/pubsub-core';
 import type { PubSubAdapter } from '../adapters/base-adapter.js';
 import type { 
   Logger,

@@ -1,7 +1,7 @@
 import { Query, Resolver, Arg, Mutation } from 'type-graphql';
 import { inject } from 'inversify';
-import { AbstractGQLController } from '@saga-soa/api-core';
-import type { ILogger } from '@saga-soa/logger';
+import { AbstractGQLController } from '@hipponot/api-core';
+import type { ILogger } from '@hipponot/logger';
 import { Session } from './session.type.js';
 import { SessionInput } from './session.input.js';
 import { sessions, createSession, getSessionById } from './session.data.js';

@@ -6,7 +6,7 @@ import type {
   UpdateRun,
   GetRun,
   GetRunsByProject
-} from '@saga-soa/trpc-types';
+} from '@hipponot/trpc-types';
 
 export type EndpointId = 
   | 'project.getAllProjects'

@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/db",
+  "name": "@hipponot/db",
   "type": "module",
   "scripts": {
     "dev": "tsup --watch",
@@ -8,11 +8,11 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "@saga-soa/config": "workspace:*",
     "@saga/typescript-config": "workspace:*",
     "@types/node": "^24.0.3",
     "tsup": "^8.5.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@hipponot/config": "workspace:*"
   },
   "dependencies": {
     "inversify": "^6.2.2",
@@ -31,5 +31,14 @@
       "import": "./dist/mocks/mock-mongo-provider.js",
       "require": "./dist/mocks/mock-mongo-provider.js"
     }
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/db"
   }
-} 
+}

@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/tgql-codegen",
+  "name": "@hipponot/tgql-codegen",
   "version": "1.0.0",
   "type": "module",
   "description": "TypeGraphQL code generation utilities for saga-soa monorepo",
@@ -51,5 +51,14 @@
     "saga-soa"
   ],
   "author": "saga-soa",
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/tgql-codegen"
+  }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/pubsub-core",
+  "name": "@hipponot/pubsub-core",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -35,5 +35,14 @@
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
     "vitest": "^1.5.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/pubsub-core"
   }
-} 
+}

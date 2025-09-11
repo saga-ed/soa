@@ -1,0 +1,359 @@
+name: Publish Packages to GitHub Packages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/**"
+      - "build-tools/**"
+      - "turbo.json"
+      - "pnpm-workspace.yaml"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      force_publish_all:
+        description: "Force publish all packages (ignore change detection)"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9.0.0"
+
+# Permission can be added at job level or workflow level
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: write # This is required for actions/checkout and version commits
+  packages: write # This is required for publishing to GitHub Packages
+
+jobs:
+  detect-changes:
+    name: Detect Changed Packages
+    runs-on: ubuntu-latest
+    outputs:
+      changed-packages: ${{ steps.get-changed-packages.outputs.packages }}
+      has-changes: ${{ steps.get-changed-packages.outputs.has-changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for change detection
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Get changed packages using Turborepo
+        id: get-changed-packages
+        run: |
+          set -e
+
+          # Get the list of changed packages
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.force_publish_all }}" == "true" ]; then
+            echo "Force publishing all packages requested"
+            # Get all package names
+            CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            # For push events, compare with previous commit
+            BASE_REF="${{ github.event.before }}"
+            if [ "$BASE_REF" == "0000000000000000000000000000000000000000" ]; then
+              # Initial commit, check all packages
+              CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+            else
+              # Get changed packages using Turborepo
+              CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sed 's|packages/||' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
+            fi
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # For manual triggers, get packages changed since last tag or main
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -n "$LAST_TAG" ]; then
+              BASE_REF="$LAST_TAG"
+            else
+              BASE_REF="origin/main"
+            fi
+            CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sed 's|packages/||' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
+          else
+            # Default: check all packages
+            CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+          fi
+
+          echo "Changed packages: $CHANGED_PACKAGES"
+          echo "packages=$CHANGED_PACKAGES" >> $GITHUB_OUTPUT
+
+          # Check if we have any changes
+          if [ "$CHANGED_PACKAGES" != "[]" ] && [ "$CHANGED_PACKAGES" != '[""]' ]; then
+            echo "has-changes=true" >> $GITHUB_OUTPUT
+            echo "Found changes in packages"
+          else
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+            echo "No package changes detected"
+          fi
+
+  test-and-lint:
+    name: Test and Lint Changed Packages
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-changes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.detect-changes.outputs.changed-packages) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint for affected packages
+        run: pnpm turbo run lint --filter=packages/${{ matrix.package }}...
+
+      - name: Run type checking for affected packages
+        run: pnpm turbo run check-types --filter=packages/${{ matrix.package }}...
+
+      - name: Build affected packages (includes dependencies)
+        run: pnpm turbo run build --filter=packages/${{ matrix.package }}...
+
+      - name: Run tests for affected packages
+        run: pnpm turbo run test --filter=packages/${{ matrix.package }}...
+
+  version-and-publish:
+    name: Version and Publish Packages
+    runs-on: ubuntu-latest
+    needs: [detect-changes, test-and-lint]
+    if: needs.detect-changes.outputs.has-changes == 'true' && (github.ref == 'refs/heads/main' || github.event_name == 'release' || github.event_name == 'workflow_dispatch')
+    outputs:
+      published-packages: ${{ steps.publish-packages.outputs.published-packages }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@hipponot"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm turbo run build
+
+      - name: Configure git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Version bump packages (if workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
+          echo "Bumping version for changed packages: $CHANGED_PACKAGES"
+
+          # Loop through each changed package and bump its version
+          echo "$CHANGED_PACKAGES" | jq -r '.[]' | while read -r package; do
+            if [ -n "$package" ] && [ "$package" != "" ]; then
+              echo "Bumping version for packages/$package"
+              cd "packages/$package"
+              npm version ${{ github.event.inputs.version }} --no-git-tag-version
+              cd ../..
+            fi
+          done
+
+          # Commit version changes
+          git add packages/*/package.json
+          if git diff --staged --quiet; then
+            echo "No version changes to commit"
+          else
+            git commit -m "chore: bump package versions (${{ github.event.inputs.version }})"
+            
+            # Only push if we're on main branch or it's a workflow dispatch
+            if [ "${{ github.ref }}" == "refs/heads/main" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+              git push
+            fi
+          fi
+
+      - name: Setup .npmrc for GitHub Packages
+        run: |
+          echo "@hipponot:registry=https://npm.pkg.github.com" >> .npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+
+      - name: Publish changed packages
+        id: publish-packages
+        run: |
+          CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
+          PUBLISHED_PACKAGES=()
+
+          echo "Publishing changed packages: $CHANGED_PACKAGES"
+
+          # Function to check if package is publishable
+          is_publishable() {
+            local package_path="$1"
+            if [ -f "$package_path/package.json" ]; then
+              # Check if package is not private
+              local is_private=$(jq -r '.private // false' "$package_path/package.json")
+              if [ "$is_private" != "true" ]; then
+                return 0  # publishable
+              fi
+            fi
+            return 1  # not publishable
+          }
+
+          # Get packages in dependency order using turborepo
+          ORDERED_PACKAGES=$(pnpm turbo run build --dry=json | jq -r '.tasks[] | select(.package != "//") | .package' | sed 's|packages/||' | sort -u)
+
+          # Publish packages in dependency order, but only those that changed
+          echo "$ORDERED_PACKAGES" | while read -r package; do
+            if echo "$CHANGED_PACKAGES" | jq -e --arg pkg "$package" 'index($pkg) != null' > /dev/null; then
+              if [ -n "$package" ] && [ "$package" != "" ]; then
+                PACKAGE_PATH="packages/$package"
+                
+                if is_publishable "$PACKAGE_PATH"; then
+                  echo "Publishing $package..."
+                  cd "$PACKAGE_PATH"
+                  
+                  # Try to publish, continue on error (e.g., if version already exists)
+                  if npm publish --access public; then
+                    echo "✅ Successfully published $package"
+                    PUBLISHED_PACKAGES+=("$package")
+                  else
+                    echo "⚠️  Failed to publish $package (may already exist)"
+                  fi
+                  
+                  cd ../..
+                else
+                  echo "⏭️  Skipping $package (private package)"
+                fi
+              fi
+            fi
+          done
+
+          # Convert array to JSON for output
+          PUBLISHED_JSON=$(printf '%s\n' "${PUBLISHED_PACKAGES[@]}" | jq -R -s -c 'split("\n")[:-1]')
+          echo "published-packages=$PUBLISHED_JSON" >> $GITHUB_OUTPUT
+          echo "Published packages: $PUBLISHED_JSON"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-release-summary:
+    name: Create Release Summary
+    runs-on: ubuntu-latest
+    needs: [version-and-publish]
+    if: always() && needs.version-and-publish.result == 'success'
+    steps:
+      - name: Create release summary
+        run: |
+          PUBLISHED_PACKAGES='${{ needs.version-and-publish.outputs.published-packages }}'
+
+          echo "## 📦 Published Packages" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$PUBLISHED_PACKAGES" != "[]" ] && [ "$PUBLISHED_PACKAGES" != '[""]' ]; then
+            echo "The following packages have been published to GitHub Packages:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # List published packages
+            echo "$PUBLISHED_PACKAGES" | jq -r '.[]' | while read -r package; do
+              if [ -n "$package" ] && [ "$package" != "" ]; then
+                echo "- \`@saga-soa/$package\`" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Installation" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "# Configure npm to use GitHub Packages for @saga-soa scope" >> $GITHUB_STEP_SUMMARY
+            echo "npm config set @saga-soa:registry https://npm.pkg.github.com" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "# Install packages" >> $GITHUB_STEP_SUMMARY
+            
+            echo "$PUBLISHED_PACKAGES" | jq -r '.[]' | while read -r package; do
+              if [ -n "$package" ] && [ "$package" != "" ]; then
+                echo "npm install @saga-soa/$package" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+            
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No packages were published in this run." >> $GITHUB_STEP_SUMMARY
+          fi

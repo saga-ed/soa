@@ -25,5 +25,14 @@
   },
   "scripts": {
     "clean": ":"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/eslint-config"
   }
 }

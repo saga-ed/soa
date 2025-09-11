@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/api-core",
+  "name": "@hipponot/api-core",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -81,7 +81,6 @@
     "zod": "3.25.67"
   },
   "devDependencies": {
-    "@saga-soa/logger": "workspace:*",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/figlet": "^1.7.0",
@@ -97,7 +96,8 @@
     "typescript": "^5.8.3",
     "undici": "^7.11.0",
     "vitest": "^1.5.0",
-    "zod": "3.25.67"
+    "zod": "3.25.67",
+    "@hipponot/logger": "workspace:*"
   },
   "typesVersions": {
     "*": {
@@ -105,5 +105,14 @@
         "dist/rest-controller.d.ts"
       ]
     }
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/api-core"
   }
 }

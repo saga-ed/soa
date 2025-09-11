@@ -4,6 +4,7 @@
   "private": true,
   "license": "MIT",
   "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
     "access": "public"
   },
   "scripts": {
@@ -12,5 +13,10 @@
   "dependencies": {
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/typescript-config"
   }
 }

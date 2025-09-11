@@ -99,17 +99,26 @@ export class ZodSchemaLoader {
   private transformESModuleExports(content: string): string {
     // Transform ES module exports to CommonJS-style assignments
     let transformed = content;
+
+    // Handle: export const SomeSchema = z.object(...);
+    transformed = transformed.replace(
+      /export\s+const\s+(\w+)\s*=/g,
+      'const $1 =; exports.$1 = $1; exports.$1'
+    );
+
+    // Fix the double assignment issue from the replacement above
+    transformed = transformed.replace(
+      /const\s+(\w+)\s*=;\s*exports\.\1\s*=\s*\1;\s*exports\.\1\s*=/g,
+      'const $1 =; exports.$1 = $1; $1'
+    );
+
+    // Actually, let's do this more cleanly
+    transformed = content;
     
     // Replace export const with const + assignment
     transformed = transformed.replace(
       /export\s+const\s+(\w+)\s*=\s*([^;]+);?/g,
       'const $1 = $2;\nexports.$1 = $1;'
-    );
-
-    // Handle: export type declarations (remove them as they don't export runtime values)
-    transformed = transformed.replace(
-      /export\s+type\s+[^=\n]*=\s*[^;\n]*;?/g,
-      ''
     );
 
     // Handle: export { SomeSchema };

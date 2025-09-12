@@ -1,7 +1,7 @@
 {
   "name": "@hipponot/logger",
   "version": "1.0.1",
-  "private": true,
+  "private": false,
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",

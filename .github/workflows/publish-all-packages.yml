@@ -1,0 +1,708 @@
+name: Publish Packages to GitHub Packages
+
+# This workflow uses a LAYERED MATRIX STRATEGY to handle package dependencies efficiently:
+# 1. calculate-dependency-layers: Analyzes @hipponot workspace dependencies and groups packages into layers
+# 2. test-and-lint-layer-N: Runs testing/linting for each layer in parallel within the layer, sequential between layers
+# 3. version-and-publish: Publishes packages in dependency order using the calculated layers
+#
+# Benefits:
+# - Maximum parallelism within each dependency layer
+# - Ensures dependencies are built/published before dependents
+# - Handles circular dependency detection
+# - Scales automatically with workspace changes
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/**"
+      - "build-tools/**"
+      - "turbo.json"
+      - "pnpm-workspace.yaml"
+  pull_request:
+    paths:
+      - "packages/**"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      force_publish_all:
+        description: "Force publish all packages (ignore change detection)"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9.0.0"
+
+# Permission can be added at job level or workflow level
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: write # This is required for actions/checkout and version commits
+  packages: write # This is required for publishing to GitHub Packages
+
+jobs:
+  detect-changes:
+    name: Detect Changed Packages
+    runs-on: ubuntu-latest
+    outputs:
+      changed-packages: ${{ steps.get-changed-packages.outputs.packages }}
+      has-changes: ${{ steps.get-changed-packages.outputs.has-changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for change detection
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Get changed packages using Turborepo
+        id: get-changed-packages
+        run: |
+          set -e
+
+          # Get the list of changed packages
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.force_publish_all }}" == "true" ]; then
+            echo "Force publishing all packages requested"
+            # Get all package names
+            CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            # For push events, compare with previous commit
+            BASE_REF="${{ github.event.before }}"
+            if [ "$BASE_REF" == "0000000000000000000000000000000000000000" ]; then
+              # Initial commit, check all packages
+              CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+            else
+              # Get changed packages using Turborepo
+              CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
+            fi
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # For manual triggers, get packages changed since last tag or main
+            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            if [ -n "$LAST_TAG" ]; then
+              BASE_REF="$LAST_TAG"
+            else
+              BASE_REF="origin/main"
+            fi
+            CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
+          else
+            # Default: check all packages
+            CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+          fi
+
+          echo "Changed packages: $CHANGED_PACKAGES"
+          echo "packages=$CHANGED_PACKAGES" >> $GITHUB_OUTPUT
+
+          # Check if we have any changes
+          if [ "$CHANGED_PACKAGES" != "[]" ] && [ "$CHANGED_PACKAGES" != '[""]' ]; then
+            echo "has-changes=true" >> $GITHUB_OUTPUT
+            echo "Found changes in packages"
+          else
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+            echo "No package changes detected"
+          fi
+
+  calculate-dependency-layers:
+    name: Calculate Package Dependency Layers
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-changes == 'true'
+    outputs:
+      layer-0: ${{ steps.calc-layers.outputs.layer-0 }}
+      layer-1: ${{ steps.calc-layers.outputs.layer-1 }}
+      layer-2: ${{ steps.calc-layers.outputs.layer-2 }}
+      layer-3: ${{ steps.calc-layers.outputs.layer-3 }}
+      total-layers: ${{ steps.calc-layers.outputs.total-layers }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Calculate dependency layers
+        id: calc-layers
+        run: |
+          set -e
+
+          CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
+          echo "Calculating dependency layers for: $CHANGED_PACKAGES"
+
+            # Create a script to analyze workspace dependencies
+            cat > analyze_deps.mjs << 'EOF'
+            import fs from 'fs';
+            import path from 'path';
+
+          function getPackageDependencies(packageName) {
+            const packagePath = path.join('packages', packageName, 'package.json');
+            if (!fs.existsSync(packagePath)) return [];
+            
+            const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+            const deps = [
+              ...Object.keys(pkg.dependencies || {}),
+              ...Object.keys(pkg.devDependencies || {})
+            ];
+            
+            // Filter to only @hipponot workspace dependencies
+            return deps
+              .filter(dep => dep.startsWith('@hipponot/'))
+              .map(dep => dep.replace('@hipponot/', ''));
+          }
+
+          function calculateLayers(packages) {
+            const layers = [];
+            const processed = new Set();
+            let currentLayer = 0;
+            
+            while (processed.size < packages.length && currentLayer < 10) {
+              const currentLayerPackages = [];
+              
+              for (const pkg of packages) {
+                if (processed.has(pkg)) continue;
+                
+                const deps = getPackageDependencies(pkg);
+                const workspaceDeps = deps.filter(dep => packages.includes(dep));
+                
+                // Package can be in this layer if all its workspace deps are already processed
+                const canProcess = workspaceDeps.every(dep => processed.has(dep));
+                
+                if (canProcess) {
+                  currentLayerPackages.push(pkg);
+                }
+              }
+              
+              if (currentLayerPackages.length === 0) {
+                console.error('Circular dependency detected or error in calculation');
+                process.exit(1);
+              }
+              
+              layers[currentLayer] = currentLayerPackages;
+              currentLayerPackages.forEach(pkg => processed.add(pkg));
+              currentLayer++;
+            }
+            
+            return layers;
+          }
+
+          const changedPackages = JSON.parse(process.argv[2]);
+          const layers = calculateLayers(changedPackages);
+
+          // Output layers as JSON
+          for (let i = 0; i < layers.length; i++) {
+            console.log(`layer-${i}=${JSON.stringify(layers[i])}`);
+          }
+          console.log(`total-layers=${layers.length}`);
+          EOF
+
+            # Run the analysis
+            node analyze_deps.mjs "$CHANGED_PACKAGES" >> $GITHUB_OUTPUT
+
+          # Debug output
+          echo "=== Dependency Layers ==="
+          cat $GITHUB_OUTPUT
+          echo "========================"
+
+  # Layer 0: Base packages with no workspace dependencies
+  test-and-lint-layer-0:
+    name: Test and Lint Layer 0 (Base Packages)
+    runs-on: ubuntu-latest
+    needs: calculate-dependency-layers
+    if: needs.calculate-dependency-layers.outputs.layer-0 != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.calculate-dependency-layers.outputs.layer-0) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint for affected packages
+        run: pnpm turbo run lint --filter=${{ matrix.package }}...
+
+      - name: Run type checking for affected packages
+        run: pnpm turbo run check-types --filter=${{ matrix.package }}...
+
+      - name: Build affected packages (includes dependencies)
+        run: pnpm turbo run build --filter=${{ matrix.package }}...
+
+      - name: Run tests for affected packages
+        run: pnpm turbo run test --filter=${{ matrix.package }}...
+
+  # Layer 1: Packages that depend only on Layer 0
+  test-and-lint-layer-1:
+    name: Test and Lint Layer 1
+    runs-on: ubuntu-latest
+    needs: [calculate-dependency-layers, test-and-lint-layer-0]
+    if: needs.calculate-dependency-layers.outputs.layer-1 != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.calculate-dependency-layers.outputs.layer-1) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint for affected packages
+        run: pnpm turbo run lint --filter=${{ matrix.package }}...
+
+      - name: Run type checking for affected packages
+        run: pnpm turbo run check-types --filter=${{ matrix.package }}...
+
+      - name: Build affected packages (includes dependencies)
+        run: pnpm turbo run build --filter=${{ matrix.package }}...
+
+      - name: Run tests for affected packages
+        run: pnpm turbo run test --filter=${{ matrix.package }}...
+
+  # Layer 2: Packages that depend on Layer 0 and/or Layer 1
+  test-and-lint-layer-2:
+    name: Test and Lint Layer 2
+    runs-on: ubuntu-latest
+    needs: [calculate-dependency-layers, test-and-lint-layer-1]
+    if: needs.calculate-dependency-layers.outputs.layer-2 != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.calculate-dependency-layers.outputs.layer-2) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint for affected packages
+        run: pnpm turbo run lint --filter=${{ matrix.package }}...
+
+      - name: Run type checking for affected packages
+        run: pnpm turbo run check-types --filter=${{ matrix.package }}...
+
+      - name: Build affected packages (includes dependencies)
+        run: pnpm turbo run build --filter=${{ matrix.package }}...
+
+      - name: Run tests for affected packages
+        run: pnpm turbo run test --filter=${{ matrix.package }}...
+
+  # Layer 3: Packages that depend on previous layers
+  test-and-lint-layer-3:
+    name: Test and Lint Layer 3
+    runs-on: ubuntu-latest
+    needs: [calculate-dependency-layers, test-and-lint-layer-2]
+    if: needs.calculate-dependency-layers.outputs.layer-3 != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.calculate-dependency-layers.outputs.layer-3) }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run lint for affected packages
+        run: pnpm turbo run lint --filter=${{ matrix.package }}...
+
+      - name: Run type checking for affected packages
+        run: pnpm turbo run check-types --filter=${{ matrix.package }}...
+
+      - name: Build affected packages (includes dependencies)
+        run: pnpm turbo run build --filter=${{ matrix.package }}...
+
+      - name: Run tests for affected packages
+        run: pnpm turbo run test --filter=${{ matrix.package }}...
+
+  version-and-publish:
+    name: Version and Publish Packages
+    runs-on: ubuntu-latest
+    needs:
+      [
+        detect-changes,
+        calculate-dependency-layers,
+        test-and-lint-layer-0,
+        test-and-lint-layer-1,
+        test-and-lint-layer-2,
+        test-and-lint-layer-3,
+      ]
+    if: |
+      always() && 
+      needs.detect-changes.outputs.has-changes == 'true' && 
+      (github.ref == 'refs/heads/main' || github.event_name == 'release' || github.event_name == 'workflow_dispatch') &&
+      (
+        needs.test-and-lint-layer-0.result == 'success' ||
+        needs.test-and-lint-layer-1.result == 'success' ||
+        needs.test-and-lint-layer-2.result == 'success' ||
+        needs.test-and-lint-layer-3.result == 'success'
+      )
+    outputs:
+      published-packages: ${{ steps.publish-packages.outputs.published-packages }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@hipponot"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm turbo run build
+
+      - name: Configure git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Version bump packages (if workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
+          echo "Bumping version for changed packages: $CHANGED_PACKAGES"
+
+          # Loop through each changed package and bump its version
+          echo "$CHANGED_PACKAGES" | jq -r '.[]' | while read -r package; do
+            if [ -n "$package" ] && [ "$package" != "" ]; then
+              echo "Bumping version for packages/$package"
+              cd "packages/$package"
+              npm version ${{ github.event.inputs.version }} --no-git-tag-version
+              cd ../..
+            fi
+          done
+
+          # Commit version changes
+          git add packages/*/package.json
+          if git diff --staged --quiet; then
+            echo "No version changes to commit"
+          else
+            git commit -m "chore: bump package versions (${{ github.event.inputs.version }})"
+            
+            # Only push if we're on main branch or it's a workflow dispatch
+            if [ "${{ github.ref }}" == "refs/heads/main" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+              git push
+            fi
+          fi
+
+      - name: Setup .npmrc for GitHub Packages
+        run: |
+          echo "@hipponot:registry=https://npm.pkg.github.com" >> .npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+
+      - name: Publish changed packages in dependency order
+        id: publish-packages
+        run: |
+          CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
+          PUBLISHED_PACKAGES=()
+
+          echo "Publishing changed packages in layer order: $CHANGED_PACKAGES"
+
+          # Function to check if package is publishable
+          is_publishable() {
+            local package_path="$1"
+            if [ -f "$package_path/package.json" ]; then
+              # Check if package is not private
+              local is_private=$(jq -r '.private // false' "$package_path/package.json")
+              if [ "$is_private" != "true" ]; then
+                return 0  # publishable
+              fi
+            fi
+            return 1  # not publishable
+          }
+
+          # Function to publish a single package
+          publish_single_package() {
+            local package="$1"
+            local context="$2"
+            
+            if [ -n "$package" ] && [ "$package" != "" ]; then
+              PACKAGE_PATH="packages/$package"
+              
+              if is_publishable "$PACKAGE_PATH"; then
+                echo "Publishing $package ($context)..."
+                cd "$PACKAGE_PATH"
+                
+                # Try to publish, continue on error (e.g., if version already exists)
+                if npm publish --access public; then
+                  echo "✅ Successfully published $package"
+                  echo "$package" >> /tmp/published_packages.txt
+                else
+                  echo "⚠️  Failed to publish $package (may already exist)"
+                fi
+                
+                cd ../..
+              else
+                echo "⏭️  Skipping $package (private package)"
+              fi
+            fi
+          }
+
+          # Function to publish packages from a layer
+          publish_layer() {
+            local layer_packages="$1"
+            local layer_name="$2"
+            
+            if [ "$layer_packages" == "[]" ] || [ "$layer_packages" == "null" ]; then
+              echo "No packages in $layer_name, skipping"
+              return
+            fi
+            
+            echo "Publishing $layer_name: $layer_packages"
+            
+            echo "$layer_packages" | jq -r '.[]' | while read -r package; do
+              if [ -n "$package" ] && [ "$package" != "" ]; then
+                # Check if package was actually changed and tested successfully
+                if echo "$CHANGED_PACKAGES" | jq -e --arg pkg "$package" 'index($pkg) != null' > /dev/null; then
+                  publish_single_package "$package" "$layer_name"
+                else
+                  echo "⏭️  Skipping $package (not in changed packages or tests failed)"
+                fi
+              fi
+            done
+          }
+
+          # Initialize published packages file
+          echo "" > /tmp/published_packages.txt
+
+          # Publish packages layer by layer
+          publish_layer '${{ needs.calculate-dependency-layers.outputs.layer-0 }}' "Layer 0 (Base)"
+          publish_layer '${{ needs.calculate-dependency-layers.outputs.layer-1 }}' "Layer 1"
+          publish_layer '${{ needs.calculate-dependency-layers.outputs.layer-2 }}' "Layer 2"
+          publish_layer '${{ needs.calculate-dependency-layers.outputs.layer-3 }}' "Layer 3"
+
+          # Handle any additional layers beyond 4 (fallback for deep dependency chains)
+          TOTAL_LAYERS='${{ needs.calculate-dependency-layers.outputs.total-layers }}'
+          if [ "$TOTAL_LAYERS" -gt 4 ]; then
+            echo "⚠️  Warning: More than 4 dependency layers detected ($TOTAL_LAYERS). Consider optimizing dependency structure."
+            echo "Using fallback sequential publishing for remaining packages..."
+            
+            # Fallback to original Turborepo ordering for any missed packages
+            ORDERED_PACKAGES=$(pnpm turbo run build --dry=json | jq -r '.tasks[] | select(.package != "//") | .package' | sed 's|packages/||' | sort -u)
+            echo "$ORDERED_PACKAGES" | while read -r package; do
+              if echo "$CHANGED_PACKAGES" | jq -e --arg pkg "$package" 'index($pkg) != null' > /dev/null; then
+                # Check if package wasn't already published
+                if ! grep -q "^$package$" /tmp/published_packages.txt 2>/dev/null; then
+                  publish_single_package "$package" "Fallback"
+                fi
+              fi
+            done
+          fi
+
+          # Collect all published packages
+          if [ -f /tmp/published_packages.txt ]; then
+            PUBLISHED_JSON=$(cat /tmp/published_packages.txt | grep -v '^$' | jq -R -s -c 'split("\n")[:-1]')
+          else
+            PUBLISHED_JSON="[]"
+          fi
+
+          echo "published-packages=$PUBLISHED_JSON" >> $GITHUB_OUTPUT
+          echo "Published packages: $PUBLISHED_JSON"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-release-summary:
+    name: Create Release Summary
+    runs-on: ubuntu-latest
+    needs: [version-and-publish]
+    if: always() && needs.version-and-publish.result == 'success'
+    steps:
+      - name: Create release summary
+        run: |
+          PUBLISHED_PACKAGES='${{ needs.version-and-publish.outputs.published-packages }}'
+
+          echo "## 📦 Published Packages" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$PUBLISHED_PACKAGES" != "[]" ] && [ "$PUBLISHED_PACKAGES" != '[""]' ]; then
+            echo "The following packages have been published to GitHub Packages:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            
+            # List published packages
+            echo "$PUBLISHED_PACKAGES" | jq -r '.[]' | while read -r package; do
+              if [ -n "$package" ] && [ "$package" != "" ]; then
+                echo "- \`@hipponot/$package\`" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Installation" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "# Configure npm to use GitHub Packages for @hipponot scope" >> $GITHUB_STEP_SUMMARY
+            echo "npm config set @hipponot:registry https://npm.pkg.github.com" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "# Install packages" >> $GITHUB_STEP_SUMMARY
+            
+            echo "$PUBLISHED_PACKAGES" | jq -r '.[]' | while read -r package; do
+              if [ -n "$package" ] && [ "$package" != "" ]; then
+                echo "npm install @hipponot/$package" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+            
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No packages were published in this run." >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,27 +1,5 @@
-import { router } from '@trpc/server';
+import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
-
-// Mock router for testing - this simulates the actual router pattern
-export const projectRouter = router({
-  getProject: t.procedure
-    .input(GetProjectSchema)
-    .query(() => ({ id: '1', name: 'Test Project' })),
-  
-  createProject: t.procedure
-    .input(CreateProjectSchema)
-    .mutation(() => ({ id: '1', name: 'New Project' })),
-  
-  updateProject: t.procedure
-    .input(UpdateProjectSchema)
-    .mutation(() => ({ id: '1', name: 'Updated Project' })),
-  
-  deleteProject: t.procedure
-    .input(DeleteProjectSchema)
-    .mutation(() => ({ success: true })),
-  
-  listProjects: t.procedure
-    .query(() => [{ id: '1', name: 'Project 1' }, { id: '2', name: 'Project 2' }])
-});
 
 // Mock schemas for testing
 export const GetProjectSchema = z.object({
@@ -43,4 +21,29 @@ export const UpdateProjectSchema = z.object({
 
 export const DeleteProjectSchema = z.object({
   id: z.string()
+});
+
+// Mock tRPC setup for testing
+const t = initTRPC.create();
+
+// Mock router for testing - this simulates the actual router pattern
+export const projectRouter = t.router({
+  getProject: t.procedure
+    .input(GetProjectSchema)
+    .query(() => ({ id: '1', name: 'Test Project' })),
+  
+  createProject: t.procedure
+    .input(CreateProjectSchema)
+    .mutation(() => ({ id: '1', name: 'New Project' })),
+  
+  updateProject: t.procedure
+    .input(UpdateProjectSchema)
+    .mutation(() => ({ id: '1', name: 'Updated Project' })),
+  
+  deleteProject: t.procedure
+    .input(DeleteProjectSchema)
+    .mutation(() => ({ success: true })),
+  
+  listProjects: t.procedure
+    .query(() => [{ id: '1', name: 'Project 1' }, { id: '2', name: 'Project 2' }])
 });

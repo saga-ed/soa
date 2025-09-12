@@ -1,6 +1,6 @@
 {
   "name": "@hipponot/api-core",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "private": false,
   "type": "module",
   "main": "dist/rest-controller.js",

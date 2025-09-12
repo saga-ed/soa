@@ -1,50 +1,5 @@
+import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
-
-// Mock router for testing - this simulates the actual router pattern
-export class UserController {
-  readonly sectorName = 'user';
-  
-  createRouter() {
-    const t = this.createProcedure();
-    return router({
-      getUser: t.procedure
-        .input(GetUserSchema)
-        .query(() => ({ id: '1', name: 'Test User', email: 'test@example.com' })),
-      
-      createUser: t.procedure
-        .input(CreateUserSchema)
-        .mutation(() => ({ id: '1', name: 'New User', email: 'new@example.com' })),
-      
-      updateUser: t.procedure
-        .input(UpdateUserSchema)
-        .mutation(() => ({ id: '1', name: 'Updated User', email: 'updated@example.com' })),
-      
-      deleteUser: t.procedure
-        .input(DeleteUserSchema)
-        .mutation(() => ({ success: true })),
-      
-      listUsers: t.procedure
-        .input(ListUsersSchema)
-        .query(() => [{ id: '1', name: 'User 1' }, { id: '2', name: 'User 2' }])
-    });
-  }
-  
-  private createProcedure() {
-    return {
-      procedure: {
-        input: (schema: any) => ({
-          query: (handler: any) => handler,
-          mutation: (handler: any) => handler
-        })
-      }
-    };
-  }
-}
-
-// Mock router function for testing
-function router(config: any) {
-  return config;
-}
 
 // Mock schemas for testing
 export const GetUserSchema = z.object({
@@ -73,3 +28,38 @@ export const ListUsersSchema = z.object({
   offset: z.number().min(0).default(0),
   role: z.enum(['admin', 'user', 'guest']).optional()
 });
+
+// Mock tRPC setup for testing
+const t = initTRPC.create();
+
+// Mock router for testing - this simulates the actual router pattern
+export const userRouter = t.router({
+  getUser: t.procedure
+    .input(GetUserSchema)
+    .query(() => ({ id: '1', name: 'Test User', email: 'test@example.com' })),
+  
+  createUser: t.procedure
+    .input(CreateUserSchema)
+    .mutation(() => ({ id: '1', name: 'New User', email: 'new@example.com' })),
+  
+  updateUser: t.procedure
+    .input(UpdateUserSchema)
+    .mutation(() => ({ id: '1', name: 'Updated User', email: 'updated@example.com' })),
+  
+  deleteUser: t.procedure
+    .input(DeleteUserSchema)
+    .mutation(() => ({ success: true })),
+  
+  listUsers: t.procedure
+    .input(ListUsersSchema)
+    .query(() => [{ id: '1', name: 'User 1' }, { id: '2', name: 'User 2' }])
+});
+
+// Mock controller class for testing
+export class UserController {
+  readonly sectorName = 'user';
+  
+  createRouter() {
+    return userRouter;
+  }
+}

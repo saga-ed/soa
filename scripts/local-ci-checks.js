@@ -266,3 +266,4 @@ This script runs the same checks as the GitHub Actions workflow:
 }
 
 main();
+

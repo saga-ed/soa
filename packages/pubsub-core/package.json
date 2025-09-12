@@ -1,6 +1,6 @@
 {
   "name": "@hipponot/pubsub-core",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "private": false,
   "type": "module",
   "main": "dist/index.js",

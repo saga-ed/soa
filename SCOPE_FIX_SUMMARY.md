@@ -94,3 +94,4 @@ The package scope fix is complete and ready for:
 ```
 @hipponot:registry=https://npm.pkg.github.com
 ```
+

@@ -21,7 +21,7 @@
     "reflect-metadata": "^0.2.2",
     "zod": "3.25.67"
   },
-  "version": "1.0.0",
+  "version": "1.0.1",
   "exports": {
     ".": {
       "import": "./dist/index.js",

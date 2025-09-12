@@ -31,6 +31,17 @@
         "^check-types"
       ]
     },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "src/**/*.test.ts",
+        "src/**/*.spec.ts",
+        "vitest.config.ts"
+      ]
+    },
     "dev": {
       "cache": false,
       "persistent": true

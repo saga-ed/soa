@@ -1,4 +1,4 @@
-// Main exports for @hipponot/trpc-codegen
+// Main exports for @hipponot/soa-trpc-codegen
 export { TRPCCodegen } from './generators/codegen.js';
 export { ConfigLoader } from './utils/config-loader.js';
 export { SectorParser } from './parsers/sector-parser.js';

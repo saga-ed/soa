@@ -39,13 +39,13 @@ importers:
 
   apps/examples/rest-api:
     dependencies:
-      '@hipponot/api-core':
+      '@hipponot/soa-api-core':
         specifier: workspace:*
         version: link:../../../packages/api-core
-      '@hipponot/db':
+      '@hipponot/soa-db':
         specifier: workspace:*
         version: link:../../../packages/db
-      '@hipponot/logger':
+      '@hipponot/soa-logger':
         specifier: workspace:^
         version: link:../../../packages/logger
       '@types/mongodb':
@@ -94,13 +94,13 @@ importers:
       '@apollo/server':
         specifier: ^4.9.6
         version: 4.12.2(graphql@16.11.0)
-      '@hipponot/api-core':
+      '@hipponot/soa-api-core':
         specifier: workspace:*
         version: link:../../../packages/api-core
-      '@hipponot/db':
+      '@hipponot/soa-db':
         specifier: workspace:*
         version: link:../../../packages/db
-      '@hipponot/logger':
+      '@hipponot/soa-logger':
         specifier: workspace:^
         version: link:../../../packages/logger
       '@types/mongodb':
@@ -167,7 +167,7 @@ importers:
 
   apps/examples/tgql-api/tgql-types:
     dependencies:
-      '@hipponot/api-core':
+      '@hipponot/soa-api-core':
         specifier: workspace:*
         version: link:../../../../packages/api-core
       graphql:
@@ -177,7 +177,7 @@ importers:
         specifier: ^2.0.0-rc.2
         version: 2.0.0-rc.2(class-validator@0.14.2)(graphql-scalars@1.24.2(graphql@16.11.0))(graphql@16.11.0)
     devDependencies:
-      '@hipponot/tgql-codegen':
+      '@hipponot/soa-tgql-codegen':
         specifier: workspace:*
         version: link:../../../../packages/tgql-codegen
       '@types/node':
@@ -198,22 +198,22 @@ importers:
 
   apps/examples/trpc-api:
     dependencies:
-      '@hipponot/api-core':
+      '@hipponot/soa-api-core':
         specifier: workspace:*
         version: link:../../../packages/api-core
-      '@hipponot/db':
+      '@hipponot/soa-db':
         specifier: workspace:*
         version: link:../../../packages/db
-      '@hipponot/logger':
+      '@hipponot/soa-logger':
         specifier: workspace:^
         version: link:../../../packages/logger
-      '@hipponot/pubsub-core':
+      '@hipponot/soa-pubsub-core':
         specifier: workspace:^
         version: link:../../../packages/pubsub-core
-      '@hipponot/pubsub-server':
+      '@hipponot/soa-pubsub-server':
         specifier: workspace:^
         version: link:../../../packages/pubsub-server
-      '@hipponot/trpc-types':
+      '@hipponot/soa-trpc-types':
         specifier: workspace:*
         version: link:trpc-types
       '@trpc/client':
@@ -278,10 +278,10 @@ importers:
         specifier: ^3.25.67
         version: 3.25.67
     devDependencies:
-      '@hipponot/trpc-codegen':
+      '@hipponot/soa-trpc-codegen':
         specifier: workspace:*
         version: link:../../../../packages/trpc-codegen
-      '@hipponot/zod2ts':
+      '@hipponot/soa-zod2ts':
         specifier: workspace:*
         version: link:../../../../build-tools/zod2ts
       '@trpc/client':
@@ -308,10 +308,10 @@ importers:
 
   apps/examples/web-client:
     dependencies:
-      '@hipponot/trpc-types':
+      '@hipponot/soa-trpc-types':
         specifier: workspace:*
         version: link:../trpc-api/trpc-types
-      '@hipponot/ui':
+      '@hipponot/soa-ui':
         specifier: workspace:*
         version: link:../../../packages/ui
       '@trpc/client':
@@ -330,7 +330,7 @@ importers:
       '@eslint/eslintrc':
         specifier: ^3.3.1
         version: 3.3.1
-      '@hipponot/typescript-config':
+      '@hipponot/soa-typescript-config':
         specifier: workspace:*
         version: link:../../../packages/typescript-config
       '@types/node':
@@ -364,7 +364,7 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0(typescript@5.8.3)(zod@3.25.67)
     devDependencies:
-      '@hipponot/typescript-config':
+      '@hipponot/soa-typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
       '@types/node':
@@ -422,7 +422,7 @@ importers:
         specifier: 3.25.67
         version: 3.25.67
     devDependencies:
-      '@hipponot/logger':
+      '@hipponot/soa-logger':
         specifier: workspace:*
         version: link:../logger
       '@types/cors':
@@ -480,7 +480,7 @@ importers:
         specifier: 3.25.67
         version: 3.25.67
     devDependencies:
-      '@hipponot/typescript-config':
+      '@hipponot/soa-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
       '@types/node':
@@ -511,10 +511,10 @@ importers:
         specifier: 3.25.67
         version: 3.25.67
     devDependencies:
-      '@hipponot/config':
+      '@hipponot/soa-config':
         specifier: workspace:*
         version: link:../config
-      '@hipponot/typescript-config':
+      '@hipponot/soa-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
       '@types/node':
@@ -587,7 +587,7 @@ importers:
         specifier: 3.25.67
         version: 3.25.67
     devDependencies:
-      '@hipponot/typescript-config':
+      '@hipponot/soa-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
       '@types/node':
@@ -605,13 +605,13 @@ importers:
 
   packages/pubsub-client:
     dependencies:
-      '@hipponot/logger':
+      '@hipponot/soa-logger':
         specifier: workspace:^
         version: link:../logger
-      '@hipponot/pubsub-core':
+      '@hipponot/soa-pubsub-core':
         specifier: workspace:*
         version: link:../pubsub-core
-      '@hipponot/pubsub-server':
+      '@hipponot/soa-pubsub-server':
         specifier: workspace:^
         version: link:../pubsub-server
       '@trpc/client':
@@ -661,7 +661,7 @@ importers:
         specifier: 3.25.67
         version: 3.25.67
     devDependencies:
-      '@hipponot/typescript-config':
+      '@hipponot/soa-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
       '@types/uuid':
@@ -679,13 +679,13 @@ importers:
 
   packages/pubsub-server:
     dependencies:
-      '@hipponot/api-core':
+      '@hipponot/soa-api-core':
         specifier: workspace:*
         version: link:../api-core
-      '@hipponot/logger':
+      '@hipponot/soa-logger':
         specifier: workspace:*
         version: link:../logger
-      '@hipponot/pubsub-core':
+      '@hipponot/soa-pubsub-core':
         specifier: workspace:*
         version: link:../pubsub-core
       '@trpc/server':
@@ -704,7 +704,7 @@ importers:
         specifier: 3.25.67
         version: 3.25.67
     devDependencies:
-      '@hipponot/typescript-config':
+      '@hipponot/soa-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
       '@types/node':
@@ -815,10 +815,10 @@ importers:
         specifier: ^19.1.0
         version: 19.1.0(react@19.1.0)
     devDependencies:
-      '@hipponot/eslint-config':
+      '@hipponot/soa-eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
-      '@hipponot/typescript-config':
+      '@hipponot/soa-typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
       '@turbo/gen':
@@ -8362,6 +8362,23 @@ snapshots:
   '@swc/core-win32-x64-msvc@1.12.6':
     optional: true
 
+  '@swc/core@1.12.6(@swc/helpers@0.5.15)':
+    dependencies:
+      '@swc/counter': 0.1.3
+      '@swc/types': 0.1.23
+    optionalDependencies:
+      '@swc/core-darwin-arm64': 1.12.6
+      '@swc/core-darwin-x64': 1.12.6
+      '@swc/core-linux-arm-gnueabihf': 1.12.6
+      '@swc/core-linux-arm64-gnu': 1.12.6
+      '@swc/core-linux-arm64-musl': 1.12.6
+      '@swc/core-linux-x64-gnu': 1.12.6
+      '@swc/core-linux-x64-musl': 1.12.6
+      '@swc/core-win32-arm64-msvc': 1.12.6
+      '@swc/core-win32-ia32-msvc': 1.12.6
+      '@swc/core-win32-x64-msvc': 1.12.6
+      '@swc/helpers': 0.5.15
+
   '@swc/core@1.12.6(@swc/helpers@0.5.17)':
     dependencies:
       '@swc/counter': 0.1.3
@@ -8378,6 +8395,7 @@ snapshots:
       '@swc/core-win32-ia32-msvc': 1.12.6
       '@swc/core-win32-x64-msvc': 1.12.6
       '@swc/helpers': 0.5.17
+    optional: true
 
   '@swc/counter@0.1.3': {}
 
@@ -9218,7 +9236,7 @@ snapshots:
       '@rollup/plugin-replace': 6.0.2(rollup@4.44.0)
       '@rollup/plugin-wasm': 6.2.2(rollup@4.44.0)
       '@rollup/pluginutils': 5.2.0(rollup@4.44.0)
-      '@swc/core': 1.12.6(@swc/helpers@0.5.17)
+      '@swc/core': 1.12.6(@swc/helpers@0.5.15)
       '@swc/helpers': 0.5.15
       clean-css: 5.3.3
       fast-glob: 3.3.3
@@ -9995,8 +10013,8 @@ snapshots:
       '@typescript-eslint/parser': 8.33.0(eslint@8.57.1)(typescript@5.8.2)
       eslint: 8.57.1
       eslint-import-resolver-node: 0.3.9
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1)
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint@8.57.1))(eslint@8.57.1)
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint@8.57.1))(eslint@8.57.1))(eslint@8.57.1)
       eslint-plugin-jsx-a11y: 6.10.2(eslint@8.57.1)
       eslint-plugin-react: 7.37.5(eslint@8.57.1)
       eslint-plugin-react-hooks: 5.2.0(eslint@8.57.1)
@@ -10019,7 +10037,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1):
+  eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint@8.57.1))(eslint@8.57.1):
     dependencies:
       '@nolyfill/is-core-module': 1.0.39
       debug: 4.4.1
@@ -10030,22 +10048,22 @@ snapshots:
       tinyglobby: 0.2.14
       unrs-resolver: 1.11.1
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint@8.57.1))(eslint@8.57.1))(eslint@8.57.1)
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1))(eslint@8.57.1):
+  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint@8.57.1))(eslint@8.57.1))(eslint@8.57.1):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
       '@typescript-eslint/parser': 8.33.0(eslint@8.57.1)(typescript@5.8.2)
       eslint: 8.57.1
       eslint-import-resolver-node: 0.3.9
-      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1)
+      eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint@8.57.1))(eslint@8.57.1)
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint@8.57.1))(eslint@8.57.1))(eslint@8.57.1):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9
@@ -10056,7 +10074,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 8.57.1
       eslint-import-resolver-node: 0.3.9
-      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1))(eslint@8.57.1)
+      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.33.0(eslint@8.57.1)(typescript@5.8.2))(eslint@8.57.1))(eslint@8.57.1))(eslint@8.57.1)
       hasown: 2.0.2
       is-core-module: 2.16.1
       is-glob: 4.0.3
@@ -12263,7 +12281,7 @@ snapshots:
     dependencies:
       '@fastify/deepmerge': 1.3.0
       '@rollup/pluginutils': 5.2.0(rollup@4.44.0)
-      '@swc/core': 1.12.6(@swc/helpers@0.5.17)
+      '@swc/core': 1.12.6(@swc/helpers@0.5.15)
       get-tsconfig: 4.10.1
       rollup: 4.44.0
       rollup-preserve-directives: 1.1.3(rollup@4.44.0)

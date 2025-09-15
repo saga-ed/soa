@@ -1,5 +1,5 @@
 {
-  "extends": "@hipponot/typescript-config/nextjs.json",
+  "extends": "@hipponot/soa-typescript-config/nextjs.json",
   "compilerOptions": {
     "plugins": [
       {

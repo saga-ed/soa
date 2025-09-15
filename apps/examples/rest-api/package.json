@@ -24,9 +24,9 @@
     "mongodb": "^5.7.0",
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2",
-    "@hipponot/api-core": "workspace:*",
-    "@hipponot/db": "workspace:*",
-    "@hipponot/logger": "workspace:^"
+    "@hipponot/soa-api-core": "workspace:*",
+    "@hipponot/soa-db": "workspace:*",
+    "@hipponot/soa-logger": "workspace:^"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

@@ -1,15 +1,15 @@
 import { Container } from 'inversify';
 import type { MongoClient } from 'mongodb';
-import { MONGO_CLIENT } from '@hipponot/db';
-import type { IMongoConnMgr } from '@hipponot/db';
-import { MockMongoProvider } from '@hipponot/db/mocks/mock-mongo-provider';
-import type { ILogger, PinoLoggerConfig } from '@hipponot/logger';
-import { PinoLogger } from '@hipponot/logger';
-import { ExpressServer } from '@hipponot/api-core/express-server';
-import { GQLServer } from '@hipponot/api-core/gql-server';
-import { ControllerLoader } from '@hipponot/api-core/utils/controller-loader';
-import type { ExpressServerConfig } from '@hipponot/api-core/express-server-schema';
-import type { GQLServerConfig } from '@hipponot/api-core/gql-server-schema';
+import { MONGO_CLIENT } from '@hipponot/soa-db';
+import type { IMongoConnMgr } from '@hipponot/soa-db';
+import { MockMongoProvider } from '@hipponot/soa-db/mocks/mock-mongo-provider';
+import type { ILogger, PinoLoggerConfig } from '@hipponot/soa-logger';
+import { PinoLogger } from '@hipponot/soa-logger';
+import { ExpressServer } from '@hipponot/soa-api-core/express-server';
+import { GQLServer } from '@hipponot/soa-api-core/gql-server';
+import { ControllerLoader } from '@hipponot/soa-api-core/utils/controller-loader';
+import type { ExpressServerConfig } from '@hipponot/soa-api-core/express-server-schema';
+import type { GQLServerConfig } from '@hipponot/soa-api-core/gql-server-schema';
 
 const container = new Container();
 

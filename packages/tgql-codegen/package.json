@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/tgql-codegen",
+  "name": "@hipponot/soa-tgql-codegen",
   "version": "1.0.0",
   "type": "module",
   "description": "TypeGraphQL code generation utilities for saga-soa monorepo",

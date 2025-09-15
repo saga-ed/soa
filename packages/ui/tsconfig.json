@@ -1,5 +1,5 @@
 {
-  "extends": "@hipponot/typescript-config/react-library.json",
+  "extends": "@hipponot/soa-typescript-config/react-library.json",
   "compilerOptions": {
     "outDir": "dist"
   },

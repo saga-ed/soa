@@ -1,6 +1,6 @@
 import { inject, injectable } from 'inversify';
 import { TYPES } from '../types/index.js';
-import type { ChannelConfig, EventEnvelope } from '@hipponot/pubsub-core';
+import type { ChannelConfig, EventEnvelope } from '@hipponot/soa-pubsub-core';
 import type { Logger } from '../types/index.js';
 
 @injectable()

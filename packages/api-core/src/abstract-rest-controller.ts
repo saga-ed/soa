@@ -7,7 +7,7 @@ import {
   HeaderParams,
 } from 'routing-controllers';
 import { injectable, inject } from 'inversify';
-import type { ILogger } from '@hipponot/logger';
+import type { ILogger } from '@hipponot/soa-logger';
 import figlet from 'figlet';
 import type { Request, Response } from 'express';
 

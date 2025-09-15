@@ -1,5 +1,5 @@
 import { injectable, inject } from 'inversify';
-import type { ILogger } from '@hipponot/logger';
+import type { ILogger } from '@hipponot/soa-logger';
 import { buildSchema } from 'type-graphql';
 import { printSchema } from 'graphql';
 import { writeFile, mkdir } from 'node:fs/promises';

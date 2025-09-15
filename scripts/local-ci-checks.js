@@ -253,7 +253,7 @@ Commands:
 Examples:
   node scripts/local-ci-checks.js                    # Check changed packages
   node scripts/local-ci-checks.js all               # Check all packages  
-  node scripts/local-ci-checks.js @hipponot/config  # Check specific package
+  node scripts/local-ci-checks.js @hipponot/soa-config  # Check specific package
 
 This script runs the same checks as the GitHub Actions workflow:
 • Install dependencies

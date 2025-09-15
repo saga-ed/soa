@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/api-core",
+  "name": "@hipponot/soa-api-core",
   "version": "1.0.4",
   "private": false,
   "type": "module",
@@ -97,7 +97,7 @@
     "undici": "^7.11.0",
     "vitest": "^1.5.0",
     "zod": "3.25.67",
-    "@hipponot/logger": "workspace:*"
+    "@hipponot/soa-logger": "workspace:*"
   },
   "typesVersions": {
     "*": {

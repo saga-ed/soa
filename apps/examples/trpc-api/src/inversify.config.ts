@@ -1,18 +1,18 @@
 import 'reflect-metadata';
 import { Container }                      from 'inversify';
-import { PinoLogger }                     from '@hipponot/logger';
-import { MongoProvider }                  from '@hipponot/db';
-import { ExpressServer }                  from '@hipponot/api-core/express-server';
-import { TRPCServer }                     from '@hipponot/api-core/trpc-server';
-import { ControllerLoader }               from '@hipponot/api-core/utils/controller-loader';
-import type { ILogger, PinoLoggerConfig } from '@hipponot/logger';
-import type { IMongoConnMgr }             from '@hipponot/db';
-import type { TRPCServerConfig }          from '@hipponot/api-core/trpc-server-schema';
-import type { ExpressServerConfig }       from '@hipponot/api-core/express-server-schema';
+import { PinoLogger }                     from '@hipponot/soa-logger';
+import { MongoProvider }                  from '@hipponot/soa-db';
+import { ExpressServer }                  from '@hipponot/soa-api-core/express-server';
+import { TRPCServer }                     from '@hipponot/soa-api-core/trpc-server';
+import { ControllerLoader }               from '@hipponot/soa-api-core/utils/controller-loader';
+import type { ILogger, PinoLoggerConfig } from '@hipponot/soa-logger';
+import type { IMongoConnMgr }             from '@hipponot/soa-db';
+import type { TRPCServerConfig }          from '@hipponot/soa-api-core/trpc-server-schema';
+import type { ExpressServerConfig }       from '@hipponot/soa-api-core/express-server-schema';
 
 // Import pubsub server components
-import { PubSubService, EventService, ChannelService, InMemoryAdapter, TYPES } from '@hipponot/pubsub-server';
-import type { PubSubAdapter }             from '@hipponot/pubsub-server';
+import { PubSubService, EventService, ChannelService, InMemoryAdapter, TYPES } from '@hipponot/soa-pubsub-server';
+import type { PubSubAdapter }             from '@hipponot/soa-pubsub-server';
 
 export const container = new Container();
 

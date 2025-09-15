@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/db",
+  "name": "@hipponot/soa-db",
   "type": "module",
   "scripts": {
     "dev": "tsup --watch",
@@ -8,11 +8,11 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "@hipponot/typescript-config": "workspace:*",
+    "@hipponot/soa-typescript-config": "workspace:*",
     "@types/node": "^24.0.3",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
-    "@hipponot/config": "workspace:*"
+    "@hipponot/soa-config": "workspace:*"
   },
   "dependencies": {
     "inversify": "^6.2.2",

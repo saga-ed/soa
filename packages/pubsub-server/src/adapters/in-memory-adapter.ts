@@ -1,4 +1,4 @@
-import type { EventEnvelope } from '@hipponot/pubsub-core';
+import type { EventEnvelope } from '@hipponot/soa-pubsub-core';
 import type { PubSubAdapter } from './base-adapter.js';
 
 export interface InMemoryAdapterOptions {

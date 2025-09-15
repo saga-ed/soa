@@ -1,6 +1,6 @@
 import { injectable, inject } from 'inversify';
-import { AbstractTRPCController, router } from '@hipponot/api-core/abstract-trpc-controller';
-import type { ILogger } from '@hipponot/logger';
+import { AbstractTRPCController, router } from '@hipponot/soa-api-core/abstract-trpc-controller';
+import type { ILogger } from '@hipponot/soa-logger';
 import {
   CreateProjectSchema,
   UpdateProjectSchema,

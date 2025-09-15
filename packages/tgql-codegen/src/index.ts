@@ -1,4 +1,4 @@
-// Main exports for @hipponot/tgql-codegen
+// Main exports for @hipponot/soa-tgql-codegen
 export { TGQLCodegen } from './generators/codegen.js';
 export { ConfigLoader } from './utils/config-loader.js';
 export { SectorParser } from './parsers/sector-parser.js';

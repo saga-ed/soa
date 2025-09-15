@@ -14,4 +14,4 @@ export type {
   EventEnvelope,
   EventName,
   EventDefinition
-} from '@hipponot/pubsub-core';
+} from '@hipponot/soa-pubsub-core';

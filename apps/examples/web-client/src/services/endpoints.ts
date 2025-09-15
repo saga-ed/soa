@@ -6,7 +6,7 @@ import type {
   CreateRunZ as CreateRun,
   UpdateRunZ as UpdateRun,
   GetRunZ as GetRun
-} from '@hipponot/trpc-types';
+} from '@hipponot/soa-trpc-types';
 
 export const ENDPOINTS: Endpoint[] = [
   // Project endpoints

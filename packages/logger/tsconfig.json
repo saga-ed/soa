@@ -1,5 +1,5 @@
 {
-  "extends": "@hipponot/typescript-config/base.json",
+  "extends": "@hipponot/soa-typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
     "experimentalDecorators": true,

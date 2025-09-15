@@ -1,4 +1,4 @@
-import type { EventEnvelope } from '@hipponot/pubsub-core';
+import type { EventEnvelope } from '@hipponot/soa-pubsub-core';
 
 export interface PubSubAdapter {
   publish(event: EventEnvelope): Promise<void>;

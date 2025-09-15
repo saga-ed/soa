@@ -1,4 +1,4 @@
-import type { EventEnvelope, CSEEvent, SSEEvent, CSEEventWithResponse, ActionContext } from '@hipponot/pubsub-core';
+import type { EventEnvelope, CSEEvent, SSEEvent, CSEEventWithResponse, ActionContext } from '@hipponot/soa-pubsub-core';
 import {
     PingMessageSchema,
     PongResponseSchema,

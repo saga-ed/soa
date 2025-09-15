@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/logger",
+  "name": "@hipponot/soa-logger",
   "version": "1.0.4",
   "private": false,
   "scripts": {
@@ -26,7 +26,7 @@
     "zod": "3.25.67"
   },
   "devDependencies": {
-    "@hipponot/typescript-config": "workspace:*",
+    "@hipponot/soa-typescript-config": "workspace:*",
     "@types/node": "latest",
     "pino-pretty": "^10.3.1",
     "tsup": "^8.5.0",

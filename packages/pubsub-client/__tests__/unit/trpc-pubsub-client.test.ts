@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { TRPCPubSubClient } from '../../src/trpc-pubsub-client.js';
-import type { EventEnvelope, EventName, CSEEventWithResponse, SSEEvent, CSEEvent } from '@hipponot/pubsub-core';
+import type { EventEnvelope, EventName, CSEEventWithResponse, SSEEvent, CSEEvent } from '@hipponot/soa-pubsub-core';
 
 describe('TRPCPubSubClient', () => {
   let client: TRPCPubSubClient;

@@ -1,8 +1,8 @@
-import { ExpressServer } from '@hipponot/api-core/express-server';
+import { ExpressServer } from '@hipponot/soa-api-core/express-server';
 import { container } from './inversify.config.js';
-import { ControllerLoader } from '@hipponot/api-core/utils/controller-loader';
-import { AbstractRestController } from '@hipponot/api-core/abstract-rest-controller';
-import type { ILogger } from '@hipponot/logger';
+import { ControllerLoader } from '@hipponot/soa-api-core/utils/controller-loader';
+import { AbstractRestController } from '@hipponot/soa-api-core/abstract-rest-controller';
+import type { ILogger } from '@hipponot/soa-logger';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

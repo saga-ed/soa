@@ -12,16 +12,16 @@
     "clean": "rm -rf .next"
   },
   "dependencies": {
-    "@hipponot/ui": "workspace:*",
+    "@hipponot/soa-ui": "workspace:*",
     "@trpc/client": "^11.0.0",
     "next": "^15.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@hipponot/trpc-types": "workspace:*"
+    "@hipponot/soa-trpc-types": "workspace:*"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
-    "@hipponot/typescript-config": "workspace:*",
+    "@hipponot/soa-typescript-config": "workspace:*",
     "@types/node": "^22.15.3",
     "@types/react": "19.1.0",
     "@types/react-dom": "19.1.1",

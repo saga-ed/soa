@@ -2,7 +2,7 @@ import fg from 'fast-glob';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { injectable, inject } from 'inversify';
-import type { ILogger } from '@hipponot/logger';
+import type { ILogger } from '@hipponot/soa-logger';
 
 @injectable()
 export class ControllerLoader {

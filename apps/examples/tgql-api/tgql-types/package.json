@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/tgql-types",
+  "name": "@hipponot/soa-tgql-types",
   "version": "1.0.0",
   "type": "module",
   "private": true,
@@ -32,7 +32,7 @@
   "dependencies": {
     "type-graphql": "^2.0.0-rc.2",
     "graphql": "^16.8.1",
-    "@hipponot/api-core": "workspace:*"
+    "@hipponot/soa-api-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.12",
@@ -40,6 +40,6 @@
     "tsup": "^8.5.0",
     "typescript": "5.8.2",
     "vitest": "^1.5.0",
-    "@hipponot/tgql-codegen": "workspace:*"
+    "@hipponot/soa-tgql-codegen": "workspace:*"
   }
 }

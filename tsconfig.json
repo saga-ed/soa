@@ -3,10 +3,10 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@hipponot/config": ["packages/config/src"],
-      "@hipponot/config/*": ["packages/config/src/*"],
-      "@hipponot/logger": ["packages/logger/src"],
-      "@hipponot/logger/*": ["packages/logger/src/*"]
+      "@hipponot/soa-config": ["packages/config/src"],
+      "@hipponot/soa-config/*": ["packages/config/src/*"],
+      "@hipponot/soa-logger": ["packages/logger/src"],
+      "@hipponot/soa-logger/*": ["packages/logger/src/*"]
     }
   },
   "exclude": ["node_modules", "dist"]

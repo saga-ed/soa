@@ -1,5 +1,5 @@
 import { injectable, inject } from 'inversify';
-import type { ILogger } from '@hipponot/logger';
+import type { ILogger } from '@hipponot/soa-logger';
 import { initTRPC } from '@trpc/server';
 
 const t = initTRPC.create();

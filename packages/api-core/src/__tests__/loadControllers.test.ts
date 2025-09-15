@@ -3,8 +3,8 @@ import { ControllerLoader } from '../utils/loadControllers.js';
 import { AbstractRestController } from '../abstract-rest-controller.js';
 import { AbstractGQLController } from '../abstract-gql-controller.js';
 import { Container } from 'inversify';
-import { PinoLogger } from '@hipponot/logger';
-import type { ILogger, PinoLoggerConfig } from '@hipponot/logger';
+import { PinoLogger } from '@hipponot/soa-logger';
+import type { ILogger, PinoLoggerConfig } from '@hipponot/soa-logger';
 import path from 'node:path';
 
 const fixturesDir = path.join(__dirname, 'fixtures');

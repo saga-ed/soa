@@ -29,9 +29,9 @@
     "routing-controllers": "^0.11.2",
     "type-graphql": "^2.0.0-rc.2",
     "uuid": "^11.1.0",
-    "@hipponot/api-core": "workspace:*",
-    "@hipponot/db": "workspace:*",
-    "@hipponot/logger": "workspace:^"
+    "@hipponot/soa-api-core": "workspace:*",
+    "@hipponot/soa-db": "workspace:*",
+    "@hipponot/soa-logger": "workspace:^"
   },
   "devDependencies": {
     "@graphql-codegen/cli": "^5.0.0",

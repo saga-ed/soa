@@ -1,5 +1,5 @@
 import Image, { type ImageProps } from 'next/image';
-import { Button } from '@hipponot/ui/button';
+import { Button } from '@hipponot/soa-ui/button';
 import styles from './page.module.css';
 
 type Props = Omit<ImageProps, 'src'> & {

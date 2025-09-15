@@ -1,12 +1,12 @@
 import { injectable, inject } from 'inversify';
-import { AbstractTRPCController, router } from '@hipponot/api-core/abstract-trpc-controller';
-import type { ILogger } from '@hipponot/logger';
+import { AbstractTRPCController, router } from '@hipponot/soa-api-core/abstract-trpc-controller';
+import type { ILogger } from '@hipponot/soa-logger';
 import { events, createPingEnvelope } from './events.js';
 import { PingMessageSchema, type PingMessageZ } from './schema/pubsub-schemas.js';
 
 // Import pubsub server functionality
-import { PubSubService, TYPES, ChannelService } from '@hipponot/pubsub-server';
-import type { EventEnvelope, EventDefinition, EventName, ChannelConfig } from '@hipponot/pubsub-core';
+import { PubSubService, TYPES, ChannelService } from '@hipponot/soa-pubsub-server';
+import type { EventEnvelope, EventDefinition, EventName, ChannelConfig } from '@hipponot/soa-pubsub-core';
 import { z } from 'zod';
 
 @injectable()

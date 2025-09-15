@@ -1,4 +1,4 @@
-import { Button } from '@hipponot/ui/button';
+import { Button } from '@hipponot/soa-ui/button';
 import Link from 'next/link';
 import styles from '../page.module.css';
 

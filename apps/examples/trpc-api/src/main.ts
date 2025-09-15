@@ -1,11 +1,11 @@
 import 'reflect-metadata';
-import { ExpressServer } from '@hipponot/api-core/express-server';
-import { TRPCServer } from '@hipponot/api-core/trpc-server';
-import { ControllerLoader } from '@hipponot/api-core/utils/controller-loader';
-import { AbstractTRPCController } from '@hipponot/api-core/abstract-trpc-controller';
-import { AbstractRestController } from '@hipponot/api-core/abstract-rest-controller';
+import { ExpressServer } from '@hipponot/soa-api-core/express-server';
+import { TRPCServer } from '@hipponot/soa-api-core/trpc-server';
+import { ControllerLoader } from '@hipponot/soa-api-core/utils/controller-loader';
+import { AbstractTRPCController } from '@hipponot/soa-api-core/abstract-trpc-controller';
+import { AbstractRestController } from '@hipponot/soa-api-core/abstract-rest-controller';
 import { container } from './inversify.config.js';
-import type { ILogger } from '@hipponot/logger';
+import type { ILogger } from '@hipponot/soa-logger';
 import type { Request, Response } from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

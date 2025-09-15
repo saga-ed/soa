@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/pubsub-server",
+  "name": "@hipponot/soa-pubsub-server",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -31,12 +31,12 @@
     "reflect-metadata": "^0.2.2",
     "zod": "3.25.67",
     "uuid": "^11.1.0",
-    "@hipponot/pubsub-core": "workspace:*",
-    "@hipponot/api-core": "workspace:*",
-    "@hipponot/logger": "workspace:*"
+    "@hipponot/soa-pubsub-core": "workspace:*",
+    "@hipponot/soa-api-core": "workspace:*",
+    "@hipponot/soa-logger": "workspace:*"
   },
   "devDependencies": {
-    "@hipponot/typescript-config": "workspace:*",
+    "@hipponot/soa-typescript-config": "workspace:*",
     "@types/node": "latest",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",

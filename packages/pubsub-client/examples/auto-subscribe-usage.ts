@@ -12,7 +12,7 @@ import type {
     CSEEventWithResponse, 
     SSEEvent, 
     CSEEvent 
-} from '@hipponot/pubsub-core';
+} from '@hipponot/soa-pubsub-core';
 
 // ============================================================================
 // Event Definitions

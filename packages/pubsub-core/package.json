@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/pubsub-core",
+  "name": "@hipponot/soa-pubsub-core",
   "version": "1.0.4",
   "private": false,
   "type": "module",
@@ -30,7 +30,7 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@hipponot/typescript-config": "workspace:*",
+    "@hipponot/soa-typescript-config": "workspace:*",
     "@types/uuid": "^10.0.0",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",

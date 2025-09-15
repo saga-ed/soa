@@ -1,7 +1,7 @@
 import { Get, Controller } from 'routing-controllers';
 import { injectable, inject } from 'inversify';
-import type { ILogger } from '@hipponot/logger';
-import { AbstractRestController } from '@hipponot/api-core/abstract-rest-controller';
+import type { ILogger } from '@hipponot/soa-logger';
+import { AbstractRestController } from '@hipponot/soa-api-core/abstract-rest-controller';
 
 const SECTOR = 'project';
 

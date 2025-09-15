@@ -24,13 +24,24 @@ export class Zod2tsGenerator {
     try {
       // Process each sector's schema file
       for (const sector of sectorInfos) {
-        const schemaFilePath = path.join(outputPath, 'schemas', `${sector.name}-schemas.ts`);
-        
-        // Check if schema file exists
+        // Try JavaScript file first, then TypeScript as fallback
+        const jsSchemaPath = path.join(outputPath, 'schemas', `${sector.name}-schemas.js`);
+        const tsSchemaPath = path.join(outputPath, 'schemas', `${sector.name}-schemas.ts`);
+
+        let schemaFilePath: string;
+
+        // Check if JavaScript schema file exists
         try {
-          await fs.access(schemaFilePath);
-        } catch (error) {
-          continue;
+          await fs.access(jsSchemaPath);
+          schemaFilePath = jsSchemaPath;
+        } catch {
+          // Try TypeScript file as fallback
+          try {
+            await fs.access(tsSchemaPath);
+            schemaFilePath = tsSchemaPath;
+          } catch {
+            continue;
+          }
         }
         
         const sectorTypesDir = path.join(typesOutputDir, sector.name);
@@ -80,8 +91,8 @@ export class Zod2tsGenerator {
         path.resolve(this.basePath, '../../build-tools/zod2ts/src/index.ts'),  // For apps/api/types in saga-soa
         path.resolve(this.basePath, '../../../build-tools/zod2ts/src/index.ts'),  // For deeper nesting
         path.resolve(this.basePath, '../../../../build-tools/zod2ts/src/index.ts'),  // Alternative
-        path.resolve(this.basePath, 'node_modules/@hipponot/zod2ts/src/index.ts'),  // Via node_modules link (saga-sm)
-        path.resolve(this.basePath, '../node_modules/@hipponot/zod2ts/src/index.ts'),  // Via parent node_modules link
+        path.resolve(this.basePath, 'node_modules/@hipponot/soa-zod2ts/src/index.ts'),  // Via node_modules link (saga-sm)
+        path.resolve(this.basePath, '../node_modules/@hipponot/soa-zod2ts/src/index.ts'),  // Via parent node_modules link
         '/home/skelly/dev/saga-soa/build-tools/zod2ts/src/index.ts',  // Absolute fallback
       ];
       
@@ -115,8 +126,8 @@ export class Zod2tsGenerator {
         path.resolve(this.basePath, '../../../build-tools/zod2ts/bin/zod2ts'),  // For apps/examples/trpc-api/trpc-types
         path.resolve(this.basePath, '../../../../build-tools/zod2ts/bin/zod2ts'),  // For deeper nesting
         path.resolve(this.basePath, '../../build-tools/zod2ts/bin/zod2ts'),  // Alternative
-        path.resolve(this.basePath, 'node_modules/@hipponot/zod2ts/bin/zod2ts'),  // Via node_modules link (saga-sm)
-        path.resolve(this.basePath, '../node_modules/@hipponot/zod2ts/bin/zod2ts'),  // Via parent node_modules link
+        path.resolve(this.basePath, 'node_modules/@hipponot/soa-zod2ts/bin/zod2ts'),  // Via node_modules link (saga-sm)
+        path.resolve(this.basePath, '../node_modules/@hipponot/soa-zod2ts/bin/zod2ts'),  // Via parent node_modules link
         '/home/skelly/dev/saga-soa/build-tools/zod2ts/bin/zod2ts',  // Absolute fallback
       ];
       

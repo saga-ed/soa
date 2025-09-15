@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/trpc-codegen",
+  "name": "@hipponot/soa-trpc-codegen",
   "version": "1.0.3",
   "type": "module",
   "description": "Reusable tRPC code generation utilities for saga-soa monorepo",

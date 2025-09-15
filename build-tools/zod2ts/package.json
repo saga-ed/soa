@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/zod2ts",
+  "name": "@hipponot/soa-zod2ts",
   "version": "1.0.3",
   "type": "module",
   "scripts": {
@@ -19,7 +19,7 @@
     }
   },
   "devDependencies": {
-    "@hipponot/typescript-config": "workspace:*",
+    "@hipponot/soa-typescript-config": "workspace:*",
     "@types/node": "24.0.12",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",

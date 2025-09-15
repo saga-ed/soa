@@ -1,5 +1,5 @@
 {
-  "name": "@hipponot/trpc-types",
+  "name": "@hipponot/soa-trpc-types",
   "version": "1.0.0",
   "type": "module",
   "private": true,
@@ -40,7 +40,7 @@
     "tsup": "^8.5.0",
     "typescript": "5.8.2",
     "vitest": "^1.5.0",
-    "@hipponot/trpc-codegen": "workspace:*",
-    "@hipponot/zod2ts": "workspace:*"
+    "@hipponot/soa-trpc-codegen": "workspace:*",
+    "@hipponot/soa-zod2ts": "workspace:*"
   }
 }

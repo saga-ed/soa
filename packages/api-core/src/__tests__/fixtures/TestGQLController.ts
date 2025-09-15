@@ -1,6 +1,6 @@
 import { injectable, inject } from 'inversify';
 import { ObjectType, Field, Query, Resolver } from 'type-graphql';
-import type { ILogger } from '@hipponot/logger';
+import type { ILogger } from '@hipponot/soa-logger';
 import { AbstractGQLController } from '../../abstract-gql-controller.js';
 
 @ObjectType()

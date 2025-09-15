@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { Container } from 'inversify';
 import { TRPCServer } from '../trpc-server.js';
 import { TRPCServerSchema } from '../trpc-server-schema.js';
-import { MockLogger } from '@hipponot/logger/mocks';
+import { MockLogger } from '@hipponot/soa-logger/mocks';
 
 describe('TRPCServer', () => {
   let container: Container;

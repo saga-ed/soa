@@ -8,8 +8,8 @@ import type {
   CSEEvent,
   SSEEvent,
   EventName
-} from '@hipponot/pubsub-core';
-import { isCSEEvent } from '@hipponot/pubsub-core';
+} from '@hipponot/soa-pubsub-core';
+import { isCSEEvent } from '@hipponot/soa-pubsub-core';
 import type { Logger } from '../types/index.js';
 import { v4 as uuidv4 } from 'uuid';
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { TRPCCodegen } from '../generators/codegen.js';
 import { ConfigLoader } from '../utils/config-loader.js';
@@ -14,10 +15,22 @@ describe('TRPCCodegen Integration', () => {
   beforeEach(async () => {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     basePath = path.resolve(__dirname, '..', '..'); // Go up to package root
+
+    // Create unique temporary directory for this test
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trpc-integration-test-'));
+
+    // Load base config and override output directory
     const configPath = path.resolve(basePath, 'src/__tests__/fixtures/test-config.js');
-    testConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    const baseConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    testConfig = {
+      ...baseConfig,
+      generation: {
+        ...baseConfig.generation,
+        outputDir: path.relative(basePath, outputDir)
+      }
+    };
+
     codegen = new TRPCCodegen(testConfig, basePath);
-    outputDir = path.resolve(basePath, testConfig.generation.outputDir);
   });
 
   afterEach(async () => {
@@ -34,7 +47,7 @@ describe('TRPCCodegen Integration', () => {
       const result = await codegen.generate();
       
       expect(result.errors).toHaveLength(0);
-      expect(result.sectors).toHaveLength(2);
+      expect(result.sectors).toHaveLength(2); // Both example sectors
       expect(result.generatedFiles.length).toBeGreaterThan(0);
       
       // Verify output directory structure
@@ -46,13 +59,13 @@ describe('TRPCCodegen Integration', () => {
         'index.ts',
         'router.ts',
         'schemas/',
-        'schemas/index.ts',
-        'schemas/user-schemas.ts',
-        'schemas/product-schemas.ts',
+        'schemas/index.ts',  // TypeScript since no dist folder in tests
+        'schemas/example_sector1-schemas.ts',
+        'schemas/example_sector2-schemas.ts',
         'types/',
         'types/index.ts',
-        'types/user/',
-        'types/product/'
+        'types/example_sector1/',
+        'types/example_sector2/'
       ];
       
       for (const item of expectedStructure) {
@@ -86,39 +99,39 @@ describe('TRPCCodegen Integration', () => {
       const schemasIndexPath = path.join(outputDir, 'schemas/index.ts');
       const schemasIndexContent = await fs.readFile(schemasIndexPath, 'utf-8');
       
-      expect(schemasIndexContent).toContain('export * from \'./user-schemas.js\';');
-      expect(schemasIndexContent).toContain('export * from \'./product-schemas.js\';');
+      expect(schemasIndexContent).toContain('export * from \'./example_sector1-schemas.js\';');
+      expect(schemasIndexContent).toContain('export * from \'./example_sector2-schemas.js\';');
       
       // Check types index
       const typesIndexPath = path.join(outputDir, 'types/index.ts');
       const typesIndexContent = await fs.readFile(typesIndexPath, 'utf-8');
       
-      expect(typesIndexContent).toContain('export * from \'./user/index.js\';');
-      expect(typesIndexContent).toContain('export * from \'./product/index.js\';');
+      expect(typesIndexContent).toContain('export * from \'./example_sector1/index.js\';');
+      expect(typesIndexContent).toContain('export * from \'./example_sector2/index.js\';');
     });
 
     it('should preserve schema file content', async () => {
       await codegen.generate();
       
-      // Check that user schemas were copied correctly
-      const userSchemasPath = path.join(outputDir, 'schemas/user-schemas.ts');
-      const userSchemasContent = await fs.readFile(userSchemasPath, 'utf-8');
+      // Check that example_sector1 schemas were copied correctly
+      const sector1SchemasPath = path.join(outputDir, 'schemas/example_sector1-schemas.ts');
+      const sector1SchemasContent = await fs.readFile(sector1SchemasPath, 'utf-8');
+
+      expect(sector1SchemasContent).toContain('CreateItemSchema');
+      expect(sector1SchemasContent).toContain('UpdateItemSchema');
+      expect(sector1SchemasContent).toContain('GetItemSchema');
+      expect(sector1SchemasContent).toContain('DeleteItemSchema');
+      expect(sector1SchemasContent).toContain('ListItemsSchema');
       
-      expect(userSchemasContent).toContain('CreateUserSchema');
-      expect(userSchemasContent).toContain('UpdateUserSchema');
-      expect(userSchemasContent).toContain('GetUserSchema');
-      expect(userSchemasContent).toContain('DeleteUserSchema');
-      expect(userSchemasContent).toContain('ListUsersSchema');
-      
-      // Check that product schemas were copied correctly
-      const productSchemasPath = path.join(outputDir, 'schemas/product-schemas.ts');
-      const productSchemasContent = await fs.readFile(productSchemasPath, 'utf-8');
-      
-      expect(productSchemasContent).toContain('CreateProductSchema');
-      expect(productSchemasContent).toContain('UpdateProductSchema');
-      expect(productSchemasContent).toContain('GetProductSchema');
-      expect(productSchemasContent).toContain('DeleteProductSchema');
-      expect(productSchemasContent).toContain('SearchProductsSchema');
+      // Check that example_sector2 schemas were copied correctly
+      const sector2SchemasPath = path.join(outputDir, 'schemas/example_sector2-schemas.ts');
+      const sector2SchemasContent = await fs.readFile(sector2SchemasPath, 'utf-8');
+
+      expect(sector2SchemasContent).toContain('CreateResourceSchema');
+      expect(sector2SchemasContent).toContain('UpdateResourceSchema');
+      expect(sector2SchemasContent).toContain('GetResourceSchema');
+      expect(sector2SchemasContent).toContain('DeleteResourceSchema');
+      expect(sector2SchemasContent).toContain('SearchResourcesSchema');
     });
 
     it('should generate router with all endpoints', async () => {
@@ -127,25 +140,26 @@ describe('TRPCCodegen Integration', () => {
       const routerPath = path.join(outputDir, 'router.ts');
       const routerContent = await fs.readFile(routerPath, 'utf-8');
       
-      // Check that all user endpoints are included
-      expect(routerContent).toContain('getUser: t.procedure');
-      expect(routerContent).toContain('createUser: t.procedure');
-      expect(routerContent).toContain('updateUser: t.procedure');
-      expect(routerContent).toContain('deleteUser: t.procedure');
-      expect(routerContent).toContain('listUsers: t.procedure');
-      
-      // Check that all product endpoints are included
-      expect(routerContent).toContain('getProduct: t.procedure');
-      expect(routerContent).toContain('createProduct: t.procedure');
-      expect(routerContent).toContain('updateProduct: t.procedure');
-      expect(routerContent).toContain('deleteProduct: t.procedure');
-      expect(routerContent).toContain('searchProducts: t.procedure');
+      // Check that all example_sector1 endpoints are included
+      expect(routerContent).toContain('getItem: t.procedure');
+      expect(routerContent).toContain('createItem: t.procedure');
+      expect(routerContent).toContain('updateItem: t.procedure');
+      expect(routerContent).toContain('deleteItem: t.procedure');
+      expect(routerContent).toContain('listItems: t.procedure');
+      expect(routerContent).toContain('healthCheck: t.procedure');
+
+      // Check that all example_sector2 endpoints are included
+      expect(routerContent).toContain('getResource: t.procedure');
+      expect(routerContent).toContain('createResource: t.procedure');
+      expect(routerContent).toContain('updateResource: t.procedure');
+      expect(routerContent).toContain('deleteResource: t.procedure');
+      expect(routerContent).toContain('searchResources: t.procedure');
       
       // Check that input schemas are correctly referenced
-      expect(routerContent).toContain('.input(userSchemas.GetUserSchema)');
-      expect(routerContent).toContain('.input(userSchemas.CreateUserSchema)');
-      expect(routerContent).toContain('.input(productSchemas.GetProductSchema)');
-      expect(routerContent).toContain('.input(productSchemas.CreateProductSchema)');
+      expect(routerContent).toContain('.input(example_sector1Schemas.GetItemSchema)');
+      expect(routerContent).toContain('.input(example_sector1Schemas.CreateItemSchema)');
+      expect(routerContent).toContain('.input(example_sector2Schemas.GetResourceSchema)');
+      expect(routerContent).toContain('.input(example_sector2Schemas.CreateResourceSchema)');
     });
   });
 

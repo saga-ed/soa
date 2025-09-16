@@ -100,25 +100,23 @@ export class ZodSchemaLoader {
     // Transform ES module exports to CommonJS-style assignments
     let transformed = content;
 
-    // Handle: export const SomeSchema = z.object(...);
+    // First, handle multi-line export const declarations
+    // This regex captures the entire declaration including multi-line objects
     transformed = transformed.replace(
-      /export\s+const\s+(\w+)\s*=/g,
-      'const $1 =; exports.$1 = $1; exports.$1'
+      /export\s+const\s+(\w+)\s*=\s*([\s\S]*?)(?=\n(?:export|\/\/|$))/g,
+      (match, name, value) => {
+        // Check if the value ends with a semicolon, if not add one
+        const trimmedValue = value.trimEnd();
+        const needsSemicolon = !trimmedValue.endsWith(';');
+        const cleanValue = needsSemicolon ? trimmedValue + ';' : trimmedValue;
+        return `const ${name} = ${cleanValue}\nexports.${name} = ${name};`;
+      }
     );
 
-    // Fix the double assignment issue from the replacement above
+    // Handle: export type declarations (just remove them as they're TypeScript only)
     transformed = transformed.replace(
-      /const\s+(\w+)\s*=;\s*exports\.\1\s*=\s*\1;\s*exports\.\1\s*=/g,
-      'const $1 =; exports.$1 = $1; $1'
-    );
-
-    // Actually, let's do this more cleanly
-    transformed = content;
-
-    // Replace export const with const + assignment
-    transformed = transformed.replace(
-      /export\s+const\s+(\w+)\s*=\s*([^;]+);?/g,
-      'const $1 = $2;\nexports.$1 = $1;'
+      /export\s+type\s+\w+\s*=\s*[^;]+;/g,
+      ''
     );
 
     // Handle: export { SomeSchema };
@@ -128,6 +126,12 @@ export class ZodSchemaLoader {
         const exportNames = exports.split(',').map((name: string) => name.trim());
         return exportNames.map((name: string) => `exports.${name} = ${name};`).join('\n');
       }
+    );
+
+    // Remove any remaining import statements that might interfere
+    transformed = transformed.replace(
+      /import\s+.*?from\s+['"][^'"]+['"];?/g,
+      ''
     );
 
     return transformed;

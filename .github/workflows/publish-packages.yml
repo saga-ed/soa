@@ -98,16 +98,16 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: 🧹 Lint ${{ matrix.package }}
-        run: pnpm turbo run lint --filter=@hipponot/${{ matrix.package }}
+        run: pnpm turbo run lint --filter=@hipponot/soa-${{ matrix.package }}
 
       - name: 🔍 Type check ${{ matrix.package }}
-        run: pnpm turbo run check-types --filter=@hipponot/${{ matrix.package }}
+        run: pnpm turbo run check-types --filter=@hipponot/soa-${{ matrix.package }}
 
       - name: 🏗️ Build ${{ matrix.package }}
-        run: pnpm turbo run build --filter=@hipponot/${{ matrix.package }}...
+        run: pnpm turbo run build --filter=@hipponot/soa-${{ matrix.package }}...
 
       - name: 🧪 Test ${{ matrix.package }}
-        run: pnpm turbo run test --filter=@hipponot/${{ matrix.package }}
+        run: pnpm turbo run test --filter=@hipponot/soa-${{ matrix.package }}
 
   test-build-tools:
     name: 🔧 Test Build Tools
@@ -282,19 +282,19 @@ jobs:
           
           # Publish in dependency order (base packages first)
           # Layer 0: Base packages (no @hipponot dependencies)
-          publish_package "packages/logger" "logger" "base"
-          publish_package "packages/config" "config" "base"
-          
+          publish_package "packages/logger" "soa-logger" "base"
+          publish_package "packages/config" "soa-config" "base"
+
           # Layer 1: Packages depending on base packages
-          publish_package "packages/db" "db" "layer-1"
-          publish_package "packages/pubsub-core" "pubsub-core" "layer-1"
-          
+          publish_package "packages/db" "soa-db" "layer-1"
+          publish_package "packages/pubsub-core" "soa-pubsub-core" "layer-1"
+
           # Layer 2: Higher-level packages
-          publish_package "packages/api-core" "api-core" "layer-2"
-          
+          publish_package "packages/api-core" "soa-api-core" "layer-2"
+
           # Build-time tools (can be published in parallel)
-          publish_package "packages/trpc-codegen" "trpc-codegen" "dev-tool"
-          publish_package "build-tools/zod2ts" "zod2ts" "build-tool"
+          publish_package "packages/trpc-codegen" "soa-trpc-codegen" "dev-tool"
+          publish_package "build-tools/zod2ts" "soa-zod2ts" "build-tool"
           
           # Collect published packages
           if [ -f /tmp/published.txt ]; then
@@ -326,7 +326,7 @@ jobs:
           if [ "$PUBLISHED" != "[]" ]; then
             echo "$PUBLISHED" | jq -r '.[]' | while read -r pkg; do
               if [ -n "$pkg" ]; then
-                echo "- ✅ \`@hipponot/$pkg\`" >> $GITHUB_STEP_SUMMARY
+                echo "- ✅ \`@hipponot/soa-$pkg\`" >> $GITHUB_STEP_SUMMARY
               fi
             done
           else

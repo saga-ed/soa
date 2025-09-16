@@ -16,8 +16,10 @@ export class SchemaGenerator {
 
     const generatedFiles: string[] = [];
 
-    // Check if we have a dist folder (compiled JavaScript)
-    const distDir = path.resolve(this.basePath, '../dist/sectors');
+    // Check if there's a dist folder with compiled JavaScript files
+    // Look for dist folder relative to where the sectors directory is located
+    const projectRoot = path.dirname(sectorsDir); // Go up from src/sectors to project root
+    const distDir = path.join(projectRoot, 'dist/sectors');
     const hasDistFolder = await fs.access(distDir).then(() => true).catch(() => false);
 
     // Copy schema files from each sector

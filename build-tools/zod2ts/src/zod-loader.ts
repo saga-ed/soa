@@ -1,20 +1,36 @@
 import { z } from 'zod';
-import { resolve } from 'node:path';
+import { resolve, extname } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { SchemaLoadingError } from './types.js';
+import { Transpiler } from './transpiler.js';
+import { Logger } from './logger.js';
 
 export class ZodSchemaLoader {
+  private transpiler: Transpiler;
+
   constructor() {
     // Inject our bundled zod into global scope for schema files to use
     this.setupGlobalZod();
+    this.transpiler = new Transpiler();
   }
 
   async loadSchemasFromFile(filePath: string): Promise<Map<string, z.ZodSchema>> {
+    let transpilationResult: Awaited<ReturnType<Transpiler['transpileFile']>> | null = null;
+
     try {
       const resolvedPath = resolve(filePath);
+      let fileToProcess = resolvedPath;
+      let originalContent: string;
+
+      // Check if this is a TypeScript file that needs transpilation
+      if (extname(resolvedPath) === '.ts') {
+        Logger.info(`Detected TypeScript file: ${resolvedPath}`);
+        transpilationResult = await this.transpiler.transpileFile(resolvedPath);
+        fileToProcess = transpilationResult.jsFilePath;
+      }
 
       // Read and modify the schema file content instead of dynamic import
-      const originalContent = await readFile(resolvedPath, 'utf-8');
+      originalContent = await readFile(fileToProcess, 'utf-8');
       const modifiedContent = this.replaceZodImports(originalContent);
 
       // Create a module-like environment and evaluate the modified content
@@ -57,6 +73,11 @@ export class ZodSchemaLoader {
       throw new SchemaLoadingError(
         `Failed to load schemas from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
       );
+    } finally {
+      // Clean up transpiled files
+      if (transpilationResult) {
+        await transpilationResult.cleanup();
+      }
     }
   }
 

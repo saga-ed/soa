@@ -1,0 +1,20 @@
+type Session {
+  id: ID!
+  userId: ID!
+  token: String!
+  createdAt: String!
+  expiresAt: String!
+}
+
+input SessionInput {
+  userId: ID!
+}
+
+extend type Query {
+  allSessions: [Session!]!
+  session(id: ID!): Session
+}
+
+extend type Mutation {
+  createSession(input: SessionInput!): Session!
+}

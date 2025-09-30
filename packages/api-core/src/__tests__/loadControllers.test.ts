@@ -46,7 +46,7 @@ describe('ControllerLoader', () => {
   it('throws an error if no controllers are found', async () => {
     const noMatchGlob = path.join(fixturesDir, 'NoSuchController.ts');
     await expect(controllerLoader.loadControllers(noMatchGlob, AbstractRestController)).rejects.toThrow(
-      'No valid controllers found'
+      'No valid REST controllers found'
     );
   });
 });

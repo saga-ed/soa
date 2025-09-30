@@ -2,6 +2,7 @@ packages:
   - 'apps/examples/rest-api'
   - 'apps/examples/tgql-api'
   - 'apps/examples/tgql-api/tgql-types'
+  - 'apps/examples/gql-api'
   - 'apps/examples/trpc-api'
   - 'apps/examples/trpc-api/trpc-types'
   - 'apps/examples/web-client'

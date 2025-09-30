@@ -1,48 +1,54 @@
 import { injectable, inject } from 'inversify';
 import type { ILogger } from '@hipponot/soa-logger';
-import { buildSchema } from 'type-graphql';
-import { printSchema } from 'graphql';
-import { writeFile, mkdir } from 'node:fs/promises';
-import path from 'node:path';
 
+// Resolver map type for SDL-first GraphQL
+export interface ResolverMap {
+    Query?: Record<string, (...args: any[]) => any>;
+    Mutation?: Record<string, (...args: any[]) => any>;
+    [key: string]: Record<string, (...args: any[]) => any> | undefined;
+}
+
+/**
+ * Abstract base class for SDL-first GraphQL controllers
+ *
+ * Unlike AbstractTGQLController which uses TypeGraphQL decorators (code-first),
+ * this class is for schema-first approach where .gql files define the schema
+ * and resolvers are plain objects.
+ */
 @injectable()
 export abstract class AbstractGQLController {
-  protected logger: ILogger;
-  abstract readonly sectorName: string;
+    static readonly controllerType = 'GQL';
+    protected logger: ILogger;
+    abstract readonly sectorName: string;
 
-  constructor(@inject('ILogger') logger: ILogger) {
-    this.logger = logger;
-  }
-
-  /**
-   * Emit SDL for this resolver to the specified output path
-   */
-  async emitSDL(outputPath: string): Promise<void> {
-    try {
-      this.logger.debug(`Emitting SDL for ${this.constructor.name} to ${outputPath}`);
-
-      // Build schema with just this resolver
-      const schema = await buildSchema({
-        resolvers: [this.constructor as new (...args: unknown[]) => unknown],
-        validate: false, // Skip validation for individual resolvers
-      });
-
-      // Convert to SDL
-      const sdl = printSchema(schema);
-
-      // Ensure output directory exists
-      const outputDir = path.dirname(outputPath);
-      await mkdir(outputDir, { recursive: true });
-
-      // Write SDL file
-      await writeFile(outputPath, sdl, 'utf-8');
-
-      this.logger.info(`✅ Emitted SDL for ${this.constructor.name} to ${outputPath}`);
-      this.logger.debug(`📊 Schema size: ${sdl.length} characters`);
-
-    } catch (error) {
-      this.logger.error(`❌ Failed to emit SDL for ${this.constructor.name}:`, error as Error);
-      throw error;
+    constructor(@inject('ILogger') logger: ILogger) {
+        this.logger = logger;
     }
-  }
+
+    /**
+     * Return resolver object for this controller
+     *
+     * Example:
+     * ```typescript
+     * getResolvers(): ResolverMap {
+     *   return {
+     *     Query: {
+     *       users: () => this.getAllUsers(),
+     *       user: (_, { id }) => this.getUserById(id),
+     *     },
+     *     Mutation: {
+     *       createUser: (_, { name, email }) => this.createUser(name, email),
+     *     },
+     *   };
+     * }
+     * ```
+     */
+    abstract getResolvers(): ResolverMap;
+
+    /**
+     * Optional initialization hook called after DI container instantiation
+     */
+    async init(): Promise<void> {
+        // Default implementation - override if needed
+    }
 }

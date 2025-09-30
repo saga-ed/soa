@@ -8,6 +8,7 @@ export const router = t.router;
 export const publicProcedure = t.procedure;
 
 export abstract class AbstractTRPCController {
+  static readonly controllerType = 'TRPC';
   protected logger: ILogger;
   abstract readonly sectorName: string;
 

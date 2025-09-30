@@ -8,20 +8,25 @@ import {
 } from 'routing-controllers';
 import { injectable, inject } from 'inversify';
 import type { ILogger } from '@hipponot/soa-logger';
+import type { ExpressServerConfig } from './express-server-schema.js';
 import figlet from 'figlet';
 import type { Request, Response } from 'express';
 
 export abstract class AbstractRestController {
+  static readonly controllerType = 'REST';
   private static _controllers: Function[] = [];
   protected logger: ILogger;
+  protected serverConfig?: ExpressServerConfig;
 
   abstract readonly sectorName: string;
 
   constructor(
     logger: ILogger,
-    public readonly _sectorName: string
+    public readonly _sectorName: string,
+    serverConfig?: ExpressServerConfig
   ) {
     this.logger = logger;
+    this.serverConfig = serverConfig;
   }
 
   @Get('/')
@@ -32,7 +37,11 @@ export abstract class AbstractRestController {
 
   @Get('/alive')
   alive() {
-    return { status: 'alive', sector: this.sectorName };
+    return {
+      status: 'alive',
+      sector: this.sectorName,
+      port: this.serverConfig?.port
+    };
   }
 
   // Removed the /sectors route from here

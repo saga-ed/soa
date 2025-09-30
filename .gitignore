@@ -62,6 +62,7 @@ Thumbs.db
 *.tsbuildinfo
 temp
 *.tmp
+.logs/
 
 # Package Manager
 .pnpm-debug.log

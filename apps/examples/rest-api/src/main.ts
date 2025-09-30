@@ -31,12 +31,21 @@ async function start() {
   await expressServer.init(container, controllers);
   const app = expressServer.getApp();
 
+  // Get server config for port info
+  const serverConfig = container.get('ExpressServerConfig');
+
   // Add a simple health check (at root level for easy access)
   app.get('/health', (req, res) => {
-    res.json({ status: 'ok', service: 'REST API' });
+    res.json({ status: 'ok', service: 'REST API', port: serverConfig.port });
   });
 
   expressServer.start();
+
+  // Print useful URLs
+  const baseUrl = `http://localhost:${serverConfig.port}`;
+  const basePath = serverConfig.basePath ? `/${serverConfig.basePath}` : '';
+  logger.info(`Health check: ${baseUrl}/health`);
+  logger.info(`Sectors list: ${baseUrl}${basePath}/sectors/list`);
 }
 
 start().catch(error => {

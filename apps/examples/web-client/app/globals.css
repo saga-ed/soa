@@ -19,6 +19,8 @@ body {
 body {
   color: var(--foreground);
   background: var(--background);
+  font-family: var(--font-geist-sans);
+  font-size: 13.5px;
 }
 
 * {

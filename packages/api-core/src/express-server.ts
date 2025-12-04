@@ -41,7 +41,7 @@ export class ExpressServer {
 
     // Step 1: Register all controllers with the DI container
     for (const ControllerClass of controllerClasses) {
-      container.bind(ControllerClass).toSelf();
+      container.bind(ControllerClass).toSelf().inSingletonScope();
     }
 
     // Step 2: Instantiate and initialize all controllers

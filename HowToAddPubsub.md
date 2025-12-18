@@ -90,7 +90,7 @@ Define all your events, schemas, and logic in a single file - the **single sourc
 ```typescript
 // src/sectors/pubsub/events.ts
 import { z } from 'zod';
-import type { EventDefinition, EventEnvelope, ActionCtx } from '@saga-soa/pubsub-core';
+import type { EventDefinition, EventEnvelope, ActionCtx } from '@saga-ed/pubsub-core';
 
 // ============================================================================
 // Payload Schemas - Single source of truth
@@ -193,13 +193,13 @@ Create the tRPC router that exposes pubsub functionality with **simplified impor
 ```typescript
 // src/sectors/pubsub/trpc/pubsub-router.ts
 import { injectable, inject } from 'inversify';
-import { AbstractTRPCController, router } from '@saga-soa/api-core/abstract-trpc-controller';
-import type { ILogger } from '@saga-soa/logger';
+import { AbstractTRPCController, router } from '@saga-ed/api-core/abstract-trpc-controller';
+import type { ILogger } from '@saga-ed/logger';
 import { events, UserNotificationSchema, type UserNotificationInput } from '../events.js';
 
 // Import pubsub server functionality
-import { PubSubService, TYPES, ChannelService } from '@saga-soa/pubsub-server';
-import type { EventEnvelope, EventDefinition, EventName, ChannelConfig } from '@saga-soa/pubsub-core';
+import { PubSubService, TYPES, ChannelService } from '@saga-ed/pubsub-server';
+import type { EventEnvelope, EventDefinition, EventName, ChannelConfig } from '@saga-ed/pubsub-core';
 import { z } from 'zod';
 
 @injectable()
@@ -374,7 +374,7 @@ Channels are logical groupings of related events. They can be configured with va
 
 ```typescript
 // src/sectors/pubsub/channels/channel-config.ts
-import type { ChannelConfig } from '@saga-soa/pubsub-core';
+import type { ChannelConfig } from '@saga-ed/pubsub-core';
 
 export const channelConfigs: ChannelConfig[] = [
   {
@@ -518,7 +518,7 @@ The Inversify configuration is handled at **two levels**:
 
 #### 1. PubSub Server Level (Lower Level)
 
-The `@saga-soa/pubsub-server` package provides its own container with core services:
+The `@saga-ed/pubsub-server` package provides its own container with core services:
 
 ```typescript
 // packages/pubsub-server/src/inversify.config.ts
@@ -535,7 +535,7 @@ Your tRPC API binds the pubsub services to its own container:
 
 ```typescript
 // src/inversify.config.ts
-import { PubSubService, EventService, ChannelService, InMemoryAdapter, TYPES } from '@saga-soa/pubsub-server';
+import { PubSubService, EventService, ChannelService, InMemoryAdapter, TYPES } from '@saga-ed/pubsub-server';
 
 export const container = new Container();
 
@@ -591,7 +591,7 @@ Test your event definitions and controllers:
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Container } from 'inversify';
 import { PubSubController } from '../trpc/pubsub-router.js';
-import { MockLogger } from '@saga-soa/logger/mocks';
+import { MockLogger } from '@saga-ed/logger/mocks';
 import { MockPubSubService } from './mocks/mock-pubsub-service.js';
 
 describe('PubSubController', () => {
@@ -628,10 +628,10 @@ All integration tests follow the **Full Server + Supertest approach**:
 // src/sectors/pubsub/__tests__/pubsub-integration.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { ExpressServer } from '@saga-soa/api-core/express-server';
-import { TRPCServer } from '@saga-soa/api-core/trpc-server';
-import { ControllerLoader } from '@saga-soa/api-core/utils/controller-loader';
-import { AbstractTRPCController } from '@saga-soa/api-core/abstract-trpc-controller';
+import { ExpressServer } from '@saga-ed/api-core/express-server';
+import { TRPCServer } from '@saga-ed/api-core/trpc-server';
+import { ControllerLoader } from '@saga-ed/api-core/utils/controller-loader';
+import { AbstractTRPCController } from '@saga-ed/api-core/abstract-trpc-controller';
 import { container } from '../../inversify.config.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -733,13 +733,13 @@ This testing pattern provides several benefits:
 ```typescript
 // src/sectors/pubsub/trpc/pubsub-router.ts
 import { injectable, inject } from 'inversify';
-import { AbstractTRPCController, router } from '@saga-soa/api-core/abstract-trpc-controller';
-import type { ILogger } from '@saga-soa/logger';
+import { AbstractTRPCController, router } from '@saga-ed/api-core/abstract-trpc-controller';
+import type { ILogger } from '@saga-ed/logger';
 import { events } from '../events.js';
 
 // Import pubsub server functionality
-import { PubSubService, TYPES, ChannelService } from '@saga-soa/pubsub-server';
-import type { EventEnvelope, EventDefinition, EventName, ChannelConfig } from '@saga-soa/pubsub-core';
+import { PubSubService, TYPES, ChannelService } from '@saga-ed/pubsub-server';
+import type { EventEnvelope, EventDefinition, EventName, ChannelConfig } from '@saga-ed/pubsub-core';
 import { z } from 'zod';
 
 @injectable()
@@ -851,7 +851,7 @@ Create a minimal test server for integration testing:
 import express from 'express';
 import { Container } from 'inversify';
 import { PubSubController } from '../../trpc/pubsub-router.js';
-import { MockLogger } from '@saga-soa/logger/mocks';
+import { MockLogger } from '@saga-ed/logger/mocks';
 import { MockPubSubService } from '../mocks/mock-pubsub-service.js';
 
 export async function createTestServer() {

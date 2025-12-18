@@ -3,16 +3,16 @@ import { Field, InputType, Int } from 'type-graphql';
 @InputType()
 export class SessionInput {
   @Field()
-  tutor: string;
+  tutor!: string;
 
   @Field()
-  student: string;
+  student!: string;
 
   @Field()
-  date: Date;
+  date!: Date;
 
   @Field(() => Int)
-  duration: number;
+  duration!: number;
 
   @Field({ nullable: true })
   notes?: string;

@@ -6,10 +6,10 @@ import { MockMongoProvider } from '@saga-ed/soa-db/mocks/mock-mongo-provider';
 import type { ILogger, PinoLoggerConfig } from '@saga-ed/soa-logger';
 import { PinoLogger } from '@saga-ed/soa-logger';
 import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
-import { GQLServer } from '@saga-ed/soa-api-core/gql-server';
+import { TGQLServer } from '@saga-ed/soa-api-core/tgql-server';
 import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
 import type { ExpressServerConfig } from '@saga-ed/soa-api-core/express-server-schema';
-import type { GQLServerConfig } from '@saga-ed/soa-api-core/gql-server-schema';
+import type { TGQLServerConfig } from '@saga-ed/soa-api-core/tgql-server-schema';
 
 const container = new Container();
 
@@ -24,20 +24,22 @@ const loggerConfig: PinoLoggerConfig = {
 // Express Server configuration
 const expressConfig: ExpressServerConfig = {
   configType: 'EXPRESS_SERVER',
-  port: Number(process.env.PORT) || 4000,
+  port: Number(process.env.PORT) || 4002,
   logLevel: 'info',
   name: 'Example GraphQL API',
   basePath: '/saga-soa/v1', // All routes will be prefixed with this base path
 };
 
 // GraphQL Server configuration
-const gqlConfig: GQLServerConfig = {
-  configType: 'GQL_SERVER',
+const gqlConfig: TGQLServerConfig = {
+  configType: 'TGQL_SERVER',
   mountPoint: '/graphql', // Will be mounted at /saga-soa/v1/graphql
   logLevel: 'info',
   name: 'GraphQL API',
   enablePlayground: true, // Enable GraphQL playground
   playgroundPath: '/playground', // Optional: custom playground path
+  emitSchema: true, // Enable schema emission
+  schemaDir: './generated', // Directory for generated schema files
 };
 
 container.bind<PinoLoggerConfig>('PinoLoggerConfig').toConstantValue(loggerConfig);
@@ -47,7 +49,7 @@ container.bind<ILogger>('ILogger').to(PinoLogger).inSingletonScope();
 container.bind<ExpressServerConfig>('ExpressServerConfig').toConstantValue(expressConfig);
 
 // Bind GraphQL Server configuration
-container.bind<GQLServerConfig>('GQLServerConfig').toConstantValue(gqlConfig);
+container.bind<TGQLServerConfig>('TGQLServerConfig').toConstantValue(gqlConfig);
 
 // Bind MongoProvider to IMongoConnMgr using async factory (toDynamicValue, Inversify v6.x)
 container
@@ -69,7 +71,7 @@ container
   .inSingletonScope();
 
 container.bind(ExpressServer).toSelf().inSingletonScope();
-container.bind(GQLServer).toSelf().inSingletonScope();
+container.bind(TGQLServer).toSelf().inSingletonScope();
 
 // Bind ControllerLoader
 container.bind(ControllerLoader).toSelf().inSingletonScope();

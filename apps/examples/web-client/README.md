@@ -19,7 +19,7 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 This example demonstrates:
 - Next.js 15 with App Router
 - TypeScript configuration
-- Integration with saga-soa workspace packages (`@saga/ui`, `@saga/eslint-config`, `@saga/typescript-config`)
+- Integration with saga-soa workspace packages (`@saga-ed/ui`, `@saga-ed/eslint-config`, `@saga-ed/typescript-config`)
 - Turbopack for fast development builds
 
 ## Available Scripts
@@ -36,7 +36,7 @@ This web client is part of the saga-soa monorepo and can be used to:
 - Consume REST API endpoints from `rest-api` example
 - Query TypeGraphQL API from `tgql-api` example  
 - Call tRPC procedures from `trpc-api` example
-- Use shared UI components from `@saga/ui` package
+- Use shared UI components from `@saga-ed/ui` package
 
 ## Learn More
 

@@ -1,4 +1,4 @@
-# @saga-soa/tgql-codegen
+# @saga-ed/tgql-codegen
 
 TypeGraphQL code generation utilities for the saga-soa monorepo. This tool provides a two-phase generation workflow for creating GraphQL SDL files and TypeScript types from TypeGraphQL resolvers.
 
@@ -14,7 +14,7 @@ This approach provides proper client-side type generation while maintaining the 
 ## Installation
 
 ```bash
-pnpm add @saga-soa/tgql-codegen
+pnpm add @saga-ed/tgql-codegen
 ```
 
 ## Configuration
@@ -31,7 +31,7 @@ module.exports = {
   },
   generation: {
     outputDir: './generated',
-    packageName: '@saga-soa/tgql-types',
+    packageName: '@saga-ed/tgql-types',
     schemaName: 'AppSchema'
   },
   sdl: {
@@ -197,7 +197,7 @@ tgql-codegen generate
 
 ```typescript
 // Import generated types
-import type { User, Session, GetUserQuery, CreateUserMutation } from '@saga-soa/tgql-types';
+import type { User, Session, GetUserQuery, CreateUserMutation } from '@saga-ed/tgql-types';
 
 // Use with Apollo Client
 import { useQuery, useMutation } from '@apollo/client';

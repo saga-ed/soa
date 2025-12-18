@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { RouterGenerator } from '../generators/router-generator.js';
 import { ConfigLoader } from '../utils/config-loader.js';
@@ -11,17 +12,40 @@ describe('RouterGenerator', () => {
   let testConfig: any;
   let basePath: string;
   let sectors: any[];
+  let outputDir: string;
 
   beforeEach(async () => {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     basePath = path.resolve(__dirname, '..', '..'); // Go up to package root
+
+    // Create unique temporary directory for this test
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trpc-router-test-'));
+
+    // Load base config and override output directory
     const configPath = path.resolve(basePath, 'src/__tests__/fixtures/test-config.js');
-    testConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    const baseConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    testConfig = {
+      ...baseConfig,
+      generation: {
+        ...baseConfig.generation,
+        outputDir: path.relative(basePath, outputDir)
+      }
+    };
+
     routerGenerator = new RouterGenerator(testConfig, basePath);
-    
-    // Get sectors for testing
-    const sectorParser = new SectorParser(testConfig, basePath);
+
+    // Get sectors for testing with base config (not modified)
+    const sectorParser = new SectorParser(baseConfig, basePath);
     sectors = await sectorParser.discoverSectors();
+  });
+
+  afterEach(async () => {
+    // Clean up generated files after each test
+    try {
+      await fs.rm(outputDir, { recursive: true, force: true });
+    } catch (error) {
+      // Ignore cleanup errors
+    }
   });
 
   describe('generateRouter()', () => {
@@ -47,8 +71,8 @@ describe('RouterGenerator', () => {
       const routerContent = await fs.readFile(routerPath, 'utf-8');
       
       // Check that both sector schemas are imported
-      expect(routerContent).toContain("import * as userSchemas from './schemas/user-schemas.js';");
-      expect(routerContent).toContain("import * as productSchemas from './schemas/product-schemas.js';");
+      expect(routerContent).toContain("import * as example_sector1Schemas from './schemas/example_sector1-schemas.js';");
+      expect(routerContent).toContain("import * as example_sector2Schemas from './schemas/example_sector2-schemas.js';");
     });
 
     it('should generate router with all sectors', async () => {
@@ -60,8 +84,8 @@ describe('RouterGenerator', () => {
       const routerContent = await fs.readFile(routerPath, 'utf-8');
       
       // Check that both sectors are included in the router
-      expect(routerContent).toContain('user: t.router({');
-      expect(routerContent).toContain('product: t.router({');
+      expect(routerContent).toContain('example_sector1: t.router({');
+      expect(routerContent).toContain('example_sector2: t.router({');
     });
 
     it('should include all endpoints from each sector', async () => {
@@ -72,19 +96,20 @@ describe('RouterGenerator', () => {
       
       const routerContent = await fs.readFile(routerPath, 'utf-8');
       
-      // Check user sector endpoints
-      expect(routerContent).toContain('getUser: t.procedure');
-      expect(routerContent).toContain('createUser: t.procedure');
-      expect(routerContent).toContain('updateUser: t.procedure');
-      expect(routerContent).toContain('deleteUser: t.procedure');
-      expect(routerContent).toContain('listUsers: t.procedure');
-      
-      // Check product sector endpoints
-      expect(routerContent).toContain('getProduct: t.procedure');
-      expect(routerContent).toContain('createProduct: t.procedure');
-      expect(routerContent).toContain('updateProduct: t.procedure');
-      expect(routerContent).toContain('deleteProduct: t.procedure');
-      expect(routerContent).toContain('searchProducts: t.procedure');
+      // Check example_sector1 endpoints
+      expect(routerContent).toContain('getItem: t.procedure');
+      expect(routerContent).toContain('createItem: t.procedure');
+      expect(routerContent).toContain('updateItem: t.procedure');
+      expect(routerContent).toContain('deleteItem: t.procedure');
+      expect(routerContent).toContain('listItems: t.procedure');
+      expect(routerContent).toContain('healthCheck: t.procedure');
+
+      // Check example_sector2 endpoints
+      expect(routerContent).toContain('getResource: t.procedure');
+      expect(routerContent).toContain('createResource: t.procedure');
+      expect(routerContent).toContain('updateResource: t.procedure');
+      expect(routerContent).toContain('deleteResource: t.procedure');
+      expect(routerContent).toContain('searchResources: t.procedure');
     });
 
     it('should use correct input schemas for each endpoint', async () => {
@@ -96,10 +121,10 @@ describe('RouterGenerator', () => {
       const routerContent = await fs.readFile(routerPath, 'utf-8');
       
       // Check that input schemas are correctly referenced
-      expect(routerContent).toContain('.input(userSchemas.GetUserSchema)');
-      expect(routerContent).toContain('.input(userSchemas.CreateUserSchema)');
-      expect(routerContent).toContain('.input(productSchemas.GetProductSchema)');
-      expect(routerContent).toContain('.input(productSchemas.CreateProductSchema)');
+      expect(routerContent).toContain('.input(example_sector1Schemas.GetItemSchema)');
+      expect(routerContent).toContain('.input(example_sector1Schemas.CreateItemSchema)');
+      expect(routerContent).toContain('.input(example_sector2Schemas.GetResourceSchema)');
+      expect(routerContent).toContain('.input(example_sector2Schemas.CreateResourceSchema)');
     });
 
     it('should generate correct procedure types', async () => {

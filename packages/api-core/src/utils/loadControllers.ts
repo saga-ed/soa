@@ -22,12 +22,16 @@ export class ControllerLoader {
   ): Promise<[new (...args: any[]) => TBase, ...Array<new (...args: any[]) => TBase>]> {
     // Support single string, array, or varargs
     const patterns = Array.isArray(globPatterns) ? globPatterns : [globPatterns];
-    
+
+    // Read controllerType from the base class's static property
+    const controllerType = (baseClass as any).controllerType || 'CONTROLLER';
+    const typeLabel = ` ${controllerType}`;
+
     try {
       const files = await fg(patterns, { absolute: true });
-      
-      this.logger.info(`Found ${files.length} files matching patterns: ${patterns.join(', ')}`);
-      
+
+      this.logger.info(`Found ${files.length}${typeLabel} files matching patterns: ${patterns.join(', ')}`);
+
       const controllers: Array<new (...args: any[]) => TBase> = [];
       const loadErrors: string[] = [];
 
@@ -41,7 +45,8 @@ export class ControllerLoader {
           if (typeof candidate === 'function' && candidate.prototype instanceof baseClass) {
             controllers.push(candidate);
             controllerFound = true;
-            this.logger.debug(`Loaded controller from default export: ${path.basename(file)}`);
+            const controllerName = candidate.name || 'UnnamedController';
+            this.logger.info(`  ✓ [${controllerType}] ${controllerName} (default export from ${path.basename(file)})`);
           } else {
             // Check all named exports
             for (const key of Object.keys(mod)) {
@@ -49,13 +54,14 @@ export class ControllerLoader {
               if (typeof named === 'function' && named.prototype instanceof baseClass) {
                 controllers.push(named);
                 controllerFound = true;
-                this.logger.debug(`Loaded controller from named export '${key}': ${path.basename(file)}`);
+                const controllerName = named.name || key;
+                this.logger.info(`  ✓ [${controllerType}] ${controllerName} (named export '${key}' from ${path.basename(file)})`);
               }
             }
           }
 
           if (!controllerFound) {
-            this.logger.warn(`No valid controller found in file: ${path.basename(file)}`);
+            this.logger.warn(`No valid${typeLabel} controller found in file: ${path.basename(file)}`);
           }
         } catch (error) {
           const errorMsg = `Failed to load file: ${path.basename(file)} - ${error instanceof Error ? error.message : String(error)}`;
@@ -65,20 +71,20 @@ export class ControllerLoader {
       }
 
       // Log summary
-      this.logger.info(`Successfully loaded ${controllers.length} controllers from ${files.length} files`);
+      this.logger.info(`Successfully loaded ${controllers.length}${typeLabel} controllers from ${files.length} files`);
       if (loadErrors.length > 0) {
         this.logger.warn(`Failed to load ${loadErrors.length} files`);
       }
 
       if (controllers.length === 0) {
-        const errorMsg = `No valid controllers found for patterns: ${patterns.join(', ')}. Ensure you have files matching the expected pattern.`;
+        const errorMsg = `No valid${typeLabel} controllers found for patterns: ${patterns.join(', ')}. Ensure you have files matching the expected pattern.`;
         this.logger.error(errorMsg);
         throw new Error(errorMsg);
       }
 
       return controllers as [new (...args: any[]) => TBase, ...Array<new (...args: any[]) => TBase>];
     } catch (error) {
-      const errorMsg = `Failed to load controllers: ${error instanceof Error ? error.message : String(error)}`;
+      const errorMsg = `Failed to load${typeLabel} controllers: ${error instanceof Error ? error.message : String(error)}`;
       this.logger.error(errorMsg);
       throw new Error(errorMsg);
     }

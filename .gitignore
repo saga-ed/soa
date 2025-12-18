@@ -28,17 +28,50 @@ out/
 build
 dist
 
+# Generated Code & Types
+generated/
+output/
+*.bundled_*.mjs
 
 # Debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+
+# IDE & Editor Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
 # Misc
-.DS_Store
 *.pem
 .git
 *.map
 .tsbuildinfo
 *.tsbuildinfo
 temp
+*.tmp
+.logs/
+
+# Package Manager
+.pnpm-debug.log
+.yarn/
+.pnp.*
+
+# Test & Coverage
+test-results/
+playwright-report/
+.nyc_output/
+

@@ -51,5 +51,14 @@
     "saga-soa"
   ],
   "author": "saga-soa",
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/tgql-codegen"
+  }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-trpc-codegen",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "type": "module",
   "description": "Reusable tRPC code generation utilities for saga-soa monorepo",
   "main": "dist/index.js",
@@ -32,10 +32,12 @@
     "tsx": "^4.20.3"
   },
   "devDependencies": {
+    "@trpc/server": "^11.0.0",
     "@types/node": "^22.10.1",
     "tsup": "^8.3.5",
     "typescript": "5.8.2",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "zod": "^3.25.0"
   },
   "keywords": [
     "trpc",
@@ -44,5 +46,14 @@
     "saga-soa"
   ],
   "author": "saga-soa",
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/trpc-codegen"
+  }
 }

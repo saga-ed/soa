@@ -14,7 +14,7 @@ program
   .name('zod2ts')
   .description('Extract fully realized TypeScript types from Zod schemas')
   .version('1.0.0')
-  .requiredOption('--zod-path <path>', 'Path to TypeScript file containing Zod schemas')
+  .requiredOption('--zod-path <path>', 'Path to TypeScript (.ts) or JavaScript (.js) file containing Zod schemas')
   .requiredOption('--output-dir <path>', 'Output directory for generated type files')
   .option(
     '--type-name <name>',

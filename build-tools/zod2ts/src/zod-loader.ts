@@ -1,28 +1,44 @@
 import { z } from 'zod';
-import { resolve } from 'node:path';
+import { resolve, extname } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { SchemaLoadingError } from './types.js';
+import { Transpiler } from './transpiler.js';
+import { Logger } from './logger.js';
 
 export class ZodSchemaLoader {
+  private transpiler: Transpiler;
+
   constructor() {
     // Inject our bundled zod into global scope for schema files to use
     this.setupGlobalZod();
+    this.transpiler = new Transpiler();
   }
 
   async loadSchemasFromFile(filePath: string): Promise<Map<string, z.ZodSchema>> {
+    let transpilationResult: Awaited<ReturnType<Transpiler['transpileFile']>> | null = null;
+
     try {
       const resolvedPath = resolve(filePath);
+      let fileToProcess = resolvedPath;
+      let originalContent: string;
+
+      // Check if this is a TypeScript file that needs transpilation
+      if (extname(resolvedPath) === '.ts') {
+        Logger.info(`Detected TypeScript file: ${resolvedPath}`);
+        transpilationResult = await this.transpiler.transpileFile(resolvedPath);
+        fileToProcess = transpilationResult.jsFilePath;
+      }
 
       // Read and modify the schema file content instead of dynamic import
-      const originalContent = await readFile(resolvedPath, 'utf-8');
+      originalContent = await readFile(fileToProcess, 'utf-8');
       const modifiedContent = this.replaceZodImports(originalContent);
 
       // Create a module-like environment and evaluate the modified content
       const moduleExports = {};
-      
+
       // Transform ES module exports to work in function scope
       const transformedContent = this.transformESModuleExports(modifiedContent);
-      
+
       const moduleScope = {
         exports: moduleExports,
         module: { exports: moduleExports },
@@ -57,6 +73,11 @@ export class ZodSchemaLoader {
       throw new SchemaLoadingError(
         `Failed to load schemas from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
       );
+    } finally {
+      // Clean up transpiled files
+      if (transpilationResult) {
+        await transpilationResult.cleanup();
+      }
     }
   }
 
@@ -100,25 +121,23 @@ export class ZodSchemaLoader {
     // Transform ES module exports to CommonJS-style assignments
     let transformed = content;
 
-    // Handle: export const SomeSchema = z.object(...);
+    // First, handle multi-line export const declarations
+    // This regex captures the entire declaration including multi-line objects
     transformed = transformed.replace(
-      /export\s+const\s+(\w+)\s*=/g,
-      'const $1 =; exports.$1 = $1; exports.$1'
+      /export\s+const\s+(\w+)\s*=\s*([\s\S]*?)(?=\n(?:export|\/\/|$))/g,
+      (match, name, value) => {
+        // Check if the value ends with a semicolon, if not add one
+        const trimmedValue = value.trimEnd();
+        const needsSemicolon = !trimmedValue.endsWith(';');
+        const cleanValue = needsSemicolon ? trimmedValue + ';' : trimmedValue;
+        return `const ${name} = ${cleanValue}\nexports.${name} = ${name};`;
+      }
     );
 
-    // Fix the double assignment issue from the replacement above
+    // Handle: export type declarations (just remove them as they're TypeScript only)
     transformed = transformed.replace(
-      /const\s+(\w+)\s*=;\s*exports\.\1\s*=\s*\1;\s*exports\.\1\s*=/g,
-      'const $1 =; exports.$1 = $1; $1'
-    );
-
-    // Actually, let's do this more cleanly
-    transformed = content;
-    
-    // Replace export const with const + assignment
-    transformed = transformed.replace(
-      /export\s+const\s+(\w+)\s*=\s*([^;]+);?/g,
-      'const $1 = $2;\nexports.$1 = $1;'
+      /export\s+type\s+\w+\s*=\s*[^;]+;/g,
+      ''
     );
 
     // Handle: export { SomeSchema };
@@ -128,6 +147,12 @@ export class ZodSchemaLoader {
         const exportNames = exports.split(',').map((name: string) => name.trim());
         return exportNames.map((name: string) => `exports.${name} = ${name};`).join('\n');
       }
+    );
+
+    // Remove any remaining import statements that might interfere
+    transformed = transformed.replace(
+      /import\s+.*?from\s+['"][^'"]+['"];?/g,
+      ''
     );
 
     return transformed;

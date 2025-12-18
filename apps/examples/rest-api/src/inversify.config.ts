@@ -22,7 +22,7 @@ const loggerConfig: PinoLoggerConfig = {
 // Express Server configuration
 const expressConfig: ExpressServerConfig = {
   configType: 'EXPRESS_SERVER',
-  port: Number(process.env.PORT) || 3000,
+  port: Number(process.env.PORT) || 4000,
   logLevel: 'info',
   name: 'REST API Example',
   basePath: 'saga-soa', // Simplified basePath since controllers no longer include hardcoded prefix

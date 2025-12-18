@@ -1,7 +1,7 @@
 import { injectable, inject } from 'inversify';
 import { ObjectType, Field, Query, Resolver } from 'type-graphql';
 import type { ILogger } from '@saga-ed/soa-logger';
-import { AbstractGQLController } from '../../abstract-gql-controller.js';
+import { AbstractTGQLController } from '../../abstract-tgql-controller.js';
 
 @ObjectType()
 export class HelloResponse {
@@ -11,7 +11,7 @@ export class HelloResponse {
 
 @injectable()
 @Resolver()
-export class TestGQLController extends AbstractGQLController {
+export class TestGQLController extends AbstractTGQLController {
   sectorName = 'test-gql';
 
   @Query(() => HelloResponse)

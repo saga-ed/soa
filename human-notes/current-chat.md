@@ -224,8 +224,8 @@ Key features:
 
 This project is under active development. The following packages have some level of build out:
 
-- **@saga-soa/config**: Strongly-typed configuration management using Zod schemas for runtime validation and TypeScript safety. Supports environment variable-based configuration, dependency injection (Inversify), and mock configuration for testing.
-- **@saga-soa/db**: Helpers for managing connections to supported databases (MongoDB, SQL/MySQL, Redis). Designed for use with Inversify to manage shared and multiple database instances within the monorepo.
+- **@saga-ed/config**: Strongly-typed configuration management using Zod schemas for runtime validation and TypeScript safety. Supports environment variable-based configuration, dependency injection (Inversify), and mock configuration for testing.
+- **@saga-ed/db**: Helpers for managing connections to supported databases (MongoDB, SQL/MySQL, Redis). Designed for use with Inversify to manage shared and multiple database instances within the monorepo.
 
 For more details and project tracking, see the [Project Board](https://github.com/orgs/hipponot/projects/22).
 
@@ -238,7 +238,7 @@ For more details and project tracking, see the [Project Board](https://github.co
 The following changes have been made to the README:
 
 - **Added a "Build Out" section** before "Getting Started":
-  - Describes the purpose and current state of `@saga-soa/config` and `@saga-soa/db`.
+  - Describes the purpose and current state of `@saga-ed/config` and `@saga-ed/db`.
   - Summarizes each package’s role and features.
 - **Added a link to the project board** for further details and tracking:  
   [Project Board](https://github.com/orgs/hipponot/projects/22)
@@ -269,15 +269,15 @@ Okay, `MongoProviderSchema` is in `packages/db/src/mongo-provider-config.ts`. I'
 
 I need to make `MongoProviderSchema` explicitly conform to `HasConfigType`. My plan is to define the schema's shape as a `HasConfigType` constant before passing it to `z.object()`. I'll first verify the dependency of `packages/db` on `packages/config` by checking `packages/db/package.json` to ensure I can import `HasConfigType`.
 
-`package.json` is there. Reading it for `@saga-soa/config` dependency.
+`package.json` is there. Reading it for `@saga-ed/config` dependency.
 
-Okay, I'll explicitly type the `MongoProviderSchema`. I'll import `HasConfigType` from `@saga-soa/config` into `mongo-provider-config.ts`, create a typed shape object, and then use that to build the schema. First, I need to verify that `HasConfigType` is properly exported from the `@saga-soa/config` package by checking its `package.json`.
+Okay, I'll explicitly type the `MongoProviderSchema`. I'll import `HasConfigType` from `@saga-ed/config` into `mongo-provider-config.ts`, create a typed shape object, and then use that to build the schema. First, I need to verify that `HasConfigType` is properly exported from the `@saga-ed/config` package by checking its `package.json`.
 
-The `@saga-soa/config` package exports `HasConfigType` through its main entry point, so `import { HasConfigType } from '@saga-soa/config'` will resolve correctly. My proposed change is valid, and I will now implement it.
+The `@saga-ed/config` package exports `HasConfigType` through its main entry point, so `import { HasConfigType } from '@saga-ed/config'` will resolve correctly. My proposed change is valid, and I will now implement it.
 
 ```typescript
 import { z } from 'zod';
-import { HasConfigType } from '@saga-soa/config';
+import { HasConfigType } from '@saga-ed/config';
 
 const mongoProviderShape: HasConfigType = {
   configType: z.literal('MONGO'),
@@ -300,7 +300,7 @@ export type MongoProviderConfig = z.infer<typeof MongoProviderSchema>;
 The following changes have been made:
 
 1. **Updated `packages/db/src/mongo-provider-config.ts`**
-   - Imported `HasConfigType` from `@saga-soa/config`.
+   - Imported `HasConfigType` from `@saga-ed/config`.
    - Explicitly typed the shape of the Zod schema to ensure it conforms to `HasConfigType`. This improves type safety and makes the relationship between the schema and the config manager clearer.
    - Created a `mongoProviderShape` constant with the `HasConfigType` and then passed it to `z.object()`.
 
@@ -326,7 +326,7 @@ I will now update the code to reflect this more direct and readable approach.
 
 ```typescript
 import { z, ZodObject } from 'zod';
-import { HasConfigType } from '@saga-soa/config';
+import { HasConfigType } from '@saga-ed/config';
 
 export const MongoProviderSchema: ZodObject<HasConfigType> = z.object({
   configType: z.literal('MONGO'),
@@ -376,7 +376,7 @@ The first approach involved creating a constant for the schema's shape and apply
 
 ```typescript
 import { z } from 'zod';
-import { HasConfigType } from '@saga-soa/config';
+import { HasConfigType } from '@saga-ed/config';
 
 const mongoProviderShape: HasConfigType = {
   configType: z.literal('MONGO'),
@@ -407,7 +407,7 @@ The improved solution applies the type constraint directly to the schema constan
 
 ```typescript
 import { z, ZodObject } from 'zod';
-import { HasConfigType } from '@saga-soa/config';
+import { HasConfigType } from '@saga-ed/config';
 
 export const MongoProviderSchema: ZodObject<HasConfigType> = z.object({
   configType: z.literal('MONGO'),
@@ -496,7 +496,7 @@ To test the `ExpressServer` in isolation, we will:
 
 - **Mock Dependencies**:
   - **`MockLogger`**: Create a `MockLogger` class that implements `ILogger` but stores log messages in an array instead of writing to the console. This allows us to assert that specific logs were written during tests.
-  - **`MockConfigManager`**: Use the existing `@saga-soa/config` package to provide a mock `ExpressServerConfig`.
+  - **`MockConfigManager`**: Use the existing `@saga-ed/config` package to provide a mock `ExpressServerConfig`.
 - **Use `supertest`**: This library allows us to make HTTP requests to the Express app without needing to bind to a real network port, making tests fast and reliable.
 - **Test Scenarios (`express-server.test.ts`)**:
   - Test that the server starts and stops correctly.
@@ -529,7 +529,7 @@ Now I will write the plan to the file.
 ```markdown
 # Plan: `express-server.ts` Implementation and Testing
 
-This document outlines the plan for implementing and testing the `express-server.ts` component within the `@saga-soa/api-core` package.
+This document outlines the plan for implementing and testing the `express-server.ts` component within the `@saga-ed/api-core` package.
 
 ## 1. Define Interfaces (`core-api/src/i-logger.ts`)
 
@@ -566,7 +566,7 @@ This document outlines the plan for implementing and testing the `express-server
 
 - **Mock Dependencies**:
   - **`MockLogger`**: A mock `ILogger` that stores log messages in an array for assertions.
-  - **`MockConfigManager`**: Use `@saga-soa/config` to provide a mock `ExpressServerConfig`.
+  - **`MockConfigManager`**: Use `@saga-ed/config` to provide a mock `ExpressServerConfig`.
 - **Use `supertest`**: To make HTTP requests to the Express app without binding to a real network port.
 - **Test Scenarios (`express-server.test.ts`)**:
   - Test server start/stop.
@@ -578,7 +578,7 @@ This document outlines the plan for implementing and testing the `express-server
 
 # Mode: PLAN
 
-Plan saved. Now, let's plan the new `@saga-soa/logger` package.
+Plan saved. Now, let's plan the new `@saga-ed/logger` package.
 
 Regarding your question:
 
@@ -588,16 +588,16 @@ Regarding your question:
 
 A separate `console.log` implementation is unnecessary. Using Pino for all environments provides consistency, gives you structured logging capabilities even in development, and avoids maintaining two separate logging implementations. We can configure the `PinoLogger` to use `pino-pretty` when in a dev environment and standard JSON logging otherwise.
 
-Here is the plan for the `@saga-soa/logger` package:
+Here is the plan for the `@saga-ed/logger` package:
 
 ---
 
-## Plan: `@saga-soa/logger`
+## Plan: `@saga-ed/logger`
 
 ### 1. Create Package Structure and Scaffolding
 
 - Create a new `packages/logger` directory.
-- Add `package.json` with the name `@saga-soa/logger` and dependencies: `pino`, `zod`, `inversify`, `reflect-metadata`. Dev dependencies will include `pino-pretty`, `@types/node`, and the testing stack.
+- Add `package.json` with the name `@saga-ed/logger` and dependencies: `pino`, `zod`, `inversify`, `reflect-metadata`. Dev dependencies will include `pino-pretty`, `@types/node`, and the testing stack.
 - Add `tsconfig.json`, `jest.config.cjs`, and `memory-bank/logger.md`.
 - Add the new package to `pnpm-workspace.yaml`.
 
@@ -644,7 +644,7 @@ Here is the plan for the `@saga-soa/logger` package:
 - Test that `PinoLogger` correctly logs messages at the specified level.
 - Test that logs below the configured level are ignored.
 - Test that the logger correctly uses the provided configuration (e.g., test that `prettyPrint` is activated).
-- Use `MockConfigManager` from `@saga-soa/config` to inject test configurations.
+- Use `MockConfigManager` from `@saga-ed/config` to inject test configurations.
 
 ---
 
@@ -662,13 +662,13 @@ act
 
 # Mode: ACT
 
-Great. I will start by creating the directory structure and scaffolding for the new `@saga-soa/logger` package.
+Great. I will start by creating the directory structure and scaffolding for the new `@saga-ed/logger` package.
 
 Now that the directories are created, I will create the `package.json` file for the new logger package.
 
 ```json
 {
-  "name": "@saga-soa/logger",
+  "name": "@saga-ed/logger",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -693,8 +693,8 @@ Now that the directories are created, I will create the `package.json` file for 
     "zod": "^3.22.2"
   },
   "devDependencies": {
-    "@saga-soa/config": "workspace:*",
-    "@saga/typescript-config": "workspace:*",
+    "@saga-ed/config": "workspace:*",
+    "@saga-ed/typescript-config": "workspace:*",
     "@types/jest": "^29.5.3",
     "@types/node": "latest",
     "jest": "^29.6.2",
@@ -709,7 +709,7 @@ Next, I'll create the `tsconfig.json` for the logger package, extending the base
 
 ```jsonc
 {
-  "extends": "@saga/typescript-config/base.json",
+  "extends": "@saga-ed/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
   },
@@ -731,7 +731,7 @@ module.exports = {
 I'll add a placeholder `logger.md` to the memory bank.
 
 ```markdown
-# @saga-soa/logger
+# @saga-ed/logger
 
 This package provides a configurable logging solution for the saga-soa project. It is built on top of Pino for high-performance, structured logging.
 
@@ -765,7 +765,7 @@ Next, I'll define the Pino configuration schema in `src/pino-logger-schema.ts`. 
 
 ```typescript
 import { z, ZodObject } from 'zod';
-import { HasConfigType } from '@saga-soa/config';
+import { HasConfigType } from '@saga-ed/config';
 
 export const PinoLoggerSchema: ZodObject<HasConfigType> = z.object({
   configType: z.literal('PINO_LOGGER'),
@@ -868,7 +868,7 @@ The linter is complaining about the decorator. This is a common TypeScript confi
 
 ```jsonc
 {
-  "extends": "@saga/typescript-config/base.json",
+  "extends": "@saga-ed/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
     "experimentalDecorators": true,
@@ -939,7 +939,7 @@ export { MockLogger } from './mocks/mock-logger';
 
 # Mode: PLAN
 
-The initial implementation of the `@saga-soa/logger` package is now complete. Here's a summary of what's been done:
+The initial implementation of the `@saga-ed/logger` package is now complete. Here's a summary of what's been done:
 
 - **Package Scaffolding**: Created the directory structure, `package.json`, `tsconfig.json`, and `jest.config.cjs`.
 - **Core Interface**: Defined `ILogger` and `LogLevel` in `src/i-logger.ts`.
@@ -976,7 +976,7 @@ I will now restore these files with the latest, correct content as previously de
 
 ```jsonc
 {
-  "extends": "@saga/typescript-config/base.json",
+  "extends": "@saga-ed/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
     "experimentalDecorators": true,
@@ -989,7 +989,7 @@ I will now restore these files with the latest, correct content as previously de
 
 ```typescript
 import { z, ZodObject } from 'zod';
-import { HasConfigType } from '@saga-soa/config';
+import { HasConfigType } from '@saga-ed/config';
 
 export const PinoLoggerSchema: ZodObject<HasConfigType> = z.object({
   configType: z.literal('PINO_LOGGER'),
@@ -1455,7 +1455,7 @@ act
 
 ```typescript
 import { z, ZodObject } from 'zod';
-import { HasConfigType } from '@saga-soa/config';
+import { HasConfigType } from '@saga-ed/config';
 
 export const PinoLoggerSchema: ZodObject<HasConfigType> = z.object({
   configType: z.literal('PINO_LOGGER'),
@@ -1758,7 +1758,7 @@ describe('PinoLogger', () => {
   - The logger auto-detects foreground/background mode using `process.stdout.isTTY`.
   - The logger enforces file logging requirements in production Express context and instantiates loggers as expected in other scenarios.
 
-You can now run the tests with `pnpm test -F @saga-soa/logger` to verify the logger’s behavior. If you need more test cases or want to extend the logger, let me know!
+You can now run the tests with `pnpm test -F @saga-ed/logger` to verify the logger’s behavior. If you need more test cases or want to extend the logger, let me know!
 
 ---
 
@@ -1787,11 +1787,11 @@ Can you read the contents of api-core/memory-bank and come up with an implementa
 
 # Mode: PLAN
 
-Based on the contents of `api-core/memory-bank/express-server.md` and `api-core.md`, here is a comprehensive implementation plan for the `@saga-soa/api-core` package:
+Based on the contents of `api-core/memory-bank/express-server.md` and `api-core.md`, here is a comprehensive implementation plan for the `@saga-ed/api-core` package:
 
 ---
 
-## Implementation Plan: `@saga-soa/api-core`
+## Implementation Plan: `@saga-ed/api-core`
 
 ### 1. **Express Server Foundation**
 
@@ -1811,7 +1811,7 @@ Based on the contents of `api-core/memory-bank/express-server.md` and `api-core.
 
 ### 2. **Logger Integration**
 
-- Use the `@saga-soa/logger` package for logging.
+- Use the `@saga-ed/logger` package for logging.
 - Inject an `ILogger` implementation into `ExpressServer` via DI.
 - Support both real and mock loggers for production and testing.
 
@@ -1836,7 +1836,7 @@ Based on the contents of `api-core/memory-bank/express-server.md` and `api-core.
 
 ### 5. **Configuration Management**
 
-- Use `@saga-soa/config` for loading and validating configuration blobs.
+- Use `@saga-ed/config` for loading and validating configuration blobs.
 - Ensure all server and logger configuration is type-safe and validated at startup.
 
 ---
@@ -1862,7 +1862,7 @@ Act
 
 ```typescript
 import { z, ZodObject } from 'zod';
-import { HasConfigType } from '@saga-soa/config';
+import { HasConfigType } from '@saga-ed/config';
 
 export const ExpressServerSchema: ZodObject<HasConfigType> = z.object({
   configType: z.literal('EXPRESS_SERVER'),
@@ -1876,7 +1876,7 @@ export type ExpressServerConfig = z.infer<typeof ExpressServerSchema>;
 
 ```json
 {
-  "name": "@saga-soa/core-api",
+  "name": "@saga-ed/core-api",
   "version": "1.0.0",
   "private": true,
   "main": "dist/index.js",
@@ -1888,7 +1888,7 @@ export type ExpressServerConfig = z.infer<typeof ExpressServerSchema>;
   },
   "dependencies": {
     "zod": "^3.22.2",
-    "@saga-soa/config": "workspace:*"
+    "@saga-ed/config": "workspace:*"
   },
   "devDependencies": {
     "@types/jest": "^29.5.3",
@@ -1908,7 +1908,7 @@ Next, I will implement the `ExpressServer` class in `src/express-server.ts`, fol
 import express, { Application } from 'express';
 import { injectable, inject } from 'inversify';
 import type { ExpressServerConfig } from './express-server-schema';
-import type { ILogger } from '@saga-soa/logger';
+import type { ILogger } from '@saga-ed/logger';
 
 @injectable()
 export class ExpressServer {
@@ -1944,7 +1944,7 @@ export class ExpressServer {
 
 ```json
 {
-  "name": "@saga-soa/api-core",
+  "name": "@saga-ed/api-core",
   "version": "1.0.0",
   "private": true,
   "main": "dist/index.js",
@@ -1956,8 +1956,8 @@ export class ExpressServer {
   },
   "dependencies": {
     "zod": "^3.22.2",
-    "@saga-soa/config": "workspace:*",
-    "@saga-soa/logger": "workspace:*",
+    "@saga-ed/config": "workspace:*",
+    "@saga-ed/logger": "workspace:*",
     "express": "^4.18.2",
     "inversify": "^6.0.1",
     "reflect-metadata": "^0.1.13"
@@ -1998,10 +1998,10 @@ Lets update the project configuration to make saga-soa/logger available via pnpm
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@saga-soa/config": ["packages/config/src"],
-      "@saga-soa/config/*": ["packages/config/src/*"],
-      "@saga-soa/logger": ["packages/logger/src"],
-      "@saga-soa/logger/*": ["packages/logger/src/*"],
+      "@saga-ed/config": ["packages/config/src"],
+      "@saga-ed/config/*": ["packages/config/src/*"],
+      "@saga-ed/logger": ["packages/logger/src"],
+      "@saga-ed/logger/*": ["packages/logger/src/*"],
     },
   },
   "exclude": ["node_modules", "dist"],
@@ -2010,8 +2010,8 @@ Lets update the project configuration to make saga-soa/logger available via pnpm
 
 The project is now configured so that:
 
-- The `@saga-soa/logger` package is available to all workspace packages via the existing `packages/*` glob in `pnpm-workspace.yaml`.
-- The root `tsconfig.json` includes path mappings for `@saga-soa/logger` and `@saga-soa/logger/*`, enabling language servers and TypeScript tooling to resolve imports from source.
+- The `@saga-ed/logger` package is available to all workspace packages via the existing `packages/*` glob in `pnpm-workspace.yaml`.
+- The root `tsconfig.json` includes path mappings for `@saga-ed/logger` and `@saga-ed/logger/*`, enabling language servers and TypeScript tooling to resolve imports from source.
 
 This ensures smooth development and correct module resolution for the logger package across your monorepo.
 
@@ -2367,7 +2367,7 @@ Here’s a plan for implementing a robust registry/plugin pattern for REST secto
   - `main.ts`: Entry point. Sets up Inversify container, binds sectors, creates Express app, and mounts the router.
   - `sectors/hello-rest.ts`: The Hello sector, extending `RestEndpointGroup` and decorated with `@injectable`.
   - `inversify.config.ts`: Sets up the DI container and registry for sectors.
-- **`package.json`**: Declares dependencies on `express`, `inversify`, `reflect-metadata`, and `@saga-soa/api-core`.
+- **`package.json`**: Declares dependencies on `express`, `inversify`, `reflect-metadata`, and `@saga-ed/api-core`.
 
 ---
 
@@ -2431,7 +2431,7 @@ ACT
 ```typescript
 import { Router, Request, Response } from 'express';
 import { injectable } from 'inversify';
-import { RestEndpointGroup } from '@saga-soa/core-api/src/rest/rest-endpoint-group';
+import { RestEndpointGroup } from '@saga-ed/core-api/src/rest/rest-endpoint-group';
 
 @injectable()
 export class HelloRest extends RestEndpointGroup {
@@ -2453,7 +2453,7 @@ export class HelloRest extends RestEndpointGroup {
 
 ```json
 {
-  "name": "@saga-soa/example-rest",
+  "name": "@saga-ed/example-rest",
   "version": "1.0.0",
   "private": true,
   "main": "dist/index.js",
@@ -2467,7 +2467,7 @@ export class HelloRest extends RestEndpointGroup {
     "express": "^4.18.2",
     "inversify": "^6.0.1",
     "reflect-metadata": "^0.1.13",
-    "@saga-soa/core-api": "workspace:*"
+    "@saga-ed/core-api": "workspace:*"
   }
 }
 ```
@@ -2485,7 +2485,7 @@ export class HelloRest extends RestEndpointGroup {
 
 ```typescript
 import { Container, interfaces } from 'inversify';
-import { RestEndpointGroup } from '@saga-soa/core-api/src/rest/rest-endpoint-group';
+import { RestEndpointGroup } from '@saga-ed/core-api/src/rest/rest-endpoint-group';
 import { HelloRest } from './sectors/hello-rest';
 
 export const TYPES = {
@@ -2504,8 +2504,8 @@ export { container };
 import 'reflect-metadata';
 import express from 'express';
 import { container, TYPES } from './inversify.config';
-import { RestRouter } from '@saga-soa/core-api/src/rest/rest-router';
-import { RestEndpointGroup } from '@saga-soa/core-api/src/rest/rest-endpoint-group';
+import { RestRouter } from '@saga-ed/core-api/src/rest/rest-router';
+import { RestEndpointGroup } from '@saga-ed/core-api/src/rest/rest-endpoint-group';
 
 const app = express();
 
@@ -2569,7 +2569,7 @@ I have a preference for ESM so please add "type" : "module" where required
 
 ```json
 {
-  "name": "@saga-soa/example-rest",
+  "name": "@saga-ed/example-rest",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -2584,7 +2584,7 @@ I have a preference for ESM so please add "type" : "module" where required
     "express": "^4.18.2",
     "inversify": "^6.0.1",
     "reflect-metadata": "^0.1.13",
-    "@saga-soa/core-api": "workspace:*"
+    "@saga-ed/core-api": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
@@ -2648,7 +2648,7 @@ Can we try and move the example_rest application to use commonjs in both package
 
 ```json
 {
-  "name": "@saga-soa/example-rest",
+  "name": "@saga-ed/example-rest",
   "version": "1.0.0",
   "private": true,
   "main": "dist/main.js",
@@ -2662,7 +2662,7 @@ Can we try and move the example_rest application to use commonjs in both package
     "express": "^4.18.2",
     "inversify": "^6.0.1",
     "reflect-metadata": "^0.1.13",
-    "@saga-soa/core-api": "workspace:*"
+    "@saga-ed/core-api": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
@@ -2696,12 +2696,12 @@ Can we try and move the example_rest application to use commonjs in both package
 }
 ```
 
-The error is because the import path `@saga-soa/api-core/src/rest/rest-endpoint-group` is not valid for a published package or workspace dependency in CommonJS/Node.js runtime. Instead, you should import from the package root (e.g., `@saga-soa/api-core`) and use the exports field in `api-core`'s `package.json` to expose the relevant modules.
+The error is because the import path `@saga-ed/api-core/src/rest/rest-endpoint-group` is not valid for a published package or workspace dependency in CommonJS/Node.js runtime. Instead, you should import from the package root (e.g., `@saga-ed/api-core`) and use the exports field in `api-core`'s `package.json` to expose the relevant modules.
 
 **To fix this:**
 
 1. Update `packages/api-core/package.json` to add proper exports for the REST modules.
-2. Update imports in the example app to use `@saga-soa/api-core/rest/rest-endpoint-group` (or similar), not the internal `src` path.
+2. Update imports in the example app to use `@saga-ed/api-core/rest/rest-endpoint-group` (or similar), not the internal `src` path.
 
 Would you like me to update the exports in `core-api` and fix the imports in the example app accordingly?
 
@@ -2717,7 +2717,7 @@ yes
 
 ```json
 {
-  "name": "@saga-soa/core-api",
+  "name": "@saga-ed/core-api",
   "version": "1.0.0",
   "private": true,
   "main": "dist/index.js",
@@ -2743,8 +2743,8 @@ yes
   },
   "dependencies": {
     "zod": "^3.22.2",
-    "@saga-soa/config": "workspace:*",
-    "@saga-soa/logger": "workspace:*",
+    "@saga-ed/config": "workspace:*",
+    "@saga-ed/logger": "workspace:*",
     "express": "^4.18.2",
     "inversify": "^6.0.1",
     "reflect-metadata": "^0.1.13",
@@ -2764,7 +2764,7 @@ yes
 ```typescript
 import { Router, Request, Response } from 'express';
 import { injectable } from 'inversify';
-import { RestEndpointGroup } from '@saga-soa/core-api/rest/rest-endpoint-group';
+import { RestEndpointGroup } from '@saga-ed/core-api/rest/rest-endpoint-group';
 
 @injectable()
 export class HelloRest extends RestEndpointGroup {
@@ -2786,7 +2786,7 @@ export class HelloRest extends RestEndpointGroup {
 
 ```typescript
 import { Container, interfaces } from 'inversify';
-import { RestEndpointGroup } from '@saga-soa/core-api/rest/rest-endpoint-group';
+import { RestEndpointGroup } from '@saga-ed/core-api/rest/rest-endpoint-group';
 import { HelloRest } from './sectors/hello-rest';
 
 export const TYPES = {
@@ -2805,8 +2805,8 @@ export { container };
 import 'reflect-metadata';
 import express from 'express';
 import { container, TYPES } from './inversify.config';
-import { RestRouter } from '@saga-soa/core-api/rest/rest-router';
-import { RestEndpointGroup } from '@saga-soa/core-api/rest/rest-endpoint-group';
+import { RestRouter } from '@saga-ed/core-api/rest/rest-router';
+import { RestEndpointGroup } from '@saga-ed/core-api/rest/rest-endpoint-group';
 
 const app = express();
 
@@ -2874,7 +2874,7 @@ yes
 
 ```json
 {
-  "name": "@saga-soa/core-api",
+  "name": "@saga-ed/core-api",
   "version": "1.0.0",
   "private": true,
   "main": "dist/index.js",
@@ -2900,8 +2900,8 @@ yes
   },
   "dependencies": {
     "zod": "^3.22.2",
-    "@saga-soa/config": "workspace:*",
-    "@saga-soa/logger": "workspace:*",
+    "@saga-ed/config": "workspace:*",
+    "@saga-ed/logger": "workspace:*",
     "express": "^4.18.2",
     "inversify": "^6.0.1",
     "reflect-metadata": "^0.1.13",
@@ -2939,7 +2939,7 @@ please remove temp/saga_api entirely
 The build is now failing due to unrelated issues in other packages (such as missing JSX configuration in the `docs`, `web`, and `ui` apps, and missing test runner types in `config`, `db`, and `logger`). However, the only error relevant to your example app is:
 
 ```
-Cannot find module '@saga-soa/core-api/rest/rest-endpoint-group' or its corresponding type declarations.
+Cannot find module '@saga-ed/core-api/rest/rest-endpoint-group' or its corresponding type declarations.
 ```
 
 This means the `exports` field is now correct, but the TypeScript build is being blocked by errors in other packages.
@@ -2952,7 +2952,7 @@ This means the `exports` field is now correct, but the TypeScript build is being
 Would you like me to update the `core-api/tsconfig.json` to only include `src` and exclude all other directories? This will allow the build to succeed and the example app to run.
 
 ```plaintext
-Cannot find module '@saga-soa/core-api/rest/rest-endpoint-group' or its corresponding type declarations.
+Cannot find module '@saga-ed/core-api/rest/rest-endpoint-group' or its corresponding type declarations.
 ```
 
 ---
@@ -2979,20 +2979,20 @@ yes
 The only remaining build error is:
 
 ```
-Cannot find module '@saga-soa/logger' or its corresponding type declarations.
+Cannot find module '@saga-ed/logger' or its corresponding type declarations.
 ```
 
-This means the `@saga-soa/logger` package is either not built, not linked, or not properly referenced in the workspace.
+This means the `@saga-ed/logger` package is either not built, not linked, or not properly referenced in the workspace.
 
 **To fix:**
 
-- Ensure `@saga-soa/logger` is built and its types are available.
+- Ensure `@saga-ed/logger` is built and its types are available.
 - Run a full workspace build (`pnpm build -r`) to build all packages in the correct order.
 
 Would you like me to run a full recursive build for the workspace to resolve this?
 
 ```plaintext
-Cannot find module '@saga-soa/logger' or its corresponding type declarations.
+Cannot find module '@saga-ed/logger' or its corresponding type declarations.
 ```
 
 ---
@@ -3188,7 +3188,7 @@ yes
 
 **Cursor**
 
-The recursive build completed successfully for all packages, including `@saga-soa/logger`, `@saga-soa/core-api`, and your `example_rest` app.
+The recursive build completed successfully for all packages, including `@saga-ed/logger`, `@saga-ed/core-api`, and your `example_rest` app.
 
 You can now run the example REST app (`pnpm start` from `apps/example_rest`) to verify that the registry pattern and sector integration work as intended.
 
@@ -3237,7 +3237,7 @@ please use ESM everywhere
 
 ```json
 {
-  "name": "@saga-soa/example-rest",
+  "name": "@saga-ed/example-rest",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -3252,7 +3252,7 @@ please use ESM everywhere
     "express": "^4.18.2",
     "inversify": "^6.0.1",
     "reflect-metadata": "^0.1.13",
-    "@saga-soa/core-api": "workspace:*"
+    "@saga-ed/core-api": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
@@ -3276,7 +3276,7 @@ please use ESM everywhere
 
 ```typescript
 import { Container, interfaces } from 'inversify';
-import { RestEndpointGroup } from '@saga-soa/core-api/rest/rest-endpoint-group';
+import { RestEndpointGroup } from '@saga-ed/core-api/rest/rest-endpoint-group';
 import { HelloRest } from './sectors/hello-rest.js';
 
 export const TYPES = {
@@ -3295,8 +3295,8 @@ export { container };
 import 'reflect-metadata';
 import express from 'express';
 import { container, TYPES } from './inversify.config.js';
-import { RestRouter } from '@saga-soa/core-api/rest/rest-router';
-import { RestEndpointGroup } from '@saga-soa/core-api/rest/rest-endpoint-group';
+import { RestRouter } from '@saga-ed/core-api/rest/rest-router';
+import { RestEndpointGroup } from '@saga-ed/core-api/rest/rest-endpoint-group';
 
 const app = express();
 
@@ -3320,7 +3320,7 @@ app.listen(PORT, () => {
 ```typescript
 import { Router, Request, Response } from 'express';
 import { injectable } from 'inversify';
-import { RestEndpointGroup } from '@saga-soa/core-api/rest/rest-endpoint-group';
+import { RestEndpointGroup } from '@saga-ed/core-api/rest/rest-endpoint-group';
 
 @injectable()
 export class HelloRest extends RestEndpointGroup {
@@ -3374,7 +3374,7 @@ yes
 
 ```json
 {
-  "name": "@saga-soa/core-api",
+  "name": "@saga-ed/core-api",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -3401,8 +3401,8 @@ yes
   },
   "dependencies": {
     "zod": "^3.22.2",
-    "@saga-soa/config": "workspace:*",
-    "@saga-soa/logger": "workspace:*",
+    "@saga-ed/config": "workspace:*",
+    "@saga-ed/logger": "workspace:*",
     "express": "^4.18.2",
     "inversify": "^6.0.1",
     "reflect-metadata": "^0.1.13",

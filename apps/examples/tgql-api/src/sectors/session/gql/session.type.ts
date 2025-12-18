@@ -3,19 +3,19 @@ import { Field, ObjectType, ID, Int } from 'type-graphql';
 @ObjectType()
 export class Session {
   @Field(() => ID)
-  id: string;
+  id!: string;
 
   @Field()
-  tutor: string;
+  tutor!: string;
 
   @Field()
-  student: string;
+  student!: string;
 
   @Field()
-  date: Date;
+  date!: Date;
 
   @Field(() => Int)
-  duration: number; // in minutes
+  duration!: number; // in minutes
 
   @Field({ nullable: true })
   notes?: string;

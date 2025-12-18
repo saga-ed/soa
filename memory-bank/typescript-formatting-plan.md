@@ -8,8 +8,8 @@ Standardize TypeScript source file formatting across all example projects to ens
 
 ### 1. Import Formatting Inconsistencies
 
-- **trpc-api**: Uses aligned imports with spaces (e.g., `import { ExpressServer }            from '@saga-soa/api-core/express-server';`)
-- **rest-api**: Uses compact imports (e.g., `import { ExpressServer } from '@saga-soa/api-core/express-server';`)
+- **trpc-api**: Uses aligned imports with spaces (e.g., `import { ExpressServer }            from '@saga-ed/api-core/express-server';`)
+- **rest-api**: Uses compact imports (e.g., `import { ExpressServer } from '@saga-ed/api-core/express-server';`)
 - **graphql-api**: Uses compact imports but with inconsistent spacing
 - Mixed spacing patterns across all examples
 

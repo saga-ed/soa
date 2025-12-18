@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { SchemaGenerator } from '../generators/schema-generator.js';
 import { ConfigLoader } from '../utils/config-loader.js';
@@ -11,17 +12,40 @@ describe('SchemaGenerator', () => {
   let testConfig: any;
   let basePath: string;
   let sectors: any[];
+  let outputDir: string;
 
   beforeEach(async () => {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     basePath = path.resolve(__dirname, '..', '..'); // Go up to package root
+
+    // Create unique temporary directory for this test
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trpc-schema-test-'));
+
+    // Load base config and override output directory
     const configPath = path.resolve(basePath, 'src/__tests__/fixtures/test-config.js');
-    testConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    const baseConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    testConfig = {
+      ...baseConfig,
+      generation: {
+        ...baseConfig.generation,
+        outputDir: path.relative(basePath, outputDir)
+      }
+    };
+
     schemaGenerator = new SchemaGenerator(testConfig, basePath);
-    
-    // Get sectors for testing
-    const sectorParser = new SectorParser(testConfig, basePath);
+
+    // Get sectors for testing with base config (not modified)
+    const sectorParser = new SectorParser(baseConfig, basePath);
     sectors = await sectorParser.discoverSectors();
+  });
+
+  afterEach(async () => {
+    // Clean up generated files after each test
+    try {
+      await fs.rm(outputDir, { recursive: true, force: true });
+    } catch (error) {
+      // Ignore cleanup errors
+    }
   });
 
   describe('generateSchemas()', () => {
@@ -39,14 +63,14 @@ describe('SchemaGenerator', () => {
       expect(schemasDirExists).toBe(true);
       
       // Check that both schema files were copied
-      const userSchemaPath = path.join(schemasDir, 'user-schemas.ts');
-      const productSchemaPath = path.join(schemasDir, 'product-schemas.ts');
-      
-      const userSchemaExists = await fs.access(userSchemaPath).then(() => true).catch(() => false);
-      const productSchemaExists = await fs.access(productSchemaPath).then(() => true).catch(() => false);
-      
-      expect(userSchemaExists).toBe(true);
-      expect(productSchemaExists).toBe(true);
+      const example1SchemaPath = path.join(schemasDir, 'example_sector1-schemas.ts');
+      const example2SchemaPath = path.join(schemasDir, 'example_sector2-schemas.ts');
+
+      const example1SchemaExists = await fs.access(example1SchemaPath).then(() => true).catch(() => false);
+      const example2SchemaExists = await fs.access(example2SchemaPath).then(() => true).catch(() => false);
+
+      expect(example1SchemaExists).toBe(true);
+      expect(example2SchemaExists).toBe(true);
     });
 
     it('should generate schemas index file', async () => {
@@ -61,23 +85,23 @@ describe('SchemaGenerator', () => {
       
       // Check index file content
       const indexContent = await fs.readFile(schemasIndexPath, 'utf-8');
-      expect(indexContent).toContain("export * from './user-schemas.js';");
-      expect(indexContent).toContain("export * from './product-schemas.js';");
+      expect(indexContent).toContain("export * from './example_sector1-schemas.js';");
+      expect(indexContent).toContain("export * from './example_sector2-schemas.js';");
     });
 
     it('should preserve schema file content', async () => {
       await schemaGenerator.generateSchemas(sectors);
       
       const outputDir = path.resolve(basePath, testConfig.generation.outputDir);
-      const userSchemaPath = path.join(outputDir, 'schemas/user-schemas.ts');
-      
+      const example1SchemaPath = path.join(outputDir, 'schemas/example_sector1-schemas.ts');
+
       // Check that the copied schema file contains expected content
-      const userSchemaContent = await fs.readFile(userSchemaPath, 'utf-8');
-      expect(userSchemaContent).toContain('CreateUserSchema');
-      expect(userSchemaContent).toContain('UpdateUserSchema');
-      expect(userSchemaContent).toContain('GetUserSchema');
-      expect(userSchemaContent).toContain('DeleteUserSchema');
-      expect(userSchemaContent).toContain('ListUsersSchema');
+      const example1SchemaContent = await fs.readFile(example1SchemaPath, 'utf-8');
+      expect(example1SchemaContent).toContain('CreateItemSchema');
+      expect(example1SchemaContent).toContain('UpdateItemSchema');
+      expect(example1SchemaContent).toContain('GetItemSchema');
+      expect(example1SchemaContent).toContain('DeleteItemSchema');
+      expect(example1SchemaContent).toContain('ListItemsSchema');
     });
 
     it('should handle schema files with different patterns', async () => {
@@ -99,9 +123,9 @@ describe('SchemaGenerator', () => {
       const outputDir = path.resolve(basePath, testConfig.generation.outputDir);
       const schemasDir = path.join(outputDir, 'schemas');
       
-      const userSchemaPath = path.join(schemasDir, 'user-schemas.ts');
-      const userSchemaExists = await fs.access(userSchemaPath).then(() => true).catch(() => false);
-      expect(userSchemaExists).toBe(true);
+      const example1SchemaPath = path.join(schemasDir, 'example_sector1-schemas.ts');
+      const example1SchemaExists = await fs.access(example1SchemaPath).then(() => true).catch(() => false);
+      expect(example1SchemaExists).toBe(true);
     });
   });
 

@@ -7,6 +7,7 @@ export default defineConfig({
     'src/config-validation-error.ts',
     'src/dotenv-config-manager.ts',
     'src/i-config-manager.ts',
+    'src/mocks/mock-config-manager.ts',
   ],
   format: ['esm'],
   dts: true,

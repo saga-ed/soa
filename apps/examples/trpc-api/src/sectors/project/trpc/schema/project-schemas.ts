@@ -19,6 +19,6 @@ export const GetProjectSchema = z.object({
 });
 
 // TypeScript types derived from schemas
-export type CreateProjectInput = z.infer<typeof CreateProjectSchema>;
-export type UpdateProjectInput = z.infer<typeof UpdateProjectSchema>;
-export type GetProjectInput = z.infer<typeof GetProjectSchema>;
+export type CreateProjectZ = z.infer<typeof CreateProjectSchema>;
+export type UpdateProjectZ = z.infer<typeof UpdateProjectSchema>;
+export type GetProjectZ = z.infer<typeof GetProjectSchema>;

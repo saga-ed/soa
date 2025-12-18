@@ -31,7 +31,7 @@ module.exports = {
   },
   generation: {
     outputDir: './generated',
-    packageName: '@saga-soa/tgql-types',
+    packageName: '@saga-ed/tgql-types',
     schemaName: 'AppSchema'
   }
 };
@@ -46,8 +46,8 @@ module.exports = {
 ## Usage
 
 ```typescript
-import { buildAppSchema, getSchemaSDL } from '@saga-soa/tgql-types';
-import type { User, UserInput } from '@saga-soa/tgql-types';
+import { buildAppSchema, getSchemaSDL } from '@saga-ed/tgql-types';
+import type { User, UserInput } from '@saga-ed/tgql-types';
 
 // Build the GraphQL schema
 const schema = await buildAppSchema();

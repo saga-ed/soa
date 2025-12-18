@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import styles from './page.module.css';
 
 interface PingEvent {
@@ -13,19 +14,6 @@ interface PingEvent {
   };
   timestamp: string;
 }
-
-interface PongResponse {
-  id: string;
-  name: string;
-  channel: string;
-  payload: {
-    reply: string;
-    originalMessage: string;
-    timestamp: string;
-  };
-  timestamp: string;
-}
-
 
 interface EventHistory {
   id: string;
@@ -81,7 +69,7 @@ function RealPingPongSection() {
 
     try {
       // Call the real tRPC ping endpoint
-      const response = await fetch('http://localhost:5000/saga-soa/v1/trpc/pubsub.ping', {
+      const response = await fetch('http://localhost:4003/saga-soa/v1/trpc/pubsub.ping', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -260,7 +248,7 @@ export default function TRPCAPIPage() {
 
   // Enhanced pubsub testing state
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
-  const [serverUrl, setServerUrl] = useState('http://localhost:5000');
+  const [serverUrl, setServerUrl] = useState('http://localhost:4003');
   const [eventHistory, setEventHistory] = useState<EventHistory[]>([]);
   const [performanceStats, setPerformanceStats] = useState<PerformanceStats>({
     totalEvents: 0,
@@ -472,6 +460,19 @@ export default function TRPCAPIPage() {
               </div>
               <div className={`${styles.statLabel} ${styles.statLabelGray}`}>Last Activity</div>
             </div>
+          </div>
+        </div>
+
+        {/* Back to Home */}
+        <div className={styles.section}>
+          <h2 className={styles.sectionTitle}>🔗 Navigation</h2>
+          <div className={styles.buttonGroup}>
+            <Link
+              href="/"
+              className={`${styles.button} ${styles.buttonSecondary}`}
+            >
+              ← Back to Home
+            </Link>
           </div>
         </div>
 

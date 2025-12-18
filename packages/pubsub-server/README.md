@@ -1,4 +1,4 @@
-# @saga-soa/pubsub-server
+# @saga-ed/pubsub-server
 
 Server implementation for the saga-soa pub/sub infrastructure, providing tRPC procedures, SSE handlers, and core services.
 
@@ -27,7 +27,7 @@ This package is part of the saga-soa workspace and should be used as a workspace
 ```json
 {
   "dependencies": {
-    "@saga-soa/pubsub-server": "workspace:*"
+    "@saga-ed/pubsub-server": "workspace:*"
   }
 }
 ```
@@ -37,8 +37,8 @@ This package is part of the saga-soa workspace and should be used as a workspace
 ### Basic Setup
 
 ```typescript
-import { createPubSubServer } from '@saga-soa/pubsub-server';
-import { MockAdapter } from '@saga-soa/pubsub-core';
+import { createPubSubServer } from '@saga-ed/pubsub-server';
+import { MockAdapter } from '@saga-ed/pubsub-core';
 import { initTRPC } from '@trpc/server';
 
 // Define your events
@@ -150,7 +150,7 @@ app.get('/events', async (req, res) => {
 The package uses Inversify for dependency injection:
 
 ```typescript
-import { container } from '@saga-soa/pubsub-server';
+import { container } from '@saga-ed/pubsub-server';
 
 // Bind external dependencies
 container.bind<PubSubAdapter>(TYPES.PubSubAdapter).toConstantValue(adapter);
@@ -228,9 +228,9 @@ pnpm test --coverage
 
 ## Dependencies
 
-- **@saga-soa/pubsub-core**: Core types and interfaces
-- **@saga-soa/api-core**: Base API functionality
-- **@saga-soa/logger**: Logging service
+- **@saga-ed/pubsub-core**: Core types and interfaces
+- **@saga-ed/api-core**: Base API functionality
+- **@saga-ed/logger**: Logging service
 - **@trpc/server**: tRPC server implementation
 - **inversify**: Dependency injection
 - **zod**: Schema validation

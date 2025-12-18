@@ -97,12 +97,12 @@ The pubsub system is now **structurally complete** with:
 ### 2.1 Create Ping-Pong Event Definitions (`apps/examples/trpc-api`)
 - [x] Create `apps/examples/trpc-api/src/sectors/pubsub/` directory
 - [x] Create `apps/examples/trpc-api/src/sectors/pubsub/events.ts`
-- [x] Reference test event fixtures from `@saga-soa/pubsub-core` for consistent structure
+- [x] Reference test event fixtures from `@saga-ed/pubsub-core` for consistent structure
 - [x] Define `ping` event with payload schema (e.g., `{ message: string, timestamp: string }`)
 - [x] Define `pong` event with payload schema (e.g., `{ reply: string, originalMessage: string, timestamp: string }`)
 - [x] Implement ping event action that automatically emits pong response
 - [x] Set up proper channel configuration for "pingpong" channel
-- [x] Ensure events import types from `@saga-soa/pubsub-core` (not adapter interfaces)
+- [x] Ensure events import types from `@saga-ed/pubsub-core` (not adapter interfaces)
 
 **Implementation Notes:**
 - **Simplified Schema Pattern**: Consolidated all schemas in `events.ts` as single source of truth
@@ -112,7 +112,7 @@ The pubsub system is now **structurally complete** with:
 
 ### 2.2 Create PubSub Sector (`apps/examples/trpc-api`)
 - [x] Create `apps/examples/trpc-api/src/sectors/pubsub/trpc/pubsub-router.ts`
-- [x] Extend `AbstractTRPCController` from `@saga-soa/api-core`
+- [x] Extend `AbstractTRPCController` from `@saga-ed/api-core`
 - [x] Implement ping-pong tRPC procedures
 - [x] Add proper error handling and validation
 - [x] Integrate with existing inversify container
@@ -125,7 +125,7 @@ The pubsub system is now **structurally complete** with:
 ### 2.3 Update Main API Integration
 - [x] Add pubsub sector to `apps/examples/trpc-api/src/sectors/index.ts`
 - [x] Ensure pubsub sector is loaded in main API
-- [x] ~~Configure in-memory adapter from `@saga-soa/pubsub-server` for development~~ (TODO: Next phase)
+- [x] ~~Configure in-memory adapter from `@saga-ed/pubsub-server` for development~~ (TODO: Next phase)
 - [x] Test ping-pong functionality via tRPC
 
 **Implementation Notes:**
@@ -328,7 +328,7 @@ export class InMemoryAdapter implements PubSubAdapter {
 ### Ping-Pong Event Definitions
 ```typescript
 import { z } from 'zod';
-import type { EventDefinition } from '@saga-soa/pubsub-core';
+import type { EventDefinition } from '@saga-ed/pubsub-core';
 
 export const pingEvent: EventDefinition<
   { message: string; timestamp: string },
@@ -423,10 +423,10 @@ export const usePingPong = () => {
 ## Dependencies and Prerequisites
 
 ### Required Packages
-- `@saga-soa/pubsub-core` (existing) - provides event types and definitions
-- `@saga-soa/pubsub-server` (existing) - provides server runtime and adapter implementations
-- `@saga-soa/api-core` (existing) - provides base controller classes
-- `@saga-soa/logger` (existing) - provides logging functionality
+- `@saga-ed/pubsub-core` (existing) - provides event types and definitions
+- `@saga-ed/pubsub-server` (existing) - provides server runtime and adapter implementations
+- `@saga-ed/api-core` (existing) - provides base controller classes
+- `@saga-ed/logger` (existing) - provides logging functionality
 
 ### Development Tools
 - TypeScript 5.8+

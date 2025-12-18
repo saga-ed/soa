@@ -1,6 +1,6 @@
-# @saga-soa/trpc-types
+# @saga-ed/trpc-types
 
-Auto-generated TypeScript types for the tRPC API using `@saga-soa/trpc-codegen`.
+Auto-generated TypeScript types for the tRPC API using `@saga-ed/trpc-codegen`.
 
 ## Usage
 
@@ -18,4 +18,4 @@ This package is automatically generated from the sector-based tRPC API structure
 - `generated/schemas/` - Copied Zod schemas from sectors
 - `generated/index.ts` - Main exports
 
-All generated files are automatically created by `@saga-soa/trpc-codegen` and should not be edited manually.
+All generated files are automatically created by `@saga-ed/trpc-codegen` and should not be edited manually.

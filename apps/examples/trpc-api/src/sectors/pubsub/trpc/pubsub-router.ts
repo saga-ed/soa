@@ -2,7 +2,7 @@ import { injectable, inject } from 'inversify';
 import { AbstractTRPCController, router } from '@saga-ed/soa-api-core/abstract-trpc-controller';
 import type { ILogger } from '@saga-ed/soa-logger';
 import { events, createPingEnvelope } from './events.js';
-import { PingMessageSchema, type PingMessageInput } from './schema/pubsub-schemas.js';
+import { PingMessageSchema, type PingMessageZ } from './schema/pubsub-schemas.js';
 
 // Import pubsub server functionality
 import { PubSubService, TYPES, ChannelService } from '@saga-ed/soa-pubsub-server';
@@ -72,7 +72,7 @@ export class PubSubController extends AbstractTRPCController {
       // Send a ping message and get automatic pong response via pubsub
       ping: t
         .input(PingMessageSchema)
-        .mutation(async ({ input }: { input: PingMessageInput }) => {
+        .mutation(async ({ input }: { input: PingMessageZ }) => {
           try {
             // Create ping event envelope
             const pingEnvelope = createPingEnvelope(input.message);

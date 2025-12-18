@@ -1,5 +1,7 @@
 import 'reflect-metadata';
-import { ExpressServer, GQLServer, AbstractRestController, AbstractGQLController } from '@saga-ed/soa-api-core';
+import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
+import { TGQLServer } from '@saga-ed/soa-api-core/tgql-server';
+import { AbstractRestController, AbstractTGQLController } from '@saga-ed/soa-api-core';
 import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
 import { container } from './inversify.config.js';
 import type { ILogger } from '@saga-ed/soa-logger';
@@ -22,15 +24,21 @@ async function start() {
   // Get the ControllerLoader from DI
   const controllerLoader = container.get(ControllerLoader);
 
-  // Dynamically load all REST controllers
-  const restControllers = await controllerLoader.loadControllers(
-    path.resolve(__dirname, GLOB_PATTERNS.REST),
-    AbstractRestController
-  );
+  // Try to load REST controllers, but don't fail if there are none
+  let restControllers: any[] = [];
+  try {
+    restControllers = await controllerLoader.loadControllers(
+      path.resolve(__dirname, GLOB_PATTERNS.REST),
+      AbstractRestController
+    );
+  } catch (error: any) {
+    // It's okay if there are no REST controllers for a GraphQL-only API
+    logger.info('No REST controllers found - running as GraphQL-only API');
+  }
 
   // Get the ExpressServer instance from DI
-  const expressServer = container.get(ExpressServer);
-  // Initialize and register REST controllers
+  const expressServer = container.get<ExpressServer>(ExpressServer);
+  // Initialize and register REST controllers (with or without REST controllers)
   await expressServer.init(container, restControllers);
   const app = expressServer.getApp();
 
@@ -40,23 +48,32 @@ async function start() {
   // Dynamically load all GQL resolvers
   const gqlResolvers = await controllerLoader.loadControllers(
     path.resolve(__dirname, GLOB_PATTERNS.GRAPHQL),
-    AbstractGQLController
+    AbstractTGQLController
   );
 
-  // Get the GQLServer instance from DI and initialize it
-  const gqlServer = container.get(GQLServer);
+  // Get the TGQLServer instance from DI and initialize it
+  const gqlServer = container.get<TGQLServer>(TGQLServer);
   await gqlServer.init(container, gqlResolvers);
 
   // Mount the GraphQL server to the Express app with basePath
   gqlServer.mountToApp(app, '/saga-soa/v1');
 
+  // Get server config for port info
+  const serverConfig = container.get('ExpressServerConfig');
+
   // Add a simple health check (at root level for easy access)
-  app.get('/health', (req, res) => {
-    res.json({ status: 'ok', service: 'GraphQL API' });
+  app.get('/health', (req: any, res: any) => {
+    res.json({ status: 'ok', service: 'GraphQL API', port: serverConfig.port });
   });
 
   // Start the server
   expressServer.start();
+
+  // Print useful URLs
+  const baseUrl = `http://localhost:${serverConfig.port}`;
+  const basePath = serverConfig.basePath ? `/${serverConfig.basePath}` : '';
+  logger.info(`Health check: ${baseUrl}/health`);
+  logger.info(`Sectors list: ${baseUrl}${basePath}/sectors/list`);
 }
 
 start().catch(error => {

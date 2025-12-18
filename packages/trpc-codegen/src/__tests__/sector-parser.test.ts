@@ -20,75 +20,80 @@ describe('SectorParser', () => {
   describe('discoverSectors()', () => {
     it('should discover test sectors correctly', async () => {
       const sectors = await sectorParser.discoverSectors();
-      
+
       expect(sectors).toHaveLength(2);
-      
+
       // Check sector names
       const sectorNames = sectors.map(s => s.name).sort();
-      expect(sectorNames).toEqual(['product', 'user']);
+      expect(sectorNames).toEqual(['example_sector1', 'example_sector2']);
     });
 
-    it('should parse user sector endpoints correctly', async () => {
+    it('should parse example_sector1 endpoints correctly', async () => {
       const sectors = await sectorParser.discoverSectors();
-      const userSector = sectors.find(s => s.name === 'user');
-      
-      expect(userSector).toBeDefined();
-      expect(userSector!.endpoints).toHaveLength(5);
-      
+      const sector1 = sectors.find(s => s.name === 'example_sector1');
+
+      expect(sector1).toBeDefined();
+      expect(sector1!.endpoints).toHaveLength(6); // Including healthCheck
+
       // Check endpoint names
-      const endpointNames = userSector!.endpoints.map(e => e.name).sort();
+      const endpointNames = sector1!.endpoints.map(e => e.name).sort();
       expect(endpointNames).toEqual([
-        'createUser',
-        'deleteUser',
-        'getUser',
-        'listUsers',
-        'updateUser'
+        'createItem',
+        'deleteItem',
+        'getItem',
+        'healthCheck',
+        'listItems',
+        'updateItem'
       ]);
-      
+
       // Check that endpoints have correct types
-      const getUserEndpoint = userSector!.endpoints.find(e => e.name === 'getUser');
-      expect(getUserEndpoint?.type).toBe('query');
-      expect(getUserEndpoint?.inputSchema).toBe('GetUserSchema');
-      
-      const createUserEndpoint = userSector!.endpoints.find(e => e.name === 'createUser');
-      expect(createUserEndpoint?.type).toBe('mutation');
-      expect(createUserEndpoint?.inputSchema).toBe('CreateUserSchema');
+      const getItemEndpoint = sector1!.endpoints.find(e => e.name === 'getItem');
+      expect(getItemEndpoint?.type).toBe('query');
+      expect(getItemEndpoint?.inputSchema).toBe('GetItemSchema');
+
+      const createItemEndpoint = sector1!.endpoints.find(e => e.name === 'createItem');
+      expect(createItemEndpoint?.type).toBe('mutation');
+      expect(createItemEndpoint?.inputSchema).toBe('CreateItemSchema');
     });
 
-    it('should parse product sector endpoints correctly', async () => {
+    it('should parse example_sector2 endpoints correctly', async () => {
       const sectors = await sectorParser.discoverSectors();
-      const productSector = sectors.find(s => s.name === 'product');
-      
-      expect(productSector).toBeDefined();
-      expect(productSector!.endpoints).toHaveLength(5);
-      
+      const sector2 = sectors.find(s => s.name === 'example_sector2');
+
+      expect(sector2).toBeDefined();
+      expect(sector2!.endpoints).toHaveLength(5);
+
       // Check endpoint names
-      const endpointNames = productSector!.endpoints.map(e => e.name).sort();
+      const endpointNames = sector2!.endpoints.map(e => e.name).sort();
       expect(endpointNames).toEqual([
-        'createProduct',
-        'deleteProduct',
-        'getProduct',
-        'searchProducts',
-        'updateProduct'
+        'createResource',
+        'deleteResource',
+        'getResource',
+        'searchResources',
+        'updateResource'
       ]);
-      
+
       // Check that endpoints have correct types
-      const searchProductsEndpoint = productSector!.endpoints.find(e => e.name === 'searchProducts');
-      expect(searchProductsEndpoint?.type).toBe('query');
-      expect(searchProductsEndpoint?.inputSchema).toBe('SearchProductsSchema');
+      const searchResourcesEndpoint = sector2!.endpoints.find(e => e.name === 'searchResources');
+      expect(searchResourcesEndpoint?.type).toBe('query');
+      expect(searchResourcesEndpoint?.inputSchema).toBe('SearchResourcesSchema');
     });
 
     it('should handle sectors without input schemas', async () => {
       // This test verifies that endpoints without input schemas are handled correctly
       const sectors = await sectorParser.discoverSectors();
-      
-      // All our test endpoints have input schemas, but we can verify the parsing works
-      for (const sector of sectors) {
-        for (const endpoint of sector.endpoints) {
-          expect(endpoint.name).toBeDefined();
-          expect(endpoint.type).toMatch(/^(query|mutation)$/);
-          expect(endpoint.inputSchema).toBeDefined();
-        }
+      const sector1 = sectors.find(s => s.name === 'example_sector1');
+
+      // Find the healthCheck endpoint which has no input schema
+      const healthCheckEndpoint = sector1!.endpoints.find(e => e.name === 'healthCheck');
+      expect(healthCheckEndpoint).toBeDefined();
+      expect(healthCheckEndpoint!.inputSchema).toBeUndefined();
+      expect(healthCheckEndpoint!.type).toBe('query');
+
+      // Verify other endpoints have input schemas
+      const otherEndpoints = sector1!.endpoints.filter(e => e.name !== 'healthCheck');
+      for (const endpoint of otherEndpoints) {
+        expect(endpoint.inputSchema).toBeDefined();
       }
     });
   });

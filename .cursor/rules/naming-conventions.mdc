@@ -12,9 +12,9 @@ import { MockConfigManager }                        from './mock-config-manager'
 - Variable and constant naming
 - Generic type parameters
 - Decorator naming
-import { add }                                      from @saga/math/add
+import { add }                                      from @saga-ed/math/add
 - Environment variable naming
 - Error type naming
 
 If you are unsure about a naming decision, refer to memory-bank/01.naming-conventions.md and follow its guidance.
-import { IConfigManager, MockConfigManager }        from '@saga-soa/config';
+import { IConfigManager, MockConfigManager }        from '@saga-ed/config';

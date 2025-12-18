@@ -18,5 +18,5 @@ export const PongResponseSchema = z.object({
 });
 
 // TypeScript types derived from schemas - these will be available to typegen
-export type PingMessageInput = z.infer<typeof PingMessageSchema>;
-export type PongResponseOutput = z.infer<typeof PongResponseSchema>;
+export type PingMessageZ = z.infer<typeof PingMessageSchema>;
+export type PongResponseZ = z.infer<typeof PongResponseSchema>;

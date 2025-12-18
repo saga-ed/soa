@@ -12,20 +12,21 @@
     "clean": "rm -rf .next"
   },
   "dependencies": {
-    "@saga-ed/soa-trpc-types": "workspace:*",
     "@saga-ed/soa-ui": "workspace:*",
     "@trpc/client": "^11.0.0",
     "next": "^15.3.0",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "@saga-ed/soa-trpc-types": "workspace:*"
   },
   "devDependencies": {
-    "@saga-ed/soa-eslint-config": "workspace:*",
+    "@eslint/eslintrc": "^3.3.1",
     "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "^22.15.3",
     "@types/react": "19.1.0",
     "@types/react-dom": "19.1.1",
-    "eslint": "^9.28.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^15.4.0",
     "typescript": "5.8.2"
   }
 }

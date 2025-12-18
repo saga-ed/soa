@@ -673,6 +673,37 @@
     font-weight: 600;
 }
 
+.featureTitle {
+    margin-bottom: 8px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.featureList {
+    font-size: 14px;
+    line-height: 1.8;
+}
+
+.codeList {
+    font-family: var(--font-geist-mono);
+}
+
+.conceptList {
+    font-size: 14px;
+    line-height: 1.8;
+    margin-bottom: 0;
+}
+
+.codeExample {
+    background: #1e1e1e;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow: auto;
+    font-size: 0.875rem;
+    color: #d4d4d4;
+    margin: 0;
+}
+
 @keyframes pulse {
     0%, 100% {
         opacity: 1;

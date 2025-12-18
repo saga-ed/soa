@@ -20,8 +20,10 @@ export default {
   
   // Parsing configuration
   parsing: {
-    endpointPattern: /(\w+):\s*t\.procedure\s*(?:\n\s*\.input\((\w+Schema)\))?\s*\n\s*\.(query|mutation)\(/g,
-    routerMethodPattern: /(?:createRouter\(\s*\)\s*\{[\s\S]*?)?return\s+router\(\s*\{([\s\S]*)\}\s*\)\s*;?\s*\}?/
+    // Match the pattern: endpointName: t.procedure with optional .input(Schema) on next line, then .query/mutation
+    endpointPattern: /(\w+):\s*t\.procedure\s*(?:\n\s*\.input\((\w+Schema)\))?\s*\n?\s*\.(query|mutation)\(/g,
+    // Match the t.router({ ... }) pattern in test fixtures - match until });
+    routerMethodPattern: /t\.router\(\s*\{([\s\S]*?)\}\s*\);/
   },
 
   // Zod2ts configuration

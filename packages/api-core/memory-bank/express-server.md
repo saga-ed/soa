@@ -1,6 +1,6 @@
 # Plan: `express-server.ts` Implementation and Testing
 
-This document outlines the plan for implementing and testing the `express-server.ts` component within the `@saga-soa/api-core` package.
+This document outlines the plan for implementing and testing the `express-server.ts` component within the `@saga-ed/api-core` package.
 
 ## 1. Define Interfaces (`api-core/src/i-logger.ts`)
 
@@ -37,7 +37,7 @@ This document outlines the plan for implementing and testing the `express-server
 
 - **Mock Dependencies**:
   - **`MockLogger`**: A mock `ILogger` that stores log messages in an array for assertions.
-  - **`MockConfigManager`**: Use `@saga-soa/config` to provide a mock `ExpressServerConfig`.
+  - **`MockConfigManager`**: Use `@saga-ed/config` to provide a mock `ExpressServerConfig`.
 - **Use `supertest`**: To make HTTP requests to the Express app without binding to a real network port.
 - **Test Scenarios (`express-server.test.ts`)**:
   - Test server start/stop.

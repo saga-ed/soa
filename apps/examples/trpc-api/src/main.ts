@@ -76,13 +76,22 @@ async function start() {
     }
   });
 
+  // Get server config for port info
+  const serverConfig = container.get('ExpressServerConfig');
+
   // Add a simple health check (at root level for easy access)
   app.get('/health', (req: Request, res: Response) => {
-    res.json({ status: 'ok', service: 'tRPC API' });
+    res.json({ status: 'ok', service: 'tRPC API', port: serverConfig.port });
   });
 
   // Start the server
   expressServer.start();
+
+  // Print useful URLs
+  const baseUrl = `http://localhost:${serverConfig.port}`;
+  const basePath = serverConfig.basePath ? `/${serverConfig.basePath}` : '';
+  logger.info(`Health check: ${baseUrl}/health`);
+  logger.info(`Sectors list: ${baseUrl}${basePath}/sectors/list`);
 }
 
 // Add global error handlers

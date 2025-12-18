@@ -24,13 +24,24 @@ export class Zod2tsGenerator {
     try {
       // Process each sector's schema file
       for (const sector of sectorInfos) {
-        const schemaFilePath = path.join(outputPath, 'schemas', `${sector.name}-schemas.ts`);
-        
-        // Check if schema file exists
+        // Try JavaScript file first, then TypeScript as fallback
+        const jsSchemaPath = path.join(outputPath, 'schemas', `${sector.name}-schemas.js`);
+        const tsSchemaPath = path.join(outputPath, 'schemas', `${sector.name}-schemas.ts`);
+
+        let schemaFilePath: string;
+
+        // Check if JavaScript schema file exists
         try {
-          await fs.access(schemaFilePath);
-        } catch (error) {
-          continue;
+          await fs.access(jsSchemaPath);
+          schemaFilePath = jsSchemaPath;
+        } catch {
+          // Try TypeScript file as fallback
+          try {
+            await fs.access(tsSchemaPath);
+            schemaFilePath = tsSchemaPath;
+          } catch {
+            continue;
+          }
         }
         
         const sectorTypesDir = path.join(typesOutputDir, sector.name);
@@ -47,8 +58,16 @@ export class Zod2tsGenerator {
             generatedFiles.push(sectorIndexPath);
             
           } else {
+            console.error(`❌ Failed to generate types for sector ${sector.name}:`, result.error);
+            // Still create an empty index file for consistency
+            const sectorIndexPath = await this.generateSectorIndex(sector.name, sectorTypesDir, []);
+            generatedFiles.push(sectorIndexPath);
           }
         } catch (error) {
+          console.error(`❌ Error generating types for sector ${sector.name}:`, error);
+          // Still create an empty index file for consistency
+          const sectorIndexPath = await this.generateSectorIndex(sector.name, sectorTypesDir, []);
+          generatedFiles.push(sectorIndexPath);
         }
       }
       
@@ -67,29 +86,33 @@ export class Zod2tsGenerator {
 
   private async runZod2ts(zodPath: string, outputDir: string): Promise<{ success: boolean; files?: string[]; error?: string }> {
     return new Promise(async (resolve) => {
-      // Try to find zod2ts in the project - look for it relative to the project root
-      // The basePath might be apps/examples/trpc-api, so we need to go up to the project root
-      let zod2tsPath = path.resolve(this.basePath, '../../build-tools/zod2ts/src/index.ts');
+      // Try to find zod2ts source in multiple possible locations
+      const possibleSourcePaths = [
+        path.resolve(this.basePath, '../../build-tools/zod2ts/src/index.ts'),  // For apps/api/types in saga-soa
+        path.resolve(this.basePath, '../../../build-tools/zod2ts/src/index.ts'),  // For deeper nesting
+        path.resolve(this.basePath, '../../../../build-tools/zod2ts/src/index.ts'),  // Alternative
+        path.resolve(this.basePath, 'node_modules/@saga-ed/soa-zod2ts/src/index.ts'),  // Via node_modules link (saga-sm)
+        path.resolve(this.basePath, '../node_modules/@saga-ed/soa-zod2ts/src/index.ts'),  // Via parent node_modules link
+        '/home/skelly/dev/saga-soa/build-tools/zod2ts/src/index.ts',  // Absolute fallback
+      ];
       
-      // If that doesn't exist, try alternative paths
-      try {
-        await fs.access(zod2tsPath);
-      } catch {
+      let zod2tsPath: string | null = null;
+      for (const testPath of possibleSourcePaths) {
         try {
-          zod2tsPath = path.resolve(this.basePath, '../../../build-tools/zod2ts/src/index.ts');
-          await fs.access(zod2tsPath);
+          await fs.access(testPath);
+          zod2tsPath = testPath;
+          break;
         } catch {
-          try {
-            zod2tsPath = path.resolve(this.basePath, '../../../../build-tools/zod2ts/src/index.ts');
-            await fs.access(zod2tsPath);
-          } catch {
-            resolve({ 
-              success: false, 
-              error: `Could not find zod2ts source. Tried paths: ${path.resolve(this.basePath, '../../build-tools/zod2ts/src/index.ts')}, ${path.resolve(this.basePath, '../../../build-tools/zod2ts/src/index.ts')}, ${path.resolve(this.basePath, '../../../../build-tools/zod2ts/src/index.ts')}` 
-            });
-            return;
-          }
+          // Continue to next path
         }
+      }
+      
+      if (!zod2tsPath) {
+        resolve({ 
+          success: false, 
+          error: `Could not find zod2ts source. Tried paths: ${possibleSourcePaths.join(', ')}` 
+        });
+        return;
       }
       
       const args = [
@@ -97,10 +120,38 @@ export class Zod2tsGenerator {
         '--output-dir', outputDir
       ];
       
-      // Use tsx to run the TypeScript source directly
-      const child = spawn('npx', ['tsx', zod2tsPath, ...args], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: this.basePath
+      // Use the zod2ts binary directly instead of tsx
+      // Try multiple possible paths to find the zod2ts binary
+      const possiblePaths = [
+        path.resolve(this.basePath, '../../../build-tools/zod2ts/bin/zod2ts'),  // For apps/examples/trpc-api/trpc-types
+        path.resolve(this.basePath, '../../../../build-tools/zod2ts/bin/zod2ts'),  // For deeper nesting
+        path.resolve(this.basePath, '../../build-tools/zod2ts/bin/zod2ts'),  // Alternative
+        path.resolve(this.basePath, 'node_modules/@saga-ed/soa-zod2ts/bin/zod2ts'),  // Via node_modules link (saga-sm)
+        path.resolve(this.basePath, '../node_modules/@saga-ed/soa-zod2ts/bin/zod2ts'),  // Via parent node_modules link
+        '/home/skelly/dev/saga-soa/build-tools/zod2ts/bin/zod2ts',  // Absolute fallback
+      ];
+      
+      let zod2tsBinary: string | null = null;
+      for (const testPath of possiblePaths) {
+        try {
+          await fs.access(testPath);
+          zod2tsBinary = testPath;
+          break;
+        } catch {
+          // Continue to next path
+        }
+      }
+      
+      if (!zod2tsBinary) {
+        resolve({ 
+          success: false, 
+          error: `Could not find zod2ts binary. Tried paths: ${possiblePaths.join(', ')}` 
+        });
+        return;
+      }
+      
+      const child = spawn('node', [zod2tsBinary, ...args], {
+        stdio: ['pipe', 'pipe', 'pipe']
       });
       
       let stdout = '';
@@ -126,7 +177,7 @@ export class Zod2tsGenerator {
         } else {
           resolve({ 
             success: false, 
-            error: stderr || `Process exited with code ${code}` 
+            error: stderr || stdout || `Process exited with code ${code}` 
           });
         }
       });
@@ -155,8 +206,9 @@ export class Zod2tsGenerator {
     const indexPath = path.join(sectorTypesDir, 'index.ts');
     
     // Get the relative paths of all generated TypeScript files in this directory
+    const normalizedSectorDir = path.resolve(sectorTypesDir);
     const typeFiles = generatedFiles
-      .filter(file => file.endsWith('.ts') && path.dirname(file) === sectorTypesDir)
+      .filter(file => file.endsWith('.ts') && path.resolve(path.dirname(file)) === normalizedSectorDir)
       .map(file => path.basename(file, '.ts'))
       .filter(name => name !== 'index'); // Don't export the index file itself
     

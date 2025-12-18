@@ -27,7 +27,7 @@ const loggerConfig: PinoLoggerConfig = {
 // Express Server configuration
 const expressConfig: ExpressServerConfig = {
   configType: 'EXPRESS_SERVER',
-  port: Number(process.env.PORT) || 5000,
+  port: Number(process.env.PORT) || 4003,
   logLevel: 'info',
   name: 'Example tRPC API',
   basePath: '/saga-soa/v1', // Add basePath like other examples

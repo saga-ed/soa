@@ -1,4 +1,4 @@
-import { beforeAll, afterAll } from 'vitest';
+import { afterAll } from 'vitest';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';

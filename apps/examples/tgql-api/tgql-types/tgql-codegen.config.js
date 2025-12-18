@@ -7,7 +7,7 @@ export default {
   },
   generation: {
     outputDir: './generated',
-    packageName: '@saga-soa/tgql-types',
+    packageName: '@saga-ed/soa-tgql-types',
     schemaName: 'AppSchema'
   },
   sdl: {

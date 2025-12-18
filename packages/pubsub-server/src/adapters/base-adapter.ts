@@ -1,4 +1,4 @@
-import type { EventEnvelope } from '@saga-soa/pubsub-core';
+import type { EventEnvelope } from '@saga-ed/soa-pubsub-core';
 
 export interface PubSubAdapter {
   publish(event: EventEnvelope): Promise<void>;

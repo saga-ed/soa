@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/pubsub-core",
+  "name": "@saga-ed/soa-pubsub-core",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -30,7 +30,7 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@saga/typescript-config": "workspace:*",
+    "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/uuid": "^10.0.0",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",

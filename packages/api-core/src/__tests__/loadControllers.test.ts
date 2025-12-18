@@ -3,8 +3,8 @@ import { ControllerLoader } from '../utils/loadControllers.js';
 import { AbstractRestController } from '../abstract-rest-controller.js';
 import { AbstractGQLController } from '../abstract-gql-controller.js';
 import { Container } from 'inversify';
-import { PinoLogger } from '@saga-soa/logger';
-import type { ILogger, PinoLoggerConfig } from '@saga-soa/logger';
+import { PinoLogger } from '@saga-ed/soa-logger';
+import type { ILogger, PinoLoggerConfig } from '@saga-ed/soa-logger';
 import path from 'node:path';
 
 const fixturesDir = path.join(__dirname, 'fixtures');

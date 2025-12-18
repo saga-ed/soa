@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/api-core",
+  "name": "@saga-ed/soa-api-core",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -81,7 +81,7 @@
     "zod": "3.25.67"
   },
   "devDependencies": {
-    "@saga-soa/logger": "workspace:*",
+    "@saga-ed/soa-logger": "workspace:*",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/figlet": "^1.7.0",

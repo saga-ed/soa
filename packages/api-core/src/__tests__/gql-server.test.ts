@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import 'reflect-metadata';
 import { injectable, Container } from 'inversify';
-import type { ILogger } from '@saga-soa/logger';
+import type { ILogger } from '@saga-ed/soa-logger';
 import { fetch } from 'undici';
 import express from 'express';
 import { Query, Resolver } from 'type-graphql';

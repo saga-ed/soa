@@ -3,10 +3,10 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@saga-soa/config": ["packages/config/src"],
-      "@saga-soa/config/*": ["packages/config/src/*"],
-      "@saga-soa/logger": ["packages/logger/src"],
-      "@saga-soa/logger/*": ["packages/logger/src/*"]
+      "@saga-ed/soa-config": ["packages/config/src"],
+      "@saga-ed/soa-config/*": ["packages/config/src/*"],
+      "@saga-ed/soa-logger": ["packages/logger/src"],
+      "@saga-ed/soa-logger/*": ["packages/logger/src/*"]
     }
   },
   "exclude": ["node_modules", "dist"]

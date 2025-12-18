@@ -1,5 +1,5 @@
 {
-  "extends": "@saga/typescript-config/nextjs.json",
+  "extends": "@saga-ed/soa-typescript-config/nextjs.json",
   "compilerOptions": {
     "plugins": [
       {

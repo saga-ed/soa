@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { ExpressServer } from '@saga-soa/api-core/express-server';
-import { ControllerLoader } from '@saga-soa/api-core/utils/controller-loader';
-import { AbstractRestController } from '@saga-soa/api-core/abstract-rest-controller';
+import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
+import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
+import { AbstractRestController } from '@saga-ed/soa-api-core/abstract-rest-controller';
 import { container } from '../inversify.config.js';
 import express from 'express';
 

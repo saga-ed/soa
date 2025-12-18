@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/trpc-types",
+  "name": "@saga-ed/soa-trpc-types",
   "version": "1.0.0",
   "type": "module",
   "private": true,
@@ -33,7 +33,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
-    "@saga-soa/trpc-codegen": "workspace:*",
+    "@saga-ed/soa-trpc-codegen": "workspace:*",
     "@trpc/client": "^11.4.3",
     "@trpc/server": "^11.0.0",
     "@types/node": "^24.0.12",

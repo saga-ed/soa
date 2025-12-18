@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/logger",
+  "name": "@saga-ed/soa-logger",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -26,7 +26,7 @@
     "zod": "3.25.67"
   },
   "devDependencies": {
-    "@saga/typescript-config": "workspace:*",
+    "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "latest",
     "pino-pretty": "^10.2.0",
     "tsup": "^8.5.0",

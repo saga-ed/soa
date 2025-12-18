@@ -1,5 +1,5 @@
 {
-  "extends": "@saga/typescript-config/base.json",
+  "extends": "@saga-ed/soa-typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
     "experimentalDecorators": true,

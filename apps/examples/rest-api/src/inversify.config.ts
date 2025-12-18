@@ -1,13 +1,13 @@
 import { Container } from 'inversify';
 import type { MongoClient } from 'mongodb';
-import { MONGO_CLIENT } from '@saga-soa/db';
-import type { IMongoConnMgr } from '@saga-soa/db';
-import { MockMongoProvider } from '@saga-soa/db/mocks/mock-mongo-provider';
-import type { ILogger, PinoLoggerConfig } from '@saga-soa/logger';
-import { PinoLogger } from '@saga-soa/logger';
-import { ExpressServer } from '@saga-soa/api-core/express-server';
-import { ControllerLoader } from '@saga-soa/api-core/utils/controller-loader';
-import type { ExpressServerConfig } from '@saga-soa/api-core/express-server-schema';
+import { MONGO_CLIENT } from '@saga-ed/soa-db';
+import type { IMongoConnMgr } from '@saga-ed/soa-db';
+import { MockMongoProvider } from '@saga-ed/soa-db/mocks/mock-mongo-provider';
+import type { ILogger, PinoLoggerConfig } from '@saga-ed/soa-logger';
+import { PinoLogger } from '@saga-ed/soa-logger';
+import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
+import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
+import type { ExpressServerConfig } from '@saga-ed/soa-api-core/express-server-schema';
 
 const container = new Container();
 

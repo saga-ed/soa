@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { Button } from "@saga/ui/button";
+import { Button } from "@saga-ed/soa-ui/button";
 import styles from "./page.module.css";
 const ThemeImage = (props) => {
     const { srcLight, srcDark, ...rest } = props;

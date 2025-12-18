@@ -1,8 +1,8 @@
-import { ExpressServer } from '@saga-soa/api-core/express-server';
+import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
 import { container } from './inversify.config.js';
-import { ControllerLoader } from '@saga-soa/api-core/utils/controller-loader';
-import { AbstractRestController } from '@saga-soa/api-core/abstract-rest-controller';
-import type { ILogger } from '@saga-soa/logger';
+import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
+import { AbstractRestController } from '@saga-ed/soa-api-core/abstract-rest-controller';
+import type { ILogger } from '@saga-ed/soa-logger';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

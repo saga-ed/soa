@@ -1,4 +1,4 @@
-// Main exports for @saga-soa/trpc-codegen
+// Main exports for @saga-ed/soa-trpc-codegen
 export { TRPCCodegen } from './generators/codegen.js';
 export { ConfigLoader } from './utils/config-loader.js';
 export { SectorParser } from './parsers/sector-parser.js';

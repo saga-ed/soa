@@ -1,6 +1,6 @@
 import { injectable, inject, Container } from 'inversify';
 import type { GQLServerConfig } from './gql-server-schema.js';
-import type { ILogger } from '@saga-soa/logger';
+import type { ILogger } from '@saga-ed/soa-logger';
 import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
 import { buildSchema } from 'type-graphql';

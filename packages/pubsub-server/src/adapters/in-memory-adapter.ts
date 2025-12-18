@@ -1,4 +1,4 @@
-import type { EventEnvelope } from '@saga-soa/pubsub-core';
+import type { EventEnvelope } from '@saga-ed/soa-pubsub-core';
 import type { PubSubAdapter } from './base-adapter.js';
 
 export interface InMemoryAdapterOptions {

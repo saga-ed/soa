@@ -17,9 +17,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@saga-soa/api-core": "workspace:*",
-    "@saga-soa/db": "workspace:*",
-    "@saga-soa/logger": "workspace:^",
+    "@saga-ed/soa-api-core": "workspace:*",
+    "@saga-ed/soa-db": "workspace:*",
+    "@saga-ed/soa-logger": "workspace:^",
     "@types/mongodb": "^4.0.7",
     "express": "^4.18.2",
     "figlet": "^1.8.1",

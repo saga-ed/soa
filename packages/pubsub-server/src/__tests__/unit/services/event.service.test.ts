@@ -4,7 +4,7 @@ import { EventService } from '../../../services/event.service.js';
 import { MockLogger } from '../../../__tests__/mocks/mock-logger.js';
 import { TYPES } from '../../../types/index.js';
 import { z } from 'zod';
-import type { EventDefinition, CSEEvent, SSEEvent } from '@saga-soa/pubsub-core';
+import type { EventDefinition, CSEEvent, SSEEvent } from '@saga-ed/soa-pubsub-core';
 import crypto from 'crypto';
 
 describe('EventService', () => {

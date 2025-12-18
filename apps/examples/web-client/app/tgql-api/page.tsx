@@ -1,4 +1,4 @@
-import { Button } from '@saga/ui/button';
+import { Button } from '@saga-ed/soa-ui/button';
 import Link from 'next/link';
 import styles from '../page.module.css';
 

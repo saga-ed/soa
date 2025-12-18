@@ -14,4 +14,4 @@ export type {
   EventEnvelope,
   EventName,
   EventDefinition
-} from '@saga-soa/pubsub-core';
+} from '@saga-ed/soa-pubsub-core';

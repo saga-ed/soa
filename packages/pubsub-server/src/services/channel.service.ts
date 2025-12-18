@@ -1,6 +1,6 @@
 import { inject, injectable } from 'inversify';
 import { TYPES } from '../types/index.js';
-import type { ChannelConfig, EventEnvelope } from '@saga-soa/pubsub-core';
+import type { ChannelConfig, EventEnvelope } from '@saga-ed/soa-pubsub-core';
 import type { Logger } from '../types/index.js';
 
 @injectable()

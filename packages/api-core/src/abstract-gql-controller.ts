@@ -1,5 +1,5 @@
 import { injectable, inject } from 'inversify';
-import type { ILogger } from '@saga-soa/logger';
+import type { ILogger } from '@saga-ed/soa-logger';
 import { buildSchema } from 'type-graphql';
 import { printSchema } from 'graphql';
 import { writeFile, mkdir } from 'node:fs/promises';

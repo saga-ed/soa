@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/config",
+  "name": "@saga-ed/soa-config",
   "version": "1.0.0",
   "scripts": {
     "dev": "tsup --watch",
@@ -22,7 +22,7 @@
     }
   },
   "devDependencies": {
-    "@saga/typescript-config": "workspace:*",
+    "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "24.0.12",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3"

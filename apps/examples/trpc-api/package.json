@@ -21,12 +21,12 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@saga-soa/api-core": "workspace:*",
-    "@saga-soa/db": "workspace:*",
-    "@saga-soa/logger": "workspace:^",
-    "@saga-soa/pubsub-core": "workspace:^",
-    "@saga-soa/pubsub-server": "workspace:^",
-    "@saga-soa/trpc-types": "workspace:*",
+    "@saga-ed/soa-api-core": "workspace:*",
+    "@saga-ed/soa-db": "workspace:*",
+    "@saga-ed/soa-logger": "workspace:^",
+    "@saga-ed/soa-pubsub-core": "workspace:^",
+    "@saga-ed/soa-pubsub-server": "workspace:^",
+    "@saga-ed/soa-trpc-types": "workspace:*",
     "@trpc/client": "^11.4.3",
     "@trpc/server": "^11.0.0",
     "@types/mongodb": "^4.0.7",

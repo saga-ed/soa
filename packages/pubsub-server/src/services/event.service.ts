@@ -8,8 +8,8 @@ import type {
   CSEEvent,
   SSEEvent,
   EventName
-} from '@saga-soa/pubsub-core';
-import { isCSEEvent } from '@saga-soa/pubsub-core';
+} from '@saga-ed/soa-pubsub-core';
+import { isCSEEvent } from '@saga-ed/soa-pubsub-core';
 import type { Logger } from '../types/index.js';
 import { v4 as uuidv4 } from 'uuid';
 

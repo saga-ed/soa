@@ -41,7 +41,7 @@ export const DEFAULT_CONFIG: TGQLCodegenConfig = {
   },
   generation: {
     outputDir: './generated',
-    packageName: '@saga-soa/tgql-types',
+    packageName: '@saga-ed/soa-tgql-types',
     schemaName: 'AppSchema'
   },
   parsing: {

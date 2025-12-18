@@ -1,8 +1,8 @@
 import { Get, Controller } from 'routing-controllers';
 import type { Request, Response } from 'express';
 import { injectable, inject } from 'inversify';
-import type { ILogger } from '@saga-soa/logger';
-import { AbstractRestController } from '@saga-soa/api-core/abstract-rest-controller';
+import type { ILogger } from '@saga-ed/soa-logger';
+import { AbstractRestController } from '@saga-ed/soa-api-core/abstract-rest-controller';
 
 const SECTOR = 'hello-mongo';
 

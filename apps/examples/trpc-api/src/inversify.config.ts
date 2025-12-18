@@ -1,18 +1,18 @@
 import 'reflect-metadata';
 import { Container }                      from 'inversify';
-import { PinoLogger }                     from '@saga-soa/logger';
-import { MongoProvider }                  from '@saga-soa/db';
-import { ExpressServer }                  from '@saga-soa/api-core/express-server';
-import { TRPCServer }                     from '@saga-soa/api-core/trpc-server';
-import { ControllerLoader }               from '@saga-soa/api-core/utils/controller-loader';
-import type { ILogger, PinoLoggerConfig } from '@saga-soa/logger';
-import type { IMongoConnMgr }             from '@saga-soa/db';
-import type { TRPCServerConfig }          from '@saga-soa/api-core/trpc-server-schema';
-import type { ExpressServerConfig }       from '@saga-soa/api-core/express-server-schema';
+import { PinoLogger }                     from '@saga-ed/soa-logger';
+import { MongoProvider }                  from '@saga-ed/soa-db';
+import { ExpressServer }                  from '@saga-ed/soa-api-core/express-server';
+import { TRPCServer }                     from '@saga-ed/soa-api-core/trpc-server';
+import { ControllerLoader }               from '@saga-ed/soa-api-core/utils/controller-loader';
+import type { ILogger, PinoLoggerConfig } from '@saga-ed/soa-logger';
+import type { IMongoConnMgr }             from '@saga-ed/soa-db';
+import type { TRPCServerConfig }          from '@saga-ed/soa-api-core/trpc-server-schema';
+import type { ExpressServerConfig }       from '@saga-ed/soa-api-core/express-server-schema';
 
 // Import pubsub server components
-import { PubSubService, EventService, ChannelService, InMemoryAdapter, TYPES } from '@saga-soa/pubsub-server';
-import type { PubSubAdapter }             from '@saga-soa/pubsub-server';
+import { PubSubService, EventService, ChannelService, InMemoryAdapter, TYPES } from '@saga-ed/soa-pubsub-server';
+import type { PubSubAdapter }             from '@saga-ed/soa-pubsub-server';
 
 export const container = new Container();
 

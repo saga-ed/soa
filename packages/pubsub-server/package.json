@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/pubsub-server",
+  "name": "@saga-ed/soa-pubsub-server",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -26,9 +26,9 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@saga-soa/pubsub-core": "workspace:*",
-    "@saga-soa/api-core": "workspace:*",
-    "@saga-soa/logger": "workspace:*",
+    "@saga-ed/soa-pubsub-core": "workspace:*",
+    "@saga-ed/soa-api-core": "workspace:*",
+    "@saga-ed/soa-logger": "workspace:*",
     "@trpc/server": "^11.0.0",
     "inversify": "^6.2.2",
     "reflect-metadata": "^0.2.2",
@@ -36,7 +36,7 @@
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@saga/typescript-config": "workspace:*",
+    "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "latest",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",

@@ -1,5 +1,5 @@
 {
-  "name": "@saga-soa/db",
+  "name": "@saga-ed/soa-db",
   "type": "module",
   "scripts": {
     "dev": "tsup --watch",
@@ -8,8 +8,8 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "@saga-soa/config": "workspace:*",
-    "@saga/typescript-config": "workspace:*",
+    "@saga-ed/soa-config": "workspace:*",
+    "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "^24.0.3",
     "mongodb-memory-server": "^10.1.4",
     "tsup": "^8.5.0",

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { ExpressServer } from '@saga-soa/api-core/express-server';
-import { TRPCServer } from '@saga-soa/api-core/trpc-server';
-import { ControllerLoader } from '@saga-soa/api-core/utils/controller-loader';
-import { AbstractTRPCController } from '@saga-soa/api-core/abstract-trpc-controller';
+import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
+import { TRPCServer } from '@saga-ed/soa-api-core/trpc-server';
+import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
+import { AbstractTRPCController } from '@saga-ed/soa-api-core/abstract-trpc-controller';
 import { container } from '../src/inversify.config.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

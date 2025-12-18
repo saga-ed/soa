@@ -1,7 +1,7 @@
 import { Query, Resolver, Arg, Mutation } from 'type-graphql';
 import { inject } from 'inversify';
-import { AbstractGQLController } from '@saga-soa/api-core';
-import type { ILogger } from '@saga-soa/logger';
+import { AbstractGQLController } from '@saga-ed/soa-api-core';
+import type { ILogger } from '@saga-ed/soa-logger';
 import { User } from './user.type.js';
 import { UserInput } from './user.input.js';
 import { users, createUser, getUserById } from './user.data.js';

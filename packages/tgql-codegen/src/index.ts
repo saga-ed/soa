@@ -1,4 +1,4 @@
-// Main exports for @saga-soa/tgql-codegen
+// Main exports for @saga-ed/soa-tgql-codegen
 export { TGQLCodegen } from './generators/codegen.js';
 export { ConfigLoader } from './utils/config-loader.js';
 export { SectorParser } from './parsers/sector-parser.js';

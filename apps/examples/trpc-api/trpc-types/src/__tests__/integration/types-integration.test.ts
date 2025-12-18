@@ -8,7 +8,7 @@ describe('Generated Types Integration', () => {
 
   it('should have project and run router sections', () => {
     // This is a basic integration test to ensure the generated types work
-    // The actual generation logic is tested in @saga-soa/trpc-codegen
+    // The actual generation logic is tested in @saga-ed/soa-trpc-codegen
     expectTypeOf<AppRouter>().toHaveProperty('project');
     expectTypeOf<AppRouter>().toHaveProperty('run');
   });

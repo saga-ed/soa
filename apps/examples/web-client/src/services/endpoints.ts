@@ -6,7 +6,7 @@ import type {
   CreateRunInput,
   UpdateRunInput,
   GetRunInput
-} from '@saga-soa/trpc-types';
+} from '@saga-ed/soa-trpc-types';
 
 export const ENDPOINTS: Endpoint[] = [
   // Project endpoints

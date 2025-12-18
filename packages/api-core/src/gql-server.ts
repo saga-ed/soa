@@ -44,8 +44,13 @@ export class GQLServer {
     }
 
     // Build TypeGraphQL schema with dynamically loaded resolvers
+    // Use Inversify container for dependency injection so type-graphql
+    // uses our singleton instances instead of instantiating new ones
     const schema = await buildSchema({
       resolvers: resolvers as unknown as [Function, ...Function[]],
+      container: {
+        get: (cls, _resolverData) => container.get(cls),
+      },
     });
 
     // Set up ApolloServer v4+ with playground configuration

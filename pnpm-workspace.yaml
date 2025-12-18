@@ -6,4 +6,5 @@ packages:
   - 'apps/examples/trpc-api/trpc-types'
   - 'apps/examples/web-client'
   - 'apps/web'
+  - 'build-tools/*'
   - 'packages/*'

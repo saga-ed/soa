@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { Zod2tsGenerator } from '../generators/zod2ts-generator.js';
 import { ConfigLoader } from '../utils/config-loader.js';
@@ -24,34 +25,56 @@ describe('Zod2tsGenerator', () => {
   let testConfig: any;
   let basePath: string;
   let sectors: any[];
+  let outputDir: string;
 
   beforeEach(async () => {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     basePath = path.resolve(__dirname, '..', '..'); // Go up to package root
+
+    // Create unique temporary directory for this test to avoid race conditions
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trpc-zod2ts-test-'));
+
+    // Load base config and override output directory
     const configPath = path.resolve(basePath, 'src/__tests__/fixtures/test-config.js');
-    testConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    const baseConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    testConfig = {
+      ...baseConfig,
+      generation: {
+        ...baseConfig.generation,
+        outputDir: path.relative(basePath, outputDir)
+      }
+    };
+
     zod2tsGenerator = new Zod2tsGenerator(testConfig, basePath);
-    
+
     // Get sectors for testing
     const sectorParser = new SectorParser(testConfig, basePath);
     sectors = await sectorParser.discoverSectors();
-    
+
     // Ensure schema files exist in the expected output directory for zod2ts
-    const outputPath = path.resolve(basePath, testConfig.generation.outputDir);
-    const schemasOutputDir = path.join(outputPath, 'schemas');
+    const schemasOutputDir = path.join(outputDir, 'schemas');
     await fs.mkdir(schemasOutputDir, { recursive: true });
-    
+
     // Copy schema files from test fixtures to the expected output location
     for (const sector of sectors) {
       const sourceSchemaFile = path.join(basePath, 'src/__tests__/fixtures/sectors', sector.name, 'trpc', 'schema', `${sector.name}-schemas.ts`);
       const targetSchemaFile = path.join(schemasOutputDir, `${sector.name}-schemas.ts`);
-      
+
       try {
         const schemaContent = await fs.readFile(sourceSchemaFile, 'utf-8');
         await fs.writeFile(targetSchemaFile, schemaContent);
       } catch (error) {
         console.warn(`Could not copy schema for ${sector.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
+    }
+  });
+
+  afterEach(async () => {
+    // Clean up generated files after each test
+    try {
+      await fs.rm(outputDir, { recursive: true, force: true });
+    } catch (error) {
+      // Ignore cleanup errors
     }
   });
 
@@ -62,38 +85,35 @@ describe('Zod2tsGenerator', () => {
 
     it('should create types directory structure', async () => {
       const generatedFiles = await zod2tsGenerator.generateTypes(sectors);
-      
+
       expect(generatedFiles.length).toBeGreaterThan(0);
-      
+
       // Check that types directory was created
-      const outputDir = path.resolve(basePath, testConfig.generation.outputDir);
       const typesDir = path.join(outputDir, testConfig.zod2ts.outputDir);
-      
+
       const typesDirExists = await fs.access(typesDir).then(() => true).catch(() => false);
       expect(typesDirExists).toBe(true);
     });
 
     it('should create sector-specific type directories', async () => {
       await zod2tsGenerator.generateTypes(sectors);
-      
-      const outputDir = path.resolve(basePath, testConfig.generation.outputDir);
+
       const typesDir = path.join(outputDir, testConfig.zod2ts.outputDir);
-      
+
       // Check that both sector type directories were created
       const userTypesDir = path.join(typesDir, 'user');
       const productTypesDir = path.join(typesDir, 'product');
-      
+
       const userTypesDirExists = await fs.access(userTypesDir).then(() => true).catch(() => false);
       const productTypesDirExists = await fs.access(productTypesDir).then(() => true).catch(() => false);
-      
+
       expect(userTypesDirExists).toBe(true);
       expect(productTypesDirExists).toBe(true);
     });
 
     it('should generate types index file', async () => {
       await zod2tsGenerator.generateTypes(sectors);
-      
-      const outputDir = path.resolve(basePath, testConfig.generation.outputDir);
+
       const typesDir = path.join(outputDir, testConfig.zod2ts.outputDir);
       const typesIndexPath = path.join(typesDir, 'index.ts');
       
@@ -151,14 +171,13 @@ describe('Zod2tsGenerator', () => {
           outputDir: './custom-types'
         }
       };
-      
+
       const customGenerator = new Zod2tsGenerator(customConfig, basePath);
-      
+
       await customGenerator.generateTypes(sectors);
-      
-      const outputDir = path.resolve(basePath, customConfig.generation.outputDir);
+
       const customTypesDir = path.join(outputDir, customConfig.zod2ts.outputDir);
-      
+
       const customTypesDirExists = await fs.access(customTypesDir).then(() => true).catch(() => false);
       expect(customTypesDirExists).toBe(true);
     });
@@ -171,32 +190,37 @@ describe('Zod2tsGenerator', () => {
         name: 'empty',
         endpoints: []
       };
-      
+
       const result = await zod2tsGenerator.generateTypes([sectorWithoutSchema]);
-      
+
       // Should still generate the types index file
       expect(result.length).toBeGreaterThan(0);
     });
 
     it('should create output directory if it does not exist', async () => {
+      // Create a new temp directory for this specific test
+      const newOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trpc-zod2ts-newdir-test-'));
+
       const customConfig = {
         ...testConfig,
         generation: {
           ...testConfig.generation,
-          outputDir: './__tests__/output/zod2ts-test'
+          outputDir: path.relative(basePath, newOutputDir)
         }
       };
-      
+
       const customGenerator = new Zod2tsGenerator(customConfig, basePath);
-      
+
       await customGenerator.generateTypes(sectors);
-      
+
       // Check that the new directory was created
-      const newOutputDir = path.resolve(basePath, customConfig.generation.outputDir);
       const typesDir = path.join(newOutputDir, customConfig.zod2ts.outputDir);
-      
+
       const typesDirExists = await fs.access(typesDir).then(() => true).catch(() => false);
       expect(typesDirExists).toBe(true);
+
+      // Clean up
+      await fs.rm(newOutputDir, { recursive: true, force: true });
     });
   });
 });

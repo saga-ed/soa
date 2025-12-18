@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { TRPCCodegen } from '../generators/codegen.js';
 import { ConfigLoader } from '../utils/config-loader.js';
@@ -14,10 +15,22 @@ describe('TRPCCodegen Integration', () => {
   beforeEach(async () => {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
     basePath = path.resolve(__dirname, '..', '..'); // Go up to package root
+
+    // Create unique temporary directory for this test to avoid race conditions
+    outputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trpc-integration-test-'));
+
+    // Load base config and override output directory
     const configPath = path.resolve(basePath, 'src/__tests__/fixtures/test-config.js');
-    testConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    const baseConfig = await ConfigLoader.loadConfig(configPath, basePath);
+    testConfig = {
+      ...baseConfig,
+      generation: {
+        ...baseConfig.generation,
+        outputDir: path.relative(basePath, outputDir)
+      }
+    };
+
     codegen = new TRPCCodegen(testConfig, basePath);
-    outputDir = path.resolve(basePath, testConfig.generation.outputDir);
   });
 
   afterEach(async () => {
@@ -151,23 +164,25 @@ describe('TRPCCodegen Integration', () => {
 
   describe('Configuration Variations', () => {
     it('should work with custom output directory', async () => {
+      // Create a new temp directory for this specific test
+      const customOutputDir = await fs.mkdtemp(path.join(os.tmpdir(), 'trpc-custom-test-'));
+
       const customConfig = {
         ...testConfig,
         generation: {
           ...testConfig.generation,
-          outputDir: './__tests__/output/custom'
+          outputDir: path.relative(basePath, customOutputDir)
         }
       };
-      
+
       const customCodegen = new TRPCCodegen(customConfig, basePath);
       const result = await customCodegen.generate();
-      
+
       expect(result.errors).toHaveLength(0);
-      
-      const customOutputDir = path.resolve(basePath, customConfig.generation.outputDir);
+
       const customOutputExists = await fs.access(customOutputDir).then(() => true).catch(() => false);
       expect(customOutputExists).toBe(true);
-      
+
       // Clean up custom output
       await fs.rm(customOutputDir, { recursive: true, force: true });
     });

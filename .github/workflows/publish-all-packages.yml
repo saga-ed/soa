@@ -186,9 +186,10 @@ jobs:
             ];
             
             // Filter to only @saga-ed workspace dependencies
+            // Package names are like @saga-ed/soa-pubsub-core, directories are pubsub-core
             return deps
-              .filter(dep => dep.startsWith('@saga-ed/'))
-              .map(dep => dep.replace('@saga-ed/', ''));
+              .filter(dep => dep.startsWith('@saga-ed/soa-'))
+              .map(dep => dep.replace('@saga-ed/soa-', ''));
           }
 
           function calculateLayers(packages) {

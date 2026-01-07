@@ -1,0 +1,392 @@
+name: Publish to AWS CodeArtifact & GitHub Packages
+
+# Manual trigger for controlled publishing to CodeArtifact and/or GitHub Packages
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      publish_target:
+        description: "Publish target"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - codeartifact
+          - github
+          - both
+      skip_tests:
+        description: "Skip tests (use with caution)"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: "20"
+  PNPM_VERSION: "9.0.0"
+  AWS_REGION: us-west-2
+  CODEARTIFACT_DOMAIN: saga
+  CODEARTIFACT_REPOSITORY: saga_soa
+  CODEARTIFACT_OWNER: "531314149529"
+
+permissions:
+  id-token: write
+  contents: write
+  packages: write
+
+jobs:
+  test:
+    name: Test All Packages
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm turbo run lint
+
+      - name: Type check
+        run: pnpm turbo run check-types
+
+      - name: Build
+        run: pnpm turbo run build
+
+      - name: Test
+        run: pnpm test
+
+  version-bump:
+    name: Version Bump
+    runs-on: ubuntu-latest
+    needs: test
+    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
+    outputs:
+      new-version: ${{ steps.bump.outputs.new-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Bump versions
+        id: bump
+        run: |
+          VERSION_TYPE="${{ github.event.inputs.version }}"
+
+          # Publishable packages (not private)
+          PUBLISHABLE_PACKAGES=(
+            "packages/api-core"
+            "packages/api-util"
+            "packages/config"
+            "packages/db"
+            "packages/logger"
+            "packages/pubsub-client"
+            "packages/pubsub-core"
+            "packages/tgql-codegen"
+            "packages/trpc-codegen"
+          )
+
+          # Check for zod2ts in build-tools
+          if [ -f "build-tools/zod2ts/package.json" ]; then
+            PUBLISHABLE_PACKAGES+=("build-tools/zod2ts")
+          fi
+
+          NEW_VERSION=""
+          for pkg_path in "${PUBLISHABLE_PACKAGES[@]}"; do
+            if [ -f "$pkg_path/package.json" ]; then
+              is_private=$(jq -r '.private // false' "$pkg_path/package.json")
+              if [ "$is_private" != "true" ]; then
+                echo "Bumping $pkg_path"
+                cd "$pkg_path"
+                npm version "$VERSION_TYPE" --no-git-tag-version
+                NEW_VERSION=$(jq -r '.version' package.json)
+                cd - > /dev/null
+              fi
+            fi
+          done
+
+          echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          # Commit version changes
+          git add packages/*/package.json build-tools/*/package.json 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: bump package versions ($VERSION_TYPE) to $NEW_VERSION"
+            git push
+          fi
+
+  publish-codeartifact:
+    name: Publish to CodeArtifact
+    runs-on: ubuntu-latest
+    needs: version-bump
+    if: |
+      always() &&
+      needs.version-bump.result == 'success' &&
+      (github.event.inputs.publish_target == 'codeartifact' || github.event.inputs.publish_target == 'both')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Pull latest (with version bump)
+        run: git pull
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm turbo run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.CODEARTIFACT_OWNER }}:role/github-actions-role/SOADeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get CodeArtifact auth token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+            --domain ${{ env.CODEARTIFACT_DOMAIN }} \
+            --domain-owner ${{ env.CODEARTIFACT_OWNER }} \
+            --query authorizationToken \
+            --output text)
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+
+      - name: Configure npm for CodeArtifact
+        run: |
+          REGISTRY_URL="https://${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com/npm/${{ env.CODEARTIFACT_REPOSITORY }}/"
+          npm config set @saga-ed:registry=$REGISTRY_URL
+          npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
+
+      - name: Publish packages in dependency order
+        run: |
+          # Layer 0: Base packages (no workspace deps)
+          LAYER_0="packages/config packages/logger packages/pubsub-core packages/api-util packages/trpc-codegen packages/tgql-codegen"
+
+          # Layer 1: Depends on Layer 0
+          LAYER_1="packages/db packages/api-core"
+
+          # Layer 2: Depends on Layer 1
+          LAYER_2="packages/pubsub-client"
+
+          # Build tools (independent)
+          BUILD_TOOLS="build-tools/zod2ts"
+
+          publish_package() {
+            local pkg_path="$1"
+            if [ -f "$pkg_path/package.json" ]; then
+              is_private=$(jq -r '.private // false' "$pkg_path/package.json")
+              if [ "$is_private" != "true" ]; then
+                pkg_name=$(jq -r '.name' "$pkg_path/package.json")
+                pkg_version=$(jq -r '.version' "$pkg_path/package.json")
+                echo "📦 Publishing $pkg_name@$pkg_version from $pkg_path..."
+                cd "$pkg_path"
+                if pnpm publish --no-git-checks --access public 2>&1; then
+                  echo "✅ Published $pkg_name@$pkg_version"
+                else
+                  echo "⚠️ Warning: Publish may have failed or version already exists"
+                fi
+                cd - > /dev/null
+              fi
+            fi
+          }
+
+          echo "=== Publishing Layer 0 (Base packages) ==="
+          for pkg in $LAYER_0; do publish_package "$pkg"; done
+
+          echo "=== Publishing Layer 1 ==="
+          for pkg in $LAYER_1; do publish_package "$pkg"; done
+
+          echo "=== Publishing Layer 2 ==="
+          for pkg in $LAYER_2; do publish_package "$pkg"; done
+
+          echo "=== Publishing Build Tools ==="
+          for pkg in $BUILD_TOOLS; do publish_package "$pkg"; done
+
+          echo "✅ CodeArtifact publishing complete"
+
+  publish-github:
+    name: Publish to GitHub Packages
+    runs-on: ubuntu-latest
+    needs: version-bump
+    if: |
+      always() &&
+      needs.version-bump.result == 'success' &&
+      (github.event.inputs.publish_target == 'github' || github.event.inputs.publish_target == 'both')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Pull latest (with version bump)
+        run: git pull
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@saga-ed"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm turbo run build
+
+      - name: Setup .npmrc for GitHub Packages
+        run: |
+          echo "@saga-ed:registry=https://npm.pkg.github.com" >> .npmrc
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
+
+      - name: Publish packages in dependency order
+        run: |
+          LAYER_0="packages/config packages/logger packages/pubsub-core packages/api-util packages/trpc-codegen packages/tgql-codegen"
+          LAYER_1="packages/db packages/api-core"
+          LAYER_2="packages/pubsub-client"
+          BUILD_TOOLS="build-tools/zod2ts"
+
+          publish_package() {
+            local pkg_path="$1"
+            if [ -f "$pkg_path/package.json" ]; then
+              is_private=$(jq -r '.private // false' "$pkg_path/package.json")
+              if [ "$is_private" != "true" ]; then
+                pkg_name=$(jq -r '.name' "$pkg_path/package.json")
+                pkg_version=$(jq -r '.version' "$pkg_path/package.json")
+                echo "📦 Publishing $pkg_name@$pkg_version to GitHub Packages..."
+                cd "$pkg_path"
+                if npm publish --access public 2>&1; then
+                  echo "✅ Published $pkg_name@$pkg_version"
+                else
+                  echo "⚠️ Warning: Publish may have failed or version already exists"
+                fi
+                cd - > /dev/null
+              fi
+            fi
+          }
+
+          for pkg in $LAYER_0; do publish_package "$pkg"; done
+          for pkg in $LAYER_1; do publish_package "$pkg"; done
+          for pkg in $LAYER_2; do publish_package "$pkg"; done
+          for pkg in $BUILD_TOOLS; do publish_package "$pkg"; done
+
+          echo "✅ GitHub Packages publishing complete"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  summary:
+    name: Create Release Summary
+    runs-on: ubuntu-latest
+    needs: [version-bump, publish-codeartifact, publish-github]
+    if: always()
+    steps:
+      - name: Create summary
+        run: |
+          echo "## 📦 Package Publishing Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.version-bump.outputs.new-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ github.event.inputs.publish_target }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version Bump:** ${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.publish-codeartifact.result }}" == "success" ]; then
+            echo "- ✅ **CodeArtifact**: Published successfully" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.publish-codeartifact.result }}" == "skipped" ]; then
+            echo "- ⏭️ **CodeArtifact**: Skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **CodeArtifact**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.publish-github.result }}" == "success" ]; then
+            echo "- ✅ **GitHub Packages**: Published successfully" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.publish-github.result }}" == "skipped" ]; then
+            echo "- ⏭️ **GitHub Packages**: Skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **GitHub Packages**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Installation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**From CodeArtifact:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Configure npm (requires AWS auth)" >> $GITHUB_STEP_SUMMARY
+          echo "npm config set @saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @saga-ed/soa-logger" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**From GitHub Packages:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "npm config set @saga-ed:registry=https://npm.pkg.github.com" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add @saga-ed/soa-logger" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

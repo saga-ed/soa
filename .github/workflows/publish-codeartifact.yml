@@ -268,6 +268,8 @@ jobs:
           # Build tools (independent)
           BUILD_TOOLS="build-tools/zod2ts"
 
+          PUBLISH_FAILURES=0
+
           publish_package() {
             local pkg_path="$1"
             if [ -f "$pkg_path/package.json" ]; then
@@ -277,11 +279,23 @@ jobs:
                 pkg_version=$(jq -r '.version' "$pkg_path/package.json")
                 echo "📦 Publishing $pkg_name@$pkg_version from $pkg_path..."
                 cd "$pkg_path"
-                if pnpm publish --no-git-checks --access public 2>&1; then
+
+                # Capture output and exit code
+                set +e
+                output=$(pnpm publish --no-git-checks --access public 2>&1)
+                exit_code=$?
+                set -e
+
+                if [ $exit_code -eq 0 ]; then
                   echo "✅ Published $pkg_name@$pkg_version"
+                elif echo "$output" | grep -qiE "(already exists|ConflictException|EPUBLISHCONFLICT|cannot publish over)"; then
+                  echo "⏭️ Skipped $pkg_name@$pkg_version (version already exists)"
                 else
-                  echo "⚠️ Warning: Publish may have failed or version already exists"
+                  echo "❌ Failed to publish $pkg_name@$pkg_version"
+                  echo "$output"
+                  PUBLISH_FAILURES=$((PUBLISH_FAILURES + 1))
                 fi
+
                 cd - > /dev/null
               fi
             fi
@@ -299,6 +313,10 @@ jobs:
           echo "=== Publishing Build Tools ==="
           for pkg in $BUILD_TOOLS; do publish_package "$pkg"; done
 
+          if [ $PUBLISH_FAILURES -gt 0 ]; then
+            echo "❌ CodeArtifact publishing failed with $PUBLISH_FAILURES error(s)"
+            exit 1
+          fi
           echo "✅ CodeArtifact publishing complete"
 
   publish-github:
@@ -349,6 +367,8 @@ jobs:
           LAYER_2="packages/pubsub-client"
           BUILD_TOOLS="build-tools/zod2ts"
 
+          PUBLISH_FAILURES=0
+
           publish_package() {
             local pkg_path="$1"
             if [ -f "$pkg_path/package.json" ]; then
@@ -358,11 +378,23 @@ jobs:
                 pkg_version=$(jq -r '.version' "$pkg_path/package.json")
                 echo "📦 Publishing $pkg_name@$pkg_version to GitHub Packages..."
                 cd "$pkg_path"
-                if npm publish --access public 2>&1; then
+
+                # Capture output and exit code
+                set +e
+                output=$(npm publish --access public 2>&1)
+                exit_code=$?
+                set -e
+
+                if [ $exit_code -eq 0 ]; then
                   echo "✅ Published $pkg_name@$pkg_version"
+                elif echo "$output" | grep -qiE "(already exists|EPUBLISHCONFLICT|cannot publish over|You cannot publish over)"; then
+                  echo "⏭️ Skipped $pkg_name@$pkg_version (version already exists)"
                 else
-                  echo "⚠️ Warning: Publish may have failed or version already exists"
+                  echo "❌ Failed to publish $pkg_name@$pkg_version"
+                  echo "$output"
+                  PUBLISH_FAILURES=$((PUBLISH_FAILURES + 1))
                 fi
+
                 cd - > /dev/null
               fi
             fi
@@ -373,6 +405,10 @@ jobs:
           for pkg in $LAYER_2; do publish_package "$pkg"; done
           for pkg in $BUILD_TOOLS; do publish_package "$pkg"; done
 
+          if [ $PUBLISH_FAILURES -gt 0 ]; then
+            echo "❌ GitHub Packages publishing failed with $PUBLISH_FAILURES error(s)"
+            exit 1
+          fi
           echo "✅ GitHub Packages publishing complete"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

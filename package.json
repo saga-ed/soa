@@ -19,7 +19,9 @@
     "ci:check": "node scripts/local-ci-checks.js",
     "ci:check:all": "node scripts/local-ci-checks.js all",
     "ci:check:changed": "node scripts/local-ci-checks.js",
-    "quick:check": "node scripts/quick-check.js"
+    "quick:check": "node scripts/quick-check.js",
+    "co:login": "export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain saga --domain-owner 531314149529 --query authorizationToken --output text) && npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/:_authToken=$CODEARTIFACT_AUTH_TOKEN && echo '✅ CodeArtifact auth token configured'",
+    "co:whoami": "npm whoami --registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/"
   },
   "devDependencies": {
     "prettier": "^3.5.3",

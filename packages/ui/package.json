@@ -10,7 +10,7 @@
     "generate:component": "turbo gen react-component",
     "check-types": "tsc --noEmit",
     "clean": ":",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
     "@saga-ed/soa-eslint-config": "workspace:*",

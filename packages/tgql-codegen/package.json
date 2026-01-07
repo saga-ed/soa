@@ -22,7 +22,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "test": "vitest",
+    "test": "vitest run --passWithNoTests",
     "check-types": "tsc --noEmit",
     "lint": "eslint src/"
   },
@@ -53,7 +53,7 @@
   "author": "saga-soa",
   "license": "MIT",
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/",
     "access": "public"
   },
   "repository": {

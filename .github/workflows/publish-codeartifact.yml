@@ -13,10 +13,24 @@ on:
           - patch
           - minor
           - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+      preid:
+        description: "Prerelease identifier (for pre* versions)"
+        required: false
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - alpha
+          - beta
+          - rc
       publish_target:
         description: "Publish target"
         required: true
-        default: "both"
+        default: "codeartifact"
         type: choice
         options:
           - codeartifact
@@ -24,6 +38,11 @@ on:
           - both
       skip_tests:
         description: "Skip tests (use with caution)"
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: "Dry run (build and test only, no publish)"
         required: false
         default: false
         type: boolean
@@ -123,6 +142,8 @@ jobs:
         id: bump
         run: |
           VERSION_TYPE="${{ github.event.inputs.version }}"
+          PREID="${{ github.event.inputs.preid }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
 
           # Publishable packages (not private)
           PUBLISHABLE_PACKAGES=(
@@ -142,6 +163,13 @@ jobs:
             PUBLISHABLE_PACKAGES+=("build-tools/zod2ts")
           fi
 
+          # Build npm version command with preid for prerelease versions
+          VERSION_CMD="npm version $VERSION_TYPE --no-git-tag-version"
+          if [[ "$VERSION_TYPE" == pre* ]]; then
+            VERSION_CMD="npm version $VERSION_TYPE --preid=$PREID --no-git-tag-version"
+            echo "📦 Creating prerelease version with identifier: $PREID"
+          fi
+
           NEW_VERSION=""
           for pkg_path in "${PUBLISHABLE_PACKAGES[@]}"; do
             if [ -f "$pkg_path/package.json" ]; then
@@ -149,7 +177,7 @@ jobs:
               if [ "$is_private" != "true" ]; then
                 echo "Bumping $pkg_path"
                 cd "$pkg_path"
-                npm version "$VERSION_TYPE" --no-git-tag-version
+                eval $VERSION_CMD
                 NEW_VERSION=$(jq -r '.version' package.json)
                 cd - > /dev/null
               fi
@@ -157,12 +185,17 @@ jobs:
           done
 
           echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "📦 New version: $NEW_VERSION"
 
-          # Commit version changes
-          git add packages/*/package.json build-tools/*/package.json 2>/dev/null || true
-          if ! git diff --staged --quiet; then
-            git commit -m "chore: bump package versions ($VERSION_TYPE) to $NEW_VERSION"
-            git push
+          # Commit version changes (skip for dry run)
+          if [ "$DRY_RUN" != "true" ]; then
+            git add packages/*/package.json build-tools/*/package.json 2>/dev/null || true
+            if ! git diff --staged --quiet; then
+              git commit -m "chore: bump package versions ($VERSION_TYPE) to $NEW_VERSION"
+              git push
+            fi
+          else
+            echo "🔍 Dry run - skipping version commit"
           fi
 
   publish-codeartifact:
@@ -172,6 +205,7 @@ jobs:
     if: |
       always() &&
       needs.version-bump.result == 'success' &&
+      github.event.inputs.dry_run != 'true' &&
       (github.event.inputs.publish_target == 'codeartifact' || github.event.inputs.publish_target == 'both')
     steps:
       - name: Checkout code
@@ -274,6 +308,7 @@ jobs:
     if: |
       always() &&
       needs.version-bump.result == 'success' &&
+      github.event.inputs.dry_run != 'true' &&
       (github.event.inputs.publish_target == 'github' || github.event.inputs.publish_target == 'both')
     steps:
       - name: Checkout code
@@ -355,24 +390,34 @@ jobs:
           echo "**Version:** ${{ needs.version-bump.outputs.new-version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ github.event.inputs.publish_target }}" >> $GITHUB_STEP_SUMMARY
           echo "**Version Bump:** ${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ github.event.inputs.version }}" == pre* ]]; then
+            echo "**Prerelease ID:** ${{ github.event.inputs.preid }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            echo "**Mode:** 🔍 Dry Run (no publish)" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "### Results" >> $GITHUB_STEP_SUMMARY
 
-          if [ "${{ needs.publish-codeartifact.result }}" == "success" ]; then
-            echo "- ✅ **CodeArtifact**: Published successfully" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ needs.publish-codeartifact.result }}" == "skipped" ]; then
-            echo "- ⏭️ **CodeArtifact**: Skipped" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            echo "- 🔍 **Dry Run**: Build and test completed, no packages published" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- ❌ **CodeArtifact**: Failed" >> $GITHUB_STEP_SUMMARY
-          fi
+            if [ "${{ needs.publish-codeartifact.result }}" == "success" ]; then
+              echo "- ✅ **CodeArtifact**: Published successfully" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ needs.publish-codeartifact.result }}" == "skipped" ]; then
+              echo "- ⏭️ **CodeArtifact**: Skipped" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ❌ **CodeArtifact**: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
 
-          if [ "${{ needs.publish-github.result }}" == "success" ]; then
-            echo "- ✅ **GitHub Packages**: Published successfully" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ needs.publish-github.result }}" == "skipped" ]; then
-            echo "- ⏭️ **GitHub Packages**: Skipped" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- ❌ **GitHub Packages**: Failed" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ needs.publish-github.result }}" == "success" ]; then
+              echo "- ✅ **GitHub Packages**: Published successfully" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ needs.publish-github.result }}" == "skipped" ]; then
+              echo "- ⏭️ **GitHub Packages**: Skipped" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- ❌ **GitHub Packages**: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY

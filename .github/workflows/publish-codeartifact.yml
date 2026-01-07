@@ -106,7 +106,7 @@ jobs:
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/zod2ts
+            --filter=@saga-ed/soa-zod2ts
 
       - name: Type check publishable packages
         run: |
@@ -119,7 +119,7 @@ jobs:
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/zod2ts
+            --filter=@saga-ed/soa-zod2ts
 
       - name: Build publishable packages
         run: |
@@ -132,7 +132,7 @@ jobs:
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/zod2ts
+            --filter=@saga-ed/soa-zod2ts
 
       - name: Test publishable packages
         run: |
@@ -145,7 +145,7 @@ jobs:
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/zod2ts
+            --filter=@saga-ed/soa-zod2ts
 
   version-bump:
     name: Version Bump

@@ -94,9 +94,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build publishable packages
+        run: |
+          # Build first - required for type checking packages with internal deps
+          pnpm turbo run build --filter=@saga-ed/soa-config \
+            --filter=@saga-ed/soa-logger \
+            --filter=@saga-ed/soa-pubsub-core \
+            --filter=@saga-ed/soa-api-util \
+            --filter=@saga-ed/soa-trpc-codegen \
+            --filter=@saga-ed/soa-tgql-codegen \
+            --filter=@saga-ed/soa-db \
+            --filter=@saga-ed/soa-api-core \
+            --filter=@saga-ed/soa-pubsub-client \
+            --filter=@saga-ed/soa-zod2ts
+
       - name: Lint publishable packages
         run: |
-          # Only lint packages that will be published
           pnpm turbo run lint --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
             --filter=@saga-ed/soa-pubsub-core \
@@ -111,19 +124,6 @@ jobs:
       - name: Type check publishable packages
         run: |
           pnpm turbo run check-types --filter=@saga-ed/soa-config \
-            --filter=@saga-ed/soa-logger \
-            --filter=@saga-ed/soa-pubsub-core \
-            --filter=@saga-ed/soa-api-util \
-            --filter=@saga-ed/soa-trpc-codegen \
-            --filter=@saga-ed/soa-tgql-codegen \
-            --filter=@saga-ed/soa-db \
-            --filter=@saga-ed/soa-api-core \
-            --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-zod2ts
-
-      - name: Build publishable packages
-        run: |
-          pnpm turbo run build --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \

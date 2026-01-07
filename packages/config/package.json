@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-config",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "scripts": {
     "dev": "tsup --watch",

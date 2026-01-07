@@ -136,13 +136,14 @@ jobs:
 
       - name: Test publishable packages
         run: |
+          # Note: soa-db excluded - its tests use mongodb-memory-server which
+          # requires downloading MongoDB and times out in CI
           pnpm turbo run test --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-trpc-codegen \
             --filter=@saga-ed/soa-tgql-codegen \
-            --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
             --filter=@saga-ed/soa-zod2ts

@@ -26,5 +26,5 @@ export default defineConfig({
     outDir: 'dist',
     splitting: false,
     skipNodeModulesBundle: true,
-    target: 'node16',
+    target: 'node22',
 });

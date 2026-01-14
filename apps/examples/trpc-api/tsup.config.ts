@@ -10,6 +10,6 @@ export default defineConfig((options: Options) => ({
   outDir: 'dist',
   splitting: false,
   skipNodeModulesBundle: true,
-  target: 'node16',
+  target: 'node22',
   ...options,
 }));

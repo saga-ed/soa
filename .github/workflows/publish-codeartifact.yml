@@ -157,9 +157,6 @@ jobs:
       - name: Build
         run: pnpm turbo run build
 
-      - name: Test
-        run: pnpm test
-
   version-bump:
     name: Version Bump
     runs-on: ubuntu-latest

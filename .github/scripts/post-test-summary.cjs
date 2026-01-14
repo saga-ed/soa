@@ -14,6 +14,12 @@ module.exports = async ({ github, context, core }) => {
     const fs = require('fs');
     const path = require('path');
 
+    // Validate PR context
+    if (!context.issue?.number) {
+        core.warning('No PR number found in context, skipping comment');
+        return;
+    }
+
     // Merge test results from multiple JSON files
     const resultsDir = 'test-results';
     const merged = {
@@ -64,7 +70,8 @@ module.exports = async ({ github, context, core }) => {
     const packageStats = {};
     for (const file of merged.testResults || []) {
         // Extract package name from path like /home/.../packages/api-core/src/...
-        const match = file.name.match(/packages\/([^/]+)\//);
+        // or /home/.../build-tools/zod2ts/...
+        const match = file.name.match(/(?:packages|build-tools)\/([^/]+)\//);
         const pkg = match ? match[1] : null;
         if (!pkg) continue;
 
@@ -85,7 +92,9 @@ module.exports = async ({ github, context, core }) => {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([pkg, stats]) => {
             const icon = stats.failed > 0 ? '❌' : '✅';
-            return `| ${icon} @saga-ed/soa-${pkg} | ${stats.total} | ${stats.passed} | ${stats.failed} |`;
+            // build-tools packages use @saga-ed prefix, packages use @saga-ed/soa- prefix
+            const pkgName = pkg === 'zod2ts' ? `@saga-ed/${pkg}` : `@saga-ed/soa-${pkg}`;
+            return `| ${icon} ${pkgName} | ${stats.total} | ${stats.passed} | ${stats.failed} |`;
         })
         .join('\n');
 

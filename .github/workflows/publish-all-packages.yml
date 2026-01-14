@@ -237,7 +237,7 @@ jobs:
 
       - name: Run tests for affected packages
         run: |
-          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=test-results-${{ matrix.package }}.json
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
         continue-on-error: true
 
       - name: Upload test results
@@ -245,7 +245,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.package }}
-          path: test-results-${{ matrix.package }}.json
+          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
           retention-days: 1
           if-no-files-found: ignore
 
@@ -307,7 +307,7 @@ jobs:
 
       - name: Run tests for affected packages
         run: |
-          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=test-results-${{ matrix.package }}.json
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
         continue-on-error: true
 
       - name: Upload test results
@@ -315,7 +315,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.package }}
-          path: test-results-${{ matrix.package }}.json
+          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
           retention-days: 1
           if-no-files-found: ignore
 
@@ -377,7 +377,7 @@ jobs:
 
       - name: Run tests for affected packages
         run: |
-          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=test-results-${{ matrix.package }}.json
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
         continue-on-error: true
 
       - name: Upload test results
@@ -385,7 +385,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.package }}
-          path: test-results-${{ matrix.package }}.json
+          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
           retention-days: 1
           if-no-files-found: ignore
 
@@ -447,7 +447,7 @@ jobs:
 
       - name: Run tests for affected packages
         run: |
-          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=test-results-${{ matrix.package }}.json
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
         continue-on-error: true
 
       - name: Upload test results
@@ -455,7 +455,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.package }}
-          path: test-results-${{ matrix.package }}.json
+          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
           retention-days: 1
           if-no-files-found: ignore
 

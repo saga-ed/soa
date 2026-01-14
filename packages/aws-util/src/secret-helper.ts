@@ -3,9 +3,9 @@ import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { inject, injectable } from 'inversify';
-import YAML from 'yaml';
+import * as YAML from 'yaml';
 import type { ILogger } from '@saga-ed/soa-logger';
-import { ensureError } from '../utils/error-util.js';
+import { ensureError } from '@saga-ed/soa-api-util';
 
 export const AWS_REGION = 'us-west-2';
 

@@ -1,5 +1,5 @@
 {
-  "name": "@saga-ed/redis-core",
+  "name": "@saga-ed/soa-redis-core",
   "version": "1.0.0",
   "private": false,
   "type": "module",

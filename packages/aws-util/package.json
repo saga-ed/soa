@@ -1,6 +1,6 @@
 {
-  "name": "@saga-ed/soa-api-util",
-  "version": "1.0.1",
+  "name": "@saga-ed/soa-aws-util",
+  "version": "1.0.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,26 +13,31 @@
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "zod": "^4.3.5"
+    "@aws-sdk/client-secrets-manager": "^3.968.0",
+    "@aws-sdk/client-sts": "^3.968.0",
+    "@saga-ed/soa-api-util": "workspace:*",
+    "inversify": "^6.2.2",
+    "reflect-metadata": "^0.2.2",
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
-    "@saga-ed/soa-logger": "workspace:*",
     "@saga-ed/soa-typescript-config": "workspace:*",
+    "@saga-ed/soa-logger": "workspace:*",
     "@types/node": "latest",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3"
   },
   "publishConfig": {
-    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/",
+    "registry": "https://npm.pkg.github.com",
     "access": "public"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/hipponot/saga-soa.git",
-    "directory": "packages/api-util"
+    "directory": "packages/aws-util"
   }
 }

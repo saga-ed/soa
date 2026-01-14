@@ -147,6 +147,18 @@ jobs:
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
             --filter=@saga-ed/soa-zod2ts
+            
+      - name: Lint
+        run: pnpm turbo run lint
+
+      - name: Type check
+        run: pnpm turbo run check-types
+
+      - name: Build
+        run: pnpm turbo run build
+
+      - name: Test
+        run: pnpm test
 
   version-bump:
     name: Version Bump

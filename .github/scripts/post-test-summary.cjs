@@ -2,6 +2,9 @@
  * Posts test summary as a PR comment
  * Used by the pr-test-summary job in publish-all-packages.yml
  *
+ * Reads and merges multiple test result JSON files from the test-results directory
+ * (uploaded as artifacts from each layer job)
+ *
  * @param {Object} params
  * @param {Object} params.github - GitHub API client from actions/github-script
  * @param {Object} params.context - GitHub Actions context
@@ -9,29 +12,57 @@
  */
 module.exports = async ({ github, context, core }) => {
     const fs = require('fs');
+    const path = require('path');
 
-    // Parse test results
-    let results;
+    // Merge test results from multiple JSON files
+    const resultsDir = 'test-results';
+    const merged = {
+        numTotalTestSuites: 0,
+        numPassedTestSuites: 0,
+        numFailedTestSuites: 0,
+        numPendingTestSuites: 0,
+        numTotalTests: 0,
+        numPassedTests: 0,
+        numFailedTests: 0,
+        numPendingTests: 0,
+        testResults: [],
+    };
+
     try {
-        results = JSON.parse(fs.readFileSync('test-results.json', 'utf8'));
+        if (fs.existsSync(resultsDir)) {
+            const files = fs.readdirSync(resultsDir).filter((f) => f.endsWith('.json'));
+            core.info(`Found ${files.length} test result files`);
+
+            for (const file of files) {
+                try {
+                    const filePath = path.join(resultsDir, file);
+                    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+
+                    merged.numTotalTestSuites += data.numTotalTestSuites || 0;
+                    merged.numPassedTestSuites += data.numPassedTestSuites || 0;
+                    merged.numFailedTestSuites += data.numFailedTestSuites || 0;
+                    merged.numPendingTestSuites += data.numPendingTestSuites || 0;
+                    merged.numTotalTests += data.numTotalTests || 0;
+                    merged.numPassedTests += data.numPassedTests || 0;
+                    merged.numFailedTests += data.numFailedTests || 0;
+                    merged.numPendingTests += data.numPendingTests || 0;
+                    merged.testResults.push(...(data.testResults || []));
+
+                    core.info(`Merged ${file}: ${data.numTotalTests || 0} tests`);
+                } catch (e) {
+                    core.warning(`Could not parse ${file}: ${e.message}`);
+                }
+            }
+        } else {
+            core.warning(`Results directory not found: ${resultsDir}`);
+        }
     } catch (e) {
-        core.warning(`Could not read test results: ${e.message}`);
-        results = {
-            numTotalTests: 0,
-            numPassedTests: 0,
-            numFailedTests: 0,
-            numPendingTests: 0,
-            numTotalTestSuites: 0,
-            numPassedTestSuites: 0,
-            numFailedTestSuites: 0,
-            numPendingTestSuites: 0,
-            testResults: [],
-        };
+        core.warning(`Error reading test results: ${e.message}`);
     }
 
     // Build per-package stats by aggregating results from test files
     const packageStats = {};
-    for (const file of results.testResults || []) {
+    for (const file of merged.testResults || []) {
         // Extract package name from path like /home/.../packages/api-core/src/...
         const match = file.name.match(/packages\/([^/]+)\//);
         const pkg = match ? match[1] : null;
@@ -59,7 +90,7 @@ module.exports = async ({ github, context, core }) => {
         .join('\n');
 
     // Build comment body
-    const statusIcon = (results.numFailedTests || 0) > 0 ? '❌' : '✅';
+    const statusIcon = (merged.numFailedTests || 0) > 0 ? '❌' : '✅';
     const anchor = '<!-- saga-soa-test-summary -->';
     const now = new Date().toISOString();
     const branchSha = context.payload.pull_request?.head?.sha?.substring(0, 7) || 'unknown';
@@ -72,10 +103,10 @@ module.exports = async ({ github, context, core }) => {
 
 | Status | Suites | Tests |
 |--------|--------|-------|
-| ✅ Passed | ${results.numPassedTestSuites || 0} | ${results.numPassedTests || 0} |
-| ❌ Failed | ${results.numFailedTestSuites || 0} | ${results.numFailedTests || 0} |
-| ⏭️ Skipped | ${results.numPendingTestSuites || 0} | ${results.numPendingTests || 0} |
-| **Total** | **${results.numTotalTestSuites || 0}** | **${results.numTotalTests || 0}** |
+| ✅ Passed | ${merged.numPassedTestSuites || 0} | ${merged.numPassedTests || 0} |
+| ❌ Failed | ${merged.numFailedTestSuites || 0} | ${merged.numFailedTests || 0} |
+| ⏭️ Skipped | ${merged.numPendingTestSuites || 0} | ${merged.numPendingTests || 0} |
+| **Total** | **${merged.numTotalTestSuites || 0}** | **${merged.numTotalTests || 0}** |
 
 ### Package Results
 | Package | Tests | Passed | Failed |

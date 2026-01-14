@@ -295,7 +295,18 @@ jobs:
         run: pnpm turbo run build --filter=@saga-ed/soa-${{ matrix.package }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: |
+          pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}... -- --reporter=json --outputFile=test-results-${{ matrix.package }}.json
+        continue-on-error: true
+
+      - name: Upload test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package }}
+          path: test-results-${{ matrix.package }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
   # Layer 1: Packages that depend only on Layer 0
   test-and-lint-layer-1:
@@ -347,7 +358,18 @@ jobs:
         run: pnpm turbo run build --filter=@saga-ed/soa-${{ matrix.package }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: |
+          pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}... -- --reporter=json --outputFile=test-results-${{ matrix.package }}.json
+        continue-on-error: true
+
+      - name: Upload test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package }}
+          path: test-results-${{ matrix.package }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
   # Layer 2: Packages that depend on Layer 0 and/or Layer 1
   test-and-lint-layer-2:
@@ -399,7 +421,18 @@ jobs:
         run: pnpm turbo run build --filter=@saga-ed/soa-${{ matrix.package }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: |
+          pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}... -- --reporter=json --outputFile=test-results-${{ matrix.package }}.json
+        continue-on-error: true
+
+      - name: Upload test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package }}
+          path: test-results-${{ matrix.package }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
   # Layer 3: Packages that depend on previous layers
   test-and-lint-layer-3:
@@ -451,7 +484,18 @@ jobs:
         run: pnpm turbo run build --filter=@saga-ed/soa-${{ matrix.package }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: |
+          pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}... -- --reporter=json --outputFile=test-results-${{ matrix.package }}.json
+        continue-on-error: true
+
+      - name: Upload test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package }}
+          path: test-results-${{ matrix.package }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
   # PR Test Summary - Posts test results as a PR comment
   pr-test-summary:
@@ -465,40 +509,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Download all test results
+        uses: actions/download-artifact@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          pattern: test-results-*
+          path: test-results
+          merge-multiple: true
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Get pnpm store directory
-        shell: bash
+      - name: List downloaded artifacts
         run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build packages
-        run: pnpm turbo run build
-
-      - name: Run tests with JSON reporter
-        id: test
-        continue-on-error: true
-        run: |
-          pnpm test -- --reporter=json --outputFile=test-results.json 2>&1 || true
+          echo "Downloaded test results:"
+          ls -la test-results/ 2>/dev/null || echo "No test results directory"
+          find test-results -name "*.json" 2>/dev/null || echo "No JSON files found"
 
       - name: Post PR Comment
         uses: actions/github-script@v7

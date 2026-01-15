@@ -17,7 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "zod": "^4.3.5"
+    "zod": "^4.2.1"
   },
   "devDependencies": {
     "@saga-ed/soa-logger": "workspace:*",

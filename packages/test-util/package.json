@@ -1,7 +1,6 @@
 {
-  "name": "@saga-ed/soa-redis-core",
+  "name": "@saga-ed/soa-test-util",
   "version": "1.0.0",
-  "private": false,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,21 +18,19 @@
   },
   "dependencies": {
     "@saga-ed/soa-api-util": "workspace:*",
-    "@saga-ed/soa-logger": "workspace:*",
-    "inversify": "^6.2.2",
-    "redis": "^5.10.0"
+    "fishery": "^2.4.0"
   },
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
     "tsup": "^8.5.1"
   },
   "publishConfig": {
-    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/",
+    "registry": "https://npm.pkg.github.com",
     "access": "public"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/hipponot/saga-soa.git",
-    "directory": "packages/redis-core"
+    "directory": "packages/test-util"
   }
 }

@@ -1,7 +1,6 @@
 {
   "name": "@saga-ed/soa-rabbitmq",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -30,5 +29,9 @@
   },
   "exports": {
     ".": "./dist/index.js"
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/",
+    "access": "public"
   }
 }

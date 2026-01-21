@@ -19,6 +19,7 @@ export const DateTimeRangeSchema:z.ZodType<{ start: Date; end: Date }> = z.objec
   start: z.date(),
   end: z.date(),
 });
+export type DateTimeRange = z.infer<typeof DateTimeRangeSchema>;
 
 export const LocalDateRangeSchema:z.ZodType<{ start: string; end: string }> = z.object({
   start: LocalDateSchema,

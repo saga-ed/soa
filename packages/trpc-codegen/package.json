@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-trpc-codegen",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "type": "module",
   "description": "Reusable tRPC code generation utilities for saga-soa monorepo",
   "main": "dist/index.js",

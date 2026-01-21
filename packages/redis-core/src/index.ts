@@ -1,1 +1,1 @@
-export { RedisConnectionManager } from './redis-connection-manager.js';
+export { RedisConnectionManager, type RedisConfig } from './redis-connection-manager.js';

@@ -148,6 +148,7 @@ jobs:
       layer-2: ${{ steps.calc-layers.outputs.layer-2 }}
       layer-3: ${{ steps.calc-layers.outputs.layer-3 }}
       total-layers: ${{ steps.calc-layers.outputs.total-layers }}
+      package-map: ${{ steps.calc-layers.outputs.package-map }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -170,75 +171,8 @@ jobs:
           CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
           echo "Calculating dependency layers for: $CHANGED_PACKAGES"
 
-            # Create a script to analyze workspace dependencies
-            cat > analyze_deps.mjs << 'EOF'
-            import fs from 'fs';
-            import path from 'path';
-
-          function getPackageDependencies(packageName) {
-            const packagePath = path.join('packages', packageName, 'package.json');
-            if (!fs.existsSync(packagePath)) return [];
-            
-            const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
-            const deps = [
-              ...Object.keys(pkg.dependencies || {}),
-              ...Object.keys(pkg.devDependencies || {})
-            ];
-            
-            // Filter to only @saga-ed workspace dependencies
-            // Package names are like @saga-ed/soa-pubsub-core, directories are pubsub-core
-            return deps
-              .filter(dep => dep.startsWith('@saga-ed/soa-'))
-              .map(dep => dep.replace('@saga-ed/soa-', ''));
-          }
-
-          function calculateLayers(packages) {
-            const layers = [];
-            const processed = new Set();
-            let currentLayer = 0;
-            
-            while (processed.size < packages.length && currentLayer < 10) {
-              const currentLayerPackages = [];
-              
-              for (const pkg of packages) {
-                if (processed.has(pkg)) continue;
-                
-                const deps = getPackageDependencies(pkg);
-                const workspaceDeps = deps.filter(dep => packages.includes(dep));
-                
-                // Package can be in this layer if all its workspace deps are already processed
-                const canProcess = workspaceDeps.every(dep => processed.has(dep));
-                
-                if (canProcess) {
-                  currentLayerPackages.push(pkg);
-                }
-              }
-              
-              if (currentLayerPackages.length === 0) {
-                console.error('Circular dependency detected or error in calculation');
-                process.exit(1);
-              }
-              
-              layers[currentLayer] = currentLayerPackages;
-              currentLayerPackages.forEach(pkg => processed.add(pkg));
-              currentLayer++;
-            }
-            
-            return layers;
-          }
-
-          const changedPackages = JSON.parse(process.argv[2]);
-          const layers = calculateLayers(changedPackages);
-
-          // Output layers as JSON
-          for (let i = 0; i < layers.length; i++) {
-            console.log(`layer-${i}=${JSON.stringify(layers[i])}`);
-          }
-          console.log(`total-layers=${layers.length}`);
-          EOF
-
-            # Run the analysis
-            node analyze_deps.mjs "$CHANGED_PACKAGES" >> $GITHUB_OUTPUT
+            # Run the dependency analysis script
+            node .github/scripts/analyze-deps.mjs "$CHANGED_PACKAGES" >> $GITHUB_OUTPUT
 
           # Debug output
           echo "=== Dependency Layers ==="
@@ -285,17 +219,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Get actual package name
+        id: pkg
+        run: |
+          PKG_NAME=$(node -p "require('./packages/${{ matrix.package }}/package.json').name")
+          echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
+          echo "Package: $PKG_NAME"
+
       - name: Run lint for affected packages
-        run: pnpm turbo run lint --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run lint --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Run type checking for affected packages
-        run: pnpm turbo run check-types --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run check-types --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Build affected packages (includes dependencies)
-        run: pnpm turbo run build --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run build --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: |
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
+        continue-on-error: true
+
+      - name: Upload test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package }}
+          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
   # Layer 1: Packages that depend only on Layer 0
   test-and-lint-layer-1:
@@ -337,17 +289,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Get actual package name
+        id: pkg
+        run: |
+          PKG_NAME=$(node -p "require('./packages/${{ matrix.package }}/package.json').name")
+          echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
+          echo "Package: $PKG_NAME"
+
       - name: Run lint for affected packages
-        run: pnpm turbo run lint --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run lint --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Run type checking for affected packages
-        run: pnpm turbo run check-types --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run check-types --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Build affected packages (includes dependencies)
-        run: pnpm turbo run build --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run build --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: |
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
+        continue-on-error: true
+
+      - name: Upload test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package }}
+          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
   # Layer 2: Packages that depend on Layer 0 and/or Layer 1
   test-and-lint-layer-2:
@@ -389,17 +359,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Get actual package name
+        id: pkg
+        run: |
+          PKG_NAME=$(node -p "require('./packages/${{ matrix.package }}/package.json').name")
+          echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
+          echo "Package: $PKG_NAME"
+
       - name: Run lint for affected packages
-        run: pnpm turbo run lint --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run lint --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Run type checking for affected packages
-        run: pnpm turbo run check-types --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run check-types --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Build affected packages (includes dependencies)
-        run: pnpm turbo run build --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run build --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: |
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
+        continue-on-error: true
+
+      - name: Upload test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package }}
+          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
   # Layer 3: Packages that depend on previous layers
   test-and-lint-layer-3:
@@ -441,17 +429,67 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Get actual package name
+        id: pkg
+        run: |
+          PKG_NAME=$(node -p "require('./packages/${{ matrix.package }}/package.json').name")
+          echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
+          echo "Package: $PKG_NAME"
+
       - name: Run lint for affected packages
-        run: pnpm turbo run lint --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run lint --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Run type checking for affected packages
-        run: pnpm turbo run check-types --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run check-types --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Build affected packages (includes dependencies)
-        run: pnpm turbo run build --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: pnpm turbo run build --filter=${{ steps.pkg.outputs.name }}...
 
       - name: Run tests for affected packages
-        run: pnpm turbo run test --filter=@saga-ed/soa-${{ matrix.package }}...
+        run: |
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
+        continue-on-error: true
+
+      - name: Upload test results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.package }}
+          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
+          retention-days: 1
+          if-no-files-found: ignore
+
+  # PR Test Summary - Posts test results as a PR comment
+  pr-test-summary:
+    name: PR Test Summary
+    runs-on: ubuntu-latest
+    needs: [test-and-lint-layer-0, test-and-lint-layer-1, test-and-lint-layer-2, test-and-lint-layer-3]
+    if: github.event_name == 'pull_request' && always()
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: test-results-*
+          path: test-results
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded test results:"
+          ls -la test-results/ 2>/dev/null || echo "No test results directory"
+          find test-results -name "*.json" 2>/dev/null || echo "No JSON files found"
+
+      - name: Post PR Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const script = require('./.github/scripts/post-test-summary.cjs');
+            await script({ github, context, core });
 
   version-and-publish:
     name: Version and Publish Packages

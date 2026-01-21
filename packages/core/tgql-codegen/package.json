@@ -1,0 +1,65 @@
+{
+  "name": "@saga-ed/soa-tgql-codegen",
+  "version": "1.0.1",
+  "type": "module",
+  "description": "TypeGraphQL code generation utilities for saga-soa monorepo",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "tgql-codegen": "./bin/tgql-codegen.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run --passWithNoTests",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "chokidar": "^3.6.0",
+    "type-graphql": "^2.0.0-rc.2",
+    "graphql": "^16.8.1",
+    "glob": "^10.3.10",
+    "reflect-metadata": "^0.2.1",
+    "@graphql-codegen/cli": "^5.0.0",
+    "@graphql-codegen/typescript": "^4.0.0",
+    "@graphql-codegen/typescript-operations": "^4.0.0"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "^22.10.1",
+    "tsup": "^8.3.5",
+    "typescript": "5.8.2",
+    "vitest": "^2.1.8"
+  },
+  "keywords": [
+    "graphql",
+    "typegraphql",
+    "codegen",
+    "typescript",
+    "saga-soa"
+  ],
+  "author": "saga-soa",
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/tgql-codegen"
+  }
+}

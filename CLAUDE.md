@@ -43,6 +43,7 @@ pnpm typecheck      # Type check
 
 - See `claude/` for Claude-specific context
 - See `claude/frontend/` for web framework patterns
+- See `claude/tooling/pnpm.md` for pnpm installation rules
 - See `apps/CLAUDE.md` for application details
 - See `packages/CLAUDE.md` for package details
 

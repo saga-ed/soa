@@ -20,13 +20,13 @@ Level 1: /CLAUDE.md
 Level 2: /apps/CLAUDE.md  &  /packages/CLAUDE.md
          Category overviews
               │
-Level 3: /apps/web/CLAUDE.md  &  /apps/api/CLAUDE.md
+Level 3: /apps/web/CLAUDE.md  &  /apps/node/CLAUDE.md
          Runtime-specific context (this is the key innovation)
               │
-Level 4: /apps/api/trpc-api/CLAUDE.md
+Level 4: /apps/node/trpc-api/CLAUDE.md
          Individual project documentation
               │
-Level 5: /apps/api/trpc-api/sectors/iam/CLAUDE.md
+Level 5: /apps/node/trpc-api/sectors/iam/CLAUDE.md
          Leaf-level details (only where needed)
 ```
 
@@ -41,7 +41,7 @@ The key insight is that **frontend apps and backend services need different cont
 - Client-side auth patterns
 - `VITE_*` environment variables
 
-**Backend (`apps/api/`):**
+**Backend (`apps/node/`):**
 - Node.js 20+ runtime
 - Docker containerization
 - ECS deployment
@@ -62,8 +62,8 @@ The key insight is that **frontend apps and backend services need different cont
 
 ## Shared Infrastructure
 Uses saga-soa infrastructure. See:
-- soa/docs/architecture.md - Core patterns
-- soa/docs/conventions.md - Coding standards
+- soa/claude/architecture.md - Core patterns
+- soa/claude/conventions.md - Coding standards
 ```
 
 This keeps documentation DRY while allowing project-specific overrides.
@@ -78,7 +78,7 @@ Claude loads context progressively:
 
 ## Token Budget
 
-Each CLAUDE.md file targets ~500 tokens (~375 words). Detailed information goes in `docs/` subdirectories and is linked from CLAUDE.md.
+Each CLAUDE.md file targets ~500 tokens (~375 words). Detailed information goes in `claude/` subdirectories and is linked from CLAUDE.md.
 
 ## What Gets Documented Where
 
@@ -86,10 +86,10 @@ Each CLAUDE.md file targets ~500 tokens (~375 words). Detailed information goes 
 |-------------|----------|
 | Tech stack overview | Root CLAUDE.md |
 | Build/test commands | Root CLAUDE.md |
-| Runtime APIs | Tier CLAUDE.md (web/ or api/) |
-| Deployment patterns | docs/deployment.md |
-| Code conventions | docs/conventions.md |
-| Architecture decisions | decisions/*.md (ADRs) |
+| Runtime APIs | Tier CLAUDE.md (web/ or node/) |
+| Deployment patterns | claude/deployment.md |
+| Code conventions | claude/conventions.md |
+| Architecture decisions | claude/decisions/*.md (ADRs) |
 | Project-specific gotchas | Project CLAUDE.md |
 
 ## Validation

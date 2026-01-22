@@ -25,7 +25,7 @@ export class MessagePublisher {
       throw new Error(`Channel ${channelName} not found, request it first using MessagePublisher.requestChannel()`);
     }
 
-    await channel.assertQueue(queueName, { durable: false });
+    await channel.assertQueue(queueName);
     channel.sendToQueue(queueName, Buffer.from(JSON.stringify(message)));
   }
 }

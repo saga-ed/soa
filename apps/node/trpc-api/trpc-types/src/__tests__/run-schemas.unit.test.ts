@@ -8,7 +8,7 @@ import {
   type UpdateRunInput,
   type GetRunInput,
   type GetRunsByProjectInput,
-} from '../../index.js';
+} from '../index.js';
 
 // Simple test data since we don't have the fixtures anymore
 const validCreateRunInput = {

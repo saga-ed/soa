@@ -6,7 +6,7 @@ import {
   type CreateProjectInput,
   type UpdateProjectInput,
   type GetProjectInput,
-} from '../../index.js';
+} from '../index.js';
 
 // Simple test data since we don't have the fixtures anymore
 const validCreateProjectInput = {

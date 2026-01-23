@@ -14,7 +14,7 @@ import {
   type UpdateRunInput,
   type GetRunInput,
   type GetRunsByProjectInput,
-} from '../../index.js';
+} from '../index.js';
 
 // Simple test data
 const validCreateProjectInput: CreateProjectInput = {

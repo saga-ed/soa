@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MockAdapter } from '../mocks/mock-adapter.js';
-import type { EventEnvelope } from '../../types/event.js';
+import { MockAdapter } from './mocks/mock-adapter.js';
+import type { EventEnvelope } from '../types/event.js';
 
 describe('Adapter Flow Integration', () => {
   let adapter: MockAdapter;

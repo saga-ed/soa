@@ -13,8 +13,8 @@ import {
   pongPayloadSchema,
   type PingPayload,
   type PongPayload
-} from '../../fixtures/test-events.js';
-import type { EventEnvelope, AbsAction } from '../../../types/index.js';
+} from './fixtures/test-events.js';
+import type { EventEnvelope, AbsAction } from '../../types/index.js';
 
 describe('Event Construction Tests', () => {
   describe('Ping Event (CSE)', () => {

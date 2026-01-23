@@ -1,6 +1,6 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
-import type { AppRouter } from '../../index.js';
-import { CreateProjectSchema, CreateRunSchema } from '../../index.js';
+import type { AppRouter } from '../index.js';
+import { CreateProjectSchema, CreateRunSchema } from '../index.js';
 
 describe('Generated Types Integration', () => {
   it('should export AppRouter type that matches tRPC expectations', () => {

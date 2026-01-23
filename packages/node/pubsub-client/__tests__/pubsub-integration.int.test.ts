@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
-import { TRPCPubSubClient } from '../../src/trpc-pubsub-client.js';
+import { TRPCPubSubClient } from '../src/trpc-pubsub-client.js';
 import type { EventEnvelope } from '@saga-ed/soa-pubsub-core';
-import { createTestServer, waitForServer, type TestServer } from './test-server.js';
+import { createTestServer, waitForServer, type TestServer } from './integration/test-server.js';
 
 describe('PubSub Integration Tests', () => {
   let client: TRPCPubSubClient;

@@ -7,7 +7,9 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-describe('TGQL Schema Generation', () => {
+// Skip: Moving away from tgql-codegen in favor of static routing.
+// Will create new tests when example is switched to static routing and tgql-codegen is removed.
+describe.skip('TGQL Schema Generation', () => {
   it('should validate existing manifest structure', () => {
     // Test against the existing generated manifest instead of running codegen
     const manifestPath = resolve(__dirname, '../../generated/manifest.json');

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { TRPCPubSubClient } from '../../src/trpc-pubsub-client.js';
+import { TRPCPubSubClient } from '../src/trpc-pubsub-client.js';
 import type { EventEnvelope, EventName, CSEEventWithResponse, SSEEvent, CSEEvent } from '@saga-ed/soa-pubsub-core';
 
 describe('TRPCPubSubClient', () => {

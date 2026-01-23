@@ -37,8 +37,10 @@
       ],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "src/**/*.test.ts",
-        "src/**/*.spec.ts",
+        "src/**/*.unit.test.ts",
+        "src/**/*.int.test.ts",
+        "**/__tests__/**/*.unit.test.ts",
+        "**/__tests__/**/*.int.test.ts",
         "vitest.config.ts"
       ]
     },

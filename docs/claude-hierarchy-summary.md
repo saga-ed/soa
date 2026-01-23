@@ -61,9 +61,11 @@ The key insight is that **frontend apps and backend services need different cont
 # In thrive/CLAUDE.md:
 
 ## Shared Infrastructure
-Uses saga-soa infrastructure. See:
-- soa/claude/architecture.md - Core patterns
-- soa/claude/conventions.md - Coding standards
+
+Uses infrastructure from [saga-soa](~/dev/soa):
+- See [soa/claude/frontend/sveltekit/](~/dev/soa/claude/frontend/sveltekit/) for SvelteKit patterns
+- See [soa/claude/tooling/pnpm.md](~/dev/soa/claude/tooling/pnpm.md) for pnpm installation rules
+- See [soa/packages/node/](~/dev/soa/packages/node/) for Node.js packages
 ```
 
 This keeps documentation DRY while allowing project-specific overrides.

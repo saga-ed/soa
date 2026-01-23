@@ -7,6 +7,11 @@
     "registry": "https://npm.pkg.github.com",
     "access": "public"
   },
+  "exports": {
+    "./base.json": "./base.json",
+    "./nextjs.json": "./nextjs.json",
+    "./react-library.json": "./react-library.json"
+  },
   "scripts": {
     "clean": ":"
   },

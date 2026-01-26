@@ -1,8 +1,10 @@
-# Manual Package Management - Quick Reference
+> **DEPRECATED**: All `@saga-ed` packages are now published to AWS CodeArtifact (`saga_js`). GitHub Packages is no longer used. See [CODEARTIFACT_SETUP.md](./CODEARTIFACT_SETUP.md) for current setup and [cicd-package-publishing.md](./cicd-package-publishing.md) for CI/CD publishing.
 
-## 🚀 For Development & Testing Purposes
+# Manual Package Management - Quick Reference (DEPRECATED)
 
-This guide covers manual package management for development and testing. For production, use the [automated GitHub workflow](./npm-registry-publishing.md).
+## For Development & Testing Purposes
+
+This guide previously covered manual GitHub Packages management. The content below is retained for historical reference only. Use `pnpm co:login` and the CodeArtifact workflow instead.
 
 ## 📋 Prerequisites for Publishing
 

@@ -1,0 +1,44 @@
+{
+  "name": "@saga-ed/soa-db",
+  "type": "module",
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "^24.0.3",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "@saga-ed/soa-config": "workspace:*"
+  },
+  "dependencies": {
+    "inversify": "^6.2.2",
+    "mongodb": "^5.7.0",
+    "mongodb-memory-server": "^10.1.4",
+    "reflect-metadata": "^0.2.2",
+    "zod": "3.25.67"
+  },
+  "version": "1.0.4",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    },
+    "./mocks/mock-mongo-provider": {
+      "import": "./dist/mocks/mock-mongo-provider.js",
+      "require": "./dist/mocks/mock-mongo-provider.js"
+    }
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/db"
+  }
+}

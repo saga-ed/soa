@@ -7,10 +7,10 @@ This document describes how SOA packages are published to AWS CodeArtifact and h
 SOA packages are published to AWS CodeArtifact under the `@saga-ed` scope:
 
 - **CodeArtifact Domain:** `saga`
-- **CodeArtifact Repository:** `saga_soa`
+- **CodeArtifact Repository:** `saga_js`
 - **AWS Account:** `531314149529`
 - **Region:** `us-west-2`
-- **Registry URL:** `https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/`
+- **Registry URL:** `https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/`
 
 ## Published Packages
 
@@ -88,7 +88,7 @@ GitHub Actions authenticates via the `SOADeployRole` IAM role (`/github-actions-
 Add to your project's `.npmrc`:
 
 ```npmrc
-@saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/
+@saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/
 ```
 
 ### 2. Authenticate
@@ -104,7 +104,7 @@ export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
   --output text)
 
 # Configure npm
-npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/:_authToken=$CODEARTIFACT_AUTH_TOKEN
+npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=$CODEARTIFACT_AUTH_TOKEN
 ```
 
 #### GitHub Actions
@@ -128,8 +128,8 @@ npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/sa
 
 - name: Configure npm for CodeArtifact
   run: |
-    npm config set @saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/
-    npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/:_authToken=$CODEARTIFACT_AUTH_TOKEN
+    npm config set @saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/
+    npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=$CODEARTIFACT_AUTH_TOKEN
 ```
 
 ### 3. Install Packages
@@ -153,7 +153,7 @@ Package may not be published yet. Check the CodeArtifact console:
 ```bash
 aws codeartifact list-package-versions \
   --domain saga \
-  --repository saga_soa \
+  --repository saga_js \
   --format npm \
   --package soa-logger \
   --namespace saga-ed
@@ -166,5 +166,5 @@ aws codeartifact list-package-versions \
 aws codeartifact list-packages \
   --domain saga \
   --domain-owner 531314149529 \
-  --repository saga_soa
+  --repository saga_js
 ```

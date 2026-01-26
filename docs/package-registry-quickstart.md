@@ -1,4 +1,6 @@
-# CodeArtifact & Cross-Repo Linking Quickstart
+# Package Registry Quickstart
+
+How `@saga-ed` and `@nimbee` packages are published, resolved, and linked across repos. Covers CodeArtifact authentication, `.npmrc` registry configuration, the `cross-repo-link.sh` on/off toggle for local development, publishing individual packages or the full SOA suite via CI, and the per-repo `soa-link.json` setup.
 
 All `@saga-ed/*` packages live in a single AWS CodeArtifact repository: **saga_js**.
 

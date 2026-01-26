@@ -59,21 +59,26 @@ Package paths follow the SOA monorepo layout: `packages/node/*` or `packages/cor
 
 ## Publishing
 
-Packages are published from SOA via GitHub Actions:
+### Single package (from the package directory)
+
+```bash
+cd packages/node/logger    # or any package with a publishConfig
+pnpm publish --no-git-checks --access public
+```
+
+This works for any package whose `.npmrc` or `publishConfig` points at `saga_js` — including non-SOA packages like `@nimbee/ars-lib` in the nimbee repo.
+
+### All SOA packages (CI workflow)
+
+The GitHub Actions workflow builds, tests, and publishes every SOA package in dependency order:
 
 ```bash
 gh workflow run publish-codeartifact.yml -f version=patch
 ```
 
-Or with options:
+Add `-f dry_run=true` to build and test without actually publishing.
 
-```bash
-gh workflow run publish-codeartifact.yml \
-  -f version=minor \
-  -f dry_run=true         # build and test only, don't publish
-```
-
-The workflow builds, tests, and publishes in dependency order. After publishing, consuming repos pick up new versions on their next `pnpm install` (with linking off).
+After publishing, consuming repos pick up new versions on their next `pnpm install` (with linking off).
 
 ## Repo Setup Checklist
 

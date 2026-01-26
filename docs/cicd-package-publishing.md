@@ -1,77 +1,46 @@
 # CI/CD Package Publishing Guide
 
-This document describes how to use the automated CI/CD pipeline for publishing `@saga-ed` packages to GitHub Packages.
+This document describes how to use the automated CI/CD pipeline for publishing `@saga-ed` packages to AWS CodeArtifact.
 
 ## Overview
 
 The CI/CD pipeline automatically:
 - 🔍 Detects which packages have changed using Turborepo
-- 🧪 Runs lint, type checking, and tests only on affected packages 
+- 🧪 Runs lint, type checking, and tests only on affected packages
 - 📦 Builds packages in dependency order
-- 🚀 Publishes only changed packages to GitHub Packages under the `@saga-ed` scope
+- 🚀 Publishes only changed packages to AWS CodeArtifact under the `@saga-ed` scope
 - 📊 Uses matrix jobs for parallel processing
 
 ## Triggering the Pipeline
 
-### 1. Automatic Triggers
-
-The pipeline runs automatically on:
-
-```yaml
-# Push to main branch with package changes
-push:
-  branches: [main]
-  paths: ["packages/**", "build-tools/**", "turbo.json", "pnpm-workspace.yaml"]
-
-# GitHub releases
-release:
-  types: [published]
-```
-
-### 2. Manual Triggers with Version Bumps
+### 1. Manual Triggers with Version Bumps
 
 Use the GitHub CLI to trigger manual deployments with version bumps:
 
 #### Patch Version Bump (1.0.0 → 1.0.1)
 ```bash
-gh workflow run "Publish Packages to GitHub Packages" \
+gh workflow run "Publish to CodeArtifact" \
   --field version=patch
 ```
 
-#### Minor Version Bump (1.0.0 → 1.1.0)  
+#### Minor Version Bump (1.0.0 → 1.1.0)
 ```bash
-gh workflow run "Publish Packages to GitHub Packages" \
+gh workflow run "Publish to CodeArtifact" \
   --field version=minor
 ```
 
 #### Major Version Bump (1.0.0 → 2.0.0)
 ```bash
-gh workflow run "Publish Packages to GitHub Packages" \
+gh workflow run "Publish to CodeArtifact" \
   --field version=major
 ```
 
 #### Force Publish All Packages (ignore change detection)
 ```bash
-gh workflow run "Publish Packages to GitHub Packages" \
+gh workflow run "Publish to CodeArtifact" \
   --field version=patch \
   --field force_publish_all=true
 ```
-
-### 3. Development Version Publishing
-
-For development branches, you can trigger the workflow to publish dev versions:
-
-```bash
-# From your feature branch
-gh workflow run "Publish Packages to GitHub Packages" \
-  --ref your-feature-branch \
-  --field version=patch
-```
-
-This will:
-- Run tests and lint checks on your branch
-- Bump versions for changed packages
-- Publish with development tags if configured
 
 ## How Change Detection Works
 
@@ -128,13 +97,13 @@ This means:
 
 ## Package Scope Configuration
 
-All packages are published under the `@saga-ed` scope:
+All packages are published under the `@saga-ed` scope to AWS CodeArtifact:
 
 ```json
 {
   "name": "@saga-ed/package-name",
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
     "access": "public"
   }
 }
@@ -142,26 +111,35 @@ All packages are published under the `@saga-ed` scope:
 
 ## Installing Published Packages
 
-### Configure npm for GitHub Packages
+### Configure .npmrc for CodeArtifact
+
+Add to your project's `.npmrc`:
+
+```npmrc
+@saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/
+```
+
+### Authenticate with CodeArtifact
 
 ```bash
-# Set registry for @saga-ed scope
-npm config set @saga-ed:registry https://npm.pkg.github.com
+# Get auth token (valid 12 hours)
+export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+  --domain saga \
+  --domain-owner 531314149529 \
+  --query authorizationToken \
+  --output text)
 
-# Or create .npmrc file
-echo "@saga-ed:registry=https://npm.pkg.github.com" >> .npmrc
+# Configure npm
+npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=$CODEARTIFACT_AUTH_TOKEN
 ```
 
 ### Install packages
 ```bash
-# Install specific packages
-npm install @saga-ed/api-core
-npm install @saga-ed/config
-npm install @saga-ed/db
-npm install @saga-ed/logger
-
-# Or using pnpm
-pnpm add @saga-ed/api-core
+# Install specific packages using pnpm
+pnpm add @saga-ed/soa-api-core
+pnpm add @saga-ed/soa-config
+pnpm add @saga-ed/soa-db
+pnpm add @saga-ed/soa-logger
 ```
 
 ## Monitoring and Debugging
@@ -169,9 +147,9 @@ pnpm add @saga-ed/api-core
 ### Check Workflow Status
 ```bash
 # List recent workflow runs
-gh run list --workflow="Publish Packages to GitHub Packages"
+gh run list --workflow="Publish to CodeArtifact"
 
-# View specific run details  
+# View specific run details
 gh run view <run-id>
 
 # View logs for specific run
@@ -180,11 +158,19 @@ gh run view <run-id> --log
 
 ### Check Published Packages
 ```bash
-# List packages in GitHub Packages
-gh api repos/:owner/:repo/packages
+# List packages in CodeArtifact
+aws codeartifact list-packages \
+  --domain saga \
+  --domain-owner 531314149529 \
+  --repository saga_js
 
-# View package versions
-npm view @saga-ed/api-core versions --json
+# View specific package versions
+aws codeartifact list-package-versions \
+  --domain saga \
+  --repository saga_js \
+  --format npm \
+  --package soa-logger \
+  --namespace saga-ed
 ```
 
 ### Common Issues
@@ -192,8 +178,11 @@ npm view @saga-ed/api-core versions --json
 #### 1. "Package already exists"
 This is normal - the workflow will skip republishing if the version already exists.
 
-#### 2. "Authentication failed"
-Check that `GITHUB_TOKEN` has `packages: write` permission.
+#### 2. "401 Unauthorized"
+Auth token may have expired (12-hour TTL). Re-authenticate:
+```bash
+pnpm co:login
+```
 
 #### 3. "No changes detected"
 If you expect changes but none are detected:
@@ -228,13 +217,13 @@ The workflow automatically handles dependency order using Turborepo's task graph
 
 ## Workflow Configuration
 
-The workflow is defined in `.github/workflows/publish-packages.yml` and includes:
+The workflow is defined in `.github/workflows/publish-codeartifact.yml` and includes:
 
 - **Change Detection**: Uses Turborepo to find affected packages
 - **Matrix Testing**: Parallel lint/test execution per package
 - **Dependency-Aware Building**: Builds packages in correct order
 - **Smart Publishing**: Only publishes changed, non-private packages
-- **GitHub Packages Integration**: Automatic registry configuration
+- **CodeArtifact Integration**: OIDC authentication via SOADeployRole
 - **Release Summaries**: Detailed output of what was published
 
 For more details, see the workflow file itself.

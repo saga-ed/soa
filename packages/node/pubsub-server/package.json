@@ -43,7 +43,7 @@
     "vitest": "^1.5.0"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
     "access": "public"
   },
   "repository": {

@@ -52,7 +52,7 @@ env:
   PNPM_VERSION: "9.0.0"
   AWS_REGION: us-west-2
   CODEARTIFACT_DOMAIN: saga
-  CODEARTIFACT_REPOSITORY: saga_soa
+  CODEARTIFACT_REPOSITORY: saga_js
   CODEARTIFACT_OWNER: "531314149529"
 
 permissions:
@@ -513,7 +513,7 @@ jobs:
           echo "**From CodeArtifact:**" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# Configure npm (requires AWS auth)" >> $GITHUB_STEP_SUMMARY
-          echo "npm config set @saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/" >> $GITHUB_STEP_SUMMARY
+          echo "npm config set @saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/" >> $GITHUB_STEP_SUMMARY
           echo "pnpm add @saga-ed/soa-logger" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

@@ -36,7 +36,7 @@
   "types": "dist/index.d.ts",
   "type": "module",
   "publishConfig": {
-    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_soa/",
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
     "access": "public"
   },
   "repository": {

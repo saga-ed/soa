@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Run } from './run.js';
-import type { CreateRunInput, UpdateRunInput } from './schema/run.schemas.js';
+import type { CreateRunZ, UpdateRunZ } from './schema/run-schemas.js';
 
 /**
  * RunHelper class encapsulates business logic for Run operations.
@@ -69,7 +69,7 @@ export class RunHelper {
   /**
    * Create a new run
    */
-  createRun(input: CreateRunInput): Run {
+  createRun(input: CreateRunZ): Run {
     const now = new Date();
     const run: Run = {
       id: uuidv4(),
@@ -89,7 +89,7 @@ export class RunHelper {
   /**
    * Update an existing run
    */
-  updateRun(input: UpdateRunInput): Run | null {
+  updateRun(input: UpdateRunZ): Run | null {
     const runIndex = this.runs.findIndex(run => run.id === input.id);
     if (runIndex === -1) {
       return null;

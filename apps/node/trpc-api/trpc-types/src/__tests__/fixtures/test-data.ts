@@ -1,4 +1,5 @@
-import type { Project, Run } from '../../schemas/index.js';
+import type { Project } from '../../../../src/sectors/project/trpc/project.js';
+import type { Run } from '../../../../src/sectors/run/trpc/run.js';
 
 // Test data for projects
 export const mockProjects: Project[] = [

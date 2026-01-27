@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-tgql-codegen",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
   "description": "TypeGraphQL code generation utilities for saga-soa monorepo",
   "main": "dist/index.js",

@@ -3,9 +3,9 @@ import {
   CreateProjectSchema,
   UpdateProjectSchema,
   GetProjectSchema,
-  type CreateProjectInput,
-  type UpdateProjectInput,
-  type GetProjectInput,
+  type CreateProject,
+  type UpdateProject,
+  type GetProject,
 } from '../index.js';
 
 // Simple test data since we don't have the fixtures anymore
@@ -154,20 +154,20 @@ describe('Project Schemas', () => {
   describe('TypeScript Type Inference', () => {
     it('should infer correct types from schemas', () => {
       // These should compile without errors
-      const createInput: CreateProjectInput = {
+      const createInput: CreateProject = {
         name: 'Test Project',
         description: 'Test Description',
         status: 'active',
       };
 
-      const updateInput: UpdateProjectInput = {
+      const updateInput: UpdateProject = {
         id: '1',
         name: 'Updated Project',
         description: 'Updated Description',
         status: 'inactive',
       };
 
-      const getInput: GetProjectInput = {
+      const getInput: GetProject = {
         id: '1',
       };
 

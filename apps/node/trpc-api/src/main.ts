@@ -4,8 +4,10 @@ import { TRPCServer } from '@saga-ed/soa-api-core/trpc-server';
 import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
 import { AbstractTRPCController } from '@saga-ed/soa-api-core/abstract-trpc-controller';
 import { AbstractRestController } from '@saga-ed/soa-api-core/abstract-rest-controller';
+import { type ExpressServerConfig } from '@saga-ed/soa-api-core';
 import { container } from './inversify.config.js';
 import type { ILogger } from '@saga-ed/soa-logger';
+import type { PubSubService } from '@saga-ed/soa-pubsub-server';
 import type { Request, Response } from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,19 +67,20 @@ async function start() {
   // Mount tRPC middleware
   await trpcServer.mountToApp(app);
 
-  // Mount SSE endpoint for real-time pubsub events
-  const pubsubService = container.get('PubSubService');
-  app.get('/events', async (req: Request, res: Response) => {
-    try {
-      await pubsubService.createSSEHandler(req, res);
-    } catch (error) {
-      logger.error('SSE handler error:', error);
-      res.status(500).json({ error: 'SSE connection failed' });
-    }
-  });
+  // TODO: Mount SSE endpoint for real-time pubsub events
+  // This requires PubSubServer, not just PubSubService
+  // const pubsubServer = container.get<PubSubServer>('PubSubServer');
+  // app.get('/events', async (req: Request, res: Response) => {
+  //   try {
+  //     await pubsubServer.createSSEHandler(req, res);
+  //   } catch (error) {
+  //     logger.error('SSE handler error:', error instanceof Error ? error : undefined, {});
+  //     res.status(500).json({ error: 'SSE connection failed' });
+  //   }
+  // });
 
   // Get server config for port info
-  const serverConfig = container.get('ExpressServerConfig');
+  const serverConfig = container.get<ExpressServerConfig>('ExpressServerConfig');
 
   // Add a simple health check (at root level for easy access)
   app.get('/health', (req: Request, res: Response) => {

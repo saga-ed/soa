@@ -2,8 +2,8 @@ import type { EventEnvelope, CSEEvent, SSEEvent, CSEEventWithResponse, ActionCon
 import {
     PingMessageSchema,
     PongResponseSchema,
-    type PingMessageInput,
-    type PongResponseOutput
+    type PingMessageZ,
+    type PongResponseZ
 } from './schema/pubsub-schemas.js';
 
 // ============================================================================
@@ -11,7 +11,7 @@ import {
 // ============================================================================
 
 // Pong event definition (SSE - Server-Sent Event) - defined first for reference
-export const pongEvent: SSEEvent<PongResponseOutput> = {
+export const pongEvent: SSEEvent<PongResponseZ> = {
     name: 'pong:response' as const,
     channel: 'pingpong',
     payloadSchema: PongResponseSchema,
@@ -22,7 +22,7 @@ export const pongEvent: SSEEvent<PongResponseOutput> = {
 };
 
 // Ping event definition (CSE - Client-Sent Event with Response)
-export const pingEvent: CSEEventWithResponse<PingMessageInput, PongResponseOutput, typeof pongEvent> = {
+export const pingEvent: CSEEventWithResponse<PingMessageZ, PongResponseZ, typeof pongEvent> = {
     name: 'ping:message' as const,
     channel: 'pingpong',
     payloadSchema: PingMessageSchema,
@@ -33,9 +33,9 @@ export const pingEvent: CSEEventWithResponse<PingMessageInput, PongResponseOutpu
     action: {
         requestId: crypto.randomUUID(),
         responseEventType: 'pong:response', // Type-safe linkage
-        async act(payload: PingMessageInput, context?: ActionContext): Promise<PongResponseOutput> {
+        async act(payload: PingMessageZ, context?: ActionContext): Promise<PongResponseZ> {
             // Create pong response
-            const pongResponse: PongResponseOutput = {
+            const pongResponse: PongResponseZ = {
                 reply: `Pong: ${payload.message}`,
                 originalMessage: payload.message,
                 timestamp: new Date().toISOString()
@@ -109,7 +109,7 @@ export const events = {
 // Helper Functions
 // ============================================================================
 
-export const createPingEnvelope = (message: string): EventEnvelope<'ping:message', PingMessageInput> => ({
+export const createPingEnvelope = (message: string): EventEnvelope<'ping:message', PingMessageZ> => ({
     id: crypto.randomUUID(),
     name: 'ping:message' as const,
     channel: 'pingpong' as const,
@@ -120,7 +120,7 @@ export const createPingEnvelope = (message: string): EventEnvelope<'ping:message
     timestamp: new Date().toISOString()
 });
 
-export const createPongEnvelope = (reply: string, originalMessage: string): EventEnvelope<'pong:response', PongResponseOutput> => ({
+export const createPongEnvelope = (reply: string, originalMessage: string): EventEnvelope<'pong:response', PongResponseZ> => ({
     id: crypto.randomUUID(),
     name: 'pong:response' as const,
     channel: 'pingpong' as const,

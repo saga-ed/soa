@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { beforeAll, afterAll } from 'vitest';
 
 // Global test setup
 beforeAll(() => {

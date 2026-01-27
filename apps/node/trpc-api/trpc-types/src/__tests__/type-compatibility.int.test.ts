@@ -7,48 +7,48 @@ import {
   UpdateRunSchema,
   GetRunSchema,
   GetRunsByProjectSchema,
-  type CreateProjectInput,
-  type UpdateProjectInput,
-  type GetProjectInput,
-  type CreateRunInput,
-  type UpdateRunInput,
-  type GetRunInput,
-  type GetRunsByProjectInput,
+  type CreateProject,
+  type UpdateProject,
+  type GetProject,
+  type CreateRun,
+  type UpdateRun,
+  type GetRun,
+  type GetRunsByProject,
 } from '../index.js';
 
 // Simple test data
-const validCreateProjectInput: CreateProjectInput = {
+const validCreateProject: CreateProject = {
   name: 'Test Project',
   description: 'Test Description',
   status: 'active',
 };
 
-const validUpdateProjectInput: UpdateProjectInput = {
+const validUpdateProject: UpdateProject = {
   id: '1',
   name: 'Updated Project',
   description: 'Updated Description',
   status: 'inactive',
 };
 
-const validGetProjectInput: GetProjectInput = {
+const validGetProject: GetProject = {
   id: '1',
 };
 
-const validCreateRunInput: CreateRunInput = {
+const validCreateRun: CreateRun = {
   projectId: '1',
   name: 'Test Run',
   description: 'Test Description',
   status: 'pending',
 };
 
-const validUpdateRunInput: UpdateRunInput = {
+const validUpdateRun: UpdateRun = {
   id: '1',
   name: 'Updated Run',
   description: 'Updated Description',
   status: 'completed',
 };
 
-const validGetRunInput: GetRunInput = {
+const validGetRun: GetRun = {
   id: '1',
 };
 
@@ -56,63 +56,63 @@ describe('Type Compatibility', () => {
   describe('Zod Schema and TypeScript Type Compatibility', () => {
     it('should have compatible CreateProject types', () => {
       // Test that Zod schema and TypeScript type are compatible
-      const zodResult = CreateProjectSchema.safeParse(validCreateProjectInput);
+      const zodResult = CreateProjectSchema.safeParse(validCreateProject);
       expect(zodResult.success).toBe(true);
       
       if (zodResult.success) {
         // This should compile without errors - TypeScript type should match Zod output
-        const typescriptType: CreateProjectInput = zodResult.data;
-        expect(typescriptType).toEqual(validCreateProjectInput);
+        const typescriptType: CreateProject = zodResult.data;
+        expect(typescriptType).toEqual(validCreateProject);
       }
     });
 
     it('should have compatible UpdateProject types', () => {
-      const zodResult = UpdateProjectSchema.safeParse(validUpdateProjectInput);
+      const zodResult = UpdateProjectSchema.safeParse(validUpdateProject);
       expect(zodResult.success).toBe(true);
       
       if (zodResult.success) {
-        const typescriptType: UpdateProjectInput = zodResult.data;
-        expect(typescriptType).toEqual(validUpdateProjectInput);
+        const typescriptType: UpdateProject = zodResult.data;
+        expect(typescriptType).toEqual(validUpdateProject);
       }
     });
 
     it('should have compatible GetProject types', () => {
-      const zodResult = GetProjectSchema.safeParse(validGetProjectInput);
+      const zodResult = GetProjectSchema.safeParse(validGetProject);
       expect(zodResult.success).toBe(true);
       
       if (zodResult.success) {
-        const typescriptType: GetProjectInput = zodResult.data;
-        expect(typescriptType).toEqual(validGetProjectInput);
+        const typescriptType: GetProject = zodResult.data;
+        expect(typescriptType).toEqual(validGetProject);
       }
     });
 
     it('should have compatible CreateRun types', () => {
-      const zodResult = CreateRunSchema.safeParse(validCreateRunInput);
+      const zodResult = CreateRunSchema.safeParse(validCreateRun);
       expect(zodResult.success).toBe(true);
       
       if (zodResult.success) {
-        const typescriptType: CreateRunInput = zodResult.data;
-        expect(typescriptType).toEqual(validCreateRunInput);
+        const typescriptType: CreateRun = zodResult.data;
+        expect(typescriptType).toEqual(validCreateRun);
       }
     });
 
     it('should have compatible UpdateRun types', () => {
-      const zodResult = UpdateRunSchema.safeParse(validUpdateRunInput);
+      const zodResult = UpdateRunSchema.safeParse(validUpdateRun);
       expect(zodResult.success).toBe(true);
       
       if (zodResult.success) {
-        const typescriptType: UpdateRunInput = zodResult.data;
-        expect(typescriptType).toEqual(validUpdateRunInput);
+        const typescriptType: UpdateRun = zodResult.data;
+        expect(typescriptType).toEqual(validUpdateRun);
       }
     });
 
     it('should have compatible GetRun types', () => {
-      const zodResult = GetRunSchema.safeParse(validGetRunInput);
+      const zodResult = GetRunSchema.safeParse(validGetRun);
       expect(zodResult.success).toBe(true);
       
       if (zodResult.success) {
-        const typescriptType: GetRunInput = zodResult.data;
-        expect(typescriptType).toEqual(validGetRunInput);
+        const typescriptType: GetRun = zodResult.data;
+        expect(typescriptType).toEqual(validGetRun);
       }
     });
 
@@ -122,7 +122,7 @@ describe('Type Compatibility', () => {
       expect(zodResult.success).toBe(true);
       
       if (zodResult.success) {
-        const typescriptType: GetRunsByProjectInput = zodResult.data;
+        const typescriptType: GetRunsByProject = zodResult.data;
         expect(typescriptType).toEqual(validData);
       }
     });
@@ -131,7 +131,7 @@ describe('Type Compatibility', () => {
   describe('Runtime Validation with TypeScript Types', () => {
     it('should validate TypeScript types at runtime', () => {
       // Create data that matches TypeScript types
-      const createProjectData: CreateProjectInput = {
+      const createProjectData: CreateProject = {
         name: 'Test Project',
         description: 'Test Description',
         status: 'active',
@@ -167,7 +167,7 @@ describe('Type Compatibility', () => {
 
     it('should handle partial updates correctly', () => {
       // Test partial update data
-      const partialUpdate: UpdateProjectInput = {
+      const partialUpdate: UpdateProject = {
         id: '1',
         name: 'Updated Name',
         // description and status are optional
@@ -189,7 +189,7 @@ describe('Type Compatibility', () => {
     it('should have consistent type inference between Zod and TypeScript', () => {
       // Test that TypeScript types match Zod inferred types
       type ZodCreateProject = typeof CreateProjectSchema._type;
-      type TypeScriptCreateProject = CreateProjectInput;
+      type TypeScriptCreateProject = CreateProject;
       
       // These should be equivalent types
       const testData = {
@@ -221,7 +221,7 @@ describe('Type Compatibility', () => {
         expect(zodResult.success).toBe(true);
         
         if (zodResult.success) {
-          const typescriptData: CreateProjectInput = zodResult.data;
+          const typescriptData: CreateProject = zodResult.data;
           expect(typescriptData.status).toBe(status);
         }
       }
@@ -277,7 +277,7 @@ describe('Type Compatibility', () => {
       
       if (zodResult.success) {
         // Should also work with the generated type
-        const generatedType: CreateProjectInput = zodResult.data;
+        const generatedType: CreateProject = zodResult.data;
         expect(generatedType).toEqual(createProjectData);
       }
     });

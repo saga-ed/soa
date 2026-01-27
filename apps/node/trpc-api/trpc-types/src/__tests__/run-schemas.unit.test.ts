@@ -4,14 +4,14 @@ import {
   UpdateRunSchema,
   GetRunSchema,
   GetRunsByProjectSchema,
-  type CreateRunInput,
-  type UpdateRunInput,
-  type GetRunInput,
-  type GetRunsByProjectInput,
+  type CreateRun,
+  type UpdateRun,
+  type GetRun,
+  type GetRunsByProject,
 } from '../index.js';
 
 // Simple test data since we don't have the fixtures anymore
-const validCreateRunInput = {
+const validCreateRun = {
   projectId: '1',
   name: 'Test Run',
   description: 'Test Description',
@@ -19,7 +19,7 @@ const validCreateRunInput = {
   config: { key: 'value' },
 };
 
-const validUpdateRunInput = {
+const validUpdateRun = {
   id: '1',
   name: 'Updated Run',
   description: 'Updated Description',
@@ -27,23 +27,23 @@ const validUpdateRunInput = {
   config: { key: 'updated' },
 };
 
-const validGetRunInput = {
+const validGetRun = {
   id: '1',
 };
 
 describe('Run Schemas', () => {
   describe('CreateRunSchema', () => {
     it('should validate correct run data', () => {
-      const result = CreateRunSchema.safeParse(validCreateRunInput);
+      const result = CreateRunSchema.safeParse(validCreateRun);
       expect(result.success).toBe(true);
       
       if (result.success) {
-        expect(result.data).toEqual(validCreateRunInput);
+        expect(result.data).toEqual(validCreateRun);
       }
     });
 
     it('should reject empty project ID', () => {
-      const invalidData = { ...validCreateRunInput, projectId: '' };
+      const invalidData = { ...validCreateRun, projectId: '' };
       const result = CreateRunSchema.safeParse(invalidData);
       expect(result.success).toBe(false);
       
@@ -54,7 +54,7 @@ describe('Run Schemas', () => {
     });
 
     it('should reject empty run name', () => {
-      const invalidData = { ...validCreateRunInput, name: '' };
+      const invalidData = { ...validCreateRun, name: '' };
       const result = CreateRunSchema.safeParse(invalidData);
       expect(result.success).toBe(false);
       
@@ -65,7 +65,7 @@ describe('Run Schemas', () => {
     });
 
     it('should reject invalid status', () => {
-      const invalidData = { ...validCreateRunInput, status: 'invalid' as any };
+      const invalidData = { ...validCreateRun, status: 'invalid' as any };
       const result = CreateRunSchema.safeParse(invalidData);
       expect(result.success).toBe(false);
       
@@ -116,7 +116,7 @@ describe('Run Schemas', () => {
 
     it('should accept valid config', () => {
       const dataWithConfig = { 
-        ...validCreateRunInput, 
+        ...validCreateRun, 
         config: { key: 'value', number: 42 } 
       };
       const result = CreateRunSchema.safeParse(dataWithConfig);
@@ -130,16 +130,16 @@ describe('Run Schemas', () => {
 
   describe('UpdateRunSchema', () => {
     it('should validate correct update data', () => {
-      const result = UpdateRunSchema.safeParse(validUpdateRunInput);
+      const result = UpdateRunSchema.safeParse(validUpdateRun);
       expect(result.success).toBe(true);
       
       if (result.success) {
-        expect(result.data).toEqual(validUpdateRunInput);
+        expect(result.data).toEqual(validUpdateRun);
       }
     });
 
     it('should reject empty run ID', () => {
-      const invalidData = { ...validUpdateRunInput, id: '' };
+      const invalidData = { ...validUpdateRun, id: '' };
       const result = UpdateRunSchema.safeParse(invalidData);
       expect(result.success).toBe(false);
       
@@ -150,7 +150,7 @@ describe('Run Schemas', () => {
     });
 
     it('should reject empty run name when provided', () => {
-      const invalidData = { ...validUpdateRunInput, name: '' };
+      const invalidData = { ...validUpdateRun, name: '' };
       const result = UpdateRunSchema.safeParse(invalidData);
       expect(result.success).toBe(false);
       
@@ -177,11 +177,11 @@ describe('Run Schemas', () => {
 
   describe('GetRunSchema', () => {
     it('should validate correct get data', () => {
-      const result = GetRunSchema.safeParse(validGetRunInput);
+      const result = GetRunSchema.safeParse(validGetRun);
       expect(result.success).toBe(true);
       
       if (result.success) {
-        expect(result.data).toEqual(validGetRunInput);
+        expect(result.data).toEqual(validGetRun);
       }
     });
 
@@ -223,7 +223,7 @@ describe('Run Schemas', () => {
   describe('TypeScript Type Inference', () => {
     it('should infer correct types from schemas', () => {
       // These should compile without errors
-      const createInput: CreateRunInput = {
+      const createInput: CreateRun = {
         projectId: '1',
         name: 'Test Run',
         description: 'Test Description',
@@ -231,7 +231,7 @@ describe('Run Schemas', () => {
         config: { key: 'value' },
       };
 
-      const updateInput: UpdateRunInput = {
+      const updateInput: UpdateRun = {
         id: '1',
         name: 'Updated Run',
         description: 'Updated Description',
@@ -239,11 +239,11 @@ describe('Run Schemas', () => {
         config: { key: 'updated' },
       };
 
-      const getInput: GetRunInput = {
+      const getInput: GetRun = {
         id: '1',
       };
 
-      const getByProjectInput: GetRunsByProjectInput = {
+      const getByProjectInput: GetRunsByProject = {
         projectId: '1',
       };
 

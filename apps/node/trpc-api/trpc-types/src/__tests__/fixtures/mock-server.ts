@@ -8,9 +8,9 @@ import {
   UpdateRunSchema,
   GetRunSchema,
   GetRunsByProjectSchema,
-  type Project,
-  type Run,
-} from '../../schemas/index.js';
+} from '../../../generated/schemas/index.js';
+import type { Project } from '../../../../src/sectors/project/trpc/project.js';
+import type { Run } from '../../../../src/sectors/run/trpc/run.js';
 import { mockProjects, mockRuns, mockProject, mockRun } from './test-data.js';
 
 // Initialize tRPC

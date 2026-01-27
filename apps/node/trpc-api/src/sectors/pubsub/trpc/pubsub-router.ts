@@ -163,8 +163,7 @@ export class PubSubController extends AbstractTRPCController {
               message: `Event "${eventName}" sent successfully`
             };
           } catch (error) {
-            this.logger.error('Failed to send custom event', {
-              error: error instanceof Error ? error.message : 'Unknown error',
+            this.logger.error('Failed to send custom event', error instanceof Error ? error : undefined, {
               input
             });
             throw new Error(`Failed to send event: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -229,8 +228,7 @@ export class PubSubController extends AbstractTRPCController {
               timestamp: new Date().toISOString()
             };
           } catch (error) {
-            this.logger.error('Failed to create subscription', {
-              error: error instanceof Error ? error.message : 'Unknown error',
+            this.logger.error('Failed to create subscription', error instanceof Error ? error : undefined, {
               input
             });
             throw new Error(`Failed to subscribe: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -255,8 +253,7 @@ export class PubSubController extends AbstractTRPCController {
               timestamp: new Date().toISOString()
             };
           } catch (error) {
-            this.logger.error('Failed to unsubscribe', {
-              error: error instanceof Error ? error.message : 'Unknown error',
+            this.logger.error('Failed to unsubscribe', error instanceof Error ? error : undefined, {
               input
             });
             throw new Error(`Failed to unsubscribe: ${error instanceof Error ? error.message : 'Unknown error'}`);

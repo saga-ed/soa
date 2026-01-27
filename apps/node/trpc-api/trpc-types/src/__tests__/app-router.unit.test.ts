@@ -1,15 +1,15 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
-import type { AppRouter } from '../../index.js';
-import type { 
-  CreateProjectInput, 
-  UpdateProjectInput, 
-  GetProjectInput,
-  CreateRunInput,
-  UpdateRunInput,
-  GetRunInput,
-  Project,
-  Run
-} from '../../index.js';
+import type { AppRouter } from '../../generated/router.js';
+import type {
+  CreateProject,
+  UpdateProject,
+  GetProject,
+  CreateRun,
+  UpdateRun,
+  GetRun,
+} from '../../generated/index.js';
+import type { Project } from '../../../src/sectors/project/trpc/project.js';
+import type { Run } from '../../../src/sectors/run/trpc/run.js';
 
 describe('AppRouter Type', () => {
   it('should have project router structure', () => {
@@ -42,38 +42,38 @@ describe('AppRouter Type', () => {
 
   it('should export all required input types', () => {
     // Test that input types are properly exported and can be used
-    const createProjectInput: CreateProjectInput = {
+    const createProjectInput: CreateProject = {
       name: 'Test Project',
       description: 'Test Description',
       status: 'active',
     };
     
-    const updateProjectInput: UpdateProjectInput = {
+    const updateProjectInput: UpdateProject = {
       id: '1',
       name: 'Updated Project',
       description: 'Updated Description',
       status: 'inactive',
     };
     
-    const getProjectInput: GetProjectInput = {
+    const getProjectInput: GetProject = {
       id: '1',
     };
     
-    const createRunInput: CreateRunInput = {
+    const createRunInput: CreateRun = {
       projectId: '1',
       name: 'Test Run',
       description: 'Test Description',
       status: 'running',
     };
     
-    const updateRunInput: UpdateRunInput = {
+    const updateRunInput: UpdateRun = {
       id: '1',
       name: 'Updated Run',
       description: 'Updated Description',
       status: 'completed',
     };
     
-    const getRunInput: GetRunInput = {
+    const getRunInput: GetRun = {
       id: '1',
     };
     

@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
 import { GQLServer } from '@saga-ed/soa-api-core/gql-server';
-import { AbstractRestController, AbstractGQLController } from '@saga-ed/soa-api-core';
+import { AbstractRestController, AbstractGQLController, type ExpressServerConfig } from '@saga-ed/soa-api-core';
 import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
 import { container } from './inversify.config.js';
 import type { ILogger } from '@saga-ed/soa-logger';
@@ -61,7 +61,7 @@ async function start() {
   gqlServer.mountToApp(app, '/saga-soa/v1');
 
   // Get server config for port info
-  const serverConfig = container.get('ExpressServerConfig');
+  const serverConfig = container.get<ExpressServerConfig>('ExpressServerConfig');
 
   // Add a simple health check (at root level for easy access)
   app.get('/health', (req: any, res: any) => {

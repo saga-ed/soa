@@ -1,7 +1,7 @@
 import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
 import { container } from './inversify.config.js';
 import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
-import { AbstractRestController } from '@saga-ed/soa-api-core/abstract-rest-controller';
+import { AbstractRestController, type ExpressServerConfig } from '@saga-ed/soa-api-core';
 import type { ILogger } from '@saga-ed/soa-logger';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +32,7 @@ async function start() {
   const app = expressServer.getApp();
 
   // Get server config for port info
-  const serverConfig = container.get('ExpressServerConfig');
+  const serverConfig = container.get<ExpressServerConfig>('ExpressServerConfig');
 
   // Add a simple health check (at root level for easy access)
   app.get('/health', (req, res) => {

@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { Project } from './project.js';
-import type { CreateProjectInput, UpdateProjectInput } from './schema/project.schemas.js';
+import type { CreateProjectZ, UpdateProjectZ } from './schema/project-schemas.js';
 
 /**
  * ProjectHelper class encapsulates business logic for Project operations.
@@ -45,7 +45,7 @@ export class ProjectHelper {
   /**
    * Create a new project
    */
-  createProject(input: CreateProjectInput): Project {
+  createProject(input: CreateProjectZ): Project {
     const now = new Date();
     const project: Project = {
       id: uuidv4(),
@@ -63,7 +63,7 @@ export class ProjectHelper {
   /**
    * Update an existing project
    */
-  updateProject(input: UpdateProjectInput): Project | null {
+  updateProject(input: UpdateProjectZ): Project | null {
     const projectIndex = this.projects.findIndex(project => project.id === input.id);
     if (projectIndex === -1) {
       return null;

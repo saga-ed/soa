@@ -57,3 +57,12 @@ All APIs expose:
 |----------|-------------|
 | `PORT` | Server port (default: 3000) |
 | `NODE_ENV` | Environment (development/production) |
+
+## Testing
+
+See [claude/testing.md](./claude/testing.md) for:
+- Controller loading patterns
+- DI/Inversify testing
+- Database isolation for parallel tests
+
+See [claude/esm.md](../../claude/esm.md) for ESM patterns (__dirname workaround, imports).

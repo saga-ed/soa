@@ -142,3 +142,22 @@ const gqlResolvers = await controllerLoader.loadControllers(
 ```
 
 **Note**: Production code (main.ts) can still use dynamic loading. This constraint applies only to test files.
+
+## ESM Patterns in Tests
+
+For ESM-specific patterns (like `__dirname` workaround for file path resolution), see [claude/esm.md](../../../claude/esm.md).
+
+**Common test use case**: Schema pattern resolution
+
+```typescript
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Works from any CWD
+const schemaPatterns = [path.resolve(__dirname, '../../schemas/**/*.gql')];
+```
+
+See [claude/esm.md](../../../claude/esm.md) for complete ESM documentation.

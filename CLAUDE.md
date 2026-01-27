@@ -42,9 +42,11 @@ pnpm typecheck      # Type check
 ## Detailed Documentation
 
 - See `claude/` for Claude-specific context
+- See `claude/esm.md` for ESM patterns (__dirname, imports, top-level await)
 - See `claude/frontend/` for web framework patterns
 - See `claude/tooling/pnpm.md` for pnpm installation rules
 - See `apps/CLAUDE.md` for application details
+- See `apps/node/claude/testing.md` for Node.js testing patterns (DI, controller loading)
 - See `packages/CLAUDE.md` for package details
 
 ---

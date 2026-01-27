@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-logger",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": false,
   "scripts": {
     "dev": "tsup --watch",
@@ -21,6 +21,7 @@
   "dependencies": {
     "inversify": "^6.2.2",
     "pino": "^8.15.0",
+    "pino-pretty": "^10.3.1",
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2",
     "zod": "3.25.67"
@@ -28,7 +29,6 @@
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "latest",
-    "pino-pretty": "^10.3.1",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3"
   },

@@ -1,0 +1,52 @@
+{
+  "name": "trpc-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "pnpm run build:types && tsup",
+    "build:types": "cd trpc-types && pnpm run build",
+    "build:main": "tsup",
+    "dev": "tsup --watch --onSuccess \"node dist/main.js\"",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.ts\" --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@trpc/client": "^11.4.3",
+    "@trpc/server": "^11.0.0",
+    "@types/mongodb": "^4.0.7",
+    "express": "^4.18.2",
+    "figlet": "^1.8.1",
+    "inversify": "^6.2.2",
+    "mongodb": "^5.7.0",
+    "reflect-metadata": "^0.2.2",
+    "routing-controllers": "^0.11.2",
+    "uuid": "^11.1.0",
+    "zod": "3.25.67",
+    "@saga-ed/soa-api-core": "workspace:*",
+    "@saga-ed/soa-db": "workspace:*",
+    "@saga-ed/soa-logger": "workspace:^",
+    "@saga-ed/soa-pubsub-core": "workspace:^",
+    "@saga-ed/soa-pubsub-server": "workspace:^",
+    "@saga-ed/soa-trpc-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.0.3",
+    "@types/supertest": "^6.0.3",
+    "@types/uuid": "^10.0.0",
+    "supertest": "^7.1.1",
+    "tsup": "^8.5.0",
+    "vitest": "^1.5.0"
+  }
+}

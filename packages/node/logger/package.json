@@ -1,0 +1,47 @@
+{
+  "name": "@saga-ed/soa-logger",
+  "version": "1.1.0",
+  "private": false,
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./mocks": {
+      "types": "./dist/mocks/mock-logger.d.ts",
+      "default": "./dist/mocks/mock-logger.js"
+    }
+  },
+  "dependencies": {
+    "inversify": "^6.2.2",
+    "pino": "^8.15.0",
+    "reflect-metadata": "^0.2.2",
+    "routing-controllers": "^0.11.2",
+    "zod": "3.25.67"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "latest",
+    "pino-pretty": "^10.3.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/logger"
+  }
+}

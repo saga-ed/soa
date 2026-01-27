@@ -1,8 +1,10 @@
-# Migration to GitHub Packages
+> **DEPRECATED**: All `@saga-ed` packages have been consolidated to a single AWS CodeArtifact repository (`saga_js`). GitHub Packages is no longer used. See [CODEARTIFACT_SETUP.md](./CODEARTIFACT_SETUP.md) for current setup instructions.
 
-## ✅ Migration Complete!
+# Migration to GitHub Packages (DEPRECATED)
 
-Your saga-soa packages have been successfully migrated from AWS CodeArtifact to GitHub Packages. This document outlines what changed and how to use the new setup.
+## ~~Migration Complete!~~
+
+This document is no longer current. Packages have been migrated back to AWS CodeArtifact (`saga_js`). The content below is retained for historical reference only.
 
 ## 🔄 What Changed
 

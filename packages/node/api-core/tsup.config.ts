@@ -1,0 +1,30 @@
+import { defineConfig } from 'tsup';
+
+export default defineConfig({
+    entry: [
+        'src/index.ts',
+        'src/express-server.ts',
+        'src/express-server-schema.ts',
+        'src/tgql-server.ts',
+        'src/tgql-server-schema.ts',
+        'src/gql-server.ts',
+        'src/gql-server-schema.ts',
+        'src/abstract-rest-controller.ts',
+        'src/abstract-trpc-controller.ts',
+        'src/abstract-tgql-controller.ts',
+        'src/abstract-gql-controller.ts',
+        'src/trpc-server.ts',
+        'src/trpc-server-schema.ts',
+        'src/sectors-controller.ts',
+        'src/utils/loadControllers.ts',
+        'src/utils/schema-loader.ts',
+    ],
+    format: ['esm'],
+    dts: true,
+    sourcemap: true,
+    clean: true,
+    outDir: 'dist',
+    splitting: false,
+    skipNodeModulesBundle: true,
+    target: 'node22',
+});

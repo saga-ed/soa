@@ -109,3 +109,36 @@ describe('API Integration', () => {
   });
 });
 ```
+
+## Controller Loading in Tests
+
+**Rule**: Use static imports for controllers in test files. Do NOT use dynamic loading with ControllerLoader.
+
+**Why**:
+- Vitest transpiles TypeScript at compile time for static imports
+- Dynamic imports (`await import()`) fail with TypeScript decorators and parameter properties
+- Prevents module identity mismatches between SOURCE and DIST code
+- Explicit dependencies are clearer in test code
+
+**Pattern**:
+
+```typescript
+// ✅ GOOD: Static imports
+import { UserResolver } from '../sectors/user/gql/user.resolver.js';
+import { AuthResolver } from '../sectors/auth/gql/auth.resolver.js';
+
+const gqlResolvers = [UserResolver, AuthResolver];
+const gqlServer = container.get<GQLServer>(GQLServer);
+await gqlServer.init(container, gqlResolvers);
+```
+
+```typescript
+// ❌ BAD: Dynamic loading (causes module identity issues in tests)
+const controllerLoader = container.get(ControllerLoader);
+const gqlResolvers = await controllerLoader.loadControllers(
+  path.resolve(__dirname, '../sectors/*/gql/*.resolver.ts'),
+  AbstractGQLController
+);
+```
+
+**Note**: Production code (main.ts) can still use dynamic loading. This constraint applies only to test files.

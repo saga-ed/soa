@@ -1,0 +1,133 @@
+{
+  "name": "@saga-ed/soa-api-core",
+  "version": "1.1.0",
+  "private": false,
+  "type": "module",
+  "main": "dist/rest-controller.js",
+  "types": "dist/rest-controller.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./abstract-gql-controller": {
+      "types": "./dist/abstract-gql-controller.d.ts",
+      "default": "./dist/abstract-gql-controller.js"
+    },
+    "./abstract-tgql-controller": {
+      "types": "./dist/abstract-tgql-controller.d.ts",
+      "default": "./dist/abstract-tgql-controller.js"
+    },
+    "./abstract-trpc-controller": {
+      "types": "./dist/abstract-trpc-controller.d.ts",
+      "default": "./dist/abstract-trpc-controller.js"
+    },
+    "./abstract-rest-controller": {
+      "types": "./dist/abstract-rest-controller.d.ts",
+      "default": "./dist/abstract-rest-controller.js"
+    },
+    "./express-server": {
+      "types": "./dist/express-server.d.ts",
+      "default": "./dist/express-server.js"
+    },
+    "./express-server-schema": {
+      "types": "./dist/express-server-schema.d.ts",
+      "default": "./dist/express-server-schema.js"
+    },
+    "./tgql-server": {
+      "types": "./dist/tgql-server.d.ts",
+      "default": "./dist/tgql-server.js"
+    },
+    "./tgql-server-schema": {
+      "types": "./dist/tgql-server-schema.d.ts",
+      "default": "./dist/tgql-server-schema.js"
+    },
+    "./gql-server": {
+      "types": "./dist/gql-server.d.ts",
+      "default": "./dist/gql-server.js"
+    },
+    "./gql-server-schema": {
+      "types": "./dist/gql-server-schema.d.ts",
+      "default": "./dist/gql-server-schema.js"
+    },
+    "./sectors-controller": {
+      "types": "./dist/sectors-controller.d.ts",
+      "default": "./dist/sectors-controller.js"
+    },
+    "./utils/loadControllers": {
+      "types": "./dist/utils/loadControllers.d.ts",
+      "default": "./dist/utils/loadControllers.js"
+    },
+    "./utils/controller-loader": {
+      "types": "./dist/utils/loadControllers.d.ts",
+      "default": "./dist/utils/loadControllers.js"
+    },
+    "./trpc-server": {
+      "types": "./dist/trpc-server.d.ts",
+      "default": "./dist/trpc-server.js"
+    },
+    "./trpc-server-schema": {
+      "types": "./dist/trpc-server-schema.d.ts",
+      "default": "./dist/trpc-server-schema.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@apollo/server": "^4.10.0",
+    "@graphql-tools/schema": "^10.0.0",
+    "@trpc/server": "^11.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "fast-glob": "^3.3.3",
+    "figlet": "^1.8.1",
+    "glob": "^10.3.10",
+    "graphql": "^16.8.1",
+    "inversify": "^6.2.2",
+    "reflect-metadata": "^0.2.2",
+    "routing-controllers": "^0.11.2",
+    "trpc-playground": "^1.0.4",
+    "type-graphql": "^2.0.0-beta.3",
+    "zod": "3.25.67"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/figlet": "^1.7.0",
+    "@types/graphql": "^14.5.0",
+    "@types/node": "latest",
+    "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^1.5.0",
+    "figlet": "^1.8.1",
+    "inversify": "^6.0.1",
+    "reflect-metadata": "^0.1.14",
+    "routing-controllers": "^0.11.2",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "undici": "^7.11.0",
+    "vitest": "^1.5.0",
+    "zod": "3.25.67",
+    "@saga-ed/soa-logger": "workspace:*"
+  },
+  "typesVersions": {
+    "*": {
+      "rest-controller": [
+        "dist/rest-controller.d.ts"
+      ]
+    }
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/api-core"
+  }
+}

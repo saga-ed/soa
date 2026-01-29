@@ -1,0 +1,17 @@
+{
+  "extends": "@saga-ed/soa-typescript-config/base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "jsx": "preserve"
+  },
+  "include": [
+    "src/**/*",
+    "generated/**/*"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "extends": "@saga-ed/soa-typescript-config/base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  },
+  "include": ["src/**/*", "generated/**/*"],
+  "exclude": ["node_modules", "dist", "../src/**/*"]
+}

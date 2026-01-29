@@ -243,14 +243,14 @@ pnpm build
 
 ## NPM Registry Configuration
 
-Packages use the `@saga-ed` scope and are configured to publish to GitHub Packages:
+Packages use the `@saga-ed` scope and are published to AWS CodeArtifact:
 
 ```bash
 # .npmrc
-@saga-ed:registry=https://npm.pkg.github.com
+@saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/
 ```
 
-To install packages from this registry, you'll need a GitHub personal access token with `read:packages` scope.
+To install packages, authenticate with CodeArtifact first. See [CODEARTIFACT_SETUP.md](./CODEARTIFACT_SETUP.md) for details.
 
 ## Additional Resources
 

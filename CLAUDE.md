@@ -1,29 +1,68 @@
+# SOA (saga-soa)
+
+Shared infrastructure monorepo for Saga platform applications.
+
+## Responsibilities
+
+- Shared packages for Node.js backend services
+- Example applications demonstrating package usage
+- Build tooling and code generation utilities
+
+## Tech Stack
+
+- **Runtime**: Node.js 20+ (ESM only)
+- **Build**: Turborepo + pnpm workspaces
+- **Language**: TypeScript (strict mode)
+- **Testing**: Vitest
+- **Linting**: ESLint (no Prettier)
+
+## Structure
+
+```
+soa/
+├── apps/           # Applications
+│   ├── web/        # Frontend apps (Next.js - legacy)
+│   └── node/       # Backend APIs
+├── packages/       # Shared libraries
+│   ├── web/        # Browser packages
+│   ├── node/       # Node.js packages
+│   └── core/       # Runtime-agnostic
+├── claude/         # Claude-readable context
+└── docs/           # Human documentation
+```
+
+## Key Commands
+
+```bash
+pnpm build          # Build all packages
+pnpm test           # Run all tests
+pnpm typecheck      # Type check
+```
+
+## Detailed Documentation
+
+- See `claude/` for Claude-specific context
+- See `claude/esm.md` for ESM patterns (__dirname, imports, top-level await)
+- See `claude/frontend/` for web framework patterns
+- See `claude/tooling/pnpm.md` for pnpm installation rules
+- See `apps/CLAUDE.md` for application details
+- See `apps/node/claude/testing.md` for Node.js testing patterns (DI, controller loading)
+- See `packages/CLAUDE.md` for package details
+
+---
+
 ## Safety Rules
-- Always ask for confirmation before running any file write or delete command (e.g., `rm`, modifying files).
-- If unsure, ask me explicitly before proceeding.
-- Exception: pnpm and turbo commands are always allowed, even if they contain rm/delete operations
 
-## Allowed Commands  
-- its always okay to run any pnpm commands in the saga-soa context (including clean commands)
-- its always okay to run any turbo commands in the saga-soa context (including clean commands)
+- Always ask for confirmation before running file write or delete commands
+- Exception: pnpm and turbo commands are always allowed
 
-## Permanent Tool Permissions
-### Always allowed Bash commands:
-- cd /home/skelly/dev/saga-soa/** (any directory navigation in saga-soa)
-- pnpm build (in any project directory)
-- pnpm generate (in any project directory) 
-- pnpm typecheck (in any project directory)
-- pnpm exec tsx:** (any tsx execution)
-- tsup (TypeScript bundler)
-- find /home/skelly/dev/saga-soa/** (file searching)
-- ls /home/skelly/dev/saga-soa/** (directory listing)
+## Allowed Commands
 
-### Always allowed file operations:
-- Read: /home/skelly/dev/saga-soa/**
-- Edit: /home/skelly/dev/saga-soa/**
-- Write: /home/skelly/dev/saga-soa/** 
+- All pnpm commands in saga-soa context
+- All turbo commands in saga-soa context
 
 ## Coding Preferences
-- Use 4-space indentation only.
-- Write tests for every new feature.
-- All packages in this mono-repo MUST use pnpm commands only, never npm commands in package.json scripts or anywhere else.
+
+- Use 4-space indentation only
+- Write tests for every new feature
+- Use pnpm only (never npm)

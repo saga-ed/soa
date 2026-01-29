@@ -1,0 +1,48 @@
+{
+  "name": "@saga-ed/soa-config",
+  "version": "1.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./i-config-manager": {
+      "types": "./dist/i-config-manager.d.ts",
+      "default": "./dist/i-config-manager.js"
+    },
+    "./mocks/mock-config-manager": {
+      "types": "./dist/mocks/mock-config-manager.d.ts",
+      "default": "./dist/mocks/mock-config-manager.js"
+    }
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "24.0.12",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "dotenv": "17.2.0",
+    "dotenv-flow": "4.1.0",
+    "inversify": "^6.2.2",
+    "reflect-metadata": "^0.2.2",
+    "routing-controllers": "^0.11.2",
+    "zod": "3.25.67"
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hipponot/saga-soa.git",
+    "directory": "packages/config"
+  }
+}

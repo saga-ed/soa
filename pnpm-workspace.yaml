@@ -1,12 +1,15 @@
 packages:
-  - 'apps/examples/rest-api'
-  - 'apps/examples/tgql-api'
-  - 'apps/examples/tgql-api/tgql-types'
-  - 'apps/examples/gql-api'
-  - 'apps/examples/trpc-api'
-  - 'apps/examples/trpc-api/trpc-types'
-  - 'apps/examples/web-client'
-  - 'apps/web'
-  - 'build-tools/*'
-  - 'packages/*'
+  # Apps by runtime tier
+  - 'apps/web/*'
+  - 'apps/node/*'
+  - 'apps/node/*/trpc-types'
+  - 'apps/node/*/tgql-types'
+  - 'apps/core/*'
+  # Legacy - will be removed after migration
+  - 'apps/projects/*'
+  # Packages by runtime tier
+  - 'packages/web/*'
+  - 'packages/node/*'
+  - 'packages/core/*'
+  # Build tools
   - 'build-tools/*'

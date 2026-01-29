@@ -23,7 +23,7 @@ export default defineConfig([
     noExternal: ['zod', 'zod-to-ts'], // Bundle zod dependencies
     external: ['commander'], // Keep commander external as it's a CLI framework
     platform: 'node',
-    target: 'node18',
+    target: 'node22',
     shims: true, // Add shims for __dirname, __filename etc
   },
 ]);

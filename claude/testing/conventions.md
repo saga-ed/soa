@@ -44,47 +44,86 @@ src/
 - Builders, fixtures, helpers, mocks inside `__tests__/`
 - E2E tests in dedicated `e2e/` directory at app level
 
-## Acceptance Tests & Specifications
+## Test Environment (Vitest Projects)
 
-**Requirement**: Every acceptance test (`.spec.test.ts` or `.spec.ts`) MUST have a spec document.
+For apps with both browser and server code, use vitest projects to run tests in the appropriate environment:
 
-### Spec Document Location & Format
+- **Browser tests** (components, UI): Run with `browser.enabled: true`
+- **Server tests** (API routes, server utilities): Run with `environment: 'node'`
 
-**Location**: `docs/specs/[feature-name].md` at package/app level
-
-```markdown
-# Feature Name
-Brief description. Link to GitHub issue if applicable.
-
-## Acceptance Criteria
-
-### Scenario: Password Reset sends reset email to valid addresses
-**Given** a registered user
-**When** they request a password reset
-**Then** system sends email with reset link
-```
-
-### Test-Spec Alignment
-
-Each test maps to one scenario. Use comments to trace steps:
+Configure include/exclude patterns to route tests to the correct environment. Ensure patterns account for `__tests__/` directories:
 
 ```typescript
-/** @spec docs/specs/password-reset.md */
+// vite.config.ts
+test: {
+  projects: [
+    {
+      test: {
+        name: 'client',
+        browser: { enabled: true, ... },
+        include: ['src/**/*.*.test.{js,ts}'],
+        exclude: ['src/lib/server/**', 'src/lib/api/**']
+      }
+    },
+    {
+      test: {
+        name: 'server',
+        environment: 'node',
+        include: ['src/lib/server/**/*.*.test.{js,ts}', 'src/lib/api/**/*.*.test.{js,ts}']
+      }
+    }
+  ]
+}
+```
+
+## Acceptance Tests & Specifications
+
+**Requirement**: Every acceptance test (`.spec.test.ts`) MUST have an inline `@spec` docstring in Gherkin format.
+
+### Spec Format
+
+The spec lives in a JSDoc comment at the top of the describe block, using Gherkin syntax:
+
+```typescript
+/**
+ * @spec Password Reset
+ *
+ * Feature: Password reset for registered users
+ *
+ * Scenario: sends reset email to valid addresses
+ *   Given a registered user
+ *   When they request a password reset
+ *   Then system sends email with reset link
+ *
+ * Scenario: rejects invalid email addresses
+ *   Given an unregistered email
+ *   When a reset is requested
+ *   Then no email is sent
+ *   And an error is returned
+ */
 describe('Password Reset', () => {
   it('sends reset email to valid addresses', async () => {
-    // Given: a registered user
     const user = await createUser({ email: 'test@example.com' });
-
-    // When: they request a password reset
     await passwordService.requestReset(user.email);
-
-    // Then: system sends email with reset link
     expect(mockEmailService.send).toHaveBeenCalledWith(
       expect.objectContaining({ to: user.email, subject: /reset/i })
     );
   });
+
+  it('rejects invalid email addresses', async () => {
+    const result = await passwordService.requestReset('unknown@example.com');
+    expect(mockEmailService.send).not.toHaveBeenCalled();
+    expect(result.error).toBeDefined();
+  });
 });
 ```
+
+### Rules
+
+1. Every acceptance test file has a `@spec` docstring at the top
+2. The spec uses Gherkin format (Feature, Scenario, Given/When/Then)
+3. Each `it()` test name matches a Scenario name exactly
+4. The test implements that scenario
 
 ### Living Documentation
 
@@ -92,10 +131,10 @@ Acceptance test specs are verifiable living documentation. Running the tests con
 
 - **Changing requirements** → Update spec first, then test
 - **Changing test** → Verify spec still matches, update if needed
-- **Review checklist**: Spec exists, `@spec` JSDoc present, scenario names match
+- **Review checklist**: `@spec` docstring present, scenario names match test names
 
 ### Agent Guidance
 
-1. **Before writing acceptance test**: Verify spec document exists
-2. **If no spec**: Create spec document first (never skip this)
-3. **After changes**: Run tests to confirm spec-test alignment
+1. **Before writing acceptance test**: Write the `@spec` docstring first
+2. **Each scenario** becomes one `it()` test with matching name
+3. **After changes**: Ensure spec scenarios and test names stay aligned

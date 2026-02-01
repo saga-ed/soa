@@ -14,13 +14,15 @@ See [/packages/CLAUDE.md](../CLAUDE.md) for packages overview.
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| `config/` | Zod configuration schemas |
-| `trpc-codegen/` | tRPC code generation CLI |
-| `tgql-codegen/` | TypeGraphQL code generation CLI |
-| `typescript-config/` | Shared tsconfig bases |
-| `eslint-config/` | Shared ESLint configurations |
+| Package | Description | Docs |
+|---------|-------------|------|
+| `config/` | Pure configuration loader with environment variable validation. Single-purpose, zero deviations. **Usage:** `import { getConfig } from '@saga-ed/soa-config'` | Tier |
+| `trpc-codegen/` | CLI tool for generating TypeScript types from tRPC routers. Standard Node.js CLI patterns. **Usage:** `pnpm trpc-codegen --input router.ts` | Tier |
+| `tgql-codegen/` | CLI tool for generating TypeScript types from TypeGraphQL schemas. Standard Node.js CLI patterns. **Usage:** `pnpm tgql-codegen --schema schema.ts` | Tier |
+| `typescript-config/` | Shared TypeScript configuration presets (`base.json`, `react.json`, `node.json`). Pure JSON config files. **Usage:** `extends: "@saga-ed/soa-typescript-config/base.json"` | Tier |
+| `eslint-config/` | Shared ESLint configuration with strict rules, no Prettier. Pure JavaScript config files. **Usage:** `extends: ["@saga-ed/soa-eslint-config"]` | Tier |
+
+**Note:** All packages in this tier are simple/single-purpose and follow tier patterns exactly. They are adequately documented at the tier level and do not require project-level CLAUDE.md files.
 
 ## Agnostic Constraints
 

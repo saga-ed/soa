@@ -21,12 +21,12 @@ export class UserResolver extends AbstractTGQLController {
   }
 
   @Query(() => User, { nullable: true })
-  user(@Arg('id') id: string) {
+  user(@Arg('id', () => String) id: string) {
     return getUserById(id);
   }
 
   @Mutation(() => User)
-  addUser(@Arg('input') input: UserInput) {
+  addUser(@Arg('input', () => UserInput) input: UserInput) {
     const user = Object.assign(new User(), input, { id: uuidv4() });
     return createUser(user);
   }

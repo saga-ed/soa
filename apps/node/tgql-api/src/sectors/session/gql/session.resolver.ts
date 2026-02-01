@@ -21,12 +21,12 @@ export class SessionResolver extends AbstractTGQLController {
   }
 
   @Query(() => Session, { nullable: true })
-  session(@Arg('id') id: string) {
+  session(@Arg('id', () => String) id: string) {
     return getSessionById(id);
   }
 
   @Mutation(() => Session)
-  addSession(@Arg('input') input: SessionInput) {
+  addSession(@Arg('input', () => SessionInput) input: SessionInput) {
     const session = Object.assign(new Session(), input, { id: uuidv4() });
     return createSession(session);
   }

@@ -5,18 +5,18 @@ export class Session {
   @Field(() => ID)
   id!: string;
 
-  @Field()
+  @Field(() => String)
   tutor!: string;
 
-  @Field()
+  @Field(() => String)
   student!: string;
 
-  @Field()
+  @Field(() => Date)
   date!: Date;
 
   @Field(() => Int)
   duration!: number; // in minutes
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   notes?: string;
 }

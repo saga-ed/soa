@@ -2,12 +2,12 @@ import { Field, InputType } from 'type-graphql';
 
 @InputType()
 export class UserInput {
-  @Field()
+  @Field(() => String)
   name!: string;
 
-  @Field()
+  @Field(() => String)
   email!: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   role?: string;
 }

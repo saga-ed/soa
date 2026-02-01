@@ -5,12 +5,12 @@ export class User {
   @Field(() => ID)
   id!: string;
 
-  @Field()
+  @Field(() => String)
   name!: string;
 
-  @Field()
+  @Field(() => String)
   email!: string;
 
-  @Field({ nullable: true })
+  @Field(() => String, { nullable: true })
   role?: string;
 }

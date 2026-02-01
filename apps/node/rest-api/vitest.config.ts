@@ -5,8 +5,10 @@ export default defineConfig({
     environment: 'node',
     include: ['src/__tests__/**/*.unit.test.ts', 'src/__tests__/**/*.int.test.ts'],
     coverage: {
-      reporter: ['text', 'html'],
-      exclude: ['**/node_modules/**', '**/dist/**', '**/test/**', '**/__tests__/**/mocks/**'],
+      provider: 'v8',
+      reporter: ['text', 'html', 'json-summary'],
+      exclude: ['**/node_modules/**', '**/dist/**', '**/test/**', '**/__tests__/**'],
+      include: ['src/**/*.ts'],
     },
   },
 });

@@ -11,8 +11,6 @@
     "start": "node dist/main.js",
     "check-types": "tsc --noEmit",
     "lint": "eslint \"src/**/*.ts\" --fix",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
     "test": "vitest run",
     "clean": "rm -rf dist",
     "emit:schema": "tsx scripts/emit-schema.ts"
@@ -41,6 +39,7 @@
     "@types/express": "^5.0.3",
     "@types/node": "^24.0.3",
     "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "^1.5.0",
     "supertest": "^7.1.1",
     "tsup": "^8.5.0",
     "tsx": "^4.20.3",

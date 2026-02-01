@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Session } from '../../../sectors/session/gql/session.type.js';
 import { sessions, createSession, getSessions, getSessionById } from '../../../sectors/session/gql/session.data.js';

@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { User } from '../../../sectors/user/gql/user.type.js';
 import { users, createUser, getUsers, getUserById } from '../../../sectors/user/gql/user.data.js';

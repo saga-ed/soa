@@ -9,13 +9,16 @@ Pattern: `name.[type].[purpose?].test.ts`
 | Unit + Regression | `*.unit.test.ts` | `user.unit.test.ts` |
 | Unit + Acceptance | `*.unit.spec.test.ts` | `user.unit.spec.test.ts` |
 | Unit + Smoke | `*.unit.smoke.test.ts` | `setup.unit.smoke.test.ts` |
+| Component + Acceptance | `*.spec.test.ts` | `Timer.spec.test.ts` |
+| Component + Smoke | `*.smoke.test.ts` | `Timer.smoke.test.ts` |
 | Integration + Regression | `*.int.test.ts` | `api.int.test.ts` |
 | Integration + Acceptance | `*.int.spec.test.ts` | `api.int.spec.test.ts` |
 | Integration + Smoke | `*.int.smoke.test.ts` | `db.int.smoke.test.ts` |
 | E2E (Playwright) | `*.spec.ts` | `auth.spec.ts` |
 
 **Rules**:
-- Type suffix (`.unit.`, `.int.`) is **required**
+- Type suffix (`.unit.`, `.int.`) is **required** for unit and integration tests
+- Component tests (rendered in a browser context) omit the type suffix, since test routing is handled by vitest project config
 - Purpose suffix (`.spec.`, `.smoke.`) is **optional**
 - No purpose suffix = regression test (default)
 

@@ -205,14 +205,41 @@ export class TGQLCodegen {
   }
 
   private async dynamicImport(filePath: string): Promise<any> {
-    try {
-      // Convert .ts to .js and look in dist directory
-      const jsPath = filePath.replace(/\.ts$/, '.js').replace('/src/', '/dist/');
-      return await import(jsPath);
-    } catch (error) {
-      console.error(`Failed to import resolver from ${filePath}:`, error);
-      throw error;
+    // Try multiple import strategies
+    const strategies = [
+      // Strategy 1: Try compiled JS in dist directory
+      async () => {
+        const jsPath = filePath.replace(/\.ts$/, '.js').replace('/src/', '/dist/');
+        return await import(jsPath);
+      },
+      // Strategy 2: Try TypeScript file directly (works with tsx/ts-node loader)
+      async () => {
+        const { pathToFileURL } = await import('node:url');
+        return await import(pathToFileURL(filePath).href);
+      },
+      // Strategy 3: Try with tsx register (if available)
+      async () => {
+        try {
+          const tsx = await import('tsx/esm/api');
+          return await tsx.tsImport(filePath, import.meta.url);
+        } catch {
+          throw new Error('tsx not available');
+        }
+      },
+    ];
+
+    let lastError: Error | null = null;
+    for (const strategy of strategies) {
+      try {
+        return await strategy();
+      } catch (error) {
+        lastError = error as Error;
+        // Continue to next strategy
+      }
     }
+
+    console.error(`Failed to import resolver from ${filePath}:`, lastError);
+    throw lastError;
   }
 
   async watch(): Promise<void> {

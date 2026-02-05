@@ -1,7 +1,7 @@
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { STSClient, GetCallerIdentityCommand } from '@aws-sdk/client-sts';
-import { readFileSync } from 'fs';
-import { homedir } from 'os';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { inject, injectable } from 'inversify';
 import * as YAML from 'yaml';
 import type { ILogger } from '@saga-ed/soa-logger';

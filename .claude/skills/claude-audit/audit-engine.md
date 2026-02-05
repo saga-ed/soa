@@ -448,13 +448,54 @@ cat pnpm-workspace.yaml
 grep "prettier" package.json
 ```
 
+#### Check 5: Cross-Repo Linking Configuration (Coach/Thrive Only)
+
+**PATTERN:** Consuming repos (coach, thrive) must have proper SOA linking configuration
+
+**Required Configuration:**
+
+1. **`soa-link.json`** - Config file listing packages and paths
+2. **npm scripts** (optional but recommended) - `soa:link:status`, `soa:link:on`, `soa:link:off` pointing to `../soa/scripts/cross-repo-link.sh`
+3. **Clean state** - `pnpm.overrides` must NOT contain SOA package links (linking should be OFF by default)
+
+**Detection:**
+```bash
+# Verify soa-link.json exists and has required fields
+test -f soa-link.json
+jq '.soaPath, .packages' soa-link.json
+
+# Check npm scripts (optional but recommended)
+grep "soa:link:status" package.json
+grep "cross-repo-link.sh" package.json
+
+# Verify linking is OFF (no SOA packages in overrides)
+jq '.pnpm.overrides | keys | map(select(test("@saga-ed/soa-")))' package.json
+# Should return empty array []
+```
+
+**Validation Rules:**
+
+1. `soa-link.json` must exist in repo root
+2. All packages used in the repo (found in workspace package.json files) must be listed in `soa-link.json`
+3. `soaPath` must point to correct relative path (typically `../soa`)
+4. Linking must be OFF by default (overrides should be empty or not contain SOA packages)
+5. If npm scripts exist, they should use `../soa/scripts/cross-repo-link.sh`
+
+**Common Violations:**
+
+- Missing `soa-link.json` file
+- Missing SOA packages used by the repo in `soa-link.json`
+- Incorrect `soaPath` in `soa-link.json`
+- Linking enabled (SOA packages in overrides) - should be OFF for commits
+- npm scripts pointing to non-existent local script instead of central script
+
 ### Scoring
 
-- **5 points**: All dependencies correct, versions matched, pnpm only
-- **4 points**: Minor version mismatches (patch level only)
-- **3 points**: Moderate version mismatches (minor level)
-- **2 points**: Major version mismatches OR incorrect dependencies
-- **1 point**: Wrong package manager OR banned packages found
+- **5 points**: All dependencies correct, versions matched, pnpm only, linking config complete and consistent
+- **4 points**: Minor version mismatches (patch level only) OR 1-2 missing packages in linking config OR missing npm scripts
+- **3 points**: Moderate version mismatches (minor level) OR incomplete linking config (missing soa-link.json)
+- **2 points**: Major version mismatches OR incorrect dependencies OR broken linking config
+- **1 point**: Wrong package manager OR banned packages found OR linking enabled (should be OFF)
 
 ---
 
@@ -685,6 +726,47 @@ REMEDIATION:
       "outDir": "./dist"
     }
   }
+```
+
+### Template: Cross-Repo Linking Configuration Violation
+
+```
+Dependency Compliance: [SCORE]/5
+───────────────────────────────────────────────────────────────
+❌ Incomplete or missing cross-repo linking configuration
+
+ISSUES FOUND:
+  - Missing soa-link.json file
+  - Missing @saga-ed/soa-aws-util in soa-link.json (used in apps/node/coach-api)
+  - Missing npm scripts: soa:link:status, soa:link:on, soa:link:off
+  - Linking is ENABLED (pnpm.overrides contains SOA packages - should be OFF)
+
+REMEDIATION:
+  1. Create or update soa-link.json to include all used packages:
+  {
+    "soaPath": "../soa",
+    "packages": {
+      "@saga-ed/soa-api-core": "packages/node/api-core",
+      "@saga-ed/soa-aws-util": "packages/node/aws-util",
+      "@saga-ed/soa-config": "packages/core/config",
+      "@saga-ed/soa-db": "packages/node/db",
+      "@saga-ed/soa-logger": "packages/node/logger"
+    }
+  }
+
+  2. Add npm scripts to package.json (optional but recommended):
+  {
+    "scripts": {
+      "soa:link:status": "../soa/scripts/cross-repo-link.sh status",
+      "soa:link:on": "../soa/scripts/cross-repo-link.sh on",
+      "soa:link:off": "../soa/scripts/cross-repo-link.sh off"
+    }
+  }
+
+  3. If linking is enabled, turn it OFF before committing:
+  pnpm soa:link:off
+
+  See: /soa/docs/cross-repo-linking-summary.md for details
 ```
 
 ---

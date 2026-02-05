@@ -19,13 +19,18 @@ export class MessagePublisher {
     return true;
   }
 
+  /**
+   * Publish a message to a queue.
+   *
+   * Note: The queue must already exist (asserted via ConnectionManager.assertQueues at startup).
+   * This method does not assert the queue to avoid conflicts with queue options.
+   */
   async publishToQueue<T>(channelName: string, queueName: string, message: T): Promise<void> {
     const channel = this.channels.get(channelName);
     if (!channel) {
       throw new Error(`Channel ${channelName} not found, request it first using MessagePublisher.requestChannel()`);
     }
 
-    await channel.assertQueue(queueName);
     channel.sendToQueue(queueName, Buffer.from(JSON.stringify(message)));
   }
 }

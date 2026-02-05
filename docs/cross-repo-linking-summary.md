@@ -13,19 +13,23 @@ The `cross-repo-link.sh` script lets you toggle between using **local SOA packag
 ## Quick Start
 
 ```bash
-# From thrive or coach repo:
+# From consuming repo (coach or thrive):
 
-# Initialize config (first time only)
-../soa/scripts/cross-repo-link.sh init
+# Using npm scripts (recommended)
+pnpm soa:link:on       # Enable local linking
+pnpm soa:link:status   # Check current state
+pnpm soa:link:off      # Disable before committing
 
-# Enable local linking
+# Or call script directly
 ../soa/scripts/cross-repo-link.sh on
-
-# Check current state
 ../soa/scripts/cross-repo-link.sh status
-
-# Disable before committing
 ../soa/scripts/cross-repo-link.sh off
+```
+
+**First Time Setup:**
+```bash
+# If soa-link.json doesn't exist yet
+../soa/scripts/cross-repo-link.sh init
 ```
 
 ## How It Works
@@ -62,7 +66,9 @@ The `cross-repo-link.sh` script lets you toggle between using **local SOA packag
 
 ## Configuration
 
-Each consuming repo needs a `soa-link.json` file:
+Each consuming repo needs:
+
+### 1. `soa-link.json` Configuration File
 
 ```json
 {
@@ -79,6 +85,18 @@ Each consuming repo needs a `soa-link.json` file:
 **Fields:**
 - `soaPath`: Relative path from consuming repo to soa
 - `packages`: Map of npm package names to their paths within soa
+
+### 2. npm Scripts (Optional but Recommended)
+
+```json
+{
+  "scripts": {
+    "soa:link:status": "../soa/scripts/cross-repo-link.sh status",
+    "soa:link:on": "../soa/scripts/cross-repo-link.sh on",
+    "soa:link:off": "../soa/scripts/cross-repo-link.sh off"
+  }
+}
+```
 
 ## Commands
 

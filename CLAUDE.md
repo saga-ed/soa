@@ -48,6 +48,7 @@ pnpm typecheck      # Type check
 - See `apps/CLAUDE.md` for application details
 - See `apps/node/claude/testing.md` for Node.js testing patterns (DI, controller loading)
 - See `packages/CLAUDE.md` for package details
+- See `docs/cross-repo-linking-summary.md` for cross-repo package linking (development workflow)
 
 ---
 

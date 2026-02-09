@@ -1,0 +1,377 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+    Service-to-Service Authentication - Monitoring, Alarms, and Dashboard.
+    CloudWatch metrics, alarms for auth failures, and an operational dashboard.
+
+Parameters:
+    Environment:
+        Type: String
+        AllowedValues:
+            - dev
+            - staging
+            - prod
+        Description: Deployment environment
+
+    ServiceName:
+        Type: String
+        Default: saga
+        Description: Service name prefix for resource naming
+
+    ApiId:
+        Type: String
+        Description: API Gateway REST API ID to monitor
+
+    ApiStageName:
+        Type: String
+        Description: API Gateway stage name to monitor
+
+    CognitoUserPoolId:
+        Type: String
+        Description: Cognito User Pool ID to monitor
+
+    AlarmSnsTopicArn:
+        Type: String
+        Default: ''
+        Description: SNS topic ARN for alarm notifications. Leave empty to skip alarm actions.
+
+    AuthFailureThreshold:
+        Type: Number
+        Default: 50
+        Description: Number of 401/403 responses in evaluation period before alarming
+
+    AuthFailureEvaluationPeriods:
+        Type: Number
+        Default: 3
+        Description: Number of consecutive periods exceeding threshold before alarming
+
+    LatencyThresholdMs:
+        Type: Number
+        Default: 3000
+        Description: P99 latency threshold in milliseconds before alarming
+
+    Error5xxThreshold:
+        Type: Number
+        Default: 10
+        Description: Number of 5XX errors in evaluation period before alarming
+
+Conditions:
+    HasAlarmTopic: !Not [!Equals [!Ref AlarmSnsTopicArn, '']]
+
+Resources:
+    # =========================================================================
+    # Auth Failure Log Metric Filters
+    # =========================================================================
+
+    # Metric filter: count 401 Unauthorized responses from access logs
+    Unauthorized401MetricFilter:
+        Type: AWS::Logs::MetricFilter
+        Properties:
+            LogGroupName: !Sub '/aws/apigateway/${ServiceName}-service-api-${Environment}/access-logs'
+            FilterPattern: '{ $.status = 401 }'
+            MetricTransformations:
+                - MetricNamespace: !Sub '${ServiceName}/ServiceAuth/${Environment}'
+                  MetricName: UnauthorizedCount
+                  MetricValue: '1'
+                  DefaultValue: 0
+                  Dimensions:
+                      - Key: ApiId
+                        Value: !Ref ApiId
+
+    # Metric filter: count 403 Forbidden responses from access logs
+    Forbidden403MetricFilter:
+        Type: AWS::Logs::MetricFilter
+        Properties:
+            LogGroupName: !Sub '/aws/apigateway/${ServiceName}-service-api-${Environment}/access-logs'
+            FilterPattern: '{ $.status = 403 }'
+            MetricTransformations:
+                - MetricNamespace: !Sub '${ServiceName}/ServiceAuth/${Environment}'
+                  MetricName: ForbiddenCount
+                  MetricValue: '1'
+                  DefaultValue: 0
+                  Dimensions:
+                      - Key: ApiId
+                        Value: !Ref ApiId
+
+    # Metric filter: extract per-client auth failures
+    PerClientAuthFailureMetricFilter:
+        Type: AWS::Logs::MetricFilter
+        Properties:
+            LogGroupName: !Sub '/aws/apigateway/${ServiceName}-service-api-${Environment}/access-logs'
+            FilterPattern: '{ ($.status = 401 || $.status = 403) && $.clientId = * }'
+            MetricTransformations:
+                - MetricNamespace: !Sub '${ServiceName}/ServiceAuth/${Environment}'
+                  MetricName: AuthFailureByClient
+                  MetricValue: '1'
+                  DefaultValue: 0
+                  Dimensions:
+                      - Key: ClientId
+                        Value: $.clientId
+
+    # Metric filter: authorizer latency
+    AuthorizerLatencyMetricFilter:
+        Type: AWS::Logs::MetricFilter
+        Properties:
+            LogGroupName: !Sub '/aws/apigateway/${ServiceName}-service-api-${Environment}/access-logs'
+            FilterPattern: '{ $.authorizerLatency = * }'
+            MetricTransformations:
+                - MetricNamespace: !Sub '${ServiceName}/ServiceAuth/${Environment}'
+                  MetricName: AuthorizerLatency
+                  MetricValue: $.authorizerLatency
+                  DefaultValue: 0
+
+    # =========================================================================
+    # CloudWatch Alarms
+    # =========================================================================
+
+    # Alarm: High rate of 401 Unauthorized responses
+    HighUnauthorizedAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmName: !Sub '${ServiceName}-${Environment}-high-unauthorized-rate'
+            AlarmDescription: >
+                High rate of 401 Unauthorized responses detected. This may indicate
+                misconfigured partner credentials, expired tokens, or unauthorized
+                access attempts.
+            Namespace: !Sub '${ServiceName}/ServiceAuth/${Environment}'
+            MetricName: UnauthorizedCount
+            Dimensions:
+                - Name: ApiId
+                  Value: !Ref ApiId
+            Statistic: Sum
+            Period: 300
+            EvaluationPeriods: !Ref AuthFailureEvaluationPeriods
+            Threshold: !Ref AuthFailureThreshold
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            TreatMissingData: notBreaching
+            AlarmActions: !If
+                - HasAlarmTopic
+                - [!Ref AlarmSnsTopicArn]
+                - !Ref 'AWS::NoValue'
+            OKActions: !If
+                - HasAlarmTopic
+                - [!Ref AlarmSnsTopicArn]
+                - !Ref 'AWS::NoValue'
+
+    # Alarm: High rate of 403 Forbidden responses
+    HighForbiddenAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmName: !Sub '${ServiceName}-${Environment}-high-forbidden-rate'
+            AlarmDescription: >
+                High rate of 403 Forbidden responses detected. This may indicate
+                a partner requesting scopes they are not authorized for or a
+                misconfigured app client.
+            Namespace: !Sub '${ServiceName}/ServiceAuth/${Environment}'
+            MetricName: ForbiddenCount
+            Dimensions:
+                - Name: ApiId
+                  Value: !Ref ApiId
+            Statistic: Sum
+            Period: 300
+            EvaluationPeriods: !Ref AuthFailureEvaluationPeriods
+            Threshold: !Ref AuthFailureThreshold
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            TreatMissingData: notBreaching
+            AlarmActions: !If
+                - HasAlarmTopic
+                - [!Ref AlarmSnsTopicArn]
+                - !Ref 'AWS::NoValue'
+            OKActions: !If
+                - HasAlarmTopic
+                - [!Ref AlarmSnsTopicArn]
+                - !Ref 'AWS::NoValue'
+
+    # Alarm: API Gateway 5XX errors
+    Api5xxErrorAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmName: !Sub '${ServiceName}-${Environment}-api-5xx-errors'
+            AlarmDescription: >
+                API Gateway is returning 5XX errors. This indicates server-side
+                failures in the authentication flow or backend integration.
+            Namespace: AWS/ApiGateway
+            MetricName: 5XXError
+            Dimensions:
+                - Name: ApiName
+                  Value: !Sub '${ServiceName}-service-api-${Environment}'
+                - Name: Stage
+                  Value: !Ref ApiStageName
+            Statistic: Sum
+            Period: 300
+            EvaluationPeriods: 2
+            Threshold: !Ref Error5xxThreshold
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            TreatMissingData: notBreaching
+            AlarmActions: !If
+                - HasAlarmTopic
+                - [!Ref AlarmSnsTopicArn]
+                - !Ref 'AWS::NoValue'
+
+    # Alarm: High API latency (P99)
+    HighLatencyAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+            AlarmName: !Sub '${ServiceName}-${Environment}-high-api-latency'
+            AlarmDescription: >
+                P99 API latency exceeds threshold. This may indicate issues with
+                the Cognito authorizer, backend service, or network problems.
+            Namespace: AWS/ApiGateway
+            MetricName: Latency
+            Dimensions:
+                - Name: ApiName
+                  Value: !Sub '${ServiceName}-service-api-${Environment}'
+                - Name: Stage
+                  Value: !Ref ApiStageName
+            ExtendedStatistic: p99
+            Period: 300
+            EvaluationPeriods: 3
+            Threshold: !Ref LatencyThresholdMs
+            ComparisonOperator: GreaterThanOrEqualToThreshold
+            TreatMissingData: notBreaching
+            AlarmActions: !If
+                - HasAlarmTopic
+                - [!Ref AlarmSnsTopicArn]
+                - !Ref 'AWS::NoValue'
+
+    # =========================================================================
+    # CloudWatch Dashboard
+    # =========================================================================
+    ServiceAuthDashboard:
+        Type: AWS::CloudWatch::Dashboard
+        Properties:
+            DashboardName: !Sub '${ServiceName}-service-auth-${Environment}'
+            DashboardBody: !Sub |
+                {
+                    "widgets": [
+                        {
+                            "type": "text",
+                            "x": 0, "y": 0,
+                            "width": 24, "height": 1,
+                            "properties": {
+                                "markdown": "# Service-to-Service Auth Dashboard (${Environment})"
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 0, "y": 1,
+                            "width": 8, "height": 6,
+                            "properties": {
+                                "title": "API Request Count",
+                                "metrics": [
+                                    ["AWS/ApiGateway", "Count", "ApiName", "${ServiceName}-service-api-${Environment}", "Stage", "${ApiStageName}", {"stat": "Sum", "period": 300}]
+                                ],
+                                "view": "timeSeries",
+                                "region": "${AWS::Region}",
+                                "period": 300
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 8, "y": 1,
+                            "width": 8, "height": 6,
+                            "properties": {
+                                "title": "API Latency (ms)",
+                                "metrics": [
+                                    ["AWS/ApiGateway", "Latency", "ApiName", "${ServiceName}-service-api-${Environment}", "Stage", "${ApiStageName}", {"stat": "p50", "period": 300, "label": "p50"}],
+                                    ["...", {"stat": "p90", "period": 300, "label": "p90"}],
+                                    ["...", {"stat": "p99", "period": 300, "label": "p99"}]
+                                ],
+                                "view": "timeSeries",
+                                "region": "${AWS::Region}",
+                                "period": 300
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 16, "y": 1,
+                            "width": 8, "height": 6,
+                            "properties": {
+                                "title": "HTTP Error Responses",
+                                "metrics": [
+                                    ["AWS/ApiGateway", "4XXError", "ApiName", "${ServiceName}-service-api-${Environment}", "Stage", "${ApiStageName}", {"stat": "Sum", "period": 300, "label": "4XX", "color": "#ff9900"}],
+                                    ["AWS/ApiGateway", "5XXError", "ApiName", "${ServiceName}-service-api-${Environment}", "Stage", "${ApiStageName}", {"stat": "Sum", "period": 300, "label": "5XX", "color": "#d13212"}]
+                                ],
+                                "view": "timeSeries",
+                                "region": "${AWS::Region}",
+                                "period": 300
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 0, "y": 7,
+                            "width": 12, "height": 6,
+                            "properties": {
+                                "title": "Authentication Failures",
+                                "metrics": [
+                                    ["${ServiceName}/ServiceAuth/${Environment}", "UnauthorizedCount", "ApiId", "${ApiId}", {"stat": "Sum", "period": 300, "label": "401 Unauthorized", "color": "#ff9900"}],
+                                    ["${ServiceName}/ServiceAuth/${Environment}", "ForbiddenCount", "ApiId", "${ApiId}", {"stat": "Sum", "period": 300, "label": "403 Forbidden", "color": "#d13212"}]
+                                ],
+                                "view": "timeSeries",
+                                "region": "${AWS::Region}",
+                                "period": 300
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 12, "y": 7,
+                            "width": 12, "height": 6,
+                            "properties": {
+                                "title": "Authorizer Latency (ms)",
+                                "metrics": [
+                                    ["${ServiceName}/ServiceAuth/${Environment}", "AuthorizerLatency", {"stat": "Average", "period": 300, "label": "Avg"}],
+                                    ["...", {"stat": "p99", "period": 300, "label": "p99"}]
+                                ],
+                                "view": "timeSeries",
+                                "region": "${AWS::Region}",
+                                "period": 300
+                            }
+                        },
+                        {
+                            "type": "metric",
+                            "x": 0, "y": 13,
+                            "width": 12, "height": 6,
+                            "properties": {
+                                "title": "Cognito Token Operations",
+                                "metrics": [
+                                    ["AWS/Cognito", "TokenRefreshSuccesses", "UserPool", "${CognitoUserPoolId}", {"stat": "Sum", "period": 300, "label": "Token Refresh Success"}],
+                                    ["AWS/Cognito", "SignInSuccesses", "UserPool", "${CognitoUserPoolId}", {"stat": "Sum", "period": 300, "label": "Sign In Success"}]
+                                ],
+                                "view": "timeSeries",
+                                "region": "${AWS::Region}",
+                                "period": 300
+                            }
+                        },
+                        {
+                            "type": "log",
+                            "x": 12, "y": 13,
+                            "width": 12, "height": 6,
+                            "properties": {
+                                "title": "Recent Auth Failures",
+                                "query": "SOURCE '/aws/apigateway/${ServiceName}-service-api-${Environment}/access-logs'\n| filter status = 401 or status = 403\n| fields @timestamp, status, clientId, resourcePath, ip\n| sort @timestamp desc\n| limit 20",
+                                "region": "${AWS::Region}",
+                                "view": "table"
+                            }
+                        }
+                    ]
+                }
+
+Outputs:
+    DashboardName:
+        Description: CloudWatch dashboard name
+        Value: !Sub '${ServiceName}-service-auth-${Environment}'
+
+    DashboardUrl:
+        Description: CloudWatch dashboard URL
+        Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ServiceName}-service-auth-${Environment}'
+
+    HighUnauthorizedAlarmArn:
+        Description: ARN of the high unauthorized rate alarm
+        Value: !GetAtt HighUnauthorizedAlarm.Arn
+
+    HighForbiddenAlarmArn:
+        Description: ARN of the high forbidden rate alarm
+        Value: !GetAtt HighForbiddenAlarm.Arn
+
+    Api5xxErrorAlarmArn:
+        Description: ARN of the 5XX error alarm
+        Value: !GetAtt Api5xxErrorAlarm.Arn

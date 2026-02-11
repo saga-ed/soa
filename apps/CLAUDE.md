@@ -34,3 +34,7 @@ apps/
 
 - `web/CLAUDE.md` - Frontend app patterns
 - `node/CLAUDE.md` - Backend API patterns
+
+---
+
+*Last updated: 2026-02*

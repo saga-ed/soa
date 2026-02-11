@@ -67,3 +67,11 @@ pnpm typecheck      # Type check
 - Use 4-space indentation only
 - Write tests for every new feature
 - Use pnpm only (never npm)
+
+## Documentation Directive
+
+**Documentation Directive:** See `.claude/skills/documentation-system/SKILL.md` for documentation maintenance instructions.
+
+---
+
+*Last updated: 2026-02*

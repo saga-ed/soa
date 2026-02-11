@@ -42,3 +42,7 @@ pnpm --filter @saga-ed/soa-ui build
 # Run Storybook (if available)
 pnpm --filter @saga-ed/soa-ui storybook
 ```
+
+---
+
+*Last updated: 2026-02*

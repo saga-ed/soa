@@ -66,3 +66,7 @@ See [claude/testing.md](./claude/testing.md) for:
 - Database isolation for parallel tests
 
 See [claude/esm.md](../../claude/esm.md) for ESM patterns (__dirname workaround, imports).
+
+---
+
+*Last updated: 2026-02*

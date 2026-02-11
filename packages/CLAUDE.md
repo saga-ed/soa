@@ -43,3 +43,7 @@ import { Config } from '@saga-ed/soa-config';
 - `web/CLAUDE.md` - Browser runtime details
 - `node/CLAUDE.md` - Node.js runtime details
 - `core/CLAUDE.md` - Runtime-agnostic details
+
+---
+
+*Last updated: 2026-02*

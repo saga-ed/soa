@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check-documentation-impact.sh",
+            "timeout": 10,
+            "statusMessage": "Checking documentation impact..."
+          }
+        ]
+      }
+    ]
+  }
+}

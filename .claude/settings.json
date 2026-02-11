@@ -8,6 +8,7 @@
         }
     },
     "enabledPlugins": {
-        "system-review@saga-tools": true
+        "system-review@saga-tools": true,
+        "documentation-system@saga-tools": true
     }
 }

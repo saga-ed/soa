@@ -75,3 +75,7 @@ None - follows all SOA patterns.
 - `../rest-api/` - REST API example
 - `/packages/node/api-core/` - Shared server utilities
 - `/apps/node/claude/testing.md` - Testing patterns
+
+---
+
+*Last updated: 2026-02*

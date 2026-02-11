@@ -86,3 +86,7 @@ export default function Page() {
 - `/apps/web/docs/` - Component showcase and documentation
 - `/packages/web/CLAUDE.md` - Web package patterns
 - `/claude/frontend/` - Frontend framework patterns
+
+---
+
+*Last updated: 2026-02*

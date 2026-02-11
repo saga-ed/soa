@@ -103,3 +103,7 @@ None - follows all SOA patterns.
 - `/packages/node/api-core/` - API server utilities
 - `/apps/node/CLAUDE.md` - Backend app patterns
 - `/apps/node/claude/testing.md` - Database testing patterns
+
+---
+
+*Last updated: 2026-02*

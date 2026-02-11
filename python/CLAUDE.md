@@ -84,3 +84,7 @@ uv add --dev pytest pytest-cov ruff mypy
 ## Additional Standards
 
 Additional Python conventions (testing, linting, type checking, etc.) may be documented in sibling files within this directory as the ecosystem matures.
+
+---
+
+*Last updated: 2026-02*

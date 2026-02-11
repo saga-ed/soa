@@ -47,3 +47,7 @@ All env vars must be prefixed with `NEXT_PUBLIC_*`:
 ## Convention Deviations
 
 - ⚠️ Next.js is legacy - new projects should use SvelteKit
+
+---
+
+*Last updated: 2026-02*

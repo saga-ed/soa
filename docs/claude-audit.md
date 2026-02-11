@@ -194,7 +194,7 @@ import fs from 'fs';
 5. Key Commands
 6. See Also
 
-See templates in `.claude/skills/documentation-system/templates/`
+See templates in the `documentation-system@saga-tools` plugin
 
 ### Dependency Version Mismatches
 

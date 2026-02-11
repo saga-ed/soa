@@ -70,7 +70,7 @@ pnpm typecheck      # Type check
 
 ## Documentation Directive
 
-**Documentation Directive:** See `.claude/skills/documentation-system/SKILL.md` for documentation maintenance instructions.
+**Documentation Directive:** Documentation system is provided via the `documentation-system@saga-tools` plugin. Use `/documentation-system` for maintenance instructions.
 
 ---
 

@@ -642,7 +642,7 @@ REMEDIATION:
   6. Convention Deviations (if any, marked with ⚠️)
   7. See Also
 
-  See template: /soa/.claude/skills/documentation-system/templates/
+  See templates in the documentation-system@saga-tools plugin
 ```
 
 ### Template: Documentation Violation (Simple Package - Optional)

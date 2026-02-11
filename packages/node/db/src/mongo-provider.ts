@@ -16,11 +16,9 @@ export class MongoProvider implements IMongoConnMgr {
 
   async connect(): Promise<void> {
     if (this.isConnected()) return;
-    this.client = null;
     const uri = this._buildConnectionString();
-    const client = new MongoClient(uri, this.config.options);
-    await client.connect();
-    this.client = client;
+    this.client = null;
+    this.client = await new MongoClient(uri, this.config.options).connect();
   }
 
   async disconnect(): Promise<void> {

@@ -1,0 +1,45 @@
+## MongoDB with profile-based volume switching
+##
+## Volume name is dynamic: mongo-profile-<SEED_PROFILE>
+## Each profile gets its own Docker volume — fully isolated.
+## Seeder checks a sentinel doc and skips if already seeded.
+
+services:
+
+  mongo:
+    image: mongo:8.0.12
+    container_name: soa-mongo
+    command: ["mongod", "--replSet", "wootmath", "--bind_ip_all"]
+    ports:
+      - "${MONGO_PORT:-27018}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  mongo_init:
+    image: mongo:8.0.12
+    container_name: soa-mongo-init
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./seed:/seed:ro
+    environment:
+      SEED_PROFILE: ${SEED_PROFILE:-small}
+    entrypoint: ["mongosh", "--host", "mongo:27017", "--file", "/seed/init-and-seed.js"]
+    restart: "no"
+
+  mongo_reset:
+    image: alpine
+    container_name: soa-mongo-reset
+    entrypoint: ["echo", "Use 'docker volume rm mongo-profile-<name>' to reset a profile"]
+    profiles: ["tools"]
+
+volumes:
+  mongo-data:
+    name: mongo-profile-${SEED_PROFILE:-small}

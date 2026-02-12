@@ -1,0 +1,172 @@
+{
+  "saga_db": {
+    "organizations": [
+      {
+        "name": "Basic Org Alpha",
+        "slug": "basic-alpha",
+        "status": "active",
+        "created_at": "2025-01-01T00:00:00Z"
+      },
+      {
+        "name": "Basic Org Beta",
+        "slug": "basic-beta",
+        "status": "active",
+        "created_at": "2025-02-01T00:00:00Z"
+      }
+    ],
+    "users": [
+      {
+        "email": "dop@basic-alpha.edu",
+        "first_name": "Diana",
+        "last_name": "Director",
+        "role": "DIRECTOR_OF_PROGRAMS",
+        "org_slug": "basic-alpha",
+        "password_hash": "$2b$10$placeholder_hash_dop_a",
+        "status": "active"
+      },
+      {
+        "email": "sd@basic-alpha.edu",
+        "first_name": "Sam",
+        "last_name": "SiteDir",
+        "role": "SITE_DIRECTOR",
+        "org_slug": "basic-alpha",
+        "password_hash": "$2b$10$placeholder_hash_sd_a",
+        "status": "active"
+      },
+      {
+        "email": "tutor1@basic-alpha.edu",
+        "first_name": "Tina",
+        "last_name": "Tutor",
+        "role": "TUTOR",
+        "org_slug": "basic-alpha",
+        "password_hash": "$2b$10$placeholder_hash_t1_a",
+        "status": "active"
+      },
+      {
+        "email": "tutor2@basic-alpha.edu",
+        "first_name": "Tom",
+        "last_name": "Tutor",
+        "role": "TUTOR",
+        "org_slug": "basic-alpha",
+        "password_hash": "$2b$10$placeholder_hash_t2_a",
+        "status": "active"
+      },
+      {
+        "email": "scholar1@basic-alpha.edu",
+        "first_name": "Sara",
+        "last_name": "Scholar",
+        "role": "SCHOLAR",
+        "org_slug": "basic-alpha",
+        "password_hash": "$2b$10$placeholder_hash_s1_a",
+        "status": "active"
+      },
+      {
+        "email": "scholar2@basic-alpha.edu",
+        "first_name": "Scott",
+        "last_name": "Scholar",
+        "role": "SCHOLAR",
+        "org_slug": "basic-alpha",
+        "password_hash": "$2b$10$placeholder_hash_s2_a",
+        "status": "active"
+      },
+      {
+        "email": "scholar3@basic-alpha.edu",
+        "first_name": "Sophie",
+        "last_name": "Scholar",
+        "role": "SCHOLAR",
+        "org_slug": "basic-alpha",
+        "password_hash": "$2b$10$placeholder_hash_s3_a",
+        "status": "active"
+      },
+      {
+        "email": "dop@basic-beta.edu",
+        "first_name": "Derek",
+        "last_name": "Director",
+        "role": "DIRECTOR_OF_PROGRAMS",
+        "org_slug": "basic-beta",
+        "password_hash": "$2b$10$placeholder_hash_dop_b",
+        "status": "active"
+      },
+      {
+        "email": "tutor1@basic-beta.edu",
+        "first_name": "Teresa",
+        "last_name": "Tutor",
+        "role": "TUTOR",
+        "org_slug": "basic-beta",
+        "password_hash": "$2b$10$placeholder_hash_t1_b",
+        "status": "active"
+      }
+    ],
+    "programs": [
+      {
+        "name": "Alpha Morning Program",
+        "org_slug": "basic-alpha",
+        "status": "active",
+        "schedule_type": "MWF",
+        "created_at": "2025-01-01T00:00:00Z"
+      },
+      {
+        "name": "Alpha Afternoon Program",
+        "org_slug": "basic-alpha",
+        "status": "active",
+        "schedule_type": "TTh",
+        "created_at": "2025-01-01T00:00:00Z"
+      },
+      {
+        "name": "Beta Program",
+        "org_slug": "basic-beta",
+        "status": "active",
+        "schedule_type": "everyday",
+        "created_at": "2025-02-01T00:00:00Z"
+      }
+    ]
+  },
+  "ars_db": {
+    "polls": [
+      {
+        "title": "Alpha Morning Poll",
+        "org_slug": "basic-alpha",
+        "question_count": 10,
+        "status": "draft"
+      },
+      {
+        "title": "Alpha Afternoon Poll",
+        "org_slug": "basic-alpha",
+        "question_count": 5,
+        "status": "published"
+      },
+      {
+        "title": "Beta Default Poll",
+        "org_slug": "basic-beta",
+        "question_count": 8,
+        "status": "draft"
+      }
+    ],
+    "sessions": [
+      {
+        "program_name": "Alpha Morning Program",
+        "org_slug": "basic-alpha",
+        "session_date": "2025-01-06",
+        "status": "completed"
+      },
+      {
+        "program_name": "Alpha Morning Program",
+        "org_slug": "basic-alpha",
+        "session_date": "2025-01-08",
+        "status": "scheduled"
+      },
+      {
+        "program_name": "Alpha Afternoon Program",
+        "org_slug": "basic-alpha",
+        "session_date": "2025-01-07",
+        "status": "scheduled"
+      },
+      {
+        "program_name": "Beta Program",
+        "org_slug": "basic-beta",
+        "session_date": "2025-02-03",
+        "status": "scheduled"
+      }
+    ]
+  }
+}

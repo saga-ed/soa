@@ -1,0 +1,43 @@
+## PostgreSQL with profile-based volume switching
+##
+## Volume name is dynamic: postgres-profile-<SEED_PROFILE>
+## Each profile gets its own Docker volume — fully isolated.
+## Postgres auto-initializes empty volumes on first start.
+## Seeder checks a sentinel table and skips if already seeded.
+
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: soa-postgres
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  postgres_init:
+    image: postgres:16
+    container_name: soa-postgres-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./seed:/seed:ro
+    environment:
+      SEED_PROFILE: ${SEED_PROFILE:-small}
+      PGPASSWORD: postgres
+    entrypoint: ["bash", "/seed/init-and-seed.sh"]
+    restart: "no"
+
+volumes:
+  postgres-data:
+    name: postgres-profile-${SEED_PROFILE:-small}

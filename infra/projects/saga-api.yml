@@ -1,0 +1,8 @@
+## saga-api — MongoDB + MySQL
+##
+## Usage:
+##   SEED_PROFILE=small docker compose -f projects/saga-api.yml up -d
+
+include:
+  - path: ../services/mongo/compose.yml
+  - path: ../services/mysql/compose.yml

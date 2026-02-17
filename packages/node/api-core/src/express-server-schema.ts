@@ -18,6 +18,9 @@ export const ExpressServerSchema = z.object({
       // Remove trailing slash if present
       return val.endsWith('/') ? val.slice(0, -1) : val;
     }),
+  corsOrigin: z
+    .union([z.literal(true), z.string()])
+    .optional(),
 });
 
 export type ExpressServerConfig = z.infer<typeof ExpressServerSchema>;

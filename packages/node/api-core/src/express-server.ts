@@ -23,10 +23,12 @@ export class ExpressServer {
     container: Container,
     controllers: Array<new (...args: any[]) => any>
   ): Promise<void> {
-    // Add CORS middleware to allow tRPC playground requests
+    // CORS middleware — configurable via EXPRESS_SERVER_CORSORIGIN
+    // Accepts: true (reflect requesting origin), a specific origin string, or '*' (any origin).
+    // Defaults to true (all origins) for backward compatibility.
     this.app.use(cors({
-      origin: true, // Allow all origins for development
-      credentials: true,
+      origin: this.config.corsOrigin ?? true,
+      credentials: this.config.corsOrigin === '*' ? false : true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
     }));

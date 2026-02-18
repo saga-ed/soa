@@ -14,7 +14,7 @@ PROFILE="${SEED_PROFILE:-small}"
 SEED_FILE="/seed/profile-${PROFILE}.sql"
 HOST="postgres"
 PORT="5432"
-USER="postgres"
+USER="${PGUSER:-postgres_admin}"
 
 echo "Postgres seed: profile=${PROFILE}"
 

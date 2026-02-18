@@ -17,6 +17,7 @@ PROJECT   ?= saga-api
 PROFILE   ?= small
 COMPOSE   := docker compose --env-file .env.defaults -f projects/$(PROJECT).yml
 
+export COMPOSE_PROJECT_NAME := soa
 export SEED_PROFILE := $(PROFILE)
 
 # Load defaults, then local overrides (gitignored .env wins over .env.defaults)
@@ -114,10 +115,10 @@ mongo-shell:
 	mongosh mongodb://localhost:$${MONGO_PORT:-27018}
 
 mysql-shell:
-	mysql -h 127.0.0.1 -P $${MYSQL_PORT:-3307} -u root
+	MYSQL_PWD=$${MYSQL_PASSWORD:-password123} mysql -h 127.0.0.1 -P $${MYSQL_PORT:-3307} -u $${MYSQL_USER:-mysql_admin}
 
 psql-shell:
-	PGPASSWORD=postgres psql -h localhost -p $${POSTGRES_PORT:-5433} -U postgres
+	PGPASSWORD=$${POSTGRES_PASSWORD:-password123} psql -h localhost -p $${POSTGRES_PORT:-5433} -U $${POSTGRES_USER:-postgres_admin}
 
 redis-cli:
 	redis-cli -p $${REDIS_PORT:-6380}

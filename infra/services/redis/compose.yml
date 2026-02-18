@@ -1,13 +1,20 @@
 ## Redis — simple, no profile switching
 ##
 ## Persistent volume for data. Start/stop only.
+## No auth — local dev only.
 
 services:
 
   redis:
-    extends:
-      file: base.yml
-      service: redis
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     ports:
       - "${REDIS_PORT:-6380}:6379"
 

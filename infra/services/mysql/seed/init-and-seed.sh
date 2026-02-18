@@ -19,7 +19,7 @@ echo "MySQL seed: profile=${PROFILE}"
 
 # Wait for MySQL to accept connections (healthcheck can pass before full readiness)
 for i in $(seq 1 15); do
-  if mysql -h "$HOST" -P "$PORT" -u root -e "SELECT 1" >/dev/null 2>&1; then
+  if mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" -e "SELECT 1" >/dev/null 2>&1; then
     echo "MySQL seed: connection ready"
     break
   fi
@@ -28,7 +28,7 @@ for i in $(seq 1 15); do
 done
 
 # Check sentinel — does the _profile_meta database + table exist with this profile?
-SEEDED=$(mysql -h "$HOST" -P "$PORT" -u root -N -e \
+SEEDED=$(mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" -N -e \
   "SELECT seeded_at FROM _profile_meta._seeded WHERE profile='${PROFILE}'" 2>/dev/null || true)
 
 if [ -n "$SEEDED" ]; then
@@ -42,10 +42,10 @@ if [ ! -f "$SEED_FILE" ]; then
 fi
 
 echo "MySQL seed: loading ${SEED_FILE} ..."
-mysql -h "$HOST" -P "$PORT" -u root < "$SEED_FILE"
+mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" < "$SEED_FILE"
 
 # Write sentinel
-mysql -h "$HOST" -P "$PORT" -u root <<SQL
+mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" <<SQL
 CREATE DATABASE IF NOT EXISTS _profile_meta;
 CREATE TABLE IF NOT EXISTS _profile_meta._seeded (
   profile VARCHAR(64) PRIMARY KEY,

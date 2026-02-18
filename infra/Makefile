@@ -25,12 +25,45 @@ export SEED_PROFILE := $(PROFILE)
 -include .env
 
 .PHONY: up switch down reset status logs list-projects list-profiles \
-        mongo-shell mysql-shell psql-shell redis-cli clean-all volumes help
+        mongo-shell mysql-shell psql-shell redis-cli clean-all volumes help \
+        check-ports
 
 ## ─── Lifecycle ───────────────────────────────────────────────
 
+## Pre-flight check: fail fast if any required port is already taken.
+check-ports:
+	@conflicts=""; stop_cmds=""; down_projects=""; \
+	for port in $(POSTGRES_PORT) $(MONGO_PORT) $(MYSQL_PORT) $(REDIS_PORT) $(RABBITMQ_PORT) $(RABBITMQ_MGMT_PORT); do \
+		[ -z "$$port" ] && continue; \
+		match=$$(docker ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' \
+			| grep -E "0\.0\.0\.0:$$port->" | head -1); \
+		if [ -n "$$match" ]; then \
+			cname=$$(echo "$$match" | cut -f1); \
+			project=$$(echo "$$match" | cut -f3); \
+			conflicts="$$conflicts\n  Port $$port is in use by container '$$cname' (project: $$project)"; \
+			stop_cmds="$$stop_cmds\n    docker stop $$cname"; \
+			if [ -n "$$project" ]; then \
+				echo "$$down_projects" | grep -q "$$project" || \
+					down_projects="$$down_projects\n    docker compose -p $$project down"; \
+			fi; \
+		fi; \
+	done; \
+	if [ -n "$$conflicts" ]; then \
+		echo ""; \
+		echo "  ERROR: Port conflict detected!"; \
+		echo "$$conflicts"; \
+		echo ""; \
+		echo "  Option 1 — stop just the conflicting container(s):"; \
+		echo "$$stop_cmds"; \
+		echo ""; \
+		echo "  Option 2 — stop the entire project (all its services):"; \
+		echo "$$down_projects"; \
+		echo ""; \
+		exit 1; \
+	fi
+
 ## Start a project's services with the given profile.
-up:
+up: check-ports
 	$(COMPOSE) up -d
 	@echo ""
 	@echo "  Project: $(PROJECT)  Profile: $(PROFILE)"
@@ -67,9 +100,23 @@ reset:
 
 ## Show running containers and which profiles are active.
 status:
-	@echo "Running soa containers:"
+	@echo "SOA containers:"
 	@echo ""
-	@docker ps --filter "name=soa-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  (none)"
+	@out=$$(docker ps --filter "name=soa-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null); \
+	if [ -z "$$out" ] || [ "$$(echo "$$out" | wc -l)" -le 1 ]; then \
+		echo "  (none)"; \
+	else \
+		echo "$$out"; \
+	fi
+	@echo ""
+	@echo "Other running containers:"
+	@echo ""
+	@other=$$(docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -v "^soa-"); \
+	if [ -z "$$other" ]; then \
+		echo "  (none)"; \
+	else \
+		echo "$$other" | column -t -s '	'; \
+	fi
 	@echo ""
 	@echo "Profile volumes:"
 	@docker volume ls --filter "name=-profile-" --format "  {{.Name}}" 2>/dev/null || echo "  (none)"
@@ -149,7 +196,7 @@ help:
 	@echo "  reset           Wipe + re-seed one profile's volumes"
 	@echo ""
 	@echo "Observability:"
-	@echo "  status          Show running containers and volumes"
+	@echo "  status          Show running containers and volumes (all projects)"
 	@echo "  logs            Tail container logs"
 	@echo "  volumes         List all profile volumes"
 	@echo ""

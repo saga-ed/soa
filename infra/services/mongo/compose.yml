@@ -7,19 +7,11 @@
 services:
 
   mongo:
-    image: mongo:8.0.12
-    container_name: soa-mongo
-    command: ["mongod", "--replSet", "wootmath", "--bind_ip_all"]
+    extends:
+      file: base.yml
+      service: mongo
     ports:
       - "${MONGO_PORT:-27018}:27017"
-    volumes:
-      - mongo-data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 15s
 
   mongo_init:
     image: mongo:8.0.12

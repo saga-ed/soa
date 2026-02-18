@@ -6,22 +6,12 @@
 services:
 
   rabbitmq:
-    image: rabbitmq:3-management-alpine
-    container_name: soa-rabbitmq
+    extends:
+      file: base.yml
+      service: rabbitmq
     ports:
       - "${RABBITMQ_PORT:-5673}:5672"
       - "${RABBITMQ_MGMT_PORT:-15673}:15672"
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
 
 volumes:
   rabbitmq-data:

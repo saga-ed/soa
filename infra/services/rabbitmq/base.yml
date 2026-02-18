@@ -1,0 +1,25 @@
+## RabbitMQ base template — extensible foundation
+##
+## Use directly via `include:` or cross-repo via `extends:`.
+## No ports — just the core service.
+
+services:
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: soa-rabbitmq
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  rabbitmq-data:
+    name: rabbitmq-data

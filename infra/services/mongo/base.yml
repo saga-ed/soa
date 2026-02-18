@@ -1,0 +1,23 @@
+## MongoDB base template — extensible foundation
+##
+## Use directly via `include:` or cross-repo via `extends:`.
+## No ports, no init sidecars — just the core service.
+
+services:
+
+  mongo:
+    image: mongo:8.0.12
+    container_name: soa-mongo
+    command: ["mongod", "--replSet", "wootmath", "--bind_ip_all"]
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  mongo-data:
+    name: mongo-profile-${SEED_PROFILE:-small}

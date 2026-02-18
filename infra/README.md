@@ -234,3 +234,60 @@ it fails fast with actionable suggestions:
 
 This prevents confusing startup failures when switching between projects that
 share database ports.
+
+## Cross-Repo Usage (npm package)
+
+Consumer repos outside this monorepo can install the service templates as an npm package:
+
+```bash
+pnpm add -D @saga-ed/infra-compose
+```
+
+Then reference the compose files via `include:` in your project's `docker-compose.yml`:
+
+```yaml
+# consumer-repo/docker-compose.yml
+include:
+  - path: node_modules/@saga-ed/infra-compose/services/mongo/compose.yml
+  - path: node_modules/@saga-ed/infra-compose/services/redis/compose.yml
+
+services:
+  my-app:
+    build: .
+    depends_on:
+      mongo:
+        condition: service_healthy
+```
+
+Docker Compose `include:` resolves bind mounts relative to the included file,
+so seed scripts at `services/mongo/seed/` resolve correctly from inside `node_modules/`.
+
+### Overriding ports and credentials
+
+The service templates read variables from `.env.defaults` with sensible fallbacks.
+Override any value in your project's `.env`:
+
+```env
+MONGO_PORT=27020
+MYSQL_PORT=3308
+SEED_PROFILE=basic
+```
+
+Then start services:
+
+```bash
+docker compose --env-file .env up -d
+```
+
+### What's included in the package
+
+Only the reusable templates are published:
+
+| Included | Excluded (soa-local only) |
+|----------|--------------------------|
+| `services/` (compose files + seed data) | `Makefile` |
+| `.env.defaults` | `projects/` |
+| | `README.md` |
+
+The `Makefile` and `projects/` directory are convenience wrappers for soa monorepo
+development. Consumer repos use `docker compose` directly.

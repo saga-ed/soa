@@ -100,7 +100,8 @@ Each data service has a seeder (`*_init` container) that:
 | `make switch` | Switch to a different profile |
 | `make down` | Stop services (keep volumes) |
 | `make reset` | Wipe + re-seed one profile |
-| `make status` | Show running containers and volumes |
+| `make check-ports` | Pre-flight port conflict check (runs automatically before `up`) |
+| `make status` | Show running containers and volumes (all projects) |
 | `make logs` | Tail container logs |
 | `make volumes` | List all profile volumes |
 | `make list-projects` | Show available projects and their services |
@@ -191,3 +192,45 @@ All ports are offset from defaults to avoid conflict with `local-db-mgr.sh`:
 | RabbitMQ | 5673 / 15673 | `RABBITMQ_PORT` / `RABBITMQ_MGMT_PORT` |
 
 Override in `.env` or inline: `make up PROJECT=saga-api MONGO_PORT=27020`
+
+## Network Safety
+
+Docker auto-assigns bridge subnets from `172.17.0.0/12`, which can overlap
+corporate VPN ranges (commonly `172.20.*`, `172.21.*`). The Docker daemon is
+configured to confine bridge networks to non-conflicting ranges:
+
+```jsonc
+// /etc/docker/daemon.json
+{
+    "default-address-pools": [
+        { "base": "172.24.0.0/13", "size": 24 },
+        { "base": "192.168.192.0/20", "size": 24 }
+    ]
+}
+```
+
+After editing `daemon.json`, restart the daemon:
+
+```bash
+sudo systemctl restart docker
+```
+
+## Port Conflict Detection
+
+`make up` runs an automatic pre-flight check (`check-ports`) before starting
+any services. If a required port is already in use by another Docker container,
+it fails fast with actionable suggestions:
+
+```
+  ERROR: Port conflict detected!
+  Port 5433 is in use by container 'soa-postgres-1' (project: soa)
+
+  Option 1 — stop just the conflicting container(s):
+    docker stop soa-postgres-1
+
+  Option 2 — stop the entire project (all its services):
+    docker compose -p soa down
+```
+
+This prevents confusing startup failures when switching between projects that
+share database ports.

@@ -1,12 +1,4 @@
 {
-    "extraKnownMarketplaces": {
-        "saga-tools": {
-            "source": {
-                "source": "github",
-                "repo": "saga-ed/claude-plugins"
-            }
-        }
-    },
     "enabledPlugins": {
         "system-review@saga-tools": true,
         "documentation-system@saga-tools": true

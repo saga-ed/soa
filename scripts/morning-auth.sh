@@ -86,30 +86,26 @@ if aws sso login --profile default; then
     echo ""
     echo -e "${YELLOW}Step 5: Refreshing AWS CodeArtifact tokens...${NC}"
 
-    # Run from /tmp to avoid pnpm workspace issues
-    pushd /tmp > /dev/null
+    echo -e "${BLUE}  Fetching CodeArtifact authorization token...${NC}"
+    CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+      --domain saga --domain-owner 531314149529 \
+      --query authorizationToken --output text 2>&1)
 
-    if aws codeartifact login --tool npm --repository saga_nimbee --domain saga --domain-owner 531314149529 --region us-west-2 2>&1 | grep -q "Successfully"; then
-        echo -e "${GREEN}  ✓ saga_nimbee${NC}"
+    if [ $? -eq 0 ]; then
+      # Only saga_js is active (saga_nimbee and saga_soa are retired)
+      npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken="$CODEARTIFACT_AUTH_TOKEN"
+      echo -e "${GREEN}  ✓ saga_js auth token configured${NC}"
+
+      # Safety: remove any stale default registry pointing to CodeArtifact
+      if grep -q "^registry=.*codeartifact" ~/.npmrc 2>/dev/null; then
+        echo -e "${YELLOW}  Removing stale CodeArtifact default registry from ~/.npmrc${NC}"
+        sed -i '/^registry=.*codeartifact/d' ~/.npmrc
+      fi
     else
-        echo -e "${RED}  ✗ saga_nimbee failed${NC}"
+      echo -e "${RED}  ✗ Failed to get CodeArtifact token${NC}"
     fi
 
-    if aws codeartifact login --tool npm --repository saga_js --domain saga --domain-owner 531314149529 --region us-west-2 2>&1 | grep -q "Successfully"; then
-        echo -e "${GREEN}  ✓ saga_js${NC}"
-    else
-        echo -e "${RED}  ✗ saga_js failed${NC}"
-    fi
-
-    if aws codeartifact login --tool npm --repository saga_soa --domain saga --domain-owner 531314149529 --region us-west-2 2>&1 | grep -q "Successfully"; then
-        echo -e "${GREEN}  ✓ saga_soa${NC}"
-    else
-        echo -e "${RED}  ✗ saga_soa failed${NC}"
-    fi
-
-    popd > /dev/null
-
-    echo -e "${GREEN}  CodeArtifact tokens valid for 12 hours${NC}"
+    echo -e "${GREEN}  CodeArtifact token valid for 12 hours${NC}"
 
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"

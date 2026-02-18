@@ -70,7 +70,7 @@ up: check-ports
 	@echo "  Services started. Use 'make status' to see what's running."
 
 ## Switch to a different profile. Instant if already seeded.
-switch:
+switch: check-ports
 	$(COMPOSE) down
 	$(COMPOSE) up -d
 	@echo ""

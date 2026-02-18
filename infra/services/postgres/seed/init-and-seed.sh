@@ -11,6 +11,10 @@
 set -e
 
 PROFILE="${SEED_PROFILE:-small}"
+if [[ ! "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "ERROR: invalid profile name '${PROFILE}' — must be alphanumeric, hyphens, or underscores only"
+  exit 1
+fi
 SEED_FILE="/seed/profile-${PROFILE}.sql"
 HOST="postgres"
 PORT="5432"
@@ -27,6 +31,11 @@ for i in $(seq 1 15); do
   echo "Postgres seed: waiting for connection (attempt $i/15)..."
   sleep 2
 done
+
+if ! psql -h "$HOST" -p "$PORT" -U "$USER" -c "SELECT 1" >/dev/null 2>&1; then
+  echo "ERROR: Postgres seed: timed out waiting for connection after 30s"
+  exit 1
+fi
 
 # Check sentinel — does the _profile_meta schema + table exist with this profile?
 SEEDED=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -c \

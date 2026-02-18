@@ -34,7 +34,7 @@ pre-seeded data profiles using volume-per-profile isolation.
 ## Quick Start
 
 ```bash
-cd fixture-cli/zcripts/local/soa
+cd infra
 
 # Start saga-api services (mongo + mysql) with default profile
 make up PROJECT=saga-api
@@ -146,7 +146,7 @@ include:
 ## Directory Structure
 
 ```
-soa/
+infra/
 ├── services/
 │   ├── mongo/
 │   │   ├── compose.yml
@@ -174,7 +174,7 @@ soa/
 │   ├── saga-api.yml           # mongo + mysql
 │   ├── adm-api.yml            # postgres + redis
 │   └── events-example.yml     # rabbitmq + postgres
-├── .env
+├── .env.defaults
 ├── Makefile
 └── README.md
 ```

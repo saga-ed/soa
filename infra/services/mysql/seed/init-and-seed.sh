@@ -11,6 +11,10 @@
 set -e
 
 PROFILE="${SEED_PROFILE:-small}"
+if [[ ! "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+  echo "ERROR: invalid profile name '${PROFILE}' — must be alphanumeric, hyphens, or underscores only"
+  exit 1
+fi
 SEED_FILE="/seed/profile-${PROFILE}.sql"
 HOST="mysql"
 PORT="3306"
@@ -26,6 +30,11 @@ for i in $(seq 1 15); do
   echo "MySQL seed: waiting for connection (attempt $i/15)..."
   sleep 2
 done
+
+if ! mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" -e "SELECT 1" >/dev/null 2>&1; then
+  echo "ERROR: MySQL seed: timed out waiting for connection after 30s"
+  exit 1
+fi
 
 # Check sentinel — does the _profile_meta database + table exist with this profile?
 SEEDED=$(mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" -N -e \

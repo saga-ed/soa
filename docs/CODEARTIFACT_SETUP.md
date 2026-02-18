@@ -48,7 +48,11 @@ pnpm co:whoami
 
 The `co:login` script:
 1. Gets a temporary auth token from CodeArtifact (valid for 12 hours)
-2. Configures npm to use that token for the registry
+2. Sets a **scoped** `_authToken` entry in `~/.npmrc` for the saga_js registry URL only
+
+> **Warning:** Never use `aws codeartifact login --tool npm`. It overwrites the **default registry** in `~/.npmrc` to point at CodeArtifact, which breaks `pnpm install` for all public npm packages. Always use `get-authorization-token` + scoped `npm config set` instead.
+
+Most repos also have a `preinstall` hook that runs `co:login` automatically before `pnpm install`. See [package-registry-quickstart.md](./package-registry-quickstart.md#preinstall-hooks) for details.
 
 ### Installing Packages
 
@@ -146,6 +150,19 @@ Auth token may have expired. Re-run:
 ```bash
 pnpm co:login
 ```
+
+### Public npm packages fail to install (403/E404 for lodash, express, etc.)
+
+Your `~/.npmrc` likely has a stale `registry=` line pointing everything at CodeArtifact. Fix:
+```bash
+# Check for the problem
+grep "^registry=.*codeartifact" ~/.npmrc
+
+# Remove it
+sed -i '/^registry=.*codeartifact/d' ~/.npmrc
+```
+
+This happens if someone previously ran `aws codeartifact login --tool npm`, which sets the default registry globally. The `morning-auth.sh` script now auto-cleans this, but if you hit it manually, the above fix resolves it.
 
 ### "404 Not Found"
 

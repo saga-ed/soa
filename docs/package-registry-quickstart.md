@@ -9,8 +9,17 @@ All `@saga-ed/*` packages live in a single AWS CodeArtifact repository: **saga_j
 Tokens last 12 hours. Re-run when you get 401s.
 
 ```bash
-aws codeartifact login --tool npm --domain saga --domain-owner 531314149529 --repository saga_js
+# From any repo with co:login configured:
+pnpm co:login
+
+# Or manually:
+export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+  --domain saga --domain-owner 531314149529 \
+  --query authorizationToken --output text)
+npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken="$CODEARTIFACT_AUTH_TOKEN"
 ```
+
+> **Warning:** Do NOT use `aws codeartifact login --tool npm`. It sets the **default registry** in `~/.npmrc` to CodeArtifact, which breaks `pnpm install` for any public npm package. Always use scoped `_authToken` entries instead (as shown above).
 
 ## How Packages Resolve
 
@@ -82,14 +91,35 @@ Add `-f dry_run=true` to build and test without actually publishing.
 
 After publishing, consuming repos pick up new versions on their next `pnpm install` (with linking off).
 
+## Preinstall Hooks
+
+Each consuming repo has a `preinstall` script that auto-authenticates before `pnpm install`:
+
+```json
+{
+  "scripts": {
+    "preinstall": "npm run co:login || true",
+    "co:login": "export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain saga --domain-owner 531314149529 --query authorizationToken --output text) && npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=$CODEARTIFACT_AUTH_TOKEN && echo 'CodeArtifact auth token configured'"
+  }
+}
+```
+
+Design notes:
+- **`|| true`** makes the hook non-fatal — CI handles its own auth, and offline devs get a clear 401 later rather than a cryptic preinstall crash.
+- **`npm run`** instead of `pnpm run` — during preinstall, pnpm may not have resolved its own binary yet. `npm` is always available system-wide.
+- **`morning-auth.sh`** still runs `get-authorization-token` centrally for ergonomics. The preinstall hooks are a safety net, not a replacement.
+
+Repos with preinstall hooks: **soa**, **thrive**, **coach**, **nimbee/saga_api**, **nimbee/adm_api**.
+
 ## Repo Setup Checklist
 
 To add CodeArtifact support to a new consuming repo:
 
 1. Create `.npmrc` with the `@saga-ed` registry line above
-2. Create `soa-link.json` mapping the packages you use
-3. Use `^x.y.z` version ranges (not `workspace:*`) for `@saga-ed` deps in `package.json`
-4. Run `../soa/scripts/cross-repo-link.sh on` to start developing locally
+2. Add `preinstall` and `co:login` scripts to `package.json` (see above)
+3. Create `soa-link.json` mapping the packages you use
+4. Use `^x.y.z` version ranges (not `workspace:*`) for `@saga-ed` deps in `package.json`
+5. Run `../soa/scripts/cross-repo-link.sh on` to start developing locally
 
 ## Further Reading
 

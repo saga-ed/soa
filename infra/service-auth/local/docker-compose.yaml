@@ -1,0 +1,53 @@
+# Local development equivalent of the service-to-service auth infrastructure.
+#
+# Uses mock-oauth2-server (by NAV) — a lightweight, configurable OAuth2/OIDC
+# server that supports client_credentials flow, JWKS, and custom scopes.
+#
+# Usage:
+#   docker compose up -d        # Start the OAuth2 server
+#   ./scripts/get-token.sh      # Fetch a test access token
+#   docker compose down          # Stop
+#
+# Endpoints (once running):
+#   Token endpoint:  http://localhost:8090/service-auth/oauth2/token
+#   JWKS endpoint:   http://localhost:8090/service-auth/jwks
+#   OpenID config:   http://localhost:8090/service-auth/.well-known/openid-configuration
+#   Well-known:      http://localhost:8090/service-auth/.well-known/oauth-authorization-server
+
+services:
+    mock-oauth2:
+        image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+        container_name: saga-mock-oauth2
+        ports:
+            - '8090:8090'
+        environment:
+            SERVER_PORT: '8090'
+            # JSON config that mirrors the Cognito setup from cognito.yaml.
+            # Defines an issuer called "service-auth" with pre-configured clients.
+            JSON_CONFIG: >
+                {
+                  "interactiveLogin": false,
+                  "httpServer": "NettyWrapper",
+                  "tokenCallbacks": [
+                    {
+                      "issuerId": "service-auth",
+                      "tokenExpiry": 3600,
+                      "requestMappings": [
+                        {
+                          "requestParam": "grant_type",
+                          "match": "client_credentials",
+                          "claims": {
+                            "aud": ["api"],
+                            "token_use": "access"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+        healthcheck:
+            test: ['CMD-SHELL', 'wget -q --spider http://localhost:8090/service-auth/.well-known/openid-configuration || exit 1']
+            interval: 5s
+            timeout: 3s
+            retries: 5
+        restart: unless-stopped

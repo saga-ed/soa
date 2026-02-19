@@ -75,3 +75,7 @@ import { BaseController } from '@saga-ed/soa-api-core';
 import { logger } from '@saga-ed/soa-logger';
 import { db } from '@saga-ed/soa-db';
 ```
+
+---
+
+*Last updated: 2026-02*

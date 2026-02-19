@@ -65,3 +65,7 @@ Other packages extend from typescript-config:
     "extends": "@saga-ed/soa-typescript-config/base.json"
 }
 ```
+
+---
+
+*Last updated: 2026-02*

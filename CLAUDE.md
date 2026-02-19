@@ -67,3 +67,11 @@ pnpm typecheck      # Type check
 - Use 4-space indentation only
 - Write tests for every new feature
 - Use pnpm only (never npm)
+
+## Documentation Directive
+
+**Documentation Directive:** Documentation system is provided via the `documentation-system@saga-tools` plugin. Use `/documentation-system` for maintenance instructions.
+
+---
+
+*Last updated: 2026-02*

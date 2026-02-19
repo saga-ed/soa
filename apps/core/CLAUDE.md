@@ -28,3 +28,7 @@ If creating a new app here, ensure it:
 - Uses only runtime-agnostic dependencies
 - Works with both Node.js and browser (if applicable)
 - Documents any runtime constraints
+
+---
+
+*Last updated: 2026-02*

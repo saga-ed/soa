@@ -89,3 +89,7 @@ None - exemplary package following all SOA patterns.
 - `/apps/node/rest-api/` - REST API example
 - `/apps/node/tgql-api/` - TypeGraphQL API example
 - `/packages/node/CLAUDE.md` - Node.js package patterns
+
+---
+
+*Last updated: 2026-02*

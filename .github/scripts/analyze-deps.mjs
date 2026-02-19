@@ -21,13 +21,30 @@ function buildPackageMap() {
     const packagesDir = 'packages';
     if (!fs.existsSync(packagesDir)) return { packageMap, dirMap };
 
-    for (const dir of fs.readdirSync(packagesDir)) {
-        const pkgPath = path.join(packagesDir, dir, 'package.json');
+    for (const tier of fs.readdirSync(packagesDir)) {
+        const tierPath = path.join(packagesDir, tier);
+        if (!fs.statSync(tierPath).isDirectory()) continue;
+
+        // Check if this is a direct package or a tier directory (node/, core/, web/)
+        const pkgPath = path.join(tierPath, 'package.json');
         if (fs.existsSync(pkgPath)) {
             const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-            if (pkg.name && pkg.name.startsWith('@saga-ed/')) {
-                packageMap[pkg.name] = dir;
-                dirMap[dir] = pkg.name;
+            if (pkg.name?.startsWith('@saga-ed/')) {
+                packageMap[pkg.name] = tier;
+                dirMap[tier] = pkg.name;
+            }
+        } else {
+            // Tier directory — scan subdirectories
+            for (const dir of fs.readdirSync(tierPath)) {
+                const nestedPkgPath = path.join(tierPath, dir, 'package.json');
+                if (fs.existsSync(nestedPkgPath)) {
+                    const pkg = JSON.parse(fs.readFileSync(nestedPkgPath, 'utf8'));
+                    if (pkg.name?.startsWith('@saga-ed/')) {
+                        const relPath = path.join(tier, dir);
+                        packageMap[pkg.name] = relPath;
+                        dirMap[relPath] = pkg.name;
+                    }
+                }
             }
         }
     }

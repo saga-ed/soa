@@ -91,6 +91,28 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.CODEARTIFACT_OWNER }}:role/github-actions-role/SOADeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get CodeArtifact auth token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+            --domain ${{ env.CODEARTIFACT_DOMAIN }} \
+            --domain-owner ${{ env.CODEARTIFACT_OWNER }} \
+            --query authorizationToken \
+            --output text)
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+
+      - name: Configure npm for CodeArtifact
+        run: |
+          REGISTRY_URL="https://${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com/npm/${{ env.CODEARTIFACT_REPOSITORY }}/"
+          npm config set @saga-ed:registry=$REGISTRY_URL
+          npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -180,6 +202,28 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.CODEARTIFACT_OWNER }}:role/github-actions-role/SOADeployRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get CodeArtifact auth token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+            --domain ${{ env.CODEARTIFACT_DOMAIN }} \
+            --domain-owner ${{ env.CODEARTIFACT_OWNER }} \
+            --query authorizationToken \
+            --output text)
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+
+      - name: Configure npm for CodeArtifact
+        run: |
+          REGISTRY_URL="https://${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com/npm/${{ env.CODEARTIFACT_REPOSITORY }}/"
+          npm config set @saga-ed:registry=$REGISTRY_URL
+          npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -277,12 +321,6 @@ jobs:
         with:
           version: ${{ env.PNPM_VERSION }}
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build all packages
-        run: pnpm turbo run build
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -304,6 +342,12 @@ jobs:
           REGISTRY_URL="https://${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com/npm/${{ env.CODEARTIFACT_REPOSITORY }}/"
           npm config set @saga-ed:registry=$REGISTRY_URL
           npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages
+        run: pnpm turbo run build
 
       - name: Publish packages in dependency order
         run: |

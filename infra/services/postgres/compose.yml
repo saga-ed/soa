@@ -22,7 +22,7 @@ services:
       retries: 10
       start_period: 15s
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
 
   postgres_init:
     image: postgres:16

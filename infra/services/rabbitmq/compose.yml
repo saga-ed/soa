@@ -1,6 +1,6 @@
 ## RabbitMQ — simple, no profile switching
 ##
-## Management UI available at http://localhost:15673
+## Management UI available at http://localhost:15672
 ## Default credentials: rabbitmq_admin / password123
 
 services:
@@ -19,8 +19,8 @@ services:
       retries: 5
       start_period: 20s
     ports:
-      - "${RABBITMQ_PORT:-5673}:5672"
-      - "${RABBITMQ_MGMT_PORT:-15673}:15672"
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
 
 volumes:
   rabbitmq-data:

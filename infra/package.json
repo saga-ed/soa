@@ -1,11 +1,15 @@
 {
     "name": "@saga-ed/infra-compose",
-    "version": "0.1.0",
+    "version": "0.3.0",
     "description": "Composable Docker service templates for Saga platform local development",
+    "bin": {
+        "infra-compose": "bin/infra-compose"
+    },
     "scripts": {
         "prepublishOnly": "export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain saga --domain-owner 531314149529 --query authorizationToken --output text) && npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=$CODEARTIFACT_AUTH_TOKEN && echo '✅ CodeArtifact auth token refreshed'"
     },
     "files": [
+        "bin/",
         "services/",
         ".env.defaults"
     ],

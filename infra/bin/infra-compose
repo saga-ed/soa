@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve package root — works from npx, pnpm exec, or node_modules/.bin/
+PKG_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Load port defaults from package, then overlay local .env if present
+set -a
+# shellcheck disable=SC1091
+[ -f "$PKG_ROOT/.env.defaults" ] && source "$PKG_ROOT/.env.defaults"
+# shellcheck disable=SC1091
+[ -f ".env" ] && source ".env"
+set +a
+
+usage() {
+    cat <<EOF
+Usage: infra-compose <command> [args]
+
+Commands:
+  check-ports       Scan Docker for port conflicts
+  status            Show running containers and profile volumes
+  shell <service>   Open a database shell (mongo|mysql|postgres|redis)
+  list-profiles     Show seed profiles per service
+  volumes           List profile Docker volumes
+  help              Show this help message
+
+Examples:
+  npx infra-compose status
+  npx infra-compose shell mongo
+  npx infra-compose check-ports
+EOF
+}
+
+cmd_check_ports() {
+    local conflicts="" stop_cmds="" down_projects=""
+
+    for port in ${POSTGRES_PORT:-} ${MONGO_PORT:-} ${MYSQL_PORT:-} ${REDIS_PORT:-} ${RABBITMQ_PORT:-} ${RABBITMQ_MGMT_PORT:-}; do
+        [ -z "$port" ] && continue
+        local match
+        match=$(docker ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' \
+            | grep -E "0\.0\.0\.0:${port}->" | head -1) || true
+        if [ -n "$match" ]; then
+            local cname project
+            cname=$(echo "$match" | cut -f1)
+            project=$(echo "$match" | cut -f3)
+            conflicts="${conflicts}\n  Port ${port} is in use by container '${cname}' (project: ${project})"
+            stop_cmds="${stop_cmds}\n    docker stop ${cname}"
+            if [ -n "$project" ]; then
+                if ! echo "$down_projects" | grep -q "$project"; then
+                    down_projects="${down_projects}\n    docker compose -p ${project} down"
+                fi
+            fi
+        fi
+    done
+
+    if [ -n "$conflicts" ]; then
+        echo ""
+        echo "  ERROR: Port conflict detected!"
+        echo -e "$conflicts"
+        echo ""
+        echo "  Option 1 — stop just the conflicting container(s):"
+        echo -e "$stop_cmds"
+        echo ""
+        echo "  Option 2 — stop the entire project (all its services):"
+        echo -e "$down_projects"
+        echo ""
+        exit 1
+    else
+        echo "  No port conflicts detected."
+    fi
+}
+
+cmd_status() {
+    echo "SOA containers:"
+    echo ""
+    local out
+    out=$(docker ps --filter "name=soa-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null) || true
+    if [ -z "$out" ] || [ "$(echo "$out" | wc -l)" -le 1 ]; then
+        echo "  (none)"
+    else
+        echo "$out"
+    fi
+    echo ""
+    echo "Other running containers:"
+    echo ""
+    local other
+    other=$(docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -v "^soa-") || true
+    if [ -z "$other" ]; then
+        echo "  (none)"
+    else
+        echo "$other" | column -t -s '	'
+    fi
+    echo ""
+    echo "Profile volumes:"
+    docker volume ls --filter "name=-profile-" --format "  {{.Name}}" 2>/dev/null || echo "  (none)"
+}
+
+cmd_shell() {
+    local service="${1:-}"
+    case "$service" in
+        mongo)
+            exec mongosh "mongodb://localhost:${MONGO_PORT:-27017}"
+            ;;
+        mysql)
+            MYSQL_PWD="${MYSQL_PASSWORD:-password123}" exec mysql \
+                -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u "${MYSQL_USER:-mysql_admin}"
+            ;;
+        postgres)
+            PGPASSWORD="${POSTGRES_PASSWORD:-password123}" exec psql \
+                -h localhost -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres_admin}"
+            ;;
+        redis)
+            exec redis-cli -p "${REDIS_PORT:-6379}"
+            ;;
+        "")
+            echo "Error: specify a service — mongo, mysql, postgres, or redis" >&2
+            exit 1
+            ;;
+        *)
+            echo "Error: unknown service '$service'. Choose: mongo, mysql, postgres, redis" >&2
+            exit 1
+            ;;
+    esac
+}
+
+cmd_list_profiles() {
+    local services_dir="$PKG_ROOT/services"
+
+    echo "Mongo profiles:"
+    for f in "$services_dir"/mongo/seed/profile-*.json; do
+        [ -f "$f" ] || continue
+        echo "  - $(basename "$f" .json | sed 's/^profile-//')"
+    done
+
+    echo "MySQL profiles:"
+    for f in "$services_dir"/mysql/seed/profile-*.sql; do
+        [ -f "$f" ] || continue
+        echo "  - $(basename "$f" .sql | sed 's/^profile-//')"
+    done
+
+    echo "Postgres profiles:"
+    for f in "$services_dir"/postgres/seed/profile-*.sql; do
+        [ -f "$f" ] || continue
+        echo "  - $(basename "$f" .sql | sed 's/^profile-//')"
+    done
+}
+
+cmd_volumes() {
+    echo "All profile volumes:"
+    docker volume ls --filter "name=-profile-" --format "  {{.Name}}" 2>/dev/null
+}
+
+# ── Main dispatch ──────────────────────────────────────────
+command="${1:-help}"
+shift || true
+
+case "$command" in
+    check-ports)    cmd_check_ports ;;
+    status)         cmd_status ;;
+    shell)          cmd_shell "$@" ;;
+    list-profiles)  cmd_list_profiles ;;
+    volumes)        cmd_volumes ;;
+    help|--help|-h) usage ;;
+    *)
+        echo "Error: unknown command '$command'" >&2
+        echo ""
+        usage >&2
+        exit 1
+        ;;
+esac

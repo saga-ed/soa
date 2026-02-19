@@ -19,7 +19,7 @@ services:
       retries: 10
       start_period: 15s
     ports:
-      - "${MONGO_PORT:-27018}:27017"
+      - "${MONGO_PORT:-27017}:27017"
 
   mongo_init:
     image: mongo:8.0.12

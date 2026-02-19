@@ -226,6 +226,10 @@ jobs:
           echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
           echo "Package: $PKG_NAME"
 
+      - name: Sanitize package name for artifacts
+        id: safe-name
+        run: echo "name=$(echo '${{ matrix.package }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Run lint for affected packages
         run: pnpm turbo run lint --filter=${{ steps.pkg.outputs.name }}...
 
@@ -237,15 +241,15 @@ jobs:
 
       - name: Run tests for affected packages
         run: |
-          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ steps.safe-name.outputs.name }}.json
         continue-on-error: true
 
       - name: Upload test results
         if: github.event_name == 'pull_request' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.package }}
-          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
+          name: test-results-${{ steps.safe-name.outputs.name }}
+          path: ${{ github.workspace }}/test-results-${{ steps.safe-name.outputs.name }}.json
           retention-days: 1
           if-no-files-found: ignore
 
@@ -296,6 +300,10 @@ jobs:
           echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
           echo "Package: $PKG_NAME"
 
+      - name: Sanitize package name for artifacts
+        id: safe-name
+        run: echo "name=$(echo '${{ matrix.package }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Run lint for affected packages
         run: pnpm turbo run lint --filter=${{ steps.pkg.outputs.name }}...
 
@@ -307,15 +315,15 @@ jobs:
 
       - name: Run tests for affected packages
         run: |
-          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ steps.safe-name.outputs.name }}.json
         continue-on-error: true
 
       - name: Upload test results
         if: github.event_name == 'pull_request' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.package }}
-          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
+          name: test-results-${{ steps.safe-name.outputs.name }}
+          path: ${{ github.workspace }}/test-results-${{ steps.safe-name.outputs.name }}.json
           retention-days: 1
           if-no-files-found: ignore
 
@@ -366,6 +374,10 @@ jobs:
           echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
           echo "Package: $PKG_NAME"
 
+      - name: Sanitize package name for artifacts
+        id: safe-name
+        run: echo "name=$(echo '${{ matrix.package }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Run lint for affected packages
         run: pnpm turbo run lint --filter=${{ steps.pkg.outputs.name }}...
 
@@ -377,15 +389,15 @@ jobs:
 
       - name: Run tests for affected packages
         run: |
-          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ steps.safe-name.outputs.name }}.json
         continue-on-error: true
 
       - name: Upload test results
         if: github.event_name == 'pull_request' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.package }}
-          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
+          name: test-results-${{ steps.safe-name.outputs.name }}
+          path: ${{ github.workspace }}/test-results-${{ steps.safe-name.outputs.name }}.json
           retention-days: 1
           if-no-files-found: ignore
 
@@ -436,6 +448,10 @@ jobs:
           echo "name=$PKG_NAME" >> $GITHUB_OUTPUT
           echo "Package: $PKG_NAME"
 
+      - name: Sanitize package name for artifacts
+        id: safe-name
+        run: echo "name=$(echo '${{ matrix.package }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Run lint for affected packages
         run: pnpm turbo run lint --filter=${{ steps.pkg.outputs.name }}...
 
@@ -447,15 +463,15 @@ jobs:
 
       - name: Run tests for affected packages
         run: |
-          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ matrix.package }}.json
+          pnpm turbo run test --filter=${{ steps.pkg.outputs.name }}... -- --reporter=json --outputFile=$GITHUB_WORKSPACE/test-results-${{ steps.safe-name.outputs.name }}.json
         continue-on-error: true
 
       - name: Upload test results
         if: github.event_name == 'pull_request' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.package }}
-          path: ${{ github.workspace }}/test-results-${{ matrix.package }}.json
+          name: test-results-${{ steps.safe-name.outputs.name }}
+          path: ${{ github.workspace }}/test-results-${{ steps.safe-name.outputs.name }}.json
           retention-days: 1
           if-no-files-found: ignore
 

@@ -23,15 +23,46 @@ export class ExpressServer {
     container: Container,
     controllers: Array<new (...args: any[]) => any>
   ): Promise<void> {
-    // CORS middleware — configurable via EXPRESS_SERVER_CORSORIGIN
-    // Accepts: true (reflect requesting origin), a specific origin string, or '*' (any origin).
-    // Defaults to true (all origins) for backward compatibility.
-    this.app.use(cors({
-      origin: this.config.corsOrigin ?? true,
-      credentials: this.config.corsOrigin === '*' ? false : true,
+    // CORS middleware — configurable via EXPRESS_SERVER_CORSALLOWEDDOMAINS
+    // When corsAllowedDomains is provided, uses subdomain-aware origin validation:
+    //   any exact match or subdomain of a listed domain is allowed.
+    // When omitted/empty, defaults to origin: true (reflect any origin) for backward compatibility.
+    // credentials is always true — Saga apps use cross-origin cookie auth.
+    const domains = this.config.corsAllowedDomains ?? [];
+
+    const corsOptions: cors.CorsOptions = {
+      credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
-    }));
+    };
+
+    if (domains.length > 0) {
+      corsOptions.origin = (requestOrigin: string | undefined, callback: (err: Error | null, origin?: string | boolean) => void) => {
+        // No Origin header = same-origin or server-to-server — always allow
+        if (!requestOrigin) {
+          callback(null, true);
+          return;
+        }
+        try {
+          const hostname = new URL(requestOrigin).hostname;
+          const isAllowed = domains.some(domain =>
+            hostname === domain || hostname.endsWith(`.${domain}`),
+          );
+          if (isAllowed) {
+            callback(null, requestOrigin);
+          } else {
+            this.logger.warn(`CORS rejected origin: ${requestOrigin}`);
+            callback(null, false);
+          }
+        } catch {
+          callback(null, false);
+        }
+      };
+    } else {
+      corsOptions.origin = true;
+    }
+
+    this.app.use(cors(corsOptions));
 
     // Ensure routing-controllers uses Inversify for controller resolution
     useContainer(container);

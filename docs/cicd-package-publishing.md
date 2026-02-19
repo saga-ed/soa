@@ -122,16 +122,19 @@ Add to your project's `.npmrc`:
 ### Authenticate with CodeArtifact
 
 ```bash
-# Get auth token (valid 12 hours)
+# Easiest: run co:login from any repo that has it
+pnpm co:login
+
+# Or manually (valid 12 hours):
 export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
   --domain saga \
   --domain-owner 531314149529 \
   --query authorizationToken \
   --output text)
-
-# Configure npm
 npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=$CODEARTIFACT_AUTH_TOKEN
 ```
+
+> **Note:** Do NOT use `aws codeartifact login --tool npm` — it hijacks the default registry in `~/.npmrc`. See [CODEARTIFACT_SETUP.md](./CODEARTIFACT_SETUP.md#troubleshooting) for details.
 
 ### Install packages
 ```bash

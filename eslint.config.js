@@ -1,4 +1,4 @@
-import { config as baseConfig } from './packages/eslint-config/base.js';
+import { config as baseConfig } from './packages/core/eslint-config/base.js';
 
 /**
  * Root ESLint configuration for the saga-soa project.
@@ -31,7 +31,7 @@ export default [
       'node_modules/**',
       '*.config.js',
       '*.config.ts',
-      'packages/eslint-config/**',
+      'packages/core/eslint-config/**',
     ],
   },
 ]; 

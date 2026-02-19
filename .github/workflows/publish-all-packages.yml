@@ -23,6 +23,7 @@ on:
   pull_request:
     paths:
       - "packages/**"
+      - ".github/**"
   release:
     types: [published]
   workflow_dispatch:

@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-zod2ts",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "type": "module",
   "scripts": {
     "dev": "tsup --watch",

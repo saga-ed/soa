@@ -110,8 +110,10 @@ jobs:
       - name: Configure npm for CodeArtifact
         run: |
           REGISTRY_URL="https://${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com/npm/${{ env.CODEARTIFACT_REPOSITORY }}/"
+          DOMAIN_URL="${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com"
           npm config set @saga-ed:registry=$REGISTRY_URL
-          npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
+          # Set auth at domain level to cover all CodeArtifact repos (saga_js + legacy saga_nimbee URLs in lockfile)
+          npm config set //${DOMAIN_URL}/:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -222,8 +224,10 @@ jobs:
       - name: Configure npm for CodeArtifact
         run: |
           REGISTRY_URL="https://${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com/npm/${{ env.CODEARTIFACT_REPOSITORY }}/"
+          DOMAIN_URL="${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com"
           npm config set @saga-ed:registry=$REGISTRY_URL
-          npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
+          # Set auth at domain level to cover all CodeArtifact repos (saga_js + legacy saga_nimbee URLs in lockfile)
+          npm config set //${DOMAIN_URL}/:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -340,8 +344,10 @@ jobs:
       - name: Configure npm for CodeArtifact
         run: |
           REGISTRY_URL="https://${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com/npm/${{ env.CODEARTIFACT_REPOSITORY }}/"
+          DOMAIN_URL="${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com"
           npm config set @saga-ed:registry=$REGISTRY_URL
-          npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
+          # Set auth at domain level to cover all CodeArtifact repos (saga_js + legacy saga_nimbee URLs in lockfile)
+          npm config set //${DOMAIN_URL}/:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

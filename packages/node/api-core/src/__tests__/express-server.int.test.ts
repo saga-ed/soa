@@ -166,7 +166,11 @@ describe('ExpressServer (integration)', () => {
   });
 
   describe('CORS: subdomain-aware origin validation', () => {
-    function createCorsServer(corsAllowedDomains?: string[]) {
+    /** Starts a CORS-configured server, runs the callback, then cleans up. */
+    async function withCorsServer(
+      domains: string[] | undefined,
+      fn: (port: number, warnings: string[]) => Promise<void>,
+    ) {
       const container = new Container();
       const warnings: string[] = [];
       const mockLogger: ILogger = {
@@ -181,157 +185,76 @@ describe('ExpressServer (integration)', () => {
         port: getRandomPort(),
         logLevel: 'info' as const,
         name: 'CORS Test Server',
-        ...(corsAllowedDomains !== undefined ? { corsAllowedDomains } : {}),
+        ...(domains !== undefined ? { corsAllowedDomains: domains } : {}),
       };
 
       container.bind('ExpressServerConfig').toConstantValue(config);
       container.bind('ILogger').toConstantValue(mockLogger);
       container.bind(ExpressServer).toSelf();
 
-      return { container, config, warnings };
-    }
-
-    it('no corsAllowedDomains → reflects any origin, credentials: true', async () => {
-      const { container, config } = createCorsServer();
       const server = container.get(ExpressServer);
       await server.init(container, [SimpleTestController]);
       server.start();
       await new Promise(resolve => setTimeout(resolve, 100));
 
       try {
-        const res = await fetch(`http://localhost:${config.port}/simple/`, {
+        await fn(config.port, warnings);
+      } finally {
+        server.stop();
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    it('no corsAllowedDomains → reflects any origin, credentials: true', async () => {
+      await withCorsServer(undefined, async (port) => {
+        const res = await fetch(`http://localhost:${port}/simple/`, {
           headers: { Origin: 'https://anything.example.com' },
         });
         expect(res.status).toBe(200);
         expect(res.headers.get('access-control-allow-origin')).toBe('https://anything.example.com');
         expect(res.headers.get('access-control-allow-credentials')).toBe('true');
-      } finally {
-        server.stop();
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      });
     });
 
-    it('corsAllowedDomains: exact domain match allowed', async () => {
-      const { container, config } = createCorsServer(['saga.org']);
-      const server = container.get(ExpressServer);
-      await server.init(container, [SimpleTestController]);
-      server.start();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      try {
-        const res = await fetch(`http://localhost:${config.port}/simple/`, {
-          headers: { Origin: 'https://saga.org' },
+    it.each([
+      { origin: 'https://saga.org',                  domains: ['saga.org'],    desc: 'exact domain match' },
+      { origin: 'https://pr-42.coach.sagadev.org',   domains: ['sagadev.org'], desc: 'subdomain match' },
+      { origin: 'https://coach.saga.org',             domains: ['saga.org', 'sagadev.org', 'wootmath.com'], desc: 'first of multiple domains' },
+      { origin: 'https://pr-7.coach.sagadev.org',     domains: ['saga.org', 'sagadev.org', 'wootmath.com'], desc: 'second of multiple domains' },
+      { origin: 'https://staging.wootmath.com',        domains: ['saga.org', 'sagadev.org', 'wootmath.com'], desc: 'third of multiple domains' },
+    ])('allows $desc ($origin)', async ({ origin, domains }) => {
+      await withCorsServer(domains, async (port) => {
+        const res = await fetch(`http://localhost:${port}/simple/`, {
+          headers: { Origin: origin },
         });
         expect(res.status).toBe(200);
-        expect(res.headers.get('access-control-allow-origin')).toBe('https://saga.org');
+        expect(res.headers.get('access-control-allow-origin')).toBe(origin);
         expect(res.headers.get('access-control-allow-credentials')).toBe('true');
-      } finally {
-        server.stop();
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      });
     });
 
-    it('corsAllowedDomains: subdomain match allowed', async () => {
-      const { container, config } = createCorsServer(['sagadev.org']);
-      const server = container.get(ExpressServer);
-      await server.init(container, [SimpleTestController]);
-      server.start();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      try {
-        const res = await fetch(`http://localhost:${config.port}/simple/`, {
-          headers: { Origin: 'https://pr-42.coach.sagadev.org' },
-        });
-        expect(res.status).toBe(200);
-        expect(res.headers.get('access-control-allow-origin')).toBe('https://pr-42.coach.sagadev.org');
-        expect(res.headers.get('access-control-allow-credentials')).toBe('true');
-      } finally {
-        server.stop();
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    });
-
-    it('corsAllowedDomains: non-matching origin rejected (no ACAO header)', async () => {
-      const { container, config, warnings } = createCorsServer(['saga.org']);
-      const server = container.get(ExpressServer);
-      await server.init(container, [SimpleTestController]);
-      server.start();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      try {
-        const res = await fetch(`http://localhost:${config.port}/simple/`, {
+    it('rejects non-matching origin (no ACAO header, logs warning)', async () => {
+      await withCorsServer(['saga.org'], async (port, warnings) => {
+        const res = await fetch(`http://localhost:${port}/simple/`, {
           headers: { Origin: 'https://evil.example.com' },
         });
         expect(res.headers.get('access-control-allow-origin')).toBeNull();
-        expect(warnings.some(w => w.includes('evil.example.com'))).toBe(true);
-      } finally {
-        server.stop();
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+        expect(warnings).toEqual(
+          expect.arrayContaining([expect.stringContaining('evil.example.com')]),
+        );
+      });
     });
 
-    it('corsAllowedDomains: no Origin header is always allowed', async () => {
-      const { container, config } = createCorsServer(['saga.org']);
-      const server = container.get(ExpressServer);
-      await server.init(container, [SimpleTestController]);
-      server.start();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      try {
-        const res = await fetch(`http://localhost:${config.port}/simple/`);
+    it('no Origin header is always allowed', async () => {
+      await withCorsServer(['saga.org'], async (port) => {
+        const res = await fetch(`http://localhost:${port}/simple/`);
         expect(res.status).toBe(200);
-      } finally {
-        server.stop();
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      });
     });
 
-    it('corsAllowedDomains: multiple domains', async () => {
-      const { container, config } = createCorsServer(['saga.org', 'sagadev.org', 'wootmath.com']);
-      const server = container.get(ExpressServer);
-      await server.init(container, [SimpleTestController]);
-      server.start();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      try {
-        // Subdomain of first domain
-        const r1 = await fetch(`http://localhost:${config.port}/simple/`, {
-          headers: { Origin: 'https://coach.saga.org' },
-        });
-        expect(r1.headers.get('access-control-allow-origin')).toBe('https://coach.saga.org');
-
-        // Subdomain of second domain
-        const r2 = await fetch(`http://localhost:${config.port}/simple/`, {
-          headers: { Origin: 'https://pr-7.coach.sagadev.org' },
-        });
-        expect(r2.headers.get('access-control-allow-origin')).toBe('https://pr-7.coach.sagadev.org');
-
-        // Subdomain of third domain
-        const r3 = await fetch(`http://localhost:${config.port}/simple/`, {
-          headers: { Origin: 'https://staging.wootmath.com' },
-        });
-        expect(r3.headers.get('access-control-allow-origin')).toBe('https://staging.wootmath.com');
-
-        // Non-matching
-        const r4 = await fetch(`http://localhost:${config.port}/simple/`, {
-          headers: { Origin: 'https://attacker.com' },
-        });
-        expect(r4.headers.get('access-control-allow-origin')).toBeNull();
-      } finally {
-        server.stop();
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-    });
-
-    it('corsAllowedDomains: preflight OPTIONS returns correct headers', async () => {
-      const { container, config } = createCorsServer(['saga.org']);
-      const server = container.get(ExpressServer);
-      await server.init(container, [SimpleTestController]);
-      server.start();
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      try {
-        const res = await fetch(`http://localhost:${config.port}/simple/`, {
+    it('preflight OPTIONS returns correct headers', async () => {
+      await withCorsServer(['saga.org'], async (port) => {
+        const res = await fetch(`http://localhost:${port}/simple/`, {
           method: 'OPTIONS',
           headers: {
             Origin: 'https://coach.saga.org',
@@ -341,10 +264,7 @@ describe('ExpressServer (integration)', () => {
         expect(res.headers.get('access-control-allow-origin')).toBe('https://coach.saga.org');
         expect(res.headers.get('access-control-allow-credentials')).toBe('true');
         expect(res.headers.get('access-control-allow-methods')).toContain('POST');
-      } finally {
-        server.stop();
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      });
     });
   });
 

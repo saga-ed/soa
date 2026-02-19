@@ -14,27 +14,184 @@ set +a
 
 usage() {
     cat <<EOF
-Usage: infra-compose <command> [args]
+Usage: infra-compose <command> [options] [-- COMPOSE_ARGS...]
 
-Commands:
+Lifecycle commands:
+  up [--profile NAME]       Start services (default profile: \$SEED_PROFILE or "small")
+  switch --profile NAME     Switch to a different seed profile (down + up)
+  down                      Stop services (volumes preserved)
+  reset --profile NAME      Wipe profile volumes and restart fresh
+
+Utility commands:
   check-ports       Scan Docker for port conflicts
-  status            Show running containers and profile volumes
+  status            Show running containers, current profile, and volumes
   shell <service>   Open a database shell (mongo|mysql|postgres|redis)
   list-profiles     Show seed profiles per service
   volumes           List profile Docker volumes
   help              Show this help message
 
+Options:
+  --profile NAME    Seed profile name (sets SEED_PROFILE env var)
+  -- ARGS...        Extra args passed through to docker compose
+
 Examples:
+  npx infra-compose up --profile small
+  npx infra-compose switch --profile basic
+  npx infra-compose reset --profile small
+  npx infra-compose down
+  npx infra-compose up --profile small -- -f docker-compose.yml
   npx infra-compose status
-  npx infra-compose shell mongo
-  npx infra-compose check-ports
 EOF
 }
+
+# ── Argument parsing helpers ───────────────────────────────
+
+# Parse --profile NAME and collect passthrough args after "--"
+# Sets: PROFILE, COMPOSE_PASSTHROUGH (array)
+parse_lifecycle_args() {
+    PROFILE=""
+    COMPOSE_PASSTHROUGH=()
+    local passthrough=false
+
+    while [[ $# -gt 0 ]]; do
+        if [[ "$passthrough" == true ]]; then
+            COMPOSE_PASSTHROUGH+=("$1")
+            shift
+            continue
+        fi
+        case "$1" in
+            --)
+                passthrough=true
+                shift
+                ;;
+            --profile)
+                shift
+                PROFILE="${1:-}"
+                if [[ -z "$PROFILE" ]]; then
+                    echo "Error: --profile requires a name" >&2
+                    exit 1
+                fi
+                shift
+                ;;
+            --profile=*)
+                PROFILE="${1#--profile=}"
+                shift
+                ;;
+            *)
+                echo "Error: unknown option '$1'" >&2
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Resolve the effective profile: explicit flag > env var > .env.defaults > "small"
+resolve_profile() {
+    local explicit="${1:-}"
+    if [[ -n "$explicit" ]]; then
+        echo "$explicit"
+    elif [[ -n "${SEED_PROFILE:-}" ]]; then
+        echo "$SEED_PROFILE"
+    else
+        echo "small"
+    fi
+}
+
+# ── Lifecycle commands ─────────────────────────────────────
+
+cmd_up() {
+    parse_lifecycle_args "$@"
+    local profile
+    profile=$(resolve_profile "$PROFILE")
+    export SEED_PROFILE="$profile"
+
+    # Pre-flight port check
+    cmd_check_ports
+
+    echo ""
+    echo "Starting services with profile: $profile"
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+
+    echo ""
+    echo "Profile: $profile"
+    echo "Profile volumes:"
+    docker volume ls --filter "name=-profile-${profile}" --format "  {{.Name}}" 2>/dev/null || true
+}
+
+cmd_switch() {
+    parse_lifecycle_args "$@"
+    if [[ -z "$PROFILE" ]]; then
+        echo "Error: switch requires --profile NAME" >&2
+        exit 1
+    fi
+    export SEED_PROFILE="$PROFILE"
+
+    echo "Switching to profile: $PROFILE"
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+
+    echo ""
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+
+    echo ""
+    echo "Switched to profile: $PROFILE"
+    echo "Profile volumes:"
+    docker volume ls --filter "name=-profile-${PROFILE}" --format "  {{.Name}}" 2>/dev/null || true
+}
+
+cmd_down() {
+    parse_lifecycle_args "$@"
+    # Allow optional --profile for env consistency, but don't require it
+    if [[ -n "$PROFILE" ]]; then
+        export SEED_PROFILE="$PROFILE"
+    fi
+
+    echo "Stopping services (volumes preserved)..."
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+
+    echo "Services stopped."
+}
+
+cmd_reset() {
+    parse_lifecycle_args "$@"
+    if [[ -z "$PROFILE" ]]; then
+        echo "Error: reset requires --profile NAME" >&2
+        exit 1
+    fi
+    export SEED_PROFILE="$PROFILE"
+
+    echo "Resetting profile: $PROFILE"
+
+    # Stop services
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+
+    # Find and remove volumes matching *-profile-<NAME>
+    local vols
+    vols=$(docker volume ls --filter "name=-profile-${PROFILE}" --format "{{.Name}}" 2>/dev/null || true)
+    if [[ -n "$vols" ]]; then
+        echo "Removing volumes:"
+        echo "$vols" | while read -r v; do
+            echo "  $v"
+            docker volume rm "$v" 2>/dev/null || true
+        done
+    else
+        echo "No volumes found matching *-profile-${PROFILE}"
+    fi
+
+    echo ""
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+
+    echo ""
+    echo "Reset profile: $PROFILE — volumes wiped, services restarted"
+    echo "Profile volumes:"
+    docker volume ls --filter "name=-profile-${PROFILE}" --format "  {{.Name}}" 2>/dev/null || true
+}
+
+# ── Utility commands ───────────────────────────────────────
 
 cmd_check_ports() {
     local conflicts="" stop_cmds="" down_projects=""
 
-    for port in ${POSTGRES_PORT:-} ${MONGO_PORT:-} ${MYSQL_PORT:-} ${REDIS_PORT:-} ${RABBITMQ_PORT:-} ${RABBITMQ_MGMT_PORT:-}; do
+    for port in ${POSTGRES_PORT:-} ${MONGO_PORT:-} ${MYSQL_PORT:-} ${REDIS_PORT:-} ${RABBITMQ_PORT:-} ${RABBITMQ_MGMT_PORT:-} ${OPENFGA_HTTP_PORT:-} ${OPENFGA_GRPC_PORT:-} ${OPENFGA_PLAYGROUND_PORT:-}; do
         [ -z "$port" ] && continue
         local match
         match=$(docker ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' \
@@ -71,6 +228,8 @@ cmd_check_ports() {
 }
 
 cmd_status() {
+    echo "Current SEED_PROFILE: ${SEED_PROFILE:-<not set, default: small>}"
+    echo ""
     echo "SOA containers:"
     echo ""
     local out
@@ -155,6 +314,10 @@ command="${1:-help}"
 shift || true
 
 case "$command" in
+    up)             cmd_up "$@" ;;
+    switch)         cmd_switch "$@" ;;
+    down)           cmd_down "$@" ;;
+    reset)          cmd_reset "$@" ;;
     check-ports)    cmd_check_ports ;;
     status)         cmd_status ;;
     shell)          cmd_shell "$@" ;;

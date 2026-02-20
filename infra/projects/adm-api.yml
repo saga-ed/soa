@@ -1,0 +1,8 @@
+## adm-api — PostgreSQL + Redis
+##
+## Usage:
+##   SEED_PROFILE=small docker compose -f projects/adm-api.yml up -d
+
+include:
+  - path: ../services/postgres/compose.yml
+  - path: ../services/redis/compose.yml

@@ -13,3 +13,5 @@ packages:
   - 'packages/core/*'
   # Build tools
   - 'build-tools/*'
+  # Infrastructure templates
+  - 'infra'

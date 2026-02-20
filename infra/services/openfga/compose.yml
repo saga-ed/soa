@@ -1,0 +1,46 @@
+## OpenFGA — authorization service backed by PostgreSQL
+##
+## Prerequisites:
+##   - A `postgres` service must be defined (via extends or otherwise)
+##   - The postgres instance must have an `openfga` database pre-created
+##     (e.g. via an init SQL script mounted at /docker-entrypoint-initdb.d/)
+##
+## Playground UI available at http://localhost:3005
+
+services:
+
+  openfga_migrate:
+    image: openfga/openfga:latest
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://${POSTGRES_USER:-postgres_admin}:${POSTGRES_PASSWORD:-password123}@postgres:5432/openfga?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  openfga:
+    image: openfga/openfga:latest
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://${POSTGRES_USER:-postgres_admin}:${POSTGRES_PASSWORD:-password123}@postgres:5432/openfga?sslmode=disable
+      OPENFGA_PLAYGROUND_ENABLED: "true"
+      OPENFGA_HTTP_ADDR: "0.0.0.0:8080"
+      OPENFGA_GRPC_ADDR: "0.0.0.0:8081"
+      OPENFGA_PLAYGROUND_PORT: "3005"
+    ports:
+      - "${OPENFGA_HTTP_PORT:-8080}:8080"
+      - "${OPENFGA_GRPC_PORT:-8081}:8081"
+      - "${OPENFGA_PLAYGROUND_PORT:-3005}:3005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      openfga_migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=:8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

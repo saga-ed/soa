@@ -1,0 +1,8 @@
+## events-example — RabbitMQ + PostgreSQL
+##
+## Usage:
+##   SEED_PROFILE=small docker compose -f projects/events-example.yml up -d
+
+include:
+  - path: ../services/rabbitmq/compose.yml
+  - path: ../services/postgres/compose.yml

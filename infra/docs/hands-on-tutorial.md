@@ -285,7 +285,7 @@ cat ~/dev/nb2/edu/js/app/saga_api/fixture-cli/zcripts/local/docker-compose.yml
    The `INFRA_COMPOSE_DIR` env var allows overriding for local development (symlinked packages).
 
 2. **Consumer overrides** — saga_api customizes the template:
-   - `container_name: mongo-8.0.12-local` — app-specific naming
+   - `container_name: mongo-6-local` — app-specific naming
    - `network_mode: "host"` — saga_api uses host networking
    - Extra `ulimits` for Mongo
 

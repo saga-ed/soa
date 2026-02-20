@@ -177,9 +177,9 @@ disable_link() {
     # Get all package names from config and remove them from overrides
     local packages=$(jq -r '.packages | keys[]' "$CONFIG_FILE")
 
-    local jq_filter=".pnpm.overrides"
+    local jq_filter="."
     for pkg in $packages; do
-        jq_filter="$jq_filter | del(.[\"$pkg\"])"
+        jq_filter="$jq_filter | del(.pnpm.overrides[\"$pkg\"])"
     done
 
     jq "$jq_filter" "$PACKAGE_JSON" > "$PACKAGE_JSON.tmp"

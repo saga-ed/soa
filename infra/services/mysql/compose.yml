@@ -1,0 +1,43 @@
+## MySQL with profile-based volume switching
+##
+## Volume name is dynamic: mysql-profile-<SEED_PROFILE>
+## Each profile gets its own Docker volume — fully isolated.
+## Seeder checks a sentinel table and skips if already seeded.
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    command: ["mysqld", "--default-authentication-plugin=mysql_native_password"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-password123}
+      MYSQL_USER: ${MYSQL_USER:-mysql_admin}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-password123}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+
+  mysql_init:
+    image: mysql:8.0
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./seed:/seed:ro
+    environment:
+      SEED_PROFILE: ${SEED_PROFILE:-small}
+      MYSQL_PWD: ${MYSQL_PASSWORD:-password123}
+      MYSQL_USER: ${MYSQL_USER:-mysql_admin}
+    entrypoint: ["bash", "/seed/init-and-seed.sh"]
+    restart: "no"
+
+volumes:
+  mysql-data:
+    name: mysql-profile-${SEED_PROFILE:-small}

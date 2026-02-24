@@ -1,0 +1,351 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve package root — works from npx, pnpm exec, or node_modules/.bin/
+PKG_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Load port defaults from package, then overlay local .env if present
+set -a
+# shellcheck disable=SC1091
+[ -f "$PKG_ROOT/.env.defaults" ] && source "$PKG_ROOT/.env.defaults"
+# shellcheck disable=SC1091
+[ -f ".env" ] && source ".env"
+set +a
+
+usage() {
+    cat <<EOF
+Usage: infra-compose <command> [options] [-- COMPOSE_ARGS...]
+
+Lifecycle commands:
+  up [--profile NAME]       Start services (default profile: \$SEED_PROFILE or "small")
+  switch --profile NAME     Switch to a different seed profile (down + up)
+  down                      Stop services (volumes preserved)
+  reset --profile NAME      Wipe profile volumes and restart fresh
+
+Utility commands:
+  check-ports       Scan Docker for port conflicts
+  status            Show running containers, current profile, and volumes
+  shell <service>   Open a database shell (mongo|mysql|postgres|redis)
+  list-profiles     Show seed profiles per service
+  volumes           List profile Docker volumes
+  help              Show this help message
+
+Options:
+  --profile NAME    Seed profile name (sets SEED_PROFILE env var)
+  -- ARGS...        Extra args passed through to docker compose
+
+Examples:
+  npx infra-compose up --profile small
+  npx infra-compose switch --profile basic
+  npx infra-compose reset --profile small
+  npx infra-compose down
+  npx infra-compose up --profile small -- -f docker-compose.yml
+  npx infra-compose status
+EOF
+}
+
+# ── Argument parsing helpers ───────────────────────────────
+
+# Parse --profile NAME and collect passthrough args after "--"
+# Sets: PROFILE, COMPOSE_PASSTHROUGH (array)
+parse_lifecycle_args() {
+    PROFILE=""
+    COMPOSE_PASSTHROUGH=()
+    local passthrough=false
+
+    while [[ $# -gt 0 ]]; do
+        if [[ "$passthrough" == true ]]; then
+            COMPOSE_PASSTHROUGH+=("$1")
+            shift
+            continue
+        fi
+        case "$1" in
+            --)
+                passthrough=true
+                shift
+                ;;
+            --profile)
+                shift
+                PROFILE="${1:-}"
+                if [[ -z "$PROFILE" ]]; then
+                    echo "Error: --profile requires a name" >&2
+                    exit 1
+                fi
+                shift
+                ;;
+            --profile=*)
+                PROFILE="${1#--profile=}"
+                shift
+                ;;
+            *)
+                echo "Error: unknown option '$1'" >&2
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Resolve the effective profile: explicit flag > env var > .env.defaults > "small"
+resolve_profile() {
+    local explicit="${1:-}"
+    if [[ -n "$explicit" ]]; then
+        echo "$explicit"
+    elif [[ -n "${SEED_PROFILE:-}" ]]; then
+        echo "$SEED_PROFILE"
+    else
+        echo "small"
+    fi
+}
+
+# ── Lifecycle commands ─────────────────────────────────────
+
+cmd_up() {
+    parse_lifecycle_args "$@"
+    local profile
+    profile=$(resolve_profile "$PROFILE")
+    export SEED_PROFILE="$profile"
+
+    # Pre-flight port check
+    cmd_check_ports
+
+    echo ""
+    echo "Starting services with profile: $profile"
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+
+    echo ""
+    echo "Profile: $profile"
+    echo "Profile volumes:"
+    docker volume ls --filter "name=-profile-${profile}" --format "  {{.Name}}" 2>/dev/null || true
+}
+
+cmd_switch() {
+    parse_lifecycle_args "$@"
+    if [[ -z "$PROFILE" ]]; then
+        echo "Error: switch requires --profile NAME" >&2
+        exit 1
+    fi
+    export SEED_PROFILE="$PROFILE"
+
+    echo "Switching to profile: $PROFILE"
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+
+    echo ""
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+
+    echo ""
+    echo "Switched to profile: $PROFILE"
+    echo "Profile volumes:"
+    docker volume ls --filter "name=-profile-${PROFILE}" --format "  {{.Name}}" 2>/dev/null || true
+}
+
+cmd_down() {
+    parse_lifecycle_args "$@"
+    # Allow optional --profile for env consistency, but don't require it
+    if [[ -n "$PROFILE" ]]; then
+        export SEED_PROFILE="$PROFILE"
+    fi
+
+    echo "Stopping services (volumes preserved)..."
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+
+    echo "Services stopped."
+}
+
+cmd_reset() {
+    parse_lifecycle_args "$@"
+    if [[ -z "$PROFILE" ]]; then
+        echo "Error: reset requires --profile NAME" >&2
+        exit 1
+    fi
+    export SEED_PROFILE="$PROFILE"
+
+    echo "Resetting profile: $PROFILE"
+
+    # Stop services
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+
+    # Find and remove volumes matching *-profile-<NAME>
+    local vols
+    vols=$(docker volume ls --filter "name=-profile-${PROFILE}" --format "{{.Name}}" 2>/dev/null || true)
+    if [[ -n "$vols" ]]; then
+        echo "Removing volumes:"
+        echo "$vols" | while read -r v; do
+            echo "  $v"
+            docker volume rm "$v" 2>/dev/null || true
+        done
+    else
+        echo "No volumes found matching *-profile-${PROFILE}"
+    fi
+
+    echo ""
+    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+
+    echo ""
+    echo "Reset profile: $PROFILE — volumes wiped, services restarted"
+    echo "Profile volumes:"
+    docker volume ls --filter "name=-profile-${PROFILE}" --format "  {{.Name}}" 2>/dev/null || true
+}
+
+# ── Utility commands ───────────────────────────────────────
+
+cmd_check_ports() {
+    local conflicts="" stop_cmds="" down_projects=""
+
+    for port in ${POSTGRES_PORT:-} ${MONGO_PORT:-} ${MYSQL_PORT:-} ${REDIS_PORT:-} ${RABBITMQ_PORT:-} ${RABBITMQ_MGMT_PORT:-} ${OPENFGA_HTTP_PORT:-} ${OPENFGA_GRPC_PORT:-} ${OPENFGA_PLAYGROUND_PORT:-}; do
+        [ -z "$port" ] && continue
+        local match
+        match=$(docker ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' \
+            | grep -E "0\.0\.0\.0:${port}->" | head -1) || true
+        if [ -n "$match" ]; then
+            local cname project
+            cname=$(echo "$match" | cut -f1)
+            project=$(echo "$match" | cut -f3)
+            conflicts="${conflicts}\n  Port ${port} is in use by container '${cname}' (project: ${project})"
+            stop_cmds="${stop_cmds}\n    docker stop ${cname}"
+            if [ -n "$project" ]; then
+                if ! echo "$down_projects" | grep -q "$project"; then
+                    down_projects="${down_projects}\n    docker compose -p ${project} down"
+                fi
+            fi
+        fi
+    done
+
+    if [ -n "$conflicts" ]; then
+        echo ""
+        echo "  ERROR: Port conflict detected!"
+        echo -e "$conflicts"
+        echo ""
+        echo "  Option 1 — stop just the conflicting container(s):"
+        echo -e "$stop_cmds"
+        echo ""
+        echo "  Option 2 — stop the entire project (all its services):"
+        echo -e "$down_projects"
+        echo ""
+        exit 1
+    else
+        echo "  No port conflicts detected."
+    fi
+}
+
+cmd_status() {
+    echo "Current SEED_PROFILE: ${SEED_PROFILE:-<not set, default: small>}"
+    echo ""
+    echo "Infra-compose containers:"
+    echo ""
+
+    # Detect the Docker Compose project name from the compose file in CWD
+    local project
+    project=$(docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" config --format json 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4) || true
+    if [ -z "$project" ]; then
+        project="infra"
+    fi
+
+    local out
+    out=$(docker ps --filter "label=com.docker.compose.project=${project}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null) || true
+    if [ -z "$out" ] || [ "$(echo "$out" | wc -l)" -le 1 ]; then
+        echo "  (none)"
+    else
+        echo "$out"
+    fi
+    echo ""
+    echo "Other running containers:"
+    echo ""
+    # Get IDs of our project containers, then exclude them
+    local project_ids
+    project_ids=$(docker ps --filter "label=com.docker.compose.project=${project}" --format "{{.ID}}" 2>/dev/null) || true
+    local other
+    if [ -n "$project_ids" ]; then
+        # Get all containers, then filter out ones from our project by name
+        local project_names
+        project_names=$(docker ps --filter "label=com.docker.compose.project=${project}" --format "{{.Names}}" 2>/dev/null) || true
+        other=$(docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -vF "$(echo "$project_names")" ) || true
+    else
+        other=$(docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null) || true
+    fi
+    if [ -z "$other" ]; then
+        echo "  (none)"
+    else
+        echo "$other" | column -t -s '	'
+    fi
+    echo ""
+    echo "Profile volumes:"
+    docker volume ls --filter "name=-profile-" --format "  {{.Name}}" 2>/dev/null || echo "  (none)"
+}
+
+cmd_shell() {
+    local service="${1:-}"
+    case "$service" in
+        mongo)
+            exec mongosh "mongodb://localhost:${MONGO_PORT:-27017}"
+            ;;
+        mysql)
+            MYSQL_PWD="${MYSQL_PASSWORD:-password123}" exec mysql \
+                -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u "${MYSQL_USER:-mysql_admin}"
+            ;;
+        postgres)
+            PGPASSWORD="${POSTGRES_PASSWORD:-password123}" exec psql \
+                -h localhost -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres_admin}"
+            ;;
+        redis)
+            exec redis-cli -p "${REDIS_PORT:-6379}"
+            ;;
+        "")
+            echo "Error: specify a service — mongo, mysql, postgres, or redis" >&2
+            exit 1
+            ;;
+        *)
+            echo "Error: unknown service '$service'. Choose: mongo, mysql, postgres, redis" >&2
+            exit 1
+            ;;
+    esac
+}
+
+cmd_list_profiles() {
+    local services_dir="$PKG_ROOT/services"
+
+    echo "Mongo profiles:"
+    for f in "$services_dir"/mongo/seed/profile-*.json; do
+        [ -f "$f" ] || continue
+        echo "  - $(basename "$f" .json | sed 's/^profile-//')"
+    done
+
+    echo "MySQL profiles:"
+    for f in "$services_dir"/mysql/seed/profile-*.sql; do
+        [ -f "$f" ] || continue
+        echo "  - $(basename "$f" .sql | sed 's/^profile-//')"
+    done
+
+    echo "Postgres profiles:"
+    for f in "$services_dir"/postgres/seed/profile-*.sql; do
+        [ -f "$f" ] || continue
+        echo "  - $(basename "$f" .sql | sed 's/^profile-//')"
+    done
+}
+
+cmd_volumes() {
+    echo "All profile volumes:"
+    docker volume ls --filter "name=-profile-" --format "  {{.Name}}" 2>/dev/null
+}
+
+# ── Main dispatch ──────────────────────────────────────────
+command="${1:-help}"
+shift || true
+
+case "$command" in
+    up)             cmd_up "$@" ;;
+    switch)         cmd_switch "$@" ;;
+    down)           cmd_down "$@" ;;
+    reset)          cmd_reset "$@" ;;
+    check-ports)    cmd_check_ports ;;
+    status)         cmd_status ;;
+    shell)          cmd_shell "$@" ;;
+    list-profiles)  cmd_list_profiles ;;
+    volumes)        cmd_volumes ;;
+    help|--help|-h) usage ;;
+    *)
+        echo "Error: unknown command '$command'" >&2
+        echo ""
+        usage >&2
+        exit 1
+        ;;
+esac

@@ -64,6 +64,16 @@ ls infra/services/
 
 You'll see: `mongo/`, `mysql/`, `postgres/`, `redis/`, `rabbitmq/`, `openfga/`. Each directory contains a `compose.yml` template that any consumer can `extends:` from.
 
+Now look at the root compose file:
+
+```bash
+cat infra/compose.yml
+```
+
+**What to observe:**
+- Uses Docker Compose `include:` to pull in all service templates — this is the "compose of composes" pattern
+- OpenFGA is excluded because it requires a pre-created `openfga` database in Postgres; include it in project-specific compose files that set up the database
+
 Now read the Mongo template:
 
 ```bash
@@ -115,7 +125,7 @@ npx infra-compose status
 
 **What to observe:**
 - Shows `Current SEED_PROFILE` (from env or default)
-- Lists SOA containers (probably none yet)
+- Lists infra-compose containers (probably none yet)
 - Lists other running containers (anything else Docker is running)
 - Lists all profile volumes (probably none yet)
 
@@ -429,6 +439,7 @@ cd ~/dev/nb2/edu/js/app/saga_api/fixture-cli/zcripts/local/
 
 | File | Purpose |
 |------|---------|
+| `infra/compose.yml` | Root compose-of-composes (includes all services) |
 | `infra/bin/infra-compose` | CLI entry point (bash script) |
 | `infra/services/{mongo,mysql,postgres,redis,rabbitmq,openfga}/compose.yml` | Service templates |
 | `infra/.env.defaults` | Default ports, credentials, `SEED_PROFILE` |

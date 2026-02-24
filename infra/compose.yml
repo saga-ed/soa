@@ -1,0 +1,15 @@
+## All services — compose of composes
+##
+## Usage:
+##   cd infra && SEED_PROFILE=small docker compose up -d
+##   npx infra-compose up --profile small
+
+include:
+  - path: services/mongo/compose.yml
+  - path: services/mysql/compose.yml
+  - path: services/postgres/compose.yml
+  - path: services/redis/compose.yml
+  - path: services/rabbitmq/compose.yml
+  # OpenFGA excluded — requires an 'openfga' database pre-created in Postgres.
+  # Include it in project-specific compose files that set up the database.
+  # - path: services/openfga/compose.yml

@@ -230,10 +230,18 @@ cmd_check_ports() {
 cmd_status() {
     echo "Current SEED_PROFILE: ${SEED_PROFILE:-<not set, default: small>}"
     echo ""
-    echo "SOA containers:"
+    echo "Infra-compose containers:"
     echo ""
+
+    # Detect the Docker Compose project name from the compose file in CWD
+    local project
+    project=$(docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" config --format json 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4) || true
+    if [ -z "$project" ]; then
+        project="infra"
+    fi
+
     local out
-    out=$(docker ps --filter "name=soa-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null) || true
+    out=$(docker ps --filter "label=com.docker.compose.project=${project}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null) || true
     if [ -z "$out" ] || [ "$(echo "$out" | wc -l)" -le 1 ]; then
         echo "  (none)"
     else
@@ -242,8 +250,18 @@ cmd_status() {
     echo ""
     echo "Other running containers:"
     echo ""
+    # Get IDs of our project containers, then exclude them
+    local project_ids
+    project_ids=$(docker ps --filter "label=com.docker.compose.project=${project}" --format "{{.ID}}" 2>/dev/null) || true
     local other
-    other=$(docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -v "^soa-") || true
+    if [ -n "$project_ids" ]; then
+        # Get all containers, then filter out ones from our project by name
+        local project_names
+        project_names=$(docker ps --filter "label=com.docker.compose.project=${project}" --format "{{.Names}}" 2>/dev/null) || true
+        other=$(docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | grep -vF "$(echo "$project_names")" ) || true
+    else
+        other=$(docker ps --format "{{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null) || true
+    fi
     if [ -z "$other" ]; then
         echo "  (none)"
     else

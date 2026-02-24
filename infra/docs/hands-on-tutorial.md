@@ -32,15 +32,15 @@ Before starting, confirm you have:
 
 - [ ] Docker and Docker Compose v2 installed
 - [ ] Node.js 20+
-- [ ] `soa2` repo cloned, on branch `gh_27-compose_of_composes`
-- [ ] `saga_api` (nb2) repo cloned, on branch `gh_7763-compose_of_composes_poc`
+- [ ] `soa` repo cloned, on branch `gh_27-compose_of_composes`
+- [ ] `saga_api` (nimbee) repo cloned, on branch `gh_7763-compose_of_composes_poc`
 
 Verify your environment:
 
 ```bash
 docker compose version       # → Docker Compose version v2.x.x
 node --version               # → v20.x.x or higher
-cd ~/dev/soa2
+cd ~/dev/soa
 git branch --show-current    # → gh_27-compose_of_composes
 ls infra/bin/infra-compose   # → exists
 ls infra/services/           # → mongo/ mysql/ postgres/ redis/ rabbitmq/ openfga/
@@ -114,7 +114,7 @@ The flow: `.env.defaults` sets `SEED_PROFILE=small` → CLI reads it → passes 
 See all available commands:
 
 ```bash
-cd ~/dev/soa2/infra
+cd ~/dev/soa/infra
 npx infra-compose help
 ```
 
@@ -148,7 +148,7 @@ The core workflow. You will start services, switch between profiles, and verify 
 ### 2.1 Start with small profile
 
 ```bash
-cd ~/dev/soa2/infra
+cd ~/dev/soa/infra
 npx infra-compose up --profile small
 ```
 
@@ -286,7 +286,7 @@ How a real application consumes `@saga-ed/infra-compose` templates.
 Read the saga_api Docker Compose file:
 
 ```bash
-cat ~/dev/nb2/edu/js/app/saga_api/fixture-cli/zcripts/local/docker-compose.yml
+cat ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/docker-compose.yml
 ```
 
 **What to observe:**
@@ -322,7 +322,7 @@ cat ~/dev/nb2/edu/js/app/saga_api/fixture-cli/zcripts/local/docker-compose.yml
 ### 3.2 Run from saga_api directory
 
 ```bash
-cd ~/dev/nb2/edu/js/app/saga_api/fixture-cli/zcripts/local/
+cd ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/
 npx infra-compose up --profile small -- -f docker-compose.yml
 ```
 
@@ -351,7 +351,7 @@ You should see volumes like:
 Read the wrapper functions:
 
 ```bash
-head -90 ~/dev/nb2/edu/js/app/saga_api/fixture-cli/zcripts/local/local-db-mgr.sh
+head -90 ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/local-db-mgr.sh
 ```
 
 **What to observe:**
@@ -393,7 +393,7 @@ fi
 Try it:
 
 ```bash
-cd ~/dev/nb2/edu/js/app/saga_api/fixture-cli/zcripts/local/
+cd ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/
 ./local-db-mgr.sh start           # Uses infra-compose when available
 ./local-db-mgr.sh switch basic    # Profile switching via wrapper
 ./local-db-mgr.sh check           # Status check

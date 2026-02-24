@@ -235,6 +235,85 @@ it fails fast with actionable suggestions:
 This prevents confusing startup failures when switching between projects that
 share database ports.
 
+## Upgrading to 0.5.0 (PostgreSQL 18)
+
+Version 0.5.0 upgrades PostgreSQL from 16 to 18, which changes the data directory layout.
+**Existing postgres volumes must be removed** before starting services — PG18 will refuse to
+start if it finds data in the old layout.
+
+### What changed
+
+| | Before (≤ 0.4.0) | After (0.5.0+) |
+|---|---|---|
+| Postgres image | `postgres:16` | `postgres:18` |
+| Volume mount | `/var/lib/postgresql/data` | `/var/lib/postgresql` |
+
+PG18 stores data in a major-version-specific subdirectory (`/var/lib/postgresql/18/data`),
+so the mount point moved up one level to `/var/lib/postgresql`.
+
+### Migration steps
+
+**1. infra-compose direct users (soa2/infra):**
+
+```bash
+cd ~/dev/soa2/infra
+
+# Stop services
+./bin/infra-compose down
+
+# Remove all postgres profile volumes
+docker volume ls --filter "name=postgres-profile-" --format "{{.Name}}" | xargs docker volume rm
+
+# Restart — fresh volumes will be created and seeded automatically
+./bin/infra-compose up --profile small
+```
+
+**2. Thrive:**
+
+```bash
+cd ~/dev/thrive
+
+# Pull latest compose-templates-poc branch (includes volume mount fix)
+git pull
+
+# Install updated package
+pnpm install
+
+# Stop and remove the old volume
+docker compose down
+docker volume rm thrive-postgres-data
+
+# Restart — databases will be re-created by init-databases.sql
+docker compose up -d
+```
+
+**3. Consumer repos using `extends:`**
+
+If your `docker-compose.yml` overrides the postgres volume mount, update it:
+
+```yaml
+# Before
+volumes:
+  - my-postgres-data:/var/lib/postgresql/data
+
+# After
+volumes:
+  - my-postgres-data:/var/lib/postgresql
+```
+
+Then remove and recreate the volume:
+
+```bash
+docker compose down
+docker volume rm <your-postgres-volume-name>
+docker compose up -d
+```
+
+> **Note:** This is a local-dev-only change. All seed data is re-applied automatically on
+> first start. No production databases are affected.
+
+---
+
 ## Cross-Repo Usage (npm package)
 
 Consumer repos outside this monorepo can install the service templates as an npm package:

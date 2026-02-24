@@ -4,6 +4,15 @@
 
 set -e
 
+# Use $BROWSER if set, otherwise fall back to xdg-open
+open_url() {
+    if [[ -n "$BROWSER" ]]; then
+        "$BROWSER" "$1" 2>/dev/null &
+    else
+        xdg-open "$1" 2>/dev/null &
+    fi
+}
+
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
@@ -56,13 +65,13 @@ fi
 
 echo ""
 echo -e "${YELLOW}Step 2: Logging out of JumpCloud...${NC}"
-xdg-open "https://console.jumpcloud.com/logout" 2>/dev/null &
+open_url "https://console.jumpcloud.com/logout"
 sleep 2
 
 echo -e "${YELLOW}Step 3: Opening JumpCloud login...${NC}"
 echo -e "  ${BLUE}→ Complete the JumpCloud login + MFA in your browser${NC}"
 echo ""
-xdg-open "https://console.jumpcloud.com/login" 2>/dev/null &
+open_url "https://console.jumpcloud.com/login"
 
 echo -e "${YELLOW}Waiting for you to complete JumpCloud authentication...${NC}"
 echo -e "Press ${GREEN}Enter${NC} when you've logged in to JumpCloud"

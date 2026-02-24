@@ -18,6 +18,12 @@ A guided walkthrough of the `@saga-ed/infra-compose` package — composable Dock
   - [3.1 The extends pattern](#31-the-extends-pattern)
   - [3.2 Run from saga_api directory](#32-run-from-saga_api-directory)
   - [3.3 The local-db-mgr.sh wrapper](#33-the-local-db-mgrsh-wrapper)
+- [PART 4: Project-Specific Seed Data (~15 min)](#part-4-project-specific-seed-data-15-min)
+  - [4.1 How template seeding works](#41-how-template-seeding-works)
+  - [4.2 Create project seed profiles](#42-create-project-seed-profiles)
+  - [4.3 Define a project-specific mongo_init service](#43-define-a-project-specific-mongo_init-service)
+  - [4.4 Test profile switching with different data](#44-test-profile-switching-with-different-data)
+  - [4.5 Alternative: docker-entrypoint-initdb.d](#45-alternative-docker-entrypoint-initdbd)
 - [Appendix: Command Cheat Sheet](#appendix-command-cheat-sheet)
 
 ## Prerequisites
@@ -396,6 +402,347 @@ cd ~/dev/nb2/edu/js/app/saga_api/fixture-cli/zcripts/local/
 **What you learned:** Existing scripts get profile switching for free by wrapping `infra-compose`. The `has_infra_compose` / `run_infra_compose` pattern provides graceful fallback — if the package isn't installed, the script falls back to raw `docker compose`.
 
 > **Reset:** Light — `./local-db-mgr.sh stop`
+
+---
+
+## PART 4: Project-Specific Seed Data (~15 min)
+
+How to define your own seed profiles with project-specific data that varies per profile. PART 2 showed how the **template** seeds generic data; here you'll build **project-level** seed profiles that load different data depending on which profile is active.
+
+### 4.1 How template seeding works
+
+Before building your own, read the template's seeder to understand the mechanism.
+
+```bash
+cat infra/services/mongo/seed/init-and-seed.js
+```
+
+**What to observe:**
+
+1. **Replica set init** (lines 9–20) — idempotent `rs.initiate()` with a try/catch guard
+2. **Wait for primary** (lines 22–51) — polls `rs.status()` and probes a write before continuing
+3. **Sentinel check** (lines 60–64) — looks for a `_profile_meta` doc matching the current profile. If found, the seeder prints "already seeded" and exits. This is what makes seeding **idempotent** across restarts and switches.
+4. **Profile file loading** (lines 66–82) — reads `/seed/profile-${SEED_PROFILE}.json`, iterates `{ db: { collection: [docs] } }`, and inserts docs via `insertMany`
+5. **Sentinel write** (lines 84–89) — after successful seeding, writes the sentinel doc so future runs skip
+
+Now read a profile file:
+
+```bash
+cat infra/services/mongo/seed/profile-small.json
+```
+
+**What to observe:**
+- Top-level keys are **database names** (`saga_db`, `ars_db`)
+- Second-level keys are **collection names** (`organizations`, `users`, etc.)
+- Values are arrays of documents to insert
+- This is the contract: any JSON file matching this shape will work with `init-and-seed.js`
+
+**What you learned:** The template seeder is a generic engine — it loads any profile JSON that conforms to `{ db: { collection: [docs] } }`. Projects provide their own seed data by mounting their own profile JSON files at `/seed/`.
+
+> **Reset:** None — read-only.
+
+### 4.2 Create project seed profiles
+
+Create a seed directory with two profile files that contain different data. We'll use a fictional `myapp` project as the example.
+
+```bash
+mkdir -p /tmp/myapp-seed-demo/seed
+```
+
+Create the small profile — one org, one user:
+
+```bash
+cat > /tmp/myapp-seed-demo/seed/profile-small.json << 'EOF'
+{
+  "myapp_db": {
+    "tenants": [
+      {
+        "name": "Acme School",
+        "slug": "acme",
+        "plan": "free",
+        "created_at": "2025-01-01T00:00:00Z"
+      }
+    ],
+    "users": [
+      {
+        "email": "admin@acme.edu",
+        "name": "Alice Admin",
+        "role": "admin",
+        "tenant_slug": "acme"
+      }
+    ]
+  }
+}
+EOF
+```
+
+Create the basic profile — two orgs, four users:
+
+```bash
+cat > /tmp/myapp-seed-demo/seed/profile-basic.json << 'EOF'
+{
+  "myapp_db": {
+    "tenants": [
+      {
+        "name": "Acme School",
+        "slug": "acme",
+        "plan": "pro",
+        "created_at": "2025-01-01T00:00:00Z"
+      },
+      {
+        "name": "Beta Academy",
+        "slug": "beta",
+        "plan": "enterprise",
+        "created_at": "2025-02-01T00:00:00Z"
+      }
+    ],
+    "users": [
+      {
+        "email": "admin@acme.edu",
+        "name": "Alice Admin",
+        "role": "admin",
+        "tenant_slug": "acme"
+      },
+      {
+        "email": "teacher@acme.edu",
+        "name": "Ted Teacher",
+        "role": "teacher",
+        "tenant_slug": "acme"
+      },
+      {
+        "email": "admin@beta.edu",
+        "name": "Bob Boss",
+        "role": "admin",
+        "tenant_slug": "beta"
+      },
+      {
+        "email": "teacher@beta.edu",
+        "name": "Tina Teach",
+        "role": "teacher",
+        "tenant_slug": "beta"
+      }
+    ]
+  }
+}
+EOF
+```
+
+Verify the files:
+
+```bash
+ls /tmp/myapp-seed-demo/seed/
+```
+
+You should see `profile-small.json` and `profile-basic.json`.
+
+**What you learned:** Profile JSON files follow the same `{ db: { collection: [docs] } }` contract as the template. You control what data each profile contains — different record counts, different field values, different collections.
+
+> **Reset:** `rm -rf /tmp/myapp-seed-demo/seed`
+
+### 4.3 Define a project-specific mongo_init service
+
+Now create a Docker Compose file that extends the template's `mongo` service and defines its own `mongo_init` that mounts the local seed directory.
+
+```bash
+cat > /tmp/myapp-seed-demo/docker-compose.yml << 'YAML'
+## myapp local databases — extends @saga-ed/infra-compose templates
+##
+## Profile switching: volumes use SEED_PROFILE for isolation.
+##   npx infra-compose up --profile small -- -f docker-compose.yml
+##   npx infra-compose switch --profile basic -- -f docker-compose.yml
+
+services:
+
+  mongo:
+    extends:
+      file: ${INFRA_COMPOSE_DIR:-./node_modules/@saga-ed/infra-compose/services}/mongo/compose.yml
+      service: mongo
+    container_name: myapp-mongo
+    volumes:
+      - myapp-mongo-data:/data/db
+
+  mongo_init:
+    image: mongo:6
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      # Mount the template's seeder script (the generic engine)
+      - ${INFRA_COMPOSE_DIR:-./node_modules/@saga-ed/infra-compose/services}/mongo/seed/init-and-seed.js:/seed/init-and-seed.js:ro
+      # Mount YOUR project-specific profile JSON files
+      - ./seed:/seed-profiles:ro
+    environment:
+      SEED_PROFILE: ${SEED_PROFILE:-small}
+    # Copy project profiles into /seed/ alongside the script, then run
+    entrypoint:
+      - sh
+      - -c
+      - |
+        cp /seed-profiles/profile-*.json /seed/
+        mongosh --host mongo:27017 --file /seed/init-and-seed.js
+    restart: "no"
+
+volumes:
+  myapp-mongo-data:
+    name: myapp-mongo-profile-${SEED_PROFILE:-small}
+YAML
+```
+
+**What to observe:**
+
+1. **`mongo` extends the template** — inherits image, healthcheck, replica set command, and ports
+2. **Volume is consumer-prefixed** — `myapp-mongo-profile-${SEED_PROFILE}` keeps this project's data separate from other consumers
+3. **`mongo_init` is project-defined** — not inherited from the template. It mounts two things:
+   - The template's `init-and-seed.js` — the generic seeding engine
+   - The project's `./seed/` directory — your profile-specific JSON files
+4. **Entrypoint copies profiles** — the `sh -c` entrypoint copies your profile JSONs into `/seed/` so `init-and-seed.js` can find them at `/seed/profile-${SEED_PROFILE}.json`
+5. **Same sentinel mechanism** — `init-and-seed.js` writes a `_profile_meta` sentinel, so re-running `up` won't re-insert data
+
+**What you learned:** Define your own `mongo_init` service that reuses the template's seeder script but mounts your own profile data. The template engine is generic — you control what data it loads.
+
+> **Reset:** `rm /tmp/myapp-seed-demo/docker-compose.yml`
+
+### 4.4 Test profile switching with different data
+
+> **Note:** This exercise requires the soa2 `infra/` package to be resolvable. If you are working from `/tmp/myapp-seed-demo/`, set `INFRA_COMPOSE_DIR` to point to your local soa2 checkout:
+> ```bash
+> export INFRA_COMPOSE_DIR=~/dev/soa2/infra/services
+> ```
+
+Start with the small profile:
+
+```bash
+cd /tmp/myapp-seed-demo
+npx infra-compose up --profile small -- -f docker-compose.yml
+```
+
+Wait for init to finish, then query Mongo:
+
+```bash
+docker exec myapp-mongo mongosh --quiet --eval '
+  db.getSiblingDB("myapp_db").tenants.countDocuments()
+'
+```
+
+Expected: `1` (Acme School only)
+
+```bash
+docker exec myapp-mongo mongosh --quiet --eval '
+  db.getSiblingDB("myapp_db").users.countDocuments()
+'
+```
+
+Expected: `1` (Alice Admin only)
+
+Now switch to basic:
+
+```bash
+npx infra-compose switch --profile basic -- -f docker-compose.yml
+```
+
+Query again:
+
+```bash
+docker exec myapp-mongo mongosh --quiet --eval '
+  db.getSiblingDB("myapp_db").tenants.countDocuments()
+'
+```
+
+Expected: `2` (Acme School + Beta Academy)
+
+```bash
+docker exec myapp-mongo mongosh --quiet --eval '
+  db.getSiblingDB("myapp_db").users.countDocuments()
+'
+```
+
+Expected: `4` (two users per org)
+
+Now switch back to small:
+
+```bash
+npx infra-compose switch --profile small -- -f docker-compose.yml
+```
+
+Query one more time:
+
+```bash
+docker exec myapp-mongo mongosh --quiet --eval '
+  db.getSiblingDB("myapp_db").tenants.countDocuments()
+'
+```
+
+Expected: `1` — your small data is exactly as you left it. No re-seeding occurred because the sentinel was already present.
+
+Verify both volumes exist:
+
+```bash
+docker volume ls --filter "name=myapp-mongo-profile"
+```
+
+You should see:
+- `myapp-mongo-profile-small`
+- `myapp-mongo-profile-basic`
+
+**What you learned:** Project-specific seed profiles work identically to the template's built-in profiles. Each profile gets its own Docker volume with different data, and switching is instant and non-destructive.
+
+> **Reset:** Full —
+> ```bash
+> npx infra-compose down -- -f docker-compose.yml
+> docker volume ls --filter "name=myapp-mongo-profile" --format "{{.Name}}" | xargs docker volume rm
+> rm -rf /tmp/myapp-seed-demo
+> ```
+
+### 4.5 Alternative: docker-entrypoint-initdb.d (simpler, no profiles)
+
+Not every project needs profile switching. If you have a single dataset that you want loaded on first boot, Mongo's native `docker-entrypoint-initdb.d` mechanism is simpler.
+
+Read how Coach uses this pattern:
+
+```bash
+cat ~/dev/coach/apps/node/coach-api/docker-compose.yml
+```
+
+**What to observe:**
+
+1. **No `mongo_init` sidecar** — Coach doesn't define a separate init service
+2. **Volumes mount init scripts directly** into the container:
+   ```yaml
+   volumes:
+     - coach-mongo-data:/data/db
+     - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/init.js:ro
+     - ./scripts/data:/docker-entrypoint-initdb.d/data:ro
+   ```
+3. **No replica set** — Coach uses standalone Mongo (`mongod --bind_ip_all`), which is when `docker-entrypoint-initdb.d` runs (it does **not** run with `--replSet`)
+4. **Volume is still profile-named** — `coach-mongo-profile-${SEED_PROFILE}` so you still get volume isolation per profile, even though the seed data is the same across profiles
+
+Now read the init script:
+
+```bash
+cat ~/dev/coach/apps/node/coach-api/scripts/mongo-init.js
+```
+
+**What to observe:**
+- Creates collections and indexes explicitly
+- Reads JSON data files from `/docker-entrypoint-initdb.d/data/`
+- Uses `db.getSiblingDB()` for a second database
+- No sentinel check needed — `docker-entrypoint-initdb.d` only runs when the volume is empty (first start)
+
+**When to use which pattern:**
+
+| | Template seeder (`mongo_init`) | `docker-entrypoint-initdb.d` |
+|---|---|---|
+| **Runs when** | Every `docker compose up` (sentinel skips re-seed) | Only on first start (empty volume) |
+| **Requires** | Sidecar service + `init-and-seed.js` | Volume mount into container |
+| **Replica set** | Yes (initializes RS first) | No (requires standalone mode) |
+| **Profile-aware** | Yes (different data per profile) | No (same script regardless of `SEED_PROFILE`) |
+| **Idempotency** | Sentinel doc in `_profile_meta` | Volume existence (empty = run, non-empty = skip) |
+| **Re-seed** | `reset --profile NAME` deletes volume + sentinel | Delete volume, restart container |
+| **Best for** | Multi-profile workflows, RS-dependent apps | Single-dataset projects, simple setups |
+
+**What you learned:** Two seeding patterns exist. The template seeder (`mongo_init` + `init-and-seed.js`) is the full-featured option with profile awareness, sentinel-based idempotency, and replica set support. The `docker-entrypoint-initdb.d` pattern is simpler but doesn't support profile-specific data or replica sets.
+
+> **Reset:** None — read-only.
 
 ---
 

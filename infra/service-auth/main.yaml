@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+    Service-to-Service Authentication - Root Stack.
+    Orchestrates Cognito, API Gateway, and Monitoring stacks for
+    OAuth 2.0 Client Credentials flow between services.
+
+    Deploy this template to provision the complete service auth infrastructure.
+    Nested templates must be uploaded to S3 first (see README).
+
+Parameters:
+    Environment:
+        Type: String
+        AllowedValues:
+            - dev
+            - staging
+            - prod
+        Default: dev
+        Description: Deployment environment
+
+    ServiceName:
+        Type: String
+        Default: saga
+        Description: Service name prefix for all resources
+
+    TemplatesBucketName:
+        Type: String
+        Description: S3 bucket containing nested CloudFormation templates
+
+    TemplatesPrefix:
+        Type: String
+        Default: service-auth
+        Description: S3 key prefix for nested templates
+
+    # Cognito Parameters
+    CustomDomainPrefix:
+        Type: String
+        Default: ''
+        Description: Custom domain prefix for Cognito hosted UI. Leave empty to skip.
+
+    AccessTokenValidityMinutes:
+        Type: Number
+        Default: 60
+        MinValue: 5
+        MaxValue: 1440
+        Description: Access token lifetime in minutes
+
+    ResourceServerIdentifier:
+        Type: String
+        Default: api
+        Description: Resource server identifier used as scope prefix
+
+    # API Gateway Parameters
+    BackendEndpoint:
+        Type: String
+        Default: ''
+        Description: Backend service endpoint URL. Leave empty for mock integrations.
+
+    AuthorizerResultTtlSeconds:
+        Type: Number
+        Default: 300
+        MinValue: 0
+        MaxValue: 3600
+        Description: Authorizer result cache TTL in seconds
+
+    ThrottleRateLimit:
+        Type: Number
+        Default: 100
+        Description: Requests per second per API key
+
+    ThrottleBurstLimit:
+        Type: Number
+        Default: 200
+        Description: Max concurrent request burst per API key
+
+    MonthlyRequestQuota:
+        Type: Number
+        Default: 1000000
+        Description: Max requests per month per usage plan
+
+    # WAF Parameters
+    WebAclArn:
+        Type: String
+        Default: ''
+        Description: Existing WAF WebACL ARN. Leave empty to skip WAF association.
+
+    # Monitoring Parameters
+    AlarmSnsTopicArn:
+        Type: String
+        Default: ''
+        Description: SNS topic ARN for alarm notifications. Leave empty to skip.
+
+    AuthFailureThreshold:
+        Type: Number
+        Default: 50
+        Description: Auth failure count threshold for alarms
+
+    LatencyThresholdMs:
+        Type: Number
+        Default: 3000
+        Description: P99 latency threshold in milliseconds
+
+Resources:
+    # =========================================================================
+    # Cognito Stack
+    # =========================================================================
+    CognitoStack:
+        Type: AWS::CloudFormation::Stack
+        Properties:
+            TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.amazonaws.com/${TemplatesPrefix}/cognito.yaml'
+            Parameters:
+                Environment: !Ref Environment
+                ServiceName: !Ref ServiceName
+                CustomDomainPrefix: !Ref CustomDomainPrefix
+                AccessTokenValidityMinutes: !Ref AccessTokenValidityMinutes
+                ResourceServerIdentifier: !Ref ResourceServerIdentifier
+            Tags:
+                - Key: Environment
+                  Value: !Ref Environment
+                - Key: Service
+                  Value: !Ref ServiceName
+                - Key: Stack
+                  Value: cognito
+
+    # =========================================================================
+    # API Gateway Stack
+    # =========================================================================
+    ApiGatewayStack:
+        Type: AWS::CloudFormation::Stack
+        DependsOn: CognitoStack
+        Properties:
+            TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.amazonaws.com/${TemplatesPrefix}/api-gateway.yaml'
+            Parameters:
+                Environment: !Ref Environment
+                ServiceName: !Ref ServiceName
+                CognitoUserPoolArn: !GetAtt CognitoStack.Outputs.UserPoolArn
+                ResourceServerIdentifier: !Ref ResourceServerIdentifier
+                AuthorizerResultTtlSeconds: !Ref AuthorizerResultTtlSeconds
+                BackendEndpoint: !Ref BackendEndpoint
+                ThrottleRateLimit: !Ref ThrottleRateLimit
+                ThrottleBurstLimit: !Ref ThrottleBurstLimit
+                MonthlyRequestQuota: !Ref MonthlyRequestQuota
+                WebAclArn: !Ref WebAclArn
+            Tags:
+                - Key: Environment
+                  Value: !Ref Environment
+                - Key: Service
+                  Value: !Ref ServiceName
+                - Key: Stack
+                  Value: api-gateway
+
+    # =========================================================================
+    # Monitoring Stack
+    # =========================================================================
+    MonitoringStack:
+        Type: AWS::CloudFormation::Stack
+        DependsOn: ApiGatewayStack
+        Properties:
+            TemplateURL: !Sub 'https://${TemplatesBucketName}.s3.amazonaws.com/${TemplatesPrefix}/monitoring.yaml'
+            Parameters:
+                Environment: !Ref Environment
+                ServiceName: !Ref ServiceName
+                ApiId: !GetAtt ApiGatewayStack.Outputs.ApiId
+                ApiStageName: !Ref Environment
+                CognitoUserPoolId: !GetAtt CognitoStack.Outputs.UserPoolId
+                AlarmSnsTopicArn: !Ref AlarmSnsTopicArn
+                AuthFailureThreshold: !Ref AuthFailureThreshold
+                LatencyThresholdMs: !Ref LatencyThresholdMs
+            Tags:
+                - Key: Environment
+                  Value: !Ref Environment
+                - Key: Service
+                  Value: !Ref ServiceName
+                - Key: Stack
+                  Value: monitoring
+
+Outputs:
+    # Cognito Outputs
+    UserPoolId:
+        Description: Cognito User Pool ID
+        Value: !GetAtt CognitoStack.Outputs.UserPoolId
+
+    TokenEndpoint:
+        Description: OAuth 2.0 token endpoint (provide to partners)
+        Value: !GetAtt CognitoStack.Outputs.TokenEndpoint
+
+    JwksUri:
+        Description: JWKS URI for offline token validation
+        Value: !GetAtt CognitoStack.Outputs.JwksUri
+
+    ExamplePartnerClientId:
+        Description: Example partner app client ID
+        Value: !GetAtt CognitoStack.Outputs.ExamplePartnerClientId
+
+    InternalServiceClientId:
+        Description: Internal service app client ID
+        Value: !GetAtt CognitoStack.Outputs.InternalServiceClientId
+
+    # API Gateway Outputs
+    ApiEndpoint:
+        Description: API Gateway endpoint URL
+        Value: !GetAtt ApiGatewayStack.Outputs.ApiEndpoint
+
+    # Monitoring Outputs
+    DashboardUrl:
+        Description: CloudWatch monitoring dashboard URL
+        Value: !GetAtt MonitoringStack.Outputs.DashboardUrl

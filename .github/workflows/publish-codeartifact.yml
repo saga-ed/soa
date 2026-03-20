@@ -106,7 +106,10 @@ jobs:
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-zod2ts
+            --filter=@saga-ed/soa-aws-util \
+            --filter=@saga-ed/soa-rabbitmq \
+            --filter=@saga-ed/soa-redis-core \
+            --filter=@saga-ed/soa-test-util
 
       - name: Lint publishable packages
         run: |
@@ -119,7 +122,10 @@ jobs:
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-zod2ts
+            --filter=@saga-ed/soa-aws-util \
+            --filter=@saga-ed/soa-rabbitmq \
+            --filter=@saga-ed/soa-redis-core \
+            --filter=@saga-ed/soa-test-util
 
       - name: Type check publishable packages
         run: |
@@ -132,7 +138,10 @@ jobs:
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-zod2ts
+            --filter=@saga-ed/soa-aws-util \
+            --filter=@saga-ed/soa-rabbitmq \
+            --filter=@saga-ed/soa-redis-core \
+            --filter=@saga-ed/soa-test-util
 
       - name: Test publishable packages
         run: |
@@ -146,7 +155,10 @@ jobs:
             --filter=@saga-ed/soa-tgql-codegen \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-zod2ts
+            --filter=@saga-ed/soa-aws-util \
+            --filter=@saga-ed/soa-rabbitmq \
+            --filter=@saga-ed/soa-redis-core \
+            --filter=@saga-ed/soa-test-util
             
       - name: Lint
         run: pnpm turbo run lint
@@ -198,21 +210,20 @@ jobs:
 
           # Publishable packages (not private)
           PUBLISHABLE_PACKAGES=(
-            "packages/api-core"
-            "packages/api-util"
-            "packages/config"
-            "packages/db"
-            "packages/logger"
-            "packages/pubsub-client"
-            "packages/pubsub-core"
-            "packages/tgql-codegen"
-            "packages/trpc-codegen"
+            "packages/core/config"
+            "packages/node/logger"
+            "packages/node/pubsub-core"
+            "packages/node/api-util"
+            "packages/core/trpc-codegen"
+            "packages/core/tgql-codegen"
+            "packages/node/db"
+            "packages/node/api-core"
+            "packages/node/pubsub-client"
+            "packages/node/aws-util"
+            "packages/node/rabbitmq"
+            "packages/node/redis-core"
+            "packages/node/test-util"
           )
-
-          # Check for zod2ts in build-tools
-          if [ -f "build-tools/zod2ts/package.json" ]; then
-            PUBLISHABLE_PACKAGES+=("build-tools/zod2ts")
-          fi
 
           # Build npm version command with preid for prerelease versions
           VERSION_CMD="npm version $VERSION_TYPE --no-git-tag-version"
@@ -240,7 +251,7 @@ jobs:
 
           # Commit version changes (skip for dry run)
           if [ "$DRY_RUN" != "true" ]; then
-            git add packages/*/package.json build-tools/*/package.json 2>/dev/null || true
+            git add packages/*/*/package.json 2>/dev/null || true
             if ! git diff --staged --quiet; then
               git commit -m "chore: bump package versions ($VERSION_TYPE) to $NEW_VERSION"
               git push
@@ -286,7 +297,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ env.CODEARTIFACT_OWNER }}:role/github-actions-role/SOADeployRole
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Get CodeArtifact auth token
@@ -308,16 +319,13 @@ jobs:
       - name: Publish packages in dependency order
         run: |
           # Layer 0: Base packages (no workspace deps)
-          LAYER_0="packages/config packages/logger packages/pubsub-core packages/api-util packages/trpc-codegen packages/tgql-codegen"
+          LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/trpc-codegen packages/core/tgql-codegen"
 
           # Layer 1: Depends on Layer 0
-          LAYER_1="packages/db packages/api-core"
+          LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
 
           # Layer 2: Depends on Layer 1
-          LAYER_2="packages/pubsub-client"
-
-          # Build tools (independent)
-          BUILD_TOOLS="build-tools/zod2ts"
+          LAYER_2="packages/node/pubsub-client"
 
           PUBLISH_FAILURES=0
 
@@ -360,9 +368,6 @@ jobs:
 
           echo "=== Publishing Layer 2 ==="
           for pkg in $LAYER_2; do publish_package "$pkg"; done
-
-          echo "=== Publishing Build Tools ==="
-          for pkg in $BUILD_TOOLS; do publish_package "$pkg"; done
 
           if [ $PUBLISH_FAILURES -gt 0 ]; then
             echo "❌ CodeArtifact publishing failed with $PUBLISH_FAILURES error(s)"
@@ -413,10 +418,9 @@ jobs:
 
       - name: Publish packages in dependency order
         run: |
-          LAYER_0="packages/config packages/logger packages/pubsub-core packages/api-util packages/trpc-codegen packages/tgql-codegen"
-          LAYER_1="packages/db packages/api-core"
-          LAYER_2="packages/pubsub-client"
-          BUILD_TOOLS="build-tools/zod2ts"
+          LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/trpc-codegen packages/core/tgql-codegen"
+          LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
+          LAYER_2="packages/node/pubsub-client"
 
           PUBLISH_FAILURES=0
 
@@ -454,7 +458,6 @@ jobs:
           for pkg in $LAYER_0; do publish_package "$pkg"; done
           for pkg in $LAYER_1; do publish_package "$pkg"; done
           for pkg in $LAYER_2; do publish_package "$pkg"; done
-          for pkg in $BUILD_TOOLS; do publish_package "$pkg"; done
 
           if [ $PUBLISH_FAILURES -gt 0 ]; then
             echo "❌ GitHub Packages publishing failed with $PUBLISH_FAILURES error(s)"

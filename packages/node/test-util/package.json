@@ -30,7 +30,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/hipponot/saga-soa.git",
-    "directory": "packages/test-util"
+    "url": "https://github.com/saga-ed/soa.git",
+    "directory": "packages/node/test-util"
   }
 }

@@ -38,7 +38,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/hipponot/saga-soa.git",
-    "directory": "packages/db"
+    "url": "https://github.com/saga-ed/soa.git",
+    "directory": "packages/node/db"
   }
 }

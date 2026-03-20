@@ -98,7 +98,6 @@ jobs:
       - name: Configure CodeArtifact registry
         run: |
           pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
-          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_nimbee/:_authToken $CODEARTIFACT_AUTH_TOKEN
 
       - name: Get pnpm store directory
         shell: bash
@@ -233,7 +232,6 @@ jobs:
       - name: Configure CodeArtifact registry
         run: |
           pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
-          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_nimbee/:_authToken $CODEARTIFACT_AUTH_TOKEN
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

@@ -508,11 +508,7 @@ importers:
         specifier: ^1.5.0
         version: 1.6.1(@types/node@24.0.12)
 
-  infra:
-    dependencies:
-      docker-compose:
-        specifier: ^0.24.8
-        version: 0.24.8
+  infra: {}
 
   packages/core/config:
     dependencies:
@@ -4135,10 +4131,6 @@ packages:
   dir-glob@3.0.1:
     resolution: {integrity: sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==, tarball: https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/dir-glob/-/dir-glob-3.0.1.tgz}
     engines: {node: '>=8'}
-
-  docker-compose@0.24.8:
-    resolution: {integrity: sha512-plizRs/Vf15H+GCVxq2EUvyPK7ei9b/cVesHvjnX4xaXjM9spHe2Ytq0BitndFgvTJ3E3NljPNUEl7BAN43iZw==}
-    engines: {node: '>= 6.0.0'}
 
   doctrine@2.1.0:
     resolution: {integrity: sha512-35mSku4ZXK0vfCuHEDAwt55dg2jNajHZ1odvF+8SSr82EsZY4QmXfuWso8oEd8zRhVObSN18aM0CjSdoBX7zIw==}
@@ -11039,10 +11031,6 @@ snapshots:
   dir-glob@3.0.1:
     dependencies:
       path-type: 4.0.0
-
-  docker-compose@0.24.8:
-    dependencies:
-      yaml: 2.8.2
 
   doctrine@2.1.0:
     dependencies:

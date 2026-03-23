@@ -161,7 +161,9 @@ export class GQLServer {
 
         // Mount Apollo middleware at the calculated mount point
         // @ts-expect-error Apollo Server v4+ middleware type mismatch with Express
-        app.use(fullMountPath, expressMiddleware(this.apolloServer, { context: async () => ({}) }));
+        app.use(fullMountPath, expressMiddleware(this.apolloServer, {
+            context: async ({ req }) => ({ auth: (req as any).auth ?? null }),
+        }));
 
         this.logger.info(`GraphQL SDL server '${this.config.name}' mounted at '${fullMountPath}'`);
 

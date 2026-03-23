@@ -34,6 +34,18 @@
       "types": "./dist/express-server-schema.d.ts",
       "default": "./dist/express-server-schema.js"
     },
+    "./auth-middleware": {
+      "types": "./dist/auth-middleware.d.ts",
+      "default": "./dist/auth-middleware.js"
+    },
+    "./auth-schema": {
+      "types": "./dist/auth-schema.d.ts",
+      "default": "./dist/auth-schema.js"
+    },
+    "./auth-types": {
+      "types": "./dist/auth-types.d.ts",
+      "default": "./dist/auth-types.js"
+    },
     "./tgql-server": {
       "types": "./dist/tgql-server.d.ts",
       "default": "./dist/tgql-server.js"
@@ -88,6 +100,7 @@
     "glob": "^10.3.10",
     "graphql": "^16.8.1",
     "inversify": "^6.2.2",
+    "jose": "5",
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2",
     "trpc-playground": "^1.0.4",
@@ -95,6 +108,7 @@
     "zod": "3.25.67"
   },
   "devDependencies": {
+    "@saga-ed/soa-logger": "workspace:*",
     "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
@@ -111,8 +125,7 @@
     "typescript": "^5.8.3",
     "undici": "^7.11.0",
     "vitest": "^1.5.0",
-    "zod": "3.25.67",
-    "@saga-ed/soa-logger": "workspace:*"
+    "zod": "3.25.67"
   },
   "typesVersions": {
     "*": {

@@ -6,6 +6,7 @@ import type { ILogger } from '@saga-ed/soa-logger';
 import { useContainer, useExpressServer } from 'routing-controllers';
 import { Container } from 'inversify';
 import { SectorsController } from './sectors-controller.js';
+import { AuthMiddleware } from './auth-middleware.js';
 
 @injectable()
 export class ExpressServer {
@@ -63,6 +64,13 @@ export class ExpressServer {
     }
 
     this.app.use(cors(corsOptions));
+
+    // Optional auth middleware — only applied if AuthConfig is bound in container
+    if (container.isBound('AuthConfig')) {
+      const authMiddleware = await container.getAsync(AuthMiddleware);
+      this.app.use(authMiddleware.middleware());
+      this.logger.info('JWT/OIDC auth middleware enabled');
+    }
 
     // Ensure routing-controllers uses Inversify for controller resolution
     useContainer(container);

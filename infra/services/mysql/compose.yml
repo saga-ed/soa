@@ -31,6 +31,7 @@ services:
         condition: service_healthy
     volumes:
       - ./seed:/seed:ro
+      - ${EXTRA_MYSQL_SEED_DIR:-./.no-extra-seed}:/extra-seed:ro
     environment:
       SEED_PROFILE: ${SEED_PROFILE:-small}
       MYSQL_PWD: ${MYSQL_PASSWORD:-password123}

@@ -54,6 +54,11 @@ if (attempts >= 30) {
 const profile = process.env.SEED_PROFILE || "small";
 const seedFile = `/seed/profile-${profile}.json`;
 
+// Project-provided seeds take priority over built-in seeds.
+// Callers pass EXTRA_SEED_DIR via infra-compose up({ seed_dir }) which is mounted at /extra-seed/.
+const extraSeedFile = `/extra-seed/profile-${profile}.json`;
+const actualSeedFile = fs.existsSync(extraSeedFile) ? extraSeedFile : seedFile;
+
 print(`Seed: profile=${profile}`);
 
 // Check if already seeded by looking for a sentinel collection
@@ -63,12 +68,17 @@ const existing = sentinel.findOne({ profile: profile });
 if (existing) {
   print(`Seed: profile '${profile}' already seeded at ${existing.seeded_at} — skipping`);
 } else {
-  print(`Seed: loading ${seedFile} ...`);
+  print(`Seed: loading ${actualSeedFile} ...`);
 
-  const raw = fs.readFileSync(seedFile, "utf8");
-  const spec = JSON.parse(raw);
+  const raw = fs.readFileSync(actualSeedFile, "utf8");
+  // Use EJSON.parse to properly deserialize BSON types ($oid, $date, etc.)
+  // from snapshot dumps while remaining compatible with plain JSON seed files
+  const spec = EJSON.parse(raw);
 
   for (const [dbName, collections] of Object.entries(spec)) {
+    // Skip metadata keys (added by dump for snapshot detection)
+    if (dbName === "_meta") continue;
+
     print(`  db: ${dbName}`);
     const target = db.getSiblingDB(dbName);
 
@@ -85,7 +95,7 @@ if (existing) {
   sentinel.insertOne({
     profile: profile,
     seeded_at: new Date().toISOString(),
-    seed_file: seedFile,
+    seed_file: actualSeedFile,
   });
 
   print(`Seed: profile '${profile}' complete`);

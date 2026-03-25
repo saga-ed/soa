@@ -1,29 +1,52 @@
 import { SpawnSyncReturns } from 'child_process';
 
+// ── Types ──────────────────────────────────────────────────
+
 export interface UpOptions {
     profile?: string;
-    /** Directory containing project-specific seed files. Mounted as /extra-seed/ in init containers. Project seeds take priority over built-in seeds. */
+    /** Directory containing project-specific seed files (mounted as /extra-seed/). */
     seed_dir?: string;
+    /** Directory for user snapshot data (default: ~/.fixtures/profiles). */
+    data_dir?: string;
 }
-export function up(options?: UpOptions): Promise<{ exitCode: number }>;
 
-export interface DumpOptions {
+export interface SnapshotOptions {
     profile: string;
     services?: string[];
+    /** Output directory (default: ~/.fixtures/profiles). */
     output_dir?: string;
     force?: boolean;
 }
-export interface RestoreOptions {
+
+export interface ProfileOptions {
     profile: string;
 }
 
-export function dump(options: DumpOptions): SpawnSyncReturns<Buffer>;
-export function restore(options: RestoreOptions): SpawnSyncReturns<Buffer>;
+export interface ListProfilesOptions {
+    /** Data directory to scan for user snapshots (default: ~/.fixtures/profiles). */
+    data_dir?: string;
+}
 
-export interface SwitchProfileOptions { profile: string; }
-export function switch_profile(options: SwitchProfileOptions): SpawnSyncReturns<Buffer>;
+export interface Profile {
+    name: string;
+    type: 'seed' | 'snapshot';
+    service: string;
+}
 
-export function list_profiles(): { exitCode: number; output: string };
+// ── Docker lifecycle ───────────────────────────────────────
 
-export interface ResetOptions { profile: string; }
-export function reset(options: ResetOptions): SpawnSyncReturns<Buffer>;
+export function up(options?: UpOptions): Promise<{ exitCode: number }>;
+export function switch_profile(options: ProfileOptions): SpawnSyncReturns<Buffer>;
+export function reset(options: ProfileOptions): SpawnSyncReturns<Buffer>;
+export function restore(options: ProfileOptions): SpawnSyncReturns<Buffer>;
+
+// ── Data operations (native JS) ───────────────────────────
+
+/** Snapshot current DB state to profile files using mongodb driver + mysql2. */
+export function snapshot(options: SnapshotOptions): Promise<{ status: number }>;
+
+/** Backward-compat alias for snapshot(). */
+export const dump: typeof snapshot;
+
+/** List profiles from built-in seeds + user data directory. */
+export function list_profiles(options?: ListProfilesOptions): { profiles: Profile[] };

@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/infra-compose",
-    "version": "0.5.9",
+    "version": "0.6.0",
     "description": "Composable Docker service templates for Saga platform local development",
     "bin": {
         "infra-compose": "bin/infra-compose"
@@ -23,7 +23,9 @@
         "api.d.ts"
     ],
     "dependencies": {
-        "docker-compose": "^0.24.8"
+        "docker-compose": "^0.24.8",
+        "mongodb": "^6.0.0",
+        "mysql2": "^3.0.0"
     },
     "publishConfig": {
         "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",

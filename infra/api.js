@@ -4,7 +4,8 @@ import { fileURLToPath } from 'url';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import mongodb from 'mongodb';
-const { MongoClient, EJSON } = mongodb;
+const { MongoClient } = mongodb;
+import { EJSON } from 'bson';
 import mysql from 'mysql2/promise';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

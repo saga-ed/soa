@@ -32,6 +32,7 @@ services:
     volumes:
       - ./seed:/seed:ro
       - ${EXTRA_MYSQL_SEED_DIR:-./.no-extra-seed}:/extra-seed:ro
+      - ${INFRA_COMPOSE_DATA_DIR:-./.no-data-dir}/mysql:/data-seed:ro
     environment:
       SEED_PROFILE: ${SEED_PROFILE:-small}
       MYSQL_PWD: ${MYSQL_PASSWORD:-password123}

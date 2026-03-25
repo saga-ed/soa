@@ -24,6 +24,12 @@ if [ -f "/extra-seed/profile-${PROFILE}.sql" ]; then
   echo "MySQL seed: using project seed from ${SEED_FILE}"
 fi
 
+# User snapshot data (from ~/.fixtures/profiles) is mounted at /data-seed/.
+if [ -f "/data-seed/profile-${PROFILE}.sql" ]; then
+  SEED_FILE="/data-seed/profile-${PROFILE}.sql"
+  echo "MySQL seed: using user data from ${SEED_FILE}"
+fi
+
 HOST="mysql"
 PORT="3306"
 # Use root for admin operations (CREATE DATABASE, etc.); MYSQL_PWD env provides password

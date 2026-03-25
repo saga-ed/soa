@@ -57,7 +57,11 @@ const seedFile = `/seed/profile-${profile}.json`;
 // Project-provided seeds take priority over built-in seeds.
 // Callers pass EXTRA_SEED_DIR via infra-compose up({ seed_dir }) which is mounted at /extra-seed/.
 const extraSeedFile = `/extra-seed/profile-${profile}.json`;
-const actualSeedFile = fs.existsSync(extraSeedFile) ? extraSeedFile : seedFile;
+// User snapshot data (from ~/.fixtures/profiles) is mounted at /data-seed/.
+const dataSeedFile = `/data-seed/profile-${profile}.json`;
+let actualSeedFile = seedFile;
+if (fs.existsSync(extraSeedFile)) actualSeedFile = extraSeedFile;
+if (fs.existsSync(dataSeedFile)) actualSeedFile = dataSeedFile;
 
 print(`Seed: profile=${profile}`);
 

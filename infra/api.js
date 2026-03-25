@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process';
 import { resolve, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
 import mongodb from 'mongodb';
 const { MongoClient } = mongodb;
@@ -11,6 +11,28 @@ import mysql from 'mysql2/promise';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BIN = resolve(__dirname, 'bin/infra-compose');
 const DEFAULT_DATA_DIR = resolve(homedir(), '.fixtures', 'profiles');
+const ACTIVE_PROFILE_FILE = resolve(homedir(), '.fixtures', 'active-profile');
+
+function write_active_profile(profile) {
+    mkdirSync(dirname(ACTIVE_PROFILE_FILE), { recursive: true });
+    writeFileSync(ACTIVE_PROFILE_FILE, JSON.stringify({
+        profile,
+        switched_at: new Date().toISOString(),
+    }));
+}
+
+/** Get the currently active profile, or null if unknown. */
+export function get_active_profile() {
+    try {
+        const content = readFileSync(ACTIVE_PROFILE_FILE, 'utf8').trim();
+        if (!content) return null;
+        // Support both old format (plain string) and new format (JSON)
+        if (content.startsWith('{')) return JSON.parse(content);
+        return { profile: content, switched_at: null };
+    } catch {
+        return null;
+    }
+}
 
 const EXCLUDED_MONGO_DBS = ['admin', 'config', 'local'];
 const EXCLUDED_MONGO_COLLECTIONS = ['_profile_meta'];
@@ -60,22 +82,49 @@ export async function up(options = {}) {
         result = spawnSync('docker-compose', ['up', '-d'], { cwd: __dirname, env, stdio: 'inherit' });
     }
     if (result.error) throw result.error;
+    if (result.status === 0 && profile) write_active_profile(profile);
     return { exitCode: result.status ?? 1 };
 }
 
 /** @param {{ profile: string }} options */
 export function switch_profile(options) {
-    return spawnSync(BIN, ['switch', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
+    const result = spawnSync(BIN, ['switch', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
+    if (result.status === 0) write_active_profile(options.profile);
+    return result;
 }
 
 /** @param {{ profile: string }} options */
 export function reset(options) {
-    return spawnSync(BIN, ['reset', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
+    const result = spawnSync(BIN, ['reset', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
+    if (result.status === 0) write_active_profile(options.profile);
+    return result;
 }
 
 /** @param {{ profile: string }} options */
 export function restore(options) {
     return spawnSync(BIN, ['restore', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
+}
+
+/**
+ * Delete snapshot files for a profile from the user data directory.
+ * Does NOT remove Docker volumes — use reset() for that.
+ * @param {{ profile: string, data_dir?: string }} options
+ */
+export function delete_profile_data(options) {
+    const { profile, data_dir } = options;
+    const base = resolve(data_dir || DEFAULT_DATA_DIR);
+    let deleted = 0;
+
+    for (const [svc, ext] of [['mongo', 'json'], ['mysql', 'sql'], ['postgres', 'sql']]) {
+        const file = resolve(base, svc, `profile-${profile}.${ext}`);
+        if (existsSync(file)) {
+            unlinkSync(file);
+            deleted++;
+            console.log(`Deleted: ${file}`);
+        }
+    }
+
+    return { deleted, profile };
 }
 
 // ── Data operations (native JS) ────────────────────────────────────

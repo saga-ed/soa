@@ -50,3 +50,14 @@ export const dump: typeof snapshot;
 
 /** List profiles from built-in seeds + user data directory. */
 export function list_profiles(options?: ListProfilesOptions): { profiles: Profile[] };
+
+export interface ActiveProfile {
+    profile: string;
+    switched_at: string | null;
+}
+
+/** Get the currently active profile (written by switch/up/reset). */
+export function get_active_profile(): ActiveProfile | null;
+
+/** Delete snapshot files for a profile. Does NOT remove Docker volumes. */
+export function delete_profile_data(options: { profile: string; data_dir?: string }): { deleted: number; profile: string };

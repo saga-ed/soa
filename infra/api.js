@@ -77,3 +77,15 @@ export function restore(options) {
 export function switch_profile(options) {
     return spawnSync(BIN, ['switch', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
 }
+
+/** List available seed profiles across all services. */
+export function list_profiles() {
+    const result = spawnSync(BIN, ['list-profiles'], { stdio: 'pipe', cwd: __dirname, encoding: 'utf8' });
+    if (result.error) throw result.error;
+    return { exitCode: result.status ?? 1, output: result.stdout ?? '' };
+}
+
+/** @param {{ profile: string }} options */
+export function reset(options) {
+    return spawnSync(BIN, ['reset', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
+}

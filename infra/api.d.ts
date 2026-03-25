@@ -22,3 +22,8 @@ export function restore(options: RestoreOptions): SpawnSyncReturns<Buffer>;
 
 export interface SwitchProfileOptions { profile: string; }
 export function switch_profile(options: SwitchProfileOptions): SpawnSyncReturns<Buffer>;
+
+export function list_profiles(): { exitCode: number; output: string };
+
+export interface ResetOptions { profile: string; }
+export function reset(options: ResetOptions): SpawnSyncReturns<Buffer>;

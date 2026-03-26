@@ -32,8 +32,8 @@ Before starting, confirm you have:
 
 - [ ] Docker and Docker Compose v2 installed
 - [ ] Node.js 20+
-- [ ] `soa` repo cloned, on branch `gh_27-compose_of_composes`
-- [ ] `saga_api` (nimbee) repo cloned, on branch `gh_7763-compose_of_composes_poc`
+- [ ] `soa` repo cloned (infra-compose is on `main`)
+- [ ] `saga_api` (nimbee) repo cloned (for PART 3)
 
 Verify your environment:
 
@@ -41,7 +41,6 @@ Verify your environment:
 docker compose version       # → Docker Compose version v2.x.x
 node --version               # → v20.x.x or higher
 cd ~/dev/soa
-git branch --show-current    # → gh_27-compose_of_composes
 ls infra/bin/infra-compose   # → exists
 ls infra/services/           # → mongo/ mysql/ postgres/ redis/ rabbitmq/ openfga/
 ```
@@ -120,7 +119,8 @@ npx infra-compose help
 
 **What to observe:**
 - **Lifecycle commands**: `up`, `switch`, `down`, `reset` — the core profile workflow
-- **Utility commands**: `check-ports`, `status`, `shell`, `list-profiles`, `volumes`
+- **Data commands**: `dump`, `restore` — save and load database snapshots
+- **Utility commands**: `check-ports`, `status`, `shell`, `list-profiles`, `volumes`, `completion`
 - The `--` separator passes extra args through to `docker compose` (e.g., `-- -f docker-compose.yml`)
 
 Check the current state:
@@ -419,11 +419,15 @@ cat infra/services/mongo/seed/init-and-seed.js
 
 **What to observe:**
 
-1. **Replica set init** (lines 9–20) — idempotent `rs.initiate()` with a try/catch guard
-2. **Wait for primary** (lines 22–51) — polls `rs.status()` and probes a write before continuing
-3. **Sentinel check** (lines 60–64) — looks for a `_profile_meta` doc matching the current profile. If found, the seeder prints "already seeded" and exits. This is what makes seeding **idempotent** across restarts and switches.
-4. **Profile file loading** (lines 66–82) — reads `/seed/profile-${SEED_PROFILE}.json`, iterates `{ db: { collection: [docs] } }`, and inserts docs via `insertMany`
-5. **Sentinel write** (lines 84–89) — after successful seeding, writes the sentinel doc so future runs skip
+1. **Replica set init** — idempotent `rs.initiate()` with a try/catch guard
+2. **Wait for primary** — polls `rs.status()` and probes a write before continuing
+3. **Sentinel check** — looks for a `_profile_meta` doc matching the current profile. If found, the seeder prints "already seeded" and exits. This is what makes seeding **idempotent** across restarts and switches.
+4. **Seed file resolution** — resolves the profile file using a priority cascade:
+   - `/data-seed/profile-${SEED_PROFILE}.json` — user snapshots from `~/.fixtures/profiles/`
+   - `/extra-seed/profile-${SEED_PROFILE}.json` — project-provided overrides
+   - `/seed/profile-${SEED_PROFILE}.json` — built-in seed data (fallback)
+5. **EJSON parsing** — uses `EJSON.parse()` to handle BSON types (`$oid`, `$date`, etc.) from snapshot dumps, then iterates `{ db: { collection: [docs] } }` and inserts via `insertMany`
+6. **Sentinel write** — after successful seeding, writes the sentinel doc so future runs skip
 
 Now read a profile file:
 
@@ -437,7 +441,7 @@ cat infra/services/mongo/seed/profile-small.json
 - Values are arrays of documents to insert
 - This is the contract: any JSON file matching this shape will work with `init-and-seed.js`
 
-**What you learned:** The template seeder is a generic engine — it loads any profile JSON that conforms to `{ db: { collection: [docs] } }`. Projects provide their own seed data by mounting their own profile JSON files at `/seed/`.
+**What you learned:** The template seeder is a generic engine — it loads any profile JSON that conforms to `{ db: { collection: [docs] } }`. The three-tier seed resolution (`/data-seed/` > `/extra-seed/` > `/seed/`) means user snapshots take priority over project seeds, which take priority over built-in seeds.
 
 > **Reset:** None — read-only.
 
@@ -604,9 +608,9 @@ YAML
 
 ### 4.4 Test profile switching with different data
 
-> **Note:** This exercise requires the soa2 `infra/` package to be resolvable. If you are working from `/tmp/myapp-seed-demo/`, set `INFRA_COMPOSE_DIR` to point to your local soa2 checkout:
+> **Note:** This exercise requires the `infra/` package to be resolvable. If you are working from `/tmp/myapp-seed-demo/`, set `INFRA_COMPOSE_DIR` to point to your local soa checkout:
 > ```bash
-> export INFRA_COMPOSE_DIR=~/dev/soa2/infra/services
+> export INFRA_COMPOSE_DIR=~/dev/soa/infra/services
 > ```
 
 Start with the small profile:
@@ -752,10 +756,20 @@ cat ~/dev/coach/apps/node/coach-api/scripts/mongo-init.js
 
 | Command | What it does |
 |---------|-------------|
-| `up --profile NAME` | Set `SEED_PROFILE`, run port check, `docker compose up -d` |
+| `up [--profile NAME]` | Set `SEED_PROFILE`, run port check, `docker compose up -d` |
 | `switch --profile NAME` | `down` + `up` with the new profile |
 | `down` | Stop services, preserve all volumes |
 | `reset --profile NAME` | `down` + remove `*-profile-NAME` volumes + `up` fresh |
+
+### Data Commands
+
+| Command | What it does |
+|---------|-------------|
+| `dump --profile NAME` | Dump live database state into seed profile files |
+| `restore --profile NAME` | Restore a profile (`reset` + re-seed from dump files) |
+
+Dump options: `--services mongo,mysql,postgres` (default: all three),
+`--output-dir DIR` (default: `services/<svc>/seed/`), `--force` (overwrite existing files).
 
 ### Utility Commands
 
@@ -764,8 +778,9 @@ cat ~/dev/coach/apps/node/coach-api/scripts/mongo-init.js
 | `status` | Show containers, current profile, and volumes |
 | `check-ports` | Scan Docker for port conflicts before starting |
 | `shell <service>` | Open a database shell (`mongo`, `mysql`, `postgres`, `redis`) |
-| `list-profiles` | Show available seed profiles per service |
+| `list-profiles` | Show available seed profiles per service (seed vs snapshot) |
 | `volumes` | List all profile Docker volumes |
+| `completion` | Print bash completion script (`eval "$(infra-compose completion)"`) |
 | `help` | Show the help message |
 
 ### Profile Resolution Order

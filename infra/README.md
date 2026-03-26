@@ -68,6 +68,7 @@ make up PROJECT=events-example
 | PostgreSQL | 5433 | Yes | `postgres-profile-<name>` |
 | Redis | 6380 | No | `redis-data` |
 | RabbitMQ | 5673 / 15673 | No | `rabbitmq-data` |
+| OpenFGA | 8180 / 8181 / 3105 | No | (uses Postgres) |
 
 ## Profile Switching
 
@@ -89,10 +90,50 @@ make volumes
 Each data service has a seeder (`*_init` container) that:
 1. Waits for the service to be healthy
 2. Checks for a sentinel (doc/table) marking "already seeded"
-3. If absent, loads `seed/profile-<name>.json|sql`
-4. Writes the sentinel so subsequent starts skip seeding
+3. If absent, resolves the seed file using a priority cascade:
+   - User snapshots: `~/.fixtures/profiles/<svc>/profile-<name>.*` (mounted at `/data-seed/`)
+   - Project overrides: `EXTRA_<SVC>_SEED_DIR` (mounted at `/extra-seed/`)
+   - Built-in seeds: `services/<svc>/seed/profile-<name>.*`
+4. Loads the seed file (EJSON for Mongo, SQL for MySQL/Postgres)
+5. Writes the sentinel so subsequent starts skip seeding
 
-## Make Targets
+## CLI Commands
+
+The `infra-compose` CLI wraps Docker Compose with profile awareness. Run via
+`npx infra-compose <command>` or `make <target>` from the soa monorepo.
+
+### Lifecycle
+
+| Command | Description |
+|---------|-------------|
+| `up [--profile NAME]` | Start services (default profile: `$SEED_PROFILE` or `small`) |
+| `switch --profile NAME` | Switch to a different profile (`down` + `up`) |
+| `down` | Stop services (volumes preserved) |
+| `reset --profile NAME` | Wipe profile volumes and restart fresh |
+
+### Data
+
+| Command | Description |
+|---------|-------------|
+| `dump --profile NAME` | Dump live database state into seed profile files |
+| `restore --profile NAME` | Restore a profile (reset + re-seed from dump files) |
+
+Dump options: `--services mongo,mysql,postgres` (default: all), `--output-dir DIR`,
+`--force` (overwrite existing files).
+
+### Utility
+
+| Command | Description |
+|---------|-------------|
+| `check-ports` | Scan Docker for port conflicts (runs automatically before `up`) |
+| `status` | Show running containers, current profile, and volumes |
+| `shell <service>` | Open a database shell (`mongo`, `mysql`, `postgres`, `redis`) |
+| `list-profiles` | Show available seed profiles per service (seed vs snapshot) |
+| `volumes` | List all profile Docker volumes |
+| `completion` | Print bash completion script (`eval "$(infra-compose completion)"`) |
+| `help` | Show help message |
+
+### Make Targets (soa monorepo only)
 
 | Target | Description |
 |--------|-------------|
@@ -100,7 +141,6 @@ Each data service has a seeder (`*_init` container) that:
 | `make switch` | Switch to a different profile |
 | `make down` | Stop services (keep volumes) |
 | `make reset` | Wipe + re-seed one profile |
-| `make check-ports` | Pre-flight port conflict check (runs automatically before `up`) |
 | `make status` | Show running containers and volumes (all projects) |
 | `make logs` | Tail container logs |
 | `make volumes` | List all profile volumes |
@@ -143,39 +183,64 @@ include:
 
 2. Switch to it: `make switch PROJECT=saga-api PROFILE=<name>`
 
+Alternatively, create a profile by dumping live database state:
+
+```bash
+# Dump all databases to seed files
+npx infra-compose dump --profile my-snapshot
+
+# Dump specific services to a custom directory
+npx infra-compose dump --profile my-snapshot --services mongo,mysql --output-dir ./snapshots
+
+# Restore from a dump
+npx infra-compose restore --profile my-snapshot
+```
+
 ## Directory Structure
 
 ```
 infra/
+├── bin/
+│   └── infra-compose          # CLI entry point
 ├── services/
 │   ├── mongo/
 │   │   ├── compose.yml
 │   │   └── seed/
 │   │       ├── init-and-seed.js
+│   │       ├── dump.js
 │   │       ├── profile-small.json
 │   │       └── profile-basic.json
 │   ├── mysql/
 │   │   ├── compose.yml
 │   │   └── seed/
 │   │       ├── init-and-seed.sh
+│   │       ├── dump.sh
 │   │       ├── profile-small.sql
 │   │       └── profile-basic.sql
 │   ├── postgres/
 │   │   ├── compose.yml
 │   │   └── seed/
 │   │       ├── init-and-seed.sh
+│   │       ├── dump.sh
 │   │       ├── profile-small.sql
 │   │       └── profile-basic.sql
 │   ├── redis/
 │   │   └── compose.yml
-│   └── rabbitmq/
+│   ├── rabbitmq/
+│   │   └── compose.yml
+│   └── openfga/
 │       └── compose.yml
 ├── projects/
 │   ├── saga-api.yml           # mongo + mysql
 │   ├── adm-api.yml            # postgres + redis
 │   └── events-example.yml     # rabbitmq + postgres
+├── api.js                     # JavaScript API
+├── api.d.ts                   # TypeScript definitions
+├── compose.yml                # Root compose (includes all services)
 ├── .env.defaults
 ├── Makefile
+├── docs/
+│   └── hands-on-tutorial.md
 └── README.md
 ```
 
@@ -190,6 +255,7 @@ All ports are offset from defaults to avoid conflict with `local-db-mgr.sh`:
 | Postgres | 5433 | `POSTGRES_PORT` |
 | Redis | 6380 | `REDIS_PORT` |
 | RabbitMQ | 5673 / 15673 | `RABBITMQ_PORT` / `RABBITMQ_MGMT_PORT` |
+| OpenFGA | 8180 / 8181 / 3105 | `OPENFGA_HTTP_PORT` / `OPENFGA_GRPC_PORT` / `OPENFGA_PLAYGROUND_PORT` |
 
 Override in `.env` or inline: `make up PROJECT=saga-api MONGO_PORT=27020`
 
@@ -253,10 +319,10 @@ so the mount point moved up one level to `/var/lib/postgresql`.
 
 ### Migration steps
 
-**1. infra-compose direct users (soa2/infra):**
+**1. infra-compose direct users (soa/infra):**
 
 ```bash
-cd ~/dev/soa2/infra
+cd ~/dev/soa/infra
 
 # Stop services
 ./bin/infra-compose down
@@ -273,7 +339,7 @@ docker volume ls --filter "name=postgres-profile-" --format "{{.Name}}" | xargs 
 ```bash
 cd ~/dev/thrive
 
-# Pull latest compose-templates-poc branch (includes volume mount fix)
+# Pull latest (includes volume mount fix)
 git pull
 
 # Install updated package
@@ -360,13 +426,14 @@ docker compose --env-file .env up -d
 
 ### What's included in the package
 
-Only the reusable templates are published:
-
 | Included | Excluded (soa-local only) |
 |----------|--------------------------|
-| `services/` (compose files + seed data) | `Makefile` |
-| `.env.defaults` | `projects/` |
-| | `README.md` |
+| `bin/` (CLI) | `Makefile` |
+| `services/` (compose files + seed data) | `projects/` |
+| `compose.yml` (root compose) | `docs/` |
+| `api.js` + `api.d.ts` (JavaScript API) | `test/` |
+| `.env.defaults` | `README.md` |
 
-The `Makefile` and `projects/` directory are convenience wrappers for soa monorepo
-development. Consumer repos use `docker compose` directly.
+The `Makefile`, `projects/`, and `docs/` directories are convenience wrappers for
+soa monorepo development. Consumer repos use the CLI (`npx infra-compose`) or
+`docker compose` directly.

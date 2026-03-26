@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>infra-compose — Team Overview</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+    :root {
+        --bg: #0f172a;
+        --bg-card: #1e293b;
+        --bg-card-hover: #334155;
+        --text: #e2e8f0;
+        --text-muted: #94a3b8;
+        --accent: #38bdf8;
+        --accent2: #818cf8;
+        --accent3: #34d399;
+        --danger: #f87171;
+        --warning: #fbbf24;
+        --code-bg: #0d1117;
+        --border: #334155;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html {
+        scroll-snap-type: y mandatory;
+        scroll-behavior: smooth;
+        overflow-y: scroll;
+    }
+
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+    }
+
+    .slide {
+        min-height: 100vh;
+        scroll-snap-align: start;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 60px 80px;
+        position: relative;
+    }
+
+    .slide-number {
+        position: absolute;
+        bottom: 30px;
+        right: 40px;
+        font-size: 14px;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+    }
+
+    h1 {
+        font-size: 3.5rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        margin-bottom: 16px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+
+    h2 {
+        font-size: 2.2rem;
+        font-weight: 600;
+        margin-bottom: 40px;
+        color: var(--text);
+        letter-spacing: -0.02em;
+    }
+
+    h3 {
+        font-size: 1.4rem;
+        font-weight: 600;
+        margin-bottom: 20px;
+        color: var(--accent);
+    }
+
+    .subtitle {
+        font-size: 1.5rem;
+        color: var(--text-muted);
+        font-weight: 300;
+        margin-bottom: 40px;
+    }
+
+    .tag {
+        display: inline-block;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 6px 16px;
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        margin: 4px;
+    }
+
+    .pain-point {
+        display: flex;
+        align-items: flex-start;
+        gap: 20px;
+        padding: 24px 32px;
+        margin: 12px 0;
+        background: var(--bg-card);
+        border-radius: 12px;
+        border-left: 4px solid var(--danger);
+        max-width: 800px;
+        width: 100%;
+        opacity: 0;
+        transform: translateX(-30px);
+        transition: all 0.6s ease;
+    }
+
+    .pain-point.visible {
+        opacity: 1;
+        transform: translateX(0);
+    }
+
+    .pain-point .icon {
+        font-size: 1.8rem;
+        flex-shrink: 0;
+        margin-top: 2px;
+    }
+
+    .pain-point .label {
+        font-weight: 600;
+        font-size: 1.1rem;
+        margin-bottom: 4px;
+    }
+
+    .pain-point .desc {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+    }
+
+    .d3-container {
+        width: 100%;
+        max-width: 1000px;
+        margin: 20px auto;
+    }
+
+    .d3-container svg {
+        width: 100%;
+        height: auto;
+    }
+
+    .steps-grid {
+        display: flex;
+        gap: 32px;
+        max-width: 1100px;
+        width: 100%;
+    }
+
+    .step-card {
+        flex: 1;
+        background: var(--bg-card);
+        border-radius: 16px;
+        padding: 32px;
+        border: 1px solid var(--border);
+        position: relative;
+    }
+
+    .step-number {
+        position: absolute;
+        top: -18px;
+        left: 24px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        color: var(--bg);
+        font-weight: 700;
+        font-size: 0.9rem;
+        padding: 6px 14px;
+        border-radius: 20px;
+    }
+
+    .step-card h3 {
+        margin-top: 8px;
+        margin-bottom: 16px;
+    }
+
+    pre {
+        background: var(--code-bg);
+        border-radius: 10px;
+        padding: 20px 24px;
+        overflow-x: auto;
+        font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+        font-size: 0.9rem;
+        line-height: 1.7;
+        border: 1px solid var(--border);
+    }
+
+    code {
+        font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+        font-size: 0.85em;
+    }
+
+    .code-keyword { color: var(--accent2); }
+    .code-string { color: var(--accent3); }
+    .code-comment { color: var(--text-muted); }
+    .code-command { color: var(--accent); }
+
+    .examples-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 32px;
+        max-width: 1100px;
+        width: 100%;
+    }
+
+    .example-card {
+        background: var(--bg-card);
+        border-radius: 16px;
+        padding: 32px;
+        border: 1px solid var(--border);
+    }
+
+    .example-card h3 {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .service-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 16px 0;
+    }
+
+    .service-tag {
+        background: rgba(56, 189, 248, 0.1);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 6px;
+        padding: 4px 12px;
+        font-size: 0.85rem;
+        color: var(--accent);
+        font-family: monospace;
+    }
+
+    .cheat-table {
+        width: 100%;
+        max-width: 1000px;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 1rem;
+    }
+
+    .cheat-table th {
+        text-align: left;
+        padding: 16px 24px;
+        background: var(--bg-card);
+        color: var(--accent);
+        font-weight: 600;
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .cheat-table th:first-child { border-radius: 12px 0 0 0; }
+    .cheat-table th:last-child { border-radius: 0 12px 0 0; }
+
+    .cheat-table td {
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .cheat-table tr:last-child td { border-bottom: none; }
+    .cheat-table tr:last-child td:first-child { border-radius: 0 0 0 12px; }
+    .cheat-table tr:last-child td:last-child { border-radius: 0 0 12px 0; }
+
+    .cheat-table td:first-child {
+        font-family: monospace;
+        color: var(--accent);
+        font-size: 0.9rem;
+        white-space: nowrap;
+    }
+
+    .cheat-table td:last-child {
+        color: var(--text-muted);
+    }
+
+    .cheat-table tbody tr {
+        background: var(--bg-card);
+        transition: background 0.2s;
+    }
+
+    .cheat-table tbody tr:hover {
+        background: var(--bg-card-hover);
+    }
+
+    .next-steps {
+        max-width: 700px;
+        text-align: center;
+    }
+
+    .next-steps .cta {
+        display: inline-block;
+        margin-top: 32px;
+        padding: 16px 40px;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        color: var(--bg);
+        font-weight: 600;
+        font-size: 1.1rem;
+        border-radius: 12px;
+        text-decoration: none;
+    }
+
+    .next-steps .links {
+        margin-top: 40px;
+        display: flex;
+        gap: 24px;
+        justify-content: center;
+    }
+
+    .next-steps .link-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px 28px;
+        text-align: left;
+    }
+
+    .next-steps .link-card .link-title {
+        color: var(--accent);
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+
+    .next-steps .link-card .link-desc {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+    }
+
+    /* Navigation dots */
+    .nav-dots {
+        position: fixed;
+        right: 24px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        z-index: 100;
+    }
+
+    .nav-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--border);
+        cursor: pointer;
+        transition: all 0.3s;
+        border: none;
+    }
+
+    .nav-dot.active {
+        background: var(--accent);
+        transform: scale(1.3);
+    }
+
+    .nav-hint {
+        position: fixed;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        opacity: 0.6;
+        transition: opacity 1s;
+    }
+
+    /* Profile switching */
+    .profile-cards {
+        display: flex;
+        gap: 24px;
+        margin: 24px 0;
+        max-width: 900px;
+    }
+
+    .profile-card {
+        flex: 1;
+        background: var(--bg-card);
+        border: 2px solid var(--border);
+        border-radius: 16px;
+        padding: 28px;
+        cursor: pointer;
+        transition: all 0.4s ease;
+        text-align: center;
+    }
+
+    .profile-card.active {
+        border-color: var(--accent);
+        background: rgba(56, 189, 248, 0.08);
+        transform: translateY(-6px);
+        box-shadow: 0 12px 40px rgba(56, 189, 248, 0.15);
+    }
+
+    .profile-card .profile-name {
+        font-family: monospace;
+        font-size: 1.3rem;
+        color: var(--accent);
+        font-weight: 700;
+        margin-bottom: 12px;
+    }
+
+    .profile-card .profile-data {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 8px;
+    }
+
+    .profile-card .profile-desc {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+    }
+
+    .profile-status {
+        margin-top: 20px;
+        padding: 16px 32px;
+        background: var(--bg-card);
+        border-radius: 10px;
+        font-family: monospace;
+        font-size: 1rem;
+        color: var(--accent3);
+        border: 1px solid var(--border);
+    }
+
+    .timing-badges {
+        display: flex;
+        gap: 24px;
+        margin-top: 24px;
+    }
+
+    .timing-badge {
+        padding: 10px 20px;
+        background: var(--bg-card);
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        text-align: center;
+    }
+
+    .timing-badge .time {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--accent3);
+    }
+
+    .timing-badge .time-desc {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+
+    .key-message {
+        margin-top: 20px;
+        color: var(--text-muted);
+        font-size: 1.05rem;
+        font-style: italic;
+    }
+
+    /* Animation helpers */
+    .fade-in {
+        opacity: 0;
+        transform: translateY(20px);
+        transition: all 0.6s ease;
+    }
+
+    .fade-in.visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
+</style>
+</head>
+<body>
+
+<!-- Navigation dots -->
+<nav class="nav-dots" id="navDots"></nav>
+<div class="nav-hint" id="navHint">Arrow keys or scroll to navigate</div>
+
+<!-- ==================== SLIDE 1: Title ==================== -->
+<section class="slide" id="slide-0">
+    <h1>infra-compose</h1>
+    <p class="subtitle">Shared database templates with instant data switching</p>
+    <div style="margin-top: 20px;">
+        <span class="tag">@saga-ed/infra-compose</span>
+        <span class="tag">npm package</span>
+        <span class="tag">local development</span>
+    </div>
+    <span class="slide-number">1 / 9</span>
+</section>
+
+<!-- ==================== SLIDE 2: The Problem ==================== -->
+<section class="slide" id="slide-1">
+    <h2>The Problem</h2>
+    <div class="pain-point" data-delay="0">
+        <div class="icon">1.</div>
+        <div>
+            <div class="label">Every project starts from scratch</div>
+            <div class="desc">Copy-paste docker-compose from old projects or Slack. Different structure every time. No consistency.</div>
+        </div>
+    </div>
+    <div class="pain-point" data-delay="200">
+        <div class="icon">2.</div>
+        <div>
+            <div class="label">Switching test data takes forever</div>
+            <div class="desc">Need different test data? Wipe everything, re-seed, wait minutes. Hope you didn't need the old data.</div>
+        </div>
+    </div>
+    <div class="pain-point" data-delay="400">
+        <div class="icon">3.</div>
+        <div>
+            <div class="label">Port conflicts break everything</div>
+            <div class="desc">Two projects using port 5432? Cryptic startup errors. Nobody knows which container to stop.</div>
+        </div>
+    </div>
+    <div class="d3-container" id="problem-diagram" style="margin-top: 32px;"></div>
+    <span class="slide-number">2 / 9</span>
+</section>
+
+<!-- ==================== SLIDE 3: The Solution ==================== -->
+<section class="slide" id="slide-2">
+    <h2>The Solution</h2>
+    <p style="color: var(--text-muted); font-size: 1.15rem; max-width: 700px; text-align: center; margin-bottom: 12px;">
+        A shared library of database templates.<br>Pick the services you need. 3 lines of config. Done.
+    </p>
+    <div class="d3-container" id="solution-diagram"></div>
+    <span class="slide-number">3 / 9</span>
+</section>
+
+<!-- ==================== SLIDE 4: Profile Switching ==================== -->
+<section class="slide" id="slide-3">
+    <h2>Profile Switching</h2>
+    <p style="color: var(--text-muted); font-size: 1.1rem; margin-bottom: 8px;">
+        Think of profiles like <strong style="color: var(--text);">save slots in a video game</strong>. Each slot has different data. Loading is instant.
+    </p>
+    <div class="profile-cards" id="profileCards">
+        <div class="profile-card active" data-profile="small" onclick="switchProfile('small')">
+            <div class="profile-name">small</div>
+            <div class="profile-data">1 org, 2 users</div>
+            <div class="profile-desc">Fast iteration & debugging</div>
+        </div>
+        <div class="profile-card" data-profile="basic" onclick="switchProfile('basic')">
+            <div class="profile-name">basic</div>
+            <div class="profile-data">5 orgs, 50 users</div>
+            <div class="profile-desc">Realistic testing</div>
+        </div>
+        <div class="profile-card" data-profile="large" onclick="switchProfile('large')">
+            <div class="profile-name">large</div>
+            <div class="profile-data">100 orgs, 10K users</div>
+            <div class="profile-desc">Load & performance testing</div>
+        </div>
+    </div>
+    <div class="profile-status" id="profileStatus">
+        $ npx infra-compose switch --profile <span id="profileName">small</span> <span style="color: var(--accent3);">  &#10003; Switched</span>
+    </div>
+    <div class="timing-badges">
+        <div class="timing-badge">
+            <div class="time">~30s</div>
+            <div class="time-desc">First load (seeds data)</div>
+        </div>
+        <div class="timing-badge">
+            <div class="time">~3s</div>
+            <div class="time-desc">After that (instant swap)</div>
+        </div>
+    </div>
+    <p class="key-message">Your old data is never lost. Just load a different slot.</p>
+    <span class="slide-number">4 / 9</span>
+</section>
+
+<!-- ==================== SLIDE 5: How It Works ==================== -->
+<section class="slide" id="slide-4">
+    <h2>How It Works</h2>
+    <div class="d3-container" id="architecture-diagram"></div>
+    <span class="slide-number">5 / 9</span>
+</section>
+
+<!-- ==================== SLIDE 6: 3 Steps ==================== -->
+<section class="slide" id="slide-5">
+    <h2>3 Steps to Start</h2>
+    <div class="steps-grid">
+        <div class="step-card">
+            <div class="step-number">Step 1</div>
+            <h3>Install</h3>
+            <pre><span class="code-command">pnpm add -D @saga-ed/infra-compose</span></pre>
+        </div>
+        <div class="step-card">
+            <div class="step-number">Step 2</div>
+            <h3>Extend</h3>
+            <pre><span class="code-comment"># docker-compose.yml</span>
+<span class="code-keyword">services:</span>
+  <span class="code-keyword">postgres:</span>
+    <span class="code-keyword">extends:</span>
+      <span class="code-keyword">file:</span> <span class="code-string">node_modules/@saga-ed/
+        infra-compose/services/
+        postgres/compose.yml</span>
+      <span class="code-keyword">service:</span> <span class="code-string">postgres</span></pre>
+        </div>
+        <div class="step-card">
+            <div class="step-number">Step 3</div>
+            <h3>Run</h3>
+            <pre><span class="code-command">npx infra-compose up \
+  --profile small</span>
+
+<span class="code-comment"># Databases are running
+# with test data loaded</span></pre>
+        </div>
+    </div>
+    <span class="slide-number">6 / 9</span>
+</section>
+
+<!-- ==================== SLIDE 7: Real Examples ==================== -->
+<section class="slide" id="slide-6">
+    <h2>Already In Production Use</h2>
+    <div class="examples-grid">
+        <div class="example-card">
+            <h3>Thrive</h3>
+            <div class="service-tags">
+                <span class="service-tag">PostgreSQL</span>
+                <span class="service-tag">OpenFGA</span>
+                <span class="service-tag">RabbitMQ</span>
+            </div>
+            <pre><span class="code-keyword">postgres:</span>
+  <span class="code-keyword">extends:</span>
+    <span class="code-keyword">file:</span> <span class="code-string">node_modules/@saga-ed/
+      infra-compose/services/
+      postgres/compose.yml</span>
+    <span class="code-keyword">service:</span> <span class="code-string">postgres</span>
+  <span class="code-keyword">container_name:</span> <span class="code-string">thrive-postgres</span>
+  <span class="code-keyword">environment:</span>
+    <span class="code-keyword">POSTGRES_DB:</span> <span class="code-string">thrive</span></pre>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 12px;">+ custom init SQL, LocalStack, FGA auth model</p>
+        </div>
+        <div class="example-card">
+            <h3>saga_api</h3>
+            <div class="service-tags">
+                <span class="service-tag">MongoDB</span>
+                <span class="service-tag">MySQL</span>
+                <span class="service-tag">Redis</span>
+            </div>
+            <pre><span class="code-keyword">mongo_service:</span>
+  <span class="code-keyword">extends:</span>
+    <span class="code-keyword">file:</span> <span class="code-string">node_modules/@saga-ed/
+      infra-compose/services/
+      mongo/compose.yml</span>
+    <span class="code-keyword">service:</span> <span class="code-string">mongo</span>
+  <span class="code-keyword">container_name:</span> <span class="code-string">mongo-6-local</span>
+  <span class="code-keyword">network_mode:</span> <span class="code-string">"host"</span></pre>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 12px;">+ replica set init, profile switching via local-db-mgr.sh</p>
+        </div>
+    </div>
+    <p style="color: var(--text-muted); margin-top: 24px; font-size: 1.05rem;">Two projects, different databases, same pattern.</p>
+    <span class="slide-number">7 / 9</span>
+</section>
+
+<!-- ==================== SLIDE 8: Cheat Sheet ==================== -->
+<section class="slide" id="slide-7">
+    <h2>Command Cheat Sheet</h2>
+    <table class="cheat-table">
+        <thead>
+            <tr>
+                <th>Command</th>
+                <th>What it does</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>npx infra-compose up --profile small</td>
+                <td>Start databases with the "small" dataset</td>
+            </tr>
+            <tr>
+                <td>npx infra-compose switch --profile basic</td>
+                <td>Switch to a different dataset (instant after first load)</td>
+            </tr>
+            <tr>
+                <td>npx infra-compose down</td>
+                <td>Stop everything (your data is preserved)</td>
+            </tr>
+            <tr>
+                <td>npx infra-compose reset --profile small</td>
+                <td>Wipe one dataset and reload it fresh</td>
+            </tr>
+            <tr>
+                <td>npx infra-compose status</td>
+                <td>Show what's currently running</td>
+            </tr>
+        </tbody>
+    </table>
+    <span class="slide-number">8 / 9</span>
+</section>
+
+<!-- ==================== SLIDE 9: Next Steps ==================== -->
+<section class="slide" id="slide-8">
+    <div class="next-steps">
+        <h2>Getting Started</h2>
+        <p style="font-size: 1.2rem; color: var(--text-muted); margin-bottom: 12px;">
+            Starting a new project?<br>
+            Don't write a docker-compose from scratch.
+        </p>
+        <div class="cta">pnpm add -D @saga-ed/infra-compose</div>
+        <div class="links">
+            <div class="link-card">
+                <div class="link-title">Hands-on Tutorial</div>
+                <div class="link-desc">infra/docs/hands-on-tutorial.md<br>Step-by-step walkthrough (~45 min)</div>
+            </div>
+            <div class="link-card">
+                <div class="link-title">Full Reference</div>
+                <div class="link-desc">infra/README.md<br>All commands, services, and config</div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-number">9 / 9</span>
+</section>
+
+<script>
+// ==================== NAVIGATION ====================
+const slides = document.querySelectorAll('.slide');
+const navDots = document.getElementById('navDots');
+const navHint = document.getElementById('navHint');
+let currentSlide = 0;
+
+// Create nav dots
+slides.forEach((_, i) => {
+    const dot = document.createElement('button');
+    dot.className = 'nav-dot' + (i === 0 ? ' active' : '');
+    dot.onclick = () => goToSlide(i);
+    navDots.appendChild(dot);
+});
+
+function goToSlide(index) {
+    if (index < 0 || index >= slides.length) return;
+    currentSlide = index;
+    slides[index].scrollIntoView({ behavior: 'smooth' });
+    updateDots();
+    triggerSlideAnimations(index);
+}
+
+function updateDots() {
+    document.querySelectorAll('.nav-dot').forEach((dot, i) => {
+        dot.classList.toggle('active', i === currentSlide);
+    });
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+        e.preventDefault();
+        goToSlide(currentSlide + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        goToSlide(currentSlide - 1);
+    }
+});
+
+// Scroll detection
+const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+        if (entry.isIntersecting) {
+            const index = Array.from(slides).indexOf(entry.target);
+            if (index !== -1) {
+                currentSlide = index;
+                updateDots();
+                triggerSlideAnimations(index);
+            }
+        }
+    });
+}, { threshold: 0.5 });
+
+slides.forEach(slide => observer.observe(slide));
+
+// Hide hint after first navigation
+let hintHidden = false;
+function hideHint() {
+    if (!hintHidden) {
+        navHint.style.opacity = '0';
+        hintHidden = true;
+    }
+}
+
+// ==================== SLIDE ANIMATIONS ====================
+const animated = new Set();
+
+function triggerSlideAnimations(index) {
+    hideHint();
+    if (animated.has(index)) return;
+    animated.add(index);
+
+    if (index === 1) animateProblem();
+    if (index === 2) animateSolution();
+    if (index === 4) animateArchitecture();
+}
+
+// ==================== SLIDE 2: Problem Diagram ====================
+function animateProblem() {
+    // Animate pain points
+    document.querySelectorAll('.pain-point').forEach((el, i) => {
+        setTimeout(() => el.classList.add('visible'), parseInt(el.dataset.delay) + 200);
+    });
+
+    // D3 diagram
+    const container = document.getElementById('problem-diagram');
+    const width = container.clientWidth;
+    const height = 200;
+    const svg = d3.select('#problem-diagram')
+        .append('svg')
+        .attr('viewBox', `0 0 ${width} ${height}`);
+
+    const repos = [
+        { name: 'saga_api', x: width * 0.17, services: 'mongo, mysql, redis', color: '#f87171' },
+        { name: 'thrive', x: width * 0.5, services: 'postgres, rabbitmq', color: '#fbbf24' },
+        { name: 'new-project', x: width * 0.83, services: '??? copy from Slack?', color: '#94a3b8' }
+    ];
+
+    const groups = svg.selectAll('g.repo')
+        .data(repos)
+        .enter()
+        .append('g')
+        .attr('class', 'repo')
+        .attr('transform', d => `translate(${d.x}, ${height / 2})`);
+
+    groups.append('rect')
+        .attr('x', -90)
+        .attr('y', -55)
+        .attr('width', 180)
+        .attr('height', 110)
+        .attr('rx', 12)
+        .attr('fill', '#1e293b')
+        .attr('stroke', d => d.color)
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', d => d.name === 'new-project' ? '6,4' : 'none')
+        .attr('opacity', 0)
+        .transition()
+        .delay((d, i) => 800 + i * 300)
+        .duration(500)
+        .attr('opacity', 1);
+
+    groups.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('y', -20)
+        .attr('fill', '#e2e8f0')
+        .attr('font-weight', '600')
+        .attr('font-size', '14px')
+        .text(d => d.name)
+        .attr('opacity', 0)
+        .transition()
+        .delay((d, i) => 1000 + i * 300)
+        .duration(400)
+        .attr('opacity', 1);
+
+    groups.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('y', 5)
+        .attr('fill', '#94a3b8')
+        .attr('font-size', '11px')
+        .attr('font-family', 'monospace')
+        .text('docker-compose.yml')
+        .attr('opacity', 0)
+        .transition()
+        .delay((d, i) => 1100 + i * 300)
+        .duration(400)
+        .attr('opacity', 1);
+
+    groups.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('y', 28)
+        .attr('fill', d => d.color)
+        .attr('font-size', '12px')
+        .text(d => d.services)
+        .attr('opacity', 0)
+        .transition()
+        .delay((d, i) => 1200 + i * 300)
+        .duration(400)
+        .attr('opacity', 1);
+
+    // "All different!" label
+    svg.append('text')
+        .attr('x', width / 2)
+        .attr('y', height - 8)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#f87171')
+        .attr('font-size', '13px')
+        .attr('font-weight', '600')
+        .text('Each project maintains its own setup independently')
+        .attr('opacity', 0)
+        .transition()
+        .delay(2200)
+        .duration(600)
+        .attr('opacity', 1);
+}
+
+// ==================== SLIDE 3: Solution Diagram ====================
+function animateSolution() {
+    const container = document.getElementById('solution-diagram');
+    const width = container.clientWidth;
+    const height = 420;
+    const svg = d3.select('#solution-diagram')
+        .append('svg')
+        .attr('viewBox', `0 0 ${width} ${height}`);
+
+    const centerX = width / 2;
+
+    // Central package
+    const pkgWidth = 520;
+    const pkgHeight = 100;
+    const pkgGroup = svg.append('g')
+        .attr('transform', `translate(${centerX}, 70)`);
+
+    pkgGroup.append('rect')
+        .attr('x', -pkgWidth / 2)
+        .attr('y', -pkgHeight / 2)
+        .attr('width', pkgWidth)
+        .attr('height', pkgHeight)
+        .attr('rx', 16)
+        .attr('fill', '#1e293b')
+        .attr('stroke', '#38bdf8')
+        .attr('stroke-width', 2)
+        .attr('opacity', 0)
+        .transition()
+        .duration(600)
+        .attr('opacity', 1);
+
+    pkgGroup.append('text')
+        .attr('text-anchor', 'middle')
+        .attr('y', -16)
+        .attr('fill', '#38bdf8')
+        .attr('font-weight', '700')
+        .attr('font-size', '15px')
+        .text('@saga-ed/infra-compose')
+        .attr('opacity', 0)
+        .transition()
+        .delay(300)
+        .duration(400)
+        .attr('opacity', 1);
+
+    // Service icons in package
+    const services = [
+        { name: 'Mongo', color: '#34d399' },
+        { name: 'MySQL', color: '#38bdf8' },
+        { name: 'Postgres', color: '#818cf8' },
+        { name: 'Redis', color: '#f87171' },
+        { name: 'RabbitMQ', color: '#fbbf24' },
+        { name: 'OpenFGA', color: '#c084fc' }
+    ];
+
+    const svcSpacing = pkgWidth / (services.length + 1);
+    services.forEach((svc, i) => {
+        const x = -pkgWidth / 2 + svcSpacing * (i + 1);
+        pkgGroup.append('rect')
+            .attr('x', x - 32)
+            .attr('y', 8)
+            .attr('width', 64)
+            .attr('height', 26)
+            .attr('rx', 6)
+            .attr('fill', svc.color + '20')
+            .attr('stroke', svc.color + '60')
+            .attr('stroke-width', 1)
+            .attr('opacity', 0)
+            .transition()
+            .delay(500 + i * 100)
+            .duration(400)
+            .attr('opacity', 1);
+
+        pkgGroup.append('text')
+            .attr('x', x)
+            .attr('y', 26)
+            .attr('text-anchor', 'middle')
+            .attr('fill', svc.color)
+            .attr('font-size', '11px')
+            .attr('font-weight', '500')
+            .text(svc.name)
+            .attr('opacity', 0)
+            .transition()
+            .delay(600 + i * 100)
+            .duration(400)
+            .attr('opacity', 1);
+    });
+
+    // Consumer projects
+    const consumers = [
+        {
+            name: 'saga_api',
+            x: centerX - 160,
+            y: 310,
+            services: ['Mongo', 'MySQL', 'Redis'],
+            colors: ['#34d399', '#38bdf8', '#f87171']
+        },
+        {
+            name: 'thrive',
+            x: centerX + 160,
+            y: 310,
+            services: ['Postgres', 'RabbitMQ', 'OpenFGA'],
+            colors: ['#818cf8', '#fbbf24', '#c084fc']
+        }
+    ];
+
+    consumers.forEach((consumer, ci) => {
+        const g = svg.append('g')
+            .attr('transform', `translate(${consumer.x}, ${consumer.y})`);
+
+        g.append('rect')
+            .attr('x', -120)
+            .attr('y', -50)
+            .attr('width', 240)
+            .attr('height', 100)
+            .attr('rx', 12)
+            .attr('fill', '#1e293b')
+            .attr('stroke', '#334155')
+            .attr('stroke-width', 1.5)
+            .attr('opacity', 0)
+            .transition()
+            .delay(1200 + ci * 200)
+            .duration(500)
+            .attr('opacity', 1);
+
+        g.append('text')
+            .attr('text-anchor', 'middle')
+            .attr('y', -22)
+            .attr('fill', '#e2e8f0')
+            .attr('font-weight', '600')
+            .attr('font-size', '15px')
+            .text(consumer.name)
+            .attr('opacity', 0)
+            .transition()
+            .delay(1400 + ci * 200)
+            .duration(400)
+            .attr('opacity', 1);
+
+        // Service tags inside consumer
+        consumer.services.forEach((svc, si) => {
+            const tagX = -80 + si * 72;
+            g.append('rect')
+                .attr('x', tagX - 2)
+                .attr('y', 2)
+                .attr('width', 68)
+                .attr('height', 24)
+                .attr('rx', 5)
+                .attr('fill', consumer.colors[si] + '20')
+                .attr('stroke', consumer.colors[si] + '50')
+                .attr('stroke-width', 1)
+                .attr('opacity', 0)
+                .transition()
+                .delay(1600 + ci * 200 + si * 100)
+                .duration(400)
+                .attr('opacity', 1);
+
+            g.append('text')
+                .attr('x', tagX + 32)
+                .attr('y', 19)
+                .attr('text-anchor', 'middle')
+                .attr('fill', consumer.colors[si])
+                .attr('font-size', '11px')
+                .text(svc)
+                .attr('opacity', 0)
+                .transition()
+                .delay(1700 + ci * 200 + si * 100)
+                .duration(400)
+                .attr('opacity', 1);
+        });
+
+        // Animated arrows from package to consumer
+        const arrowPath = `M${centerX},120 C${centerX},200 ${consumer.x},220 ${consumer.x},260`;
+        svg.append('path')
+            .attr('d', arrowPath)
+            .attr('fill', 'none')
+            .attr('stroke', '#38bdf8')
+            .attr('stroke-width', 2)
+            .attr('stroke-dasharray', '6,4')
+            .attr('opacity', 0)
+            .transition()
+            .delay(1100 + ci * 200)
+            .duration(600)
+            .attr('opacity', 0.5);
+
+        // Animated arrow head
+        svg.append('polygon')
+            .attr('points', `${consumer.x},260 ${consumer.x - 6},248 ${consumer.x + 6},248`)
+            .attr('fill', '#38bdf8')
+            .attr('opacity', 0)
+            .transition()
+            .delay(1400 + ci * 200)
+            .duration(400)
+            .attr('opacity', 0.6);
+    });
+
+    // Caption
+    svg.append('text')
+        .attr('x', centerX)
+        .attr('y', 195)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#94a3b8')
+        .attr('font-size', '13px')
+        .attr('font-style', 'italic')
+        .text('Pick the databases you need. Extend the template. Done.')
+        .attr('opacity', 0)
+        .transition()
+        .delay(2400)
+        .duration(600)
+        .attr('opacity', 1);
+}
+
+// ==================== SLIDE 5: Architecture Diagram ====================
+function animateArchitecture() {
+    const container = document.getElementById('architecture-diagram');
+    const width = container.clientWidth;
+    const height = 440;
+    const svg = d3.select('#architecture-diagram')
+        .append('svg')
+        .attr('viewBox', `0 0 ${width} ${height}`);
+
+    const centerX = width / 2;
+    const layerWidth = 600;
+
+    const layers = [
+        {
+            y: 340,
+            label: 'Profile Volumes (Data Save Slots)',
+            sublabel: 'mongo-profile-small  |  postgres-profile-basic  |  ...',
+            color: '#34d399',
+            delay: 0,
+            items: [
+                { name: 'small', desc: '1 org' },
+                { name: 'basic', desc: '5 orgs' },
+                { name: 'large', desc: '100 orgs' }
+            ]
+        },
+        {
+            y: 210,
+            label: 'infra-compose Templates',
+            sublabel: 'Image, health check, ports, seeding engine',
+            color: '#38bdf8',
+            delay: 600,
+            items: [
+                { name: 'Mongo' },
+                { name: 'MySQL' },
+                { name: 'Postgres' },
+                { name: 'Redis' },
+                { name: 'RabbitMQ' }
+            ]
+        },
+        {
+            y: 80,
+            label: 'Your Project',
+            sublabel: 'Container name, credentials, custom init, extra services',
+            color: '#818cf8',
+            delay: 1200,
+            items: [
+                { name: 'docker-compose.yml with extends:' }
+            ]
+        }
+    ];
+
+    layers.forEach((layer, li) => {
+        const g = svg.append('g');
+
+        // Layer box
+        g.append('rect')
+            .attr('x', centerX - layerWidth / 2)
+            .attr('y', layer.y - 40)
+            .attr('width', layerWidth)
+            .attr('height', 80)
+            .attr('rx', 12)
+            .attr('fill', '#1e293b')
+            .attr('stroke', layer.color + '60')
+            .attr('stroke-width', 2)
+            .attr('opacity', 0)
+            .transition()
+            .delay(layer.delay)
+            .duration(500)
+            .attr('opacity', 1);
+
+        // Layer label
+        g.append('text')
+            .attr('x', centerX)
+            .attr('y', layer.y - 12)
+            .attr('text-anchor', 'middle')
+            .attr('fill', layer.color)
+            .attr('font-weight', '600')
+            .attr('font-size', '15px')
+            .text(layer.label)
+            .attr('opacity', 0)
+            .transition()
+            .delay(layer.delay + 200)
+            .duration(400)
+            .attr('opacity', 1);
+
+        // Sublabel
+        g.append('text')
+            .attr('x', centerX)
+            .attr('y', layer.y + 14)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#94a3b8')
+            .attr('font-size', '12px')
+            .text(layer.sublabel)
+            .attr('opacity', 0)
+            .transition()
+            .delay(layer.delay + 300)
+            .duration(400)
+            .attr('opacity', 1);
+
+        // Connector arrow to next layer
+        if (li < layers.length - 1) {
+            const nextLayer = layers[li + 1];
+            const arrowStartY = layer.y - 40;
+            const arrowEndY = nextLayer.y + 40;
+            const midY = (arrowStartY + arrowEndY) / 2;
+
+            g.append('line')
+                .attr('x1', centerX)
+                .attr('y1', arrowStartY)
+                .attr('x2', centerX)
+                .attr('y2', arrowEndY)
+                .attr('stroke', '#475569')
+                .attr('stroke-width', 2)
+                .attr('stroke-dasharray', '4,4')
+                .attr('opacity', 0)
+                .transition()
+                .delay(layer.delay + 500)
+                .duration(400)
+                .attr('opacity', 0.6);
+
+            g.append('polygon')
+                .attr('points', `${centerX},${arrowStartY} ${centerX - 5},${arrowStartY - 10} ${centerX + 5},${arrowStartY - 10}`)
+                .attr('fill', '#475569')
+                .attr('opacity', 0)
+                .transition()
+                .delay(layer.delay + 500)
+                .duration(400)
+                .attr('opacity', 0.6);
+        }
+    });
+
+    // Side annotations
+    const annotations = [
+        { y: 80, text: 'You customize', color: '#818cf8', x: centerX + layerWidth / 2 + 20 },
+        { y: 210, text: 'Template provides', color: '#38bdf8', x: centerX + layerWidth / 2 + 20 },
+        { y: 340, text: 'Data persists', color: '#34d399', x: centerX + layerWidth / 2 + 20 }
+    ];
+
+    annotations.forEach((ann, i) => {
+        svg.append('text')
+            .attr('x', ann.x)
+            .attr('y', ann.y + 4)
+            .attr('fill', ann.color)
+            .attr('font-size', '12px')
+            .attr('font-weight', '500')
+            .attr('opacity', 0)
+            .transition()
+            .delay(2000 + i * 200)
+            .duration(400)
+            .attr('opacity', 0.8)
+            .text(ann.text);
+    });
+}
+
+// ==================== PROFILE SWITCHING INTERACTION ====================
+function switchProfile(name) {
+    document.querySelectorAll('.profile-card').forEach(card => {
+        card.classList.toggle('active', card.dataset.profile === name);
+    });
+    document.getElementById('profileName').textContent = name;
+}
+
+// ==================== INITIAL SETUP ====================
+// Trigger first slide animations
+setTimeout(() => {
+    animated.add(0);
+}, 100);
+</script>
+</body>
+</html>

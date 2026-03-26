@@ -252,6 +252,9 @@ async function snapshot_mysql(profile, out_dir, defaults) {
             `-- Source: infra-compose snapshot (native JS)`,
             `--`,
             ``,
+            `SET FOREIGN_KEY_CHECKS=0;`,
+            `SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO';`,
+            ``,
         ];
 
         for (const db of databases) {
@@ -296,6 +299,9 @@ async function snapshot_mysql(profile, out_dir, defaults) {
             }
             lines.push(``);
         }
+
+        lines.push(`SET FOREIGN_KEY_CHECKS=1;`);
+        lines.push(``);
 
         const out_file = resolve(out_dir, `profile-${profile}.sql`);
         const sql = lines.join('\n');

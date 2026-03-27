@@ -335,7 +335,7 @@ cmd_dump() {
                 echo "── Postgres ──"
                 PROFILE="$PROFILE" \
                 OUTPUT_DIR="$out_dir" \
-                HOST="localhost" \
+                HOST="127.0.0.1" \
                 PORT="${POSTGRES_PORT:-5433}" \
                 USER="${POSTGRES_USER:-postgres_admin}" \
                 PGPASSWORD="${POSTGRES_PASSWORD:-password123}" \

@@ -171,3 +171,45 @@ jobs:
               console.log('router.js: parseable (' + src.length + ' bytes)');
             });
           "
+
+  # ── Integration tests (requires Docker) ─────────────────────
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install database clients
+        run: |
+          # mongosh
+          wget -qO- https://www.mongodb.org/static/pgp/server-6.0.asc | \
+            sudo gpg --dearmor -o /usr/share/keyrings/mongodb-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/mongodb-archive-keyring.gpg] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/6.0 multiverse" | \
+            sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mongodb-mongosh mysql-client > /dev/null
+          # psql is pre-installed on ubuntu-latest
+
+      - name: Verify prerequisites
+        run: |
+          docker compose version
+          mongosh --version
+          mysql --version
+          psql --version
+
+      - name: Pull Docker images
+        run: |
+          docker pull mongo:6 &
+          docker pull mysql:8 &
+          docker pull postgres:15 &
+          wait
+          echo "All images pulled"
+
+      - name: Run integration tests
+        run: bash test/run-integration.sh

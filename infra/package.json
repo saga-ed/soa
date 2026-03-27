@@ -1,18 +1,55 @@
 {
     "name": "@saga-ed/infra-compose",
-    "version": "0.5.0",
+    "version": "0.7.3",
     "description": "Composable Docker service templates for Saga platform local development",
     "bin": {
         "infra-compose": "bin/infra-compose"
     },
     "scripts": {
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:integration": "bash test/run-integration.sh",
+        "typecheck": "tsc --noEmit --strict --moduleResolution node16 --module node16 --target es2022 --skipLibCheck api.d.ts handlers.d.ts",
         "prepublishOnly": "export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain saga --domain-owner 531314149529 --query authorizationToken --output text) && npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=$CODEARTIFACT_AUTH_TOKEN && echo '✅ CodeArtifact auth token refreshed'"
     },
+    "type": "module",
+    "main": "api.js",
+    "exports": {
+        ".": "./api.js",
+        "./router": "./router.js",
+        "./handlers": "./handlers.js"
+    },
+    "types": "api.d.ts",
     "files": [
         "bin/",
         "services/",
-        ".env.defaults"
+        ".env.defaults",
+        "compose.yml",
+        "api.js",
+        "api.d.ts",
+        "handlers.js",
+        "handlers.d.ts",
+        "router.js",
+        "router.d.ts"
     ],
+    "dependencies": {
+        "docker-compose": "^0.24.8",
+        "mongodb": "^6.0.0",
+        "mysql2": "^3.0.0"
+    },
+    "devDependencies": {
+        "express": "^4.22.1",
+        "typescript": "^5.9.3",
+        "vitest": "^1.6.1"
+    },
+    "peerDependencies": {
+        "express": "^4.18.0 || ^5.0.0"
+    },
+    "peerDependenciesMeta": {
+        "express": {
+            "optional": true
+        }
+    },
     "publishConfig": {
         "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
         "access": "public"

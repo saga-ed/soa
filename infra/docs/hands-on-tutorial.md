@@ -750,6 +750,86 @@ cat ~/dev/coach/apps/node/coach-api/scripts/mongo-init.js
 
 ---
 
+## PART 5: HTTP API & Consumer Integration (~10 min)
+
+infra-compose also exports an Express router that exposes all lifecycle operations over HTTP. This is how fixture-cli (and any future project) provides remote profile management.
+
+### 5.1 The router pattern
+
+```javascript
+import express from 'express';
+import { create_router } from '@saga-ed/infra-compose/router';
+
+const app = express();
+
+// Mount with lifecycle hooks for post-operation side effects
+app.use('/infra', create_router({
+    on_after_switch: async () => { await restart_my_app(); },
+    on_after_reset:  async () => { await restart_my_app(); },
+}));
+
+app.listen(7777);
+```
+
+**What to observe:**
+- `create_router()` returns a standard Express Router — mount it at any path
+- Lifecycle hooks fire **after** a successful operation — use them to restart your app so it picks up the new DB state
+- Hooks are optional — omit them for standalone use (e.g., `infra-compose serve`)
+- Express is an optional peerDependency — if you only use the JS API, you don't need Express installed
+
+### 5.2 Available HTTP endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/snapshot` | Dump current DB state as a named profile |
+| `POST` | `/switch` | Switch to a different profile (down + up) |
+| `POST` | `/reset` | Wipe profile volumes and restart fresh |
+| `POST` | `/restore` | Restore from seed/snapshot files |
+| `GET` | `/profiles` | List available profiles (seeds + snapshots) |
+| `POST` | `/delete-profile` | Delete snapshot files for a profile |
+| `GET` | `/active-profile` | Get the currently active profile |
+| `GET` | `/health` | Health check |
+
+All endpoints return `{ ok: true, ... }` on success or `{ ok: false, error: "..." }` on failure.
+
+### 5.3 The three-layer architecture
+
+```
+Layer 0: Docker Compose         (containers, volumes, networking)
+Layer 1: api.js                 (native JS — no bash intermediary)
+Layer 2: router.js              (HTTP adapter with lifecycle hooks)
+```
+
+- **Layer 1** calls Docker directly via `spawnSync('docker', ['compose', ...])` and uses native MongoDB/MySQL drivers for snapshot operations. No bash scripts in the hot path.
+- **Layer 2** wraps Layer 1's handler functions in Express routes. Handlers are also available as framework-agnostic functions via `@saga-ed/infra-compose/handlers`.
+
+### 5.4 How fixture-cli uses this
+
+fixture-cli's `fixture:serve` command mounts the infra-compose router at `/infra` alongside its own fixture-specific routes at `/fixture`:
+
+```
+fixture-serve (port 7777)
+├── /infra/*       → infra-compose router (DB lifecycle)
+│   ├── /infra/switch      POST   switch profile
+│   ├── /infra/reset       POST   reset profile
+│   ├── /infra/snapshot    POST   snapshot DB state
+│   ├── /infra/profiles    GET    list profiles
+│   └── ...
+└── /fixture/*     → fixture-cli controller (fixture-specific)
+    ├── /fixture/store     POST   snapshot + update fixture_metadata
+    ├── /fixture/restore   POST   lookup metadata + switch
+    ├── /fixture/create-async  POST   create fixture (job queue)
+    └── /fixture/export-playwright  GET   export test credentials
+```
+
+The seam: infra-compose owns general-purpose DB lifecycle operations (reusable by any project). fixture-cli owns fixture-specific logic (metadata registry, test data factories, Playwright export).
+
+**What you learned:** The HTTP API is a thin transport layer over the same JS functions the CLI uses. Any Express app can mount it and wire in app-specific behavior via lifecycle hooks.
+
+> **Reset:** None — read-only.
+
+---
+
 ## Appendix: Command Cheat Sheet
 
 ### Lifecycle Commands
@@ -802,7 +882,10 @@ Dump options: `--services mongo,mysql,postgres` (default: all three),
 | File | Purpose |
 |------|---------|
 | `infra/compose.yml` | Root compose-of-composes (includes all services) |
-| `infra/bin/infra-compose` | CLI entry point (bash script) |
+| `infra/api.js` | Programmatic API (native JS — snapshot, switch, reset, etc.) |
+| `infra/handlers.js` | Framework-agnostic handler functions (`{ ok, ... }` envelope) |
+| `infra/router.js` | Express Router factory with lifecycle hooks |
+| `infra/bin/infra-compose` | CLI entry point (bash script, for human use) |
 | `infra/services/{mongo,mysql,postgres,redis,rabbitmq,openfga}/compose.yml` | Service templates |
 | `infra/.env.defaults` | Default ports, credentials, `SEED_PROFILE` |
 | `fixture-cli/zcripts/local/docker-compose.yml` | saga_api consumer compose |

@@ -16,14 +16,30 @@ if [[ ! "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
   exit 1
 fi
 SEED_FILE="/seed/profile-${PROFILE}.sql"
+
+# Project-provided seeds take priority over built-in seeds.
+# Callers pass EXTRA_SEED_DIR via infra-compose up({ seed_dir }) which is mounted at /extra-seed/.
+if [ -f "/extra-seed/profile-${PROFILE}.sql" ]; then
+  SEED_FILE="/extra-seed/profile-${PROFILE}.sql"
+  echo "MySQL seed: using project seed from ${SEED_FILE}"
+fi
+
+# User snapshot data (from ~/.fixtures/profiles) is mounted at /data-seed/.
+if [ -f "/data-seed/profile-${PROFILE}.sql" ]; then
+  SEED_FILE="/data-seed/profile-${PROFILE}.sql"
+  echo "MySQL seed: using user data from ${SEED_FILE}"
+fi
+
 HOST="mysql"
 PORT="3306"
+# Use root for admin operations (CREATE DATABASE, etc.); MYSQL_PWD env provides password
+ADMIN_USER="${MYSQL_ADMIN_USER:-root}"
 
 echo "MySQL seed: profile=${PROFILE}"
 
 # Wait for MySQL to accept connections (healthcheck can pass before full readiness)
 for i in $(seq 1 15); do
-  if mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" -e "SELECT 1" >/dev/null 2>&1; then
+  if mysql -h "$HOST" -P "$PORT" -u "$ADMIN_USER" -e "SELECT 1" >/dev/null 2>&1; then
     echo "MySQL seed: connection ready"
     break
   fi
@@ -31,13 +47,13 @@ for i in $(seq 1 15); do
   sleep 2
 done
 
-if ! mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" -e "SELECT 1" >/dev/null 2>&1; then
+if ! mysql -h "$HOST" -P "$PORT" -u "$ADMIN_USER" -e "SELECT 1" >/dev/null 2>&1; then
   echo "ERROR: MySQL seed: timed out waiting for connection after 30s"
   exit 1
 fi
 
 # Check sentinel — does the _profile_meta database + table exist with this profile?
-SEEDED=$(mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" -N -e \
+SEEDED=$(mysql -h "$HOST" -P "$PORT" -u "$ADMIN_USER" -N -e \
   "SELECT seeded_at FROM _profile_meta._seeded WHERE profile='${PROFILE}'" 2>/dev/null || true)
 
 if [ -n "$SEEDED" ]; then
@@ -51,10 +67,10 @@ if [ ! -f "$SEED_FILE" ]; then
 fi
 
 echo "MySQL seed: loading ${SEED_FILE} ..."
-mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" < "$SEED_FILE"
+mysql -h "$HOST" -P "$PORT" -u "$ADMIN_USER" < "$SEED_FILE"
 
 # Write sentinel
-mysql -h "$HOST" -P "$PORT" -u "${MYSQL_USER:-mysql_admin}" <<SQL
+mysql -h "$HOST" -P "$PORT" -u "$ADMIN_USER" <<SQL
 CREATE DATABASE IF NOT EXISTS _profile_meta;
 CREATE TABLE IF NOT EXISTS _profile_meta._seeded (
   profile VARCHAR(64) PRIMARY KEY,

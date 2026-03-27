@@ -28,6 +28,8 @@ services:
         condition: service_healthy
     volumes:
       - ./seed:/seed:ro
+      - ${EXTRA_MONGO_SEED_DIR:-./.no-extra-seed}:/extra-seed:ro
+      - ${INFRA_COMPOSE_DATA_DIR:-./.no-data-dir}/mongo:/data-seed:ro
     environment:
       SEED_PROFILE: ${SEED_PROFILE:-small}
     entrypoint: ["mongosh", "--host", "mongo:27017", "--file", "/seed/init-and-seed.js"]

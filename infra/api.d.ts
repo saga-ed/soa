@@ -1,5 +1,3 @@
-import { SpawnSyncReturns } from 'child_process';
-
 // ── Types ──────────────────────────────────────────────────
 
 export interface UpOptions {
@@ -20,6 +18,10 @@ export interface SnapshotOptions {
 
 export interface ProfileOptions {
     profile: string;
+    /** Directory containing project-specific seed files (mounted as /extra-seed/). */
+    seed_dir?: string;
+    /** Directory for user snapshot data (default: ~/.fixtures/profiles). */
+    data_dir?: string;
 }
 
 export interface ListProfilesOptions {
@@ -33,12 +35,23 @@ export interface Profile {
     service: string;
 }
 
+export interface ProfileResult {
+    status: number;
+    profile: string;
+}
+
 // ── Docker lifecycle ───────────────────────────────────────
 
 export function up(options?: UpOptions): Promise<{ exitCode: number }>;
-export function switch_profile(options: ProfileOptions): SpawnSyncReturns<Buffer>;
-export function reset(options: ProfileOptions): SpawnSyncReturns<Buffer>;
-export function restore(options: ProfileOptions): SpawnSyncReturns<Buffer>;
+
+/** Switch to a different database profile (down + up with new volumes). */
+export function switch_profile(options: ProfileOptions): ProfileResult;
+
+/** Reset a profile: stop services, wipe profile volumes, restart fresh. */
+export function reset(options: ProfileOptions): ProfileResult;
+
+/** Restore a profile from seed/snapshot files. Wipes existing volumes if present. */
+export function restore(options: ProfileOptions): ProfileResult;
 
 // ── Data operations (native JS) ───────────────────────────
 

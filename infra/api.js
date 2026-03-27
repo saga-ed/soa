@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import { resolve, dirname, basename } from 'path';
+import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
@@ -9,7 +9,6 @@ import { EJSON } from 'bson';
 import mysql from 'mysql2/promise';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BIN = resolve(__dirname, 'bin/infra-compose');
 const DEFAULT_DATA_DIR = resolve(homedir(), '.fixtures', 'profiles');
 const ACTIVE_PROFILE_FILE = resolve(homedir(), '.fixtures', 'active-profile');
 
@@ -59,13 +58,13 @@ function load_env_defaults() {
     };
 }
 
-// ── Docker lifecycle (delegates to bin/infra-compose) ──────────────
+// ── Docker helpers ─────────────────────────────────────────────────
 
 /**
- * Start Docker services (detached).
- * @param {{ profile?: string, seed_dir?: string, data_dir?: string }} options
+ * Build the env object for docker compose commands.
+ * Merges process.env + .env.defaults + .env, with optional profile and seed_dir.
  */
-export async function up(options = {}) {
+function build_compose_env(options = {}) {
     const { profile, seed_dir, data_dir } = options;
     const env = { ...process.env, ...load_env_defaults() };
     if (profile) env.SEED_PROFILE = profile;
@@ -76,33 +75,153 @@ export async function up(options = {}) {
         env.EXTRA_POSTGRES_SEED_DIR = resolve(base, 'postgres');
     }
     env.INFRA_COMPOSE_DATA_DIR = resolve(data_dir || DEFAULT_DATA_DIR);
+    return env;
+}
 
-    let result = spawnSync('docker', ['compose', 'up', '-d'], { cwd: __dirname, env, stdio: 'inherit' });
+/**
+ * Run a docker compose command, with fallback to docker-compose.
+ * @param {string[]} args - compose subcommand args (e.g. ['up', '-d'])
+ * @param {Record<string, string>} env
+ * @returns {import('child_process').SpawnSyncReturns<Buffer>}
+ */
+function compose_cmd(args, env) {
+    let result = spawnSync('docker', ['compose', ...args], { cwd: __dirname, env, stdio: 'inherit' });
     if (result.error?.code === 'ENOENT') {
-        result = spawnSync('docker-compose', ['up', '-d'], { cwd: __dirname, env, stdio: 'inherit' });
+        result = spawnSync('docker-compose', args, { cwd: __dirname, env, stdio: 'inherit' });
     }
+    return result;
+}
+
+/**
+ * List Docker volume names matching a profile filter.
+ * @param {string} profile
+ * @returns {string[]}
+ */
+function list_profile_volumes(profile) {
+    const result = spawnSync('docker', [
+        'volume', 'ls', '--filter', `name=-profile-${profile}`, '--format', '{{.Name}}',
+    ], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    if (result.status !== 0 || !result.stdout) return [];
+    return result.stdout.trim().split('\n').filter(Boolean);
+}
+
+/**
+ * Remove Docker volumes by name (batch).
+ * @param {string[]} volumes
+ * @returns {{ status: number }}
+ */
+function remove_volumes(volumes) {
+    if (volumes.length === 0) return { status: 0 };
+    const result = spawnSync('docker', ['volume', 'rm', ...volumes], { stdio: 'inherit' });
+    return { status: result.status ?? 1 };
+}
+
+// ── Docker lifecycle ──────────────────────────────────────────────
+
+/**
+ * Start Docker services (detached).
+ * @param {{ profile?: string, seed_dir?: string, data_dir?: string }} options
+ */
+export async function up(options = {}) {
+    const { profile } = options;
+    const env = build_compose_env(options);
+
+    const result = compose_cmd(['up', '-d'], env);
     if (result.error) throw result.error;
     if (result.status === 0 && profile) write_active_profile(profile);
     return { exitCode: result.status ?? 1 };
 }
 
-/** @param {{ profile: string }} options */
+/**
+ * Switch to a different database profile (down + up with new volumes).
+ * @param {{ profile: string, seed_dir?: string, data_dir?: string }} options
+ * @returns {{ status: number, profile: string }}
+ */
 export function switch_profile(options) {
-    const result = spawnSync(BIN, ['switch', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
-    if (result.status === 0) write_active_profile(options.profile);
-    return result;
+    const { profile } = options;
+    const env = build_compose_env(options);
+
+    // Down
+    const down = compose_cmd(['down'], env);
+    if (down.status !== 0) return { status: down.status ?? 1, profile };
+
+    // Up with new profile
+    const up = compose_cmd(['up', '-d'], env);
+    if (up.status === 0) write_active_profile(profile);
+    return { status: up.status ?? 1, profile };
 }
 
-/** @param {{ profile: string }} options */
+/**
+ * Reset a profile: stop services, wipe profile volumes, restart fresh.
+ * @param {{ profile: string, seed_dir?: string, data_dir?: string }} options
+ * @returns {{ status: number, profile: string }}
+ */
 export function reset(options) {
-    const result = spawnSync(BIN, ['reset', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
-    if (result.status === 0) write_active_profile(options.profile);
-    return result;
+    const { profile } = options;
+    const env = build_compose_env(options);
+
+    // Down
+    const down = compose_cmd(['down'], env);
+    if (down.status !== 0) return { status: down.status ?? 1, profile };
+
+    // Remove profile volumes
+    const volumes = list_profile_volumes(profile);
+    if (volumes.length > 0) {
+        console.log(`Removing ${volumes.length} volume(s) for profile: ${profile}`);
+        const rm = remove_volumes(volumes);
+        if (rm.status !== 0) return { status: rm.status, profile };
+    }
+
+    // Up — fresh seed
+    const up = compose_cmd(['up', '-d'], env);
+    if (up.status === 0) write_active_profile(profile);
+    return { status: up.status ?? 1, profile };
 }
 
-/** @param {{ profile: string }} options */
+/**
+ * Restore a profile from seed/snapshot files (reset + re-seed).
+ * If profile volumes exist, wipes them first. Otherwise starts fresh.
+ * @param {{ profile: string, seed_dir?: string, data_dir?: string }} options
+ * @returns {{ status: number, profile: string }}
+ */
 export function restore(options) {
-    return spawnSync(BIN, ['restore', '--profile', options.profile], { stdio: 'inherit', cwd: __dirname });
+    const { profile } = options;
+    const services_dir = resolve(__dirname, 'services');
+
+    // Verify at least one seed file exists for this profile
+    const seed_files = [
+        resolve(services_dir, 'mongo', 'seed', `profile-${profile}.json`),
+        resolve(services_dir, 'mysql', 'seed', `profile-${profile}.sql`),
+        resolve(services_dir, 'postgres', 'seed', `profile-${profile}.sql`),
+    ];
+    const has_seed = seed_files.some(f => existsSync(f));
+
+    // Also check user data dir for snapshots
+    const data_dir = resolve(options.data_dir || DEFAULT_DATA_DIR);
+    const snapshot_files = [
+        resolve(data_dir, 'mongo', `profile-${profile}.json`),
+        resolve(data_dir, 'mysql', `profile-${profile}.sql`),
+        resolve(data_dir, 'postgres', `profile-${profile}.sql`),
+    ];
+    const has_snapshot = snapshot_files.some(f => existsSync(f));
+
+    if (!has_seed && !has_snapshot) {
+        console.error(`Error: no seed or snapshot files found for profile '${profile}'`);
+        return { status: 1, profile };
+    }
+
+    // If volumes exist, reset (wipe + re-seed). Otherwise just start fresh.
+    const volumes = list_profile_volumes(profile);
+    if (volumes.length > 0) {
+        console.log(`Existing volumes found — resetting profile: ${profile}`);
+        return reset(options);
+    } else {
+        console.log(`No existing volumes — starting fresh for profile: ${profile}`);
+        const env = build_compose_env(options);
+        const result = compose_cmd(['up', '-d'], env);
+        if (result.status === 0) write_active_profile(profile);
+        return { status: result.status ?? 1, profile };
+    }
 }
 
 /**
@@ -319,7 +438,14 @@ async function snapshot_mysql(profile, out_dir, defaults) {
 export function list_profiles(options = {}) {
     const data_dir = resolve(options.data_dir || DEFAULT_DATA_DIR);
     const services_dir = resolve(__dirname, 'services');
+    const defaults = load_env_defaults();
     const profiles = [];
+
+    const extra_dirs = {
+        mongo: defaults.EXTRA_MONGO_SEED_DIR,
+        mysql: defaults.EXTRA_MYSQL_SEED_DIR,
+        postgres: defaults.EXTRA_POSTGRES_SEED_DIR,
+    };
 
     for (const svc of ['mongo', 'mysql', 'postgres']) {
         const ext = svc === 'mongo' ? 'json' : 'sql';
@@ -329,7 +455,11 @@ export function list_profiles(options = {}) {
         const builtin_dir = resolve(services_dir, svc, 'seed');
         scan_profiles(builtin_dir, ext, svc, profiles, seen);
 
-        // Scan user data dir
+        // Scan project-provided extra seeds (e.g., fixture-cli's saga-api profile)
+        const extra_dir = extra_dirs[svc];
+        if (extra_dir) scan_profiles(resolve(extra_dir), ext, svc, profiles, seen);
+
+        // Scan user data dir (snapshots)
         const user_dir = resolve(data_dir, svc);
         scan_profiles(user_dir, ext, svc, profiles, seen);
     }

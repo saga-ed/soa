@@ -1,7 +1,7 @@
 import { defineConfig, type Options } from 'tsup';
 
 export default defineConfig((options: Options) => ({
-  entry: ['src/main.ts', 'src/inversify.config.ts', 'src/sectors/**/*'],
+  entry: ['src/main.ts', 'src/inversify.config.ts', 'src/trpc.ts', 'src/app-router.ts', 'src/sectors/**/*'],
   clean: true,
   format: ['esm'],
   sourcemap: true,

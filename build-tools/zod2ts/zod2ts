@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-# Convenience script to run zod2ts from anywhere in the project
-# Usage: ./tools/zod2ts/zod2ts --zod-path ./schemas/user.ts --output-dir ./types
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"$SCRIPT_DIR/bin/zod2ts" "$@" 

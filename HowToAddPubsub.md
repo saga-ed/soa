@@ -447,23 +447,13 @@ export const UserNotificationSchema = z.object({
 export type UserNotificationInput = z.infer<typeof UserNotificationSchema>;
 ```
 
-#### 2. Code Generation
+#### 2. Direct Type Import
 
-Use the built-in code generation tools to create client types:
-
-```bash
-# Generate types from your tRPC API
-pnpm run codegen
-
-# This will create types that can be imported by clients
-```
-
-#### 3. Direct Import (Simple Cases)
-
-For simple APIs, you can directly import types:
+The `AppRouter` type is exported directly from the static router composition — no code generation required. Clients import types from the `trpc-types` package:
 
 ```typescript
 // Client code
+import type { AppRouter } from '@saga-ed/soa-trpc-types';
 import type { UserNotificationInput } from '@your-api/schemas';
 ```
 

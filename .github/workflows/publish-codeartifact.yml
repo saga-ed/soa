@@ -122,6 +122,7 @@ jobs:
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-tgql-codegen \
+            --filter=@saga-ed/soa-trpc-base \
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
@@ -137,6 +138,7 @@ jobs:
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-tgql-codegen \
+            --filter=@saga-ed/soa-trpc-base \
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
@@ -152,6 +154,7 @@ jobs:
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-tgql-codegen \
+            --filter=@saga-ed/soa-trpc-base \
             --filter=@saga-ed/soa-db \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
@@ -169,6 +172,7 @@ jobs:
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-tgql-codegen \
+            --filter=@saga-ed/soa-trpc-base \
             --filter=@saga-ed/soa-api-core \
             --filter=@saga-ed/soa-pubsub-client \
             --filter=@saga-ed/soa-aws-util \
@@ -251,6 +255,7 @@ jobs:
             "packages/node/pubsub-core"
             "packages/node/api-util"
             "packages/core/tgql-codegen"
+            "packages/core/trpc-base"
             "packages/node/db"
             "packages/node/api-core"
             "packages/node/pubsub-client"
@@ -354,7 +359,7 @@ jobs:
       - name: Publish packages in dependency order
         run: |
           # Layer 0: Base packages (no workspace deps)
-          LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen"
+          LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base"
 
           # Layer 1: Depends on Layer 0
           LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
@@ -453,7 +458,7 @@ jobs:
 
       - name: Publish packages in dependency order
         run: |
-          LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen"
+          LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base"
           LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
           LAYER_2="packages/node/pubsub-client"
 

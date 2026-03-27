@@ -122,6 +122,23 @@ wait_for_init_containers() {
     return 1
 }
 
+wait_for_postgres() {
+    info "Waiting for Postgres to accept queries..."
+    local max_wait=30
+    local waited=0
+    while [[ $waited -lt $max_wait ]]; do
+        if PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
+            -c "SELECT 1" >/dev/null 2>&1; then
+            info "Postgres ready (${waited}s)"
+            return 0
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+    fail "Postgres not ready within ${max_wait}s"
+    return 1
+}
+
 create_seed_files() {
     # Copy "small" profile seed files to our test-unique profile name
     local profile="$1"
@@ -219,7 +236,8 @@ $COMPOSE up -d
 wait_for_init_containers
 
 # Give a moment for final writes
-sleep 3
+sleep 5
+wait_for_postgres
 
 # ── Mongo: verify seed data ──
 info "Checking Mongo seed data..."
@@ -243,11 +261,11 @@ assert_eq "MySQL: saga_db.users has 3 rows" "3" "$MYSQL_USERS"
 
 # ── Postgres: verify seed data ──
 info "Checking Postgres seed data..."
-PG_ORGS=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
+PG_ORGS=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
     -t -A -c "SELECT COUNT(*) FROM organizations" 2>/dev/null) || PG_ORGS="ERROR"
 assert_eq "Postgres: organizations has 1 row" "1" "$PG_ORGS"
 
-PG_USERS=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
+PG_USERS=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
     -t -A -c "SELECT COUNT(*) FROM users" 2>/dev/null) || PG_USERS="ERROR"
 assert_eq "Postgres: users has 3 rows" "3" "$PG_USERS"
 
@@ -281,11 +299,11 @@ MYSQL_USERS_AFTER=$(MYSQL_PWD="$MYSQL_PASSWORD" mysql -h 127.0.0.1 -P "$MYSQL_PO
 assert_eq "MySQL: users now has 4 rows after insert" "4" "$MYSQL_USERS_AFTER"
 
 # Postgres: add an extra user
-PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
+PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
     -c "INSERT INTO users (id, org_id, email, role, display_name) VALUES ('user-test', 'org-001', 'test@dump.test', 'TESTER', 'Dump Tester')" >/dev/null 2>&1 \
     || fail "Postgres: insert extra user failed"
 
-PG_USERS_AFTER=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
+PG_USERS_AFTER=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
     -t -A -c "SELECT COUNT(*) FROM users" 2>/dev/null) || PG_USERS_AFTER="ERROR"
 assert_eq "Postgres: users now has 4 rows after insert" "4" "$PG_USERS_AFTER"
 
@@ -427,7 +445,8 @@ export SEED_PROFILE="$DUMP_PROFILE"
 $COMPOSE up -d
 
 wait_for_init_containers
-sleep 3
+sleep 5
+wait_for_postgres
 
 # ── Verify Mongo restored data ──
 info "Checking Mongo restored data..."
@@ -451,11 +470,15 @@ assert_eq "Restore MySQL: test user email preserved" "test@dump.test" "$RESTORED
 
 # ── Verify Postgres restored data ──
 info "Checking Postgres restored data..."
-RESTORED_PG_USERS=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
-    -t -A -c "SELECT COUNT(*) FROM users" 2>/dev/null) || RESTORED_PG_USERS="ERROR"
+# Debug: show what tables exist
+info "Postgres tables:"
+PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
+    -c "\dt" 2>&1 | head -20 || info "  (could not list tables)"
+RESTORED_PG_USERS=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
+    -t -A -c "SELECT COUNT(*) FROM users" 2>&1) || RESTORED_PG_USERS="ERROR"
 assert_eq "Restore Postgres: users has 4 rows (original + extra)" "4" "$RESTORED_PG_USERS"
 
-RESTORED_PG_TEST=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h localhost -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
+RESTORED_PG_TEST=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
     -t -A -c "SELECT email FROM users WHERE id='user-test'" 2>/dev/null) || RESTORED_PG_TEST="ERROR"
 assert_eq "Restore Postgres: test user email preserved" "test@dump.test" "$RESTORED_PG_TEST"
 

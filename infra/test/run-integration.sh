@@ -103,40 +103,21 @@ assert_not_contains() {
     fi
 }
 
-wait_for_init_containers() {
-    info "Waiting for init containers to complete..."
-    local max_wait=120
-    local waited=0
-    while [[ $waited -lt $max_wait ]]; do
-        local init_status
-        init_status=$($COMPOSE ps -a --format '{{.Name}} {{.State}}' 2>/dev/null \
-            | grep '_init' | grep -v 'exited' || true)
-        if [[ -z "$init_status" ]]; then
-            info "Init containers finished (${waited}s)"
-            return 0
-        fi
-        sleep 3
-        waited=$((waited + 3))
-    done
-    fail "Init containers did not finish within ${max_wait}s"
-    return 1
-}
+start_and_wait() {
+    info "Starting services (waiting for healthchecks)..."
+    $COMPOSE up -d --wait
 
-wait_for_postgres() {
-    info "Waiting for Postgres to accept queries..."
-    local max_wait=30
-    local waited=0
-    while [[ $waited -lt $max_wait ]]; do
-        if PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
-            -c "SELECT 1" >/dev/null 2>&1; then
-            info "Postgres ready (${waited}s)"
-            return 0
-        fi
-        sleep 2
-        waited=$((waited + 2))
-    done
-    fail "Postgres not ready within ${max_wait}s"
-    return 1
+    info "Waiting for init containers to finish seeding..."
+    local init_containers
+    init_containers=$($COMPOSE ps -a --format '{{.Name}}' | grep '_init' || true)
+    if [[ -n "$init_containers" ]]; then
+        # docker wait blocks until containers exit — no polling needed.
+        # Works even if they already exited (returns immediately with exit code).
+        docker wait $init_containers >/dev/null
+        info "Init containers finished"
+    else
+        info "No init containers found"
+    fi
 }
 
 create_seed_files() {
@@ -231,13 +212,7 @@ log "Test 1: Start services + verify seed data"
 create_seed_files "$SEED_PROFILE"
 
 export SEED_PROFILE
-$COMPOSE up -d
-
-wait_for_init_containers
-
-# Give a moment for final writes
-sleep 5
-wait_for_postgres
+start_and_wait
 
 # ── Mongo: verify seed data ──
 info "Checking Mongo seed data..."
@@ -442,11 +417,7 @@ $COMPOSE down 2>/dev/null || true
 
 # Start with the dumped profile — the init-and-seed scripts consume the dump files
 export SEED_PROFILE="$DUMP_PROFILE"
-$COMPOSE up -d
-
-wait_for_init_containers
-sleep 5
-wait_for_postgres
+start_and_wait
 
 # ── Verify Mongo restored data ──
 info "Checking Mongo restored data..."
@@ -470,12 +441,8 @@ assert_eq "Restore MySQL: test user email preserved" "test@dump.test" "$RESTORED
 
 # ── Verify Postgres restored data ──
 info "Checking Postgres restored data..."
-# Debug: show what tables exist
-info "Postgres tables:"
-PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
-    -c "\dt" 2>&1 | head -20 || info "  (could not list tables)"
 RESTORED_PG_USERS=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \
-    -t -A -c "SELECT COUNT(*) FROM users" 2>&1) || RESTORED_PG_USERS="ERROR"
+    -t -A -c "SELECT COUNT(*) FROM users" 2>/dev/null) || RESTORED_PG_USERS="ERROR"
 assert_eq "Restore Postgres: users has 4 rows (original + extra)" "4" "$RESTORED_PG_USERS"
 
 RESTORED_PG_TEST=$(PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -p "$POSTGRES_PORT" -U "$POSTGRES_USER" \

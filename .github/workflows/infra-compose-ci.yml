@@ -107,10 +107,7 @@ jobs:
 
       # Validate that .d.ts declarations are self-consistent and importable
       - name: Check type declarations
-        run: |
-          npx tsc --noEmit --strict --moduleResolution node16 --module node16 \
-            --target es2022 --skipLibCheck \
-            api.d.ts handlers.d.ts
+        run: npm run typecheck
 
   # ── Package validation ──────────────────────────────────────
   package:

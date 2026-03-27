@@ -9,6 +9,7 @@
         "test": "vitest run",
         "test:watch": "vitest",
         "test:integration": "bash test/run-integration.sh",
+        "typecheck": "tsc --noEmit --strict --moduleResolution node16 --module node16 --target es2022 --skipLibCheck api.d.ts handlers.d.ts",
         "prepublishOnly": "export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain saga --domain-owner 531314149529 --query authorizationToken --output text) && npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=$CODEARTIFACT_AUTH_TOKEN && echo '✅ CodeArtifact auth token refreshed'"
     },
     "type": "module",
@@ -38,6 +39,7 @@
     },
     "devDependencies": {
         "express": "^4.22.1",
+        "typescript": "^5.9.3",
         "vitest": "^1.6.1"
     },
     "peerDependencies": {

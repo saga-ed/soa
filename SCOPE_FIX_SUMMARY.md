@@ -36,9 +36,9 @@
 #### 1. Package Dependencies
 - **File**: `apps/api/package.json`
   - Updated all `@saga-ed/*` dependencies to `@saga-ed/*`
-  - Includes: api-core, db, logger, pubsub-core, config, trpc-codegen
+  - Includes: api-core, db, logger, pubsub-core, config, trpc-base
 - **File**: `apps/api/types/package.json`
-  - Updated devDependencies: trpc-codegen, zod2ts
+  - Updated devDependencies: trpc-base
 
 ## 📦 Affected Packages
 
@@ -51,7 +51,7 @@
 6. `@saga-ed/pubsub-core`
 7. `@saga-ed/pubsub-server`
 8. `@saga-ed/tgql-codegen`
-9. `@saga-ed/trpc-codegen`
+9. `@saga-ed/trpc-base`
 10. `@saga-ed/typescript-config`
 11. `@saga-ed/ui`
 12. `@saga-ed/eslint-config`

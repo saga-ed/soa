@@ -1,0 +1,46 @@
+{
+    "name": "@saga-ed/soa-trpc-base",
+    "version": "1.0.0",
+    "type": "module",
+    "description": "Shared tRPC initialization factory for saga-soa monorepo",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsup",
+        "dev": "tsup --watch",
+        "check-types": "tsc --noEmit",
+        "lint": "eslint src/"
+    },
+    "dependencies": {
+        "@trpc/server": "^11.0.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.1",
+        "tsup": "^8.3.5",
+        "typescript": "5.8.2"
+    },
+    "keywords": [
+        "trpc",
+        "saga-soa"
+    ],
+    "author": "saga-soa",
+    "license": "MIT",
+    "publishConfig": {
+        "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/saga-ed/soa.git",
+        "directory": "packages/core/trpc-base"
+    }
+}

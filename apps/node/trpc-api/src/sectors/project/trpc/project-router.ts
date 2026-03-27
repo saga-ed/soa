@@ -1,70 +1,53 @@
-import { injectable, inject } from 'inversify';
-import { AbstractTRPCController, router } from '@saga-ed/soa-api-core/abstract-trpc-controller';
-import type { ILogger } from '@saga-ed/soa-logger';
+import { router, publicProcedure } from '../../../trpc.js';
 import {
-  CreateProjectSchema,
-  UpdateProjectSchema,
-  GetProjectSchema,
-  type CreateProjectZ,
-  type UpdateProjectZ,
-  type GetProjectZ,
+    CreateProjectSchema,
+    UpdateProjectSchema,
+    GetProjectSchema,
 } from './schema/project-schemas.js';
-import { ProjectHelper } from './project-helper.js';
 
-@injectable()
-export class ProjectController extends AbstractTRPCController {
-  readonly sectorName = 'project';
-  private projectHelper: ProjectHelper;
+export const projectRouter = router({
+    // Get all projects
+    getAllProjects: publicProcedure.query(({ ctx }) => {
+        return ctx.projectHelper.getAllProjects();
+    }),
 
-  constructor(@inject('ILogger') logger: ILogger) {
-    super(logger);
-    this.projectHelper = new ProjectHelper();
-  }
+    // Get project by ID
+    getProjectById: publicProcedure
+        .input(GetProjectSchema)
+        .query(({ ctx, input }) => {
+            const project = ctx.projectHelper.getProjectById(input.id);
+            if (!project) {
+                throw new Error('Project not found');
+            }
+            return project;
+        }),
 
-  createRouter() {
-    const t = this.createProcedure();
-
-    return router({
-      // Get all projects
-      getAllProjects: t.query(() => {
-        return this.projectHelper.getAllProjects();
-      }),
-
-      // Get project by ID
-      getProjectById: t.input(GetProjectSchema).query(({ input }: { input: GetProjectZ }) => {
-        const project = this.projectHelper.getProjectById(input.id);
-        if (!project) {
-          throw new Error('Project not found');
-        }
-        return project;
-      }),
-
-      // Create project
-      createProject: t
+    // Create project
+    createProject: publicProcedure
         .input(CreateProjectSchema)
-        .mutation(({ input }: { input: CreateProjectZ }) => {
-          return this.projectHelper.createProject(input);
+        .mutation(({ ctx, input }) => {
+            return ctx.projectHelper.createProject(input);
         }),
 
-      // Update project
-      updateProject: t
+    // Update project
+    updateProject: publicProcedure
         .input(UpdateProjectSchema)
-        .mutation(({ input }: { input: UpdateProjectZ }) => {
-          const updatedProject = this.projectHelper.updateProject(input);
-          if (!updatedProject) {
-            throw new Error('Project not found');
-          }
-          return updatedProject;
+        .mutation(({ ctx, input }) => {
+            const updatedProject = ctx.projectHelper.updateProject(input);
+            if (!updatedProject) {
+                throw new Error('Project not found');
+            }
+            return updatedProject;
         }),
 
-      // Delete project
-      deleteProject: t.input(GetProjectSchema).mutation(({ input }: { input: GetProjectZ }) => {
-        const success = this.projectHelper.deleteProject(input.id);
-        if (!success) {
-          throw new Error('Project not found');
-        }
-        return { success: true, message: 'Project deleted successfully' };
-      }),
-    });
-  }
-}
+    // Delete project
+    deleteProject: publicProcedure
+        .input(GetProjectSchema)
+        .mutation(({ ctx, input }) => {
+            const success = ctx.projectHelper.deleteProject(input.id);
+            if (!success) {
+                throw new Error('Project not found');
+            }
+            return { success: true, message: 'Project deleted successfully' };
+        }),
+});

@@ -1,10 +1,10 @@
 # tRPC API
 
-A modular tRPC-based API using sector-based architecture with dynamic router loading and type generation.
+A modular tRPC-based API using sector-based architecture with static router composition and direct type export.
 
 ## Overview
 
-This API implements a tRPC server with a sector-based organization. Each sector represents a distinct business domain and contains its own tRPC routers, Zod schemas, and business logic.
+This API implements a tRPC server with a sector-based organization. Each sector represents a distinct business domain and contains its own tRPC routers, Zod schemas, and business logic. The `AppRouter` type is exported directly from the static router composition — no code generation required.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ The API is organized into **sectors**, each representing a distinct business dom
 src/sectors/
 ├── project/
 │   ├── trpc/
-│   │   ├── project.router.ts    # tRPC controller implementation
+│   │   ├── project.router.ts    # Static tRPC router definition
 │   │   ├── project.schemas.ts   # Zod schemas + TypeScript types
 │   │   ├── project.types.ts     # Re-exports for sector interface
 │   │   ├── project.data.ts      # Business logic/data access
@@ -26,9 +26,9 @@ src/sectors/
     └── trpc/                    # Same structure as project
 ```
 
-### Dynamic Router Loading
+### Static Router Composition
 
-The API dynamically loads tRPC routers from sector directories at runtime, automatically discovering new sectors without manual configuration.
+Sector routers are defined as plain module-level constants and statically imported into `app-router.ts`, which composes them into the `appRouter` and exports `type AppRouter = typeof appRouter`. This type is re-exported by the `trpc-types` sub-package for client consumption.
 
 ## Quick Start
 
@@ -43,19 +43,22 @@ pnpm dev
 pnpm build
 ```
 
-## Type Generation
+## Type Sharing
 
-This API works with the companion `trpc-types` package which automatically generates TypeScript types from the tRPC router structure. For detailed information about type generation, router parsing, and usage examples, see:
+The `trpc-types` sub-package directly re-exports the `AppRouter` type from `app-router.ts`. Clients import the type for end-to-end type safety:
 
-**[📖 Detailed Documentation →](./trpc-types/README.md)**
+```typescript
+import type { AppRouter } from '@saga-ed/soa-trpc-types';
+```
+
+For details, see: **[trpc-types README](./trpc-types/README.md)**
 
 ## Scripts
 
 - `pnpm dev` - Start development server with hot reload
 - `pnpm build` - Build the API for production
 - `pnpm test` - Run tests
-- `pnpm generate` - Generate tRPC router types
 
 ## Development
 
-The API uses dependency injection for clean separation of concerns and testability. Each sector can be developed independently and will be automatically discovered by the main application. 
+The API uses dependency injection for clean separation of concerns and testability. Each sector can be developed independently. Services are injected via the tRPC context at request time from the Inversify DI container, keeping router definitions pure and statically analyzable.

@@ -1,55 +1,59 @@
+import 'reflect-metadata';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
-import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
-import { TRPCServer } from '@saga-ed/soa-api-core/trpc-server';
-import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
-import { AbstractTRPCController } from '@saga-ed/soa-api-core/abstract-trpc-controller';
+import { createExpressMiddleware } from '@trpc/server/adapters/express';
+import { appRouter } from '../src/app-router.js';
+import type { TRPCContext } from '../src/trpc.js';
+import { ProjectHelper } from '../src/sectors/project/trpc/project-helper.js';
+import { RunHelper } from '../src/sectors/run/trpc/run-helper.js';
+import { events } from '../src/sectors/pubsub/trpc/events.js';
 import { container } from '../src/inversify.config.js';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { PubSubService, TYPES, ChannelService } from '@saga-ed/soa-pubsub-server';
+import type { ILogger } from '@saga-ed/soa-logger';
+import type { EventDefinition, ChannelConfig } from '@saga-ed/soa-pubsub-core';
 import express from 'express';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 describe('Automatic Pong Emission Tests', () => {
     let app: express.Application;
     let server: any;
 
     beforeAll(async () => {
-        // Get the ControllerLoader from DI
-        const controllerLoader = container.get(ControllerLoader);
-        
-        // Dynamically load all tRPC controllers
-        const controllers = await controllerLoader.loadControllers(
-            path.resolve(__dirname, '../src/sectors/*/trpc/*-router.ts'),
-            AbstractTRPCController
+        app = express();
+
+        const logger = container.get<ILogger>('ILogger');
+        const pubsubService = container.get<PubSubService>('PubSubService');
+        const channelService = container.get<ChannelService>(TYPES.ChannelService);
+
+        // Register events and channels
+        pubsubService.registerEvents(events as unknown as Record<string, EventDefinition>);
+        const pingpongChannel: ChannelConfig = {
+            name: 'pingpong',
+            family: 'demo',
+            ordered: false,
+            maxSubscribers: 100,
+            maxEventSize: 1024 * 1024,
+            historyRetentionMs: 24 * 60 * 60 * 1000,
+            authScope: 'user'
+        };
+        channelService.registerChannels([pingpongChannel]);
+
+        const projectHelper = new ProjectHelper();
+        const runHelper = new RunHelper();
+
+        // Mount tRPC with static router
+        app.use(
+            '/saga-soa/v1/trpc',
+            createExpressMiddleware({
+                router: appRouter,
+                createContext: (): TRPCContext => ({
+                    logger,
+                    pubsubService,
+                    channelService,
+                    projectHelper,
+                    runHelper,
+                }),
+            }),
         );
-
-        // Bind all loaded controllers to the DI container
-        for (const controller of controllers) {
-            container.bind(controller).toSelf().inSingletonScope();
-        }
-
-        // Configure Express server
-        const expressServer = container.get(ExpressServer);
-        await expressServer.init(container, []);
-        app = expressServer.getApp();
-
-        // Get the TRPCServer instance from DI
-        const trpcServer = container.get(TRPCServer);
-
-        // Add routers to the TRPCServer using dynamically loaded controllers
-        for (const controller of controllers) {
-            const controllerInstance = container.get(controller) as any;
-            trpcServer.addRouter(controllerInstance.sectorName, controllerInstance.createRouter());
-        }
-
-        // Create tRPC middleware using TRPCServer
-        const trpcMiddleware = trpcServer.createExpressMiddleware();
-
-        // Mount tRPC on the configured base path
-        app.use(trpcServer.getBasePath(), trpcMiddleware);
 
         // Start the server on a random port
         server = app.listen(0);
@@ -81,13 +85,11 @@ describe('Automatic Pong Emission Tests', () => {
             expect(result.pingEvent.payload.message).toBe(pingPayload.message);
 
             // The key insight: the action now returns the SAME data that was emitted as SSE
-            // This proves the ping action executed with context and emitted the pong response
             expect(result.pubsubResult.result).toBeDefined();
             expect(result.pubsubResult.result.reply).toBe(`Pong: ${pingPayload.message}`);
             expect(result.pubsubResult.result.originalMessage).toBe(pingPayload.message);
             expect(result.pubsubResult.result.requestId).toBeDefined();
 
-            // The response should contain the action result (what was also emitted as SSE)
             const actionResult = result.pubsubResult.result;
             expect(actionResult.reply).toContain('Pong:');
             expect(actionResult.originalMessage).toBe(pingPayload.message);
@@ -98,7 +100,6 @@ describe('Automatic Pong Emission Tests', () => {
             const promises = [];
             const testMessages = ['Rapid 1', 'Rapid 2', 'Rapid 3'];
 
-            // Send multiple pings rapidly
             for (const message of testMessages) {
                 promises.push(
                     request(app)
@@ -113,7 +114,6 @@ describe('Automatic Pong Emission Tests', () => {
 
             const responses = await Promise.all(promises);
 
-            // Verify each ping triggered automatic pong emission
             responses.forEach((response, index) => {
                 const result = response.body.result.data;
                 const expectedMessage = testMessages[index];
@@ -139,46 +139,39 @@ describe('Automatic Pong Emission Tests', () => {
             const result = response.body.result.data;
             const actionResult = result.pubsubResult.result;
 
-            // Verify the action received context and used it to emit SSE
             expect(actionResult.reply).toBe(`Pong: ${testMessage}`);
             expect(actionResult.originalMessage).toBe(testMessage);
-            
-            // The requestId should be consistent (from action context)
+
             expect(actionResult.requestId).toBeDefined();
             expect(typeof actionResult.requestId).toBe('string');
-            
-            // Verify the timestamp was set by the action
+
             expect(actionResult.timestamp).toBeDefined();
             const timestamp = new Date(actionResult.timestamp);
-            expect(timestamp.getTime()).toBeCloseTo(Date.now(), -3); // Within ~1000ms
+            expect(timestamp.getTime()).toBeCloseTo(Date.now(), -3);
         });
 
         it('should handle custom correlation IDs correctly', async () => {
-            const customCorrelationId = 'custom-correlation-123';
-            
             const response = await request(app)
                 .post('/saga-soa/v1/trpc/pubsub.sendEvent')
                 .send({
                     name: 'ping:message',
-                    payload: { 
+                    payload: {
                         message: 'Custom correlation test',
                         timestamp: new Date().toISOString()
                     },
                     channel: 'pingpong',
                     options: {
-                        correlationId: customCorrelationId
+                        correlationId: 'custom-correlation-123'
                     }
                 })
                 .expect(200);
 
             const result = response.body.result.data;
-            
-            // Verify the event was processed and pong was emitted
+
             expect(result.success).toBe(true);
             expect(result.result.reply).toBe('Pong: Custom correlation test');
             expect(result.result.originalMessage).toBe('Custom correlation test');
-            
-            // The request should succeed (pong SSE was emitted with custom correlation ID)
+
             expect(result.eventId).toBeDefined();
         });
     });

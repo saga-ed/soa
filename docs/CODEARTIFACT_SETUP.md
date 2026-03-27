@@ -24,8 +24,7 @@ SOA packages are published to AWS CodeArtifact under the `@saga-ed` scope:
 | `@saga-ed/soa-pubsub-client` | PubSub client library |
 | `@saga-ed/soa-pubsub-core` | PubSub core types/interfaces |
 | `@saga-ed/soa-tgql-codegen` | TypeGraphQL code generation |
-| `@saga-ed/soa-trpc-codegen` | tRPC code generation |
-| `@saga-ed/soa-zod2ts` | Zod to TypeScript schema generation |
+| `@saga-ed/soa-trpc-base` | Shared tRPC initialization factory |
 
 ## Local Development
 

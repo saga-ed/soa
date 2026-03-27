@@ -1,7 +1,7 @@
 # SOA Repository Remediation Plan (Updated)
 
 **Generated:** 2026-01-31
-**Updated:** 2026-01-31 (Excluded: trpc-api, trpc-codegen, web-client)
+**Updated:** 2026-03-27 (Excluded: trpc-api, trpc-codegen [removed], web-client)
 **Current Health:** 2.8/5.0 (Fair) ⚠️
 **Target Health:** 4.3/5.0 (Good) ✅
 **Estimated Total Effort:** ~12-14 hours over 2 sprints
@@ -11,8 +11,8 @@
 ## Scope Exclusions
 
 **Excluded from remediation** (future migrations/refactors):
-- ❌ **trpc-api** - Moving to static router (no codegen)
-- ❌ **trpc-codegen** - Being deprecated in favor of static router approach
+- ❌ **trpc-api** - Migrated to static router pattern (no codegen)
+- ❌ **trpc-codegen** - Removed; replaced by `@saga-ed/soa-trpc-base` + static router pattern
 - ❌ **web-client** - Migrating to SvelteKit immediately
 
 **In Scope:** 20 packages (down from 23)
@@ -147,7 +147,7 @@ grep "prettier" apps/node/tgql-api/package.json
 ### 2.3 Update Tier CLAUDE.md for Simple Packages
 
 **Files to Update:**
-- `/packages/core/CLAUDE.md` - Add descriptions for config, tgql-codegen (simple CLI)
+- `/packages/core/CLAUDE.md` - Add descriptions for config, tgql-codegen, trpc-base
 - `/packages/node/CLAUDE.md` - Add descriptions for logger, pubsub, redis
 
 **Example:**
@@ -255,10 +255,10 @@ Simple Pino logger wrapper with sensible defaults. Standard Node.js logging patt
 
 ## Notes on Excluded Packages
 
-### trpc-api + trpc-codegen
-**Reason:** Moving to static router approach (no codegen)
-**Action:** These will be refactored separately, no remediation needed
-**Future:** Once refactored to static router, add documentation and tests
+### trpc-api (formerly + trpc-codegen)
+**Reason:** Migrated to static router approach; `trpc-codegen` and `zod2ts` packages removed
+**Action:** Refactored to use `@saga-ed/soa-trpc-base` + static `app-router.ts` composition
+**Status:** `AppRouter` type now exported directly — no codegen pipeline
 
 ### web-client
 **Reason:** Migrating to SvelteKit immediately

@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+    Service-to-Service Authentication - Cognito User Pool, Resource Server, and App Clients.
+    Implements OAuth 2.0 Client Credentials flow for cross-organization service authentication.
+
+Parameters:
+    Environment:
+        Type: String
+        AllowedValues:
+            - dev
+            - staging
+            - prod
+        Description: Deployment environment
+
+    ServiceName:
+        Type: String
+        Default: saga
+        Description: Service name prefix for resource naming
+
+    CustomDomainPrefix:
+        Type: String
+        Default: ''
+        Description: >
+            Custom domain prefix for the Cognito hosted UI (e.g. "auth-saga-dev").
+            Leave empty to skip custom domain creation.
+
+    AccessTokenValidityMinutes:
+        Type: Number
+        Default: 60
+        MinValue: 5
+        MaxValue: 1440
+        Description: Access token lifetime in minutes (5 min to 24 hours)
+
+    ResourceServerIdentifier:
+        Type: String
+        Default: api
+        Description: Identifier for the resource server (used as scope prefix)
+
+Conditions:
+    CreateCustomDomain: !Not [!Equals [!Ref CustomDomainPrefix, '']]
+
+Resources:
+    # =========================================================================
+    # Cognito User Pool
+    # =========================================================================
+    ServiceAuthUserPool:
+        Type: AWS::Cognito::UserPool
+        DeletionPolicy: Retain
+        UpdateReplacePolicy: Retain
+        Properties:
+            UserPoolName: !Sub '${ServiceName}-service-auth-${Environment}'
+            AdminCreateUserConfig:
+                AllowAdminCreateUserOnly: true
+            # No password policy needed - machine clients use client credentials, not passwords.
+            # No MFA, email, or SMS config needed - this pool is for machine-to-machine auth only.
+            UserPoolTags:
+                Environment: !Ref Environment
+                Service: !Ref ServiceName
+                Purpose: service-to-service-auth
+                ManagedBy: cloudformation
+
+    # =========================================================================
+    # Resource Server - Defines scopes (permissions) for the API
+    # =========================================================================
+    ServiceAuthResourceServer:
+        Type: AWS::Cognito::UserPoolResourceServer
+        Properties:
+            UserPoolId: !Ref ServiceAuthUserPool
+            Identifier: !Ref ResourceServerIdentifier
+            Name: !Sub '${ServiceName}-api-${Environment}'
+            Scopes:
+                - ScopeName: read
+                  ScopeDescription: Read access to API resources
+                - ScopeName: write
+                  ScopeDescription: Write access to API resources
+                - ScopeName: 'webhooks.send'
+                  ScopeDescription: Permission to send webhooks to our endpoints
+                - ScopeName: 'webhooks.receive'
+                  ScopeDescription: Permission to receive webhooks from our service
+                - ScopeName: admin
+                  ScopeDescription: Administrative access (internal services only)
+
+    # =========================================================================
+    # Custom Domain (optional)
+    # =========================================================================
+    ServiceAuthDomain:
+        Type: AWS::Cognito::UserPoolDomain
+        Condition: CreateCustomDomain
+        Properties:
+            Domain: !Ref CustomDomainPrefix
+            UserPoolId: !Ref ServiceAuthUserPool
+
+    # =========================================================================
+    # Example Partner App Client
+    # Demonstrates configuration for a single partner. In practice, create one
+    # app client per external partner organization via additional stacks or
+    # automation.
+    # =========================================================================
+    ExamplePartnerAppClient:
+        Type: AWS::Cognito::UserPoolClient
+        DependsOn: ServiceAuthResourceServer
+        Properties:
+            ClientName: !Sub '${ServiceName}-example-partner-${Environment}'
+            UserPoolId: !Ref ServiceAuthUserPool
+            GenerateSecret: true
+            # Only allow client credentials flow (machine-to-machine)
+            AllowedOAuthFlows:
+                - client_credentials
+            AllowedOAuthFlowsUserPoolClient: true
+            # Assign scopes this partner is allowed to request
+            AllowedOAuthScopes:
+                - !Sub '${ResourceServerIdentifier}/read'
+                - !Sub '${ResourceServerIdentifier}/write'
+                - !Sub '${ResourceServerIdentifier}/webhooks.send'
+            # Token validity
+            AccessTokenValidity: !Ref AccessTokenValidityMinutes
+            TokenValidityUnits:
+                AccessToken: minutes
+            # No refresh token for client credentials flow
+            ExplicitAuthFlows: []
+            # Prevent user-facing auth flows
+            SupportedIdentityProviders: []
+
+    # =========================================================================
+    # Internal Service App Client
+    # For internal cross-service calls with elevated permissions.
+    # =========================================================================
+    InternalServiceAppClient:
+        Type: AWS::Cognito::UserPoolClient
+        DependsOn: ServiceAuthResourceServer
+        Properties:
+            ClientName: !Sub '${ServiceName}-internal-service-${Environment}'
+            UserPoolId: !Ref ServiceAuthUserPool
+            GenerateSecret: true
+            AllowedOAuthFlows:
+                - client_credentials
+            AllowedOAuthFlowsUserPoolClient: true
+            AllowedOAuthScopes:
+                - !Sub '${ResourceServerIdentifier}/read'
+                - !Sub '${ResourceServerIdentifier}/write'
+                - !Sub '${ResourceServerIdentifier}/webhooks.send'
+                - !Sub '${ResourceServerIdentifier}/webhooks.receive'
+                - !Sub '${ResourceServerIdentifier}/admin'
+            AccessTokenValidity: !Ref AccessTokenValidityMinutes
+            TokenValidityUnits:
+                AccessToken: minutes
+            ExplicitAuthFlows: []
+            SupportedIdentityProviders: []
+
+Outputs:
+    UserPoolId:
+        Description: Cognito User Pool ID
+        Value: !Ref ServiceAuthUserPool
+        Export:
+            Name: !Sub '${ServiceName}-${Environment}-service-auth-user-pool-id'
+
+    UserPoolArn:
+        Description: Cognito User Pool ARN
+        Value: !GetAtt ServiceAuthUserPool.Arn
+        Export:
+            Name: !Sub '${ServiceName}-${Environment}-service-auth-user-pool-arn'
+
+    UserPoolProviderURL:
+        Description: Cognito User Pool provider URL (issuer)
+        Value: !GetAtt ServiceAuthUserPool.ProviderURL
+        Export:
+            Name: !Sub '${ServiceName}-${Environment}-service-auth-provider-url'
+
+    TokenEndpoint:
+        Description: OAuth 2.0 token endpoint
+        Value: !If
+            - CreateCustomDomain
+            - !Sub 'https://${CustomDomainPrefix}.auth.${AWS::Region}.amazoncognito.com/oauth2/token'
+            - !Sub 'https://${ServiceAuthUserPool}.auth.${AWS::Region}.amazoncognito.com/oauth2/token'
+
+    JwksUri:
+        Description: JWKS URI for token verification
+        Value: !Sub 'https://cognito-idp.${AWS::Region}.amazonaws.com/${ServiceAuthUserPool}/.well-known/jwks.json'
+
+    ResourceServerIdentifier:
+        Description: Resource server identifier (scope prefix)
+        Value: !Ref ResourceServerIdentifier
+        Export:
+            Name: !Sub '${ServiceName}-${Environment}-service-auth-resource-server-id'
+
+    ExamplePartnerClientId:
+        Description: Example partner app client ID (distribute to partner securely)
+        Value: !Ref ExamplePartnerAppClient
+
+    InternalServiceClientId:
+        Description: Internal service app client ID
+        Value: !Ref InternalServiceAppClient

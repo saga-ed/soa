@@ -147,9 +147,12 @@ export function switch_profile(options) {
     const down = compose_cmd(['down'], env);
     if (down.status !== 0) return { status: down.status ?? 1, profile };
 
-    // Up with new profile
+    // Up with new profile, wait for init containers to finish seeding
     const up = compose_cmd(['up', '-d'], env);
-    if (up.status === 0) write_active_profile(profile);
+    if (up.status === 0) {
+        write_active_profile(profile);
+        wait_for_init_containers(env);
+    }
     return { status: up.status ?? 1, profile };
 }
 
@@ -174,10 +177,31 @@ export function reset(options) {
         if (rm.status !== 0) return { status: rm.status, profile };
     }
 
-    // Up — fresh seed
+    // Up — fresh seed, then wait for init containers to finish seeding
     const up = compose_cmd(['up', '-d'], env);
-    if (up.status === 0) write_active_profile(profile);
+    if (up.status === 0) {
+        write_active_profile(profile);
+        wait_for_init_containers(env);
+    }
     return { status: up.status ?? 1, profile };
+}
+
+/**
+ * Wait for init containers (mysql_init, mongo_init, postgres_init) to finish.
+ * These run seeds/snapshots and exit. Without waiting, callers may try to
+ * use the databases before seeding is complete.
+ */
+function wait_for_init_containers(env) {
+    const init_services = ['mysql_init', 'mongo_init', 'postgres_init'];
+    for (const svc of init_services) {
+        const ps = spawnSync('docker', [
+            'compose', 'ps', '--status', 'running', '--format', '{{.Name}}', svc,
+        ], { cwd: __dirname, env, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+        const name = (ps.stdout || '').trim();
+        if (name) {
+            spawnSync('docker', ['wait', name], { stdio: 'inherit', timeout: 120000 });
+        }
+    }
 }
 
 /**

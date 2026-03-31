@@ -50,11 +50,13 @@ function parse_env_file(filepath) {
     return env;
 }
 
-/** Load env: .env.defaults first, then .env overrides (mirrors bin/infra-compose behavior). */
+/** Load env: .env.defaults first, then .env overrides, then user-level ~/.fixtures/.env.
+ *  The user-level file survives npm reinstalls (package .env gets wiped by npm install -g). */
 function load_env_defaults() {
     return {
         ...parse_env_file(resolve(__dirname, '.env.defaults')),
         ...parse_env_file(resolve(__dirname, '.env')),
+        ...parse_env_file(resolve(homedir(), '.fixtures', '.env')),
     };
 }
 

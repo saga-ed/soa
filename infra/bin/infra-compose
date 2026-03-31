@@ -4,12 +4,15 @@ set -euo pipefail
 # Resolve package root — works from npx, pnpm exec, or node_modules/.bin/
 PKG_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Load port defaults from package, then overlay local .env if present
+# Load port defaults: package defaults → package .env → user ~/.fixtures/.env
+# The user-level file survives npm reinstalls (package .env gets wiped by npm install -g).
 set -a
 # shellcheck disable=SC1091
 [ -f "$PKG_ROOT/.env.defaults" ] && source "$PKG_ROOT/.env.defaults"
 # shellcheck disable=SC1091
 [ -f ".env" ] && source ".env"
+# shellcheck disable=SC1091
+[ -f "$HOME/.fixtures/.env" ] && source "$HOME/.fixtures/.env"
 set +a
 
 usage() {

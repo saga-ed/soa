@@ -1,66 +1,53 @@
-import { injectable, inject } from 'inversify';
-import { AbstractTRPCController, router } from '@saga-ed/soa-api-core/abstract-trpc-controller';
-import type { ILogger } from '@saga-ed/soa-logger';
+import { router, publicProcedure } from '../../../trpc.js';
 import {
-  CreateRunSchema,
-  UpdateRunSchema,
-  GetRunSchema,
-  type CreateRunZ,
-  type UpdateRunZ,
-  type GetRunZ,
+    CreateRunSchema,
+    UpdateRunSchema,
+    GetRunSchema,
 } from './schema/run-schemas.js';
-import { RunHelper } from './run-helper.js';
 
-@injectable()
-export class RunController extends AbstractTRPCController {
-  readonly sectorName = 'run';
-  private runHelper: RunHelper;
+export const runRouter = router({
+    // Get all runs
+    getAllRuns: publicProcedure.query(({ ctx }) => {
+        return ctx.runHelper.getAllRuns();
+    }),
 
-  constructor(@inject('ILogger') logger: ILogger) {
-    super(logger);
-    this.runHelper = new RunHelper();
-  }
+    // Get run by ID
+    getRunById: publicProcedure
+        .input(GetRunSchema)
+        .query(({ ctx, input }) => {
+            const run = ctx.runHelper.getRunById(input.id);
+            if (!run) {
+                throw new Error('Run not found');
+            }
+            return run;
+        }),
 
-  createRouter() {
-    const t = this.createProcedure();
+    // Create run
+    createRun: publicProcedure
+        .input(CreateRunSchema)
+        .mutation(({ ctx, input }) => {
+            return ctx.runHelper.createRun(input);
+        }),
 
-    return router({
-      // Get all runs
-      getAllRuns: t.query(() => {
-        return this.runHelper.getAllRuns();
-      }),
+    // Update run
+    updateRun: publicProcedure
+        .input(UpdateRunSchema)
+        .mutation(({ ctx, input }) => {
+            const updatedRun = ctx.runHelper.updateRun(input);
+            if (!updatedRun) {
+                throw new Error('Run not found');
+            }
+            return updatedRun;
+        }),
 
-      // Get run by ID
-      getRunById: t.input(GetRunSchema).query(({ input }: { input: GetRunZ }) => {
-        const run = this.runHelper.getRunById(input.id);
-        if (!run) {
-          throw new Error('Run not found');
-        }
-        return run;
-      }),
-
-      // Create run
-      createRun: t.input(CreateRunSchema).mutation(({ input }: { input: CreateRunZ }) => {
-        return this.runHelper.createRun(input);
-      }),
-
-      // Update run
-      updateRun: t.input(UpdateRunSchema).mutation(({ input }: { input: UpdateRunZ }) => {
-        const updatedRun = this.runHelper.updateRun(input);
-        if (!updatedRun) {
-          throw new Error('Run not found');
-        }
-        return updatedRun;
-      }),
-
-      // Delete run
-      deleteRun: t.input(GetRunSchema).mutation(({ input }: { input: GetRunZ }) => {
-        const success = this.runHelper.deleteRun(input.id);
-        if (!success) {
-          throw new Error('Run not found');
-        }
-        return { success: true, message: 'Run deleted successfully' };
-      }),
-    });
-  }
-}
+    // Delete run
+    deleteRun: publicProcedure
+        .input(GetRunSchema)
+        .mutation(({ ctx, input }) => {
+            const success = ctx.runHelper.deleteRun(input.id);
+            if (!success) {
+                throw new Error('Run not found');
+            }
+            return { success: true, message: 'Run deleted successfully' };
+        }),
+});

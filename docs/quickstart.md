@@ -83,7 +83,7 @@ This uses Turborepo to build all packages in the correct dependency order:
 2. **Core packages**:
    - `@saga-ed/soa-config`
    - `@saga-ed/soa-logger`
-   - `@saga-ed/soa-trpc-codegen`
+   - `@saga-ed/soa-trpc-base`
    - `@saga-ed/soa-tgql-codegen`
 
 3. **Service packages**:
@@ -92,7 +92,7 @@ This uses Turborepo to build all packages in the correct dependency order:
    - `@saga-ed/soa-pubsub-server`
    - `@saga-ed/soa-pubsub-client`
 
-4. **Type packages** (generated):
+4. **Type packages**:
    - `@saga-ed/soa-trpc-types`
    - `@saga-ed/soa-tgql-types`
 
@@ -177,7 +177,7 @@ soa/
 │   ├── pubsub-core/       # PubSub type definitions
 │   ├── pubsub-server/     # PubSub server implementation
 │   ├── tgql-codegen/      # TypeGraphQL code generator
-│   ├── trpc-codegen/      # tRPC code generator
+│   ├── trpc-base/         # Shared tRPC initialization factory
 │   ├── typescript-config/ # Shared TypeScript configuration
 │   └── ui/                # Shared UI components
 ├── apps/
@@ -187,8 +187,6 @@ soa/
 │       ├── tgql-api/      # TypeGraphQL API example
 │       ├── trpc-api/      # tRPC API example
 │       └── web-client/    # Next.js web client
-└── build-tools/
-    └── zod2ts/            # Zod to TypeScript converter
 ```
 
 ## Common Issues

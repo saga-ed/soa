@@ -18,10 +18,6 @@
       "types": "./dist/abstract-tgql-controller.d.ts",
       "default": "./dist/abstract-tgql-controller.js"
     },
-    "./abstract-trpc-controller": {
-      "types": "./dist/abstract-trpc-controller.d.ts",
-      "default": "./dist/abstract-trpc-controller.js"
-    },
     "./abstract-rest-controller": {
       "types": "./dist/abstract-rest-controller.d.ts",
       "default": "./dist/abstract-rest-controller.js"
@@ -61,14 +57,6 @@
     "./utils/controller-loader": {
       "types": "./dist/utils/loadControllers.d.ts",
       "default": "./dist/utils/loadControllers.js"
-    },
-    "./trpc-server": {
-      "types": "./dist/trpc-server.d.ts",
-      "default": "./dist/trpc-server.js"
-    },
-    "./trpc-server-schema": {
-      "types": "./dist/trpc-server-schema.d.ts",
-      "default": "./dist/trpc-server-schema.js"
     }
   },
   "scripts": {
@@ -80,7 +68,6 @@
   "dependencies": {
     "@apollo/server": "^4.10.0",
     "@graphql-tools/schema": "^10.0.0",
-    "@trpc/server": "^11.0.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "fast-glob": "^3.3.3",
@@ -90,7 +77,6 @@
     "inversify": "^6.2.2",
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2",
-    "trpc-playground": "^1.0.4",
     "type-graphql": "^2.0.0-beta.3",
     "zod": "3.25.67"
   },

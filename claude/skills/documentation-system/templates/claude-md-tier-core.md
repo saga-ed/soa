@@ -51,7 +51,8 @@ const config = Config.parse(rawConfig);
 | `config/` | Zod configuration schemas |
 | `typescript-config/` | Shared tsconfig bases |
 | `eslint-config/` | Shared ESLint configurations |
-| `[codegen]/` | Code generation utilities |
+| `[codegen]/` | Code generation utilities (e.g., tgql-codegen) |
+| `trpc-base/` | Shared tRPC initialization factory |
 
 ## Convention Deviations
 

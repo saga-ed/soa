@@ -5,5 +5,6 @@ export default defineConfig({
     format: ['esm'],
     dts: true,
     clean: true,
-    external: ['@trpc/server'],
+    sourcemap: true,
+    target: 'es2022',
 });

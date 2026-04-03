@@ -12,7 +12,7 @@ See [/CLAUDE.md](../CLAUDE.md) for repository-wide context.
 |------|---------|-------------|
 | `web/` | Browser | Browser-only packages (React UI) |
 | `node/` | Node.js | Server-side packages (Express, DB, messaging) |
-| `core/` | Agnostic | Work in any runtime (config, types, codegen) |
+| `core/` | Agnostic | Work in any runtime (config, types, tRPC base) |
 
 ## Import Guidelines
 

@@ -7,8 +7,7 @@
     "jsx": "preserve"
   },
   "include": [
-    "src/**/*",
-    "generated/**/*"
+    "src/**/*"
   ],
   "exclude": [
     "dist",

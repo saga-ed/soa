@@ -9,21 +9,11 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./schemas": {
-      "types": "./dist/schemas/index.d.ts",
-      "default": "./dist/schemas/index.js"
-    },
-    "./generated": {
-      "types": "./dist/generated/index.d.ts",
-      "default": "./dist/generated/index.js"
     }
   },
   "scripts": {
-    "dev": "trpc-codegen watch -c codegen.config.js",
-    "build": "pnpm generate && tsup",
-    "generate": "trpc-codegen generate -c codegen.config.js",
-    "clean": "rm -rf dist generated",
+    "build": "tsup",
+    "clean": "rm -rf dist",
     "check-types": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -39,8 +29,6 @@
     "@vitest/coverage-v8": "^1.5.0",
     "tsup": "^8.5.0",
     "typescript": "5.8.2",
-    "vitest": "^1.5.0",
-    "@saga-ed/soa-trpc-codegen": "workspace:*",
-    "@saga-ed/soa-zod2ts": "workspace:*"
+    "vitest": "^1.5.0"
   }
 }

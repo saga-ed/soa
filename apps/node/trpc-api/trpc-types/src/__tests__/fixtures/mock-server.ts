@@ -8,7 +8,7 @@ import {
   UpdateRunSchema,
   GetRunSchema,
   GetRunsByProjectSchema,
-} from '../../../generated/schemas/index.js';
+} from '../../index.js';
 import type { Project } from '../../../../src/sectors/project/trpc/project.js';
 import type { Run } from '../../../../src/sectors/run/trpc/run.js';
 import { mockProjects, mockRuns, mockProject, mockRun } from './test-data.js';

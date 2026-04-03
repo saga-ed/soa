@@ -70,7 +70,7 @@ Average: 3.77/5.0
 [4.5] ✅ config           - Good: Simple config loader, well-described in tier docs
 [5.0] ✅ eslint-config    - Excellent: Pure config files, no CLAUDE.md needed
 [4.0] ✅ tgql-codegen     - Good: CLI tool, could benefit from CLAUDE.md
-[4.0] ✅ trpc-codegen     - Good: CLI tool, could benefit from CLAUDE.md
+[5.0] ✅ trpc-base        - Excellent: Simple factory function, well-documented at tier level
 [5.0] ✅ typescript-config - Excellent: Pure config files, no CLAUDE.md needed
 
 Average: 4.5/5.0
@@ -479,9 +479,9 @@ Similar to rabbitmq - Redis wrapper should document connection patterns, caching
 
 ---
 
-### trpc-codegen (4.0/5.0) ✅ Good
+### trpc-base (5.0/5.0) ✅ Excellent
 
-Similar to tgql-codegen - CLI tool that's simple enough without CLAUDE.md but could benefit from usage docs.
+Simple factory function (`createTRPCBase<TContext>()`) for per-app tRPC initialization. Replaces the former trpc-codegen package. Well-documented at the tier level.
 
 ---
 
@@ -757,7 +757,7 @@ This audit evaluated all 23 packages across 6 dimensions using the UPDATED crite
 - config
 - eslint-config
 - tgql-codegen
-- trpc-codegen
+- trpc-base
 - typescript-config
 
 ### Packages/Web (1)

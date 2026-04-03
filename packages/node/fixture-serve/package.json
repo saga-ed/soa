@@ -1,0 +1,68 @@
+{
+  "name": "@saga-ed/fixture-serve",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Reusable fixture server infrastructure — Express server, async job queue, provision workflow, and credential export for service-specific fixture CLIs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./fixture-server": {
+      "types": "./dist/fixture-server.d.ts",
+      "default": "./dist/fixture-server.js"
+    },
+    "./abstract-fixture-controller": {
+      "types": "./dist/abstract-fixture-controller.d.ts",
+      "default": "./dist/abstract-fixture-controller.js"
+    },
+    "./service-restart": {
+      "types": "./dist/service-restart.d.ts",
+      "default": "./dist/service-restart.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "default": "./dist/types.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "inversify": "^6.2.2",
+    "mongodb": "^6.0.0",
+    "reflect-metadata": "^0.2.2",
+    "routing-controllers": "^0.11.2",
+    "zod": "3.25.67"
+  },
+  "peerDependencies": {
+    "@saga-ed/infra-compose": ">=0.10.0",
+    "@saga-ed/soa-api-core": ">=1.0.0",
+    "@saga-ed/soa-logger": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@saga-ed/infra-compose": "workspace:*",
+    "@saga-ed/soa-api-core": "workspace:*",
+    "@saga-ed/soa-logger": "workspace:*",
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/express": "^5.0.3",
+    "@types/node": "latest",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^1.5.0"
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saga-ed/soa.git",
+    "directory": "packages/node/fixture-serve"
+  }
+}

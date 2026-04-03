@@ -1,11 +1,12 @@
 {
     "name": "@saga-ed/infra-compose",
-    "version": "0.9.0",
+    "version": "0.10.5",
     "description": "Composable Docker service templates for Saga platform local development",
     "bin": {
         "infra-compose": "bin/infra-compose"
     },
     "scripts": {
+        "lint": "eslint .",
         "test": "vitest run",
         "test:watch": "vitest",
         "test:integration": "bash test/run-integration.sh",
@@ -17,7 +18,9 @@
     "exports": {
         ".": "./api.js",
         "./router": "./router.js",
-        "./handlers": "./handlers.js"
+        "./handlers": "./handlers.js",
+        "./ec2-router": "./ec2/ec2-router.js",
+        "./ec2-server": "./ec2/server.js"
     },
     "types": "api.d.ts",
     "files": [
@@ -30,14 +33,16 @@
         "handlers.js",
         "handlers.d.ts",
         "router.js",
-        "router.d.ts"
+        "router.d.ts",
+        "ec2/"
     ],
     "dependencies": {
-        "docker-compose": "^0.24.8",
         "mongodb": "^6.0.0",
         "mysql2": "^3.0.0"
     },
     "devDependencies": {
+        "@eslint/js": "^10.0.1",
+        "eslint": "^10.1.0",
         "express": "^4.22.1",
         "typescript": "^5.9.3",
         "vitest": "^1.6.1"

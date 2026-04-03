@@ -40,6 +40,8 @@ Utility commands:
 
 Options:
   --profile NAME    Seed profile name (sets SEED_PROFILE env var)
+  --seed-dir DIR    Directory containing extra seed data subdirs (mysql/, mongo/, postgres/)
+                    Sets EXTRA_MYSQL_SEED_DIR, EXTRA_MONGO_SEED_DIR, EXTRA_POSTGRES_SEED_DIR
   -- ARGS...        Extra args passed through to docker compose
 
 Dump options:
@@ -49,7 +51,9 @@ Dump options:
 
 Examples:
   npx infra-compose up --profile small
+  npx infra-compose up --profile small --seed-dir ./my-seeds
   npx infra-compose switch --profile basic
+  npx infra-compose switch --profile basic --seed-dir ./my-seeds
   npx infra-compose reset --profile small
   npx infra-compose down
   npx infra-compose dump --profile my-snapshot
@@ -62,10 +66,11 @@ EOF
 
 # ── Argument parsing helpers ───────────────────────────────
 
-# Parse --profile NAME and collect passthrough args after "--"
-# Sets: PROFILE, COMPOSE_PASSTHROUGH (array)
+# Parse --profile NAME, --seed-dir DIR, and collect passthrough args after "--"
+# Sets: PROFILE, SEED_DIR, COMPOSE_PASSTHROUGH (array)
 parse_lifecycle_args() {
     PROFILE=""
+    SEED_DIR=""
     COMPOSE_PASSTHROUGH=()
     local passthrough=false
 
@@ -91,6 +96,19 @@ parse_lifecycle_args() {
                 ;;
             --profile=*)
                 PROFILE="${1#--profile=}"
+                shift
+                ;;
+            --seed-dir)
+                shift
+                SEED_DIR="${1:-}"
+                if [[ -z "$SEED_DIR" ]]; then
+                    echo "Error: --seed-dir requires a path" >&2
+                    exit 1
+                fi
+                shift
+                ;;
+            --seed-dir=*)
+                SEED_DIR="${1#--seed-dir=}"
                 shift
                 ;;
             *)
@@ -178,6 +196,14 @@ cmd_up() {
     profile=$(resolve_profile "$PROFILE")
     export SEED_PROFILE="$profile"
 
+    if [[ -n "$SEED_DIR" ]]; then
+        local base
+        base="$(cd "$SEED_DIR" && pwd)"
+        export EXTRA_MYSQL_SEED_DIR="$base/mysql"
+        export EXTRA_MONGO_SEED_DIR="$base/mongo"
+        export EXTRA_POSTGRES_SEED_DIR="$base/postgres"
+    fi
+
     # Pre-flight port check
     cmd_check_ports
 
@@ -198,6 +224,14 @@ cmd_switch() {
         exit 1
     fi
     export SEED_PROFILE="$PROFILE"
+
+    if [[ -n "$SEED_DIR" ]]; then
+        local base
+        base="$(cd "$SEED_DIR" && pwd)"
+        export EXTRA_MYSQL_SEED_DIR="$base/mysql"
+        export EXTRA_MONGO_SEED_DIR="$base/mongo"
+        export EXTRA_POSTGRES_SEED_DIR="$base/postgres"
+    fi
 
     echo "Switching to profile: $PROFILE"
     docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
@@ -310,8 +344,10 @@ cmd_dump() {
                     exit 1
                 fi
                 echo "── Mongo ──"
-                mongosh "mongodb://localhost:${MONGO_PORT:-27018}" \
-                    --eval "var PROFILE='${PROFILE}'; var OUTPUT_DIR='${out_dir}'" \
+                DUMP_PROFILE="$PROFILE" \
+                DUMP_OUTPUT_DIR="$out_dir" \
+                    mongosh "mongodb://localhost:${MONGO_PORT:-27018}" \
+                    --eval "var PROFILE=process.env.DUMP_PROFILE; var OUTPUT_DIR=process.env.DUMP_OUTPUT_DIR" \
                     --file "$dump_script"
                 ;;
             mysql)
@@ -493,18 +529,18 @@ cmd_shell() {
     local service="${1:-}"
     case "$service" in
         mongo)
-            exec mongosh "mongodb://localhost:${MONGO_PORT:-27017}"
+            exec mongosh "mongodb://localhost:${MONGO_PORT:-27018}"
             ;;
         mysql)
             MYSQL_PWD="${MYSQL_PASSWORD:-password123}" exec mysql \
-                -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u "${MYSQL_USER:-mysql_admin}"
+                -h 127.0.0.1 -P "${MYSQL_PORT:-3307}" -u "${MYSQL_USER:-mysql_admin}"
             ;;
         postgres)
             PGPASSWORD="${POSTGRES_PASSWORD:-password123}" exec psql \
-                -h localhost -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres_admin}"
+                -h localhost -p "${POSTGRES_PORT:-5433}" -U "${POSTGRES_USER:-postgres_admin}"
             ;;
         redis)
-            exec redis-cli -p "${REDIS_PORT:-6379}"
+            exec redis-cli -p "${REDIS_PORT:-6380}"
             ;;
         "")
             echo "Error: specify a service — mongo, mysql, postgres, or redis" >&2

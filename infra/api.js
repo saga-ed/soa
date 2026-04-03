@@ -1,7 +1,7 @@
 import { spawnSync } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync, openSync, readSync, closeSync } from 'fs';
 import { homedir } from 'os';
 import mongodb from 'mongodb';
 const { MongoClient } = mongodb;
@@ -25,13 +25,16 @@ export function get_active_profile() {
     try {
         const content = readFileSync(ACTIVE_PROFILE_FILE, 'utf8').trim();
         if (!content) return null;
-        // Support both old format (plain string) and new format (JSON)
         if (content.startsWith('{')) return JSON.parse(content);
         return { profile: content, switched_at: null };
     } catch {
         return null;
     }
 }
+
+const SERVICES = ['mongo', 'mysql', 'postgres'];
+const INIT_CONTAINERS = SERVICES.map(s => `${s}_init`);
+const SERVICE_EXT = { mongo: 'json', mysql: 'sql', postgres: 'sql' };
 
 const EXCLUDED_MONGO_DBS = ['admin', 'config', 'local'];
 const EXCLUDED_MONGO_COLLECTIONS = ['_profile_meta'];
@@ -52,12 +55,15 @@ function parse_env_file(filepath) {
 
 /** Load env: .env.defaults first, then .env overrides, then user-level ~/.fixtures/.env.
  *  The user-level file survives npm reinstalls (package .env gets wiped by npm install -g). */
+let _env_cache = null;
 function load_env_defaults() {
-    return {
+    if (_env_cache) return _env_cache;
+    _env_cache = {
         ...parse_env_file(resolve(__dirname, '.env.defaults')),
         ...parse_env_file(resolve(__dirname, '.env')),
         ...parse_env_file(resolve(homedir(), '.fixtures', '.env')),
     };
+    return _env_cache;
 }
 
 // ── Docker helpers ─────────────────────────────────────────────────
@@ -192,14 +198,17 @@ export function reset(options) {
  * use the databases before seeding is complete.
  */
 function wait_for_init_containers(env) {
-    const init_services = ['mysql_init', 'mongo_init', 'postgres_init'];
+    const init_services = INIT_CONTAINERS;
     for (const svc of init_services) {
         const ps = spawnSync('docker', [
             'compose', 'ps', '--status', 'running', '--format', '{{.Name}}', svc,
         ], { cwd: __dirname, env, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
         const name = (ps.stdout || '').trim();
         if (name) {
-            spawnSync('docker', ['wait', name], { stdio: 'inherit', timeout: 120000 });
+            const wait = spawnSync('docker', ['wait', name], { stdio: 'inherit', timeout: 120000 });
+            if (wait.signal || wait.status === null) {
+                console.error(`Warning: ${svc} seed timed out after 120s — database may not be fully seeded`);
+            }
         }
     }
 }
@@ -214,22 +223,12 @@ export function restore(options) {
     const { profile } = options;
     const services_dir = resolve(__dirname, 'services');
 
-    // Verify at least one seed file exists for this profile
-    const seed_files = [
-        resolve(services_dir, 'mongo', 'seed', `profile-${profile}.json`),
-        resolve(services_dir, 'mysql', 'seed', `profile-${profile}.sql`),
-        resolve(services_dir, 'postgres', 'seed', `profile-${profile}.sql`),
-    ];
-    const has_seed = seed_files.some(f => existsSync(f));
-
-    // Also check user data dir for snapshots
+    // Verify at least one seed or snapshot file exists for this profile
     const data_dir = resolve(options.data_dir || DEFAULT_DATA_DIR);
-    const snapshot_files = [
-        resolve(data_dir, 'mongo', `profile-${profile}.json`),
-        resolve(data_dir, 'mysql', `profile-${profile}.sql`),
-        resolve(data_dir, 'postgres', `profile-${profile}.sql`),
-    ];
-    const has_snapshot = snapshot_files.some(f => existsSync(f));
+    const has_seed = SERVICES.some(svc =>
+        existsSync(resolve(services_dir, svc, 'seed', `profile-${profile}.${SERVICE_EXT[svc]}`)));
+    const has_snapshot = SERVICES.some(svc =>
+        existsSync(resolve(data_dir, svc, `profile-${profile}.${SERVICE_EXT[svc]}`)));
 
     if (!has_seed && !has_snapshot) {
         console.error(`Error: no seed or snapshot files found for profile '${profile}'`);
@@ -260,7 +259,7 @@ export function delete_profile_data(options) {
     const base = resolve(data_dir || DEFAULT_DATA_DIR);
     let deleted = 0;
 
-    for (const [svc, ext] of [['mongo', 'json'], ['mysql', 'sql'], ['postgres', 'sql']]) {
+    for (const [svc, ext] of Object.entries(SERVICE_EXT)) {
         const file = resolve(base, svc, `profile-${profile}.${ext}`);
         if (existsSync(file)) {
             unlinkSync(file);
@@ -281,15 +280,16 @@ export function delete_profile_data(options) {
  * @param {{ profile: string, services?: string[], output_dir?: string, force?: boolean }} options
  */
 export async function snapshot(options) {
-    const { profile, services = ['mongo', 'mysql'], output_dir, force = false } = options;
+    const { profile, services = ['mongo', 'mysql', 'postgres'], output_dir, force = false } = options;
     const out_base = resolve(output_dir || DEFAULT_DATA_DIR);
     const defaults = load_env_defaults();
 
     console.log(`Snapshot: profile=${profile} output=${out_base}`);
     console.log(`Services: ${services.join(' ')}`);
 
+    // Validate and prepare output dirs before starting
     for (const svc of services) {
-        const ext = svc === 'mongo' ? 'json' : 'sql';
+        const ext = SERVICE_EXT[svc] || 'sql';
         const out_dir = resolve(out_base, svc);
         const out_file = resolve(out_dir, `profile-${profile}.${ext}`);
 
@@ -298,17 +298,24 @@ export async function snapshot(options) {
             return { status: 1 };
         }
         mkdirSync(out_dir, { recursive: true });
+    }
 
-        try {
-            if (svc === 'mongo') {
-                await snapshot_mongo(profile, out_dir, defaults);
-            } else if (svc === 'mysql') {
-                await snapshot_mysql(profile, out_dir, defaults);
-            }
-        } catch (err) {
-            console.error(`Snapshot ${svc} failed:`, err.message);
-            return { status: 1 };
-        }
+    // Run snapshots in parallel where possible
+    const snapshot_fns = { mongo: snapshot_mongo, mysql: snapshot_mysql };
+    const unsupported = services.filter(svc => !snapshot_fns[svc]);
+    if (unsupported.length > 0) {
+        console.warn(`Warning: no native JS snapshot for: ${unsupported.join(', ')} — use CLI 'dump' command instead`);
+    }
+    const tasks = services
+        .filter(svc => snapshot_fns[svc])
+        .map(svc => snapshot_fns[svc](profile, resolve(out_base, svc), defaults)
+            .catch(err => { throw new Error(`Snapshot ${svc} failed: ${err.message}`); }));
+
+    try {
+        await Promise.all(tasks);
+    } catch (err) {
+        console.error(err.message);
+        return { status: 1 };
     }
 
     console.log(`\nSnapshot complete. Profile '${profile}' saved.`);
@@ -348,7 +355,6 @@ async function snapshot_mongo(profile, out_dir, defaults) {
                 const docs = await db.collection(collName).find({}).toArray();
                 if (docs.length === 0) continue;
 
-                // Convert BSON types to JSON-safe representations
                 const cleaned = docs.map(doc => JSON.parse(EJSON.stringify(doc, { relaxed: true })));
                 result[dbInfo.name][collName] = cleaned;
                 console.log(`    ${collName}: ${cleaned.length} docs`);
@@ -432,6 +438,8 @@ async function snapshot_mysql(profile, out_dir, defaults) {
                         const values = columns.map(c => {
                             const v = row[c];
                             if (v === null) return 'NULL';
+                            if (typeof v === 'boolean') return v ? '1' : '0';
+                            if (typeof v === 'bigint') return String(v);
                             if (typeof v === 'number') return String(v);
                             if (v instanceof Date) return `'${v.toISOString().slice(0, 19).replace('T', ' ')}'`;
                             if (Buffer.isBuffer(v)) return `X'${v.toString('hex')}'`;
@@ -473,8 +481,8 @@ export function list_profiles(options = {}) {
         postgres: defaults.EXTRA_POSTGRES_SEED_DIR,
     };
 
-    for (const svc of ['mongo', 'mysql', 'postgres']) {
-        const ext = svc === 'mongo' ? 'json' : 'sql';
+    for (const svc of SERVICES) {
+        const ext = SERVICE_EXT[svc];
         const seen = new Set();
 
         // Scan built-in seeds
@@ -508,13 +516,17 @@ function scan_profiles(dir, ext, service, profiles, seen) {
         let type = 'seed';
         const filepath = resolve(dir, file);
         try {
-            if (ext === 'json') {
+            if (ext === 'sql') {
+                // SQL: snapshot marker is on line 1, read only first 64 bytes
+                const fd = openSync(filepath, 'r');
+                const buf = Buffer.alloc(64);
+                const bytesRead = readSync(fd, buf, 0, 64, 0);
+                closeSync(fd);
+                if (buf.toString('utf8', 0, bytesRead).startsWith('-- @infra-compose/snapshot')) type = 'snapshot';
+            } else {
+                // JSON: _meta key can be anywhere, but files are small fixture data
                 const content = readFileSync(filepath, 'utf8');
                 if (content.includes('"_meta"') && content.includes('"snapshot"')) type = 'snapshot';
-            } else {
-                // Check first line for snapshot marker
-                const content = readFileSync(filepath, 'utf8');
-                if (content.startsWith('-- @infra-compose/snapshot')) type = 'snapshot';
             }
         } catch { /* ignore read errors */ }
 

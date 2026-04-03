@@ -174,6 +174,19 @@ infra/
 │   ├── saga-api.yml           # mongo + mysql
 │   ├── adm-api.yml            # postgres + redis
 │   └── events-example.yml     # rabbitmq + postgres
+├── ec2/
+│   ├── server.js              # EC2 db-host HTTP server entry point
+│   └── ec2-router.js          # Express router for EC2 DB instance management
+├── api.js                     # Programmatic API (lifecycle, snapshot, profiles)
+├── api.d.ts                   # TypeScript types for api.js
+├── handlers.js                # HTTP handler wrappers ({ ok: true/false } convention)
+├── handlers.d.ts              # TypeScript types for handlers.js
+├── router.js                  # Express router factory with lifecycle hooks
+├── router.d.ts                # TypeScript types for router.js
+├── bin/
+│   └── infra-compose          # CLI entry point
+├── compose.yml                # Root compose file (includes all services)
+├── vitest.config.js           # Test configuration
 ├── .env.defaults
 ├── Makefile
 └── README.md
@@ -370,3 +383,100 @@ Only the reusable templates are published:
 
 The `Makefile` and `projects/` directory are convenience wrappers for soa monorepo
 development. Consumer repos use `docker compose` directly.
+
+---
+
+## Programmatic API
+
+The package exports three JavaScript modules for use in Node.js applications.
+
+### `api.js` — Core lifecycle functions
+
+```js
+import {
+    up,
+    switch_profile,
+    reset,
+    restore,
+    snapshot,
+    list_profiles,
+    get_active_profile,
+    delete_profile_data,
+} from '@saga-ed/infra-compose/api';
+```
+
+| Function | Description |
+|----------|-------------|
+| `up(options)` | Start services. Accepts `{ profile, seed_dir, compose_args }` |
+| `switch_profile(options)` | Stop services and restart with a new profile |
+| `reset(options)` | Wipe profile volumes and restart fresh |
+| `restore(options)` | Restore from seed/snapshot files (reset + re-seed) |
+| `snapshot(options)` | Dump current DB state as a named profile |
+| `list_profiles()` | List available seed and snapshot profiles per service |
+| `get_active_profile()` | Return the currently active profile, or `null` |
+| `delete_profile_data(options)` | Delete snapshot files for a named profile |
+
+See `api.d.ts` for full type signatures.
+
+### `handlers.js` — HTTP handler functions
+
+Framework-agnostic handler functions that wrap `api.js` operations and return
+`{ ok: true, ... }` on success or `{ ok: false, error: "..." }` on failure:
+
+```js
+import { handle_switch, handle_reset, handle_snapshot } from '@saga-ed/infra-compose/handlers';
+```
+
+These are the same functions the built-in Express router uses — import them directly
+if you want to wire them into a custom HTTP framework.
+
+### `router.js` — Express router factory
+
+```js
+import { create_router } from '@saga-ed/infra-compose/router';
+import express from 'express';
+
+const app = express();
+
+app.use('/infra', create_router({
+    on_after_switch:   async () => { await restart_my_app(); },
+    on_after_reset:    async () => { await restart_my_app(); },
+    on_after_snapshot: async () => { /* optional post-snapshot hook */ },
+}));
+
+app.listen(7777);
+```
+
+`create_router(options)` returns a standard Express `Router` with the following endpoints:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/switch` | Switch to a different profile |
+| `POST` | `/reset` | Wipe profile volumes and restart fresh |
+| `POST` | `/snapshot` | Dump current DB state as a named profile |
+| `POST` | `/restore` | Restore from seed/snapshot files |
+| `GET` | `/profiles` | List available profiles |
+| `POST` | `/delete-profile` | Delete snapshot files for a profile |
+| `GET` | `/active-profile` | Get the currently active profile |
+| `GET` | `/health` | Health check |
+
+Lifecycle hooks (`on_after_switch`, `on_after_reset`, `on_after_snapshot`) are optional
+and fire after a successful operation — use them to restart your application so it picks
+up the new database state. Express is an optional peer dependency; omit it if you only
+use `api.js` directly.
+
+---
+
+## EC2 DB-Host Server
+
+The `ec2/` directory contains an HTTP server for managing Docker database instances on
+EC2 virtual machines. It is used by the fixture-admin Lambda to provision and manage
+fixture databases on remote VMs.
+
+Entry points:
+- `ec2/server.js` — standalone HTTP server (start directly on the VM)
+- `ec2/ec2-router.js` — Express router (mount into an existing app)
+
+Package exports:
+- `@saga-ed/infra-compose/ec2-router` → `ec2/ec2-router.js`
+- `@saga-ed/infra-compose/ec2-server` → `ec2/server.js`

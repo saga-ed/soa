@@ -32,8 +32,8 @@ Before starting, confirm you have:
 
 - [ ] Docker and Docker Compose v2 installed
 - [ ] Node.js 20+
-- [ ] `soa` repo cloned, on branch `gh_27-compose_of_composes`
-- [ ] `saga_api` (nimbee) repo cloned, on branch `gh_7763-compose_of_composes_poc`
+- [ ] `soa` repo cloned, on branch `main`
+- [ ] `saga_api` (nimbee) repo cloned
 
 Verify your environment:
 
@@ -41,7 +41,7 @@ Verify your environment:
 docker compose version       # → Docker Compose version v2.x.x
 node --version               # → v20.x.x or higher
 cd ~/dev/soa
-git branch --show-current    # → gh_27-compose_of_composes
+git branch --show-current    # → main
 ls infra/bin/infra-compose   # → exists
 ls infra/services/           # → mongo/ mysql/ postgres/ redis/ rabbitmq/ openfga/
 ```
@@ -286,7 +286,7 @@ How a real application consumes `@saga-ed/infra-compose` templates.
 Read the saga_api Docker Compose file:
 
 ```bash
-cat ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/docker-compose.yml
+cat <your-consumer-project>/docker-compose.yml
 ```
 
 **What to observe:**
@@ -322,7 +322,7 @@ cat ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/docker-compose.ym
 ### 3.2 Run from saga_api directory
 
 ```bash
-cd ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/
+cd <your-consumer-project>/
 npx infra-compose up --profile small -- -f docker-compose.yml
 ```
 
@@ -351,7 +351,7 @@ You should see volumes like:
 Read the wrapper functions:
 
 ```bash
-head -90 ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/local-db-mgr.sh
+head -90 <your-consumer-project>/local-db-mgr.sh
 ```
 
 **What to observe:**
@@ -393,7 +393,7 @@ fi
 Try it:
 
 ```bash
-cd ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/
+cd <your-consumer-project>/
 ./local-db-mgr.sh start           # Uses infra-compose when available
 ./local-db-mgr.sh switch basic    # Profile switching via wrapper
 ./local-db-mgr.sh check           # Status check
@@ -604,9 +604,9 @@ YAML
 
 ### 4.4 Test profile switching with different data
 
-> **Note:** This exercise requires the soa2 `infra/` package to be resolvable. If you are working from `/tmp/myapp-seed-demo/`, set `INFRA_COMPOSE_DIR` to point to your local soa2 checkout:
+> **Note:** This exercise requires the `@saga-ed/infra-compose` package to be resolvable. If you are working from `/tmp/myapp-seed-demo/`, set `INFRA_COMPOSE_DIR` to point to your local checkout:
 > ```bash
-> export INFRA_COMPOSE_DIR=~/dev/soa2/infra/services
+> export INFRA_COMPOSE_DIR=<path-to-infra-compose>/services
 > ```
 
 Start with the small profile:

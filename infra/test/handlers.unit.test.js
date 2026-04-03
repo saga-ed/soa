@@ -55,12 +55,12 @@ describe('handle_snapshot', () => {
         expect(snapshot).not.toHaveBeenCalled();
     });
 
-    it('defaults force to false and services to mongo+mysql', async () => {
+    it('defaults force to false and services to all three', async () => {
         snapshot.mockResolvedValue({ status: 0 });
 
         await handle_snapshot({ profile: 'x' });
         expect(snapshot).toHaveBeenCalledWith(
-            expect.objectContaining({ force: false, services: ['mongo', 'mysql'] }),
+            expect.objectContaining({ force: false, services: ['mongo', 'mysql', 'postgres'] }),
         );
     });
 });
@@ -88,6 +88,13 @@ describe('handle_switch', () => {
         const result = handle_switch({});
         expect(result.ok).toBe(false);
         expect(result.error).toBe('profile is required');
+        expect(switch_profile).not.toHaveBeenCalled();
+    });
+
+    it('rejects invalid profile names', () => {
+        const result = handle_switch({ profile: '../../etc' });
+        expect(result.ok).toBe(false);
+        expect(result.error).toMatch(/invalid profile name/);
         expect(switch_profile).not.toHaveBeenCalled();
     });
 });

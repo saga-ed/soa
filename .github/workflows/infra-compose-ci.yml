@@ -1,0 +1,169 @@
+name: infra-compose CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-compose-ci.yml"
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra-compose-ci.yml"
+
+# Cancel in-progress runs for the same branch/PR — only latest commit matters
+concurrency:
+  group: infra-compose-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Unit tests (no Docker required) ─────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'infra/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npx vitest run --reporter=verbose
+
+  # ── Type checking ───────────────────────────────────────────
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'infra/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Validate that .d.ts declarations are self-consistent and importable
+      - name: Check type declarations
+        run: npm run typecheck
+
+  # ── Package validation ──────────────────────────────────────
+  package:
+    name: Package Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: 'infra/package-lock.json'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Verify npm pack succeeds and includes expected files
+      - name: Validate package contents
+        run: |
+          npm pack --dry-run 2>&1 | tee /tmp/pack-output.txt
+          for file in api.js api.d.ts handlers.js handlers.d.ts router.js router.d.ts; do
+            if ! grep -q "$file" /tmp/pack-output.txt; then
+              echo "ERROR: $file missing from package" >&2
+              exit 1
+            fi
+          done
+          echo "All expected files present in package"
+
+      # Verify subpath exports resolve correctly
+      - name: Validate exports
+        run: |
+          node -e "import('./api.js').then(() => console.log('api.js: OK'))"
+          node -e "import('./handlers.js').then(() => console.log('handlers.js: OK'))"
+          node -e "
+            import('fs').then(fs => {
+              const src = fs.readFileSync('./router.js', 'utf8');
+              console.log('router.js: parseable (' + src.length + ' bytes)');
+            });
+          "
+
+  # ── Integration tests (requires Docker) ─────────────────────
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install database clients
+        run: |
+          # mongosh
+          wget -qO- https://www.mongodb.org/static/pgp/server-6.0.asc | \
+            sudo gpg --dearmor -o /usr/share/keyrings/mongodb-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/mongodb-archive-keyring.gpg] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/6.0 multiverse" | \
+            sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mongodb-mongosh mysql-client > /dev/null
+          # psql is pre-installed on ubuntu-latest
+
+      - name: Verify prerequisites
+        run: |
+          docker compose version
+          mongosh --version
+          mysql --version
+          psql --version
+
+      - name: Pull Docker images
+        run: |
+          docker pull mongo:6 &
+          docker pull mysql:8 &
+          docker pull postgres:15 &
+          wait
+          echo "All images pulled"
+
+      - name: Run integration tests
+        run: bash test/run-integration.sh

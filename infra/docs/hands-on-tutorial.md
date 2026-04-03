@@ -32,8 +32,8 @@ Before starting, confirm you have:
 
 - [ ] Docker and Docker Compose v2 installed
 - [ ] Node.js 20+
-- [ ] `soa` repo cloned (infra-compose is on `main`)
-- [ ] `saga_api` (nimbee) repo cloned (for PART 3)
+- [ ] `soa` repo cloned, on branch `main`
+- [ ] `saga_api` (nimbee) repo cloned
 
 Verify your environment:
 
@@ -41,6 +41,7 @@ Verify your environment:
 docker compose version       # → Docker Compose version v2.x.x
 node --version               # → v20.x.x or higher
 cd ~/dev/soa
+git branch --show-current    # → main
 ls infra/bin/infra-compose   # → exists
 ls infra/services/           # → mongo/ mysql/ postgres/ redis/ rabbitmq/ openfga/
 ```
@@ -119,8 +120,7 @@ npx infra-compose help
 
 **What to observe:**
 - **Lifecycle commands**: `up`, `switch`, `down`, `reset` — the core profile workflow
-- **Data commands**: `dump`, `restore` — save and load database snapshots
-- **Utility commands**: `check-ports`, `status`, `shell`, `list-profiles`, `volumes`, `completion`
+- **Utility commands**: `check-ports`, `status`, `shell`, `list-profiles`, `volumes`
 - The `--` separator passes extra args through to `docker compose` (e.g., `-- -f docker-compose.yml`)
 
 Check the current state:
@@ -286,7 +286,7 @@ How a real application consumes `@saga-ed/infra-compose` templates.
 Read the saga_api Docker Compose file:
 
 ```bash
-cat ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/docker-compose.yml
+cat <your-consumer-project>/docker-compose.yml
 ```
 
 **What to observe:**
@@ -322,7 +322,7 @@ cat ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/docker-compose.ym
 ### 3.2 Run from saga_api directory
 
 ```bash
-cd ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/
+cd <your-consumer-project>/
 npx infra-compose up --profile small -- -f docker-compose.yml
 ```
 
@@ -351,7 +351,7 @@ You should see volumes like:
 Read the wrapper functions:
 
 ```bash
-head -90 ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/local-db-mgr.sh
+head -90 <your-consumer-project>/local-db-mgr.sh
 ```
 
 **What to observe:**
@@ -393,7 +393,7 @@ fi
 Try it:
 
 ```bash
-cd ~/dev/nimbee/edu/js/app/saga_api/fixture-cli/zcripts/local/
+cd <your-consumer-project>/
 ./local-db-mgr.sh start           # Uses infra-compose when available
 ./local-db-mgr.sh switch basic    # Profile switching via wrapper
 ./local-db-mgr.sh check           # Status check
@@ -419,15 +419,11 @@ cat infra/services/mongo/seed/init-and-seed.js
 
 **What to observe:**
 
-1. **Replica set init** — idempotent `rs.initiate()` with a try/catch guard
-2. **Wait for primary** — polls `rs.status()` and probes a write before continuing
-3. **Sentinel check** — looks for a `_profile_meta` doc matching the current profile. If found, the seeder prints "already seeded" and exits. This is what makes seeding **idempotent** across restarts and switches.
-4. **Seed file resolution** — resolves the profile file using a priority cascade:
-   - `/data-seed/profile-${SEED_PROFILE}.json` — user snapshots from `~/.fixtures/profiles/`
-   - `/extra-seed/profile-${SEED_PROFILE}.json` — project-provided overrides
-   - `/seed/profile-${SEED_PROFILE}.json` — built-in seed data (fallback)
-5. **EJSON parsing** — uses `EJSON.parse()` to handle BSON types (`$oid`, `$date`, etc.) from snapshot dumps, then iterates `{ db: { collection: [docs] } }` and inserts via `insertMany`
-6. **Sentinel write** — after successful seeding, writes the sentinel doc so future runs skip
+1. **Replica set init** (lines 9–20) — idempotent `rs.initiate()` with a try/catch guard
+2. **Wait for primary** (lines 22–51) — polls `rs.status()` and probes a write before continuing
+3. **Sentinel check** (lines 60–64) — looks for a `_profile_meta` doc matching the current profile. If found, the seeder prints "already seeded" and exits. This is what makes seeding **idempotent** across restarts and switches.
+4. **Profile file loading** (lines 66–82) — reads `/seed/profile-${SEED_PROFILE}.json`, iterates `{ db: { collection: [docs] } }`, and inserts docs via `insertMany`
+5. **Sentinel write** (lines 84–89) — after successful seeding, writes the sentinel doc so future runs skip
 
 Now read a profile file:
 
@@ -441,7 +437,7 @@ cat infra/services/mongo/seed/profile-small.json
 - Values are arrays of documents to insert
 - This is the contract: any JSON file matching this shape will work with `init-and-seed.js`
 
-**What you learned:** The template seeder is a generic engine — it loads any profile JSON that conforms to `{ db: { collection: [docs] } }`. The three-tier seed resolution (`/data-seed/` > `/extra-seed/` > `/seed/`) means user snapshots take priority over project seeds, which take priority over built-in seeds.
+**What you learned:** The template seeder is a generic engine — it loads any profile JSON that conforms to `{ db: { collection: [docs] } }`. Projects provide their own seed data by mounting their own profile JSON files at `/seed/`.
 
 > **Reset:** None — read-only.
 
@@ -608,9 +604,9 @@ YAML
 
 ### 4.4 Test profile switching with different data
 
-> **Note:** This exercise requires the `infra/` package to be resolvable. If you are working from `/tmp/myapp-seed-demo/`, set `INFRA_COMPOSE_DIR` to point to your local soa checkout:
+> **Note:** This exercise requires the `@saga-ed/infra-compose` package to be resolvable. If you are working from `/tmp/myapp-seed-demo/`, set `INFRA_COMPOSE_DIR` to point to your local checkout:
 > ```bash
-> export INFRA_COMPOSE_DIR=~/dev/soa/infra/services
+> export INFRA_COMPOSE_DIR=<path-to-infra-compose>/services
 > ```
 
 Start with the small profile:
@@ -750,26 +746,96 @@ cat ~/dev/coach/apps/node/coach-api/scripts/mongo-init.js
 
 ---
 
+## PART 5: HTTP API & Consumer Integration (~10 min)
+
+infra-compose also exports an Express router that exposes all lifecycle operations over HTTP. This is how fixture-cli (and any future project) provides remote profile management.
+
+### 5.1 The router pattern
+
+```javascript
+import express from 'express';
+import { create_router } from '@saga-ed/infra-compose/router';
+
+const app = express();
+
+// Mount with lifecycle hooks for post-operation side effects
+app.use('/infra', create_router({
+    on_after_switch: async () => { await restart_my_app(); },
+    on_after_reset:  async () => { await restart_my_app(); },
+}));
+
+app.listen(7777);
+```
+
+**What to observe:**
+- `create_router()` returns a standard Express Router — mount it at any path
+- Lifecycle hooks fire **after** a successful operation — use them to restart your app so it picks up the new DB state
+- Hooks are optional — omit them for standalone use (e.g., `infra-compose serve`)
+- Express is an optional peerDependency — if you only use the JS API, you don't need Express installed
+
+### 5.2 Available HTTP endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/snapshot` | Dump current DB state as a named profile |
+| `POST` | `/switch` | Switch to a different profile (down + up) |
+| `POST` | `/reset` | Wipe profile volumes and restart fresh |
+| `POST` | `/restore` | Restore from seed/snapshot files |
+| `GET` | `/profiles` | List available profiles (seeds + snapshots) |
+| `POST` | `/delete-profile` | Delete snapshot files for a profile |
+| `GET` | `/active-profile` | Get the currently active profile |
+| `GET` | `/health` | Health check |
+
+All endpoints return `{ ok: true, ... }` on success or `{ ok: false, error: "..." }` on failure.
+
+### 5.3 The three-layer architecture
+
+```
+Layer 0: Docker Compose         (containers, volumes, networking)
+Layer 1: api.js                 (native JS — no bash intermediary)
+Layer 2: router.js              (HTTP adapter with lifecycle hooks)
+```
+
+- **Layer 1** calls Docker directly via `spawnSync('docker', ['compose', ...])` and uses native MongoDB/MySQL drivers for snapshot operations. No bash scripts in the hot path.
+- **Layer 2** wraps Layer 1's handler functions in Express routes. Handlers are also available as framework-agnostic functions via `@saga-ed/infra-compose/handlers`.
+
+### 5.4 How fixture-cli uses this
+
+fixture-cli's `fixture:serve` command mounts the infra-compose router at `/infra` alongside its own fixture-specific routes at `/fixture`:
+
+```
+fixture-serve (port 7777)
+├── /infra/*       → infra-compose router (DB lifecycle)
+│   ├── /infra/switch      POST   switch profile
+│   ├── /infra/reset       POST   reset profile
+│   ├── /infra/snapshot    POST   snapshot DB state
+│   ├── /infra/profiles    GET    list profiles
+│   └── ...
+└── /fixture/*     → fixture-cli controller (fixture-specific)
+    ├── /fixture/store     POST   snapshot + update fixture_metadata
+    ├── /fixture/restore   POST   lookup metadata + switch
+    ├── /fixture/create-async  POST   create fixture (job queue)
+    └── /fixture/export-playwright  GET   export test credentials
+```
+
+The seam: infra-compose owns general-purpose DB lifecycle operations (reusable by any project). fixture-cli owns fixture-specific logic (metadata registry, test data factories, Playwright export).
+
+**What you learned:** The HTTP API is a thin transport layer over the same JS functions the CLI uses. Any Express app can mount it and wire in app-specific behavior via lifecycle hooks.
+
+> **Reset:** None — read-only.
+
+---
+
 ## Appendix: Command Cheat Sheet
 
 ### Lifecycle Commands
 
 | Command | What it does |
 |---------|-------------|
-| `up [--profile NAME]` | Set `SEED_PROFILE`, run port check, `docker compose up -d` |
+| `up --profile NAME` | Set `SEED_PROFILE`, run port check, `docker compose up -d` |
 | `switch --profile NAME` | `down` + `up` with the new profile |
 | `down` | Stop services, preserve all volumes |
 | `reset --profile NAME` | `down` + remove `*-profile-NAME` volumes + `up` fresh |
-
-### Data Commands
-
-| Command | What it does |
-|---------|-------------|
-| `dump --profile NAME` | Dump live database state into seed profile files |
-| `restore --profile NAME` | Restore a profile (`reset` + re-seed from dump files) |
-
-Dump options: `--services mongo,mysql,postgres` (default: all three),
-`--output-dir DIR` (default: `services/<svc>/seed/`), `--force` (overwrite existing files).
 
 ### Utility Commands
 
@@ -778,9 +844,8 @@ Dump options: `--services mongo,mysql,postgres` (default: all three),
 | `status` | Show containers, current profile, and volumes |
 | `check-ports` | Scan Docker for port conflicts before starting |
 | `shell <service>` | Open a database shell (`mongo`, `mysql`, `postgres`, `redis`) |
-| `list-profiles` | Show available seed profiles per service (seed vs snapshot) |
+| `list-profiles` | Show available seed profiles per service |
 | `volumes` | List all profile Docker volumes |
-| `completion` | Print bash completion script (`eval "$(infra-compose completion)"`) |
 | `help` | Show the help message |
 
 ### Profile Resolution Order
@@ -802,7 +867,10 @@ Dump options: `--services mongo,mysql,postgres` (default: all three),
 | File | Purpose |
 |------|---------|
 | `infra/compose.yml` | Root compose-of-composes (includes all services) |
-| `infra/bin/infra-compose` | CLI entry point (bash script) |
+| `infra/api.js` | Programmatic API (native JS — snapshot, switch, reset, etc.) |
+| `infra/handlers.js` | Framework-agnostic handler functions (`{ ok, ... }` envelope) |
+| `infra/router.js` | Express Router factory with lifecycle hooks |
+| `infra/bin/infra-compose` | CLI entry point (bash script, for human use) |
 | `infra/services/{mongo,mysql,postgres,redis,rabbitmq,openfga}/compose.yml` | Service templates |
 | `infra/.env.defaults` | Default ports, credentials, `SEED_PROFILE` |
 | `fixture-cli/zcripts/local/docker-compose.yml` | saga_api consumer compose |

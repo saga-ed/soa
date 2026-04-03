@@ -16,6 +16,20 @@ if [[ ! "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
   exit 1
 fi
 SEED_FILE="/seed/profile-${PROFILE}.sql"
+
+# Project-provided seeds take priority over built-in seeds.
+# Callers pass EXTRA_SEED_DIR via infra-compose up({ seed_dir }) which is mounted at /extra-seed/.
+if [ -f "/extra-seed/profile-${PROFILE}.sql" ]; then
+  SEED_FILE="/extra-seed/profile-${PROFILE}.sql"
+  echo "Postgres seed: using project seed from ${SEED_FILE}"
+fi
+
+# User snapshot data (from ~/.fixtures/profiles) is mounted at /data-seed/.
+if [ -f "/data-seed/profile-${PROFILE}.sql" ]; then
+  SEED_FILE="/data-seed/profile-${PROFILE}.sql"
+  echo "Postgres seed: using user data from ${SEED_FILE}"
+fi
+
 HOST="postgres"
 PORT="5432"
 USER="${PGUSER:-postgres_admin}"

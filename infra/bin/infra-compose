@@ -4,12 +4,15 @@ set -euo pipefail
 # Resolve package root — works from npx, pnpm exec, or node_modules/.bin/
 PKG_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Load port defaults from package, then overlay local .env if present
+# Load port defaults: package defaults → package .env → user ~/.fixtures/.env
+# The user-level file survives npm reinstalls (package .env gets wiped by npm install -g).
 set -a
 # shellcheck disable=SC1091
 [ -f "$PKG_ROOT/.env.defaults" ] && source "$PKG_ROOT/.env.defaults"
 # shellcheck disable=SC1091
 [ -f ".env" ] && source ".env"
+# shellcheck disable=SC1091
+[ -f "$HOME/.fixtures/.env" ] && source "$HOME/.fixtures/.env"
 set +a
 
 usage() {
@@ -22,23 +25,40 @@ Lifecycle commands:
   down                      Stop services (volumes preserved)
   reset --profile NAME      Wipe profile volumes and restart fresh
 
+Data commands:
+  dump --profile NAME       Dump live database state into seed profile files
+  restore --profile NAME    Restore a profile (reset + re-seed from dump files)
+
 Utility commands:
   check-ports       Scan Docker for port conflicts
   status            Show running containers, current profile, and volumes
   shell <service>   Open a database shell (mongo|mysql|postgres|redis)
-  list-profiles     Show seed profiles per service
+  list-profiles     Show seed profiles per service (seed vs snapshot)
   volumes           List profile Docker volumes
+  completion        Print bash completion script (eval "\$(infra-compose completion)")
   help              Show this help message
 
 Options:
   --profile NAME    Seed profile name (sets SEED_PROFILE env var)
+  --seed-dir DIR    Directory containing extra seed data subdirs (mysql/, mongo/, postgres/)
+                    Sets EXTRA_MYSQL_SEED_DIR, EXTRA_MONGO_SEED_DIR, EXTRA_POSTGRES_SEED_DIR
   -- ARGS...        Extra args passed through to docker compose
+
+Dump options:
+  --services LIST   Comma-separated: mongo,mysql,postgres (default: all three)
+  --output-dir DIR  Where to write seed files (default: services/<svc>/seed/)
+  --force           Overwrite existing profile files
 
 Examples:
   npx infra-compose up --profile small
+  npx infra-compose up --profile small --seed-dir ./my-seeds
   npx infra-compose switch --profile basic
+  npx infra-compose switch --profile basic --seed-dir ./my-seeds
   npx infra-compose reset --profile small
   npx infra-compose down
+  npx infra-compose dump --profile my-snapshot
+  npx infra-compose dump --profile my-snapshot --services mongo,mysql --output-dir ./snapshots
+  npx infra-compose restore --profile my-snapshot
   npx infra-compose up --profile small -- -f docker-compose.yml
   npx infra-compose status
 EOF
@@ -46,10 +66,11 @@ EOF
 
 # ── Argument parsing helpers ───────────────────────────────
 
-# Parse --profile NAME and collect passthrough args after "--"
-# Sets: PROFILE, COMPOSE_PASSTHROUGH (array)
+# Parse --profile NAME, --seed-dir DIR, and collect passthrough args after "--"
+# Sets: PROFILE, SEED_DIR, COMPOSE_PASSTHROUGH (array)
 parse_lifecycle_args() {
     PROFILE=""
+    SEED_DIR=""
     COMPOSE_PASSTHROUGH=()
     local passthrough=false
 
@@ -77,12 +98,82 @@ parse_lifecycle_args() {
                 PROFILE="${1#--profile=}"
                 shift
                 ;;
+            --seed-dir)
+                shift
+                SEED_DIR="${1:-}"
+                if [[ -z "$SEED_DIR" ]]; then
+                    echo "Error: --seed-dir requires a path" >&2
+                    exit 1
+                fi
+                shift
+                ;;
+            --seed-dir=*)
+                SEED_DIR="${1#--seed-dir=}"
+                shift
+                ;;
             *)
                 echo "Error: unknown option '$1'" >&2
                 exit 1
                 ;;
         esac
     done
+}
+
+# Parse dump-specific args: --profile, --services, --output-dir, --force
+# Sets: PROFILE, DUMP_SERVICES (array), DUMP_OUTPUT_DIR, DUMP_FORCE
+parse_dump_args() {
+    PROFILE=""
+    DUMP_SERVICES=()
+    DUMP_OUTPUT_DIR=""
+    DUMP_FORCE=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --profile)
+                shift
+                PROFILE="${1:-}"
+                [[ -z "$PROFILE" ]] && { echo "Error: --profile requires a name" >&2; exit 1; }
+                shift
+                ;;
+            --profile=*)
+                PROFILE="${1#--profile=}"
+                shift
+                ;;
+            --services)
+                shift
+                IFS=',' read -ra DUMP_SERVICES <<< "${1:-}"
+                [[ ${#DUMP_SERVICES[@]} -eq 0 ]] && { echo "Error: --services requires a list" >&2; exit 1; }
+                shift
+                ;;
+            --services=*)
+                IFS=',' read -ra DUMP_SERVICES <<< "${1#--services=}"
+                shift
+                ;;
+            --output-dir)
+                shift
+                DUMP_OUTPUT_DIR="${1:-}"
+                [[ -z "$DUMP_OUTPUT_DIR" ]] && { echo "Error: --output-dir requires a path" >&2; exit 1; }
+                shift
+                ;;
+            --output-dir=*)
+                DUMP_OUTPUT_DIR="${1#--output-dir=}"
+                shift
+                ;;
+            --force)
+                DUMP_FORCE=true
+                shift
+                ;;
+            *)
+                echo "Error: unknown option '$1'" >&2
+                exit 1
+                ;;
+        esac
+    done
+
+    # Defaults
+    if [[ ${#DUMP_SERVICES[@]} -eq 0 ]]; then
+        DUMP_SERVICES=(mongo mysql postgres)
+    fi
 }
 
 # Resolve the effective profile: explicit flag > env var > .env.defaults > "small"
@@ -105,6 +196,14 @@ cmd_up() {
     profile=$(resolve_profile "$PROFILE")
     export SEED_PROFILE="$profile"
 
+    if [[ -n "$SEED_DIR" ]]; then
+        local base
+        base="$(cd "$SEED_DIR" && pwd)"
+        export EXTRA_MYSQL_SEED_DIR="$base/mysql"
+        export EXTRA_MONGO_SEED_DIR="$base/mongo"
+        export EXTRA_POSTGRES_SEED_DIR="$base/postgres"
+    fi
+
     # Pre-flight port check
     cmd_check_ports
 
@@ -125,6 +224,14 @@ cmd_switch() {
         exit 1
     fi
     export SEED_PROFILE="$PROFILE"
+
+    if [[ -n "$SEED_DIR" ]]; then
+        local base
+        base="$(cd "$SEED_DIR" && pwd)"
+        export EXTRA_MYSQL_SEED_DIR="$base/mysql"
+        export EXTRA_MONGO_SEED_DIR="$base/mongo"
+        export EXTRA_POSTGRES_SEED_DIR="$base/postgres"
+    fi
 
     echo "Switching to profile: $PROFILE"
     docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
@@ -184,6 +291,152 @@ cmd_reset() {
     echo "Reset profile: $PROFILE — volumes wiped, services restarted"
     echo "Profile volumes:"
     docker volume ls --filter "name=-profile-${PROFILE}" --format "  {{.Name}}" 2>/dev/null || true
+}
+
+# ── Data commands ─────────────────────────────────────────
+
+cmd_dump() {
+    parse_dump_args "$@"
+    if [[ -z "$PROFILE" ]]; then
+        echo "Error: dump requires --profile NAME" >&2
+        exit 1
+    fi
+    if [[ ! "$PROFILE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        echo "Error: invalid profile name '${PROFILE}' — must be alphanumeric, hyphens, or underscores only" >&2
+        exit 1
+    fi
+
+    local services_dir="$PKG_ROOT/services"
+
+    echo "Dumping live databases to profile: $PROFILE"
+    echo "Services: ${DUMP_SERVICES[*]}"
+    echo ""
+
+    for svc in "${DUMP_SERVICES[@]}"; do
+        # When --output-dir is set, create per-service subdirectories to avoid
+        # filename collisions (mysql and postgres both produce .sql files)
+        local out_dir
+        if [[ -n "$DUMP_OUTPUT_DIR" ]]; then
+            out_dir="$DUMP_OUTPUT_DIR/$svc"
+        else
+            out_dir="$services_dir/$svc/seed"
+        fi
+
+        # Determine expected output file
+        local ext="sql"
+        [[ "$svc" == "mongo" ]] && ext="json"
+        local out_file="$out_dir/profile-${PROFILE}.${ext}"
+
+        # Check for existing file unless --force
+        if [[ -f "$out_file" && "$DUMP_FORCE" != true ]]; then
+            echo "Error: $out_file already exists. Use --force to overwrite." >&2
+            exit 1
+        fi
+
+        # Ensure output directory exists
+        mkdir -p "$out_dir"
+
+        case "$svc" in
+            mongo)
+                local dump_script="$services_dir/mongo/seed/dump.js"
+                if [[ ! -f "$dump_script" ]]; then
+                    echo "Error: dump script not found: $dump_script" >&2
+                    exit 1
+                fi
+                echo "── Mongo ──"
+                DUMP_PROFILE="$PROFILE" \
+                DUMP_OUTPUT_DIR="$out_dir" \
+                    mongosh "mongodb://localhost:${MONGO_PORT:-27018}" \
+                    --eval "var PROFILE=process.env.DUMP_PROFILE; var OUTPUT_DIR=process.env.DUMP_OUTPUT_DIR" \
+                    --file "$dump_script"
+                ;;
+            mysql)
+                local dump_script="$services_dir/mysql/seed/dump.sh"
+                if [[ ! -f "$dump_script" ]]; then
+                    echo "Error: dump script not found: $dump_script" >&2
+                    exit 1
+                fi
+                echo "── MySQL ──"
+                PROFILE="$PROFILE" \
+                OUTPUT_DIR="$out_dir" \
+                HOST="127.0.0.1" \
+                PORT="${MYSQL_PORT:-3307}" \
+                USER="root" \
+                MYSQL_PWD="${MYSQL_PASSWORD:-password123}" \
+                    bash "$dump_script"
+                ;;
+            postgres)
+                local dump_script="$services_dir/postgres/seed/dump.sh"
+                if [[ ! -f "$dump_script" ]]; then
+                    echo "Error: dump script not found: $dump_script" >&2
+                    exit 1
+                fi
+                echo "── Postgres ──"
+                PROFILE="$PROFILE" \
+                OUTPUT_DIR="$out_dir" \
+                HOST="127.0.0.1" \
+                PORT="${POSTGRES_PORT:-5433}" \
+                USER="${POSTGRES_USER:-postgres_admin}" \
+                PGPASSWORD="${POSTGRES_PASSWORD:-password123}" \
+                    bash "$dump_script"
+                ;;
+            *)
+                echo "Warning: unknown service '$svc' — skipping" >&2
+                ;;
+        esac
+        echo ""
+    done
+
+    echo "Dump complete. Profile '$PROFILE' seed files created."
+    echo "Restore with: infra-compose restore --profile $PROFILE"
+}
+
+cmd_restore() {
+    parse_lifecycle_args "$@"
+    if [[ -z "$PROFILE" ]]; then
+        echo "Error: restore requires --profile NAME" >&2
+        exit 1
+    fi
+
+    local services_dir="$PKG_ROOT/services"
+    local found=false
+
+    # Verify at least one seed file exists for this profile
+    for f in \
+        "$services_dir/mongo/seed/profile-${PROFILE}.json" \
+        "$services_dir/mysql/seed/profile-${PROFILE}.sql" \
+        "$services_dir/postgres/seed/profile-${PROFILE}.sql"; do
+        if [[ -f "$f" ]]; then
+            found=true
+            break
+        fi
+    done
+
+    if [[ "$found" != true ]]; then
+        echo "Error: no seed files found for profile '$PROFILE'" >&2
+        echo "Looked in:"
+        echo "  $services_dir/mongo/seed/profile-${PROFILE}.json"
+        echo "  $services_dir/mysql/seed/profile-${PROFILE}.sql"
+        echo "  $services_dir/postgres/seed/profile-${PROFILE}.sql"
+        exit 1
+    fi
+
+    echo "Restoring profile: $PROFILE"
+
+    # Check if any profile volumes exist
+    local vols
+    vols=$(docker volume ls --filter "name=-profile-${PROFILE}" --format "{{.Name}}" 2>/dev/null || true)
+
+    if [[ -n "$vols" ]]; then
+        echo "Existing volumes found — resetting (wipe + re-seed)..."
+        cmd_reset --profile "$PROFILE" "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}"
+    else
+        echo "No existing volumes — starting fresh (first-time seed)..."
+        cmd_up --profile "$PROFILE" "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}"
+    fi
+
+    echo ""
+    echo "Restore complete for profile: $PROFILE"
 }
 
 # ── Utility commands ───────────────────────────────────────
@@ -276,18 +529,18 @@ cmd_shell() {
     local service="${1:-}"
     case "$service" in
         mongo)
-            exec mongosh "mongodb://localhost:${MONGO_PORT:-27017}"
+            exec mongosh "mongodb://localhost:${MONGO_PORT:-27018}"
             ;;
         mysql)
             MYSQL_PWD="${MYSQL_PASSWORD:-password123}" exec mysql \
-                -h 127.0.0.1 -P "${MYSQL_PORT:-3306}" -u "${MYSQL_USER:-mysql_admin}"
+                -h 127.0.0.1 -P "${MYSQL_PORT:-3307}" -u "${MYSQL_USER:-mysql_admin}"
             ;;
         postgres)
             PGPASSWORD="${POSTGRES_PASSWORD:-password123}" exec psql \
-                -h localhost -p "${POSTGRES_PORT:-5432}" -U "${POSTGRES_USER:-postgres_admin}"
+                -h localhost -p "${POSTGRES_PORT:-5433}" -U "${POSTGRES_USER:-postgres_admin}"
             ;;
         redis)
-            exec redis-cli -p "${REDIS_PORT:-6379}"
+            exec redis-cli -p "${REDIS_PORT:-6380}"
             ;;
         "")
             echo "Error: specify a service — mongo, mysql, postgres, or redis" >&2
@@ -306,20 +559,63 @@ cmd_list_profiles() {
     echo "Mongo profiles:"
     for f in "$services_dir"/mongo/seed/profile-*.json; do
         [ -f "$f" ] || continue
-        echo "  - $(basename "$f" .json | sed 's/^profile-//')"
+        local name
+        name=$(basename "$f" .json | sed 's/^profile-//')
+        local ptype="seed"
+        # Check for snapshot marker: "_meta" key with type "snapshot"
+        if grep -q '"_meta"' "$f" 2>/dev/null && grep -q '"type".*"snapshot"' "$f" 2>/dev/null; then
+            ptype="snapshot"
+        fi
+        echo "  - ${name} (${ptype})"
     done
 
     echo "MySQL profiles:"
     for f in "$services_dir"/mysql/seed/profile-*.sql; do
         [ -f "$f" ] || continue
-        echo "  - $(basename "$f" .sql | sed 's/^profile-//')"
+        local name
+        name=$(basename "$f" .sql | sed 's/^profile-//')
+        local ptype="seed"
+        # Check for snapshot marker comment in first line
+        if head -1 "$f" 2>/dev/null | grep -q '@infra-compose/snapshot'; then
+            ptype="snapshot"
+        fi
+        echo "  - ${name} (${ptype})"
     done
 
     echo "Postgres profiles:"
     for f in "$services_dir"/postgres/seed/profile-*.sql; do
         [ -f "$f" ] || continue
-        echo "  - $(basename "$f" .sql | sed 's/^profile-//')"
+        local name
+        name=$(basename "$f" .sql | sed 's/^profile-//')
+        local ptype="seed"
+        if head -1 "$f" 2>/dev/null | grep -q '@infra-compose/snapshot'; then
+            ptype="snapshot"
+        fi
+        echo "  - ${name} (${ptype})"
     done
+}
+
+cmd_completion() {
+    local completion_script="$PKG_ROOT/bin/infra-compose-completion.bash"
+    if [[ ! -f "$completion_script" ]]; then
+        echo "Error: completion script not found: $completion_script" >&2
+        exit 1
+    fi
+
+    if [[ "${1:-}" == "--install" ]]; then
+        local line='eval "$(infra-compose completion)"'
+        local rc="$HOME/.bashrc"
+        if grep -qF "$line" "$rc" 2>/dev/null; then
+            echo "Already installed in $rc"
+        else
+            echo "" >> "$rc"
+            echo "# infra-compose tab completion" >> "$rc"
+            echo "$line" >> "$rc"
+            echo "Installed completion to $rc — restart your shell or run: source $rc"
+        fi
+    else
+        cat "$completion_script"
+    fi
 }
 
 cmd_volumes() {
@@ -336,11 +632,14 @@ case "$command" in
     switch)         cmd_switch "$@" ;;
     down)           cmd_down "$@" ;;
     reset)          cmd_reset "$@" ;;
+    dump)           cmd_dump "$@" ;;
+    restore)        cmd_restore "$@" ;;
     check-ports)    cmd_check_ports ;;
     status)         cmd_status ;;
     shell)          cmd_shell "$@" ;;
     list-profiles)  cmd_list_profiles ;;
     volumes)        cmd_volumes ;;
+    completion)     cmd_completion "$@" ;;
     help|--help|-h) usage ;;
     *)
         echo "Error: unknown command '$command'" >&2

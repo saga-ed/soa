@@ -92,22 +92,24 @@ function build_compose_env(options = {}) {
  */
 function spawn_promise(cmd, args, options = {}) {
     return new Promise((resolve) => {
-        const { timeout, ...spawnOpts } = options;
+        const { timeout, encoding, ...spawnOpts } = options;
         const proc = spawn(cmd, args, { ...spawnOpts, stdio: spawnOpts.stdio || 'inherit' });
-        let stdout = '';
-        let stderr = '';
+        const chunks_out = [];
+        const chunks_err = [];
         let timer;
-        if (proc.stdout) proc.stdout.on('data', d => { stdout += d; });
-        if (proc.stderr) proc.stderr.on('data', d => { stderr += d; });
+        if (proc.stdout) proc.stdout.on('data', d => { chunks_out.push(d); });
+        if (proc.stderr) proc.stderr.on('data', d => { chunks_err.push(d); });
         if (timeout) {
             timer = setTimeout(() => { proc.kill('SIGTERM'); }, timeout);
         }
         proc.on('error', (error) => {
             if (timer) clearTimeout(timer);
-            resolve({ status: null, stdout, stderr, error, signal: null });
+            resolve({ status: null, stdout: '', stderr: '', error, signal: null });
         });
         proc.on('close', (code, signal) => {
             if (timer) clearTimeout(timer);
+            const stdout = Buffer.concat(chunks_out).toString(encoding || 'utf8');
+            const stderr = Buffer.concat(chunks_err).toString(encoding || 'utf8');
             resolve({ status: code, stdout, stderr, error: null, signal });
         });
     });

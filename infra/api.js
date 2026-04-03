@@ -97,8 +97,8 @@ function spawn_promise(cmd, args, options = {}) {
         const chunks_out = [];
         const chunks_err = [];
         let timer;
-        if (proc.stdout) proc.stdout.on('data', d => { chunks_out.push(d); });
-        if (proc.stderr) proc.stderr.on('data', d => { chunks_err.push(d); });
+        if (proc.stdout) proc.stdout.on('data', d => { chunks_out.push(typeof d === 'string' ? Buffer.from(d) : d); });
+        if (proc.stderr) proc.stderr.on('data', d => { chunks_err.push(typeof d === 'string' ? Buffer.from(d) : d); });
         if (timeout) {
             timer = setTimeout(() => { proc.kill('SIGTERM'); }, timeout);
         }

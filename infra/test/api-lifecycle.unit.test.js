@@ -2,10 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
+import { EventEmitter } from 'events';
 
-// Mock child_process to intercept all spawnSync calls
+// Track spawn calls for assertions
+const spawn_calls = [];
+
+// Mock child_process.spawn to return controllable child processes
 vi.mock('child_process', () => ({
-    spawnSync: vi.fn(),
+    spawn: vi.fn(),
 }));
 
 // Mock mongodb and mysql2 — not needed for lifecycle tests but imported by api.js
@@ -13,28 +17,52 @@ vi.mock('mongodb', () => ({ default: { MongoClient: vi.fn() } }));
 vi.mock('bson', () => ({ EJSON: { stringify: vi.fn() } }));
 vi.mock('mysql2/promise', () => ({ default: { createConnection: vi.fn() } }));
 
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 
 // ── Helpers ─────────────────────────────────────────────────
 
-/** Configure spawnSync mock to return success for all calls by default. */
-function mock_spawn_success() {
-    spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '', error: null });
+/** Create a mock child process that emits 'close' with the given result. */
+function make_mock_child(result) {
+    const child = new EventEmitter();
+    // If stdio is piped, create readable streams
+    if (result.stdout !== undefined) {
+        const stdout_stream = new EventEmitter();
+        child.stdout = stdout_stream;
+    }
+    if (result.stderr !== undefined) {
+        const stderr_stream = new EventEmitter();
+        child.stderr = stderr_stream;
+    }
+    child.kill = vi.fn();
+    // Emit data and close asynchronously (next tick) to simulate real spawn
+    process.nextTick(() => {
+        if (child.stdout && result.stdout) child.stdout.emit('data', result.stdout);
+        if (child.stderr && result.stderr) child.stderr.emit('data', result.stderr);
+        child.emit('close', result.status ?? 0, result.signal || null);
+    });
+    return child;
 }
 
-/** Configure spawnSync to return specific results per call index. */
+/** Configure spawn mock to return specific results per call index. */
 function mock_spawn_sequence(results) {
     let call_idx = 0;
-    spawnSync.mockImplementation(() => {
-        const result = results[call_idx] || { status: 0, stdout: '', stderr: '' };
+    spawn_calls.length = 0;
+    spawn.mockImplementation((cmd, args, options) => {
+        spawn_calls.push([cmd, args, options]);
+        const result = results[call_idx] || { status: 0 };
         call_idx++;
-        return result;
+        return make_mock_child(result);
     });
 }
 
-/** Extract the docker commands from spawnSync calls (skip non-docker calls). */
+/** Configure spawn mock to return success for all calls. */
+function mock_spawn_success() {
+    mock_spawn_sequence([]);
+}
+
+/** Extract the docker commands from spawn calls. */
 function get_docker_calls() {
-    return spawnSync.mock.calls
+    return spawn_calls
         .filter(([cmd]) => cmd === 'docker' || cmd === 'docker-compose')
         .map(([cmd, args]) => cmd === 'docker' ? args.join(' ') : `docker-compose ${args.join(' ')}`);
 }
@@ -44,13 +72,14 @@ function get_docker_calls() {
 describe('switch_profile', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        spawn_calls.length = 0;
     });
 
     it('calls docker compose down then up with SEED_PROFILE env', async () => {
         mock_spawn_success();
         const { switch_profile } = await import('../api.js');
 
-        const result = switch_profile({ profile: 'my-profile' });
+        const result = await switch_profile({ profile: 'my-profile' });
         expect(result.status).toBe(0);
         expect(result.profile).toBe('my-profile');
 
@@ -59,7 +88,7 @@ describe('switch_profile', () => {
         expect(calls[1]).toBe('compose up -d');
 
         // Verify SEED_PROFILE was set in env
-        const up_call = spawnSync.mock.calls.find(([cmd, args]) =>
+        const up_call = spawn_calls.find(([cmd, args]) =>
             cmd === 'docker' && args.includes('up'));
         expect(up_call[2].env.SEED_PROFILE).toBe('my-profile');
     });
@@ -70,7 +99,7 @@ describe('switch_profile', () => {
         ]);
         const { switch_profile } = await import('../api.js');
 
-        const result = switch_profile({ profile: 'bad' });
+        const result = await switch_profile({ profile: 'bad' });
         expect(result.status).toBe(1);
 
         // Should not attempt up after failed down
@@ -86,7 +115,7 @@ describe('switch_profile', () => {
         ]);
         const { switch_profile } = await import('../api.js');
 
-        const result = switch_profile({ profile: 'bad-up' });
+        const result = await switch_profile({ profile: 'bad-up' });
         expect(result.status).toBe(1);
     });
 });
@@ -96,6 +125,7 @@ describe('switch_profile', () => {
 describe('reset', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        spawn_calls.length = 0;
     });
 
     it('calls down, lists volumes, removes them, then up', async () => {
@@ -107,7 +137,7 @@ describe('reset', () => {
         ]);
         const { reset } = await import('../api.js');
 
-        const result = reset({ profile: 'test' });
+        const result = await reset({ profile: 'test' });
         expect(result.status).toBe(0);
         expect(result.profile).toBe('test');
 
@@ -126,7 +156,7 @@ describe('reset', () => {
         ]);
         const { reset } = await import('../api.js');
 
-        const result = reset({ profile: 'fresh' });
+        const result = await reset({ profile: 'fresh' });
         expect(result.status).toBe(0);
 
         const calls = get_docker_calls();
@@ -140,7 +170,7 @@ describe('reset', () => {
         ]);
         const { reset } = await import('../api.js');
 
-        const result = reset({ profile: 'fail' });
+        const result = await reset({ profile: 'fail' });
         expect(result.status).toBe(1);
         expect(get_docker_calls().length).toBe(1);
     });
@@ -153,7 +183,7 @@ describe('reset', () => {
         ]);
         const { reset } = await import('../api.js');
 
-        const result = reset({ profile: 'x' });
+        const result = await reset({ profile: 'x' });
         expect(result.status).toBe(1);
         // Should not attempt up
         const calls = get_docker_calls();
@@ -168,6 +198,7 @@ describe('restore', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        spawn_calls.length = 0;
         tmp_dir = resolve(tmpdir(), `infra-restore-test-${process.pid}-${Date.now()}`);
         mkdirSync(tmp_dir, { recursive: true });
     });
@@ -179,7 +210,7 @@ describe('restore', () => {
     it('returns error when no seed files exist', async () => {
         const { restore } = await import('../api.js');
 
-        const result = restore({ profile: 'nonexistent', data_dir: tmp_dir });
+        const result = await restore({ profile: 'nonexistent', data_dir: tmp_dir });
         expect(result.status).toBe(1);
         // No docker calls should be made
         expect(get_docker_calls().length).toBe(0);
@@ -201,7 +232,7 @@ describe('restore', () => {
             { status: 0 },                                    // docker compose up
         ]);
 
-        const result = restore({ profile: 'has-vols', data_dir: tmp_dir });
+        const result = await restore({ profile: 'has-vols', data_dir: tmp_dir });
         expect(result.status).toBe(0);
 
         const calls = get_docker_calls();
@@ -222,7 +253,7 @@ describe('restore', () => {
             { status: 0 },             // docker compose up
         ]);
 
-        const result = restore({ profile: 'fresh', data_dir: tmp_dir });
+        const result = await restore({ profile: 'fresh', data_dir: tmp_dir });
         expect(result.status).toBe(0);
 
         const calls = get_docker_calls();

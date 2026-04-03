@@ -30,11 +30,11 @@ export async function handle_snapshot(input) {
  * Switch to a different database profile (down + up with new volumes).
  * @param {{ profile: string }} input
  */
-export function handle_switch(input) {
+export async function handle_switch(input) {
     const err = require_profile(input);
     if (err) return err;
 
-    const result = switch_profile({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
+    const result = await switch_profile({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
     return result.status === 0
         ? { ok: true, profile: input.profile }
         : { ok: false, error: `switch failed (exit ${result.status})` };
@@ -44,11 +44,11 @@ export function handle_switch(input) {
  * Reset a profile (wipe volumes + restart with fresh seed).
  * @param {{ profile: string, seed_dir?: string, data_dir?: string }} input
  */
-export function handle_reset(input) {
+export async function handle_reset(input) {
     const err = require_profile(input);
     if (err) return err;
 
-    const result = reset({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
+    const result = await reset({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
     return result.status === 0
         ? { ok: true, profile: input.profile }
         : { ok: false, error: `reset failed (exit ${result.status})` };
@@ -58,11 +58,11 @@ export function handle_reset(input) {
  * Restore a profile from snapshot files (reset + re-seed from dumps).
  * @param {{ profile: string, seed_dir?: string, data_dir?: string }} input
  */
-export function handle_restore(input) {
+export async function handle_restore(input) {
     const err = require_profile(input);
     if (err) return err;
 
-    const result = restore({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
+    const result = await restore({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
     return result.status === 0
         ? { ok: true, profile: input.profile }
         : { ok: false, error: `restore failed (exit ${result.status})` };

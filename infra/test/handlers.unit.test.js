@@ -68,31 +68,31 @@ describe('handle_snapshot', () => {
 // ── handle_switch ───────────────────────────────────────────
 
 describe('handle_switch', () => {
-    it('returns ok:true on success', () => {
-        switch_profile.mockReturnValue({ status: 0, profile: 'p1' });
+    it('returns ok:true on success', async () => {
+        switch_profile.mockResolvedValue({ status: 0, profile: 'p1' });
 
-        const result = handle_switch({ profile: 'p1' });
+        const result = await handle_switch({ profile: 'p1' });
         expect(result.ok).toBe(true);
         expect(result.profile).toBe('p1');
     });
 
-    it('returns ok:false on failure', () => {
-        switch_profile.mockReturnValue({ status: 1, profile: 'p1' });
+    it('returns ok:false on failure', async () => {
+        switch_profile.mockResolvedValue({ status: 1, profile: 'p1' });
 
-        const result = handle_switch({ profile: 'p1' });
+        const result = await handle_switch({ profile: 'p1' });
         expect(result.ok).toBe(false);
         expect(result.error).toContain('switch failed');
     });
 
-    it('validates profile is required', () => {
-        const result = handle_switch({});
+    it('validates profile is required', async () => {
+        const result = await handle_switch({});
         expect(result.ok).toBe(false);
         expect(result.error).toBe('profile is required');
         expect(switch_profile).not.toHaveBeenCalled();
     });
 
-    it('rejects invalid profile names', () => {
-        const result = handle_switch({ profile: '../../etc' });
+    it('rejects invalid profile names', async () => {
+        const result = await handle_switch({ profile: '../../etc' });
         expect(result.ok).toBe(false);
         expect(result.error).toMatch(/invalid profile name/);
         expect(switch_profile).not.toHaveBeenCalled();
@@ -102,24 +102,24 @@ describe('handle_switch', () => {
 // ── handle_reset ────────────────────────────────────────────
 
 describe('handle_reset', () => {
-    it('returns ok:true on success', () => {
-        reset.mockReturnValue({ status: 0, profile: 'r1' });
+    it('returns ok:true on success', async () => {
+        reset.mockResolvedValue({ status: 0, profile: 'r1' });
 
-        const result = handle_reset({ profile: 'r1' });
+        const result = await handle_reset({ profile: 'r1' });
         expect(result.ok).toBe(true);
         expect(result.profile).toBe('r1');
     });
 
-    it('returns ok:false on failure', () => {
-        reset.mockReturnValue({ status: 1, profile: 'r1' });
+    it('returns ok:false on failure', async () => {
+        reset.mockResolvedValue({ status: 1, profile: 'r1' });
 
-        const result = handle_reset({ profile: 'r1' });
+        const result = await handle_reset({ profile: 'r1' });
         expect(result.ok).toBe(false);
         expect(result.error).toContain('reset failed');
     });
 
-    it('validates profile is required', () => {
-        const result = handle_reset({});
+    it('validates profile is required', async () => {
+        const result = await handle_reset({});
         expect(result.ok).toBe(false);
         expect(switch_profile).not.toHaveBeenCalled();
     });
@@ -128,24 +128,24 @@ describe('handle_reset', () => {
 // ── handle_restore ──────────────────────────────────────────
 
 describe('handle_restore', () => {
-    it('returns ok:true on success', () => {
-        restore.mockReturnValue({ status: 0, profile: 'snap1' });
+    it('returns ok:true on success', async () => {
+        restore.mockResolvedValue({ status: 0, profile: 'snap1' });
 
-        const result = handle_restore({ profile: 'snap1' });
+        const result = await handle_restore({ profile: 'snap1' });
         expect(result.ok).toBe(true);
         expect(result.profile).toBe('snap1');
     });
 
-    it('returns ok:false on failure', () => {
-        restore.mockReturnValue({ status: 1, profile: 'snap1' });
+    it('returns ok:false on failure', async () => {
+        restore.mockResolvedValue({ status: 1, profile: 'snap1' });
 
-        const result = handle_restore({ profile: 'snap1' });
+        const result = await handle_restore({ profile: 'snap1' });
         expect(result.ok).toBe(false);
         expect(result.error).toContain('restore failed');
     });
 
-    it('validates profile is required', () => {
-        const result = handle_restore({});
+    it('validates profile is required', async () => {
+        const result = await handle_restore({});
         expect(result.ok).toBe(false);
         expect(restore).not.toHaveBeenCalled();
     });

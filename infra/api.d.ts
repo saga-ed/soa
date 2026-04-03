@@ -45,13 +45,13 @@ export interface ProfileResult {
 export function up(options?: UpOptions): Promise<{ exitCode: number }>;
 
 /** Switch to a different database profile (down + up with new volumes). */
-export function switch_profile(options: ProfileOptions): ProfileResult;
+export function switch_profile(options: ProfileOptions): Promise<ProfileResult>;
 
 /** Reset a profile: stop services, wipe profile volumes, restart fresh. */
-export function reset(options: ProfileOptions): ProfileResult;
+export function reset(options: ProfileOptions): Promise<ProfileResult>;
 
 /** Restore a profile from seed/snapshot files. Wipes existing volumes if present. */
-export function restore(options: ProfileOptions): ProfileResult;
+export function restore(options: ProfileOptions): Promise<ProfileResult>;
 
 // ── Data operations (native JS) ───────────────────────────
 

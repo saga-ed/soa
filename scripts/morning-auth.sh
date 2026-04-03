@@ -86,26 +86,11 @@ if aws sso login --profile default; then
     echo ""
     echo -e "${YELLOW}Step 5: Refreshing AWS CodeArtifact tokens...${NC}"
 
-    echo -e "${BLUE}  Fetching CodeArtifact authorization token...${NC}"
-    CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-      --domain saga --domain-owner 531314149529 \
-      --query authorizationToken --output text 2>&1)
-
-    if [ $? -eq 0 ]; then
-      # Only saga_js is active (saga_nimbee and saga_soa are retired)
-      npm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken="$CODEARTIFACT_AUTH_TOKEN"
-      echo -e "${GREEN}  ✓ saga_js auth token configured${NC}"
-
-      # Safety: remove any stale default registry pointing to CodeArtifact
-      if grep -q "^registry=.*codeartifact" ~/.npmrc 2>/dev/null; then
-        echo -e "${YELLOW}  Removing stale CodeArtifact default registry from ~/.npmrc${NC}"
-        sed -i '/^registry=.*codeartifact/d' ~/.npmrc
-      fi
+    if bash "$(dirname "$0")/co-login.sh"; then
+      echo -e "${GREEN}  ✓ CodeArtifact configured (12h expiry)${NC}"
     else
       echo -e "${RED}  ✗ Failed to get CodeArtifact token${NC}"
     fi
-
-    echo -e "${GREEN}  CodeArtifact token valid for 12 hours${NC}"
 
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"

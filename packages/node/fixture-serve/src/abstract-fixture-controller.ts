@@ -54,6 +54,11 @@ export abstract class AbstractFixtureController extends AbstractRestController {
     private mongo_client!: MongoClient;
     private mongo_mgr!: IMongoConnMgr;
     private _ssm: SSMClient | null = null;
+    private _ssm_mod: any = null;
+    private _cached_create_types: any[] | null = null;
+    private output_buffers = new Map<string, string[]>();
+    private output_flush_timers = new Map<string, ReturnType<typeof setInterval>>();
+    private active_child: import('child_process').ChildProcess | null = null;
     protected vm_name = hostname().split('.')[0];
 
     // ── Abstract: subclasses must implement ──
@@ -132,14 +137,14 @@ export abstract class AbstractFixtureController extends AbstractRestController {
         return this.ctrl_config.default_profile || 'default';
     }
 
-    private async get_ssm(): Promise<any> {
+    /** Lazy-load SSM client + module. Caches both to avoid repeated dynamic imports. */
+    private async get_ssm(): Promise<{ client: any; mod: any }> {
         if (!this._ssm) {
-            // Dynamic import avoids bundling the large AWS SDK at build time.
-            // eslint-disable-next-line @typescript-eslint/no-require-imports
             const mod = await import('@aws-sdk/client-ssm' as string);
             this._ssm = new mod.SSMClient({ region: 'us-west-2' });
+            this._ssm_mod = mod;
         }
-        return this._ssm;
+        return { client: this._ssm, mod: this._ssm_mod };
     }
 
     // ── Snapshot / Restore ──
@@ -199,10 +204,11 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
     @Get('/create-types')
     async list_create_types() {
+        if (this._cached_create_types) return { ok: true, types: this._cached_create_types };
+
         const dir = this.fixtures_dir;
         const types: { id: string; name: string; has_ts_creator: boolean; est_seconds: number }[] = [];
 
-        // Discover from bash scripts
         if (existsSync(dir)) {
             for (const file of readdirSync(dir)) {
                 const match = file.match(/^create-fixture-(.+)\.sh$/);
@@ -218,7 +224,6 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             }
         }
 
-        // Include TS-only creators not backed by bash scripts
         for (const [id, def] of Object.entries(this.fixture_types)) {
             if (def.creator && !types.some(t => t.id === id)) {
                 types.push({
@@ -230,6 +235,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             }
         }
 
+        this._cached_create_types = types;
         return { ok: true, types };
     }
 
@@ -455,12 +461,12 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
             let result: any;
             if (creator) {
-                await this.append_output(job_id, `Using TS creator for ${fixture_type}`);
+                this.append_output(job_id, `Using TS creator for ${fixture_type}`);
                 result = await creator({
                     fixture_id, mongo_host, mongo_port, sql_host, sql_port, force_adhoc,
                 });
             } else {
-                await this.append_output(job_id, `Using bash script for ${fixture_type}`);
+                this.append_output(job_id, `Using bash script for ${fixture_type}`);
                 await this.run_bash_create(
                     job_id, fixture_type, fixture_id,
                     `${mongo_host}:${mongo_port}`, `${sql_host}:${sql_port}`, force_adhoc,
@@ -468,19 +474,20 @@ export abstract class AbstractFixtureController extends AbstractRestController {
                 result = { exit_code: 0, fixture_id };
             }
 
-            // Shared post-create: snapshot, publish SSM, mark complete
-            await this.append_output(job_id, `Saving snapshot as profile: ${fixture_id}`);
+            this.append_output(job_id, `Saving snapshot as profile: ${fixture_id}`);
             await snapshot({ profile: fixture_id, services: this.services_to_snapshot, force: true });
             if (this.ctrl_config.site_url) {
-                await this.append_output(job_id, 'Publishing playwright env to SSM...');
+                this.append_output(job_id, 'Publishing playwright env to SSM...');
                 await this.publish_playwright_env(fixture_id, this.ctrl_config.site_url);
                 await this.publish_capabilities(fixture_id, fixture_type);
             }
+            await this.finalize_output(job_id);
             await this.jobs_collection.updateOne(
                 { _id: job_id } as any,
                 { $set: { status: 'completed', completed_at: new Date(), result } },
             );
         } catch (err: any) {
+            await this.finalize_output(job_id);
             await this.jobs_collection.updateOne(
                 { _id: job_id } as any,
                 { $set: { status: 'failed', completed_at: new Date(), error_message: err.message || String(err) } },
@@ -498,6 +505,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             if (force_adhoc) args.push('--force-adhoc');
 
             const child = child_spawn('bash', args, { env: process.env });
+            this.active_child = child;
             const stderr_chunks: string[] = [];
 
             child.stdout?.on('data', (data: Buffer) => {
@@ -510,6 +518,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             });
 
             child.on('close', async (code: number | null) => {
+                this.active_child = null;
                 if (code === 0) {
                     done();
                 } else {
@@ -523,11 +532,41 @@ export abstract class AbstractFixtureController extends AbstractRestController {
         });
     }
 
-    private async append_output(job_id: string, line: string) {
+    /** Kill any running child process (called during shutdown). */
+    kill_active_child() {
+        if (this.active_child) {
+            this.active_child.kill('SIGTERM');
+            this.active_child = null;
+        }
+    }
+
+    private append_output(job_id: string, line: string) {
+        let buffer = this.output_buffers.get(job_id);
+        if (!buffer) {
+            buffer = [];
+            this.output_buffers.set(job_id, buffer);
+            const timer = setInterval(() => this.flush_output(job_id), 2000);
+            this.output_flush_timers.set(job_id, timer);
+        }
+        buffer.push(line);
+    }
+
+    private async flush_output(job_id: string) {
+        const buffer = this.output_buffers.get(job_id);
+        if (!buffer || buffer.length === 0) return;
+        const lines = buffer.splice(0);
         await this.jobs_collection.updateOne(
             { _id: job_id } as any,
-            { $push: { output: line } as any },
+            { $push: { output: { $each: lines } } as any },
         );
+    }
+
+    private async finalize_output(job_id: string) {
+        const timer = this.output_flush_timers.get(job_id);
+        if (timer) clearInterval(timer);
+        this.output_flush_timers.delete(job_id);
+        await this.flush_output(job_id);
+        this.output_buffers.delete(job_id);
     }
 
     // ── SSM publishing ──
@@ -541,8 +580,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             }
 
             const param_name = `${this.ssm_prefix}/playwright-env`;
-            const ssm = await this.get_ssm();
-            const mod = await import('@aws-sdk/client-ssm' as string);
+            const { client: ssm, mod } = await this.get_ssm();
             await ssm.send(new mod.PutParameterCommand({
                 Name: param_name,
                 Value: JSON.stringify(playwright_data),
@@ -559,8 +597,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
         try {
             const capabilities = this.fixture_capabilities[fixture_type] || [];
             const param_name = `${this.ssm_prefix}/capabilities`;
-            const ssm = await this.get_ssm();
-            const mod = await import('@aws-sdk/client-ssm' as string);
+            const { client: ssm, mod } = await this.get_ssm();
             await ssm.send(new mod.PutParameterCommand({
                 Name: param_name,
                 Value: JSON.stringify({
@@ -586,8 +623,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
         let has_playwright_env = false;
         try {
-            const ssm = await this.get_ssm();
-            const mod = await import('@aws-sdk/client-ssm' as string);
+            const { client: ssm, mod } = await this.get_ssm();
             await ssm.send(new mod.GetParameterCommand({
                 Name: `${this.ssm_prefix}/playwright-env`,
             }));

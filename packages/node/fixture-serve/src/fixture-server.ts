@@ -37,9 +37,30 @@ import type { ExpressServerConfig } from '@saga-ed/soa-api-core';
 import { AbstractRestController } from '@saga-ed/soa-api-core';
 import { get_active_profile } from '@saga-ed/infra-compose';
 import { create_router as create_infra_router } from '@saga-ed/infra-compose/router';
+import { getMetadataArgsStorage } from 'routing-controllers';
 import { create_service_restarter } from './service-restart.js';
 import { register_with_admin } from './admin-registration.js';
 import type { FixtureControllerConfig } from './abstract-fixture-controller.js';
+
+// Patch routing-controllers to walk the prototype chain for param metadata.
+// routing-controllers' MetadataBuilder.createActions() walks the chain for actions
+// and re-targets them to the child class, but createParams() only does an exact
+// match — so @Body()/@Param() on abstract base classes are silently dropped.
+const storage = getMetadataArgsStorage();
+const _origFilterParams = storage.filterParamsWithTargetAndMethod.bind(storage);
+storage.filterParamsWithTargetAndMethod = function (target: Function, method: string) {
+    const seen = new Set<number>();
+    const result: any[] = [];
+    for (let t: any = target; t && t !== Object; t = Object.getPrototypeOf(t)) {
+        for (const p of _origFilterParams(t, method)) {
+            if (!seen.has(p.index)) {
+                seen.add(p.index);
+                result.push(p);
+            }
+        }
+    }
+    return result;
+};
 
 export interface FixtureServerConfig {
     /** Port to listen on. */

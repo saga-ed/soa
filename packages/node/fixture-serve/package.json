@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/fixture-serve",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": false,
   "type": "module",
   "description": "Reusable fixture server infrastructure — Express server, async job queue, provision workflow, and credential export for service-specific fixture CLIs",
@@ -27,8 +27,8 @@
     }
   },
   "scripts": {
-    "dev": "tsup --watch",
-    "build": "tsup",
+    "dev": "tsc --watch",
+    "build": "tsc",
     "test": "vitest run",
     "clean": "rm -rf dist"
   },

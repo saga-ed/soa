@@ -9,4 +9,5 @@ export type {
     SuiteRoles,
     JobDocument,
     ProvisionState,
+    ProvisionStatus,
 } from './types.js';

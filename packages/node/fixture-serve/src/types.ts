@@ -45,10 +45,12 @@ export interface JobDocument {
     output: string[];
 }
 
+/** Valid lifecycle states for a provision operation. */
+export type ProvisionStatus = 'idle' | 'resetting' | 'creating' | 'switching' | 'verifying' | 'ready' | 'failed';
+
 /** In-memory state for a provision lifecycle operation. */
 export interface ProvisionState {
-    status: string;
-    provision_status: string;
+    status: ProvisionStatus;
     fixture_type: string;
     fixture_id: string;
     started_at: Date;

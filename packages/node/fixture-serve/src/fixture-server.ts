@@ -27,7 +27,6 @@
  */
 
 import 'reflect-metadata';
-import * as express from 'express';
 import { Container } from 'inversify';
 import type { ILogger, PinoLoggerConfig } from '@saga-ed/soa-logger';
 import { PinoLogger } from '@saga-ed/soa-logger';
@@ -176,20 +175,10 @@ export class FixtureServer {
         }
 
         // 3. Set up Express app
+        // CORS and body parsing are handled by ExpressServer.init() —
+        // api-core applies cors() middleware and routing-controllers parses @Body() params.
         this.express_server = this.container.get(ExpressServer);
         const app = this.express_server.getApp();
-
-        app.use((_req, res, next) => {
-            res.header('Access-Control-Allow-Origin', '*');
-            res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-            res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-            if (_req.method === 'OPTIONS') {
-                res.sendStatus(204);
-                return;
-            }
-            next();
-        });
-        app.use(express.json());
 
         // 4. Mount infra-compose router with lifecycle hooks
         const logger = this.container.get<ILogger>('ILogger');
@@ -231,11 +220,11 @@ export class FixtureServer {
         }
 
         // 9. Graceful shutdown
-        process.on('SIGINT', () => {
+        process.once('SIGINT', () => {
             this.express_server.stop();
             process.exit(0);
         });
-        process.on('SIGTERM', () => {
+        process.once('SIGTERM', () => {
             this.express_server.stop();
             process.exit(0);
         });

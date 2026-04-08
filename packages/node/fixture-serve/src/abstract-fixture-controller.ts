@@ -31,7 +31,7 @@ import { snapshot, switch_profile, reset, get_active_profile } from '@saga-ed/in
 import type { ILogger } from '@saga-ed/soa-logger';
 import { AbstractRestController } from '@saga-ed/soa-api-core';
 import type { ExpressServerConfig } from '@saga-ed/soa-api-core';
-import type { FixtureTypeDefinition, RoleMapping, SuiteRoles, ProvisionState } from './types.js';
+import type { FixtureTypeDefinition, RoleMapping, SuiteRoles, ProvisionState, ProvisionStatus } from './types.js';
 
 /** Config injected into the controller via DI. */
 export interface FixtureControllerConfig {
@@ -144,6 +144,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
     // ── Snapshot / Restore ──
 
+    /** Backward-compat alias — fixture-admin Lambda proxies to /snapshot. */
     @Post('/snapshot')
     async snapshot_fixture(@Body() body: { fixture_id: string; force?: boolean }) {
         return this.store(body);
@@ -232,18 +233,25 @@ export abstract class AbstractFixtureController extends AbstractRestController {
         return { ok: true, types };
     }
 
-    @Post('/create-async')
-    async create_async(@Body() body: { fixture_type?: string; fixture_id?: string; force_adhoc?: boolean }) {
+    /** Resolve and validate a fixture type from request body. */
+    private resolve_fixture_type(body: { fixture_type?: string; fixture_id?: string; force_adhoc?: boolean }) {
         const fixture_type = body.fixture_type || Object.keys(this.fixture_types)[0] || 'default';
-        const { fixture_id, force_adhoc = false } = body;
-
+        const fixture_id = body.fixture_id || fixture_type;
+        const force_adhoc = body.force_adhoc ?? false;
         const script = path_resolve(this.fixtures_dir, `create-fixture-${fixture_type}.sh`);
         const has_ts = !!this.fixture_types[fixture_type]?.creator;
-        if (!existsSync(script) && !has_ts) {
+        const valid = existsSync(script) || has_ts;
+        return { fixture_type, fixture_id, force_adhoc, valid };
+    }
+
+    @Post('/create-async')
+    async create_async(@Body() body: { fixture_type?: string; fixture_id?: string; force_adhoc?: boolean }) {
+        const { fixture_type, fixture_id, force_adhoc, valid } = this.resolve_fixture_type(body);
+        if (!valid) {
             return { ok: false, error: `Unknown fixture type: ${fixture_type}` };
         }
 
-        const resolved_fixture_id = fixture_id || fixture_type;
+        const resolved_fixture_id = fixture_id;
         const job_id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         await this.jobs_collection.insertOne({
             _id: job_id as any,
@@ -284,13 +292,8 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
     @Post('/provision')
     async provision(@Body() body: { fixture_type?: string; fixture_id?: string; force_adhoc?: boolean }) {
-        const fixture_type = body.fixture_type || Object.keys(this.fixture_types)[0] || 'default';
-        const { fixture_id, force_adhoc = false } = body;
-        const resolved_id = fixture_id || fixture_type;
-
-        const script = path_resolve(this.fixtures_dir, `create-fixture-${fixture_type}.sh`);
-        const has_ts = !!this.fixture_types[fixture_type]?.creator;
-        if (!existsSync(script) && !has_ts) {
+        const { fixture_type, fixture_id: resolved_id, force_adhoc, valid } = this.resolve_fixture_type(body);
+        if (!valid) {
             return { ok: false, error: `Unknown fixture type: ${fixture_type}` };
         }
 
@@ -300,7 +303,6 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
         this.provision_state = {
             status: 'resetting',
-            provision_status: 'resetting',
             fixture_type,
             fixture_id: resolved_id,
             started_at: new Date(),
@@ -322,7 +324,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
         return {
             ok: true,
             status: this.provision_state.status,
-            provision_status: this.provision_state.provision_status,
+            provision_status: this.provision_state.status,
             fixture_type: this.provision_state.fixture_type,
             fixture_id: this.provision_state.fixture_id,
             started_at: this.provision_state.started_at,
@@ -335,12 +337,11 @@ export abstract class AbstractFixtureController extends AbstractRestController {
     }
 
     private async run_provision_job(fixture_type: string, fixture_id: string, force_adhoc: boolean) {
-        const update = (provision_status: string) => {
+        const update = (status: ProvisionStatus) => {
             if (this.provision_state) {
-                this.provision_state.status = provision_status;
-                this.provision_state.provision_status = provision_status;
+                this.provision_state.status = status;
             }
-            this.logger.info(`[provision] ${provision_status}`);
+            this.logger.info(`[provision] ${status}`);
         };
 
         try {
@@ -360,7 +361,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             }
 
             // Step 2: Create fixture
-            await update('creating');
+            update('creating');
             this.logger.info(`Provision: creating ${fixture_type} as ${fixture_id}`);
 
             const create_job_id = `create-${Date.now().toString(36)}`;
@@ -380,7 +381,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             }
 
             // Step 3: Switch to snapshot
-            await update('switching');
+            update('switching');
             this.logger.info(`Provision: switching to snapshot ${fixture_id}`);
             const switch_result = await switch_profile({ profile: fixture_id });
             if (switch_result.status !== 0) {
@@ -390,7 +391,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             await this.on_after_switch();
 
             // Step 4: Verify
-            await update('verifying');
+            update('verifying');
 
             const active_after_switch = get_active_profile();
             if (active_after_switch?.profile !== fixture_id) {
@@ -412,7 +413,6 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
             if (this.provision_state) {
                 this.provision_state.status = 'ready';
-                this.provision_state.provision_status = 'ready';
                 this.provision_state.completed_at = new Date();
                 this.provision_state.user_count = user_count;
             }
@@ -420,7 +420,6 @@ export abstract class AbstractFixtureController extends AbstractRestController {
         } catch (err: any) {
             if (this.provision_state) {
                 this.provision_state.status = 'failed';
-                this.provision_state.provision_status = 'failed';
                 this.provision_state.completed_at = new Date();
                 this.provision_state.error = err.message || String(err);
             }
@@ -454,40 +453,33 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
             const creator = this.fixture_types[fixture_type]?.creator;
 
+            let result: any;
             if (creator) {
                 await this.append_output(job_id, `Using TS creator for ${fixture_type}`);
-                const result = await creator({
+                result = await creator({
                     fixture_id, mongo_host, mongo_port, sql_host, sql_port, force_adhoc,
                 });
-                await this.append_output(job_id, `Saving snapshot as profile: ${fixture_id}`);
-                await snapshot({ profile: fixture_id, services: this.services_to_snapshot, force: true });
-                if (this.ctrl_config.site_url) {
-                    await this.append_output(job_id, 'Publishing playwright env to SSM...');
-                    await this.publish_playwright_env(fixture_id, this.ctrl_config.site_url);
-                    await this.publish_capabilities(fixture_id, fixture_type);
-                }
-                await this.jobs_collection.updateOne(
-                    { _id: job_id } as any,
-                    { $set: { status: 'completed', completed_at: new Date(), result } },
-                );
             } else {
                 await this.append_output(job_id, `Using bash script for ${fixture_type}`);
                 await this.run_bash_create(
                     job_id, fixture_type, fixture_id,
                     `${mongo_host}:${mongo_port}`, `${sql_host}:${sql_port}`, force_adhoc,
                 );
-                await this.append_output(job_id, `Saving snapshot as profile: ${fixture_id}`);
-                await snapshot({ profile: fixture_id, services: this.services_to_snapshot, force: true });
-                if (this.ctrl_config.site_url) {
-                    await this.append_output(job_id, 'Publishing playwright env to SSM...');
-                    await this.publish_playwright_env(fixture_id, this.ctrl_config.site_url);
-                    await this.publish_capabilities(fixture_id, fixture_type);
-                }
-                await this.jobs_collection.updateOne(
-                    { _id: job_id } as any,
-                    { $set: { status: 'completed', completed_at: new Date(), result: { exit_code: 0, fixture_id } } },
-                );
+                result = { exit_code: 0, fixture_id };
             }
+
+            // Shared post-create: snapshot, publish SSM, mark complete
+            await this.append_output(job_id, `Saving snapshot as profile: ${fixture_id}`);
+            await snapshot({ profile: fixture_id, services: this.services_to_snapshot, force: true });
+            if (this.ctrl_config.site_url) {
+                await this.append_output(job_id, 'Publishing playwright env to SSM...');
+                await this.publish_playwright_env(fixture_id, this.ctrl_config.site_url);
+                await this.publish_capabilities(fixture_id, fixture_type);
+            }
+            await this.jobs_collection.updateOne(
+                { _id: job_id } as any,
+                { $set: { status: 'completed', completed_at: new Date(), result } },
+            );
         } catch (err: any) {
             await this.jobs_collection.updateOne(
                 { _id: job_id } as any,

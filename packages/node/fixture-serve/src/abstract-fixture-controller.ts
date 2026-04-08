@@ -24,7 +24,9 @@ import { resolve as path_resolve } from 'path';
 import { hostname } from 'os';
 import { Post, Get, Body, QueryParam, Param } from 'routing-controllers';
 import { injectable, inject } from 'inversify';
-import { MongoClient } from 'mongodb';
+import type { MongoClient } from 'mongodb';
+import { MONGO_CLIENT } from '@saga-ed/soa-db';
+import type { IMongoConnMgr } from '@saga-ed/soa-db';
 // SSMClient is dynamically imported at runtime to avoid large SDK dependency at startup.
 type SSMClient = any;
 import { snapshot, switch_profile, reset, get_active_profile } from '@saga-ed/infra-compose';
@@ -50,6 +52,7 @@ export interface FixtureControllerConfig {
 export abstract class AbstractFixtureController extends AbstractRestController {
     readonly sectorName = 'fixture';
     private mongo_client!: MongoClient;
+    private mongo_mgr!: IMongoConnMgr;
     private _ssm: SSMClient | null = null;
     protected vm_name = hostname().split('.')[0];
 
@@ -84,29 +87,26 @@ export abstract class AbstractFixtureController extends AbstractRestController {
     constructor(
         @inject('ILogger') logger: ILogger,
         @inject('FixtureControllerConfig') protected ctrl_config: FixtureControllerConfig,
+        @inject(MONGO_CLIENT) mongo_client: MongoClient,
+        @inject('IMongoConnMgr') mongo_mgr: IMongoConnMgr,
         @inject('ExpressServerConfig') serverConfig?: ExpressServerConfig,
     ) {
         super(logger, 'fixture', serverConfig);
+        this.mongo_client = mongo_client;
+        this.mongo_mgr = mongo_mgr;
     }
 
     // ── Lifecycle ──
 
+    /** Override in subclass for additional init. MongoDB is connected via DI. */
     async init() {
-        this.mongo_client = new MongoClient(this.ctrl_config.mongo_uri, {
-            directConnection: true,
-            serverSelectionTimeoutMS: 30000,
-        });
-        await this.mongo_client.connect();
         this.logger.info(`FixtureController: connected to MongoDB at ${this.ctrl_config.mongo_uri}`);
     }
 
     protected async reconnect_mongo() {
-        try { await this.mongo_client.close(); } catch { /* already closed */ }
-        this.mongo_client = new MongoClient(this.ctrl_config.mongo_uri, {
-            directConnection: true,
-            serverSelectionTimeoutMS: 30000,
-        });
-        await this.mongo_client.connect();
+        await this.mongo_mgr.disconnect();
+        await this.mongo_mgr.connect();
+        this.mongo_client = this.mongo_mgr.getClient();
         this.logger.info('FixtureController: reconnected to MongoDB');
     }
 

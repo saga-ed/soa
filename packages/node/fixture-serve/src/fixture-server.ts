@@ -34,6 +34,9 @@ import { ExpressServer } from '@saga-ed/soa-api-core/express-server';
 import { ControllerLoader } from '@saga-ed/soa-api-core/utils/controller-loader';
 import type { ExpressServerConfig } from '@saga-ed/soa-api-core';
 import { AbstractRestController } from '@saga-ed/soa-api-core';
+import { MongoProvider, MONGO_CLIENT } from '@saga-ed/soa-db';
+import type { IMongoConnMgr } from '@saga-ed/soa-db';
+import type { MongoClient } from 'mongodb';
 import { get_active_profile } from '@saga-ed/infra-compose';
 import { create_router as create_infra_router } from '@saga-ed/infra-compose/router';
 import { create_service_restarter } from './service-restart.js';
@@ -139,6 +142,26 @@ export class FixtureServer {
         };
         this.container.bind<FixtureControllerConfig>('FixtureControllerConfig').toConstantValue(ctrl_config);
 
+        // MongoDB via MongoProvider — connection is established during DI resolution
+        const parsed_uri = new URL(config.mongo_uri.replace('mongodb://', 'http://'));
+        this.container.bind<IMongoConnMgr>('IMongoConnMgr').toDynamicValue(async () => {
+            const provider = new MongoProvider({
+                configType: 'MONGO',
+                instanceName: 'fixture-db',
+                host: parsed_uri.hostname,
+                port: parseInt(parsed_uri.port || '27017', 10),
+                database: config.db_name,
+                options: { directConnection: true, serverSelectionTimeoutMS: 30000 },
+            });
+            await provider.connect();
+            return provider;
+        }).inSingletonScope();
+
+        this.container.bind<MongoClient>(MONGO_CLIENT).toDynamicValue(async () => {
+            const mgr = await this.container.getAsync<IMongoConnMgr>('IMongoConnMgr');
+            return mgr.getClient();
+        }).inSingletonScope();
+
         this.container.bind(ExpressServer).toSelf().inSingletonScope();
         this.container.bind(ControllerLoader).toSelf().inSingletonScope();
 
@@ -199,14 +222,16 @@ export class FixtureServer {
         }
 
         // 9. Graceful shutdown
-        process.once('SIGINT', () => {
+        const shutdown = async () => {
+            try {
+                const mgr = await this.container.getAsync<IMongoConnMgr>('IMongoConnMgr');
+                await mgr.disconnect();
+            } catch { /* container may not have resolved yet */ }
             this.express_server.stop();
             process.exit(0);
-        });
-        process.once('SIGTERM', () => {
-            this.express_server.stop();
-            process.exit(0);
-        });
+        };
+        process.once('SIGINT', shutdown);
+        process.once('SIGTERM', shutdown);
     }
 
     stop(): void {

@@ -3,7 +3,7 @@ import cors from 'cors';
 import { injectable, inject } from 'inversify';
 import type { ExpressServerConfig } from './express-server-schema.js';
 import type { ILogger } from '@saga-ed/soa-logger';
-import { useContainer, useExpressServer } from 'routing-controllers';
+import { useContainer, useExpressServer, getMetadataArgsStorage } from 'routing-controllers';
 import { Container } from 'inversify';
 import { SectorsController } from './sectors-controller.js';
 
@@ -11,6 +11,7 @@ import { SectorsController } from './sectors-controller.js';
 export class ExpressServer {
   private readonly app: Application;
   private serverInstance?: ReturnType<Application['listen']>;
+  private static _paramPatchApplied = false;
 
   constructor(
     @inject('ExpressServerConfig') private config: ExpressServerConfig,
@@ -87,6 +88,12 @@ export class ExpressServer {
       }
     }
 
+    // Patch routing-controllers to walk the prototype chain for param metadata.
+    // createActions() walks the chain and re-targets actions to the child class,
+    // but createParams() uses exact match — so @Body()/@Param() on abstract base
+    // classes are silently dropped. Workaround for routing-controllers@0.11.x.
+    ExpressServer.applyParamInheritancePatch();
+
     // Prepare routing-controllers configuration
     const routingConfig: Parameters<typeof useExpressServer>[1] = {
       controllers: controllerClasses as Function[],
@@ -120,5 +127,26 @@ export class ExpressServer {
 
   public getApp(): Application {
     return this.app;
+  }
+
+  private static applyParamInheritancePatch(): void {
+    if (ExpressServer._paramPatchApplied) return;
+    ExpressServer._paramPatchApplied = true;
+
+    const storage = getMetadataArgsStorage();
+    const orig = storage.filterParamsWithTargetAndMethod.bind(storage);
+    storage.filterParamsWithTargetAndMethod = function (target: Function, method: string) {
+      const seen = new Set<number>();
+      const result: any[] = [];
+      for (let t: any = target; t && t !== Object; t = Object.getPrototypeOf(t)) {
+        for (const p of orig(t, method)) {
+          if (!seen.has(p.index)) {
+            seen.add(p.index);
+            result.push(p);
+          }
+        }
+      }
+      return result;
+    };
   }
 }

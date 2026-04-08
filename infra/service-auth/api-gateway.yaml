@@ -1,0 +1,496 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+    Service-to-Service Authentication - API Gateway with Cognito Authorizer.
+    Configures a REST API Gateway with JWT-based authorization, scope enforcement,
+    usage plans, and WAF integration.
+
+Parameters:
+    Environment:
+        Type: String
+        AllowedValues:
+            - dev
+            - staging
+            - prod
+        Description: Deployment environment
+
+    ServiceName:
+        Type: String
+        Default: saga
+        Description: Service name prefix for resource naming
+
+    CognitoUserPoolArn:
+        Type: String
+        Description: ARN of the Cognito User Pool for token validation
+
+    ResourceServerIdentifier:
+        Type: String
+        Default: api
+        Description: Resource server identifier (scope prefix, must match cognito.yaml)
+
+    AuthorizerResultTtlSeconds:
+        Type: Number
+        Default: 300
+        MinValue: 0
+        MaxValue: 3600
+        Description: >
+            How long API Gateway caches authorizer results (seconds).
+            0 disables caching. Max 3600 (1 hour).
+
+    BackendEndpoint:
+        Type: String
+        Default: ''
+        Description: >
+            Backend service endpoint URL (e.g. http://internal-alb-1234.us-west-2.elb.amazonaws.com).
+            Leave empty to create mock integrations for testing.
+
+    ThrottleRateLimit:
+        Type: Number
+        Default: 100
+        Description: Requests per second rate limit per API key
+
+    ThrottleBurstLimit:
+        Type: Number
+        Default: 200
+        Description: Maximum concurrent request burst limit per API key
+
+    MonthlyRequestQuota:
+        Type: Number
+        Default: 1000000
+        Description: Maximum requests per month per usage plan
+
+    WebAclArn:
+        Type: String
+        Default: ''
+        Description: ARN of an existing WAF WebACL to associate. Leave empty to skip.
+
+Conditions:
+    HasBackendEndpoint: !Not [!Equals [!Ref BackendEndpoint, '']]
+    HasWebAcl: !Not [!Equals [!Ref WebAclArn, '']]
+
+Resources:
+    # =========================================================================
+    # REST API
+    # =========================================================================
+    ServiceApi:
+        Type: AWS::ApiGateway::RestApi
+        Properties:
+            Name: !Sub '${ServiceName}-service-api-${Environment}'
+            Description: !Sub 'Service-to-service API for ${ServiceName} (${Environment})'
+            EndpointConfiguration:
+                Types:
+                    - REGIONAL
+            Tags:
+                - Key: Environment
+                  Value: !Ref Environment
+                - Key: Service
+                  Value: !Ref ServiceName
+                - Key: ManagedBy
+                  Value: cloudformation
+
+    # =========================================================================
+    # Cognito Authorizer
+    # =========================================================================
+    CognitoAuthorizer:
+        Type: AWS::ApiGateway::Authorizer
+        Properties:
+            Name: !Sub '${ServiceName}-cognito-authorizer-${Environment}'
+            RestApiId: !Ref ServiceApi
+            Type: COGNITO_USER_POOLS
+            IdentitySource: method.request.header.Authorization
+            ProviderARNs:
+                - !Ref CognitoUserPoolArn
+            AuthorizerResultTtlInSeconds: !Ref AuthorizerResultTtlSeconds
+
+    # =========================================================================
+    # API Resources (routes)
+    # =========================================================================
+
+    # --- /api ---
+    ApiResource:
+        Type: AWS::ApiGateway::Resource
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ParentId: !GetAtt ServiceApi.RootResourceId
+            PathPart: api
+
+    # --- /api/resources ---
+    ApiResourcesResource:
+        Type: AWS::ApiGateway::Resource
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ParentId: !Ref ApiResource
+            PathPart: resources
+
+    # --- /api/resources/{resourceId} ---
+    ApiResourceByIdResource:
+        Type: AWS::ApiGateway::Resource
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ParentId: !Ref ApiResourcesResource
+            PathPart: '{resourceId}'
+
+    # --- /webhooks ---
+    WebhooksResource:
+        Type: AWS::ApiGateway::Resource
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ParentId: !GetAtt ServiceApi.RootResourceId
+            PathPart: webhooks
+
+    # --- /webhooks/events ---
+    WebhookEventsResource:
+        Type: AWS::ApiGateway::Resource
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ParentId: !Ref WebhooksResource
+            PathPart: events
+
+    # --- /health (unauthenticated) ---
+    HealthResource:
+        Type: AWS::ApiGateway::Resource
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ParentId: !GetAtt ServiceApi.RootResourceId
+            PathPart: health
+
+    # =========================================================================
+    # Methods - Protected endpoints with scope-based authorization
+    # =========================================================================
+
+    # GET /api/resources → requires api/read
+    GetResourcesMethod:
+        Type: AWS::ApiGateway::Method
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ResourceId: !Ref ApiResourcesResource
+            HttpMethod: GET
+            AuthorizationType: COGNITO_USER_POOLS
+            AuthorizerId: !Ref CognitoAuthorizer
+            AuthorizationScopes:
+                - !Sub '${ResourceServerIdentifier}/read'
+            RequestParameters:
+                method.request.header.Authorization: true
+            MethodResponses:
+                - StatusCode: '200'
+                  ResponseModels:
+                      application/json: Empty
+                - StatusCode: '401'
+                  ResponseModels:
+                      application/json: Error
+                - StatusCode: '403'
+                  ResponseModels:
+                      application/json: Error
+            Integration: !If
+                - HasBackendEndpoint
+                - Type: HTTP_PROXY
+                  IntegrationHttpMethod: GET
+                  Uri: !Sub '${BackendEndpoint}/api/resources'
+                  IntegrationResponses:
+                      - StatusCode: '200'
+                - Type: MOCK
+                  RequestTemplates:
+                      application/json: '{"statusCode": 200}'
+                  IntegrationResponses:
+                      - StatusCode: '200'
+                        ResponseTemplates:
+                            application/json: '{"message": "GET /api/resources - mock response", "scopes": "$context.authorizer.claims.scope"}'
+
+    # POST /api/resources → requires api/write
+    PostResourcesMethod:
+        Type: AWS::ApiGateway::Method
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ResourceId: !Ref ApiResourcesResource
+            HttpMethod: POST
+            AuthorizationType: COGNITO_USER_POOLS
+            AuthorizerId: !Ref CognitoAuthorizer
+            AuthorizationScopes:
+                - !Sub '${ResourceServerIdentifier}/write'
+            RequestParameters:
+                method.request.header.Authorization: true
+            MethodResponses:
+                - StatusCode: '201'
+                  ResponseModels:
+                      application/json: Empty
+                - StatusCode: '401'
+                  ResponseModels:
+                      application/json: Error
+                - StatusCode: '403'
+                  ResponseModels:
+                      application/json: Error
+            Integration: !If
+                - HasBackendEndpoint
+                - Type: HTTP_PROXY
+                  IntegrationHttpMethod: POST
+                  Uri: !Sub '${BackendEndpoint}/api/resources'
+                  IntegrationResponses:
+                      - StatusCode: '201'
+                - Type: MOCK
+                  RequestTemplates:
+                      application/json: '{"statusCode": 201}'
+                  IntegrationResponses:
+                      - StatusCode: '201'
+                        ResponseTemplates:
+                            application/json: '{"message": "POST /api/resources - mock response"}'
+
+    # GET /api/resources/{resourceId} → requires api/read
+    GetResourceByIdMethod:
+        Type: AWS::ApiGateway::Method
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ResourceId: !Ref ApiResourceByIdResource
+            HttpMethod: GET
+            AuthorizationType: COGNITO_USER_POOLS
+            AuthorizerId: !Ref CognitoAuthorizer
+            AuthorizationScopes:
+                - !Sub '${ResourceServerIdentifier}/read'
+            RequestParameters:
+                method.request.header.Authorization: true
+                method.request.path.resourceId: true
+            MethodResponses:
+                - StatusCode: '200'
+                  ResponseModels:
+                      application/json: Empty
+                - StatusCode: '404'
+                  ResponseModels:
+                      application/json: Error
+            Integration: !If
+                - HasBackendEndpoint
+                - Type: HTTP_PROXY
+                  IntegrationHttpMethod: GET
+                  Uri: !Sub '${BackendEndpoint}/api/resources/{resourceId}'
+                  RequestParameters:
+                      integration.request.path.resourceId: method.request.path.resourceId
+                  IntegrationResponses:
+                      - StatusCode: '200'
+                - Type: MOCK
+                  RequestTemplates:
+                      application/json: '{"statusCode": 200}'
+                  IntegrationResponses:
+                      - StatusCode: '200'
+                        ResponseTemplates:
+                            application/json: '{"resourceId": "$input.params(''resourceId'')", "message": "mock resource"}'
+
+    # POST /webhooks/events → requires webhooks.send
+    PostWebhookEventsMethod:
+        Type: AWS::ApiGateway::Method
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ResourceId: !Ref WebhookEventsResource
+            HttpMethod: POST
+            AuthorizationType: COGNITO_USER_POOLS
+            AuthorizerId: !Ref CognitoAuthorizer
+            AuthorizationScopes:
+                - !Sub '${ResourceServerIdentifier}/webhooks.send'
+            RequestParameters:
+                method.request.header.Authorization: true
+            MethodResponses:
+                - StatusCode: '202'
+                  ResponseModels:
+                      application/json: Empty
+                - StatusCode: '401'
+                  ResponseModels:
+                      application/json: Error
+            Integration: !If
+                - HasBackendEndpoint
+                - Type: HTTP_PROXY
+                  IntegrationHttpMethod: POST
+                  Uri: !Sub '${BackendEndpoint}/webhooks/events'
+                  IntegrationResponses:
+                      - StatusCode: '202'
+                - Type: MOCK
+                  RequestTemplates:
+                      application/json: '{"statusCode": 202}'
+                  IntegrationResponses:
+                      - StatusCode: '202'
+                        ResponseTemplates:
+                            application/json: '{"message": "Webhook event accepted"}'
+
+    # GET /health → unauthenticated
+    HealthMethod:
+        Type: AWS::ApiGateway::Method
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ResourceId: !Ref HealthResource
+            HttpMethod: GET
+            AuthorizationType: NONE
+            MethodResponses:
+                - StatusCode: '200'
+                  ResponseModels:
+                      application/json: Empty
+            Integration:
+                Type: MOCK
+                RequestTemplates:
+                    application/json: '{"statusCode": 200}'
+                IntegrationResponses:
+                    - StatusCode: '200'
+                      ResponseTemplates:
+                          application/json: '{"status": "healthy"}'
+
+    # =========================================================================
+    # Gateway Responses (custom error bodies for auth failures)
+    # =========================================================================
+    UnauthorizedResponse:
+        Type: AWS::ApiGateway::GatewayResponse
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ResponseType: UNAUTHORIZED
+            StatusCode: '401'
+            ResponseTemplates:
+                application/json: '{"error": "unauthorized", "message": "Missing or invalid authentication token"}'
+
+    AccessDeniedResponse:
+        Type: AWS::ApiGateway::GatewayResponse
+        Properties:
+            RestApiId: !Ref ServiceApi
+            ResponseType: ACCESS_DENIED
+            StatusCode: '403'
+            ResponseTemplates:
+                application/json: '{"error": "forbidden", "message": "Insufficient permissions for this operation"}'
+
+    # =========================================================================
+    # Deployment & Stage
+    # =========================================================================
+    ApiDeployment:
+        Type: AWS::ApiGateway::Deployment
+        DependsOn:
+            - GetResourcesMethod
+            - PostResourcesMethod
+            - GetResourceByIdMethod
+            - PostWebhookEventsMethod
+            - HealthMethod
+        Properties:
+            RestApiId: !Ref ServiceApi
+
+    ApiStage:
+        Type: AWS::ApiGateway::Stage
+        Properties:
+            StageName: !Ref Environment
+            RestApiId: !Ref ServiceApi
+            DeploymentId: !Ref ApiDeployment
+            Description: !Sub '${Environment} stage'
+            MethodSettings:
+                # Enable CloudWatch logging and metrics for all methods
+                - ResourcePath: '/*'
+                  HttpMethod: '*'
+                  MetricsEnabled: true
+                  DataTraceEnabled: false
+                  LoggingLevel: INFO
+                  ThrottlingRateLimit: !Ref ThrottleRateLimit
+                  ThrottlingBurstLimit: !Ref ThrottleBurstLimit
+            AccessLogSetting:
+                DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+                Format: >-
+                    {"requestId":"$context.requestId",
+                    "ip":"$context.identity.sourceIp",
+                    "caller":"$context.identity.caller",
+                    "requestTime":"$context.requestTime",
+                    "httpMethod":"$context.httpMethod",
+                    "resourcePath":"$context.resourcePath",
+                    "status":"$context.status",
+                    "protocol":"$context.protocol",
+                    "responseLength":"$context.responseLength",
+                    "authorizerLatency":"$context.authorizer.latency",
+                    "integrationLatency":"$context.integrationLatency",
+                    "clientId":"$context.authorizer.claims.client_id",
+                    "scopes":"$context.authorizer.claims.scope",
+                    "error":"$context.error.message"}
+            Tags:
+                - Key: Environment
+                  Value: !Ref Environment
+
+    # =========================================================================
+    # Access Log Group
+    # =========================================================================
+    ApiAccessLogGroup:
+        Type: AWS::Logs::LogGroup
+        Properties:
+            LogGroupName: !Sub '/aws/apigateway/${ServiceName}-service-api-${Environment}/access-logs'
+            RetentionInDays: 90
+            Tags:
+                - Key: Environment
+                  Value: !Ref Environment
+
+    # =========================================================================
+    # Usage Plans & API Keys (per-partner rate limiting)
+    # =========================================================================
+    PartnerUsagePlan:
+        Type: AWS::ApiGateway::UsagePlan
+        DependsOn: ApiStage
+        Properties:
+            UsagePlanName: !Sub '${ServiceName}-partner-plan-${Environment}'
+            Description: Usage plan for external partner integrations
+            ApiStages:
+                - ApiId: !Ref ServiceApi
+                  Stage: !Ref Environment
+            Throttle:
+                RateLimit: !Ref ThrottleRateLimit
+                BurstLimit: !Ref ThrottleBurstLimit
+            Quota:
+                Limit: !Ref MonthlyRequestQuota
+                Period: MONTH
+            Tags:
+                - Key: Environment
+                  Value: !Ref Environment
+
+    InternalUsagePlan:
+        Type: AWS::ApiGateway::UsagePlan
+        DependsOn: ApiStage
+        Properties:
+            UsagePlanName: !Sub '${ServiceName}-internal-plan-${Environment}'
+            Description: Usage plan for internal service-to-service calls (higher limits)
+            ApiStages:
+                - ApiId: !Ref ServiceApi
+                  Stage: !Ref Environment
+            Throttle:
+                # Internal services get 5x the partner rate
+                RateLimit: !Select [0, [500]]
+                BurstLimit: !Select [0, [1000]]
+            Quota:
+                Limit: 10000000
+                Period: MONTH
+            Tags:
+                - Key: Environment
+                  Value: !Ref Environment
+
+    # =========================================================================
+    # WAF Association (optional)
+    # =========================================================================
+    WafAssociation:
+        Type: AWS::WAFv2::WebACLAssociation
+        Condition: HasWebAcl
+        DependsOn: ApiStage
+        Properties:
+            ResourceArn: !Sub 'arn:aws:apigateway:${AWS::Region}::/restapis/${ServiceApi}/stages/${Environment}'
+            WebACLArn: !Ref WebAclArn
+
+Outputs:
+    ApiId:
+        Description: API Gateway REST API ID
+        Value: !Ref ServiceApi
+        Export:
+            Name: !Sub '${ServiceName}-${Environment}-service-api-id'
+
+    ApiEndpoint:
+        Description: API Gateway invoke URL
+        Value: !Sub 'https://${ServiceApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+        Export:
+            Name: !Sub '${ServiceName}-${Environment}-service-api-endpoint'
+
+    AuthorizerId:
+        Description: Cognito Authorizer ID
+        Value: !Ref CognitoAuthorizer
+
+    PartnerUsagePlanId:
+        Description: Usage plan ID for partner integrations
+        Value: !Ref PartnerUsagePlan
+
+    InternalUsagePlanId:
+        Description: Usage plan ID for internal services
+        Value: !Ref InternalUsagePlan
+
+    AccessLogGroupArn:
+        Description: CloudWatch log group ARN for API access logs
+        Value: !GetAtt ApiAccessLogGroup.Arn
+        Export:
+            Name: !Sub '${ServiceName}-${Environment}-api-access-log-group-arn'

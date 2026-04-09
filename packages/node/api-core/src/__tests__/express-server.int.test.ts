@@ -7,7 +7,7 @@ import { TestSector } from './test-sector.js';
 import { fetch } from 'undici';
 import { useContainer, createExpressServer } from 'routing-controllers';
 import { ExpressServer } from '../express-server.js';
-import { JsonController, Get } from 'routing-controllers';
+import { JsonController, Get, Post, Body } from 'routing-controllers';
 
 function getRandomPort() {
   return Math.floor(Math.random() * 10000) + 20000;
@@ -22,6 +22,19 @@ export class SimpleTestController {
     return { message: 'simple test' };
   }
 }
+
+// Abstract base with @Body() parameter decorator — tests prototype chain patch
+@injectable()
+abstract class AbstractEchoController {
+  @Post('/echo')
+  echo(@Body() body: { msg: string }) {
+    return { received: body.msg };
+  }
+}
+
+@injectable()
+@JsonController('/inherit')
+export class InheritedParamController extends AbstractEchoController {}
 
 describe('ExpressServer (integration)', () => {
   it('should start and stop correctly', async () => {
@@ -311,5 +324,46 @@ describe('ExpressServer (integration)', () => {
 
     // Wait a bit for server to stop
     await new Promise(resolve => setTimeout(resolve, 100));
+  });
+
+  it('should inherit @Body() params from abstract base classes', async () => {
+    const container = new Container();
+    const mockLogger: ILogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    };
+
+    const port = getRandomPort();
+    const config = {
+      configType: 'EXPRESS_SERVER' as const,
+      port,
+      logLevel: 'info' as const,
+      name: 'Inherit Test',
+    };
+
+    container.bind('ExpressServerConfig').toConstantValue(config);
+    container.bind('ILogger').toConstantValue(mockLogger);
+    container.bind(ExpressServer).toSelf();
+
+    const server = container.get(ExpressServer);
+    await server.init(container, [InheritedParamController]);
+    server.start();
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    try {
+      const resp = await fetch(`http://localhost:${port}/inherit/echo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msg: 'hello' }),
+      });
+      expect(resp.status).toBe(200);
+      const data = await resp.json() as any;
+      expect(data.received).toBe('hello');
+    } finally {
+      server.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
   });
 });

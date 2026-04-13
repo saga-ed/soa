@@ -67,6 +67,85 @@ function get_docker_calls() {
         .map(([cmd, args]) => cmd === 'docker' ? args.join(' ') : `docker-compose ${args.join(' ')}`);
 }
 
+// ── up ─────────────────────────────────────────────────────
+
+describe('up', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        spawn_calls.length = 0;
+    });
+
+    it('calls docker compose up -d with no extra args by default', async () => {
+        mock_spawn_success();
+        const { up } = await import('../api.js');
+
+        const result = await up({ profile: 'small' });
+        expect(result.exitCode).toBe(0);
+
+        const calls = get_docker_calls();
+        expect(calls[0]).toBe('compose up -d');
+    });
+
+    it('passes -f flag and sets cwd when compose_file is provided', async () => {
+        mock_spawn_success();
+        const { up } = await import('../api.js');
+
+        const compose_file = '/some/project/docker-compose.yml';
+        await up({ profile: 'small', compose_file });
+
+        const calls = get_docker_calls();
+        expect(calls[0]).toBe(`compose -f ${compose_file} up -d`);
+
+        // Verify cwd was set to the compose file's directory
+        const up_call = spawn_calls.find(([cmd, args]) =>
+            cmd === 'docker' && args.includes('up'));
+        expect(up_call[2].cwd).toBe('/some/project');
+    });
+
+    it('appends service names when services option is provided', async () => {
+        mock_spawn_success();
+        const { up } = await import('../api.js');
+
+        await up({ profile: 'small', services: ['mongo', 'mysql', 'redis'] });
+
+        const calls = get_docker_calls();
+        expect(calls[0]).toBe('compose up -d mongo mysql redis');
+    });
+
+    it('passes both compose_file and services together', async () => {
+        mock_spawn_success();
+        const { up } = await import('../api.js');
+
+        const compose_file = '/project/docker-compose.yml';
+        await up({ profile: 'small', compose_file, services: ['mongo', 'redis'] });
+
+        const calls = get_docker_calls();
+        expect(calls[0]).toBe(`compose -f ${compose_file} up -d mongo redis`);
+
+        const up_call = spawn_calls.find(([cmd, args]) =>
+            cmd === 'docker' && args.includes('up'));
+        expect(up_call[2].cwd).toBe('/project');
+    });
+
+    it('throws when docker compose fails with an error', async () => {
+        spawn_calls.length = 0;
+        spawn.mockImplementation((cmd, args, options) => {
+            spawn_calls.push([cmd, args, options]);
+            const child = new EventEmitter();
+            child.kill = vi.fn();
+            process.nextTick(() => {
+                child.emit('error', Object.assign(new Error('spawn failed'), { code: 'ENOENT' }));
+                child.emit('close', null, null);
+            });
+            return child;
+        });
+        const { up } = await import('../api.js');
+
+        // Both docker and docker-compose fail with ENOENT
+        await expect(up({ profile: 'x' })).rejects.toThrow();
+    });
+});
+
 // ── switch_profile ──────────────────────────────────────────
 
 describe('switch_profile', () => {

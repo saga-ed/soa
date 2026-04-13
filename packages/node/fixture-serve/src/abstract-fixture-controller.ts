@@ -46,6 +46,8 @@ export interface FixtureControllerConfig {
     jobs_collection?: string;
     service_name?: string;
     health_url?: string;
+    /** Path to a project-specific docker-compose.yml for infra-compose operations. */
+    compose_file?: string;
 }
 
 @injectable()
@@ -192,7 +194,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             return { ok: false, error: `Fixture '${fixture_id}' has no snapshot. Create one first.` };
         }
 
-        const result = await switch_profile({ profile: snapshot_profile });
+        const result = await switch_profile({ profile: snapshot_profile, compose_file: this.ctrl_config.compose_file });
         if (result.status !== 0) {
             return { ok: false, error: `infra-compose switch failed (exit ${result.status})` };
         }
@@ -298,7 +300,9 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
     @Post('/provision')
     async provision(@Body() body: { fixture_type?: string; fixture_id?: string; force_adhoc?: boolean }) {
+        this.logger.info(`Provision request body: ${JSON.stringify(body)}`);
         const { fixture_type, fixture_id: resolved_id, force_adhoc, valid } = this.resolve_fixture_type(body);
+        this.logger.info(`Provision resolved: type=${fixture_type} id=${resolved_id}`);
         if (!valid) {
             return { ok: false, error: `Unknown fixture type: ${fixture_type}` };
         }
@@ -353,7 +357,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
         try {
             // Step 1: Reset to seed profile
             this.logger.info(`Provision: resetting to ${this.default_profile} seed`);
-            const reset_result = await reset({ profile: this.default_profile });
+            const reset_result = await reset({ profile: this.default_profile, compose_file: this.ctrl_config.compose_file });
             if (reset_result.status !== 0) {
                 throw new Error(`Reset to seed failed (exit ${reset_result.status})`);
             }
@@ -389,7 +393,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             // Step 3: Switch to snapshot
             update('switching');
             this.logger.info(`Provision: switching to snapshot ${fixture_id}`);
-            const switch_result = await switch_profile({ profile: fixture_id });
+            const switch_result = await switch_profile({ profile: fixture_id, compose_file: this.ctrl_config.compose_file });
             if (switch_result.status !== 0) {
                 throw new Error(`Switch to snapshot failed (exit ${switch_result.status})`);
             }
@@ -657,6 +661,8 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
     protected async build_playwright_export(fixture_id: string, base_url: string, password?: string): Promise<any> {
         const pw = password || this.default_password;
+        const active_profile = get_active_profile();
+        this.logger.info(`build_playwright_export: fixture_id=${fixture_id} base_url=${base_url} active_profile=${active_profile?.profile}`);
 
         const is_active = fixture_id === 'active' || fixture_id === '*';
         const doc = is_active
@@ -668,6 +674,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
         const metadata = doc as any;
         const user_ids: string[] = metadata.users || [];
+        this.logger.info(`build_playwright_export: found fixture_id=${metadata.fixture_id} users=${user_ids.length} roles=${Object.keys(metadata.user_roles || {}).length}`);
         const user_roles: Record<string, string> = metadata.user_roles || {};
         const user_emails: Record<string, string> = metadata.user_emails || {};
 

@@ -98,6 +98,9 @@ export interface FixtureServerConfig {
 
     /** Server display name. Default: 'fixture-server'. */
     name?: string;
+
+    /** Path to a project-specific docker-compose.yml for infra-compose operations. */
+    compose_file?: string;
 }
 
 export class FixtureServer {
@@ -139,6 +142,7 @@ export class FixtureServer {
             default_profile: config.default_profile,
             metadata_collection: config.metadata_collection,
             jobs_collection: config.jobs_collection,
+            compose_file: config.compose_file,
         };
         this.container.bind<FixtureControllerConfig>('FixtureControllerConfig').toConstantValue(ctrl_config);
 

@@ -30,8 +30,8 @@ if [ -f "/data-seed/profile-${PROFILE}.sql" ]; then
   echo "MySQL seed: using user data from ${SEED_FILE}"
 fi
 
-HOST="mysql"
-PORT="3306"
+HOST="${MYSQL_HOST:-mysql}"
+PORT="${MYSQL_PORT:-3306}"
 # Use root for admin operations (CREATE DATABASE, etc.); MYSQL_PWD env provides password
 ADMIN_USER="${MYSQL_ADMIN_USER:-root}"
 

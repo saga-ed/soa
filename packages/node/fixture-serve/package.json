@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/fixture-serve",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "private": false,
   "type": "module",
   "description": "Reusable fixture server infrastructure — Express server, async job queue, provision workflow, and credential export for service-specific fixture CLIs",

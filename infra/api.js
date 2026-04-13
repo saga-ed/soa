@@ -120,10 +120,11 @@ function spawn_promise(cmd, args, options = {}) {
  * @param {string[]} args - compose subcommand args (e.g. ['up', '-d'])
  * @param {Record<string, string>} env
  */
-async function compose_cmd(args, env) {
-    let result = await spawn_promise('docker', ['compose', ...args], { cwd: __dirname, env, stdio: 'inherit' });
+async function compose_cmd(args, env, cwd) {
+    const work_dir = cwd || __dirname;
+    let result = await spawn_promise('docker', ['compose', ...args], { cwd: work_dir, env, stdio: 'inherit' });
     if (result.error?.code === 'ENOENT') {
-        result = await spawn_promise('docker-compose', args, { cwd: __dirname, env, stdio: 'inherit' });
+        result = await spawn_promise('docker-compose', args, { cwd: work_dir, env, stdio: 'inherit' });
     }
     return result;
 }
@@ -159,10 +160,19 @@ async function remove_volumes(volumes) {
  * @param {{ profile?: string, seed_dir?: string, data_dir?: string }} options
  */
 export async function up(options = {}) {
-    const { profile } = options;
+    const { profile, compose_file, services } = options;
     const env = build_compose_env(options);
 
-    const result = await compose_cmd(['up', '-d'], env);
+    const args = [];
+    let cwd;
+    if (compose_file) {
+        args.push('-f', resolve(compose_file));
+        cwd = dirname(resolve(compose_file));
+    }
+    args.push('up', '-d');
+    if (services?.length) args.push(...services);
+
+    const result = await compose_cmd(args, env, cwd);
     if (result.error) throw result.error;
     if (result.status === 0 && profile) write_active_profile(profile);
     return { exitCode: result.status ?? 1 };

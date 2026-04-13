@@ -300,7 +300,9 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
     @Post('/provision')
     async provision(@Body() body: { fixture_type?: string; fixture_id?: string; force_adhoc?: boolean }) {
+        this.logger.info(`Provision request body: ${JSON.stringify(body)}`);
         const { fixture_type, fixture_id: resolved_id, force_adhoc, valid } = this.resolve_fixture_type(body);
+        this.logger.info(`Provision resolved: type=${fixture_type} id=${resolved_id}`);
         if (!valid) {
             return { ok: false, error: `Unknown fixture type: ${fixture_type}` };
         }
@@ -659,6 +661,8 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
     protected async build_playwright_export(fixture_id: string, base_url: string, password?: string): Promise<any> {
         const pw = password || this.default_password;
+        const active_profile = get_active_profile();
+        this.logger.info(`build_playwright_export: fixture_id=${fixture_id} base_url=${base_url} active_profile=${active_profile?.profile}`);
 
         const is_active = fixture_id === 'active' || fixture_id === '*';
         const doc = is_active
@@ -670,6 +674,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
 
         const metadata = doc as any;
         const user_ids: string[] = metadata.users || [];
+        this.logger.info(`build_playwright_export: found fixture_id=${metadata.fixture_id} users=${user_ids.length} roles=${Object.keys(metadata.user_roles || {}).length}`);
         const user_roles: Record<string, string> = metadata.user_roles || {};
         const user_emails: Record<string, string> = metadata.user_emails || {};
 

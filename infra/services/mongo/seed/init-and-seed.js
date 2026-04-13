@@ -59,9 +59,10 @@ const seedFile = `/seed/profile-${profile}.json`;
 const extraSeedFile = `/extra-seed/profile-${profile}.json`;
 // User snapshot data (from ~/.fixtures/profiles) is mounted at /data-seed/.
 const dataSeedFile = `/data-seed/profile-${profile}.json`;
-let actualSeedFile = seedFile;
-if (fs.existsSync(extraSeedFile)) actualSeedFile = extraSeedFile;
+let actualSeedFile = null;
 if (fs.existsSync(dataSeedFile)) actualSeedFile = dataSeedFile;
+else if (fs.existsSync(extraSeedFile)) actualSeedFile = extraSeedFile;
+else if (fs.existsSync(seedFile)) actualSeedFile = seedFile;
 
 print(`Seed: profile=${profile}`);
 
@@ -71,6 +72,9 @@ const existing = sentinel.findOne({ profile: profile });
 
 if (existing) {
   print(`Seed: profile '${profile}' already seeded at ${existing.seeded_at} — skipping`);
+} else if (!actualSeedFile) {
+  print(`Seed: no seed file found for profile '${profile}' — skipping data load`);
+  sentinel.insertOne({ profile, seeded_at: new Date().toISOString(), source: "none" });
 } else {
   print(`Seed: loading ${actualSeedFile} ...`);
 

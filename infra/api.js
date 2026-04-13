@@ -156,20 +156,26 @@ async function remove_volumes(volumes) {
 // ── Docker lifecycle ──────────────────────────────────────────────
 
 /**
+ * Build -f flag and cwd for a project-specific compose file.
+ * @param {string | undefined} compose_file
+ * @returns {{ file_args: string[], cwd: string | undefined }}
+ */
+function compose_file_args(compose_file) {
+    if (!compose_file) return { file_args: [], cwd: undefined };
+    const abs = resolve(compose_file);
+    return { file_args: ['-f', abs], cwd: dirname(abs) };
+}
+
+/**
  * Start Docker services (detached).
- * @param {{ profile?: string, seed_dir?: string, data_dir?: string }} options
+ * @param {{ profile?: string, seed_dir?: string, data_dir?: string, compose_file?: string, services?: string[] }} options
  */
 export async function up(options = {}) {
     const { profile, compose_file, services } = options;
     const env = build_compose_env(options);
+    const { file_args, cwd } = compose_file_args(compose_file);
 
-    const args = [];
-    let cwd;
-    if (compose_file) {
-        args.push('-f', resolve(compose_file));
-        cwd = dirname(resolve(compose_file));
-    }
-    args.push('up', '-d');
+    const args = [...file_args, 'up', '-d'];
     if (services?.length) args.push(...services);
 
     const result = await compose_cmd(args, env, cwd);
@@ -184,18 +190,19 @@ export async function up(options = {}) {
  * @returns {Promise<{ status: number, profile: string }>}
  */
 export async function switch_profile(options) {
-    const { profile } = options;
+    const { profile, compose_file } = options;
     const env = build_compose_env(options);
+    const { file_args, cwd } = compose_file_args(compose_file);
 
     // Down
-    const down = await compose_cmd(['down'], env);
+    const down = await compose_cmd([...file_args, 'down'], env, cwd);
     if (down.status !== 0) return { status: down.status ?? 1, profile };
 
     // Up with new profile, wait for init containers to finish seeding
-    const up_result = await compose_cmd(['up', '-d'], env);
+    const up_result = await compose_cmd([...file_args, 'up', '-d'], env, cwd);
     if (up_result.status === 0) {
         write_active_profile(profile);
-        await wait_for_init_containers(env);
+        await wait_for_init_containers(env, cwd, file_args);
     }
     return { status: up_result.status ?? 1, profile };
 }
@@ -206,11 +213,12 @@ export async function switch_profile(options) {
  * @returns {Promise<{ status: number, profile: string }>}
  */
 export async function reset(options) {
-    const { profile } = options;
+    const { profile, compose_file } = options;
     const env = build_compose_env(options);
+    const { file_args, cwd } = compose_file_args(compose_file);
 
     // Down
-    const down = await compose_cmd(['down'], env);
+    const down = await compose_cmd([...file_args, 'down'], env, cwd);
     if (down.status !== 0) return { status: down.status ?? 1, profile };
 
     // Remove profile volumes
@@ -222,10 +230,10 @@ export async function reset(options) {
     }
 
     // Up — fresh seed, then wait for init containers to finish seeding
-    const up_result = await compose_cmd(['up', '-d'], env);
+    const up_result = await compose_cmd([...file_args, 'up', '-d'], env, cwd);
     if (up_result.status === 0) {
         write_active_profile(profile);
-        await wait_for_init_containers(env);
+        await wait_for_init_containers(env, cwd, file_args);
     }
     return { status: up_result.status ?? 1, profile };
 }
@@ -235,11 +243,12 @@ export async function reset(options) {
  * These run seeds/snapshots and exit. Without waiting, callers may try to
  * use the databases before seeding is complete.
  */
-async function wait_for_init_containers(env) {
+async function wait_for_init_containers(env, cwd, file_args = []) {
+    const work_dir = cwd || __dirname;
     for (const svc of INIT_CONTAINERS) {
         const ps = await spawn_promise('docker', [
-            'compose', 'ps', '--status', 'running', '--format', '{{.Name}}', svc,
-        ], { cwd: __dirname, env, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+            'compose', ...file_args, 'ps', '--status', 'running', '--format', '{{.Name}}', svc,
+        ], { cwd: work_dir, env, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
         const name = (ps.stdout || '').trim();
         if (name) {
             const wait = await spawn_promise('docker', ['wait', name], { stdio: 'inherit', timeout: 120000 });
@@ -280,7 +289,8 @@ export async function restore(options) {
     } else {
         console.log(`No existing volumes — starting fresh for profile: ${profile}`);
         const env = build_compose_env(options);
-        const result = await compose_cmd(['up', '-d'], env);
+        const { file_args, cwd } = compose_file_args(options.compose_file);
+        const result = await compose_cmd([...file_args, 'up', '-d'], env, cwd);
         if (result.status === 0) write_active_profile(profile);
         return { status: result.status ?? 1, profile };
     }

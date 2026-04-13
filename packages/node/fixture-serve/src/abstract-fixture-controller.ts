@@ -46,6 +46,8 @@ export interface FixtureControllerConfig {
     jobs_collection?: string;
     service_name?: string;
     health_url?: string;
+    /** Path to a project-specific docker-compose.yml for infra-compose operations. */
+    compose_file?: string;
 }
 
 @injectable()
@@ -192,7 +194,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             return { ok: false, error: `Fixture '${fixture_id}' has no snapshot. Create one first.` };
         }
 
-        const result = await switch_profile({ profile: snapshot_profile });
+        const result = await switch_profile({ profile: snapshot_profile, compose_file: this.ctrl_config.compose_file });
         if (result.status !== 0) {
             return { ok: false, error: `infra-compose switch failed (exit ${result.status})` };
         }
@@ -353,7 +355,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
         try {
             // Step 1: Reset to seed profile
             this.logger.info(`Provision: resetting to ${this.default_profile} seed`);
-            const reset_result = await reset({ profile: this.default_profile });
+            const reset_result = await reset({ profile: this.default_profile, compose_file: this.ctrl_config.compose_file });
             if (reset_result.status !== 0) {
                 throw new Error(`Reset to seed failed (exit ${reset_result.status})`);
             }
@@ -389,7 +391,7 @@ export abstract class AbstractFixtureController extends AbstractRestController {
             // Step 3: Switch to snapshot
             update('switching');
             this.logger.info(`Provision: switching to snapshot ${fixture_id}`);
-            const switch_result = await switch_profile({ profile: fixture_id });
+            const switch_result = await switch_profile({ profile: fixture_id, compose_file: this.ctrl_config.compose_file });
             if (switch_result.status !== 0) {
                 throw new Error(`Switch to snapshot failed (exit ${switch_result.status})`);
             }

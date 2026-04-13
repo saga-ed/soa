@@ -26,6 +26,8 @@ export interface ProfileOptions {
     seed_dir?: string;
     /** Directory for user snapshot data (default: ~/.fixtures/profiles). */
     data_dir?: string;
+    /** Path to a project-specific compose file. If omitted, uses the infra-compose master compose.yml. */
+    compose_file?: string;
 }
 
 export interface ListProfilesOptions {

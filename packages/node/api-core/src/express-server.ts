@@ -64,6 +64,7 @@ export class ExpressServer {
     }
 
     this.app.use(cors(corsOptions));
+    this.app.use(express.json());
 
     // Ensure routing-controllers uses Inversify for controller resolution
     useContainer(container);

@@ -21,7 +21,7 @@ export function create_router(options = {}) {
     const wrap = (fn, hook_name) => async (req, res) => {
         try {
             const { output_dir: _output_dir, data_dir: _data_dir, seed_dir: _seed_dir, ...safe } = { ...req.query, ...req.body };
-            const input = safe;
+            const input = { ...safe, compose_file: options.compose_file };
             const result = await fn(input);
             if (result.ok && hook_name && options[hook_name]) {
                 await options[hook_name](result);

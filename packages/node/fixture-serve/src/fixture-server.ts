@@ -190,6 +190,7 @@ export class FixtureServer {
         const logger = this.container.get<ILogger>('ILogger');
         const restart_fn = create_service_restarter(config.service_name, config.health_url);
         const infra_router = create_infra_router({
+            compose_file: config.compose_file,
             on_after_switch: config.infra_hooks?.on_after_switch ?? (async () => { await restart_fn(logger); }),
             on_after_reset: config.infra_hooks?.on_after_reset ?? (async () => { await restart_fn(logger); }),
             on_after_snapshot: config.infra_hooks?.on_after_snapshot,

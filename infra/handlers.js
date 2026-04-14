@@ -34,7 +34,7 @@ export async function handle_switch(input) {
     const err = require_profile(input);
     if (err) return err;
 
-    const result = await switch_profile({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
+    const result = await switch_profile({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir, compose_file: input.compose_file });
     return result.status === 0
         ? { ok: true, profile: input.profile }
         : { ok: false, error: `switch failed (exit ${result.status})` };
@@ -48,7 +48,7 @@ export async function handle_reset(input) {
     const err = require_profile(input);
     if (err) return err;
 
-    const result = await reset({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
+    const result = await reset({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir, compose_file: input.compose_file });
     return result.status === 0
         ? { ok: true, profile: input.profile }
         : { ok: false, error: `reset failed (exit ${result.status})` };
@@ -62,7 +62,7 @@ export async function handle_restore(input) {
     const err = require_profile(input);
     if (err) return err;
 
-    const result = await restore({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir });
+    const result = await restore({ profile: input.profile, seed_dir: input.seed_dir, data_dir: input.data_dir, compose_file: input.compose_file });
     return result.status === 0
         ? { ok: true, profile: input.profile }
         : { ok: false, error: `restore failed (exit ${result.status})` };

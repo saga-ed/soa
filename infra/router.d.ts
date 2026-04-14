@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { ProfileResponse } from './handlers.js';
 
 export interface InfraRouterOptions {
+    /** Path to a project-specific compose file. If omitted, uses the infra-compose master compose.yml. */
+    compose_file?: string;
     /** Called after a successful switch_profile operation. */
     on_after_switch?: (result: ProfileResponse) => Promise<void> | void;
     /** Called after a successful reset operation. */

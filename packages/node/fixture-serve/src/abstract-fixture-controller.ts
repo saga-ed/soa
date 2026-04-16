@@ -128,11 +128,15 @@ export abstract class AbstractFixtureController extends AbstractRestController {
     }
 
     protected get metadata_collection() {
-        return this.mongo_client.db(this.ctrl_config.db_name).collection(this.metadata_collection_name);
+        // Always resolve from the connection manager so infra hook reconnects
+        // (which bypass the controller) are picked up automatically.
+        const client = this.mongo_mgr.getClient();
+        return client.db(this.ctrl_config.db_name).collection(this.metadata_collection_name);
     }
 
     protected get jobs_collection() {
-        return this.mongo_client.db(this.ctrl_config.db_name).collection(this.jobs_collection_name);
+        const client = this.mongo_mgr.getClient();
+        return client.db(this.ctrl_config.db_name).collection(this.jobs_collection_name);
     }
 
     protected get default_profile() {

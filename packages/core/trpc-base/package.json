@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-trpc-base",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "type": "module",
     "description": "Shared tRPC initialization factory for saga-soa monorepo",
     "main": "dist/index.js",

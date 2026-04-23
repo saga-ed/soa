@@ -1,0 +1,39 @@
+{
+  "name": "@saga-ed/mesh-fixture-cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "CLI for authoring, storing, and restoring cross-repo fixtures on the saga-mesh (rostering + program-hub + SDS). Part of saga-ed/student-data-system#80 Phase 3.",
+  "bin": {
+    "mesh-fixture": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "mesh-fixture": "node dist/cli.js"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "latest",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3"
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saga-ed/soa.git",
+    "directory": "packages/node/mesh-fixture-cli"
+  }
+}

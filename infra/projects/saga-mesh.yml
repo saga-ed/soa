@@ -1,0 +1,36 @@
+## saga-mesh — cross-repo fixture mesh for the SDS #80 initiative.
+##
+## Shared infra for the rostering + program-hub + student-data-system
+## trio. One postgres (multi-DB) + redis + rabbitmq, all on a single
+## docker network managed by infra-compose.
+##
+## Databases created by projects/saga-mesh/seed/profile-empty.sql on
+## first boot (before any app's migrations run):
+##
+##   iam_local        rostering iam-api          owner=iam
+##   iam_pii_local    rostering iam-pii          owner=iam_pii
+##   programs         program-hub programs-api   owner=saga_user
+##   scheduling       program-hub scheduling-api owner=saga_user
+##   ads_adm_local    SDS ads-adm-api            owner=ads_adm
+##   ledger_local     SDS ledger-api             owner=ledger
+##
+## Usage:
+##   SEED_PROFILE=empty make up PROJECT=saga-mesh
+##   SEED_PROFILE=empty make status PROJECT=saga-mesh
+##
+## Tracking: saga-ed/student-data-system#80 Phase 2 D2.2.
+## See that repo's claude/projects/sds_80/phase-2/ for the design.
+
+include:
+  - path: ../services/postgres/compose.yml
+  - path: ../services/redis/compose.yml
+  - path: ../services/rabbitmq/compose.yml
+
+services:
+  # Override postgres_init's extra-seed mount to pull this project's
+  # profile-empty.sql in addition to the default services/postgres/seed/
+  # profiles. Paths are relative to this file's location (infra/projects/).
+  postgres_init:
+    volumes:
+      - ../services/postgres/seed:/seed:ro
+      - ./saga-mesh/seed:/extra-seed:ro

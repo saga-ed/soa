@@ -27,10 +27,21 @@ include:
   - path: ../services/rabbitmq/compose.yml
 
 services:
+  # Deterministic container names so per-repo scripts can target them
+  # via `docker exec <name>` without having to parse compose project
+  # prefixes.
+  postgres:
+    container_name: saga-mesh-postgres
+  redis:
+    container_name: saga-mesh-redis
+  rabbitmq:
+    container_name: saga-mesh-rabbitmq
+
   # Override postgres_init's extra-seed mount to pull this project's
   # profile-empty.sql in addition to the default services/postgres/seed/
   # profiles. Paths are relative to this file's location (infra/projects/).
   postgres_init:
+    container_name: saga-mesh-postgres-init
     volumes:
       - ../services/postgres/seed:/seed:ro
       - ./saga-mesh/seed:/extra-seed:ro

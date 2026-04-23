@@ -17,12 +17,17 @@ PROJECT   ?= saga-api
 PROFILE   ?= small
 COMPOSE   := docker compose --env-file .env.defaults -f projects/$(PROJECT).yml
 
-export COMPOSE_PROJECT_NAME := soa
-export SEED_PROFILE := $(PROFILE)
-
-# Load defaults, then local overrides (gitignored .env wins over .env.defaults)
+# Load defaults first, then local overrides (gitignored .env wins over
+# .env.defaults), THEN export SEED_PROFILE from the effective PROFILE value.
+# This order matters: if the `export SEED_PROFILE := $(PROFILE)` line runs
+# before the -include, then .env.defaults's SEED_PROFILE=<something> would
+# silently override the PROFILE= command-line arg and stale-cached profile
+# volumes (e.g. postgres-profile-small) end up getting reused by mistake.
 -include .env.defaults
 -include .env
+
+export COMPOSE_PROJECT_NAME := soa
+export SEED_PROFILE := $(PROFILE)
 
 .PHONY: up switch down reset status logs list-projects list-profiles \
         mongo-shell mysql-shell psql-shell redis-cli clean-all volumes help \

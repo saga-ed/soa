@@ -45,6 +45,8 @@ check-ports:
 		if [ -n "$$match" ]; then \
 			cname=$$(echo "$$match" | cut -f1); \
 			project=$$(echo "$$match" | cut -f3); \
+			# Skip own-project containers — `make up` is meant to be idempotent. \
+			if [ "$$project" = "$(COMPOSE_PROJECT_NAME)" ]; then continue; fi; \
 			conflicts="$$conflicts\n  Port $$port is in use by container '$$cname' (project: $$project)"; \
 			stop_cmds="$$stop_cmds\n    docker stop $$cname"; \
 			if [ -n "$$project" ]; then \

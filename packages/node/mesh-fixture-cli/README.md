@@ -2,7 +2,7 @@
 
 Cross-repo fixture authoring + snapshot lifecycle for the saga-mesh (rostering + program-hub + student-data-system).
 
-**Status:** Phase 3 scaffold (as of 2026-04-23). `fixture:list` is functional; everything else is stubbed with a clear "not-yet-implemented" message. See `saga-ed/student-data-system#80` Phase 3 for the full roadmap.
+**Status:** Phase 3 D3.1–D3.3 shipped. Built on oclif v4 (ported from commander 2026-04); commands are discovered from `dist/commands/<topic>/<verb>.js` via oclif's pattern strategy.
 
 ## Install (local-dev)
 
@@ -10,8 +10,8 @@ Cross-repo fixture authoring + snapshot lifecycle for the saga-mesh (rostering +
 cd ~/dev/soa
 pnpm install
 pnpm -F @saga-ed/mesh-fixture-cli build
-# Then invoke from anywhere once soa's `pnpm link` is done, or:
-node ~/dev/soa/packages/node/mesh-fixture-cli/dist/cli.js fixture:list
+# Then invoke via the bin shim:
+node ~/dev/soa/packages/node/mesh-fixture-cli/bin/run.js fixture:list
 ```
 
 ## Command surface
@@ -19,15 +19,15 @@ node ~/dev/soa/packages/node/mesh-fixture-cli/dist/cli.js fixture:list
 | Command | Status | Purpose |
 |---|---|---|
 | `fixture:list` | ✅ | List snapshots on disk under `~/.saga-mesh/fixtures/` |
-| `fixture:store --fixture-id <id>` | 🚧 stub | Coordinated `pg_dump` of saga-mesh-postgres → tarball |
-| `fixture:restore --fixture-id <id>` | 🚧 stub | Restore + `redis-cli FLUSHDB` |
-| `fixture:delete --fixture-id <id>` | 🚧 stub | Remove a fixture's tarball |
-| `iam:create-org` | 🚧 stub | rostering group creation (dedup by sourceId) |
-| `iam:create-user` | 🚧 stub | rostering user creation (dedup by username) |
-| `iam:add-membership` | 🚧 stub | top-down parent-ordered membership |
-| `pgm:create-program` | 🚧 stub | program-hub program creation |
-| `pgm:create-period` | 🚧 stub | period under a program |
-| `pgm:enroll` | 🚧 stub | school + section enrollment |
+| `fixture:store --fixture-id <id>` | ✅ | `pg_dump` all saga-mesh DBs → `~/.saga-mesh/fixtures/<id>/` + `manifest.json` |
+| `fixture:restore --fixture-id <id>` | ✅ | `pg_restore` dumps + `redis-cli FLUSHDB` |
+| `fixture:delete --fixture-id <id>` | ✅ | Remove a fixture's directory |
+| `iam:create-org` | ✅ | rostering group creation (dedup by sourceId) |
+| `iam:create-user` | ✅ | rostering user creation (dedup by username) |
+| `iam:add-membership` | ✅ | parent-ordered membership (dedup by "already member") |
+| `pgm:create-program` | ✅ | program-hub program creation (dedup by org+name) |
+| `pgm:create-period` | ✅ | period under a program (dedup by program+name) |
+| `pgm:enroll` | ✅ | school + section enrollment (upsert-shaped) |
 | `ads:seed-attendance` | ⏸ deferred | blocked on Seth PR #77 coordination |
 
 ### Global flags
@@ -64,12 +64,12 @@ The `fixture:store` + `fixture:restore` round-trip is Phase 3 D3.3's exit criter
 
 ## Roadmap
 
-1. **D3.1 (this package)** — scaffolding (done in this commit) + real `fixture:list`. Next: implement `fixture:store` and `fixture:restore` against saga-mesh-postgres.
-2. **D3.2** — add a `FixtureMetadata` Prisma model to each repo's schema so the CLI can audit which fixture-id each DB currently holds.
-3. **D3.3** — the pg_dump/pg_restore + FLUSHDB mechanics.
+1. **D3.1 (this package)** — ✅ oclif v4 scaffold + all iam/pgm/fixture commands.
+2. **D3.2** — add a `FixtureMetadata` Prisma model + `fixture.registry.*` tRPC router to each service. When that's live, the CLI will post a CommandInfo to `fixture.registry.addCommand` after every idempotent create, and a new `fixture:show` / `fixture:validate` pair will query across services.
+3. **D3.3** — ✅ pg_dump/pg_restore + FLUSHDB mechanics.
 4. **D3.7** — resolve the Phase-2 setup idempotency gaps (workspace rebuilds, scenario `--ignore-workspace` installs, app-local `.env` files).
 5. **Coordinate with SDS PR #77** before implementing `ads:seed-attendance`.
-6. **D3.4** — `create-fixture-demo-small.sh` orchestration script.
+6. **D3.4** — `fixtures/demo-small/create.sh` orchestration script (✅ shipped).
 7. **D3.6** — port the legacy `adm-combined` fixture.
 
 Tracking: `saga-ed/student-data-system#80` · plan doc: `~/dev/sds-fixture/claude/projects/sds_80/research/06-phased-implementation-plan.md` §Phase 3 + appendix A.5.

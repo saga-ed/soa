@@ -49,7 +49,7 @@ function runDockerSpawn(args: string[], options: { stdout?: 'inherit' | { toFile
     });
 
     let stderr = '';
-    proc.stderr.on('data', (chunk: Buffer) => {
+    proc.stderr?.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
 

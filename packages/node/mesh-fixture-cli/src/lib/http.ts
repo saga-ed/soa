@@ -130,5 +130,5 @@ export function extractCookie(setCookie: string, cookieName: string): string | n
   // Set-Cookie may be comma-separated if multiple cookies set; regex handles both.
   const re = new RegExp(`(?:^|[,;\\s])${cookieName}=([^;]+)`);
   const m = re.exec(setCookie);
-  return m ? m[1] : null;
+  return m?.[1] ?? null;
 }

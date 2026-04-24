@@ -22,7 +22,9 @@ node ~/dev/soa/packages/node/mesh-fixture-cli/bin/run.js fixture:list
 | `fixture:store --fixture-id <id>` | ✅ | `pg_dump` all saga-mesh DBs → `~/.saga-mesh/fixtures/<id>/` + `manifest.json` |
 | `fixture:restore --fixture-id <id>` | ✅ | `pg_restore` dumps + `redis-cli FLUSHDB` |
 | `fixture:delete --fixture-id <id>` | ✅ | Remove a fixture's directory |
-| `iam:create-org` | ✅ | rostering group creation (dedup by sourceId) |
+| `fixture:show <fixture-id>` | ✅ | Merged view of fixture.registry rows across iam/programs/scheduling/ads-adm |
+| `fixture:validate <fixture-id>` | ✅ | Verify every registry artifact id still resolves (exits 1 if any missing) |
+| `iam:create-org` | ✅ | rostering group creation (dedup by sourceId) + writes registry row |
 | `iam:create-user` | ✅ | rostering user creation (dedup by username) |
 | `iam:add-membership` | ✅ | parent-ordered membership (dedup by "already member") |
 | `pgm:create-program` | ✅ | program-hub program creation (dedup by org+name) |
@@ -38,7 +40,17 @@ All commands accept:
 - `--output-json` — structured JSON on stdout
 - `--iam-url <url>` — override rostering iam-api base URL (default: `http://localhost:3000`; env: `IAM_API_URL`)
 - `--programs-url <url>` — program-hub programs-api (default: `:3006`; env: `PROGRAMS_API_URL`)
+- `--scheduling-url <url>` — program-hub scheduling-api (default: `:3008`; env: `SCHEDULING_API_URL`)
 - `--ads-adm-url <url>` — SDS ads-adm-api (default: `:5005`; env: `ADS_ADM_URL`)
+
+### Registry (D3.2 consumer)
+
+Every idempotent create command (iam:*, pgm:*) now writes to its owning service's `fixture.registry` router post-success:
+
+- Appends a `CommandInfo` (command name, sanitized args, timestamp, cliVersion) to the fixture's `commandHistory`.
+- Adds the created row's UUID to the appropriate `artifacts` bucket (`groups`, `users`, `memberships`, `programs`, `periods`, `enrollments`). Memberships + enrollments are synthesized composite ids (`<userId>:<groupId>`, `<programId>:<schoolId>:<sectionId>`).
+- `fixture:show <id>` queries all 4 services in parallel and prints a merged view (human / --porcelain / --output-json).
+- `fixture:validate <id>` verifies every artifact uuid still resolves via `groups.getBulk`, `users.getBulk`, `programs.get`, `periods.get`. Synthesized composite ids are marked "skipped" rather than "missing". Exits 1 on any missing reference.
 
 ### Storage
 

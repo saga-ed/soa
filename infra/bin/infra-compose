@@ -17,8 +17,11 @@ set +a
 
 # Wrap docker compose so it always resolves relative to the bundled compose/ dir,
 # while still forwarding any COMPOSE_PASSTHROUGH args the caller supplied after --.
+# Pin the project name to "infra" so it doesn't drift with cwd; the previous
+# layout had docker compose running from infra/ (project name = "infra"), and
+# external tooling that targets that project name would otherwise break.
 run_compose() {
-    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" "$@")
+    (cd "$PKG_ROOT/compose" && docker compose -p infra "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" "$@")
 }
 
 usage() {

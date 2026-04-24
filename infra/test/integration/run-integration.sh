@@ -5,7 +5,7 @@
 # Tests the full round-trip: seed → insert extra data → dump → restore → verify
 #
 # Usage:
-#   cd infra && bash test/run-integration.sh
+#   cd infra && bash test/integration/run-integration.sh
 #
 # Prerequisites: Docker, mongosh, mysql client, psql client
 #
@@ -16,7 +16,7 @@ set -uo pipefail
 # Note: NOT set -e — we handle errors via assert functions so all tests run
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PKG_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE="docker compose --env-file $SCRIPT_DIR/.env.test -f $SCRIPT_DIR/compose.yml -p infra-test"
 CLI="$PKG_ROOT/bin/infra-compose"
 

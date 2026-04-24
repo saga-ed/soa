@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/infra-compose",
-    "version": "0.10.16",
+    "version": "1.0.0",
     "description": "Composable Docker service templates for Saga platform local development",
     "bin": {
         "infra-compose": "bin/infra-compose"
@@ -9,32 +9,25 @@
         "lint": "eslint .",
         "test": "vitest run",
         "test:watch": "vitest",
-        "test:integration": "bash test/run-integration.sh",
-        "typecheck": "tsc --noEmit --strict --moduleResolution node16 --module node16 --target es2022 --skipLibCheck api.d.ts handlers.d.ts",
+        "test:integration": "bash test/integration/run-integration.sh",
+        "typecheck": "tsc --noEmit --strict --moduleResolution node16 --module node16 --target es2022 --skipLibCheck src/api.d.ts src/handlers.d.ts",
         "prepublishOnly": "bash ../scripts/co-login.sh"
     },
     "type": "module",
-    "main": "api.js",
+    "main": "src/api.js",
     "exports": {
-        ".": "./api.js",
-        "./router": "./router.js",
-        "./handlers": "./handlers.js",
-        "./ec2-router": "./ec2/ec2-router.js",
-        "./ec2-server": "./ec2/server.js"
+        ".": "./src/api.js",
+        "./router": "./src/router.js",
+        "./handlers": "./src/handlers.js",
+        "./ec2-router": "./src/ec2/ec2-router.js",
+        "./ec2-server": "./src/ec2/server.js"
     },
-    "types": "api.d.ts",
+    "types": "src/api.d.ts",
     "files": [
         "bin/",
-        "services/",
-        ".env.defaults",
-        "compose.yml",
-        "api.js",
-        "api.d.ts",
-        "handlers.js",
-        "handlers.d.ts",
-        "router.js",
-        "router.d.ts",
-        "ec2/"
+        "compose/",
+        "src/",
+        ".env.defaults"
     ],
     "dependencies": {
         "mongodb": "^6.0.0",

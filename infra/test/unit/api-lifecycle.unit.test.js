@@ -77,7 +77,7 @@ describe('up', () => {
 
     it('calls docker compose up -d with no extra args by default', async () => {
         mock_spawn_success();
-        const { up } = await import('../api.js');
+        const { up } = await import('../../src/api.js');
 
         const result = await up({ profile: 'small' });
         expect(result.exitCode).toBe(0);
@@ -88,7 +88,7 @@ describe('up', () => {
 
     it('passes -f flag and sets cwd when compose_file is provided', async () => {
         mock_spawn_success();
-        const { up } = await import('../api.js');
+        const { up } = await import('../../src/api.js');
 
         const compose_file = '/some/project/docker-compose.yml';
         await up({ profile: 'small', compose_file });
@@ -104,7 +104,7 @@ describe('up', () => {
 
     it('appends service names when services option is provided', async () => {
         mock_spawn_success();
-        const { up } = await import('../api.js');
+        const { up } = await import('../../src/api.js');
 
         await up({ profile: 'small', services: ['mongo', 'mysql', 'redis'] });
 
@@ -114,7 +114,7 @@ describe('up', () => {
 
     it('passes both compose_file and services together', async () => {
         mock_spawn_success();
-        const { up } = await import('../api.js');
+        const { up } = await import('../../src/api.js');
 
         const compose_file = '/project/docker-compose.yml';
         await up({ profile: 'small', compose_file, services: ['mongo', 'redis'] });
@@ -139,7 +139,7 @@ describe('up', () => {
             });
             return child;
         });
-        const { up } = await import('../api.js');
+        const { up } = await import('../../src/api.js');
 
         // Both docker and docker-compose fail with ENOENT
         await expect(up({ profile: 'x' })).rejects.toThrow();
@@ -156,7 +156,7 @@ describe('switch_profile', () => {
 
     it('calls docker compose down then up with SEED_PROFILE env', async () => {
         mock_spawn_success();
-        const { switch_profile } = await import('../api.js');
+        const { switch_profile } = await import('../../src/api.js');
 
         const result = await switch_profile({ profile: 'my-profile' });
         expect(result.status).toBe(0);
@@ -176,7 +176,7 @@ describe('switch_profile', () => {
         mock_spawn_sequence([
             { status: 1, stdout: '', stderr: 'down failed' }, // down fails
         ]);
-        const { switch_profile } = await import('../api.js');
+        const { switch_profile } = await import('../../src/api.js');
 
         const result = await switch_profile({ profile: 'bad' });
         expect(result.status).toBe(1);
@@ -192,7 +192,7 @@ describe('switch_profile', () => {
             { status: 0 }, // down succeeds
             { status: 1 }, // up fails
         ]);
-        const { switch_profile } = await import('../api.js');
+        const { switch_profile } = await import('../../src/api.js');
 
         const result = await switch_profile({ profile: 'bad-up' });
         expect(result.status).toBe(1);
@@ -214,7 +214,7 @@ describe('reset', () => {
             { status: 0 },  // volume rm (batch)
             { status: 0 },  // docker compose up
         ]);
-        const { reset } = await import('../api.js');
+        const { reset } = await import('../../src/api.js');
 
         const result = await reset({ profile: 'test' });
         expect(result.status).toBe(0);
@@ -233,7 +233,7 @@ describe('reset', () => {
             { status: 0, stdout: '' }, // volume ls (empty)
             { status: 0 },           // up (no volume rm step)
         ]);
-        const { reset } = await import('../api.js');
+        const { reset } = await import('../../src/api.js');
 
         const result = await reset({ profile: 'fresh' });
         expect(result.status).toBe(0);
@@ -247,7 +247,7 @@ describe('reset', () => {
         mock_spawn_sequence([
             { status: 1 }, // down fails
         ]);
-        const { reset } = await import('../api.js');
+        const { reset } = await import('../../src/api.js');
 
         const result = await reset({ profile: 'fail' });
         expect(result.status).toBe(1);
@@ -260,7 +260,7 @@ describe('reset', () => {
             { status: 0, stdout: 'vol-profile-x\n' },          // volume ls
             { status: 1 },                                     // volume rm fails
         ]);
-        const { reset } = await import('../api.js');
+        const { reset } = await import('../../src/api.js');
 
         const result = await reset({ profile: 'x' });
         expect(result.status).toBe(1);
@@ -287,7 +287,7 @@ describe('restore', () => {
     });
 
     it('returns error when no seed files exist', async () => {
-        const { restore } = await import('../api.js');
+        const { restore } = await import('../../src/api.js');
 
         const result = await restore({ profile: 'nonexistent', data_dir: tmp_dir });
         expect(result.status).toBe(1);
@@ -296,7 +296,7 @@ describe('restore', () => {
     });
 
     it('calls reset when volumes exist for profile', async () => {
-        const { restore } = await import('../api.js');
+        const { restore } = await import('../../src/api.js');
 
         // Create a seed file so the profile is found
         const mongo_dir = resolve(tmp_dir, 'mongo');
@@ -321,7 +321,7 @@ describe('restore', () => {
     });
 
     it('calls up directly when no volumes exist', async () => {
-        const { restore } = await import('../api.js');
+        const { restore } = await import('../../src/api.js');
 
         const mysql_dir = resolve(tmp_dir, 'mysql');
         mkdirSync(mysql_dir, { recursive: true });

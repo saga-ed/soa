@@ -10,16 +10,16 @@
       "default": "./dist/index.js"
     },
     "./fixture-server": {
-      "types": "./dist/fixture-server.d.ts",
-      "default": "./dist/fixture-server.js"
+      "types": "./dist/server/fixture-server.d.ts",
+      "default": "./dist/server/fixture-server.js"
     },
     "./abstract-fixture-controller": {
-      "types": "./dist/abstract-fixture-controller.d.ts",
-      "default": "./dist/abstract-fixture-controller.js"
+      "types": "./dist/controller/abstract-fixture-controller.d.ts",
+      "default": "./dist/controller/abstract-fixture-controller.js"
     },
     "./service-restart": {
-      "types": "./dist/service-restart.d.ts",
-      "default": "./dist/service-restart.js"
+      "types": "./dist/utils/service-restart.d.ts",
+      "default": "./dist/utils/service-restart.js"
     },
     "./types": {
       "types": "./dist/types.d.ts",

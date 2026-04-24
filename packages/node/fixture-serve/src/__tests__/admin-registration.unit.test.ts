@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ILogger } from '@saga-ed/soa-logger';
-import { register_with_admin } from '../admin-registration.js';
+import { register_with_admin } from '../server/admin-registration.js';
 
 vi.mock('@saga-ed/infra-compose', () => ({
     get_active_profile: vi.fn(() => ({ profile: 'basic' })),

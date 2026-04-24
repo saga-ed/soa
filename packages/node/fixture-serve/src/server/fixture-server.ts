@@ -39,9 +39,9 @@ import type { IMongoConnMgr } from '@saga-ed/soa-db';
 import type { MongoClient } from 'mongodb';
 import { get_active_profile } from '@saga-ed/infra-compose';
 import { create_router as create_infra_router } from '@saga-ed/infra-compose/router';
-import { create_service_restarter } from './service-restart.js';
+import { create_service_restarter } from '../utils/service-restart.js';
 import { register_with_admin } from './admin-registration.js';
-import type { FixtureControllerConfig } from './abstract-fixture-controller.js';
+import type { FixtureControllerConfig } from '../controller/abstract-fixture-controller.js';
 
 export interface FixtureServerConfig {
     /** Port to listen on. */

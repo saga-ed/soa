@@ -75,7 +75,7 @@ describe('get_active_profile (file format contract)', () => {
 
 describe('get_active_profile (wired)', () => {
     it('is exported from api.js and returns a plausible shape', async () => {
-        const { get_active_profile } = await import('../api.js');
+        const { get_active_profile } = await import('../../src/api.js');
         const result = get_active_profile();
         // result is either null or { profile: string, switched_at: ... }
         if (result !== null) {
@@ -99,7 +99,7 @@ describe('list_profiles', () => {
     });
 
     it('returns empty profiles when data_dir has no files', async () => {
-        const { list_profiles } = await import('../api.js');
+        const { list_profiles } = await import('../../src/api.js');
         // Use a temp dir that has no profile files.
         // list_profiles scans built-in seeds + data_dir.
         // We can't control built-in seeds, but we can verify the function runs without error.
@@ -109,7 +109,7 @@ describe('list_profiles', () => {
     });
 
     it('finds seed profile files in data_dir', async () => {
-        const { list_profiles } = await import('../api.js');
+        const { list_profiles } = await import('../../src/api.js');
 
         // Create a fake mongo profile
         const mongo_dir = resolve(tmp_dir, 'mongo');
@@ -125,7 +125,7 @@ describe('list_profiles', () => {
     });
 
     it('detects snapshot type from _meta marker in JSON', async () => {
-        const { list_profiles } = await import('../api.js');
+        const { list_profiles } = await import('../../src/api.js');
 
         const mongo_dir = resolve(tmp_dir, 'mongo');
         mkdirSync(mongo_dir, { recursive: true });
@@ -141,7 +141,7 @@ describe('list_profiles', () => {
     });
 
     it('detects snapshot type from SQL comment marker', async () => {
-        const { list_profiles } = await import('../api.js');
+        const { list_profiles } = await import('../../src/api.js');
 
         const mysql_dir = resolve(tmp_dir, 'mysql');
         mkdirSync(mysql_dir, { recursive: true });
@@ -155,7 +155,7 @@ describe('list_profiles', () => {
     });
 
     it('finds profiles across multiple services', async () => {
-        const { list_profiles } = await import('../api.js');
+        const { list_profiles } = await import('../../src/api.js');
 
         for (const [svc, ext, content] of [
             ['mongo', 'json', '{}'],
@@ -174,7 +174,7 @@ describe('list_profiles', () => {
     });
 
     it('ignores non-profile files', async () => {
-        const { list_profiles } = await import('../api.js');
+        const { list_profiles } = await import('../../src/api.js');
 
         const mongo_dir = resolve(tmp_dir, 'mongo');
         mkdirSync(mongo_dir, { recursive: true });
@@ -206,7 +206,7 @@ describe('delete_profile_data', () => {
     });
 
     it('deletes existing profile files and returns count', async () => {
-        const { delete_profile_data } = await import('../api.js');
+        const { delete_profile_data } = await import('../../src/api.js');
 
         // Create profile files for two services
         for (const [svc, ext] of [['mongo', 'json'], ['mysql', 'sql']]) {
@@ -221,7 +221,7 @@ describe('delete_profile_data', () => {
     });
 
     it('returns 0 deleted when no files exist', async () => {
-        const { delete_profile_data } = await import('../api.js');
+        const { delete_profile_data } = await import('../../src/api.js');
 
         const result = delete_profile_data({ profile: 'nonexistent', data_dir: tmp_dir });
         expect(result.deleted).toBe(0);

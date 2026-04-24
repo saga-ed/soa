@@ -6,7 +6,7 @@ vi.mock('child_process', () => ({
 }));
 
 import { spawnSync } from 'child_process';
-import { create_service_restarter } from '../service-restart.js';
+import { create_service_restarter } from '../utils/service-restart.js';
 
 function make_logger(): ILogger & { calls: { level: string; msg: string }[] } {
     const calls: { level: string; msg: string }[] = [];

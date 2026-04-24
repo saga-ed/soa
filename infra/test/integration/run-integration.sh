@@ -125,12 +125,12 @@ create_seed_files() {
     local profile="$1"
     info "Creating seed files for test profile: $profile"
 
-    cp "$PKG_ROOT/services/mongo/seed/profile-small.json" \
-       "$PKG_ROOT/services/mongo/seed/profile-${profile}.json"
-    cp "$PKG_ROOT/services/mysql/seed/profile-small.sql" \
-       "$PKG_ROOT/services/mysql/seed/profile-${profile}.sql"
-    cp "$PKG_ROOT/services/postgres/seed/profile-small.sql" \
-       "$PKG_ROOT/services/postgres/seed/profile-${profile}.sql"
+    cp "$PKG_ROOT/compose/services/mongo/seed/profile-small.json" \
+       "$PKG_ROOT/compose/services/mongo/seed/profile-${profile}.json"
+    cp "$PKG_ROOT/compose/services/mysql/seed/profile-small.sql" \
+       "$PKG_ROOT/compose/services/mysql/seed/profile-${profile}.sql"
+    cp "$PKG_ROOT/compose/services/postgres/seed/profile-small.sql" \
+       "$PKG_ROOT/compose/services/postgres/seed/profile-${profile}.sql"
 }
 
 # ── Cleanup ──────────────────────────────────────────────────
@@ -155,8 +155,8 @@ cleanup() {
     for svc_ext in "mongo/seed:json" "mysql/seed:sql" "postgres/seed:sql"; do
         local svc_dir="${svc_ext%%:*}"
         local ext="${svc_ext##*:}"
-        rm -f "$PKG_ROOT/services/${svc_dir}/profile-${SEED_PROFILE}.${ext}"
-        rm -f "$PKG_ROOT/services/${svc_dir}/profile-${DUMP_PROFILE}.${ext}"
+        rm -f "$PKG_ROOT/compose/services/${svc_dir}/profile-${SEED_PROFILE}.${ext}"
+        rm -f "$PKG_ROOT/compose/services/${svc_dir}/profile-${DUMP_PROFILE}.${ext}"
     done
 
     info "Restoring .env..."
@@ -391,9 +391,9 @@ log "Test 7: Dump to default seed dirs"
 # Dump to default locations (services/<svc>/seed/)
 "$CLI" dump --profile "$DUMP_PROFILE" || fail "Default dump command failed"
 
-assert_file_exists "Default dump: mongo seed file" "$PKG_ROOT/services/mongo/seed/profile-${DUMP_PROFILE}.json"
-assert_file_exists "Default dump: mysql seed file" "$PKG_ROOT/services/mysql/seed/profile-${DUMP_PROFILE}.sql"
-assert_file_exists "Default dump: postgres seed file" "$PKG_ROOT/services/postgres/seed/profile-${DUMP_PROFILE}.sql"
+assert_file_exists "Default dump: mongo seed file" "$PKG_ROOT/compose/services/mongo/seed/profile-${DUMP_PROFILE}.json"
+assert_file_exists "Default dump: mysql seed file" "$PKG_ROOT/compose/services/mysql/seed/profile-${DUMP_PROFILE}.sql"
+assert_file_exists "Default dump: postgres seed file" "$PKG_ROOT/compose/services/postgres/seed/profile-${DUMP_PROFILE}.sql"
 
 # ══════════════════════════════════════════════════════════════
 # TEST 8: list-profiles shows type distinction

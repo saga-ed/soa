@@ -29,9 +29,9 @@ vi.mock('@saga-ed/soa-db', async () => {
     return { ...actual, MongoProvider: TestMongoProvider };
 });
 
-import { AbstractFixtureController } from '../abstract-fixture-controller.js';
+import { AbstractFixtureController } from '../controller/abstract-fixture-controller.js';
 import type { FixtureTypeDefinition } from '../types.js';
-import { FixtureServer } from '../fixture-server.js';
+import { FixtureServer } from '../server/fixture-server.js';
 
 @injectable()
 @Controller('/testfx')

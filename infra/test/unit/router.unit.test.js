@@ -3,7 +3,7 @@ import http from 'http';
 import express from 'express';
 
 // Mock handlers so the router calls our fakes
-vi.mock('../handlers.js', () => ({
+vi.mock('../../src/handlers.js', () => ({
     handle_snapshot: vi.fn(),
     handle_switch: vi.fn(),
     handle_reset: vi.fn(),
@@ -13,8 +13,8 @@ vi.mock('../handlers.js', () => ({
     handle_get_active: vi.fn(),
 }));
 
-import * as handlers from '../handlers.js';
-import { create_router } from '../router.js';
+import * as handlers from '../../src/handlers.js';
+import { create_router } from '../../src/router.js';
 
 // ── Test HTTP helpers ───────────────────────────────────────
 

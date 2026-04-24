@@ -22,7 +22,7 @@ vi.mock('@saga-ed/infra-compose/router', async () => {
     };
 });
 
-import { FixtureServer } from '../fixture-server.js';
+import { FixtureServer } from '../server/fixture-server.js';
 
 @injectable()
 @Controller('/noop')

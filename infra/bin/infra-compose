@@ -46,7 +46,7 @@ Options:
 
 Dump options:
   --services LIST   Comma-separated: mongo,mysql,postgres (default: all three)
-  --output-dir DIR  Where to write seed files (default: services/<svc>/seed/)
+  --output-dir DIR  Where to write seed files (default: compose/services/<svc>/seed/)
   --force           Overwrite existing profile files
 
 Examples:
@@ -209,7 +209,7 @@ cmd_up() {
 
     echo ""
     echo "Starting services with profile: $profile"
-    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d)
 
     echo ""
     echo "Profile: $profile"
@@ -234,10 +234,10 @@ cmd_switch() {
     fi
 
     echo "Switching to profile: $PROFILE"
-    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down)
 
     echo ""
-    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d)
 
     echo ""
     echo "Switched to profile: $PROFILE"
@@ -253,7 +253,7 @@ cmd_down() {
     fi
 
     echo "Stopping services (volumes preserved)..."
-    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down)
 
     echo "Services stopped."
 }
@@ -269,7 +269,7 @@ cmd_reset() {
     echo "Resetting profile: $PROFILE"
 
     # Stop services
-    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down
+    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down)
 
     # Find and remove volumes matching *-profile-<NAME>
     local vols
@@ -285,7 +285,7 @@ cmd_reset() {
     fi
 
     echo ""
-    docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d
+    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d)
 
     echo ""
     echo "Reset profile: $PROFILE — volumes wiped, services restarted"
@@ -306,7 +306,7 @@ cmd_dump() {
         exit 1
     fi
 
-    local services_dir="$PKG_ROOT/services"
+    local services_dir="$PKG_ROOT/compose/services"
 
     echo "Dumping live databases to profile: $PROFILE"
     echo "Services: ${DUMP_SERVICES[*]}"
@@ -398,7 +398,7 @@ cmd_restore() {
         exit 1
     fi
 
-    local services_dir="$PKG_ROOT/services"
+    local services_dir="$PKG_ROOT/compose/services"
     local found=false
 
     # Verify at least one seed file exists for this profile
@@ -488,7 +488,7 @@ cmd_status() {
 
     # Detect the Docker Compose project name from the compose file in CWD
     local project
-    project=$(docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" config --format json 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4) || true
+    project=$(cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" config --format json 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4) || true
     if [ -z "$project" ]; then
         project="infra"
     fi
@@ -554,7 +554,7 @@ cmd_shell() {
 }
 
 cmd_list_profiles() {
-    local services_dir="$PKG_ROOT/services"
+    local services_dir="$PKG_ROOT/compose/services"
 
     echo "Mongo profiles:"
     for f in "$services_dir"/mongo/seed/profile-*.json; do

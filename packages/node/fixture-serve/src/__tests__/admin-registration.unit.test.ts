@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MockLogger } from '@saga-ed/soa-logger';
-import { register_with_admin } from '../server/admin-registration.js';
+import { register_with_admin, start_heartbeat } from '../server/admin-registration.js';
 
 vi.mock('@saga-ed/infra-compose', () => ({
     get_active_profile: vi.fn(() => ({ profile: 'basic' })),
@@ -124,5 +124,85 @@ describe('register_with_admin', () => {
         const admin_call = fetch_spy.mock.calls.find(c => c[0] === 'http://admin.test/register');
         const body = JSON.parse(admin_call![1].body);
         expect(body.active_profile).toBeNull();
+    });
+});
+
+describe('start_heartbeat', () => {
+    const config = {
+        admin_url: 'http://admin.test/register',
+        port: 7777,
+        site_url: 'https://snapper.test',
+        version: '0.2.6',
+    };
+
+    let fetch_spy: ReturnType<typeof vi.fn>;
+    let logger: MockLogger;
+
+    // IMDS failures → 127.0.0.1 fallback without waiting on the real 2s timeouts.
+    const ok_response_with_imds_failure = () => {
+        fetch_spy.mockImplementation(async (url: any) => {
+            if (typeof url === 'string' && url.includes('169.254.169.254')) {
+                throw new Error('no IMDS in unit test');
+            }
+            return { ok: true, status: 200, statusText: 'OK' } as any;
+        });
+    };
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        fetch_spy = vi.fn();
+        vi.stubGlobal('fetch', fetch_spy);
+        logger = new MockLogger();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        vi.clearAllMocks();
+    });
+
+    const register_calls = () =>
+        fetch_spy.mock.calls.filter((c: any[]) => c[0] === config.admin_url).length;
+
+    it('registers at startup and re-registers on the interval, stopping on handle.stop()', async () => {
+        ok_response_with_imds_failure();
+        const handle = start_heartbeat(config, logger, 1000);
+
+        await vi.advanceTimersByTimeAsync(0);
+        const after_startup = register_calls();
+        expect(after_startup).toBeGreaterThanOrEqual(1);
+
+        await vi.advanceTimersByTimeAsync(3500);
+        const after_intervals = register_calls();
+        expect(after_intervals).toBeGreaterThan(after_startup);
+
+        handle.stop();
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(register_calls()).toBe(after_intervals);
+    });
+
+    it('stop() is idempotent', () => {
+        ok_response_with_imds_failure();
+        const handle = start_heartbeat(config, logger, 1000);
+        handle.stop();
+        expect(() => handle.stop()).not.toThrow();
+    });
+
+    it('keeps heartbeating after a failed registration', async () => {
+        fetch_spy.mockImplementation(async (url: any) => {
+            if (typeof url === 'string' && url.includes('169.254.169.254')) {
+                throw new Error('no IMDS');
+            }
+            return { ok: false, status: 503, statusText: 'Service Unavailable' } as any;
+        });
+
+        const handle = start_heartbeat(config, logger, 1000);
+        await vi.runOnlyPendingTimersAsync();
+        await vi.advanceTimersByTimeAsync(2000);
+
+        expect(register_calls()).toBeGreaterThanOrEqual(3);
+        expect(logger.logs.some(l => l.level === 'warn')).toBe(true);
+
+        handle.stop();
     });
 });

@@ -66,6 +66,33 @@ export async function register_with_admin(config: AdminRegistrationConfig, logge
             logger.warn(`register_with_admin: ${resp.status} ${resp.statusText}`);
         }
     } catch (err: any) {
-        logger.warn(`register_with_admin: ${err.message} (will retry on next restart)`);
+        logger.warn(`register_with_admin: ${err.message} (will retry on next heartbeat)`);
     }
+}
+
+/** Well under the admin-side 72h DynamoDB TTL that would otherwise drop the host from the UI. */
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30 * 60 * 1000;
+
+export interface HeartbeatHandle {
+    stop(): void;
+}
+
+/**
+ * Register with fixture-admin now, then re-register on an interval so the
+ * admin-side row does not TTL-expire. Individual registrations are
+ * fire-and-forget: a failure logs a warning and the loop continues.
+ */
+export function start_heartbeat(
+    config: AdminRegistrationConfig,
+    logger: ILogger,
+    interval_ms: number = DEFAULT_HEARTBEAT_INTERVAL_MS,
+): HeartbeatHandle {
+    void register_with_admin(config, logger);
+
+    const timer = setInterval(() => {
+        void register_with_admin(config, logger);
+    }, interval_ms);
+    timer.unref();
+
+    return { stop: () => clearInterval(timer) };
 }

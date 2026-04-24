@@ -15,6 +15,12 @@ set -a
 [ -f "$HOME/.fixtures/.env" ] && source "$HOME/.fixtures/.env"
 set +a
 
+# Wrap docker compose so it always resolves relative to the bundled compose/ dir,
+# while still forwarding any COMPOSE_PASSTHROUGH args the caller supplied after --.
+run_compose() {
+    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" "$@")
+}
+
 usage() {
     cat <<EOF
 Usage: infra-compose <command> [options] [-- COMPOSE_ARGS...]
@@ -209,7 +215,7 @@ cmd_up() {
 
     echo ""
     echo "Starting services with profile: $profile"
-    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d)
+    run_compose up -d
 
     echo ""
     echo "Profile: $profile"
@@ -234,10 +240,10 @@ cmd_switch() {
     fi
 
     echo "Switching to profile: $PROFILE"
-    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down)
+    run_compose down
 
     echo ""
-    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d)
+    run_compose up -d
 
     echo ""
     echo "Switched to profile: $PROFILE"
@@ -253,7 +259,7 @@ cmd_down() {
     fi
 
     echo "Stopping services (volumes preserved)..."
-    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down)
+    run_compose down
 
     echo "Services stopped."
 }
@@ -269,7 +275,7 @@ cmd_reset() {
     echo "Resetting profile: $PROFILE"
 
     # Stop services
-    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" down)
+    run_compose down
 
     # Find and remove volumes matching *-profile-<NAME>
     local vols
@@ -285,7 +291,7 @@ cmd_reset() {
     fi
 
     echo ""
-    (cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" up -d)
+    run_compose up -d
 
     echo ""
     echo "Reset profile: $PROFILE — volumes wiped, services restarted"
@@ -488,7 +494,7 @@ cmd_status() {
 
     # Detect the Docker Compose project name from the compose file in CWD
     local project
-    project=$(cd "$PKG_ROOT/compose" && docker compose "${COMPOSE_PASSTHROUGH[@]+"${COMPOSE_PASSTHROUGH[@]}"}" config --format json 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4) || true
+    project=$(run_compose config --format json 2>/dev/null | grep -o '"name":"[^"]*"' | head -1 | cut -d'"' -f4) || true
     if [ -z "$project" ]; then
         project="infra"
     fi

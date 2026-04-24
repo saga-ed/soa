@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, writeFileSync, chmodSync } from 'fs';
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Controller } from 'routing-controllers';
@@ -84,6 +84,7 @@ describe('AbstractFixtureController (integration)', () => {
 
     afterAll(async () => {
         server?.stop();
+        if (fixtures_dir) rmSync(fixtures_dir, { recursive: true, force: true });
     });
 
     it('GET /testfx/create-types returns fixture types from fixtures_dir and ts creators', async () => {

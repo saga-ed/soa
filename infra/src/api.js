@@ -123,8 +123,7 @@ function spawn_promise(cmd, args, options = {}) {
  * @param {Record<string, string>} env
  */
 async function compose_cmd(args, env, cwd) {
-    // When no explicit cwd/compose_file is supplied, run docker from the compose/
-    // subdir so its default compose.yml is picked up after the src/ & compose/ split.
+    // Default cwd = bundled compose/ dir so docker finds the master compose.yml.
     const work_dir = cwd || resolve(PKG_ROOT, 'compose');
     let result = await spawn_promise('docker', ['compose', ...args], { cwd: work_dir, env, stdio: 'inherit' });
     if (result.error?.code === 'ENOENT') {
@@ -248,8 +247,7 @@ export async function reset(options) {
  * use the databases before seeding is complete.
  */
 async function wait_for_init_containers(env, cwd, file_args = []) {
-    // When no explicit cwd/compose_file is supplied, run docker from the compose/
-    // subdir so its default compose.yml is picked up after the src/ & compose/ split.
+    // Default cwd = bundled compose/ dir so docker finds the master compose.yml.
     const work_dir = cwd || resolve(PKG_ROOT, 'compose');
     for (const svc of INIT_CONTAINERS) {
         const ps = await spawn_promise('docker', [

@@ -94,9 +94,8 @@ describe('FixtureServer (integration)', () => {
         expect(body).toEqual({ pong: true });
     });
 
-    it('exposes container via getContainer()', () => {
+    it('exposes container via getContainer() with standard bindings', () => {
         const c = server.getContainer();
-        expect(c).toBeDefined();
         expect(c.isBound('ILogger')).toBe(true);
         expect(c.isBound('ExpressServerConfig')).toBe(true);
         expect(c.isBound('FixtureControllerConfig')).toBe(true);

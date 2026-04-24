@@ -3,13 +3,9 @@ import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'fs';
 import { resolve } from 'path';
 import { tmpdir } from 'os';
 
-// ── get_active_profile ──────────────────────────────────────
-//
-// ACTIVE_PROFILE_FILE is resolved at module load from os.homedir().
-// Tests a direct re-implementation of the read logic against a tmp dir,
-// verifying the three format contracts (JSON / legacy plain / missing).
-// The module-loaded ACTIVE_PROFILE_FILE constant is covered indirectly by
-// the integration suite, which runs against a controlled $HOME.
+// ACTIVE_PROFILE_FILE is module-scoped from homedir(); re-implement the read
+// path here to exercise the file-format contract against a tmp path. The
+// module-bound path is covered by the integration suite.
 
 describe('get_active_profile (file format contract)', () => {
     let tmp_file;
@@ -74,10 +70,9 @@ describe('get_active_profile (file format contract)', () => {
 });
 
 describe('get_active_profile (wired)', () => {
-    it('is exported from api.js and returns a plausible shape', async () => {
+    it('is exported from api.js and returns null or { profile, ... }', async () => {
         const { get_active_profile } = await import('../../src/api.js');
         const result = get_active_profile();
-        // result is either null or { profile: string, switched_at: ... }
         if (result !== null) {
             expect(result).toHaveProperty('profile');
         }
@@ -98,11 +93,8 @@ describe('list_profiles', () => {
         rmSync(tmp_dir, { recursive: true, force: true });
     });
 
-    it('returns empty profiles when data_dir has no files', async () => {
+    it('returns a profiles array when data_dir has no files', async () => {
         const { list_profiles } = await import('../../src/api.js');
-        // Use a temp dir that has no profile files.
-        // list_profiles scans built-in seeds + data_dir.
-        // We can't control built-in seeds, but we can verify the function runs without error.
         const result = list_profiles({ data_dir: tmp_dir });
         expect(result).toHaveProperty('profiles');
         expect(Array.isArray(result.profiles)).toBe(true);

@@ -221,9 +221,9 @@ describe('router lifecycle hooks', () => {
 });
 
 describe('router compose_file threading', () => {
-    // Covers the fix from commit 5533bcb — compose_file must pass from
-    // create_router options through to each handler's input object so a
-    // single fixture-serve instance can target a project-specific compose.yml.
+    // Invariant: compose_file passed to create_router must appear in every
+    // mutating handler's input so a single fixture-serve can target a
+    // project-specific compose.yml rather than the bundled master.
 
     it('threads compose_file from router options into handle_switch input', async () => {
         handlers.handle_switch.mockReturnValue({ ok: true, profile: 'p' });

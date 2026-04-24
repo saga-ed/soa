@@ -219,3 +219,52 @@ describe('router lifecycle hooks', () => {
         await test_server.close();
     });
 });
+
+describe('router compose_file threading', () => {
+    // Covers the fix from commit 5533bcb — compose_file must pass from
+    // create_router options through to each handler's input object so a
+    // single fixture-serve instance can target a project-specific compose.yml.
+
+    it('threads compose_file from router options into handle_switch input', async () => {
+        handlers.handle_switch.mockReturnValue({ ok: true, profile: 'p' });
+        test_server = await create_test_server({ compose_file: '/etc/infra/saga-api.yml' });
+
+        await api(test_server.base_url, 'POST', '/switch', { profile: 'p' });
+        expect(handlers.handle_switch).toHaveBeenCalledWith(
+            expect.objectContaining({ profile: 'p', compose_file: '/etc/infra/saga-api.yml' }),
+        );
+        await test_server.close();
+    });
+
+    it('threads compose_file into handle_reset input', async () => {
+        handlers.handle_reset.mockReturnValue({ ok: true, profile: 'r' });
+        test_server = await create_test_server({ compose_file: '/etc/infra/saga-api.yml' });
+
+        await api(test_server.base_url, 'POST', '/reset', { profile: 'r' });
+        expect(handlers.handle_reset).toHaveBeenCalledWith(
+            expect.objectContaining({ profile: 'r', compose_file: '/etc/infra/saga-api.yml' }),
+        );
+        await test_server.close();
+    });
+
+    it('threads compose_file into handle_restore input', async () => {
+        handlers.handle_restore.mockReturnValue({ ok: true, profile: 's' });
+        test_server = await create_test_server({ compose_file: '/etc/infra/saga-api.yml' });
+
+        await api(test_server.base_url, 'POST', '/restore', { profile: 's' });
+        expect(handlers.handle_restore).toHaveBeenCalledWith(
+            expect.objectContaining({ profile: 's', compose_file: '/etc/infra/saga-api.yml' }),
+        );
+        await test_server.close();
+    });
+
+    it('handler input compose_file is undefined when router has no compose_file option', async () => {
+        handlers.handle_switch.mockReturnValue({ ok: true, profile: 'default-p' });
+        test_server = await create_test_server({});
+
+        await api(test_server.base_url, 'POST', '/switch', { profile: 'default-p' });
+        const call_args = handlers.handle_switch.mock.calls[0][0];
+        expect(call_args.compose_file).toBeUndefined();
+        await test_server.close();
+    });
+});

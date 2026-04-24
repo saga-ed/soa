@@ -40,7 +40,7 @@ import type { MongoClient } from 'mongodb';
 import { get_active_profile } from '@saga-ed/infra-compose';
 import { create_router as create_infra_router } from '@saga-ed/infra-compose/router';
 import { create_service_restarter } from '../utils/service-restart.js';
-import { register_with_admin } from './admin-registration.js';
+import { start_heartbeat, type HeartbeatHandle } from './admin-registration.js';
 import type { FixtureControllerConfig } from '../controller/abstract-fixture-controller.js';
 
 export interface FixtureServerConfig {
@@ -107,6 +107,7 @@ export class FixtureServer {
     /** DI container — exposed for infra_hooks that need MongoDB reconnection or other bindings. */
     container!: Container;
     private express_server!: ExpressServer;
+    private admin_heartbeat?: HeartbeatHandle;
 
     constructor(private config: FixtureServerConfig) {}
 
@@ -231,10 +232,10 @@ export class FixtureServer {
         // 7. Start listening
         this.express_server.start();
 
-        // 8. Optional admin registration
+        // 8. Optional admin registration (with periodic heartbeat to keep TTL fresh)
         const admin_url = config.admin_register_url || process.env.FIXTURE_ADMIN_URL;
         if (admin_url) {
-            register_with_admin({
+            this.admin_heartbeat = start_heartbeat({
                 admin_url,
                 port: config.port,
                 site_url: config.site_url || '',
@@ -244,6 +245,7 @@ export class FixtureServer {
 
         // 9. Graceful shutdown
         const shutdown = async () => {
+            this.admin_heartbeat?.stop();
             try {
                 const mgr = await this.container.getAsync<IMongoConnMgr>('IMongoConnMgr');
                 await mgr.disconnect();
@@ -256,6 +258,7 @@ export class FixtureServer {
     }
 
     stop(): void {
+        this.admin_heartbeat?.stop();
         this.express_server?.stop();
     }
 

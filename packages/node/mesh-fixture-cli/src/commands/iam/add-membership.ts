@@ -14,6 +14,7 @@ import {
   findUserByUsername,
   looksLikeUuid,
 } from '../../iam-helpers.js';
+import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
 
 export default class IamAddMembership extends BaseCommand {
   static description =
@@ -74,6 +75,19 @@ export default class IamAddMembership extends BaseCommand {
           { userId, groupId, dedup: 'hit' },
           `  hit    membership ${userId.slice(0, 8)}... in ${groupId.slice(0, 8)}...`,
         );
+        await appendArtifact(
+          'iam:add-membership',
+          flags['fixture-id'],
+          'memberships',
+          `${userId}:${groupId}`,
+          flags,
+        );
+        await recordCommand(
+          'iam:add-membership',
+          flags['fixture-id'],
+          sanitizeArgs(flags),
+          flags,
+        );
         return;
       }
       throw err;
@@ -82,6 +96,19 @@ export default class IamAddMembership extends BaseCommand {
       flags,
       { userId, groupId, dedup: 'miss' },
       `  new    membership ${userId.slice(0, 8)}... in ${groupId.slice(0, 8)}...`,
+    );
+    await appendArtifact(
+      'iam:add-membership',
+      flags['fixture-id'],
+      'memberships',
+      `${userId}:${groupId}`,
+      flags,
+    );
+    await recordCommand(
+      'iam:add-membership',
+      flags['fixture-id'],
+      sanitizeArgs(flags),
+      flags,
     );
   }
 }

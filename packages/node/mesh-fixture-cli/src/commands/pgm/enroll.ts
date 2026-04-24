@@ -10,6 +10,7 @@ import { asFlag, fixtureIdFlag, sourceFlag } from '../../shared-flags.js';
 import { TrpcClient } from '../../lib/http.js';
 import { devLogin } from '../../lib/auth.js';
 import { looksLikeUuid, resolveGroupId } from '../../iam-helpers.js';
+import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
 
 interface Program {
   id: string;
@@ -122,5 +123,13 @@ export default class PgmEnroll extends BaseCommand {
       { programId, schoolId, sectionId, period: flags.period ?? null, dedup: 'upsert' },
       `  ok     enroll program=${programId.slice(0, 8)}... school=${flags.school} section=${flags.section}`,
     );
+    await appendArtifact(
+      'pgm:enroll',
+      flags['fixture-id'],
+      'enrollments',
+      `${programId}:${schoolId}:${sectionId}`,
+      flags,
+    );
+    await recordCommand('pgm:enroll', flags['fixture-id'], sanitizeArgs(flags), flags);
   }
 }

@@ -29,6 +29,10 @@ export const baseFlags = {
     description: 'override program-hub programs-api base URL',
     default: process.env.PROGRAMS_API_URL ?? 'http://localhost:3006',
   }),
+  'scheduling-url': Flags.string({
+    description: 'override program-hub scheduling-api base URL',
+    default: process.env.SCHEDULING_API_URL ?? 'http://localhost:3008',
+  }),
   'ads-adm-url': Flags.string({
     description: 'override SDS ads-adm-api base URL',
     default: process.env.ADS_ADM_URL ?? 'http://localhost:5005',

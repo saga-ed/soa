@@ -15,6 +15,7 @@ import {
   findGroupBySourceId,
   type Group,
 } from '../../iam-helpers.js';
+import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
 
 export default class IamCreateOrg extends BaseCommand {
   static description =
@@ -52,6 +53,8 @@ export default class IamCreateOrg extends BaseCommand {
         { groupId: existing.id, kind: existing.kind, dedup: 'hit' },
         `  hit    ${existing.kind}/${flags.slug} → ${existing.id}`,
       );
+      await appendArtifact('iam:create-org', flags['fixture-id'], 'groups', existing.id, flags);
+      await recordCommand('iam:create-org', flags['fixture-id'], sanitizeArgs(flags), flags);
       return;
     }
 
@@ -78,5 +81,7 @@ export default class IamCreateOrg extends BaseCommand {
       { groupId: created.id, kind: created.kind, dedup: 'miss' },
       `  new    ${created.kind}/${flags.slug} → ${created.id}`,
     );
+    await appendArtifact('iam:create-org', flags['fixture-id'], 'groups', created.id, flags);
+    await recordCommand('iam:create-org', flags['fixture-id'], sanitizeArgs(flags), flags);
   }
 }

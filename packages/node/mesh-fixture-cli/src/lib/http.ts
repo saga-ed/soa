@@ -1,12 +1,21 @@
 /**
  * http — small tRPC-over-HTTP client for the mesh-fixture CLI.
  *
- * tRPC v11 wire format at the endpoints we care about (iam-api, programs-api):
- *   - POST /trpc/<path>  with body = input (top-level JSON, NOT wrapped in `{ json: {...} }`)
- *   - GET  /trpc/<path>?input=<encoded JSON>  for queries
+ * Two wire shapes in play across the mesh:
  *
- * Responses are `{ result: { data: T } }` on success, `{ error: { ... } }`
- * on failure. We unwrap both cases and throw a typed error on failure.
+ *   a) plain JSON (iam-api, programs-api, scheduling-api):
+ *      - POST /trpc/<path>  body = <input>
+ *      - GET  /trpc/<path>?input=<url-encoded JSON>
+ *      - response envelope = { result: { data: T } }
+ *
+ *   b) superjson (ads-adm-api — @saga-ed/soa-trpc-base ships with the
+ *      superjson transformer bolted on):
+ *      - POST body = { json: <input> }  (meta elided when no Dates/Maps)
+ *      - GET  input param = JSON.stringify({ json: <input> })
+ *      - response envelope = { result: { data: { json: T, meta? } } }
+ *
+ * Caller picks the transformer via `transformer: 'none' | 'superjson'` on
+ * TrpcClient construction. Default is 'none' (matches historical behavior).
  *
  * Auth: session cookie set by /trpc/auth.devLogin. Callers pass the cookie
  * string into the client constructor; the cookie flows through every
@@ -34,16 +43,29 @@ export class TrpcCallError extends Error {
   }
 }
 
+export type TrpcTransformer = 'none' | 'superjson';
+
 export interface TrpcClientOptions {
   baseUrl: string;
   /** Optional session cookie to send on every request. */
   cookie?: string;
   /** Optional extra headers (org id, trace id, etc.). */
   headers?: Record<string, string>;
+  /**
+   * Wire transformer the target server uses. 'none' sends plain JSON
+   * (iam-api, programs-api, scheduling-api). 'superjson' wraps every
+   * input/output in `{ json: ..., meta? }` (ads-adm-api via
+   * @saga-ed/soa-trpc-base).
+   */
+  transformer?: TrpcTransformer;
 }
 
 export class TrpcClient {
-  constructor(private readonly opts: TrpcClientOptions) {}
+  private readonly transformer: TrpcTransformer;
+
+  constructor(private readonly opts: TrpcClientOptions) {
+    this.transformer = opts.transformer ?? 'none';
+  }
 
   withCookie(cookie: string): TrpcClient {
     return new TrpcClient({ ...this.opts, cookie });
@@ -59,7 +81,7 @@ export class TrpcClient {
   async query<T = unknown>(procedure: string, input?: unknown): Promise<T> {
     const url = new URL(`/trpc/${procedure}`, this.opts.baseUrl);
     if (input !== undefined) {
-      url.searchParams.set('input', JSON.stringify(input));
+      url.searchParams.set('input', JSON.stringify(this.wrapInput(input)));
     }
     const res = await fetch(url.toString(), {
       method: 'GET',
@@ -76,7 +98,7 @@ export class TrpcClient {
         'content-type': 'application/json',
         ...this.headers(),
       },
-      body: JSON.stringify(input ?? {}),
+      body: JSON.stringify(this.wrapInput(input ?? {})),
     });
     return this.unwrap<T>(procedure, res);
   }
@@ -85,6 +107,26 @@ export class TrpcClient {
     const h: Record<string, string> = { ...(this.opts.headers ?? {}) };
     if (this.opts.cookie) h['Cookie'] = this.opts.cookie;
     return h;
+  }
+
+  private wrapInput(input: unknown): unknown {
+    // superjson hosts want `{ json: <payload> }`. Dates / Maps / BigInts
+    // would also need a `meta` field — we don't pass those as input, so
+    // omit meta.
+    return this.transformer === 'superjson' ? { json: input } : input;
+  }
+
+  private unwrapData<T>(data: unknown): T {
+    // superjson response payload is `{ json: T, meta? }`. We ignore meta
+    // since none of the fields we care about are superjson-encoded
+    // primitives (FixtureMetadata dates come back as ISO strings from
+    // the Prisma Json columns — but top-level createdAt / lastUpdated
+    // ARE Date-typed in the Prisma schema, so superjson will tag them
+    // in meta. If a caller needs the actual Date, they can re-parse.)
+    if (this.transformer === 'superjson' && data && typeof data === 'object' && 'json' in data) {
+      return (data as { json: T }).json;
+    }
+    return data as T;
   }
 
   private async unwrap<T>(procedure: string, res: Response): Promise<T> {
@@ -102,9 +144,9 @@ export class TrpcClient {
     }
 
     // Successful tRPC v11 envelope: { result: { data: T } }
-    const envelope = parsed as { result?: { data?: T } };
+    const envelope = parsed as { result?: { data?: unknown } };
     if (envelope.result && 'data' in envelope.result) {
-      return envelope.result.data as T;
+      return this.unwrapData<T>(envelope.result.data);
     }
     // Some endpoints (older format, or error-path 2xx) may not use the
     // envelope — return the raw body.
@@ -113,15 +155,19 @@ export class TrpcClient {
 
   private extractTrpcError(body: unknown): TrpcError | null {
     if (typeof body !== 'object' || body === null) return null;
-    const b = body as { error?: { message?: string; code?: number; data?: TrpcError['data']; json?: unknown } };
-    if (b.error) {
-      return {
-        message: b.error.message ?? 'unknown',
-        code: b.error.code ?? -1,
-        data: b.error.data,
-      };
-    }
-    return null;
+    // superjson error envelope: { error: { json: {message, code, data} } }
+    // plain  error envelope: { error: {message, code, data} }
+    const root = body as { error?: Record<string, unknown> };
+    if (!root.error) return null;
+    const source =
+      this.transformer === 'superjson' && root.error['json']
+        ? (root.error['json'] as Record<string, unknown>)
+        : root.error;
+    return {
+      message: (source['message'] as string | undefined) ?? 'unknown',
+      code: (source['code'] as number | undefined) ?? -1,
+      data: source['data'] as TrpcError['data'],
+    };
   }
 }
 

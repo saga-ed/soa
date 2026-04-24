@@ -7,6 +7,7 @@ import { BaseCommand } from '../../base-command.js';
 import { asFlag, fixtureIdFlag } from '../../shared-flags.js';
 import { TrpcClient } from '../../lib/http.js';
 import { findUserByUsername, type User } from '../../iam-helpers.js';
+import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
 
 export default class IamCreateUser extends BaseCommand {
   static description = 'Create a user — dedup by username (via users.search).';
@@ -46,6 +47,8 @@ export default class IamCreateUser extends BaseCommand {
         { userId: existing.id, username: existing.username, dedup: 'hit' },
         `  hit    user/${flags.username} → ${existing.id}`,
       );
+      await appendArtifact('iam:create-user', flags['fixture-id'], 'users', existing.id, flags);
+      await recordCommand('iam:create-user', flags['fixture-id'], sanitizeArgs(flags), flags);
       return;
     }
 
@@ -67,5 +70,7 @@ export default class IamCreateUser extends BaseCommand {
       { userId: created.id, username: created.username, dedup: 'miss' },
       `  new    user/${flags.username} → ${created.id}`,
     );
+    await appendArtifact('iam:create-user', flags['fixture-id'], 'users', created.id, flags);
+    await recordCommand('iam:create-user', flags['fixture-id'], sanitizeArgs(flags), flags);
   }
 }

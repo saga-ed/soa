@@ -9,6 +9,7 @@ import { asFlag, fixtureIdFlag, sourceFlag } from '../../shared-flags.js';
 import { TrpcClient } from '../../lib/http.js';
 import { devLogin } from '../../lib/auth.js';
 import { looksLikeUuid, resolveGroupId } from '../../iam-helpers.js';
+import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
 
 interface Program {
   id: string;
@@ -97,6 +98,8 @@ export default class PgmCreatePeriod extends BaseCommand {
         { periodId: existing.id, name: existing.name, dedup: 'hit' },
         `  hit    period/${flags.name} → ${existing.id}`,
       );
+      await appendArtifact('pgm:create-period', flags['fixture-id'], 'periods', existing.id, flags);
+      await recordCommand('pgm:create-period', flags['fixture-id'], sanitizeArgs(flags), flags);
       return;
     }
 
@@ -111,5 +114,7 @@ export default class PgmCreatePeriod extends BaseCommand {
       { periodId: created.id, name: created.name, dedup: 'miss' },
       `  new    period/${flags.name} → ${created.id}`,
     );
+    await appendArtifact('pgm:create-period', flags['fixture-id'], 'periods', created.id, flags);
+    await recordCommand('pgm:create-period', flags['fixture-id'], sanitizeArgs(flags), flags);
   }
 }

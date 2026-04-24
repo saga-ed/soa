@@ -11,6 +11,7 @@ import { asFlag, fixtureIdFlag, sourceFlag } from '../../shared-flags.js';
 import { TrpcClient, TrpcCallError } from '../../lib/http.js';
 import { devLogin } from '../../lib/auth.js';
 import { resolveGroupId } from '../../iam-helpers.js';
+import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
 
 interface Program {
   id: string;
@@ -90,6 +91,8 @@ export default class PgmCreateProgram extends BaseCommand {
         { programId: existing.id, name: existing.name, dedup: 'hit' },
         `  hit    program/${flags.name} → ${existing.id}`,
       );
+      await appendArtifact('pgm:create-program', flags['fixture-id'], 'programs', existing.id, flags);
+      await recordCommand('pgm:create-program', flags['fixture-id'], sanitizeArgs(flags), flags);
       return;
     }
 
@@ -106,5 +109,7 @@ export default class PgmCreateProgram extends BaseCommand {
       { programId: created.id, name: created.name, dedup: 'miss' },
       `  new    program/${flags.name} → ${created.id}`,
     );
+    await appendArtifact('pgm:create-program', flags['fixture-id'], 'programs', created.id, flags);
+    await recordCommand('pgm:create-program', flags['fixture-id'], sanitizeArgs(flags), flags);
   }
 }

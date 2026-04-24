@@ -33,7 +33,7 @@ import { snapshot, switch_profile, reset, get_active_profile } from '@saga-ed/in
 import type { ILogger } from '@saga-ed/soa-logger';
 import { AbstractRestController } from '@saga-ed/soa-api-core';
 import type { ExpressServerConfig } from '@saga-ed/soa-api-core';
-import type { FixtureTypeDefinition, RoleMapping, SuiteRoles, ProvisionState, ProvisionStatus } from './types.js';
+import type { FixtureTypeDefinition, RoleMapping, SuiteRoles, ProvisionState, ProvisionStatus } from '../types.js';
 
 /** Config injected into the controller via DI. */
 export interface FixtureControllerConfig {

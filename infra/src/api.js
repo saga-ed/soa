@@ -9,6 +9,8 @@ import { EJSON } from 'bson';
 import mysql from 'mysql2/promise';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+// api.js lives at <pkg>/src/api.js → package root is one dir up.
+const PKG_ROOT = resolve(__dirname, '..');
 const DEFAULT_DATA_DIR = resolve(homedir(), '.fixtures', 'profiles');
 const ACTIVE_PROFILE_FILE = resolve(homedir(), '.fixtures', 'active-profile');
 
@@ -59,8 +61,8 @@ let _env_cache = null;
 function load_env_defaults() {
     if (_env_cache) return _env_cache;
     _env_cache = {
-        ...parse_env_file(resolve(__dirname, '.env.defaults')),
-        ...parse_env_file(resolve(__dirname, '.env')),
+        ...parse_env_file(resolve(PKG_ROOT, '.env.defaults')),
+        ...parse_env_file(resolve(PKG_ROOT, '.env')),
         ...parse_env_file(resolve(homedir(), '.fixtures', '.env')),
     };
     return _env_cache;
@@ -121,7 +123,8 @@ function spawn_promise(cmd, args, options = {}) {
  * @param {Record<string, string>} env
  */
 async function compose_cmd(args, env, cwd) {
-    const work_dir = cwd || __dirname;
+    // Default cwd = bundled compose/ dir so docker finds the master compose.yml.
+    const work_dir = cwd || resolve(PKG_ROOT, 'compose');
     let result = await spawn_promise('docker', ['compose', ...args], { cwd: work_dir, env, stdio: 'inherit' });
     if (result.error?.code === 'ENOENT') {
         result = await spawn_promise('docker-compose', args, { cwd: work_dir, env, stdio: 'inherit' });
@@ -244,7 +247,8 @@ export async function reset(options) {
  * use the databases before seeding is complete.
  */
 async function wait_for_init_containers(env, cwd, file_args = []) {
-    const work_dir = cwd || __dirname;
+    // Default cwd = bundled compose/ dir so docker finds the master compose.yml.
+    const work_dir = cwd || resolve(PKG_ROOT, 'compose');
     for (const svc of INIT_CONTAINERS) {
         const ps = await spawn_promise('docker', [
             'compose', ...file_args, 'ps', '--status', 'running', '--format', '{{.Name}}', svc,
@@ -267,7 +271,7 @@ async function wait_for_init_containers(env, cwd, file_args = []) {
  */
 export async function restore(options) {
     const { profile } = options;
-    const services_dir = resolve(__dirname, 'services');
+    const services_dir = resolve(PKG_ROOT, 'compose', 'services');
 
     // Verify at least one seed or snapshot file exists for this profile
     const data_dir = resolve(options.data_dir || DEFAULT_DATA_DIR);
@@ -518,7 +522,7 @@ async function snapshot_mysql(profile, out_dir, defaults) {
  */
 export function list_profiles(options = {}) {
     const data_dir = resolve(options.data_dir || DEFAULT_DATA_DIR);
-    const services_dir = resolve(__dirname, 'services');
+    const services_dir = resolve(PKG_ROOT, 'compose', 'services');
     const defaults = load_env_defaults();
     const profiles = [];
 

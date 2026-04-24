@@ -1,9 +1,0 @@
-## Test project — all 3 data services for integration testing
-##
-## Uses isolated ports to avoid conflict with dev instances.
-## Usage: SEED_PROFILE=small docker compose -f test/compose.yml up -d
-
-include:
-  - path: ../services/mongo/compose.yml
-  - path: ../services/mysql/compose.yml
-  - path: ../services/postgres/compose.yml

@@ -1,482 +1,100 @@
-# Composable Docker Services with Profile Switching
+# @saga-ed/infra-compose
 
-Compose the database services each project needs, with instant switching between
-pre-seeded data profiles using volume-per-profile isolation.
+**Composable Docker service templates with instant profile switching for local development and E2E test infrastructure.**
 
-## How It Works
+## What it does
 
-1. **Services** (`services/`) — each database is a standalone compose file
-2. **Projects** (`projects/`) — compose files that `include:` the services they need
-3. **Profiles** — each seed profile gets its own Docker volume (e.g., `mongo-profile-small`)
-4. Switching profiles means detaching one volume and attaching another — instant if already seeded
+Bundled Docker Compose templates for MongoDB, MySQL, PostgreSQL, Redis, RabbitMQ, and OpenFGA — plus a CLI, a JS API, and an Express router that orchestrate **volume-per-profile isolation**. Switching from the `small` profile to `basic` takes ~3–5 seconds (if the volume has been seeded once); resetting a profile is a single command.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  projects/saga-api.yml                                  │
-│    include:                                             │
-│      - services/mongo/compose.yml                       │
-│      - services/mysql/compose.yml                       │
-└─────────┬───────────────────────────────┬───────────────┘
-          │                               │
-  ┌───────▼────────┐             ┌────────▼───────┐
-  │     mongo      │             │     mysql      │
-  │  :27018        │             │  :3307         │
-  └───────┬────────┘             └────────┬───────┘
-          │                               │
-  ┌───────▼────────┐             ┌────────▼───────┐
-  │ Volume:        │             │ Volume:        │
-  │ mongo-profile- │             │ mysql-profile- │
-  │   small        │             │   small        │
-  │   basic        │             │   basic        │
-  └────────────────┘             └────────────────┘
-```
+Published to npm as `@saga-ed/infra-compose`. Consumers include the bundled templates via `docker compose` `include:` syntax — no hand-rolled local compose files needed.
 
-## Quick Start
+## Why you'd use it
+
+| You have | Without infra-compose | With infra-compose |
+|---|---|---|
+| Multiple projects needing different DB combinations | Copy-paste compose files, maintain parallel init scripts | `include:` the canonical service files, pick your profile |
+| Need to switch between data states for testing | Manual dump/restore, restart containers, ~30–60s | `infra-compose switch --profile basic` — ~5s |
+| E2E test suite needs known DB state | Hand-rolled teardown/reseed per run | `POST /infra/reset` from your test harness |
+| Port conflicts with system DBs or VPN | Debug each collision manually | Pre-offset ports (27018, 3307, 5433, 6380) + pre-flight check |
+| `npm install -g` wipes your `.env` overrides | Annoyed | `.env.defaults` (bundled) → `.env` (project) → `~/.fixtures/.env` (survives reinstalls) |
+
+## Quick start
 
 ```bash
 cd infra
 
-# Start saga-api services (mongo + mysql) with default profile
+# 1. Bring up saga-api (mongo + mysql) with the "small" seed
 make up PROJECT=saga-api
 
-# Switch to basic profile (first time: seeds data; then: instant)
+# 2. Switch to "basic" — instant after first seed
 make switch PROJECT=saga-api PROFILE=basic
 
-# Start adm-api services (postgres + redis)
+# 3. Stop everything (volumes preserved)
 make down PROJECT=saga-api
-make up PROJECT=adm-api
-
-# Start events example (rabbitmq + postgres)
-make down PROJECT=adm-api
-make up PROJECT=events-example
 ```
 
-## Projects
+Or via the CLI from any cwd:
 
-| Project | Services | Use Case |
-|---------|----------|----------|
+```bash
+npx infra-compose up --profile small
+npx infra-compose switch --profile basic
+npx infra-compose status
+```
+
+## Projects and services
+
+| Project | Services | Use case |
+|---|---|---|
 | `saga-api` | mongo, mysql | Main GraphQL/REST API |
 | `adm-api` | postgres, redis | Attendance & Daily Management API |
 | `events-example` | rabbitmq, postgres | Event-driven example |
 
-## Services
-
-| Service | Port | Profile Switching | Volume Pattern |
-|---------|------|-------------------|----------------|
+| Service | Port | Profile switching | Volume pattern |
+|---|---|---|---|
 | MongoDB | 27018 | Yes | `mongo-profile-<name>` |
 | MySQL | 3307 | Yes | `mysql-profile-<name>` |
 | PostgreSQL | 5433 | Yes | `postgres-profile-<name>` |
 | Redis | 6380 | No | `redis-data` |
 | RabbitMQ | 5673 / 15673 | No | `rabbitmq-data` |
 
-## Profile Switching
+## Depth reading
 
-Profiles are isolated Docker volumes. Switching detaches one volume and attaches another:
+| Topic | Where |
+|---|---|
+| Architecture (volume-per-profile, sentinel seeding, `compose_file` threading) | [docs/architecture.md](./docs/architecture.md) |
+| Four adoption contexts (local dev, snapper VM, CI, external npm consumer) | [docs/adoption-guide.md](./docs/adoption-guide.md) |
+| JS API + HTTP endpoints + `{ ok, ... }` contract | [docs/api-reference.md](./docs/api-reference.md) |
+| Port conflicts, VPN / `daemon.json`, init timeouts, env precedence | [docs/troubleshooting.md](./docs/troubleshooting.md) |
+| Hands-on walkthrough for snapper VM | [docs/hands-on-tutorial.md](./docs/hands-on-tutorial.md) |
+| Contributor-facing internals (three-layer design, extension points) | [CLAUDE.md](./CLAUDE.md) |
 
-```bash
-# Switch — instant if profile was previously seeded
-make switch PROJECT=saga-api PROFILE=basic
-
-# Reset one profile (wipe volume + re-seed) — other profiles untouched
-make reset PROJECT=saga-api PROFILE=basic
-
-# See what volumes exist
-make volumes
-```
-
-### How seeding works
-
-Each data service has a seeder (`*_init` container) that:
-1. Waits for the service to be healthy
-2. Checks for a sentinel (doc/table) marking "already seeded"
-3. If absent, loads `seed/profile-<name>.json|sql`
-4. Writes the sentinel so subsequent starts skip seeding
-
-## Make Targets
-
-| Target | Description |
-|--------|-------------|
-| `make up` | Start project services |
-| `make switch` | Switch to a different profile |
-| `make down` | Stop services (keep volumes) |
-| `make reset` | Wipe + re-seed one profile |
-| `make check-ports` | Pre-flight port conflict check (runs automatically before `up`) |
-| `make status` | Show running containers and volumes (all projects) |
-| `make logs` | Tail container logs |
-| `make volumes` | List all profile volumes |
-| `make list-projects` | Show available projects and their services |
-| `make list-profiles` | Show available seed profiles per service |
-| `make mongo-shell` | Open mongosh |
-| `make mysql-shell` | Open mysql client |
-| `make psql-shell` | Open psql |
-| `make redis-cli` | Open redis-cli |
-| `make clean-all` | Destroy ALL data |
-| `make help` | Show all targets |
-
-All targets accept `PROJECT=<name>` and `PROFILE=<name>` (defaults: saga-api, small).
-
-## Adding a New Service
-
-1. Create `services/<name>/compose.yml` with the service definition
-2. For profile switching: add a `seed/` dir with init script and profile data files
-3. Use `name: <name>-profile-${SEED_PROFILE:-small}` in the volume definition
-4. Add the service to project files that need it
-
-## Adding a New Project
-
-1. Create `projects/<name>.yml`:
-
-```yaml
-include:
-  - path: ../services/mongo/compose.yml
-  - path: ../services/redis/compose.yml
-```
-
-2. That's it. `make up PROJECT=<name>` just works.
-
-## Adding a New Profile
-
-1. Add seed data files in the appropriate service directories:
-   - Mongo: `services/mongo/seed/profile-<name>.json`
-   - MySQL: `services/mysql/seed/profile-<name>.sql`
-   - Postgres: `services/postgres/seed/profile-<name>.sql`
-
-2. Switch to it: `make switch PROJECT=saga-api PROFILE=<name>`
-
-## Directory Structure
+## Repository structure
 
 ```
 infra/
-├── services/
-│   ├── mongo/
-│   │   ├── compose.yml
-│   │   └── seed/
-│   │       ├── init-and-seed.js
-│   │       ├── profile-small.json
-│   │       └── profile-basic.json
-│   ├── mysql/
-│   │   ├── compose.yml
-│   │   └── seed/
-│   │       ├── init-and-seed.sh
-│   │       ├── profile-small.sql
-│   │       └── profile-basic.sql
-│   ├── postgres/
-│   │   ├── compose.yml
-│   │   └── seed/
-│   │       ├── init-and-seed.sh
-│   │       ├── profile-small.sql
-│   │       └── profile-basic.sql
-│   ├── redis/
-│   │   └── compose.yml
-│   └── rabbitmq/
-│       └── compose.yml
-├── projects/
-│   ├── saga-api.yml           # mongo + mysql
-│   ├── adm-api.yml            # postgres + redis
-│   └── events-example.yml     # rabbitmq + postgres
-├── ec2/
-│   ├── server.js              # EC2 db-host HTTP server entry point
-│   └── ec2-router.js          # Express router for EC2 DB instance management
-├── api.js                     # Programmatic API (lifecycle, snapshot, profiles)
-├── api.d.ts                   # TypeScript types for api.js
-├── handlers.js                # HTTP handler wrappers ({ ok: true/false } convention)
-├── handlers.d.ts              # TypeScript types for handlers.js
-├── router.js                  # Express router factory with lifecycle hooks
-├── router.d.ts                # TypeScript types for router.js
-├── bin/
-│   └── infra-compose          # CLI entry point
-├── compose.yml                # Root compose file (includes all services)
-├── vitest.config.js           # Test configuration
-├── .env.defaults
-├── Makefile
-└── README.md
+├── bin/infra-compose               # CLI (bash)
+├── src/                            # Runtime JS
+│   ├── api.js                      # Programmatic API (up/switch/reset/…)
+│   ├── handlers.js                 # HTTP handler wrappers ({ ok: … } contract)
+│   ├── router.js                   # Express router factory
+│   └── ec2/                        # EC2 db-host server (separate subsystem)
+├── compose/                        # Docker Compose templates
+│   ├── compose.yml                 # Master "all services" file
+│   ├── services/{mongo,mysql,postgres,redis,rabbitmq,openfga}/
+│   └── projects/{saga-api,adm-api,events-example}.yml
+├── test/
+│   ├── unit/                       # Vitest unit tests
+│   └── integration/                # Bash + Docker integration suite
+├── docs/                           # Human-readable guides
+├── .env.defaults                   # Port/credential defaults
+├── Makefile                        # Developer convenience targets
+└── package.json                    # Published as @saga-ed/infra-compose
 ```
 
-## Ports
+## Relationship to fixture-serve
 
-All ports are offset from defaults to avoid conflict with `local-db-mgr.sh`:
+[`@saga-ed/fixture-serve`](../packages/node/fixture-serve/README.md) is a higher-level Express server that **mounts infra-compose's router at `/infra`** and adds fixture-specific endpoints (provision, snapshot, Playwright credential export). If you want fixture management on top of profile switching, adopt fixture-serve; if you just need database profile orchestration, use infra-compose directly.
 
-| Service | Default | Override |
-|---------|---------|----------|
-| Mongo | 27018 | `MONGO_PORT` |
-| MySQL | 3307 | `MYSQL_PORT` |
-| Postgres | 5433 | `POSTGRES_PORT` |
-| Redis | 6380 | `REDIS_PORT` |
-| RabbitMQ | 5673 / 15673 | `RABBITMQ_PORT` / `RABBITMQ_MGMT_PORT` |
+## License
 
-Override in `.env` or inline: `make up PROJECT=saga-api MONGO_PORT=27020`
-
-## Network Safety
-
-Docker auto-assigns bridge subnets from `172.17.0.0/12`, which can overlap
-corporate VPN ranges (commonly `172.20.*`, `172.21.*`). The Docker daemon is
-configured to confine bridge networks to non-conflicting ranges:
-
-```jsonc
-// /etc/docker/daemon.json
-{
-    "default-address-pools": [
-        { "base": "172.24.0.0/13", "size": 24 },
-        { "base": "192.168.192.0/20", "size": 24 }
-    ]
-}
-```
-
-After editing `daemon.json`, restart the daemon:
-
-```bash
-sudo systemctl restart docker
-```
-
-## Port Conflict Detection
-
-`make up` runs an automatic pre-flight check (`check-ports`) before starting
-any services. If a required port is already in use by another Docker container,
-it fails fast with actionable suggestions:
-
-```
-  ERROR: Port conflict detected!
-  Port 5433 is in use by container 'soa-postgres-1' (project: soa)
-
-  Option 1 — stop just the conflicting container(s):
-    docker stop soa-postgres-1
-
-  Option 2 — stop the entire project (all its services):
-    docker compose -p soa down
-```
-
-This prevents confusing startup failures when switching between projects that
-share database ports.
-
-## Upgrading to 0.5.0 (PostgreSQL 18)
-
-Version 0.5.0 upgrades PostgreSQL from 16 to 18, which changes the data directory layout.
-**Existing postgres volumes must be removed** before starting services — PG18 will refuse to
-start if it finds data in the old layout.
-
-### What changed
-
-| | Before (≤ 0.4.0) | After (0.5.0+) |
-|---|---|---|
-| Postgres image | `postgres:16` | `postgres:18` |
-| Volume mount | `/var/lib/postgresql/data` | `/var/lib/postgresql` |
-
-PG18 stores data in a major-version-specific subdirectory (`/var/lib/postgresql/18/data`),
-so the mount point moved up one level to `/var/lib/postgresql`.
-
-### Migration steps
-
-**1. infra-compose direct users (soa2/infra):**
-
-```bash
-cd ~/dev/soa2/infra
-
-# Stop services
-./bin/infra-compose down
-
-# Remove all postgres profile volumes
-docker volume ls --filter "name=postgres-profile-" --format "{{.Name}}" | xargs docker volume rm
-
-# Restart — fresh volumes will be created and seeded automatically
-./bin/infra-compose up --profile small
-```
-
-**2. Thrive:**
-
-```bash
-cd ~/dev/thrive
-
-# Pull latest compose-templates-poc branch (includes volume mount fix)
-git pull
-
-# Install updated package
-pnpm install
-
-# Stop and remove the old volume
-docker compose down
-docker volume rm thrive-postgres-data
-
-# Restart — databases will be re-created by init-databases.sql
-docker compose up -d
-```
-
-**3. Consumer repos using `extends:`**
-
-If your `docker-compose.yml` overrides the postgres volume mount, update it:
-
-```yaml
-# Before
-volumes:
-  - my-postgres-data:/var/lib/postgresql/data
-
-# After
-volumes:
-  - my-postgres-data:/var/lib/postgresql
-```
-
-Then remove and recreate the volume:
-
-```bash
-docker compose down
-docker volume rm <your-postgres-volume-name>
-docker compose up -d
-```
-
-> **Note:** This is a local-dev-only change. All seed data is re-applied automatically on
-> first start. No production databases are affected.
-
----
-
-## Cross-Repo Usage (npm package)
-
-Consumer repos outside this monorepo can install the service templates as an npm package:
-
-```bash
-pnpm add -D @saga-ed/infra-compose
-```
-
-Then reference the compose files via `include:` in your project's `docker-compose.yml`:
-
-```yaml
-# consumer-repo/docker-compose.yml
-include:
-  - path: node_modules/@saga-ed/infra-compose/services/mongo/compose.yml
-  - path: node_modules/@saga-ed/infra-compose/services/redis/compose.yml
-
-services:
-  my-app:
-    build: .
-    depends_on:
-      mongo:
-        condition: service_healthy
-```
-
-Docker Compose `include:` resolves bind mounts relative to the included file,
-so seed scripts at `services/mongo/seed/` resolve correctly from inside `node_modules/`.
-
-### Overriding ports and credentials
-
-The service templates read variables from `.env.defaults` with sensible fallbacks.
-Override any value in your project's `.env`:
-
-```env
-MONGO_PORT=27020
-MYSQL_PORT=3308
-SEED_PROFILE=basic
-```
-
-Then start services:
-
-```bash
-docker compose --env-file .env up -d
-```
-
-### What's included in the package
-
-Only the reusable templates are published:
-
-| Included | Excluded (soa-local only) |
-|----------|--------------------------|
-| `services/` (compose files + seed data) | `Makefile` |
-| `.env.defaults` | `projects/` |
-| | `README.md` |
-
-The `Makefile` and `projects/` directory are convenience wrappers for soa monorepo
-development. Consumer repos use `docker compose` directly.
-
----
-
-## Programmatic API
-
-The package exports three JavaScript modules for use in Node.js applications.
-
-### `api.js` — Core lifecycle functions
-
-```js
-import {
-    up,
-    switch_profile,
-    reset,
-    restore,
-    snapshot,
-    list_profiles,
-    get_active_profile,
-    delete_profile_data,
-} from '@saga-ed/infra-compose/api';
-```
-
-| Function | Description |
-|----------|-------------|
-| `up(options)` | Start services. Accepts `{ profile, seed_dir, compose_args }` |
-| `switch_profile(options)` | Stop services and restart with a new profile |
-| `reset(options)` | Wipe profile volumes and restart fresh |
-| `restore(options)` | Restore from seed/snapshot files (reset + re-seed) |
-| `snapshot(options)` | Dump current DB state as a named profile |
-| `list_profiles()` | List available seed and snapshot profiles per service |
-| `get_active_profile()` | Return the currently active profile, or `null` |
-| `delete_profile_data(options)` | Delete snapshot files for a named profile |
-
-See `api.d.ts` for full type signatures.
-
-### `handlers.js` — HTTP handler functions
-
-Framework-agnostic handler functions that wrap `api.js` operations and return
-`{ ok: true, ... }` on success or `{ ok: false, error: "..." }` on failure:
-
-```js
-import { handle_switch, handle_reset, handle_snapshot } from '@saga-ed/infra-compose/handlers';
-```
-
-These are the same functions the built-in Express router uses — import them directly
-if you want to wire them into a custom HTTP framework.
-
-### `router.js` — Express router factory
-
-```js
-import { create_router } from '@saga-ed/infra-compose/router';
-import express from 'express';
-
-const app = express();
-
-app.use('/infra', create_router({
-    on_after_switch:   async () => { await restart_my_app(); },
-    on_after_reset:    async () => { await restart_my_app(); },
-    on_after_snapshot: async () => { /* optional post-snapshot hook */ },
-}));
-
-app.listen(7777);
-```
-
-`create_router(options)` returns a standard Express `Router` with the following endpoints:
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/switch` | Switch to a different profile |
-| `POST` | `/reset` | Wipe profile volumes and restart fresh |
-| `POST` | `/snapshot` | Dump current DB state as a named profile |
-| `POST` | `/restore` | Restore from seed/snapshot files |
-| `GET` | `/profiles` | List available profiles |
-| `POST` | `/delete-profile` | Delete snapshot files for a profile |
-| `GET` | `/active-profile` | Get the currently active profile |
-| `GET` | `/health` | Health check |
-
-Lifecycle hooks (`on_after_switch`, `on_after_reset`, `on_after_snapshot`) are optional
-and fire after a successful operation — use them to restart your application so it picks
-up the new database state. Express is an optional peer dependency; omit it if you only
-use `api.js` directly.
-
----
-
-## EC2 DB-Host Server
-
-The `ec2/` directory contains an HTTP server for managing Docker database instances on
-EC2 virtual machines. It is used by the fixture-admin Lambda to provision and manage
-fixture databases on remote VMs.
-
-Entry points:
-- `ec2/server.js` — standalone HTTP server (start directly on the VM)
-- `ec2/ec2-router.js` — Express router (mount into an existing app)
-
-Package exports:
-- `@saga-ed/infra-compose/ec2-router` → `ec2/ec2-router.js`
-- `@saga-ed/infra-compose/ec2-server` → `ec2/server.js`
+Internal — Saga Education.

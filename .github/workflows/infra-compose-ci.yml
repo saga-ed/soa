@@ -106,7 +106,7 @@ jobs:
       - name: Validate package contents
         run: |
           npm pack --dry-run 2>&1 | tee /tmp/pack-output.txt
-          for file in api.js api.d.ts handlers.js handlers.d.ts router.js router.d.ts; do
+          for file in src/api.js src/api.d.ts src/handlers.js src/handlers.d.ts src/router.js src/router.d.ts; do
             if ! grep -q "$file" /tmp/pack-output.txt; then
               echo "ERROR: $file missing from package" >&2
               exit 1
@@ -117,11 +117,11 @@ jobs:
       # Verify subpath exports resolve correctly
       - name: Validate exports
         run: |
-          node -e "import('./api.js').then(() => console.log('api.js: OK'))"
-          node -e "import('./handlers.js').then(() => console.log('handlers.js: OK'))"
+          node -e "import('./src/api.js').then(() => console.log('api.js: OK'))"
+          node -e "import('./src/handlers.js').then(() => console.log('handlers.js: OK'))"
           node -e "
             import('fs').then(fs => {
-              const src = fs.readFileSync('./router.js', 'utf8');
+              const src = fs.readFileSync('./src/router.js', 'utf8');
               console.log('router.js: parseable (' + src.length + ' bytes)');
             });
           "
@@ -166,4 +166,4 @@ jobs:
           echo "All images pulled"
 
       - name: Run integration tests
-        run: bash test/run-integration.sh
+        run: bash test/integration/run-integration.sh

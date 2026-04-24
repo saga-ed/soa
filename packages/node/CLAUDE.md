@@ -19,6 +19,7 @@ See [/packages/CLAUDE.md](../CLAUDE.md) for packages overview.
 | `api-core/` | Shared API server utilities with abstract controllers for REST/GraphQL/TypeGraphQL/tRPC, server bootstrapping, and dynamic controller loading. | [api-core/](./api-core/CLAUDE.md) |
 | `api-util/` | API helper utilities for request validation, response formatting, and error handling. Single-purpose utilities. | Tier |
 | `db/` | MongoDB connection management with DI integration, connection pooling, and mock provider for testing. | [db/](./db/CLAUDE.md) |
+| `fixture-serve/` | Ready-to-run Express server for test fixture lifecycle — provision/snapshot/restore endpoints, async jobs, Playwright credential export, infra-compose integration. Subclass `AbstractFixtureController` per service. | [fixture-serve/](./fixture-serve/CLAUDE.md) |
 | `logger/` | Simple Pino logger wrapper with sensible defaults and structured logging. Standard Node.js logging patterns. **Usage:** `import { logger } from '@saga-ed/soa-logger'` | Tier |
 | `pubsub-client/` | PubSub client library for subscribing to events. Connects to pubsub-server. Standard event emitter patterns. | Tier |
 | `pubsub-core/` | PubSub core types and interfaces. Pure TypeScript types. **Usage:** `import { PubSubEvent } from '@saga-ed/soa-pubsub-core'` | Tier |

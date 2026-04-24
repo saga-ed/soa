@@ -104,7 +104,8 @@ export interface FixtureServerConfig {
 }
 
 export class FixtureServer {
-    private container!: Container;
+    /** DI container — exposed for infra_hooks that need MongoDB reconnection or other bindings. */
+    container!: Container;
     private express_server!: ExpressServer;
 
     constructor(private config: FixtureServerConfig) {}
@@ -189,10 +190,25 @@ export class FixtureServer {
         // 4. Mount infra-compose router with lifecycle hooks
         const logger = this.container.get<ILogger>('ILogger');
         const restart_fn = create_service_restarter(config.service_name, config.health_url);
+        // Reconnect MongoDB after volume swaps so queries hit the new profile's data.
+        // Without this, the controller's metadata_collection reads stale documents
+        // from the previous profile's connection.
+        const reconnect_mongo = async () => {
+            const mgr = await this.container.getAsync<IMongoConnMgr>('IMongoConnMgr');
+            await mgr.disconnect();
+            await mgr.connect();
+            logger.info('infra hook: reconnected MongoDB after profile change');
+        };
         const infra_router = create_infra_router({
             compose_file: config.compose_file,
-            on_after_switch: config.infra_hooks?.on_after_switch ?? (async () => { await restart_fn(logger); }),
-            on_after_reset: config.infra_hooks?.on_after_reset ?? (async () => { await restart_fn(logger); }),
+            on_after_switch: config.infra_hooks?.on_after_switch ?? (async () => {
+                await reconnect_mongo();
+                await restart_fn(logger);
+            }),
+            on_after_reset: config.infra_hooks?.on_after_reset ?? (async () => {
+                await reconnect_mongo();
+                await restart_fn(logger);
+            }),
             on_after_snapshot: config.infra_hooks?.on_after_snapshot,
         });
         app.use('/infra', infra_router);

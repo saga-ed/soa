@@ -1,32 +1,35 @@
 /**
- * pgm:enroll — set program enrollment (school + section). Uses upsert-shaped
- * enrollment.setProgramEnrollment so repeat runs are safe. Optional --period
- * also applies enrollment.setPeriodAssignments.
+ * pgm:enroll — thin spawn-and-relay shell.
+ *
+ * Per the architecture pattern audit (claude/projects/sds_80/phase-3/
+ * architecture-pattern-audit.md) and D3.8: the composite enrollment logic
+ * lives in `@saga-ed/pgm-seed` inside the program-hub repo. This command
+ * is a lightweight wrapper that spawns the pgm-seed binary and relays its
+ * exit + output.
+ *
+ * After the child exits 0, the CLI records a CommandInfo via
+ * fixture.registry.addCommand + appendArtifact on programs-api so
+ * fixture:show / fixture:list surface the run in the fixture's history.
+ * Registry writes stay the CLI's job — per architecture audit — so the
+ * child doesn't need cross-service awareness.
  */
 
+import { existsSync } from 'node:fs';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { asFlag, fixtureIdFlag, sourceFlag } from '../../shared-flags.js';
 import { TrpcClient } from '../../lib/http.js';
-import { devLogin } from '../../lib/auth.js';
-import { looksLikeUuid, resolveGroupId } from '../../iam-helpers.js';
+import { resolveGroupId } from '../../iam-helpers.js';
 import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
-
-interface Program {
-  id: string;
-  name: string;
-  organizationId: string;
-}
-
-interface Period {
-  id: string;
-  name: string;
-  programId: string;
-}
+import {
+  resolvePgmSeedBin,
+  spawnPgmSeed,
+  extractUuidFromStdout,
+} from '../../lib/pgm-seed-bin.js';
 
 export default class PgmEnroll extends BaseCommand {
   static description =
-    'Set program enrollment (school + section). Upsert-shaped — safe to re-run.';
+    'Set program enrollment (school + section). Upsert — safe to re-run. Delegates to pgm-seed.';
 
   static flags = {
     ...BaseCommand.baseFlags,
@@ -56,73 +59,48 @@ export default class PgmEnroll extends BaseCommand {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(PgmEnroll);
+    const binPath = resolvePgmSeedBin();
+    if (!existsSync(binPath)) {
+      this.logToStderr(
+        `pgm-seed binary not found at ${binPath}. ` +
+          'Build the package (cd ~/dev/program-hub/packages/node/pgm-seed && pnpm build) ' +
+          'or set PGM_SEED_BIN to override.',
+      );
+      this.exit(2);
+    }
 
+    const args: string[] = ['enroll',
+      '--fixture-id', flags['fixture-id'],
+      '--program', flags.program,
+      '--school', flags.school,
+      '--section', flags.section,
+      '--org', flags.org,
+      '--source', flags.source,
+      '--as', flags.as,
+      '--iam-url', flags['iam-url'],
+      '--programs-url', flags['programs-url'],
+    ];
+    if (flags.period) args.push('--period', flags.period);
+    if (flags.porcelain) args.push('--porcelain');
+    if (flags['output-json']) args.push('--output-json');
+
+    const { exitCode, stdout } = await spawnPgmSeed(binPath, args);
+    if (exitCode !== 0) {
+      this.exit(exitCode);
+    }
+
+    // Re-resolve school+section to UUIDs for the artifact key (keeps the
+    // registry shape identical to pre-D3.8: <programUuid>:<schoolUuid>:<sectionUuid>).
+    // programId is captured from the child's stdout; short-circuits when
+    // flags.program was already a UUID. Fall back to flags.program when
+    // nothing matched the UUID pattern (shouldn't happen in practice).
     const iamClient = new TrpcClient({ baseUrl: flags['iam-url'] });
-    const [orgId, schoolId, sectionId] = await Promise.all([
-      resolveGroupId(iamClient, flags.source, flags.org),
+    const [schoolId, sectionId] = await Promise.all([
       resolveGroupId(iamClient, flags.source, flags.school),
       resolveGroupId(iamClient, flags.source, flags.section),
     ]);
-    const { cookie } = await devLogin(flags['iam-url'], flags.as);
-    const programsClient = new TrpcClient({
-      baseUrl: flags['programs-url'],
-      cookie,
-      headers: { 'x-organization-id': orgId },
-    });
+    const programId = extractUuidFromStdout(stdout, 'programId') ?? flags.program;
 
-    let programId: string;
-    if (looksLikeUuid(flags.program)) {
-      programId = flags.program;
-    } else {
-      const resp = await programsClient.query<{ programs: Program[] }>(
-        'programs.list',
-        { page: 1, limit: 200 },
-      );
-      const p = resp.programs.find((x) => x.name === flags.program);
-      if (!p) throw new Error(`program '${flags.program}' not found.`);
-      programId = p.id;
-    }
-
-    // setProgramEnrollment is upsert-shaped — safe to call repeatedly.
-    // Uses only-include + all-except (per demo-small spec) so just the
-    // named section is enrolled with every one of its students.
-    await programsClient.mutation('enrollment.setProgramEnrollment', {
-      programId,
-      schools: [
-        {
-          schoolGroupId: schoolId,
-          enrolled: true,
-          childPolicy: 'only-include',
-          sectionEnrollments: [
-            { sectionGroupId: sectionId, studentPolicy: 'all-except' },
-          ],
-        },
-      ],
-    });
-
-    if (flags.period) {
-      let periodId: string;
-      if (looksLikeUuid(flags.period)) {
-        periodId = flags.period;
-      } else {
-        const periods = await programsClient.query<Period[]>('periods.list', {
-          programId,
-        });
-        const p = periods.find((x) => x.name === flags.period);
-        if (!p) throw new Error(`period '${flags.period}' not found on program.`);
-        periodId = p.id;
-      }
-      await programsClient.mutation('enrollment.setPeriodAssignments', {
-        programId,
-        assignments: [{ sectionGroupId: sectionId, periodId, action: 'add' }],
-      });
-    }
-
-    this.emit(
-      flags,
-      { programId, schoolId, sectionId, period: flags.period ?? null, dedup: 'upsert' },
-      `  ok     enroll program=${programId.slice(0, 8)}... school=${flags.school} section=${flags.section}`,
-    );
     await appendArtifact(
       'pgm:enroll',
       flags['fixture-id'],

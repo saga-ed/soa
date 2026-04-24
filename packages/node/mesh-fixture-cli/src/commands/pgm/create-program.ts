@@ -1,26 +1,24 @@
 /**
- * pgm:create-program — create a program under an org. Dedup by
- * (organizationId, name) via programs.list. Auth: devLogin as --as
- * against iam-api, then carry the iam_session cookie on programs-api calls
- * with x-organization-id resolved from --org.
+ * pgm:create-program — thin spawn-and-relay shell.
+ *
+ * Composite logic lives in @saga-ed/pgm-seed (D3.8). The CLI handles the
+ * fixture-registry bookkeeping after the child exits 0; the child owns the
+ * actual programs.create + dedup call.
  */
 
+import { existsSync } from 'node:fs';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { asFlag, fixtureIdFlag, sourceFlag } from '../../shared-flags.js';
-import { TrpcClient, TrpcCallError } from '../../lib/http.js';
-import { devLogin } from '../../lib/auth.js';
-import { resolveGroupId } from '../../iam-helpers.js';
 import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
-
-interface Program {
-  id: string;
-  name: string;
-  organizationId: string;
-}
+import {
+  resolvePgmSeedBin,
+  spawnPgmSeed,
+  extractUuidFromStdout,
+} from '../../lib/pgm-seed-bin.js';
 
 export default class PgmCreateProgram extends BaseCommand {
-  static description = 'Create a program — dedup by (organizationId, name).';
+  static description = 'Create a program — dedup by (org, name). Delegates to pgm-seed.';
 
   static flags = {
     ...BaseCommand.baseFlags,
@@ -59,57 +57,40 @@ export default class PgmCreateProgram extends BaseCommand {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(PgmCreateProgram);
-
-    const iamClient = new TrpcClient({ baseUrl: flags['iam-url'] });
-    const orgId = await resolveGroupId(iamClient, flags.source, flags.org);
-    const { cookie } = await devLogin(flags['iam-url'], flags.as);
-
-    const programsClient = new TrpcClient({
-      baseUrl: flags['programs-url'],
-      cookie,
-      headers: { 'x-organization-id': orgId },
-    });
-
-    // Dedup: list programs for this org, match by name. programs.list is
-    // paged + wrapped: { programs: [...], total, page, limit }. Pull a large
-    // first page rather than walk pages — seed volumes are small.
-    let existing: Program | null = null;
-    try {
-      const resp = await programsClient.query<{ programs: Program[] }>(
-        'programs.list',
-        { page: 1, limit: 200 },
+    const binPath = resolvePgmSeedBin();
+    if (!existsSync(binPath)) {
+      this.logToStderr(
+        `pgm-seed binary not found at ${binPath}. ` +
+          'Build the package (cd ~/dev/program-hub/packages/node/pgm-seed && pnpm build) ' +
+          'or set PGM_SEED_BIN to override.',
       );
-      existing = resp.programs.find((p) => p.name === flags.name) ?? null;
-    } catch (err) {
-      // If programs.list is unavailable, fall through — a duplicate-name
-      // create will throw, which we can treat as hit.
-      if (!(err instanceof TrpcCallError && err.status === 404)) throw err;
-    }
-    if (existing) {
-      this.emit(
-        flags,
-        { programId: existing.id, name: existing.name, dedup: 'hit' },
-        `  hit    program/${flags.name} → ${existing.id}`,
-      );
-      await appendArtifact('pgm:create-program', flags['fixture-id'], 'programs', existing.id, flags);
-      await recordCommand('pgm:create-program', flags['fixture-id'], sanitizeArgs(flags), flags);
-      return;
+      this.exit(2);
     }
 
-    const created = await programsClient.mutation<Program>('programs.create', {
-      name: flags.name,
-      timezone: flags.timezone,
-      streetAddress: flags.street,
-      city: flags.city,
-      state: flags.state,
-      zip: flags.zip,
-    });
-    this.emit(
-      flags,
-      { programId: created.id, name: created.name, dedup: 'miss' },
-      `  new    program/${flags.name} → ${created.id}`,
-    );
-    await appendArtifact('pgm:create-program', flags['fixture-id'], 'programs', created.id, flags);
+    const args: string[] = ['create-program',
+      '--fixture-id', flags['fixture-id'],
+      '--name', flags.name,
+      '--org', flags.org,
+      '--timezone', flags.timezone,
+      '--street', flags.street,
+      '--city', flags.city,
+      '--state', flags.state,
+      '--zip', flags.zip,
+      '--source', flags.source,
+      '--as', flags.as,
+      '--iam-url', flags['iam-url'],
+      '--programs-url', flags['programs-url'],
+    ];
+    if (flags.porcelain) args.push('--porcelain');
+    if (flags['output-json']) args.push('--output-json');
+
+    const { exitCode, stdout } = await spawnPgmSeed(binPath, args);
+    if (exitCode !== 0) {
+      this.exit(exitCode);
+    }
+
+    const programId = extractUuidFromStdout(stdout, 'programId') ?? flags.name;
+    await appendArtifact('pgm:create-program', flags['fixture-id'], 'programs', programId, flags);
     await recordCommand('pgm:create-program', flags['fixture-id'], sanitizeArgs(flags), flags);
   }
 }

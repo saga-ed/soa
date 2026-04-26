@@ -1,0 +1,33 @@
+{
+  "fixtureId": "adm-combined",
+  "schemaVersion": 1,
+  "description": "Real prod-derived adm fixture: Chicago Public Schools (LVLHS, Simeon) + NMPED (Pecos), SY 2025-26. Anchor for Phase 4 cross-repo coherence work between rostering, program-hub, and ads-adm.",
+  "prodMirrorSource": {
+    "mongoUri": "mongodb://mongo5.mirror.internal:27017",
+    "sagaDbName": "saga_blank",
+    "arsDbName": "ars"
+  },
+  "dateRange": {
+    "from": "2025-07-01",
+    "to": "2026-06-30"
+  },
+  "orgs": [
+    {
+      "id": "85d438b5-78b0-fa96-fbda-f7eae119251e",
+      "displayName": "Chicago Public Schools",
+      "timezone": "America/Chicago",
+      "programs": [
+        { "id": "c2a01e8a-985f-dca8-0756-9143645c39bf", "displayName": "LVLHS INF/WL" },
+        { "id": "4525e730-8cc4-bc4b-e287-3ea82cf81eb2", "displayName": "Simeon" }
+      ]
+    },
+    {
+      "id": "dec6b72c-2139-72d6-c421-90e63937998b",
+      "displayName": "NMPED",
+      "timezone": "America/Denver",
+      "programs": [
+        { "id": "c3f3556d-d7c9-8523-83eb-4cf4e17ac074", "displayName": "Pecos Cyber Academy 6th" }
+      ]
+    }
+  ]
+}

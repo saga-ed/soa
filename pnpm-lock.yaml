@@ -936,6 +936,9 @@ importers:
       '@oclif/plugin-help':
         specifier: ^6.0.0
         version: 6.2.44
+      zod:
+        specifier: 3.25.67
+        version: 3.25.67
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*

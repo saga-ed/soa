@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { v5 as uuidv5 } from 'uuid';
 
 // dist/lib/load-fixture-definition.js → ../../fixtures resolves to package
 // root. Works both for the soa workspace (compiled output in dist/) and
@@ -104,4 +105,33 @@ export function fixtureOrgIds(def: FixtureDefinition): string[] {
 
 export function fixtureProgramIds(def: FixtureDefinition): string[] {
   return def.orgs.flatMap((o) => o.programs.map((p) => p.id));
+}
+
+/**
+ * Fixed namespace UUID used to deterministically derive iam_local.User.id
+ * UUIDs from prod-mirror numeric user_ids. Stable across seeders so that
+ * iam-seed (rostering) + ads-adm-seed (student-data-system) write the
+ * SAME UUID for the same prod-mirror user — making FK joins from
+ * ads_adm_local.iam_user_id → iam_local.users.id resolve.
+ *
+ * Distinct from PR #77's `apps/node/fixtures/src/deterministic.ts`
+ * namespace; this one belongs to the saga-mesh prod-mirror anchor.
+ */
+const PROD_MIRROR_USER_NAMESPACE = '4e6f9b8c-6e75-5e4d-b1a3-3c0e8f2c4d10';
+
+/**
+ * Derive a deterministic iam User UUID from a prod-mirror numeric user_id.
+ *
+ *   uuidForProdMirrorUser('287')  // always produces the same UUID
+ *
+ * Both rostering's iam-seed and student-data-system's ads-adm-seed call
+ * this so adm_attendance.iam_user_id round-trips to iam_local.users.id.
+ *
+ * Originally lived in rostering/packages/node/iam-seed/src/uuid-derive.ts
+ * (and still exists there for backward compat); promoted to this shared
+ * library 2026-04-26 when ads-adm-seed needed the same conversion to
+ * close the cross-seeder ID drift gap.
+ */
+export function uuidForProdMirrorUser(prodMirrorUserId: string): string {
+  return uuidv5(`adm-combined/${prodMirrorUserId}`, PROD_MIRROR_USER_NAMESPACE);
 }

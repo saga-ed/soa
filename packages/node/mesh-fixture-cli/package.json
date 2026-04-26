@@ -56,11 +56,13 @@
   "dependencies": {
     "@oclif/core": "^4.0.0",
     "@oclif/plugin-help": "^6.0.0",
+    "uuid": "^11.0.0",
     "zod": "3.25.67"
   },
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "latest",
+    "@types/uuid": "^10.0.0",
     "oclif": "^4.22.93",
     "typescript": "^5.8.3"
   },

@@ -936,6 +936,9 @@ importers:
       '@oclif/plugin-help':
         specifier: ^6.0.0
         version: 6.2.44
+      uuid:
+        specifier: ^11.0.0
+        version: 11.1.0
       zod:
         specifier: 3.25.67
         version: 3.25.67
@@ -946,6 +949,9 @@ importers:
       '@types/node':
         specifier: latest
         version: 25.6.0
+      '@types/uuid':
+        specifier: ^10.0.0
+        version: 10.0.0
       oclif:
         specifier: ^4.22.93
         version: 4.23.0(@types/node@25.6.0)

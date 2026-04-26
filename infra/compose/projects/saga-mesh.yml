@@ -15,33 +15,22 @@
 ##   ledger_local     SDS ledger-api             owner=ledger
 ##
 ## Usage:
+##   EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
 ##   SEED_PROFILE=empty make up PROJECT=saga-mesh
-##   SEED_PROFILE=empty make status PROJECT=saga-mesh
 ##
-## Tracking: saga-ed/student-data-system#80 Phase 2 D2.2.
-## See that repo's claude/projects/sds_80/phase-2/ for the design.
+## Container names: post the soa infra/ → infra/compose/ restructure
+## (PR #62/#64), local `services:` overrides on top of `include:` are
+## rejected by docker compose with "services.X conflicts with imported
+## resource". Containers therefore get docker-compose's default names
+## (`<COMPOSE_PROJECT_NAME>-<service>-1`, e.g. `soa-postgres-1`). The
+## per-repo seeders accept SAGA_MESH_*_CONTAINER env vars to look up
+## the right names — see mesh-fixture-cli/src/lib/postgres.ts:19.
+##
+## Tracking: saga-ed/student-data-system#80 Phase 4 (D4.1 inside-machine
+## adapt-to-upstream after PR #62/#64 restructure).
+## See that repo's claude/projects/sds_80/phase-2/ for the original design.
 
 include:
   - path: ../services/postgres/compose.yml
   - path: ../services/redis/compose.yml
   - path: ../services/rabbitmq/compose.yml
-
-services:
-  # Deterministic container names so per-repo scripts can target them
-  # via `docker exec <name>` without having to parse compose project
-  # prefixes.
-  postgres:
-    container_name: saga-mesh-postgres
-  redis:
-    container_name: saga-mesh-redis
-  rabbitmq:
-    container_name: saga-mesh-rabbitmq
-
-  # Override postgres_init's extra-seed mount to pull this project's
-  # profile-empty.sql in addition to the default services/postgres/seed/
-  # profiles. Paths are relative to this file's location (infra/projects/).
-  postgres_init:
-    container_name: saga-mesh-postgres-init
-    volumes:
-      - ../services/postgres/seed:/seed:ro
-      - ./saga-mesh/seed:/extra-seed:ro

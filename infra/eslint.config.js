@@ -54,7 +54,7 @@ export default [
         ignores: [
             'node_modules/**',
             'eslint.config.js',
-            'services/**/seed/*.js',
+            'compose/services/**/seed/*.js',
         ],
     },
 ];

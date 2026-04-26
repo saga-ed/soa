@@ -43,7 +43,7 @@ node --version               # → v20.x.x or higher
 cd ~/dev/soa
 git branch --show-current    # → main
 ls infra/bin/infra-compose   # → exists
-ls infra/services/           # → mongo/ mysql/ postgres/ redis/ rabbitmq/ openfga/
+ls infra/compose/services/           # → mongo/ mysql/ postgres/ redis/ rabbitmq/ openfga/
 ```
 
 **Reset instructions** appear at the end of each section. Three levels:
@@ -65,7 +65,7 @@ Orientation — understand what ships in the package before running anything.
 List the available service templates:
 
 ```bash
-ls infra/services/
+ls infra/compose/services/
 ```
 
 You'll see: `mongo/`, `mysql/`, `postgres/`, `redis/`, `rabbitmq/`, `openfga/`. Each directory contains a `compose.yml` template that any consumer can `extends:` from.
@@ -73,7 +73,7 @@ You'll see: `mongo/`, `mysql/`, `postgres/`, `redis/`, `rabbitmq/`, `openfga/`. 
 Now look at the root compose file:
 
 ```bash
-cat infra/compose.yml
+cat infra/compose/compose.yml
 ```
 
 **What to observe:**
@@ -83,7 +83,7 @@ cat infra/compose.yml
 Now read the Mongo template:
 
 ```bash
-cat infra/services/mongo/compose.yml
+cat infra/compose/services/mongo/compose.yml
 ```
 
 **What to observe:**
@@ -414,7 +414,7 @@ How to define your own seed profiles with project-specific data that varies per 
 Before building your own, read the template's seeder to understand the mechanism.
 
 ```bash
-cat infra/services/mongo/seed/init-and-seed.js
+cat infra/compose/services/mongo/seed/init-and-seed.js
 ```
 
 **What to observe:**
@@ -428,7 +428,7 @@ cat infra/services/mongo/seed/init-and-seed.js
 Now read a profile file:
 
 ```bash
-cat infra/services/mongo/seed/profile-small.json
+cat infra/compose/services/mongo/seed/profile-small.json
 ```
 
 **What to observe:**
@@ -866,12 +866,12 @@ The seam: infra-compose owns general-purpose DB lifecycle operations (reusable b
 
 | File | Purpose |
 |------|---------|
-| `infra/compose.yml` | Root compose-of-composes (includes all services) |
+| `infra/compose/compose.yml` | Root compose-of-composes (includes all services) |
 | `infra/api.js` | Programmatic API (native JS — snapshot, switch, reset, etc.) |
 | `infra/handlers.js` | Framework-agnostic handler functions (`{ ok, ... }` envelope) |
 | `infra/router.js` | Express Router factory with lifecycle hooks |
 | `infra/bin/infra-compose` | CLI entry point (bash script, for human use) |
-| `infra/services/{mongo,mysql,postgres,redis,rabbitmq,openfga}/compose.yml` | Service templates |
+| `infra/compose/services/{mongo,mysql,postgres,redis,rabbitmq,openfga}/compose.yml` | Service templates |
 | `infra/.env.defaults` | Default ports, credentials, `SEED_PROFILE` |
 | `fixture-cli/zcripts/local/docker-compose.yml` | saga_api consumer compose |
 | `fixture-cli/zcripts/local/local-db-mgr.sh` | saga_api legacy wrapper |

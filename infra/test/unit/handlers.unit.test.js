@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the entire api.js module so handlers call our fakes
-vi.mock('../api.js', () => ({
+vi.mock('../../src/api.js', () => ({
     snapshot: vi.fn(),
     switch_profile: vi.fn(),
     reset: vi.fn(),
@@ -14,12 +14,12 @@ vi.mock('../api.js', () => ({
 import {
     snapshot, switch_profile, reset, restore,
     list_profiles, get_active_profile, delete_profile_data,
-} from '../api.js';
+} from '../../src/api.js';
 
 import {
     handle_snapshot, handle_switch, handle_reset, handle_restore,
     handle_list_profiles, handle_delete_profile, handle_get_active,
-} from '../handlers.js';
+} from '../../src/handlers.js';
 
 beforeEach(() => {
     vi.clearAllMocks();

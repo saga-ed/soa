@@ -39,9 +39,9 @@ import type { IMongoConnMgr } from '@saga-ed/soa-db';
 import type { MongoClient } from 'mongodb';
 import { get_active_profile } from '@saga-ed/infra-compose';
 import { create_router as create_infra_router } from '@saga-ed/infra-compose/router';
-import { create_service_restarter } from './service-restart.js';
-import { register_with_admin } from './admin-registration.js';
-import type { FixtureControllerConfig } from './abstract-fixture-controller.js';
+import { create_service_restarter } from '../utils/service-restart.js';
+import { start_heartbeat, type HeartbeatHandle } from './admin-registration.js';
+import type { FixtureControllerConfig } from '../controller/abstract-fixture-controller.js';
 
 export interface FixtureServerConfig {
     /** Port to listen on. */
@@ -104,8 +104,10 @@ export interface FixtureServerConfig {
 }
 
 export class FixtureServer {
-    private container!: Container;
+    /** DI container — exposed for infra_hooks that need MongoDB reconnection or other bindings. */
+    container!: Container;
     private express_server!: ExpressServer;
+    private admin_heartbeat?: HeartbeatHandle;
 
     constructor(private config: FixtureServerConfig) {}
 
@@ -189,10 +191,25 @@ export class FixtureServer {
         // 4. Mount infra-compose router with lifecycle hooks
         const logger = this.container.get<ILogger>('ILogger');
         const restart_fn = create_service_restarter(config.service_name, config.health_url);
+        // Reconnect MongoDB after volume swaps so queries hit the new profile's data.
+        // Without this, the controller's metadata_collection reads stale documents
+        // from the previous profile's connection.
+        const reconnect_mongo = async () => {
+            const mgr = await this.container.getAsync<IMongoConnMgr>('IMongoConnMgr');
+            await mgr.disconnect();
+            await mgr.connect();
+            logger.info('infra hook: reconnected MongoDB after profile change');
+        };
         const infra_router = create_infra_router({
             compose_file: config.compose_file,
-            on_after_switch: config.infra_hooks?.on_after_switch ?? (async () => { await restart_fn(logger); }),
-            on_after_reset: config.infra_hooks?.on_after_reset ?? (async () => { await restart_fn(logger); }),
+            on_after_switch: config.infra_hooks?.on_after_switch ?? (async () => {
+                await reconnect_mongo();
+                await restart_fn(logger);
+            }),
+            on_after_reset: config.infra_hooks?.on_after_reset ?? (async () => {
+                await reconnect_mongo();
+                await restart_fn(logger);
+            }),
             on_after_snapshot: config.infra_hooks?.on_after_snapshot,
         });
         app.use('/infra', infra_router);
@@ -215,10 +232,10 @@ export class FixtureServer {
         // 7. Start listening
         this.express_server.start();
 
-        // 8. Optional admin registration
+        // 8. Optional admin registration (with periodic heartbeat to keep TTL fresh)
         const admin_url = config.admin_register_url || process.env.FIXTURE_ADMIN_URL;
         if (admin_url) {
-            register_with_admin({
+            this.admin_heartbeat = start_heartbeat({
                 admin_url,
                 port: config.port,
                 site_url: config.site_url || '',
@@ -228,6 +245,7 @@ export class FixtureServer {
 
         // 9. Graceful shutdown
         const shutdown = async () => {
+            this.admin_heartbeat?.stop();
             try {
                 const mgr = await this.container.getAsync<IMongoConnMgr>('IMongoConnMgr');
                 await mgr.disconnect();
@@ -240,6 +258,7 @@ export class FixtureServer {
     }
 
     stop(): void {
+        this.admin_heartbeat?.stop();
         this.express_server?.stop();
     }
 

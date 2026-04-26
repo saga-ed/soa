@@ -15,7 +15,7 @@
 
 PROJECT   ?= saga-api
 PROFILE   ?= small
-COMPOSE   := docker compose --env-file .env.defaults -f projects/$(PROJECT).yml
+COMPOSE   := docker compose --env-file .env.defaults -f compose/projects/$(PROJECT).yml
 
 # Load defaults first, then local overrides (gitignored .env wins over
 # .env.defaults), THEN export SEED_PROFILE from the effective PROFILE value.
@@ -142,7 +142,7 @@ volumes:
 ## List available projects.
 list-projects:
 	@echo "Available projects:"
-	@for f in projects/*.yml; do \
+	@for f in compose/projects/*.yml; do \
 		name=$$(basename "$$f" .yml); \
 		services=$$(grep 'path:' "$$f" | sed 's|.*services/||;s|/compose.yml||' | tr '\n' ' '); \
 		echo "  $$name  →  $$services"; \
@@ -151,15 +151,15 @@ list-projects:
 ## List available seed profiles (by scanning seed directories).
 list-profiles:
 	@echo "Mongo profiles:"
-	@ls services/mongo/seed/profile-*.json 2>/dev/null | while read f; do \
+	@ls compose/services/mongo/seed/profile-*.json 2>/dev/null | while read f; do \
 		echo "  - $$(basename "$$f" .json | sed 's/^profile-//')"; \
 	done
 	@echo "MySQL profiles:"
-	@ls services/mysql/seed/profile-*.sql 2>/dev/null | while read f; do \
+	@ls compose/services/mysql/seed/profile-*.sql 2>/dev/null | while read f; do \
 		echo "  - $$(basename "$$f" .sql | sed 's/^profile-//')"; \
 	done
 	@echo "Postgres profiles:"
-	@ls services/postgres/seed/profile-*.sql 2>/dev/null | while read f; do \
+	@ls compose/services/postgres/seed/profile-*.sql 2>/dev/null | while read f; do \
 		echo "  - $$(basename "$$f" .sql | sed 's/^profile-//')"; \
 	done
 

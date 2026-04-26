@@ -3,7 +3,7 @@
  *
  * Uses the container's built-in postgres client tools so the host doesn't
  * need them installed. All operations assume the saga-mesh-postgres
- * container (from ~/dev/soa/infra/projects/saga-mesh.yml) is running —
+ * container (from ~/dev/soa/infra/compose/projects/saga-mesh.yml) is running —
  * callers should assert that via isContainerRunning() first and fail
  * fast with a clear message.
  *
@@ -20,7 +20,7 @@ export const POSTGRES_CONTAINER = process.env.SAGA_MESH_POSTGRES_CONTAINER ?? 's
 export const REDIS_CONTAINER = process.env.SAGA_MESH_REDIS_CONTAINER ?? 'saga-mesh-redis';
 export const POSTGRES_ADMIN_USER = process.env.SAGA_MESH_POSTGRES_ADMIN_USER ?? 'postgres_admin';
 
-// The six databases saga-mesh hosts, per ~/dev/soa/infra/projects/saga-mesh/seed/profile-empty.sql.
+// The six databases saga-mesh hosts, per ~/dev/soa/infra/compose/projects/saga-mesh/seed/profile-empty.sql.
 // Keep this list in sync with that SQL and with phase-2/port-assignments.md.
 export const SAGA_MESH_DATABASES = [
   'iam_local',

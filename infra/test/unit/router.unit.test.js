@@ -3,7 +3,7 @@ import http from 'http';
 import express from 'express';
 
 // Mock handlers so the router calls our fakes
-vi.mock('../handlers.js', () => ({
+vi.mock('../../src/handlers.js', () => ({
     handle_snapshot: vi.fn(),
     handle_switch: vi.fn(),
     handle_reset: vi.fn(),
@@ -13,8 +13,8 @@ vi.mock('../handlers.js', () => ({
     handle_get_active: vi.fn(),
 }));
 
-import * as handlers from '../handlers.js';
-import { create_router } from '../router.js';
+import * as handlers from '../../src/handlers.js';
+import { create_router } from '../../src/router.js';
 
 // ── Test HTTP helpers ───────────────────────────────────────
 
@@ -216,6 +216,55 @@ describe('router lifecycle hooks', () => {
 
         const { data } = await api(test_server.base_url, 'POST', '/switch', { profile: 'no-hooks' });
         expect(data.ok).toBe(true); // should not throw
+        await test_server.close();
+    });
+});
+
+describe('router compose_file threading', () => {
+    // Invariant: compose_file passed to create_router must appear in every
+    // mutating handler's input so a single fixture-serve can target a
+    // project-specific compose.yml rather than the bundled master.
+
+    it('threads compose_file from router options into handle_switch input', async () => {
+        handlers.handle_switch.mockReturnValue({ ok: true, profile: 'p' });
+        test_server = await create_test_server({ compose_file: '/etc/infra/saga-api.yml' });
+
+        await api(test_server.base_url, 'POST', '/switch', { profile: 'p' });
+        expect(handlers.handle_switch).toHaveBeenCalledWith(
+            expect.objectContaining({ profile: 'p', compose_file: '/etc/infra/saga-api.yml' }),
+        );
+        await test_server.close();
+    });
+
+    it('threads compose_file into handle_reset input', async () => {
+        handlers.handle_reset.mockReturnValue({ ok: true, profile: 'r' });
+        test_server = await create_test_server({ compose_file: '/etc/infra/saga-api.yml' });
+
+        await api(test_server.base_url, 'POST', '/reset', { profile: 'r' });
+        expect(handlers.handle_reset).toHaveBeenCalledWith(
+            expect.objectContaining({ profile: 'r', compose_file: '/etc/infra/saga-api.yml' }),
+        );
+        await test_server.close();
+    });
+
+    it('threads compose_file into handle_restore input', async () => {
+        handlers.handle_restore.mockReturnValue({ ok: true, profile: 's' });
+        test_server = await create_test_server({ compose_file: '/etc/infra/saga-api.yml' });
+
+        await api(test_server.base_url, 'POST', '/restore', { profile: 's' });
+        expect(handlers.handle_restore).toHaveBeenCalledWith(
+            expect.objectContaining({ profile: 's', compose_file: '/etc/infra/saga-api.yml' }),
+        );
+        await test_server.close();
+    });
+
+    it('handler input compose_file is undefined when router has no compose_file option', async () => {
+        handlers.handle_switch.mockReturnValue({ ok: true, profile: 'default-p' });
+        test_server = await create_test_server({});
+
+        await api(test_server.base_url, 'POST', '/switch', { profile: 'default-p' });
+        const call_args = handlers.handle_switch.mock.calls[0][0];
+        expect(call_args.compose_file).toBeUndefined();
         await test_server.close();
     });
 });

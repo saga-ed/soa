@@ -1,0 +1,78 @@
+{
+  "name": "@saga-ed/mesh-fixture-cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "CLI for authoring, storing, and restoring cross-repo fixtures on the saga-mesh (rostering + program-hub + SDS). Part of saga-ed/student-data-system#80 Phase 3.",
+  "bin": {
+    "mesh-fixture": "./bin/run.js"
+  },
+  "exports": {
+    "./fixture-definition": {
+      "import": "./dist/lib/load-fixture-definition.js",
+      "types": "./dist/lib/load-fixture-definition.d.ts"
+    }
+  },
+  "oclif": {
+    "bin": "mesh-fixture",
+    "dirname": "mesh-fixture",
+    "commands": {
+      "strategy": "pattern",
+      "target": "./dist/commands"
+    },
+    "plugins": [
+      "@oclif/plugin-help"
+    ],
+    "topicSeparator": ":",
+    "topics": {
+      "fixture": {
+        "description": "Fixture snapshot + registry lifecycle (list, store, restore, delete, show, validate)."
+      },
+      "iam": {
+        "description": "Rostering iam-api seed commands (create-org, create-user, add-membership)."
+      },
+      "pgm": {
+        "description": "Program-hub seed commands (create-program, create-period, enroll)."
+      },
+      "ads": {
+        "description": "SDS ads-adm-api seed commands (deferred pending #77 coordination)."
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "fixtures",
+    "oclif.manifest.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && oclif manifest",
+    "dev": "tsc --watch",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf dist oclif.manifest.json",
+    "mesh-fixture": "node bin/run.js"
+  },
+  "dependencies": {
+    "@oclif/core": "^4.0.0",
+    "@oclif/plugin-help": "^6.0.0",
+    "uuid": "^11.0.0",
+    "zod": "3.25.67"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "latest",
+    "@types/uuid": "^10.0.0",
+    "oclif": "^4.22.93",
+    "typescript": "^5.8.3"
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saga-ed/soa.git",
+    "directory": "packages/node/mesh-fixture-cli"
+  }
+}

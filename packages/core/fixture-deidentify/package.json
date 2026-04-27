@@ -1,0 +1,29 @@
+{
+  "name": "@saga-ed/fixture-deidentify",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "^24.0.3",
+    "tsup": "^8.5.0",
+    "typescript": "5.8.2",
+    "vitest": "^1.6.1"
+  }
+}

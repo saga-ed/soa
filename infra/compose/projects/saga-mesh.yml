@@ -1,0 +1,36 @@
+## saga-mesh — cross-repo fixture mesh for the SDS #80 initiative.
+##
+## Shared infra for the rostering + program-hub + student-data-system
+## trio. One postgres (multi-DB) + redis + rabbitmq, all on a single
+## docker network managed by infra-compose.
+##
+## Databases created by projects/saga-mesh/seed/profile-empty.sql on
+## first boot (before any app's migrations run):
+##
+##   iam_local        rostering iam-api          owner=iam
+##   iam_pii_local    rostering iam-pii          owner=iam_pii
+##   programs         program-hub programs-api   owner=saga_user
+##   scheduling       program-hub scheduling-api owner=saga_user
+##   ads_adm_local    SDS ads-adm-api            owner=ads_adm
+##   ledger_local     SDS ledger-api             owner=ledger
+##
+## Usage:
+##   EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
+##   SEED_PROFILE=empty make up PROJECT=saga-mesh
+##
+## Container names: post the soa infra/ → infra/compose/ restructure
+## (PR #62/#64), local `services:` overrides on top of `include:` are
+## rejected by docker compose with "services.X conflicts with imported
+## resource". Containers therefore get docker-compose's default names
+## (`<COMPOSE_PROJECT_NAME>-<service>-1`, e.g. `soa-postgres-1`). The
+## per-repo seeders accept SAGA_MESH_*_CONTAINER env vars to look up
+## the right names — see mesh-fixture-cli/src/lib/postgres.ts:19.
+##
+## Tracking: saga-ed/student-data-system#80 Phase 4 (D4.1 inside-machine
+## adapt-to-upstream after PR #62/#64 restructure).
+## See that repo's claude/projects/sds_80/phase-2/ for the original design.
+
+include:
+  - path: ../services/postgres/compose.yml
+  - path: ../services/redis/compose.yml
+  - path: ../services/rabbitmq/compose.yml

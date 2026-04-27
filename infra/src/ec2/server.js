@@ -9,6 +9,11 @@
  *   PROJECTS_DIR          — compose project root (default: /opt/db-manager/projects)
  *   DATA_DIR              — EBS mount root (default: /mnt/data)
  *   PORT_REGISTRY_PATH    — port registry file (default: /opt/db-manager/port-registry.json)
+ *   MANAGED_BY_TAG        — ManagedBy tag value applied to created EBS volumes
+ *                           (default: "db-host"). Must match the value the IaC's
+ *                           UserData volume-discovery loop filters on, otherwise
+ *                           replacement instances won't re-attach existing volumes
+ *                           during ASG recovery.
  */
 
 import express from 'express';

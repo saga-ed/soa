@@ -265,6 +265,8 @@ jobs:
             "packages/node/rabbitmq"
             "packages/node/redis-core"
             "packages/node/test-util"
+            "packages/core/fixture-deidentify"
+            "packages/node/mesh-fixture-cli"
           )
 
           # Build npm version command with preid for prerelease versions

@@ -375,17 +375,16 @@ export function create_ec2_router(config = {}) {
     });
 
     // POST /dbs/:name/hydrate — re-create compose project on a fresh
-    // instance from caller-supplied {engine, version, port, db_name}.
-    // Assumes the EBS volume holding /mnt/data/<name> is already mounted
-    // (UserData's auto-attach loop handles that on instance launch). Used
-    // by the orchestrator's recovery flow when an ASG instance is replaced
-    // and DBs need to be re-homed onto the new instance with their existing
-    // data intact. Idempotent: a second hydrate on the same name is a
-    // compose-up of the existing project_dir.
+    // instance from caller-supplied {engine, version, port, db_name,
+    // volume_id}. If volume_id is provided and the mount_path is not
+    // already a mountpoint, attach and mount the volume here (handles
+    // ASG-replacement recovery where UserData's volume-discovery loop
+    // raced the previous instance's termination). Idempotent: a second
+    // hydrate is a compose-up of the existing project_dir.
     router.post('/dbs/:name/hydrate', (req, res) => {
         try {
             const { name } = req.params;
-            const { engine, version, port, db_name } = req.body || {};
+            const { engine, version, port, db_name, volume_id } = req.body || {};
 
             if (!engine || !port) {
                 return res.status(400).json({ ok: false, error: 'engine and port are required' });
@@ -395,8 +394,18 @@ export function create_ec2_router(config = {}) {
             }
 
             const mount_path = resolve(data_dir, name);
-            if (!existsSync(mount_path)) {
-                return res.status(400).json({ ok: false, error: `Data volume not mounted at ${mount_path} — UserData should have attached it` });
+            const is_mounted = spawnSync('mountpoint', ['-q', mount_path], { stdio: 'pipe' }).status === 0;
+            if (!is_mounted) {
+                if (!volume_id) {
+                    return res.status(400).json({ ok: false, error: `Data volume not mounted at ${mount_path} and no volume_id provided to attach` });
+                }
+                const meta = get_instance_metadata();
+                attach_and_mount({
+                    volume_id,
+                    mount_path,
+                    instance_id: meta.instance_id,
+                    region: region || meta.region,
+                });
             }
 
             // Reflect the known port in the local registry so subsequent

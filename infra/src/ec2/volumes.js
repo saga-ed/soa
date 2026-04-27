@@ -41,13 +41,22 @@ export function get_instance_metadata() {
 
 /**
  * Create an EBS volume with db-host tags.
+ *
+ * The ManagedBy tag value comes from the MANAGED_BY_TAG env var (default
+ * "db-host"). The IaC's UserData volume-discovery loop filters on that
+ * tag, so any deployment that wants its own namespace (e.g. a parallel
+ * "db-host-v2" stack) must set MANAGED_BY_TAG to match what the
+ * launch-template UserData filters on, or the loop will skip these
+ * volumes on a replacement instance and recovery will not work.
+ *
  * @param {{ name: string, size: number, az: string, region: string, env_name?: string }} config
  * @returns {string} volume_id
  */
 export function create_volume({ name, size, az, region, env_name }) {
+    const managed_by = process.env.MANAGED_BY_TAG || 'db-host';
     const tags = [
         { Key: 'Name', Value: `db-host-${name}` },
-        { Key: 'ManagedBy', Value: 'db-host' },
+        { Key: 'ManagedBy', Value: managed_by },
         { Key: 'ServiceName', Value: name },
         { Key: 'MountPath', Value: `/mnt/data/${name}` },
     ];

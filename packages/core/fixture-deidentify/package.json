@@ -1,7 +1,6 @@
 {
   "name": "@saga-ed/fixture-deidentify",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -25,5 +24,9 @@
     "tsup": "^8.5.0",
     "typescript": "5.8.2",
     "vitest": "^1.6.1"
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
   }
 }

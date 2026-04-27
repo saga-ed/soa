@@ -1,7 +1,6 @@
 {
   "name": "@saga-ed/mesh-fixture-cli",
   "version": "0.0.1",
-  "private": true,
   "type": "module",
   "description": "CLI for authoring, storing, and restoring cross-repo fixtures on the saga-mesh (rostering + program-hub + SDS). Part of saga-ed/student-data-system#80 Phase 3.",
   "bin": {

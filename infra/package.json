@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/infra-compose",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "description": "Composable Docker service templates for Saga platform local development",
     "bin": {
         "infra-compose": "bin/infra-compose"

@@ -67,6 +67,23 @@ export function allocate_port(engine, name, options = {}) {
 }
 
 /**
+ * Record a known (engine, name, port) tuple in the registry. Used during
+ * hydrate when the caller already knows which port to use (from a remote
+ * source of truth, e.g. the orchestrator's DynamoDB registry) and wants
+ * the local port-registry to reflect it without searching for a free slot.
+ * @param {string} engine - postgres, mongo, or mysql
+ * @param {string} name - service name
+ * @param {number} port - port to record
+ * @param {{ registry_path?: string }} [options]
+ */
+export function register_port(engine, name, port, options = {}) {
+    const registry_path = options.registry_path || DEFAULT_REGISTRY_PATH;
+    const registry = read_registry(registry_path);
+    registry[name] = { engine, port };
+    write_registry(registry_path, registry);
+}
+
+/**
  * Release a port allocation.
  * @param {string} name - service name
  * @param {{ registry_path?: string }} [options]

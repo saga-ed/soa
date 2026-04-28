@@ -11,7 +11,7 @@ import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync, rmSync
 import { resolve } from 'path';
 import { engines } from './engines.js';
 import { generate_compose } from './compose-generator.js';
-import { allocate_port, release_port, get_allocated_ports } from './ports.js';
+import { allocate_port, register_port, release_port, get_allocated_ports } from './ports.js';
 import { create_volume, attach_and_mount, get_instance_metadata } from './volumes.js';
 import { register, deregister } from './cloudmap.js';
 import { snapshot_db, download_profile_seed, seed_after_start, list_s3_profiles, read_profile_registry, write_active_profile } from './profiles.js';
@@ -369,6 +369,89 @@ export function create_ec2_router(config = {}) {
                 return res.status(500).json({ ok: false, error: `stop failed: ${result.stderr}` });
             }
             res.json({ ok: true, name: req.params.name, action: 'stopped' });
+        } catch (err) {
+            res.status(500).json({ ok: false, error: err.message });
+        }
+    });
+
+    // POST /dbs/:name/hydrate — re-create compose project on a fresh
+    // instance from caller-supplied {engine, version, port, db_name,
+    // volume_id}. If volume_id is provided and the mount_path is not
+    // already a mountpoint, attach and mount the volume here (handles
+    // ASG-replacement recovery where UserData's volume-discovery loop
+    // raced the previous instance's termination). Idempotent: a second
+    // hydrate is a compose-up of the existing project_dir.
+    router.post('/dbs/:name/hydrate', (req, res) => {
+        try {
+            const { name } = req.params;
+            const { engine, version, port, db_name, volume_id } = req.body || {};
+
+            if (!engine || !port) {
+                return res.status(400).json({ ok: false, error: 'engine and port are required' });
+            }
+            if (!engines[engine]) {
+                return res.status(400).json({ ok: false, error: `Unknown engine: ${engine}. Use: ${Object.keys(engines).join(', ')}` });
+            }
+
+            const mount_path = resolve(data_dir, name);
+            const is_mounted = spawnSync('mountpoint', ['-q', mount_path], { stdio: 'pipe' }).status === 0;
+            if (!is_mounted) {
+                if (!volume_id) {
+                    return res.status(400).json({ ok: false, error: `Data volume not mounted at ${mount_path} and no volume_id provided to attach` });
+                }
+                const meta = get_instance_metadata();
+                attach_and_mount({
+                    volume_id,
+                    mount_path,
+                    instance_id: meta.instance_id,
+                    region: region || meta.region,
+                });
+            }
+
+            // Reflect the known port in the local registry so subsequent
+            // placement / list calls see this DB.
+            register_port(engine, name, port, { registry_path });
+
+            const compose_content = generate_compose({
+                name,
+                engine,
+                version,
+                port,
+                db_name: db_name || name,
+                data_dir,
+                // Intentionally no seeds_dir: data is already on the EBS
+                // volume; running initdb again would clobber it.
+            });
+
+            const project_dir = resolve(projects_dir, name);
+            mkdirSync(project_dir, { recursive: true });
+            writeFileSync(resolve(project_dir, 'docker-compose.yml'), compose_content);
+
+            const up = compose_cmd(project_dir, ['up', '-d']);
+            if (up.status !== 0) {
+                return res.status(500).json({ ok: false, error: `docker compose up failed: ${up.stderr}` });
+            }
+
+            if (namespace_id) {
+                const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
+                register({
+                    name,
+                    ip,
+                    port,
+                    namespace_id,
+                    region: region || get_instance_metadata().region,
+                });
+            }
+
+            res.json({
+                ok: true,
+                name,
+                engine,
+                version: version || engines[engine].default_version,
+                port,
+                db_name: db_name || name,
+                action: 'hydrated',
+            });
         } catch (err) {
             res.status(500).json({ ok: false, error: err.message });
         }

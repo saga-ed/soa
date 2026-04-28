@@ -41,13 +41,22 @@ export function get_instance_metadata() {
 
 /**
  * Create an EBS volume with db-host tags.
+ *
+ * The ManagedBy tag value comes from the MANAGED_BY_TAG env var (default
+ * "db-host"). The IaC's UserData volume-discovery loop filters on that
+ * tag, so any deployment that wants its own namespace (e.g. a parallel
+ * "db-host-v2" stack) must set MANAGED_BY_TAG to match what the
+ * launch-template UserData filters on, or the loop will skip these
+ * volumes on a replacement instance and recovery will not work.
+ *
  * @param {{ name: string, size: number, az: string, region: string, env_name?: string }} config
  * @returns {string} volume_id
  */
 export function create_volume({ name, size, az, region, env_name }) {
+    const managed_by = process.env.MANAGED_BY_TAG || 'db-host';
     const tags = [
         { Key: 'Name', Value: `db-host-${name}` },
-        { Key: 'ManagedBy', Value: 'db-host' },
+        { Key: 'ManagedBy', Value: managed_by },
         { Key: 'ServiceName', Value: name },
         { Key: 'MountPath', Value: `/mnt/data/${name}` },
     ];
@@ -83,9 +92,24 @@ export function create_volume({ name, size, az, region, env_name }) {
 
 /**
  * Attach an EBS volume, format if new, mount, and add fstab entry.
+ *
+ * Tolerant of a recently-terminated instance still holding the volume:
+ * waits up to 180s for the volume to reach `available` before attaching.
+ * The format step uses `blkid` to skip mkfs if the device already has a
+ * filesystem, so this is safe to call against an existing data volume
+ * (the recovery case).
+ *
  * @param {{ volume_id: string, mount_path: string, instance_id: string, region: string }} config
  */
 export function attach_and_mount({ volume_id, mount_path, instance_id, region }) {
+    // The volume may still be detaching from a recently-terminated
+    // instance. Wait for it to be available before attaching.
+    run('aws', [
+        'ec2', 'wait', 'volume-available',
+        '--volume-ids', volume_id,
+        '--region', region,
+    ], { timeout: 180000 });
+
     // Find next available device letter (f through p)
     const attached = JSON.parse(run('aws', [
         'ec2', 'describe-instances',

@@ -45,9 +45,9 @@ function get_compose_config(projects_dir, name, engine) {
     if (!existsSync(compose_path)) return defaults;
     const content = readFileSync(compose_path, 'utf8');
 
-    const db_patterns = { postgres: /POSTGRES_DB:\s*"?(\w+)"?/, mysql: /MYSQL_DATABASE:\s*"?(\w+)"?/, mongo: /MONGO_INITDB_DATABASE:\s*"?(\w+)"?/ };
-    const user_patterns = { postgres: /POSTGRES_USER:\s*"?(\w+)"?/, mysql: /MYSQL_USER:\s*"?(\w+)"?/, mongo: /MONGO_INITDB_ROOT_USERNAME:\s*"?(\w+)"?/ };
-    const pw_patterns = { postgres: /POSTGRES_PASSWORD:\s*"?(\w+)"?/, mysql: /MYSQL_ROOT_PASSWORD:\s*"?(\w+)"?/, mongo: /MONGO_INITDB_ROOT_PASSWORD:\s*"?(\w+)"?/ };
+    const db_patterns = { postgres: /POSTGRES_DB:\s*"?([\w-]+)"?/, mysql: /MYSQL_DATABASE:\s*"?([\w-]+)"?/, mongo: /MONGO_INITDB_DATABASE:\s*"?([\w-]+)"?/ };
+    const user_patterns = { postgres: /POSTGRES_USER:\s*"?([\w-]+)"?/, mysql: /MYSQL_USER:\s*"?([\w-]+)"?/, mongo: /MONGO_INITDB_ROOT_USERNAME:\s*"?([\w-]+)"?/ };
+    const pw_patterns = { postgres: /POSTGRES_PASSWORD:\s*"?([\w-]+)"?/, mysql: /MYSQL_ROOT_PASSWORD:\s*"?([\w-]+)"?/, mongo: /MONGO_INITDB_ROOT_PASSWORD:\s*"?([\w-]+)"?/ };
 
     const db_match = content.match(db_patterns[engine]);
     const user_match = content.match(user_patterns[engine]);

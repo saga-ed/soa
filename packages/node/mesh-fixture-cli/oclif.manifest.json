@@ -89,10 +89,10 @@
         "seed-attendance.js"
       ]
     },
-    "iam:add-membership": {
+    "snapshot:delete": {
       "aliases": [],
       "args": {},
-      "description": "Add a user to a group by slug-or-UUID. Parent-first ordering enforced by iam.",
+      "description": "rm -rf ~/.saga-mesh/snapshots/<id>/.",
       "flags": {
         "porcelain": {
           "description": "machine-readable output; no color, minimal noise",
@@ -139,49 +139,23 @@
           "type": "option"
         },
         "fixture-id": {
-          "description": "fixture identifier",
+          "description": "fixture identifier to delete",
           "name": "fixture-id",
           "required": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
-        "user": {
-          "description": "user (username or UUID)",
-          "name": "user",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "group": {
-          "description": "target group (sourceId or UUID)",
-          "name": "group",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "source": {
-          "description": "dedup / slug-lookup namespace",
-          "name": "source",
-          "default": "demo",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "as": {
-          "description": "fixture-admin email for devLogin (ignored when AUTH_ENABLED=false)",
-          "name": "as",
-          "default": "demo-tutor@fixture.test",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
+        "yes": {
+          "description": "skip confirmation prompt",
+          "name": "yes",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
       "hiddenAliases": [],
-      "id": "iam:add-membership",
+      "id": "snapshot:delete",
       "pluginAlias": "@saga-ed/mesh-fixture-cli",
       "pluginName": "@saga-ed/mesh-fixture-cli",
       "pluginType": "core",
@@ -191,14 +165,14 @@
       "relativePath": [
         "dist",
         "commands",
-        "iam",
-        "add-membership.js"
+        "snapshot",
+        "delete.js"
       ]
     },
-    "iam:create-org": {
+    "snapshot:list": {
       "aliases": [],
       "args": {},
-      "description": "Create a group (org/school/section) — dedup by (source, sourceId).",
+      "description": "List all snapshots on disk under SAGA_MESH_SNAPSHOTS_DIR.",
       "flags": {
         "porcelain": {
           "description": "machine-readable output; no color, minimal noise",
@@ -243,65 +217,11 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
-        },
-        "fixture-id": {
-          "description": "fixture identifier",
-          "name": "fixture-id",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "slug": {
-          "description": "stable slug; becomes sourceId",
-          "name": "slug",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "kind": {
-          "description": "group kind (e.g. district | school | section)",
-          "name": "kind",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "parent": {
-          "description": "parent group slug (must already exist)",
-          "name": "parent",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "display-name": {
-          "description": "human display name (defaults to slug)",
-          "name": "display-name",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "source": {
-          "description": "dedup / slug-lookup namespace",
-          "name": "source",
-          "default": "demo",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "as": {
-          "description": "fixture-admin email for devLogin (ignored when AUTH_ENABLED=false)",
-          "name": "as",
-          "default": "demo-tutor@fixture.test",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
         }
       },
       "hasDynamicHelp": false,
       "hiddenAliases": [],
-      "id": "iam:create-org",
+      "id": "snapshot:list",
       "pluginAlias": "@saga-ed/mesh-fixture-cli",
       "pluginName": "@saga-ed/mesh-fixture-cli",
       "pluginType": "core",
@@ -311,14 +231,14 @@
       "relativePath": [
         "dist",
         "commands",
-        "iam",
-        "create-org.js"
+        "snapshot",
+        "list.js"
       ]
     },
-    "iam:create-user": {
+    "snapshot:restore": {
       "aliases": [],
       "args": {},
-      "description": "Create a user — dedup by username (via users.search).",
+      "description": "pg_restore a named snapshot over the running saga-mesh, then FLUSHDB redis.",
       "flags": {
         "porcelain": {
           "description": "machine-readable output; no color, minimal noise",
@@ -365,55 +285,9 @@
           "type": "option"
         },
         "fixture-id": {
-          "description": "fixture identifier",
+          "description": "fixture identifier to restore",
           "name": "fixture-id",
           "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "username": {
-          "description": "unique username (dedup key)",
-          "name": "username",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "email": {
-          "description": "email",
-          "name": "email",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "name-first": {
-          "description": "first name",
-          "name": "name-first",
-          "default": "Demo",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "name-last": {
-          "description": "last name",
-          "name": "name-last",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "screen-name": {
-          "description": "screen name (defaults to username)",
-          "name": "screen-name",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "as": {
-          "description": "fixture-admin email for devLogin (ignored when AUTH_ENABLED=false)",
-          "name": "as",
-          "default": "demo-tutor@fixture.test",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -421,7 +295,7 @@
       },
       "hasDynamicHelp": false,
       "hiddenAliases": [],
-      "id": "iam:create-user",
+      "id": "snapshot:restore",
       "pluginAlias": "@saga-ed/mesh-fixture-cli",
       "pluginName": "@saga-ed/mesh-fixture-cli",
       "pluginType": "core",
@@ -431,14 +305,86 @@
       "relativePath": [
         "dist",
         "commands",
-        "iam",
-        "create-user.js"
+        "snapshot",
+        "restore.js"
       ]
     },
-    "iam:seed-from-prod-mirror": {
+    "snapshot:show": {
+      "aliases": [],
+      "args": {
+        "fixture-id": {
+          "description": "fixture identifier to display",
+          "name": "fixture-id",
+          "required": true
+        }
+      },
+      "description": "Show a fixture's merged registry across iam-api / programs-api / scheduling-api / ads-adm-api.",
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "iam-url": {
+          "description": "override rostering iam-api base URL",
+          "name": "iam-url",
+          "default": "http://localhost:3000",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "programs-url": {
+          "description": "override program-hub programs-api base URL",
+          "name": "programs-url",
+          "default": "http://localhost:3006",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "scheduling-url": {
+          "description": "override program-hub scheduling-api base URL",
+          "name": "scheduling-url",
+          "default": "http://localhost:3008",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "ads-adm-url": {
+          "description": "override SDS ads-adm-api base URL",
+          "name": "ads-adm-url",
+          "default": "http://localhost:5005",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "snapshot:show",
+      "pluginAlias": "@saga-ed/mesh-fixture-cli",
+      "pluginName": "@saga-ed/mesh-fixture-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "snapshot",
+        "show.js"
+      ]
+    },
+    "snapshot:store": {
       "aliases": [],
       "args": {},
-      "description": "Seed iam_local + iam_pii_local from prod-mirror (delegates to iam-seed).",
+      "description": "pg_dump all saga-mesh databases into ~/.saga-mesh/snapshots/<id>/.",
       "flags": {
         "porcelain": {
           "description": "machine-readable output; no color, minimal noise",
@@ -485,32 +431,30 @@
           "type": "option"
         },
         "fixture-id": {
-          "description": "fixture identifier",
+          "description": "fixture identifier (e.g. \"demo-small\")",
           "name": "fixture-id",
           "required": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
-        "source": {
-          "description": "prod-mirror or path to a pre-extracted JSON dump",
-          "name": "source",
-          "default": "prod-mirror",
+        "description": {
+          "description": "human description stored in manifest.json",
+          "name": "description",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
-        "limit": {
-          "description": "cap on user count extracted (debugging only)",
-          "name": "limit",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
+        "force": {
+          "description": "overwrite an existing snapshot with the same id",
+          "name": "force",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
       "hiddenAliases": [],
-      "id": "iam:seed-from-prod-mirror",
+      "id": "snapshot:store",
       "pluginAlias": "@saga-ed/mesh-fixture-cli",
       "pluginName": "@saga-ed/mesh-fixture-cli",
       "pluginType": "core",
@@ -520,8 +464,80 @@
       "relativePath": [
         "dist",
         "commands",
-        "iam",
-        "seed-from-prod-mirror.js"
+        "snapshot",
+        "store.js"
+      ]
+    },
+    "snapshot:validate": {
+      "aliases": [],
+      "args": {
+        "fixture-id": {
+          "description": "fixture identifier to validate",
+          "name": "fixture-id",
+          "required": true
+        }
+      },
+      "description": "Verify every registry artifact id on a fixture still resolves (exits 1 if any are missing).",
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "iam-url": {
+          "description": "override rostering iam-api base URL",
+          "name": "iam-url",
+          "default": "http://localhost:3000",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "programs-url": {
+          "description": "override program-hub programs-api base URL",
+          "name": "programs-url",
+          "default": "http://localhost:3006",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "scheduling-url": {
+          "description": "override program-hub scheduling-api base URL",
+          "name": "scheduling-url",
+          "default": "http://localhost:3008",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "ads-adm-url": {
+          "description": "override SDS ads-adm-api base URL",
+          "name": "ads-adm-url",
+          "default": "http://localhost:5005",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "snapshot:validate",
+      "pluginAlias": "@saga-ed/mesh-fixture-cli",
+      "pluginName": "@saga-ed/mesh-fixture-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "snapshot",
+        "validate.js"
       ]
     },
     "pgm:create-period": {
@@ -1011,10 +1027,10 @@
         "seed-from-prod-mirror.js"
       ]
     },
-    "snapshot:delete": {
+    "iam:add-membership": {
       "aliases": [],
       "args": {},
-      "description": "rm -rf ~/.saga-mesh/snapshots/<id>/.",
+      "description": "Add a user to a group by slug-or-UUID. Parent-first ordering enforced by iam.",
       "flags": {
         "porcelain": {
           "description": "machine-readable output; no color, minimal noise",
@@ -1061,163 +1077,49 @@
           "type": "option"
         },
         "fixture-id": {
-          "description": "fixture identifier to delete",
+          "description": "fixture identifier",
           "name": "fixture-id",
           "required": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
-        "yes": {
-          "description": "skip confirmation prompt",
-          "name": "yes",
-          "allowNo": false,
-          "type": "boolean"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "snapshot:delete",
-      "pluginAlias": "@saga-ed/mesh-fixture-cli",
-      "pluginName": "@saga-ed/mesh-fixture-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "snapshot",
-        "delete.js"
-      ]
-    },
-    "snapshot:list": {
-      "aliases": [],
-      "args": {},
-      "description": "List all snapshots on disk under SAGA_MESH_SNAPSHOTS_DIR.",
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "iam-url": {
-          "description": "override rostering iam-api base URL",
-          "name": "iam-url",
-          "default": "http://localhost:3000",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "programs-url": {
-          "description": "override program-hub programs-api base URL",
-          "name": "programs-url",
-          "default": "http://localhost:3006",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "scheduling-url": {
-          "description": "override program-hub scheduling-api base URL",
-          "name": "scheduling-url",
-          "default": "http://localhost:3008",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "ads-adm-url": {
-          "description": "override SDS ads-adm-api base URL",
-          "name": "ads-adm-url",
-          "default": "http://localhost:5005",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "snapshot:list",
-      "pluginAlias": "@saga-ed/mesh-fixture-cli",
-      "pluginName": "@saga-ed/mesh-fixture-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "snapshot",
-        "list.js"
-      ]
-    },
-    "snapshot:restore": {
-      "aliases": [],
-      "args": {},
-      "description": "pg_restore a named snapshot over the running saga-mesh, then FLUSHDB redis.",
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "iam-url": {
-          "description": "override rostering iam-api base URL",
-          "name": "iam-url",
-          "default": "http://localhost:3000",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "programs-url": {
-          "description": "override program-hub programs-api base URL",
-          "name": "programs-url",
-          "default": "http://localhost:3006",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "scheduling-url": {
-          "description": "override program-hub scheduling-api base URL",
-          "name": "scheduling-url",
-          "default": "http://localhost:3008",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "ads-adm-url": {
-          "description": "override SDS ads-adm-api base URL",
-          "name": "ads-adm-url",
-          "default": "http://localhost:5005",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fixture-id": {
-          "description": "fixture identifier to restore",
-          "name": "fixture-id",
+        "user": {
+          "description": "user (username or UUID)",
+          "name": "user",
           "required": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "group": {
+          "description": "target group (sourceId or UUID)",
+          "name": "group",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "source": {
+          "description": "dedup / slug-lookup namespace",
+          "name": "source",
+          "default": "demo",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "as": {
+          "description": "fixture-admin email for devLogin (ignored when AUTH_ENABLED=false)",
+          "name": "as",
+          "default": "demo-tutor@fixture.test",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
       "hiddenAliases": [],
-      "id": "snapshot:restore",
+      "id": "iam:add-membership",
       "pluginAlias": "@saga-ed/mesh-fixture-cli",
       "pluginName": "@saga-ed/mesh-fixture-cli",
       "pluginType": "core",
@@ -1227,86 +1129,14 @@
       "relativePath": [
         "dist",
         "commands",
-        "snapshot",
-        "restore.js"
+        "iam",
+        "add-membership.js"
       ]
     },
-    "snapshot:show": {
-      "aliases": [],
-      "args": {
-        "fixture-id": {
-          "description": "fixture identifier to display",
-          "name": "fixture-id",
-          "required": true
-        }
-      },
-      "description": "Show a fixture's merged registry across iam-api / programs-api / scheduling-api / ads-adm-api.",
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "iam-url": {
-          "description": "override rostering iam-api base URL",
-          "name": "iam-url",
-          "default": "http://localhost:3000",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "programs-url": {
-          "description": "override program-hub programs-api base URL",
-          "name": "programs-url",
-          "default": "http://localhost:3006",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "scheduling-url": {
-          "description": "override program-hub scheduling-api base URL",
-          "name": "scheduling-url",
-          "default": "http://localhost:3008",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "ads-adm-url": {
-          "description": "override SDS ads-adm-api base URL",
-          "name": "ads-adm-url",
-          "default": "http://localhost:5005",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "snapshot:show",
-      "pluginAlias": "@saga-ed/mesh-fixture-cli",
-      "pluginName": "@saga-ed/mesh-fixture-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "snapshot",
-        "show.js"
-      ]
-    },
-    "snapshot:store": {
+    "iam:create-org": {
       "aliases": [],
       "args": {},
-      "description": "pg_dump all saga-mesh databases into ~/.saga-mesh/snapshots/<id>/.",
+      "description": "Create a group (org/school/section) — dedup by (source, sourceId).",
       "flags": {
         "porcelain": {
           "description": "machine-readable output; no color, minimal noise",
@@ -1353,30 +1183,63 @@
           "type": "option"
         },
         "fixture-id": {
-          "description": "fixture identifier (e.g. \"demo-small\")",
+          "description": "fixture identifier",
           "name": "fixture-id",
           "required": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
-        "description": {
-          "description": "human description stored in manifest.json",
-          "name": "description",
+        "slug": {
+          "description": "stable slug; becomes sourceId",
+          "name": "slug",
+          "required": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
-        "force": {
-          "description": "overwrite an existing snapshot with the same id",
-          "name": "force",
-          "allowNo": false,
-          "type": "boolean"
+        "kind": {
+          "description": "group kind (e.g. district | school | section)",
+          "name": "kind",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "parent": {
+          "description": "parent group slug (must already exist)",
+          "name": "parent",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "display-name": {
+          "description": "human display name (defaults to slug)",
+          "name": "display-name",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "source": {
+          "description": "dedup / slug-lookup namespace",
+          "name": "source",
+          "default": "demo",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "as": {
+          "description": "fixture-admin email for devLogin (ignored when AUTH_ENABLED=false)",
+          "name": "as",
+          "default": "demo-tutor@fixture.test",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
       "hiddenAliases": [],
-      "id": "snapshot:store",
+      "id": "iam:create-org",
       "pluginAlias": "@saga-ed/mesh-fixture-cli",
       "pluginName": "@saga-ed/mesh-fixture-cli",
       "pluginType": "core",
@@ -1386,20 +1249,14 @@
       "relativePath": [
         "dist",
         "commands",
-        "snapshot",
-        "store.js"
+        "iam",
+        "create-org.js"
       ]
     },
-    "snapshot:validate": {
+    "iam:create-user": {
       "aliases": [],
-      "args": {
-        "fixture-id": {
-          "description": "fixture identifier to validate",
-          "name": "fixture-id",
-          "required": true
-        }
-      },
-      "description": "Verify every registry artifact id on a fixture still resolves (exits 1 if any are missing).",
+      "args": {},
+      "description": "Create a user — dedup by username (via users.search).",
       "flags": {
         "porcelain": {
           "description": "machine-readable output; no color, minimal noise",
@@ -1444,11 +1301,65 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "fixture-id": {
+          "description": "fixture identifier",
+          "name": "fixture-id",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "username": {
+          "description": "unique username (dedup key)",
+          "name": "username",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "email": {
+          "description": "email",
+          "name": "email",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "name-first": {
+          "description": "first name",
+          "name": "name-first",
+          "default": "Demo",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "name-last": {
+          "description": "last name",
+          "name": "name-last",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "screen-name": {
+          "description": "screen name (defaults to username)",
+          "name": "screen-name",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "as": {
+          "description": "fixture-admin email for devLogin (ignored when AUTH_ENABLED=false)",
+          "name": "as",
+          "default": "demo-tutor@fixture.test",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
       "hiddenAliases": [],
-      "id": "snapshot:validate",
+      "id": "iam:create-user",
       "pluginAlias": "@saga-ed/mesh-fixture-cli",
       "pluginName": "@saga-ed/mesh-fixture-cli",
       "pluginType": "core",
@@ -1458,8 +1369,97 @@
       "relativePath": [
         "dist",
         "commands",
-        "snapshot",
-        "validate.js"
+        "iam",
+        "create-user.js"
+      ]
+    },
+    "iam:seed-from-prod-mirror": {
+      "aliases": [],
+      "args": {},
+      "description": "Seed iam_local + iam_pii_local from prod-mirror (delegates to iam-seed).",
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "iam-url": {
+          "description": "override rostering iam-api base URL",
+          "name": "iam-url",
+          "default": "http://localhost:3000",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "programs-url": {
+          "description": "override program-hub programs-api base URL",
+          "name": "programs-url",
+          "default": "http://localhost:3006",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "scheduling-url": {
+          "description": "override program-hub scheduling-api base URL",
+          "name": "scheduling-url",
+          "default": "http://localhost:3008",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "ads-adm-url": {
+          "description": "override SDS ads-adm-api base URL",
+          "name": "ads-adm-url",
+          "default": "http://localhost:5005",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fixture-id": {
+          "description": "fixture identifier",
+          "name": "fixture-id",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "source": {
+          "description": "prod-mirror or path to a pre-extracted JSON dump",
+          "name": "source",
+          "default": "prod-mirror",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "limit": {
+          "description": "cap on user count extracted (debugging only)",
+          "name": "limit",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "iam:seed-from-prod-mirror",
+      "pluginAlias": "@saga-ed/mesh-fixture-cli",
+      "pluginName": "@saga-ed/mesh-fixture-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "iam",
+        "seed-from-prod-mirror.js"
       ]
     }
   },

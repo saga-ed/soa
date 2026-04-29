@@ -1,5 +1,5 @@
 /**
- * fixture:validate — verify every artifact id on a fixture still resolves.
+ * snapshot:validate — verify every artifact id on a fixture still resolves.
  *
  * For each service's `artifacts` bucket, issues targeted lookups to confirm
  * the referenced rows exist:
@@ -226,7 +226,7 @@ function tally(checks: ArtifactCheck[]): ValidateResult['totals'] {
   return t;
 }
 
-export default class FixtureValidate extends BaseCommand {
+export default class SnapshotValidate extends BaseCommand {
   static description =
     'Verify every registry artifact id on a fixture still resolves (exits 1 if any are missing).';
 
@@ -242,7 +242,7 @@ export default class FixtureValidate extends BaseCommand {
   };
 
   async run(): Promise<void> {
-    const { args, flags } = await this.parse(FixtureValidate);
+    const { args, flags } = await this.parse(SnapshotValidate);
     const id = args['fixture-id'];
 
     const services: RegistryService[] = ['iam', 'programs', 'scheduling', 'ads'];

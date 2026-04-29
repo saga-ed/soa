@@ -12,7 +12,7 @@
  * This module owns two concerns:
  *   1. Route each iam: / pgm: / ads: CLI command to its owning service's
  *      registry and POST a CommandInfo after the business mutation succeeds.
- *   2. Offer fixture:show / fixture:validate the cross-service read path.
+ *   2. Offer snapshot:show / snapshot:validate the cross-service read path.
  *
  * addCommand calls are best-effort — a registry write failure should log a
  * warning but not fail the enclosing fixture-author command, because the
@@ -23,7 +23,7 @@ import { TrpcClient, TrpcCallError, type TrpcTransformer } from './http.js';
 
 /**
  * The four services that back `fixture.registry.*`. Used to route command
- * writes and aggregate reads in fixture:show / fixture:validate.
+ * writes and aggregate reads in snapshot:show / snapshot:validate.
  */
 export type RegistryService = 'iam' | 'programs' | 'scheduling' | 'ads';
 
@@ -81,7 +81,7 @@ export function serviceFor(command: string): RegistryService {
   if (command.startsWith('iam:')) return 'iam';
   if (command.startsWith('pgm:')) return 'programs';
   if (command.startsWith('ads:')) return 'ads';
-  // fixture:* commands that record against a specific service are
+  // snapshot:* commands that record against a specific service are
   // called with the explicit service form (recordCommandOn); anything
   // else is programmer error.
   throw new Error(
@@ -147,7 +147,7 @@ export function clientFor(
  * merges a new id into the named bucket, and upserts. Safe to call with a
  * new fixture-id — get() returns null and upsert creates the row.
  *
- * Called alongside recordCommand so fixture:validate has something concrete
+ * Called alongside recordCommand so snapshot:validate has something concrete
  * to walk. Same service-routing rules as recordCommand (iam: → iam-api,
  * pgm: → programs-api, …). Failures are logged but don't break callers.
  */
@@ -233,7 +233,7 @@ export async function recordCommandOn(
 /**
  * Query one service's registry for a fixture id. Returns null on NOT_FOUND
  * instead of throwing. Network / auth / other 5xx errors propagate so
- * fixture:show / fixture:validate can surface them.
+ * snapshot:show / snapshot:validate can surface them.
  */
 export async function getRegistry(
   service: RegistryService,

@@ -10,7 +10,7 @@
  * relays its exit + output.
  *
  * After the child process exits 0, the CLI records a CommandInfo via
- * fixture.registry.addCommand on ads-adm-api so fixture:show / fixture:list
+ * fixture.registry.addCommand on ads-adm-api so snapshot:show / snapshot:list
  * can surface the run in the fixture's history.
  */
 

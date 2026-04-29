@@ -1,5 +1,5 @@
 /**
- * fixture:store — pg_dump each saga-mesh database into
+ * snapshot:store — pg_dump each saga-mesh database into
  * ~/.saga-mesh/snapshots/<id>/<db>.dump + write manifest.json.
  */
 
@@ -22,7 +22,7 @@ import {
   pgDump,
 } from '../../lib/postgres.js';
 
-export default class FixtureStore extends BaseCommand {
+export default class SnapshotStore extends BaseCommand {
   static description =
     'pg_dump all saga-mesh databases into ~/.saga-mesh/snapshots/<id>/.';
 
@@ -36,24 +36,24 @@ export default class FixtureStore extends BaseCommand {
       description: 'human description stored in manifest.json',
     }),
     force: Flags.boolean({
-      description: 'overwrite an existing fixture with the same id',
+      description: 'overwrite an existing snapshot with the same id',
       default: false,
     }),
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(FixtureStore);
+    const { flags } = await this.parse(SnapshotStore);
     await assertPostgresRunning();
 
     const dir = snapshotDir(flags['fixture-id']);
     if (existsSync(dir) && !flags.force) {
       throw new Error(
-        `fixture '${flags['fixture-id']}' already exists at ${dir}. Use --force to overwrite.`,
+        `snapshot '${flags['fixture-id']}' already exists at ${dir}. Use --force to overwrite.`,
       );
     }
     ensureDir(dir);
 
-    this.log(`Storing fixture '${flags['fixture-id']}' → ${dir}`);
+    this.log(`Storing snapshot '${flags['fixture-id']}' → ${dir}`);
     const databases: SnapshotManifest['databases'] = [];
     for (const db of SAGA_MESH_DATABASES) {
       const dumpFile = dumpPathFor(dir, db);

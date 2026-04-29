@@ -1,5 +1,5 @@
 /**
- * fixture:show — cross-service view of a fixture's FixtureMetadata rows.
+ * snapshot:show — cross-service view of a fixture's FixtureMetadata rows.
  *
  * Queries `fixture.registry.get` in parallel on iam-api + programs-api +
  * scheduling-api + ads-adm-api, merges the results, and prints a human /
@@ -104,7 +104,7 @@ function mergeViews(id: string, views: ServiceView[]): MergedView {
   };
 }
 
-export default class FixtureShow extends BaseCommand {
+export default class SnapshotShow extends BaseCommand {
   static description =
     'Show a fixture\'s merged registry across iam-api / programs-api / scheduling-api / ads-adm-api.';
 
@@ -120,7 +120,7 @@ export default class FixtureShow extends BaseCommand {
   };
 
   async run(): Promise<void> {
-    const { args, flags } = await this.parse(FixtureShow);
+    const { args, flags } = await this.parse(SnapshotShow);
     const id = args['fixture-id'];
 
     // Fetch across all 4 services in parallel. Distinguish NOT_FOUND (legit

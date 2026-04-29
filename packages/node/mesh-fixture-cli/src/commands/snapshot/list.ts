@@ -1,11 +1,11 @@
 /**
- * fixture:list — list all snapshots on disk under SAGA_MESH_SNAPSHOTS_DIR.
+ * snapshot:list — list all snapshots on disk under SAGA_MESH_SNAPSHOTS_DIR.
  */
 
 import { BaseCommand } from '../../base-command.js';
 import { SNAPSHOTS_ROOT, formatBytes, scanSnapshots } from '../../snapshot-store.js';
 
-export default class FixtureList extends BaseCommand {
+export default class SnapshotList extends BaseCommand {
   static description = 'List all snapshots on disk under SAGA_MESH_SNAPSHOTS_DIR.';
 
   static flags = {
@@ -13,7 +13,7 @@ export default class FixtureList extends BaseCommand {
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(FixtureList);
+    const { flags } = await this.parse(SnapshotList);
     const entries = scanSnapshots();
 
     if (flags['output-json']) {
@@ -36,7 +36,7 @@ export default class FixtureList extends BaseCommand {
     if (entries.length === 0) {
       if (!flags.porcelain) {
         this.log(`No snapshots found under ${SNAPSHOTS_ROOT}.`);
-        this.log(`  Create one: mesh-fixture fixture store --fixture-id <name>`);
+        this.log(`  Create one: mesh-fixture snapshot:store --fixture-id <name>`);
       }
       return;
     }

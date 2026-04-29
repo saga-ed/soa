@@ -11,19 +11,19 @@ cd ~/dev/soa
 pnpm install
 pnpm -F @saga-ed/mesh-fixture-cli build
 # Then invoke via the bin shim:
-node ~/dev/soa/packages/node/mesh-fixture-cli/bin/run.js fixture:list
+node ~/dev/soa/packages/node/mesh-fixture-cli/bin/run.js snapshot:list
 ```
 
 ## Command surface
 
 | Command | Status | Purpose |
 |---|---|---|
-| `fixture:list` | ✅ | List snapshots on disk under `~/.saga-mesh/fixtures/` |
-| `fixture:store --fixture-id <id>` | ✅ | `pg_dump` all saga-mesh DBs → `~/.saga-mesh/fixtures/<id>/` + `manifest.json` |
-| `fixture:restore --fixture-id <id>` | ✅ | `pg_restore` dumps + `redis-cli FLUSHDB` |
-| `fixture:delete --fixture-id <id>` | ✅ | Remove a fixture's directory |
-| `fixture:show <fixture-id>` | ✅ | Merged view of fixture.registry rows across iam/programs/scheduling/ads-adm |
-| `fixture:validate <fixture-id>` | ✅ | Verify every registry artifact id still resolves (exits 1 if any missing) |
+| `snapshot:list` | ✅ | List snapshots on disk under `~/.saga-mesh/snapshots/` |
+| `snapshot:store --fixture-id <id>` | ✅ | `pg_dump` all saga-mesh DBs → `~/.saga-mesh/snapshots/<id>/` + `manifest.json` |
+| `snapshot:restore --fixture-id <id>` | ✅ | `pg_restore` dumps + `redis-cli FLUSHDB` |
+| `snapshot:delete --fixture-id <id>` | ✅ | Remove a snapshot's directory |
+| `snapshot:show <fixture-id>` | ✅ | Merged view of fixture.registry rows across iam/programs/scheduling/ads-adm |
+| `snapshot:validate <fixture-id>` | ✅ | Verify every registry artifact id still resolves (exits 1 if any missing) |
 | `iam:create-org` | ✅ | rostering group creation (dedup by sourceId) + writes registry row |
 | `iam:create-user` | ✅ | rostering user creation (dedup by username) |
 | `iam:add-membership` | ✅ | parent-ordered membership (dedup by "already member") |
@@ -49,12 +49,12 @@ Every idempotent create command (iam:*, pgm:*) now writes to its owning service'
 
 - Appends a `CommandInfo` (command name, sanitized args, timestamp, cliVersion) to the fixture's `commandHistory`.
 - Adds the created row's UUID to the appropriate `artifacts` bucket (`groups`, `users`, `memberships`, `programs`, `periods`, `enrollments`). Memberships + enrollments are synthesized composite ids (`<userId>:<groupId>`, `<programId>:<schoolId>:<sectionId>`).
-- `fixture:show <id>` queries all 4 services in parallel and prints a merged view (human / --porcelain / --output-json).
-- `fixture:validate <id>` verifies every artifact uuid still resolves via `groups.getBulk`, `users.getBulk`, `programs.get`, `periods.get`. Synthesized composite ids are marked "skipped" rather than "missing". Exits 1 on any missing reference.
+- `snapshot:show <id>` queries all 4 services in parallel and prints a merged view (human / --porcelain / --output-json).
+- `snapshot:validate <id>` verifies every artifact uuid still resolves via `groups.getBulk`, `users.getBulk`, `programs.get`, `periods.get`. Synthesized composite ids are marked "skipped" rather than "missing". Exits 1 on any missing reference.
 
 ### Storage
 
-Fixture snapshots live under `$SAGA_MESH_FIXTURES_DIR` (default `~/.saga-mesh/fixtures/<fixture-id>/`). Each fixture is a directory containing per-database `*.dump` files plus a `manifest.json`.
+Snapshots live under `$SAGA_MESH_SNAPSHOTS_DIR` (default `~/.saga-mesh/snapshots/<fixture-id>/`). Each snapshot is a directory containing per-database `*.dump` files plus a `manifest.json`.
 
 ## How it fits the mesh
 
@@ -66,18 +66,18 @@ A full local-dev round-trip:
 saga-mesh.sh setup                           # mesh up
 mesh-fixture iam:create-org --fixture-id demo-small --slug demo-small-org ...
 # … more create-* commands
-mesh-fixture fixture:store --fixture-id demo-small
+mesh-fixture snapshot:store --fixture-id demo-small
 saga-mesh.sh nuke                            # tear mesh down
 saga-mesh.sh setup                           # fresh mesh
-mesh-fixture fixture:restore --fixture-id demo-small   # data back, < 2min
+mesh-fixture snapshot:restore --fixture-id demo-small   # data back, < 2min
 ```
 
-The `fixture:store` + `fixture:restore` round-trip is Phase 3 D3.3's exit criterion.
+The `snapshot:store` + `snapshot:restore` round-trip is Phase 3 D3.3's exit criterion.
 
 ## Roadmap
 
 1. **D3.1 (this package)** — ✅ oclif v4 scaffold + all iam/pgm/fixture commands.
-2. **D3.2** — add a `FixtureMetadata` Prisma model + `fixture.registry.*` tRPC router to each service. When that's live, the CLI will post a CommandInfo to `fixture.registry.addCommand` after every idempotent create, and a new `fixture:show` / `fixture:validate` pair will query across services.
+2. **D3.2** — add a `FixtureMetadata` Prisma model + `fixture.registry.*` tRPC router to each service. When that's live, the CLI will post a CommandInfo to `fixture.registry.addCommand` after every idempotent create, and a new `snapshot:show` / `snapshot:validate` pair will query across services.
 3. **D3.3** — ✅ pg_dump/pg_restore + FLUSHDB mechanics.
 4. **D3.7** — resolve the Phase-2 setup idempotency gaps (workspace rebuilds, scenario `--ignore-workspace` installs, app-local `.env` files).
 5. **Coordinate with SDS PR #77** before implementing `ads:seed-attendance`.

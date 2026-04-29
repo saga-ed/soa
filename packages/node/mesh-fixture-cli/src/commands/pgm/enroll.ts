@@ -9,7 +9,7 @@
  *
  * After the child exits 0, the CLI records a CommandInfo via
  * fixture.registry.addCommand + appendArtifact on programs-api so
- * fixture:show / fixture:list surface the run in the fixture's history.
+ * snapshot:show / snapshot:list surface the run in the fixture's history.
  * Registry writes stay the CLI's job — per architecture audit — so the
  * child doesn't need cross-service awareness.
  */

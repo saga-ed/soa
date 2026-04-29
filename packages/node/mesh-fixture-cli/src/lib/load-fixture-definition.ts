@@ -8,7 +8,7 @@
  * duplicating hardcoded TARGETS arrays.
  *
  * Distinct from SnapshotManifest in snapshot-store.ts (snapshot metadata
- * under ~/.saga-mesh/snapshots/) and the per-service fixture.registry.*
+ * under ~/.saga-mesh/snapshots/) and the per-service snapshot.registry.*
  * tRPC surface in lib/registry.ts.
  */
 

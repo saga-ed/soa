@@ -119,7 +119,7 @@ export class TrpcClient {
   private unwrapData<T>(data: unknown): T {
     // superjson response payload is `{ json: T, meta? }`. We ignore meta
     // since none of the fields we care about are superjson-encoded
-    // primitives (FixtureMetadata dates come back as ISO strings from
+    // primitives (SnapshotMetadata dates come back as ISO strings from
     // the Prisma Json columns — but top-level createdAt / lastUpdated
     // ARE Date-typed in the Prisma schema, so superjson will tag them
     // in meta. If a caller needs the actual Date, they can re-parse.)

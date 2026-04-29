@@ -1,7 +1,7 @@
 /**
- * snapshot:show — cross-service view of a fixture's FixtureMetadata rows.
+ * snapshot:show — cross-service view of a fixture's SnapshotMetadata rows.
  *
- * Queries `fixture.registry.get` in parallel on iam-api + programs-api +
+ * Queries `snapshot.registry.get` in parallel on iam-api + programs-api +
  * scheduling-api + ads-adm-api, merges the results, and prints a human /
  * porcelain / JSON summary. Services that don't have the fixture are
  * listed explicitly so the reader knows where the gap is.
@@ -22,7 +22,7 @@ import { BaseCommand } from '../../base-command.js';
 import {
   getRegistry,
   type CommandInfo,
-  type FixtureMetadata,
+  type SnapshotMetadata,
   type RegistryService,
 } from '../../lib/registry.js';
 
@@ -42,7 +42,7 @@ const SERVICE_LABELS: Record<RegistryService, string> = {
 
 interface ServiceView {
   service: RegistryService;
-  metadata: FixtureMetadata | null;
+  metadata: SnapshotMetadata | null;
   error: string | null;
 }
 
@@ -51,7 +51,7 @@ interface MergedView {
   createdAt: string | null;
   lastUpdated: string | null;
   description: string | null;
-  services: Record<RegistryService, FixtureMetadata | null>;
+  services: Record<RegistryService, SnapshotMetadata | null>;
   serviceErrors: Record<RegistryService, string | null>;
   commandHistory: CommandInfo[];
   presentIn: RegistryService[];
@@ -59,7 +59,7 @@ interface MergedView {
 }
 
 function mergeViews(id: string, views: ServiceView[]): MergedView {
-  const services = {} as Record<RegistryService, FixtureMetadata | null>;
+  const services = {} as Record<RegistryService, SnapshotMetadata | null>;
   const serviceErrors = {} as Record<RegistryService, string | null>;
   const commandHistory: CommandInfo[] = [];
   const presentIn: RegistryService[] = [];

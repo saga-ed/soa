@@ -1,13 +1,13 @@
 /**
  * registry — post-mutation writes + reads against the per-service
- * fixture.registry.* routers (D3.2). Each of iam-api, programs-api,
+ * snapshot.registry.* routers (D3.2). Each of iam-api, programs-api,
  * scheduling-api, ads-adm-api exposes the same 5-procedure shape:
  *
- *   fixture.registry.upsert       — mutation, { id, description?, artifacts?, snapshotProfile?, snapshotAt?, schemaRev? }
- *   fixture.registry.get          — query,    { id }           → FixtureMetadata
- *   fixture.registry.list         — query                       → FixtureMetadata[]
- *   fixture.registry.addCommand   — mutation, { id, command: CommandInfo }
- *   fixture.registry.delete       — mutation, { id }
+ *   snapshot.registry.upsert       — mutation, { id, description?, artifacts?, snapshotProfile?, snapshotAt?, schemaRev? }
+ *   snapshot.registry.get          — query,    { id }           → SnapshotMetadata
+ *   snapshot.registry.list         — query                       → SnapshotMetadata[]
+ *   snapshot.registry.addCommand   — mutation, { id, command: CommandInfo }
+ *   snapshot.registry.delete       — mutation, { id }
  *
  * This module owns two concerns:
  *   1. Route each iam: / pgm: / ads: CLI command to its owning service's
@@ -22,7 +22,7 @@
 import { TrpcClient, TrpcCallError, type TrpcTransformer } from './http.js';
 
 /**
- * The four services that back `fixture.registry.*`. Used to route command
+ * The four services that back `snapshot.registry.*`. Used to route command
  * writes and aggregate reads in snapshot:show / snapshot:validate.
  */
 export type RegistryService = 'iam' | 'programs' | 'scheduling' | 'ads';
@@ -52,12 +52,12 @@ export interface CommandInfo {
 }
 
 /**
- * FixtureMetadata as returned by fixture.registry.get. All dates arrive
+ * SnapshotMetadata as returned by snapshot.registry.get. All dates arrive
  * as ISO strings on plain-JSON services; on ads-adm-api's superjson path
  * the wrapper strips the meta but values may come back tagged — callers
  * just treat these as strings.
  */
-export interface FixtureMetadata {
+export interface SnapshotMetadata {
   id: string;
   createdAt: string;
   lastUpdated: string;
@@ -178,14 +178,14 @@ export async function appendArtifactOn(
       : [];
     if (!bucket.includes(id)) bucket.push(id);
     artifacts[kind] = bucket;
-    await client.mutation('fixture.registry.upsert', {
+    await client.mutation('snapshot.registry.upsert', {
       id: fixtureId,
       artifacts,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(
-      `  warn   fixture.registry.upsert artifacts.${kind} (${service}): ${msg}\n`,
+      `  warn   snapshot.registry.upsert artifacts.${kind} (${service}): ${msg}\n`,
     );
   }
 }
@@ -221,11 +221,11 @@ export async function recordCommandOn(
     cliVersion: CLI_VERSION,
   };
   try {
-    await client.mutation('fixture.registry.addCommand', { id: fixtureId, command: info });
+    await client.mutation('snapshot.registry.addCommand', { id: fixtureId, command: info });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     process.stderr.write(
-      `  warn   fixture.registry.addCommand (${service}): ${msg}\n`,
+      `  warn   snapshot.registry.addCommand (${service}): ${msg}\n`,
     );
   }
 }
@@ -239,10 +239,10 @@ export async function getRegistry(
   service: RegistryService,
   fixtureId: string,
   endpoints: RegistryEndpoints,
-): Promise<FixtureMetadata | null> {
+): Promise<SnapshotMetadata | null> {
   const client = clientFor(service, endpoints);
   try {
-    return await client.query<FixtureMetadata>('fixture.registry.get', {
+    return await client.query<SnapshotMetadata>('snapshot.registry.get', {
       id: fixtureId,
     });
   } catch (err) {

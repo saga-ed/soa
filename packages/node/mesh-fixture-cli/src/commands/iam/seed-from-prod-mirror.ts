@@ -7,7 +7,7 @@
  * exit + output, mirroring ads/seed-attendance.ts.
  *
  * After the child exits 0, the CLI records a CommandInfo via
- * fixture.registry.addCommand on iam-api so snapshot:show / snapshot:list
+ * snapshot.registry.addCommand on iam-api so snapshot:show / snapshot:list
  * can surface the run in the fixture's history.
  */
 

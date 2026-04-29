@@ -25,7 +25,7 @@ import { BaseCommand } from '../../base-command.js';
 import {
   clientFor,
   getRegistry,
-  type FixtureMetadata,
+  type SnapshotMetadata,
   type RegistryService,
 } from '../../lib/registry.js';
 import { TrpcCallError } from '../../lib/http.js';
@@ -79,7 +79,7 @@ async function checkSingle<T = unknown>(
 }
 
 async function validateIam(
-  metadata: FixtureMetadata,
+  metadata: SnapshotMetadata,
   endpoints: {
     'iam-url': string;
     'programs-url': string;
@@ -152,7 +152,7 @@ async function validateIam(
 }
 
 async function validatePrograms(
-  metadata: FixtureMetadata,
+  metadata: SnapshotMetadata,
   endpoints: {
     'iam-url': string;
     'programs-url': string;
@@ -195,7 +195,7 @@ async function validatePrograms(
 
 function validatePassthrough(
   service: RegistryService,
-  metadata: FixtureMetadata,
+  metadata: SnapshotMetadata,
 ): ArtifactCheck[] {
   // scheduling / ads artifacts are not populated by this CLI yet. Enumerate
   // whatever is there and skip validation — surface rather than hide them.

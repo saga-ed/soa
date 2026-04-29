@@ -1,10 +1,10 @@
 /**
- * Fixture on-disk store — shared helpers for fixture:* commands.
+ * Snapshot on-disk store — shared helpers for the snapshot-storage layer.
  *
- * Shape under $SAGA_MESH_FIXTURES_DIR (default ~/.saga-mesh/fixtures):
+ * Shape under $SAGA_MESH_SNAPSHOTS_DIR (default ~/.saga-mesh/snapshots):
  *
  *   <id>/
- *     manifest.json          # FixtureManifest JSON
+ *     manifest.json          # SnapshotManifest JSON
  *     iam_local.dump         # pg_dump -F c output, one per saga-mesh DB
  *     iam_pii_local.dump
  *     ...
@@ -28,11 +28,11 @@ import {
   REDIS_CONTAINER,
 } from './lib/postgres.js';
 
-export const FIXTURES_ROOT =
-  process.env.SAGA_MESH_FIXTURES_DIR ?? join(homedir(), '.saga-mesh', 'fixtures');
+export const SNAPSHOTS_ROOT =
+  process.env.SAGA_MESH_SNAPSHOTS_DIR ?? join(homedir(), '.saga-mesh', 'snapshots');
 
-export interface FixtureManifest {
-  /** Fixture identifier (= directory name under FIXTURES_ROOT). */
+export interface SnapshotManifest {
+  /** Fixture identifier (= directory name under SNAPSHOTS_ROOT). */
   fixtureId: string;
   /** Human description (optional, --description flag). */
   description?: string;
@@ -52,33 +52,33 @@ export interface FixtureManifest {
   cliVersion: string;
 }
 
-export interface FixtureEntry {
+export interface SnapshotEntry {
   fixtureId: string;
   path: string;
   sizeBytes: number;
   mtime: Date;
-  manifest: FixtureManifest | null;
+  manifest: SnapshotManifest | null;
 }
 
-export function fixtureDir(fixtureId: string): string {
-  return join(FIXTURES_ROOT, fixtureId);
+export function snapshotDir(fixtureId: string): string {
+  return join(SNAPSHOTS_ROOT, fixtureId);
 }
 
-export function readManifest(dir: string): FixtureManifest | null {
+export function readManifest(dir: string): SnapshotManifest | null {
   const path = join(dir, 'manifest.json');
   if (!existsSync(path)) return null;
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as FixtureManifest;
+    return JSON.parse(readFileSync(path, 'utf8')) as SnapshotManifest;
   } catch {
     return null;
   }
 }
 
-export function scanFixtures(): FixtureEntry[] {
-  if (!existsSync(FIXTURES_ROOT)) return [];
-  const entries: FixtureEntry[] = [];
-  for (const name of readdirSync(FIXTURES_ROOT)) {
-    const path = join(FIXTURES_ROOT, name);
+export function scanSnapshots(): SnapshotEntry[] {
+  if (!existsSync(SNAPSHOTS_ROOT)) return [];
+  const entries: SnapshotEntry[] = [];
+  for (const name of readdirSync(SNAPSHOTS_ROOT)) {
+    const path = join(SNAPSHOTS_ROOT, name);
     const st = statSync(path);
     if (!st.isDirectory()) continue;
     let sizeBytes = 0;

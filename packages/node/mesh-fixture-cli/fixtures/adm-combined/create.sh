@@ -20,7 +20,7 @@
 #                                    program/period/user UUIDs. Per the
 #                                    architecture audit (phase-3/), this also
 #                                    fires the registry addCommand so
-#                                    fixture:show / fixture:list surface the run.
+#                                    snapshot:show / snapshot:list surface the run.
 #
 # Order matters — iam writes the User + Group rows the others reference;
 # pgm writes Program + TutoringPeriod rows ads-adm-api joins against. Each
@@ -39,7 +39,7 @@
 #      PII_CRYPTO_PIIHMACKEYHEX; the iam-seed bin reads it directly).
 #
 # After this script completes, snapshot via:
-#   mesh-fixture fixture:store --fixture-id adm-combined
+#   mesh-fixture snapshot:store --fixture-id adm-combined
 # (run automatically as the last step below).
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -69,9 +69,9 @@ cli pgm:seed-from-prod-mirror --fixture-id "$FIXTURE_ID" --source prod-mirror
 echo "--> 3/4 ads:seed-attendance"
 cli ads:seed-attendance --fixture-id "$FIXTURE_ID" --source prod-mirror
 
-echo "--> 4/4 fixture:store"
-cli fixture:store --fixture-id "$FIXTURE_ID"
+echo "--> 4/4 snapshot:store"
+cli snapshot:store --fixture-id "$FIXTURE_ID"
 
 echo
 echo "✓ fixture '$FIXTURE_ID' authored + stored. Restore on a clean mesh with:"
-echo "    mesh-fixture fixture:restore --fixture-id $FIXTURE_ID"
+echo "    mesh-fixture snapshot:restore --fixture-id $FIXTURE_ID"

@@ -16,8 +16,8 @@ import { spawn } from 'node:child_process';
 import { openSync, closeSync, statSync, createReadStream, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const POSTGRES_CONTAINER = process.env.SAGA_MESH_POSTGRES_CONTAINER ?? 'saga-mesh-postgres';
-export const REDIS_CONTAINER = process.env.SAGA_MESH_REDIS_CONTAINER ?? 'saga-mesh-redis';
+export const POSTGRES_CONTAINER = process.env.SAGA_MESH_POSTGRES_CONTAINER ?? 'soa-postgres-1';
+export const REDIS_CONTAINER = process.env.SAGA_MESH_REDIS_CONTAINER ?? 'soa-redis-1';
 export const POSTGRES_ADMIN_USER = process.env.SAGA_MESH_POSTGRES_ADMIN_USER ?? 'postgres_admin';
 
 // The six databases saga-mesh hosts, per ~/dev/soa/infra/compose/projects/saga-mesh/seed/profile-empty.sql.
@@ -195,7 +195,7 @@ export function fileSize(path: string): number {
   }
 }
 
-/** Convenience: join a fixture dir with a db's dump filename. */
-export function dumpPathFor(fixtureDir: string, db: SagaMeshDatabase): string {
-  return join(fixtureDir, `${db}.dump`);
+/** Convenience: join a snapshot dir with a db's dump filename. */
+export function dumpPathFor(snapshotDir: string, db: SagaMeshDatabase): string {
+  return join(snapshotDir, `${db}.dump`);
 }

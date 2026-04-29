@@ -24,8 +24,8 @@
     ],
     "topicSeparator": ":",
     "topics": {
-      "fixture": {
-        "description": "Fixture snapshot + registry lifecycle (list, store, restore, delete, show, validate)."
+      "snapshot": {
+        "description": "Snapshot lifecycle commands (list, store, restore, delete, show, validate)."
       },
       "iam": {
         "description": "Rostering iam-api seed commands (create-org, create-user, add-membership)."

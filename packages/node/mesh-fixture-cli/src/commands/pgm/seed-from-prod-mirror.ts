@@ -7,8 +7,8 @@
  * wrapper spawns the bin with that subcommand and relays exit + output.
  *
  * After the child exits 0, the CLI records a CommandInfo via
- * fixture.registry.addCommand on programs-api so fixture:show /
- * fixture:list can surface the run in the fixture's history.
+ * snapshot.registry.addCommand on programs-api so snapshot:show /
+ * snapshot:list can surface the run in the fixture's history.
  */
 
 import { spawn } from 'node:child_process';

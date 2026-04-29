@@ -61,7 +61,7 @@ export const sourceFlag = Flags.string({
 
 /**
  * Fixture identifier — passed through to every create/enroll command so
- * Phase 2 addCommand wiring can associate the run with a FixtureMetadata row.
+ * Phase 2 addCommand wiring can associate the run with a SnapshotMetadata row.
  */
 export const fixtureIdFlag = Flags.string({
   description: 'fixture identifier',

@@ -1,6 +1,6 @@
 /**
- * fixture:store — pg_dump each saga-mesh database into
- * ~/.saga-mesh/fixtures/<id>/<db>.dump + write manifest.json.
+ * snapshot:store — pg_dump each saga-mesh database into
+ * ~/.saga-mesh/snapshots/<id>/<db>.dump + write manifest.json.
  */
 
 import { existsSync, writeFileSync } from 'node:fs';
@@ -9,10 +9,10 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import {
   assertPostgresRunning,
-  fixtureDir,
   formatBytes,
-  type FixtureManifest,
-} from '../../fixture-store.js';
+  snapshotDir,
+  type SnapshotManifest,
+} from '../../snapshot-store.js';
 import {
   SAGA_MESH_DATABASES,
   POSTGRES_CONTAINER,
@@ -22,9 +22,9 @@ import {
   pgDump,
 } from '../../lib/postgres.js';
 
-export default class FixtureStore extends BaseCommand {
+export default class SnapshotStore extends BaseCommand {
   static description =
-    'pg_dump all saga-mesh databases into ~/.saga-mesh/fixtures/<id>/.';
+    'pg_dump all saga-mesh databases into ~/.saga-mesh/snapshots/<id>/.';
 
   static flags = {
     ...BaseCommand.baseFlags,
@@ -36,25 +36,25 @@ export default class FixtureStore extends BaseCommand {
       description: 'human description stored in manifest.json',
     }),
     force: Flags.boolean({
-      description: 'overwrite an existing fixture with the same id',
+      description: 'overwrite an existing snapshot with the same id',
       default: false,
     }),
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(FixtureStore);
+    const { flags } = await this.parse(SnapshotStore);
     await assertPostgresRunning();
 
-    const dir = fixtureDir(flags['fixture-id']);
+    const dir = snapshotDir(flags['fixture-id']);
     if (existsSync(dir) && !flags.force) {
       throw new Error(
-        `fixture '${flags['fixture-id']}' already exists at ${dir}. Use --force to overwrite.`,
+        `snapshot '${flags['fixture-id']}' already exists at ${dir}. Use --force to overwrite.`,
       );
     }
     ensureDir(dir);
 
-    this.log(`Storing fixture '${flags['fixture-id']}' → ${dir}`);
-    const databases: FixtureManifest['databases'] = [];
+    this.log(`Storing snapshot '${flags['fixture-id']}' → ${dir}`);
+    const databases: SnapshotManifest['databases'] = [];
     for (const db of SAGA_MESH_DATABASES) {
       const dumpFile = dumpPathFor(dir, db);
       process.stdout.write(`  dumping ${db.padEnd(18)} `);
@@ -64,7 +64,7 @@ export default class FixtureStore extends BaseCommand {
       databases.push({ name: db, dumpFile: `${db}.dump`, sizeBytes: size });
     }
 
-    const manifest: FixtureManifest = {
+    const manifest: SnapshotManifest = {
       fixtureId: flags['fixture-id'],
       description: flags.description,
       createdAt: new Date().toISOString(),

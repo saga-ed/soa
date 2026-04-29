@@ -23,7 +23,7 @@
 # re-applies). See ../../README.md for mesh-fixture CLI flag reference.
 #
 # After this script completes, snapshot via:
-#   mesh-fixture fixture:store --fixture-id demo-small
+#   mesh-fixture snapshot:store --fixture-id demo-small
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -90,4 +90,4 @@ cli pgm:enroll \
 
 echo
 echo "✓ fixture '$FIXTURE_ID' authored. Snapshot with:"
-echo "    mesh-fixture fixture:store --fixture-id $FIXTURE_ID"
+echo "    mesh-fixture snapshot:store --fixture-id $FIXTURE_ID"

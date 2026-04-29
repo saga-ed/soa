@@ -1,5 +1,5 @@
 /**
- * fixture:restore — pg_restore a named fixture over the running saga-mesh,
+ * snapshot:restore — pg_restore a named snapshot over the running saga-mesh,
  * then redis-cli FLUSHDB.
  */
 
@@ -10,14 +10,14 @@ import { BaseCommand } from '../../base-command.js';
 import {
   assertPostgresRunning,
   assertRedisRunning,
-  fixtureDir,
   readManifest,
-} from '../../fixture-store.js';
+  snapshotDir,
+} from '../../snapshot-store.js';
 import { pgRestore, redisFlushdb } from '../../lib/postgres.js';
 
-export default class FixtureRestore extends BaseCommand {
+export default class SnapshotRestore extends BaseCommand {
   static description =
-    'pg_restore a named fixture over the running saga-mesh, then FLUSHDB redis.';
+    'pg_restore a named snapshot over the running saga-mesh, then FLUSHDB redis.';
 
   static flags = {
     ...BaseCommand.baseFlags,
@@ -28,19 +28,19 @@ export default class FixtureRestore extends BaseCommand {
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(FixtureRestore);
+    const { flags } = await this.parse(SnapshotRestore);
     await assertPostgresRunning();
     await assertRedisRunning();
 
-    const dir = fixtureDir(flags['fixture-id']);
+    const dir = snapshotDir(flags['fixture-id']);
     const manifest = readManifest(dir);
     if (!manifest) {
       throw new Error(
-        `no manifest found at ${dir}/manifest.json (run fixture:list to see what exists).`,
+        `no manifest found at ${dir}/manifest.json (run snapshot:list to see what exists).`,
       );
     }
 
-    this.log(`Restoring fixture '${flags['fixture-id']}' from ${dir}`);
+    this.log(`Restoring snapshot '${flags['fixture-id']}' from ${dir}`);
     this.log(`  stored: ${manifest.createdAt}`);
     if (manifest.description) this.log(`  desc:   ${manifest.description}`);
 

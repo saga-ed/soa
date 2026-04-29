@@ -195,7 +195,7 @@ export function fileSize(path: string): number {
   }
 }
 
-/** Convenience: join a fixture dir with a db's dump filename. */
-export function dumpPathFor(fixtureDir: string, db: SagaMeshDatabase): string {
-  return join(fixtureDir, `${db}.dump`);
+/** Convenience: join a snapshot dir with a db's dump filename. */
+export function dumpPathFor(snapshotDir: string, db: SagaMeshDatabase): string {
+  return join(snapshotDir, `${db}.dump`);
 }

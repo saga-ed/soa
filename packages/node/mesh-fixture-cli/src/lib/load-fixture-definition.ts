@@ -7,8 +7,8 @@
  * ads-adm-seed) import loadFixtureDefinition() from here instead of
  * duplicating hardcoded TARGETS arrays.
  *
- * Distinct from FixtureManifest in fixture-store.ts (snapshot metadata
- * under ~/.saga-mesh/fixtures/) and the per-service fixture.registry.*
+ * Distinct from SnapshotManifest in snapshot-store.ts (snapshot metadata
+ * under ~/.saga-mesh/snapshots/) and the per-service fixture.registry.*
  * tRPC surface in lib/registry.ts.
  */
 

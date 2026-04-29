@@ -1,12 +1,12 @@
 /**
- * fixture:list — list all fixtures on disk under SAGA_MESH_FIXTURES_DIR.
+ * fixture:list — list all snapshots on disk under SAGA_MESH_SNAPSHOTS_DIR.
  */
 
 import { BaseCommand } from '../../base-command.js';
-import { FIXTURES_ROOT, formatBytes, scanFixtures } from '../../fixture-store.js';
+import { SNAPSHOTS_ROOT, formatBytes, scanSnapshots } from '../../snapshot-store.js';
 
 export default class FixtureList extends BaseCommand {
-  static description = 'List all fixtures on disk under SAGA_MESH_FIXTURES_DIR.';
+  static description = 'List all snapshots on disk under SAGA_MESH_SNAPSHOTS_DIR.';
 
   static flags = {
     ...BaseCommand.baseFlags,
@@ -14,7 +14,7 @@ export default class FixtureList extends BaseCommand {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(FixtureList);
-    const entries = scanFixtures();
+    const entries = scanSnapshots();
 
     if (flags['output-json']) {
       this.log(
@@ -35,7 +35,7 @@ export default class FixtureList extends BaseCommand {
 
     if (entries.length === 0) {
       if (!flags.porcelain) {
-        this.log(`No fixtures found under ${FIXTURES_ROOT}.`);
+        this.log(`No snapshots found under ${SNAPSHOTS_ROOT}.`);
         this.log(`  Create one: mesh-fixture fixture store --fixture-id <name>`);
       }
       return;
@@ -48,7 +48,7 @@ export default class FixtureList extends BaseCommand {
       return;
     }
 
-    this.log(`Fixtures under ${FIXTURES_ROOT}:`);
+    this.log(`Snapshots under ${SNAPSHOTS_ROOT}:`);
     this.log('');
     this.log('  ' + 'ID'.padEnd(28) + 'SIZE'.padEnd(12) + 'MODIFIED');
     this.log('  ' + '─'.repeat(70));

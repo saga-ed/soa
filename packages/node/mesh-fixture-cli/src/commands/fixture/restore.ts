@@ -10,9 +10,9 @@ import { BaseCommand } from '../../base-command.js';
 import {
   assertPostgresRunning,
   assertRedisRunning,
-  fixtureDir,
   readManifest,
-} from '../../fixture-store.js';
+  snapshotDir,
+} from '../../snapshot-store.js';
 import { pgRestore, redisFlushdb } from '../../lib/postgres.js';
 
 export default class FixtureRestore extends BaseCommand {
@@ -32,7 +32,7 @@ export default class FixtureRestore extends BaseCommand {
     await assertPostgresRunning();
     await assertRedisRunning();
 
-    const dir = fixtureDir(flags['fixture-id']);
+    const dir = snapshotDir(flags['fixture-id']);
     const manifest = readManifest(dir);
     if (!manifest) {
       throw new Error(

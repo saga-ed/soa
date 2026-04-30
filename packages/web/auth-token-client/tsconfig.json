@@ -1,0 +1,11 @@
+{
+  "extends": "@saga-ed/soa-typescript-config/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["es2022", "DOM", "DOM.Iterable"],
+    "types": ["vitest"]
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}

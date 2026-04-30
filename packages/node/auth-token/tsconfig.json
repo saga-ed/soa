@@ -1,0 +1,10 @@
+{
+  "extends": "@saga-ed/soa-typescript-config/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["vitest", "node"]
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}

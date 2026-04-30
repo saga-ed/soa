@@ -15,7 +15,6 @@ export const JanusClaimsSchema = z.object({
   sub: z.string().min(1),
   email: z.string().email(),
   name: z.string(),
-  groups: z.array(z.string()),
   permissions: z.array(z.string()),
   iat: z.number().int(),
   exp: z.number().int(),

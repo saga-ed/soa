@@ -7,7 +7,6 @@ export interface MintInput {
   sub: string;
   email: string;
   name: string;
-  groups: string[];
   permissions: string[];
   authTime: number;
 }
@@ -35,7 +34,6 @@ export async function mintJanusToken(
   return await new SignJWT({
     email: input.email,
     name: input.name,
-    groups: input.groups,
     permissions: input.permissions,
     authTime: input.authTime,
   })

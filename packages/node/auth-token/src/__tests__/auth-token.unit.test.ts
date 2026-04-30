@@ -36,6 +36,21 @@ describe('Janus claims schema', () => {
     ).toThrow();
   });
 
+  it('accepts an empty email — email is informational, not gating data', () => {
+    const claims = {
+      iss: 'janus',
+      aud: 'wootdev',
+      sub: 'jc-user-123',
+      email: '',
+      name: 'Dev User',
+      permissions: [],
+      iat: 1_700_000_000,
+      exp: 1_700_028_800,
+      authTime: 1_700_000_000,
+    };
+    expect(JanusClaimsSchema.parse(claims)).toEqual(claims);
+  });
+
   it('rejects empty subject', () => {
     expect(() =>
       JanusClaimsSchema.parse({

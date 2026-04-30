@@ -13,7 +13,7 @@ export const JanusClaimsSchema = z.object({
   iss: z.literal(ISSUER),
   aud: z.literal(AUDIENCE),
   sub: z.string().min(1),
-  email: z.string().email(),
+  email: z.string(),
   name: z.string(),
   permissions: z.array(z.string()),
   iat: z.number().int(),

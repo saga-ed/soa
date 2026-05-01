@@ -154,8 +154,7 @@ export class FixtureServer {
             const provider = new MongoProvider({
                 configType: 'MONGO',
                 instanceName: 'fixture-db',
-                host: parsed_uri.hostname,
-                port: parseInt(parsed_uri.port || '27017', 10),
+                hosts: [`${parsed_uri.hostname}:${parsed_uri.port || '27017'}`],
                 database: config.db_name,
                 options: { directConnection: true, serverSelectionTimeoutMS: 30000 },
             });

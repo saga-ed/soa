@@ -1,6 +1,6 @@
 # Event-driven packages — adopter conventions
 
-Reference for fleet services consuming `@saga-ed/soa-event-envelope`, `event-outbox`, `event-consumer`, `observability`, `event-test-harness`. Conventions originated in the `soa_event_driven_example` POC; design decisions live under `~/dev/soa/.claude/projects/soa_75/decisions/`.
+Reference for fleet services consuming `@saga-ed/soa-event-envelope`, `event-outbox`, `event-consumer`, `observability`, `event-test-harness`. Design decisions live under `.claude/projects/soa_75/decisions/`.
 
 ## What this stack is (and isn't)
 
@@ -37,38 +37,67 @@ Cross-service event types live in their own `@saga-ed/<family>-events` package (
 
 ## Outbox + consumer wiring (publisher side)
 
+`buildEnvelope` snapshots the active OTel trace context into `meta.traceparent` so the consumer's span chains under the original request. `writeOutbox` then appends the envelope inside the same transaction as the domain write.
+
 ```ts
+import { buildEnvelope } from '@saga-ed/soa-event-envelope';
 import { writeOutbox } from '@saga-ed/soa-event-outbox';
 
-await pg.transaction(async (tx) => {
-    await tx.insert(...);                        // domain change
-    await writeOutbox(tx, {                      // same transaction
-        type: 'iam.user.created.v1',
-        payload: { ... },
+await prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({ data: { ... } });
+
+    const envelope = buildEnvelope({
+        eventType: 'iam.user.created',
+        eventVersion: 1,
+        aggregateType: 'user',
+        aggregateId: user.id,
+        payload: { id: user.id, email: user.email },
     });
+    await writeOutbox(tx, envelope);
 });
 ```
 
-A separate process (or boot-time call in dev) runs `startRelay({ pg, rabbit, ... })` to ship outbox rows to the broker.
+A separate process (or service boot) runs an `OutboxRelay` that polls the table and ships rows to RabbitMQ:
+
+```ts
+import { OutboxRelay } from '@saga-ed/soa-event-outbox';
+
+const relay = new OutboxRelay({
+    pool, connectionManager, logger,
+    exchange: 'iam.events',
+    metrics: observability.addOutbox(pool),
+});
+await relay.start();
+```
 
 ## Idempotent consumer (consumer side)
 
 ```ts
-import { createConsumer } from '@saga-ed/soa-event-consumer';
+import { EventConsumer } from '@saga-ed/soa-event-consumer';
 
-const consumer = createConsumer({
-    pg, rabbit,
+const consumer = new EventConsumer({
+    pool, connectionManager, logger,
+    consumerName: 'admissions.iam-projection',
     queue: 'admissions.iam-projection',
+    bindings: [{ exchange: 'iam.events', routingKey: 'iam.user.*' }],
     handlers: {
-        'iam.user.created.v1': async (envelope, tx) => {
-            await tx.insert(...);                 // projection write
+        'iam.user.created.v1': {
+            key: 'iam.user.created.v1',
+            payloadSchema: UserCreatedV1,
+            async handle(envelope, payload, tx) {
+                await tx.query(
+                    `INSERT INTO user_projection (id, email) VALUES ($1, $2)`,
+                    [payload.id, payload.email],
+                );
+            },
         },
     },
+    metrics: observability.addConsumer(pool, 'admissions.iam-projection'),
 });
 await consumer.start();
 ```
 
-The consumer writes to `consumed_events(envelope_id PK)` inside the same tx as the projection — duplicates are no-ops.
+The consumer inserts into `consumed_events(consumer_name, event_id)` inside the same tx as the projection — duplicates short-circuit on the unique constraint.
 
 ## Hybrid contract testing
 
@@ -99,7 +128,7 @@ Initialise once at process boot — before importing any instrumented module:
 
 ```ts
 import { initTracing } from '@saga-ed/soa-observability';
-initTracing({ serviceName: 'programs-api' });
+const handle = initTracing('programs-api', { logger });
 ```
 
 See `decisions/d-observability.md`.
@@ -114,5 +143,4 @@ See `decisions/d-observability.md`.
 
 ---
 
-*Source decisions:* `~/dev/soa/.claude/projects/soa_75/decisions/`
-*Reference POC:* `~/dev/soa_event_driven_example/`
+*Source decisions:* `.claude/projects/soa_75/decisions/`

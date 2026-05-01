@@ -84,12 +84,9 @@ export interface EventConsumerOpts {
      * Optional dead-letter wiring. When set, the main queue is declared
      * with `x-dead-letter-exchange` and a sibling DLQ is asserted + bound
      * to that DLX. On ANY handler error, the message is nacked WITHOUT
-     * requeue (`channel.nack(msg, false, false)`), causing RabbitMQ to
-     * route it to the DLX → DLQ. Phase 3.5 fail-fast model: every error
-     * → DLQ; ops drain via the RabbitMQ management UI (a dedicated
-     * /dlq/replay endpoint is a deferred follow-up).
-     *
-     * Without this option, errors nack-with-requeue (legacy behavior).
+     * requeue, causing RabbitMQ to route it to the DLX → DLQ (fail-fast:
+     * ops drain via the RabbitMQ management UI). Without this option,
+     * errors nack-with-requeue.
      */
     dlq?: DlqConfig;
     /** Optional Prometheus hooks. No-op when undefined. */
@@ -285,9 +282,12 @@ export class EventConsumer {
             );
 
             if (insertResult.rowCount === 0) {
-                // Duplicate delivery — already processed.
+                // Duplicate delivery — already processed. Logged at debug
+                // because high-throughput streams can produce these by the
+                // thousand and they aren't operationally interesting beyond
+                // the events_duplicate_total counter.
                 await client.query('COMMIT');
-                this.opts.logger.info(
+                this.opts.logger.debug(
                     `[EventConsumer:${this.opts.consumerName}] skip duplicate ${envelope.eventId}`,
                 );
                 this.opts.metrics?.onDuplicate(

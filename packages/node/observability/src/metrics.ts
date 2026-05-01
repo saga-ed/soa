@@ -99,7 +99,7 @@ function createOutboxMetrics(
     const eventsPublishFailedTotal = new Counter({
         name: 'events_publish_failed_total',
         help: 'Outbox publish attempts that threw before persisting.',
-        labelNames: ['event_type', 'event_version', 'reason'] as const,
+        labelNames: ['event_type', 'event_version', 'reason_class'] as const,
         registers: [registry],
     });
 
@@ -130,7 +130,7 @@ function createOutboxMetrics(
             eventsPublishFailedTotal.inc({
                 event_type: eventType,
                 event_version: String(eventVersion),
-                reason: reason.slice(0, 120),
+                reason_class: classifyReason(reason),
             });
         },
     };
@@ -152,7 +152,7 @@ function createConsumerMetrics(
     const eventsFailedTotal = new Counter({
         name: 'events_failed_total',
         help: 'Events that threw during consumption (routed to DLQ via fail-fast).',
-        labelNames: ['event_type', 'event_version', 'reason'] as const,
+        labelNames: ['event_type', 'event_version', 'reason_class'] as const,
         registers: [registry],
     });
 
@@ -191,7 +191,7 @@ function createConsumerMetrics(
             eventsFailedTotal.inc({
                 event_type: eventType,
                 event_version: String(eventVersion),
-                reason: reason.slice(0, 120),
+                reason_class: classifyReason(reason),
             });
         },
         onDuplicate: (eventType, eventVersion) => {
@@ -201,6 +201,21 @@ function createConsumerMetrics(
             });
         },
     };
+}
+
+// Map a free-form error message to a small, bounded set of label values so the
+// Prometheus series cardinality can't blow up on noisy errors (timeouts that
+// embed IPs/timestamps, postgres messages with row IDs, etc).
+function classifyReason(reason: string): string {
+    const r = reason.toLowerCase();
+    if (r.includes('timeout') || r.includes('etimedout')) return 'timeout';
+    if (r.includes('econnrefused') || r.includes('enotfound') || r.includes('econnreset')) return 'network';
+    if (r.includes('malformed envelope')) return 'malformed_envelope';
+    if (r.includes('no handler registered')) return 'no_handler';
+    if (r.includes('zod') || r.includes('invalid')) return 'validation';
+    if (r.includes('channel closed') || r.includes('connection closed')) return 'broker_closed';
+    if (r.includes('duplicate key') || r.includes('unique constraint')) return 'db_conflict';
+    return 'other';
 }
 
 /** Express handler that serves the Prometheus text exposition format. */

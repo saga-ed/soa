@@ -1,5 +1,5 @@
 import type { Channel } from 'amqplib';
-import type { Pool, PoolClient } from 'pg';
+import type { Pool } from 'pg';
 import type { ILogger } from '@saga-ed/soa-logger';
 import type { ConnectionManager } from '@saga-ed/soa-rabbitmq';
 import {
@@ -48,13 +48,10 @@ interface OutboxRow {
 const tracer = trace.getTracer('@saga-ed/soa-event-outbox');
 
 /**
- * Polling outbox relay. On each tick:
- *   1. SELECT unpublished rows FOR UPDATE SKIP LOCKED (multi-relay safe).
- *   2. For each row: publish to RabbitMQ, mark published_at = NOW().
- *   3. COMMIT.
- *
- * On error within a row, the row stays unpublished and is retried next tick.
- * Phase 4+ will add per-row retry budgets + DLQ wiring.
+ * Polling outbox relay. Selects unpublished rows with FOR UPDATE SKIP LOCKED
+ * (multi-relay safe), publishes each to RabbitMQ, then marks them published in
+ * a single batched UPDATE before commit. Errors leave rows unpublished for the
+ * next tick. Per-row retry budgets + DLQ wiring are not yet implemented.
  */
 export class OutboxRelay {
     private channel: Channel | null = null;
@@ -66,12 +63,12 @@ export class OutboxRelay {
     async start(): Promise<void> {
         this.channel = await this.opts.connectionManager.newChannel();
         await this.channel.assertExchange(this.opts.exchange, 'topic', { durable: true });
-        // NOTE: Phase 1 uses `persistent: true` for durability but does not
-        // wait for publisher confirms (soa-rabbitmq's `newChannel()` returns
-        // a plain Channel, not a ConfirmChannel). This means a broker crash
-        // between `channel.publish` and disk persistence could drop messages.
-        // Phase 4+ will widen soa-rabbitmq with `newConfirmChannel()` and
-        // restore strict at-least-once semantics.
+        // Publishes use `persistent: true` for durability but do NOT wait for
+        // publisher confirms — `@saga-ed/soa-rabbitmq` exposes only a plain
+        // Channel today, not a ConfirmChannel. A broker crash between
+        // `channel.publish` and disk persistence could drop messages. Widen
+        // soa-rabbitmq with `newConfirmChannel()` to restore strict
+        // at-least-once.
 
         this.running = true;
         this.opts.logger.info(`[OutboxRelay] started (exchange=${this.opts.exchange})`);
@@ -139,9 +136,17 @@ export class OutboxRelay {
                 return;
             }
 
+            const publishedIds: string[] = [];
             for (const row of result.rows) {
-                await this.publishRow(client, row);
+                await this.publishRow(row);
+                publishedIds.push(row.event_id);
             }
+
+            // Batch the published_at update — one round-trip instead of N.
+            await client.query(
+                `UPDATE outbox_event SET published_at = NOW() WHERE event_id = ANY($1::uuid[])`,
+                [publishedIds],
+            );
 
             await client.query('COMMIT');
         } catch (err) {
@@ -156,7 +161,7 @@ export class OutboxRelay {
         }
     }
 
-    private async publishRow(client: PoolClient, row: OutboxRow): Promise<void> {
+    private async publishRow(row: OutboxRow): Promise<void> {
         if (!this.channel) {
             throw new Error('OutboxRelay channel missing');
         }
@@ -224,10 +229,9 @@ export class OutboxRelay {
 
                 if (!ok) {
                     // Channel buffer full. Wait for drain, but also listen
-                    // for 'error' / 'close' — without those, a connection
-                    // drop while we're awaiting drain leaves the row locked
-                    // under FOR UPDATE SKIP LOCKED forever and the relay
-                    // hangs.
+                    // for 'error'/'close' — without those, a connection drop
+                    // while awaiting drain leaves the row locked under FOR
+                    // UPDATE SKIP LOCKED forever and the relay hangs.
                     const ch = this.channel!;
                     await new Promise<void>((resolve, reject) => {
                         const onDrain = (): void => {
@@ -250,11 +254,6 @@ export class OutboxRelay {
                         ch.once('close', onClose);
                     });
                 }
-
-                await client.query(
-                    `UPDATE outbox_event SET published_at = NOW() WHERE event_id = $1`,
-                    [row.event_id],
-                );
 
                 this.opts.metrics?.onPublished(row.event_type, row.event_version);
                 span.setStatus({ code: SpanStatusCode.OK });

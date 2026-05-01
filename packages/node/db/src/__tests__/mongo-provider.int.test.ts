@@ -20,8 +20,7 @@ describe('MockMongoProvider (Inversify Factory with MockConfigManager)', () => {
     mockConfig = {
       configType: 'MONGO',
       instanceName: MOCK_INSTANCE_NAME,
-      host: 'localhost',
-      port: 27017,
+      hosts: ['localhost:27017'],
       database: 'testdb',
       username: 'user',
       password: 'pass',

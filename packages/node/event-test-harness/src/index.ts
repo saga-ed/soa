@@ -92,9 +92,23 @@ export interface StartInfraOpts {
  *   await infra.stop();
  */
 export async function startInfra(opts: StartInfraOpts = {}): Promise<InfraHandle> {
-    const [postgres, rabbitmq] = await Promise.all([
+    // allSettled (not Promise.all) so a partial-start failure doesn't strand
+    // the container that did come up — testcontainers leaks Docker resources
+    // until the next cleanup sweep otherwise.
+    const [pgResult, rmqResult] = await Promise.allSettled([
         new PostgreSqlContainer(opts.postgresImage ?? 'postgres:17-alpine').start(),
         new RabbitMQContainer(opts.rabbitmqImage ?? 'rabbitmq:3.13-management-alpine').start(),
     ]);
-    return new TestcontainersInfraHandle(postgres, rabbitmq);
+    if (pgResult.status === 'rejected' || rmqResult.status === 'rejected') {
+        if (pgResult.status === 'fulfilled') {
+            await pgResult.value.stop().catch(() => {});
+        }
+        if (rmqResult.status === 'fulfilled') {
+            await rmqResult.value.stop().catch(() => {});
+        }
+        throw pgResult.status === 'rejected'
+            ? pgResult.reason
+            : (rmqResult as PromiseRejectedResult).reason;
+    }
+    return new TestcontainersInfraHandle(pgResult.value, rmqResult.value);
 }

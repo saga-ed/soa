@@ -1,8 +1,10 @@
 // Canonical SQL for the consumed_events table. Per-consumer idempotency:
-// `INSERT ... ON CONFLICT DO NOTHING RETURNING event_id` returns 0 rows
-// if we've already processed this (consumer_name, event_id), so the handler
-// is skipped. Combined with publisher confirms + RabbitMQ persistence, this
-// gives at-least-once delivery + exactly-once semantics on the projection.
+// `INSERT ... ON CONFLICT DO NOTHING RETURNING event_id` returns 0 rows if
+// we've already processed this (consumer_name, event_id), so the handler is
+// skipped. Combined with persistent publishes (durability of in-flight
+// messages still has the broker-crash-pre-fsync gap noted in OutboxRelay
+// until soa-rabbitmq exposes a confirm channel), this gives at-least-once
+// delivery and effectively-exactly-once semantics on the projection.
 
 export const CONSUMED_EVENTS_SQL = `
 CREATE TABLE IF NOT EXISTS consumed_events (

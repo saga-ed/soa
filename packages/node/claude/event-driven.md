@@ -57,13 +57,15 @@ await prisma.$transaction(async (tx) => {
 });
 ```
 
-A separate process (or service boot) runs an `OutboxRelay` that polls the table and ships rows to RabbitMQ:
+A separate process (or service boot) runs an `OutboxRelay` that polls the table and ships rows to RabbitMQ. `pool`, `connectionManager`, `exchange`, and `logger` are all required. Any tx client exposing Prisma's `$executeRaw` template-tag method satisfies the `SqlTagExecutor` interface that `writeOutbox` accepts.
 
 ```ts
 import { OutboxRelay } from '@saga-ed/soa-event-outbox';
 
 const relay = new OutboxRelay({
-    pool, connectionManager, logger,
+    pool,
+    connectionManager,
+    logger,
     exchange: 'iam.events',
     metrics: observability.addOutbox(pool),
 });
@@ -72,32 +74,37 @@ await relay.start();
 
 ## Idempotent consumer (consumer side)
 
+`handlers` is a flat array; the consumer indexes it internally by `eventKey(eventType, eventVersion)` and rejects duplicate registrations.
+
 ```ts
-import { EventConsumer } from '@saga-ed/soa-event-consumer';
+import { EventConsumer, type EventHandler } from '@saga-ed/soa-event-consumer';
+
+const userCreatedV1: EventHandler<{ id: string; email: string }> = {
+    eventType: 'iam.user.created',
+    eventVersion: 1,
+    payloadSchema: UserCreatedV1,
+    async handle(envelope, payload, tx) {
+        await tx.query(
+            `INSERT INTO user_projection (id, email) VALUES ($1, $2)`,
+            [payload.id, payload.email],
+        );
+    },
+};
 
 const consumer = new EventConsumer({
-    pool, connectionManager, logger,
+    pool,
+    connectionManager,
+    logger,
     consumerName: 'admissions.iam-projection',
     queue: 'admissions.iam-projection',
     bindings: [{ exchange: 'iam.events', routingKey: 'iam.user.*' }],
-    handlers: {
-        'iam.user.created.v1': {
-            key: 'iam.user.created.v1',
-            payloadSchema: UserCreatedV1,
-            async handle(envelope, payload, tx) {
-                await tx.query(
-                    `INSERT INTO user_projection (id, email) VALUES ($1, $2)`,
-                    [payload.id, payload.email],
-                );
-            },
-        },
-    },
+    handlers: [userCreatedV1],
     metrics: observability.addConsumer(pool, 'admissions.iam-projection'),
 });
 await consumer.start();
 ```
 
-The consumer inserts into `consumed_events(consumer_name, event_id)` inside the same tx as the projection — duplicates short-circuit on the unique constraint.
+The consumer inserts into `consumed_events(consumer_name, event_id)` inside the same tx as the projection — duplicates short-circuit on the unique constraint. Malformed envelopes and unknown handler keys always nack-without-requeue (poison messages never loop).
 
 ## Hybrid contract testing
 

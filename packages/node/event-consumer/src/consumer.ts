@@ -1,4 +1,4 @@
-import type { Channel } from 'amqplib';
+import type { Channel, ConsumeMessage } from 'amqplib';
 import type { Pool, PoolClient } from 'pg';
 import type { ZodType } from 'zod';
 import type { ILogger } from '@saga-ed/soa-logger';
@@ -12,16 +12,42 @@ import {
 } from '@opentelemetry/api';
 import { EventEnvelopeSchema, type EventEnvelope } from '@saga-ed/soa-event-envelope';
 
+declare const EVENT_KEY_BRAND: unique symbol;
+
+/**
+ * `<eventType>.v<eventVersion>` formed by `eventKey()`. Branded so a raw string
+ * can't accidentally satisfy a handler-lookup parameter — the only way to
+ * mint one is the constructor, which guarantees the format.
+ */
+export type EventKey = string & { readonly [EVENT_KEY_BRAND]: true };
+
+export function eventKey(eventType: string, eventVersion: number): EventKey {
+    return `${eventType}.v${eventVersion}` as EventKey;
+}
+
 export class ConsumerVersionMismatchError extends Error {
-    constructor(public readonly key: string) {
+    constructor(public readonly key: EventKey) {
         super(`No handler registered for event key "${key}"`);
         this.name = 'ConsumerVersionMismatchError';
     }
 }
 
+/**
+ * Thrown by `buildHandlerMap` when two handlers share the same `(eventType,
+ * eventVersion)` — silent collisions used to be possible when handlers were
+ * passed as a `Record<string, EventHandler>` and a typo in the key string
+ * shadowed the intended handler.
+ */
+export class DuplicateHandlerError extends Error {
+    constructor(public readonly key: EventKey) {
+        super(`Duplicate handler registered for event key "${key}"`);
+        this.name = 'DuplicateHandlerError';
+    }
+}
+
 export interface EventHandler<T> {
-    /** "<eventType>.v<eventVersion>" — must match envelope's lookup key. */
-    key: string;
+    eventType: string;
+    eventVersion: number;
     payloadSchema: ZodType<T>;
     /**
      * Run the projection / side effect within the supplied tx-scoped client.
@@ -34,6 +60,26 @@ export interface EventHandler<T> {
         payload: T,
         tx: PoolClient,
     ) => Promise<void>;
+}
+
+export type HandlerMap = ReadonlyMap<EventKey, EventHandler<unknown>>;
+
+/**
+ * Build the handler lookup map from a flat array. Throws on duplicate
+ * `(eventType, eventVersion)`. Use this instead of constructing a Map by
+ * hand so the EventKey invariant is enforced at the single registration
+ * point.
+ */
+export function buildHandlerMap(
+    handlers: ReadonlyArray<EventHandler<unknown>>,
+): HandlerMap {
+    const map = new Map<EventKey, EventHandler<unknown>>();
+    for (const h of handlers) {
+        const key = eventKey(h.eventType, h.eventVersion);
+        if (map.has(key)) throw new DuplicateHandlerError(key);
+        map.set(key, h);
+    }
+    return map;
 }
 
 export interface EventConsumerBinding {
@@ -73,11 +119,15 @@ export interface EventConsumerOpts {
     /**
      * One or more `{ exchange, routingKey }` pairs to bind this queue to.
      * A consumer can fan in events from multiple upstream domains via the
-     * same queue (single handlers map dispatches by `<eventType>.v<version>`).
+     * same queue (handlers map dispatches by `<eventType>.v<version>`).
      */
     bindings: EventConsumerBinding[];
-    /** Handlers keyed by "<eventType>.v<eventVersion>". */
-    handlers: Record<string, EventHandler<unknown>>;
+    /**
+     * Flat list of handlers — internally indexed by `eventKey(eventType,
+     * eventVersion)`. Pass via `buildHandlerMap()` if you already have a
+     * map; otherwise the consumer builds it itself and rejects duplicates.
+     */
+    handlers: ReadonlyArray<EventHandler<unknown>>;
     /** Prefetch count (default 10). */
     prefetch?: number;
     /**
@@ -86,7 +136,11 @@ export interface EventConsumerOpts {
      * to that DLX. On ANY handler error, the message is nacked WITHOUT
      * requeue, causing RabbitMQ to route it to the DLX → DLQ (fail-fast:
      * ops drain via the RabbitMQ management UI). Without this option,
-     * errors nack-with-requeue.
+     * handler errors nack-with-requeue (transient errors retry).
+     *
+     * Note: malformed envelopes and unknown-handler-key errors ALWAYS nack
+     * without requeue, regardless of `dlq` — re-delivering an unparseable
+     * or unrouteable message just creates a tight poison loop.
      */
     dlq?: DlqConfig;
     /** Optional Prometheus hooks. No-op when undefined. */
@@ -101,17 +155,22 @@ const tracer = trace.getTracer('@saga-ed/soa-event-consumer');
  *
  * On each message:
  *   1. Parse envelope (Zod-validate the wire shape).
- *   2. Look up handler by "<eventType>.v<eventVersion>"; missing → throw.
+ *   2. Look up handler by `eventKey(eventType, eventVersion)`; missing → throw
+ *      ConsumerVersionMismatchError (treated as poison, never requeued).
  *   3. BEGIN; INSERT consumed_events ON CONFLICT DO NOTHING.
  *   4. If 0 rows inserted → already processed; COMMIT and ack.
  *   5. Else: validate payload, run handler within the tx, COMMIT, ack.
- *   6. On error: ROLLBACK, nack — to DLQ if configured, requeue otherwise.
+ *   6. On handler error: ROLLBACK, nack — to DLQ if configured, requeue
+ *      otherwise. Parse / unknown-key errors always nack without requeue.
  */
 export class EventConsumer {
     private channel: Channel | null = null;
     private consumerTag: string | null = null;
+    private readonly handlerMap: HandlerMap;
 
-    constructor(private readonly opts: EventConsumerOpts) {}
+    constructor(private readonly opts: EventConsumerOpts) {
+        this.handlerMap = buildHandlerMap(opts.handlers);
+    }
 
     async start(): Promise<void> {
         this.channel = await this.opts.connectionManager.newChannel();
@@ -149,22 +208,11 @@ export class EventConsumer {
             );
         }
 
-        const useDlq = Boolean(this.opts.dlq);
         const consumeRes = await this.channel.consume(
             this.opts.queue,
             (msg) => {
                 if (!msg) return;
-                void this.handleMessage(msg.content)
-                    .then(() => this.channel?.ack(msg))
-                    .catch((err) => {
-                        this.opts.logger.error(
-                            `[EventConsumer:${this.opts.consumerName}] handler error → ${useDlq ? 'DLQ' : 'requeue'}`,
-                            err instanceof Error ? err : undefined,
-                        );
-                        // useDlq: nack-without-requeue → DLX routes to DLQ.
-                        // Otherwise: nack-with-requeue (legacy behavior).
-                        this.channel?.nack(msg, false, !useDlq);
-                    });
+                void this.dispatch(msg);
             },
             { noAck: false },
         );
@@ -195,16 +243,37 @@ export class EventConsumer {
         this.opts.logger.info(`[EventConsumer:${this.opts.consumerName}] stopped`);
     }
 
+    private async dispatch(msg: ConsumeMessage): Promise<void> {
+        try {
+            await this.handleMessage(msg.content);
+            this.channel?.ack(msg);
+        } catch (err) {
+            // Poison errors never requeue — re-delivering an unparseable or
+            // unrouteable message just spins the same failure forever and
+            // burns broker + log + metrics quota.
+            const poison =
+                err instanceof MalformedEnvelopeError ||
+                err instanceof ConsumerVersionMismatchError;
+            const requeue = poison ? false : !this.opts.dlq;
+            const fate = poison ? 'drop' : this.opts.dlq ? 'DLQ' : 'requeue';
+            this.opts.logger.error(
+                `[EventConsumer:${this.opts.consumerName}] handler error → ${fate}`,
+                err instanceof Error ? err : undefined,
+            );
+            this.channel?.nack(msg, false, requeue);
+        }
+    }
+
     private async handleMessage(buffer: Buffer): Promise<void> {
         let envelope: EventEnvelope;
         try {
             const raw = JSON.parse(buffer.toString('utf8')) as unknown;
             envelope = EventEnvelopeSchema.parse(raw);
         } catch (err) {
-            // Malformed envelope: surface as error so DLQ can quarantine it.
-            // No metrics call here — eventType/version unknown.
-            throw new Error(
-                `Malformed envelope: ${err instanceof Error ? err.message : String(err)}`,
+            // Use a typed error so `dispatch` can route this branch to a
+            // bounded `reason_class` and to the never-requeue path.
+            throw new MalformedEnvelopeError(
+                err instanceof Error ? err.message : String(err),
             );
         }
 
@@ -261,8 +330,8 @@ export class EventConsumer {
     }
 
     private async processEnvelope(envelope: EventEnvelope): Promise<void> {
-        const key = `${envelope.eventType}.v${envelope.eventVersion}`;
-        const handler = this.opts.handlers[key];
+        const key = eventKey(envelope.eventType, envelope.eventVersion);
+        const handler = this.handlerMap.get(key);
         if (!handler) {
             throw new ConsumerVersionMismatchError(key);
         }
@@ -270,6 +339,7 @@ export class EventConsumer {
         const payload = handler.payloadSchema.parse(envelope.payload);
 
         const client = await this.opts.pool.connect();
+        let clientPoisoned = false;
         try {
             await client.query('BEGIN');
 
@@ -302,12 +372,31 @@ export class EventConsumer {
         } catch (err) {
             try {
                 await client.query('ROLLBACK');
-            } catch {
-                // ignore rollback failures
+            } catch (rollbackErr) {
+                // Mid-transaction connection loss can cause both the original
+                // op and the ROLLBACK to fail. The pool client is now in an
+                // unknown state and must NOT be recycled — release(err)
+                // tells node-postgres to destroy it.
+                clientPoisoned = true;
+                this.opts.logger.error(
+                    `[EventConsumer:${this.opts.consumerName}] ROLLBACK failed; destroying client`,
+                    rollbackErr instanceof Error ? rollbackErr : undefined,
+                );
             }
             throw err;
         } finally {
-            client.release();
+            if (clientPoisoned) {
+                client.release(new Error('rollback failed; client destroyed'));
+            } else {
+                client.release();
+            }
         }
+    }
+}
+
+export class MalformedEnvelopeError extends Error {
+    constructor(detail: string) {
+        super(`Malformed envelope: ${detail}`);
+        this.name = 'MalformedEnvelopeError';
     }
 }

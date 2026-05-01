@@ -88,3 +88,54 @@ describe('EventEnvelopeMetaSchema', () => {
         expect(result.success).toBe(true);
     });
 });
+
+describe('buildEnvelope', () => {
+    it('omits meta entirely when no carrier and no override are present', () => {
+        const env = buildEnvelope({
+            eventType: 'foo.bar',
+            eventVersion: 1,
+            aggregateType: 'thing',
+            aggregateId: 'a',
+            payload: {},
+        });
+        // Without an active OTel SDK in this test env, propagation.inject is
+        // a no-op, so no carrier merges in. The contract is meta === undefined
+        // (not an empty object) — adopters check `if (env.meta)` to gate
+        // re-injection on the wire.
+        expect(env.meta).toBeUndefined();
+    });
+
+    it('explicit meta override wins over (and supplements) the active-context carrier', () => {
+        const env = buildEnvelope({
+            eventType: 'foo.bar',
+            eventVersion: 1,
+            aggregateType: 'thing',
+            aggregateId: 'a',
+            payload: {},
+            meta: {
+                traceparent: '00-cafebabecafebabecafebabecafebabe-1234567812345678-01',
+                correlationId: 'corr-123',
+            },
+        });
+        expect(env.meta?.traceparent).toBe(
+            '00-cafebabecafebabecafebabecafebabe-1234567812345678-01',
+        );
+        expect(env.meta?.correlationId).toBe('corr-123');
+    });
+
+    it('uses the supplied occurredAt and eventId when provided', () => {
+        const at = new Date('2026-01-02T03:04:05.000Z');
+        const id = '00000000-0000-4000-8000-00000000abcd';
+        const env = buildEnvelope({
+            eventId: id,
+            occurredAt: at,
+            eventType: 'foo.bar',
+            eventVersion: 1,
+            aggregateType: 'thing',
+            aggregateId: 'a',
+            payload: {},
+        });
+        expect(env.eventId).toBe(id);
+        expect(env.occurredAt).toBe(at.toISOString());
+    });
+});

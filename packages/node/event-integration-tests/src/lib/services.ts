@@ -49,13 +49,21 @@ export function spawnService(opts: SpawnOpts): SpawnedService {
         stdio: ['ignore', 'pipe', 'pipe'],
     });
     const baseUrl = `http://localhost:${opts.port}`;
+    const tag = opts.serviceDir.split('/').pop();
+
+    // Without an `error` listener, an ENOENT on `node` or EACCES on
+    // dist/main.js becomes an uncaught exception that crashes the whole
+    // vitest worker with a confusing stack instead of failing the test.
+    proc.on('error', (err) => {
+        process.stderr.write(`[${tag}:spawn-error] ${err.message}\n`);
+    });
 
     // Surface logs from the subprocess so test output shows what failed.
     proc.stdout?.on('data', (data: Buffer) => {
-        process.stdout.write(`[${opts.serviceDir.split('/').pop()}] ${data.toString()}`);
+        process.stdout.write(`[${tag}] ${data.toString()}`);
     });
     proc.stderr?.on('data', (data: Buffer) => {
-        process.stderr.write(`[${opts.serviceDir.split('/').pop()}:err] ${data.toString()}`);
+        process.stderr.write(`[${tag}:err] ${data.toString()}`);
     });
 
     const stop = async (): Promise<void> => {
@@ -63,6 +71,9 @@ export function spawnService(opts: SpawnOpts): SpawnedService {
         proc.kill('SIGTERM');
         await new Promise<void>((resolve) => {
             const t = setTimeout(() => {
+                process.stderr.write(
+                    `[${tag}] SIGTERM did not exit within 5s; sending SIGKILL\n`,
+                );
                 proc.kill('SIGKILL');
                 resolve();
             }, 5_000);

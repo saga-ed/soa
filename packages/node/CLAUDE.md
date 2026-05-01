@@ -29,7 +29,7 @@ See [/packages/CLAUDE.md](../CLAUDE.md) for packages overview.
 | `aws-util/` | AWS SDK utilities for S3, SQS, and SNS. Helper functions for common AWS operations. | Tier |
 | `test-util/` | Vitest testing utilities with custom matchers and test helpers. **Usage:** `import { createMockRequest } from '@saga-ed/soa-test-util'` | Tier |
 | `event-envelope/` | Zod-validated cross-service event envelope (id, type, version, occurredAt, traceparent, payload). **Usage:** `import { EventEnvelopeSchema } from '@saga-ed/soa-event-envelope'` | [event-driven.md](./claude/event-driven.md) |
-| `event-outbox/` | Transactional outbox: `writeOutbox()` writes inside the same pg tx as your domain change; `startRelay()` ships rows to RabbitMQ with at-least-once delivery. | [event-driven.md](./claude/event-driven.md) |
+| `event-outbox/` | Transactional outbox: `writeOutbox()` writes inside the same pg tx as your domain change; `new OutboxRelay({...}).start()` ships rows to RabbitMQ with at-least-once delivery. | [event-driven.md](./claude/event-driven.md) |
 | `event-consumer/` | Idempotent RabbitMQ consumer with `consumed_events` dedup table, Zod runtime validation, OTel trace propagation. | [event-driven.md](./claude/event-driven.md) |
 | `observability/` | OpenTelemetry tracing setup, Prometheus metrics for outbox/consumer, Express error middleware. **Usage:** `import { initTracing } from '@saga-ed/soa-observability'` | [event-driven.md](./claude/event-driven.md) |
 | `event-test-harness/` | Testcontainers helpers for spinning up Postgres + RabbitMQ in integration tests. **Usage:** `import { startInfra } from '@saga-ed/soa-event-test-harness'` | [event-driven.md](./claude/event-driven.md) |

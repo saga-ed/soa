@@ -16,13 +16,6 @@ export interface Observability {
     /** prom-client registry served at GET /metrics. */
     registry: Registry;
     /**
-     * Wire the logger used for gauge-collect failures and metrics-route
-     * errors. Without this, gauge SQL failures are silent (a stale value
-     * masks DB outages); after binding, failures surface via the logger
-     * AND `gauge_collect_failures_total`.
-     */
-    bindLogger: (logger: ILogger) => void;
-    /**
      * Register publisher counters + the outbox lag gauge. The pool feeds
      * the gauge's `collect()` callback. Returns the metrics callbacks
      * to hand to OutboxRelay opts.
@@ -50,8 +43,16 @@ export interface Observability {
  * makes "this service has no outbox" explicit at the call site (you
  * simply don't call `addOutbox`) instead of returning no-op callbacks
  * that silently do nothing.
+ *
+ * `logger` is required at construction (rather than wired later) so that
+ * gauge-collect failures during the bootstrap window — e.g. during the
+ * very first scrape, before any later `bindLogger()` could fire — still
+ * land in the structured log stream.
  */
-export function createObservability(serviceName: string): Observability {
+export function createObservability(
+    serviceName: string,
+    logger: ILogger,
+): Observability {
     const registry = new Registry();
     const prefix = `${serviceName.replace(/-/g, '_')}_`;
     collectDefaultMetrics({ register: registry, prefix });
@@ -63,19 +64,15 @@ export function createObservability(serviceName: string): Observability {
         registers: [registry],
     });
 
-    let logger: ILogger | null = null;
     const reportGaugeFailure = (gauge: string, err: unknown): void => {
         gaugeFailures.inc({ gauge });
-        logger?.warn(
+        logger.warn(
             `[observability] ${gauge} collect() failed: ${err instanceof Error ? err.message : String(err)}`,
         );
     };
 
     return {
         registry,
-        bindLogger: (l) => {
-            logger = l;
-        },
         addOutbox: (pool) => createOutboxMetrics(registry, pool, reportGaugeFailure),
         addConsumer: (pool, consumerName) =>
             createConsumerMetrics(registry, pool, consumerName, reportGaugeFailure),
@@ -205,10 +202,12 @@ function createConsumerMetrics(
 
 // Map a free-form error message to a small, bounded set of label values so the
 // Prometheus series cardinality can't blow up on noisy errors (timeouts that
-// embed IPs/timestamps, postgres messages with row IDs, etc).
-function classifyReason(reason: string): string {
+// embed IPs/timestamps, postgres messages with row IDs, etc). Exported under
+// a __ prefix so unit tests can pin the mapping table without enlarging the
+// public API.
+export function classifyReason(reason: string): string {
     const r = reason.toLowerCase();
-    if (r.includes('timeout') || r.includes('etimedout')) return 'timeout';
+    if (r.includes('timeout') || r.includes('timed out') || r.includes('etimedout')) return 'timeout';
     if (r.includes('econnrefused') || r.includes('enotfound') || r.includes('econnreset')) return 'network';
     if (r.includes('malformed envelope')) return 'malformed_envelope';
     if (r.includes('no handler registered')) return 'no_handler';

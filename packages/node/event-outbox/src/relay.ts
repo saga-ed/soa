@@ -28,6 +28,22 @@ export interface OutboxRelayOpts {
     pollIntervalMs?: number;
     /** Max rows per poll. Defaults to 100. */
     batchSize?: number;
+    /**
+     * Max time to wait for a `'drain'` event when the AMQP channel buffer is
+     * full. Without a cap, a silently-dropped TCP socket (NAT timeout, network
+     * blackhole) can wedge the relay because none of `drain`/`error`/`close`
+     * fires until amqplib's heartbeat eventually closes the connection.
+     * Defaults to 30s.
+     */
+    drainTimeoutMs?: number;
+    /**
+     * Called when the relay encounters an unrecoverable pg error
+     * (auth failure, missing role, missing database, missing table). Default
+     * behavior: rethrow out of `tick()` so the parent process surfaces it via
+     * `process.on('uncaughtException')` and the orchestrator restarts.
+     * Override to e.g. trigger a graceful shutdown.
+     */
+    onFatalError?: (err: Error) => void;
     /** Optional Prometheus hooks. No-op when undefined. */
     metrics?: OutboxMetrics;
     logger: ILogger;
@@ -104,10 +120,25 @@ export class OutboxRelay {
         try {
             await this.drainBatch();
         } catch (err) {
-            this.opts.logger.error(
-                '[OutboxRelay] poll failed',
-                err instanceof Error ? err : undefined,
-            );
+            const e = err instanceof Error ? err : new Error(String(err));
+            if (isFatalPgError(e)) {
+                // Configuration / permission errors aren't going to fix
+                // themselves on the next tick — log loudly and stop the loop
+                // so the orchestrator notices instead of burying 2 errors/sec
+                // in Sentry forever.
+                this.opts.logger.error(
+                    '[OutboxRelay] fatal pg error; halting',
+                    e,
+                );
+                this.running = false;
+                if (this.opts.onFatalError) {
+                    this.opts.onFatalError(e);
+                } else {
+                    throw e;
+                }
+                return;
+            }
+            this.opts.logger.error('[OutboxRelay] poll failed', e);
         }
         this.scheduleNext();
     }
@@ -118,6 +149,7 @@ export class OutboxRelay {
         }
         const batchSize = this.opts.batchSize ?? 100;
         const client = await this.opts.pool.connect();
+        let clientPoisoned = false;
         try {
             await client.query('BEGIN');
             const result = await client.query<OutboxRow>(
@@ -152,12 +184,23 @@ export class OutboxRelay {
         } catch (err) {
             try {
                 await client.query('ROLLBACK');
-            } catch {
-                // Ignore rollback failures
+            } catch (rollbackErr) {
+                // Mid-tx connection loss can fail both ops. The pg client is
+                // in unknown state and must NOT be recycled — `release(err)`
+                // tells node-postgres to destroy it.
+                clientPoisoned = true;
+                this.opts.logger.error(
+                    '[OutboxRelay] ROLLBACK failed; destroying client',
+                    rollbackErr instanceof Error ? rollbackErr : undefined,
+                );
             }
             throw err;
         } finally {
-            client.release();
+            if (clientPoisoned) {
+                client.release(new Error('rollback failed; client destroyed'));
+            } else {
+                client.release();
+            }
         }
     }
 
@@ -229,26 +272,40 @@ export class OutboxRelay {
 
                 if (!ok) {
                     // Channel buffer full. Wait for drain, but also listen
-                    // for 'error'/'close' — without those, a connection drop
-                    // while awaiting drain leaves the row locked under FOR
-                    // UPDATE SKIP LOCKED forever and the relay hangs.
+                    // for 'error'/'close' AND a hard timeout — without all
+                    // three, a silently-dropped TCP socket can wedge the
+                    // relay because none of those events arrive until
+                    // amqplib's heartbeat eventually closes the connection,
+                    // and the row stays locked under FOR UPDATE SKIP LOCKED.
                     const ch = this.channel!;
+                    const timeoutMs = this.opts.drainTimeoutMs ?? 30_000;
                     await new Promise<void>((resolve, reject) => {
-                        const onDrain = (): void => {
+                        const cleanup = (): void => {
+                            clearTimeout(timer);
+                            ch.removeListener('drain', onDrain);
                             ch.removeListener('error', onError);
                             ch.removeListener('close', onClose);
+                        };
+                        const onDrain = (): void => {
+                            cleanup();
                             resolve();
                         };
                         const onError = (err: Error): void => {
-                            ch.removeListener('drain', onDrain);
-                            ch.removeListener('close', onClose);
+                            cleanup();
                             reject(err);
                         };
                         const onClose = (): void => {
-                            ch.removeListener('drain', onDrain);
-                            ch.removeListener('error', onError);
+                            cleanup();
                             reject(new Error('channel closed while awaiting drain'));
                         };
+                        const timer = setTimeout(() => {
+                            cleanup();
+                            reject(
+                                new Error(
+                                    `timed out after ${timeoutMs}ms awaiting channel drain`,
+                                ),
+                            );
+                        }, timeoutMs);
                         ch.once('drain', onDrain);
                         ch.once('error', onError);
                         ch.once('close', onClose);
@@ -272,4 +329,24 @@ export class OutboxRelay {
             }
         });
     }
+}
+
+/**
+ * SQLSTATE codes that indicate a misconfiguration or missing object that the
+ * relay cannot recover from by retrying. Any of these surfacing repeatedly
+ * means manual intervention (rotate creds, grant role, run migration) — the
+ * relay should fail loudly so the orchestrator can restart and alerts fire,
+ * rather than burning quota with `ERROR`-level logs forever.
+ *
+ * - 28P01: invalid_password (auth failure)
+ * - 28000: invalid_authorization_specification
+ * - 42501: insufficient_privilege (role lacks SELECT/UPDATE)
+ * - 3D000: invalid_catalog_name (database missing)
+ * - 42P01: undefined_table (outbox_event missing — migration not run)
+ */
+const FATAL_PG_CODES = new Set(['28P01', '28000', '42501', '3D000', '42P01']);
+
+function isFatalPgError(err: Error): boolean {
+    const code = (err as { code?: unknown }).code;
+    return typeof code === 'string' && FATAL_PG_CODES.has(code);
 }

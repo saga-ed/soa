@@ -1,0 +1,26 @@
+{
+    "name": "@saga-ed/soa-event-integration-tests",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test": "vitest run --passWithNoTests",
+        "test:int": "vitest run --config vitest.int.config.ts",
+        "check-types": "tsc --noEmit",
+        "lint": "eslint src/",
+        "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "@saga-ed/soa-event-test-harness": "workspace:*",
+        "amqplib": "^0.10.4",
+        "pg": "^8.13.0"
+    },
+    "devDependencies": {
+        "@saga-ed/soa-typescript-config": "workspace:*",
+        "@types/amqplib": "^0.10.4",
+        "@types/node": "^24.0.3",
+        "@types/pg": "^8.11.10",
+        "typescript": "5.8.2",
+        "vitest": "^1.6.1"
+    }
+}

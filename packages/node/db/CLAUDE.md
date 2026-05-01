@@ -150,28 +150,30 @@ The end-to-end paths the unit tests can't reach — TLS handshake, SCRAM auth, C
 
 #### Setup
 
-The targets are private-VPC EC2; reach them with three SSM port-forwards, one per shell or backgrounded:
+The targets are private-VPC EC2 with no stable instance IDs (db-host can be replaced; staging mongo runs under an ASG). Always resolve the current instance at runtime:
 
 ```bash
-# dev-shared-mongo
-aws --profile saga-admin-dev ssm start-session \
-  --target i-0090c49ed82e9b90c \
-  --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["27017"],"localPortNumber":["27117"]}' &
+# Resolve current targets
+DB_HOST=$(aws --profile saga-admin-dev ssm get-parameter \
+  --name /dev/db-host/instance-id --query Parameter.Value --output text)
+STG_MONGO=$(aws --profile saga-admin-dev ec2 describe-instances \
+  --filters Name=tag:aws:autoscaling:groupName,Values=saga-mongodb-staging \
+            Name=instance-state-name,Values=running \
+  --query 'Reservations[0].Instances[0].InstanceId' --output text)
 
-# dev-auth-mongo (testbed — see iac cloudformation_templates/dbs/db_host/dev-auth-mongo/)
-aws --profile saga-admin-dev ssm start-session \
-  --target i-0090c49ed82e9b90c \
+# Open three SSM port-forwards (one per shell, or backgrounded)
+aws --profile saga-admin-dev ssm start-session --target "$DB_HOST" \
   --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["27020"],"localPortNumber":["27120"]}' &
-
-# staging mongo (find the current ASG instance via aws ec2 describe-instances
-# --filters Name=tag:aws:autoscaling:groupName,Values=saga-mongodb-staging)
-aws --profile saga-admin-dev ssm start-session \
-  --target <staging-mongo-instance-id> \
+  --parameters '{"portNumber":["27017"],"localPortNumber":["27117"]}' &  # dev-shared-mongo
+aws --profile saga-admin-dev ssm start-session --target "$DB_HOST" \
   --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["27017"],"localPortNumber":["27317"]}' &
+  --parameters '{"portNumber":["27020"],"localPortNumber":["27120"]}' &  # dev-auth-mongo (testbed)
+aws --profile saga-admin-dev ssm start-session --target "$STG_MONGO" \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["27017"],"localPortNumber":["27317"]}' &  # staging shared mongo
 ```
+
+The `dev-auth-mongo` testbed lives on db-host alongside `dev-shared-mongo`; both share the same `/dev/db-host/instance-id` lookup. The dev-auth-mongo setup itself is in iac at `cloudformation_templates/dbs/db_host/dev-auth-mongo/`.
 
 Then run the smoke:
 

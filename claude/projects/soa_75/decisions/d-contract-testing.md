@@ -2,6 +2,10 @@
 
 RESOLVED 2026-04-30: Three layers, zero new infra: (1) publisher snapshot-diff in CI, (2) per-consumer `consumed-events.json` declarations cross-checked in CI, (3) Zod runtime validation at consume time.
 
+**Implementation status as of 2026-05-05:**
+- **Layer 3 (runtime Zod validation):** ✅ implemented in `@saga-ed/soa-event-consumer` and used by adopters in rostering #138 and program-hub #60.
+- **Layers 1 + 2 (snapshot + pins + CI gate):** ⚠️ documented here and demonstrated in `soa_event_driven_example` (`tools/contract-check/`), but **not yet lifted into soa**. Adopters today cannot follow the full workflow — they have runtime validation only. Lifting the PoC tooling into soa is tracked as companion work.
+
 ## Context
 
 Two failure modes the POC must prevent reaching production:

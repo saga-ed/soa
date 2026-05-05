@@ -54,6 +54,26 @@ tooling answers the operational questions: "is the outbox falling behind",
      publish rate.
    - Anonymous Admin role enabled so the dev experience is one-click.
 
+## Import-order requirement (added 2026-05-05)
+
+**`initTracing(serviceName)` MUST be the first statement in `main.ts`, before any application imports.**
+
+`@saga-ed/soa-event-outbox` and `@saga-ed/soa-event-consumer` (and other packages) call `trace.getTracer()` at module load. If those modules are imported before OTel has initialized, they cache a no-op tracer for the rest of the process lifetime — and no spans appear for outbox publish or consume operations.
+
+```typescript
+// CORRECT — initTracing first, then everything else:
+import { initTracing, shutdownTracing } from '@saga-ed/soa-observability';
+const tracingHandle = initTracing('iam-api');
+
+import { container } from './inversify.config.js';   // safe now
+import { ConnectionManager } from '@saga-ed/soa-rabbitmq';
+// ...
+```
+
+**Symptom of getting it wrong:** HTTP request spans appear in Jaeger / X-Ray; the event-driven hop (publish → consume) is invisible. Often mis-diagnosed as "broker not propagating context."
+
+Both rostering #138 and program-hub #60 hit this footgun and converged on the import-first pattern. See `d-consumer-resilience.md` for the broader operational pattern set.
+
 ## Why manual instrumentation over auto
 
 - ESM + tsup's `skipNodeModulesBundle: true` produces a bundle where

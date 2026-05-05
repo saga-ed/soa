@@ -2,6 +2,17 @@
 
 RESOLVED 2026-04-30: Four packages — `@example/envelope` + per-publisher `@example/{identity,catalog,admissions}-events`. Mirrors the back-port target shape; ownership visible in `package.json` deps.
 
+**Validated in adopters as of 2026-05-05:** the per-family pattern was applied directly:
+
+| PoC package (in `soa_event_driven_example`) | Adopter package | Owner repo |
+|---|---|---|
+| `@example/envelope` | `@saga-ed/soa-event-envelope` | soa (shared) |
+| `@example/identity-events` | `@saga-ed/iam-events` | rostering |
+| `@example/catalog-events` | `@saga-ed/programs-events` | program-hub |
+| `@example/admissions-events` | `@saga-ed/scheduling-events` | program-hub |
+
+The per-publisher families landed cleanly in their owning repos with no friction. Naming convention confirmed: `@saga-ed/<domain>-events` where `<domain>` is the publisher's bounded context (not its service name). One known gap: the events-package owner is also responsible for wire-format enum mapping helpers — see `d-publisher-migration.md` § 2 for that pattern.
+
 ## Context
 
 How should event Zod schemas be organized as npm packages? The choice affects publisher-consumer release coupling, contract-check tool structure, and how lift-and-shift to soa fleet repos works.

@@ -69,4 +69,46 @@ describe('createOutboxPool', () => {
         );
         expect(getOpts(pool).options).toBe('-c statement_timeout=5000');
     });
+
+    it('poolOverrides.max wins over the top-level max option', () => {
+        const pool = createOutboxPool(
+            'postgresql://u:p@h:5432/db',
+            { max: 2, poolOverrides: { max: 8 } },
+        );
+        expect(getOpts(pool).max).toBe(8);
+    });
+
+    it('treats present-but-empty ?schema= the same as absent', () => {
+        const pool = createOutboxPool('postgresql://u:p@h:5432/db?schema=');
+        expect(getOpts(pool).options).toBeUndefined();
+    });
+
+    it('throws on a non-URL connection string with a useful message', () => {
+        // libpq KV form ("host=… dbname=…") and other non-URL strings are not
+        // supported. We surface a helpful error rather than letting URL throw
+        // a raw TypeError that points at the wrong line.
+        expect(() => createOutboxPool('host=/var/run dbname=app')).toThrow(
+            /URL-form connection string/,
+        );
+        expect(() => createOutboxPool('not a url')).toThrow(/URL-form/);
+    });
+
+    it('rejects a schema name with spaces or special chars (libpq injection guard)', () => {
+        // A schema value of ` pr_142 -c statement_timeout=0` would inject a
+        // second startup parameter via the `-c search_path=…` form. The
+        // identifier-regex check forbids it.
+        expect(() =>
+            createOutboxPool('postgresql://u:p@h/db?schema=pr_142%20-c%20statement_timeout%3D0'),
+        ).toThrow(/unquoted-identifier|safely interpolated/i);
+
+        expect(() => createOutboxPool('postgresql://u:p@h/db?schema=foo%3Bbar')).toThrow(
+            /safely interpolated/i,
+        );
+    });
+
+    it('accepts hyphen-free schema names that match Postgres unquoted identifiers', () => {
+        // pr_142 (underscore) and Pr142 (mixed case) both pass.
+        expect(() => createOutboxPool('postgresql://u:p@h/db?schema=pr_142')).not.toThrow();
+        expect(() => createOutboxPool('postgresql://u:p@h/db?schema=Pr142')).not.toThrow();
+    });
 });

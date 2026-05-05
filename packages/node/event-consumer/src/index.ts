@@ -1,4 +1,5 @@
 export { CONSUMED_EVENTS_SQL, PRISMA_MODEL_FRAGMENT } from './schema.js';
+export { applyPreviewTag } from '@saga-ed/soa-event-envelope';
 export {
     EventConsumer,
     ConsumerVersionMismatchError,

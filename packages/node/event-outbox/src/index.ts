@@ -5,3 +5,5 @@ export {
     type OutboxRelayOpts,
     type OutboxMetrics,
 } from './relay.js';
+export { createOutboxPool, type CreateOutboxPoolOpts } from './create-pool.js';
+export { applyPreviewTag } from '@saga-ed/soa-event-envelope';

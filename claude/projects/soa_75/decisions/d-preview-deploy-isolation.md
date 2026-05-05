@@ -89,6 +89,22 @@ Without step 2, orphaned exchanges and queues accumulate on the broker, which is
 - **Broker-only isolation** wouldn't prevent migration conflicts. Prisma migrations would either run unconditionally (clobbering) or skip (drifting from the per-PR schema layout).
 - **Together** they make a PR-preview a fully self-contained eventing stack on shared infrastructure.
 
+`createOutboxPool` enforces this pairing as a startup invariant: it asserts that `?schema=` in `DATABASE_URL` and `EVENT_PREVIEW_TAG` are either both set or both absent, throwing with a directional error message otherwise. A half-applied state silently leaks events across PRs (broker-leak when schema-without-tag, DB-leak when tag-without-schema), and the failure mode wouldn't surface until production traffic hit it. Closing it at boot keeps misconfiguration from making it past first deploy.
+
+## Supported `DATABASE_URL` shape (createOutboxPool)
+
+The helper accepts only URL-form connection strings (`postgresql://…`). The libpq KV form (`host=… dbname=…`) is rejected with a helpful error.
+
+The optional `?schema=<name>` query parameter must match `[A-Za-z_][A-Za-z0-9_]*` — Postgres unquoted-identifier rules. Hyphenated preview identifiers like `pr-42` belong to AWS resource names; adopter pipelines convert to `pr_42` (underscore) via bash `${IDENTIFIER//-/_}` before constructing the URL. The helper's regex prevents libpq-option injection through that interpolation point.
+
+Other URL params (`?options=`, `?sslmode=`, etc.) ride along verbatim via `connectionString` and are NOT interpreted by the helper. The full adopter URL form, used by both rostering #138 and program-hub #60, looks like:
+
+```
+postgresql://u:p@host:5432/db?schema=pr_42&options=-c%20search_path%3Dpr_42
+```
+
+The helper parses `?schema=`, sets a top-level `options: '-c search_path=pr_42'` on the pg.Pool config (which overrides the URL's `?options=`), and otherwise lets the URL ride through. Adopters needing additional libpq options (e.g. `statement_timeout`) should use `opts.poolOverrides.options` to set the full string explicitly — that overrides the helper's default and is documented as the escape hatch.
+
 ## Local-vs-prod divergences
 
 - Production uses `EVENT_PREVIEW_TAG=""` (empty); the `tagged()` helper is a no-op and exchanges/queues use their canonical names.

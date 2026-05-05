@@ -35,13 +35,32 @@ const SCHEMA_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * resolve to the same schema — the load-bearing piece of preview-environment
  * isolation (see d-preview-deploy-isolation.md).
  *
- * In production the Prisma URL has no `?schema=…`, the `options` are unset,
- * and the helper behaves like a plain `new Pool({ connectionString })`.
+ * The helper is intentionally production-safe: when neither `?schema=` nor
+ * `EVENT_PREVIEW_TAG` are set, it's equivalent to
+ * `new Pool({ connectionString, max: 2 })`. The startup coherence assert
+ * (below) ensures preview state can't leak in by accident — that's what
+ * makes a single helper safe across both environments.
  *
- * Throws if `databaseUrl` is not a parseable URL or if the `schema` value
- * contains characters outside the Postgres unquoted-identifier set
- * (`[A-Za-z_][A-Za-z0-9_]*`). The connection-string form (`host=… dbname=…`)
- * is not supported — pass a URL.
+ * Supported `databaseUrl` shape:
+ *   - URL form only (`postgresql://…`). The libpq KV form
+ *     (`host=… dbname=…`) is not supported — pass a URL.
+ *   - Optional `?schema=<name>` query parameter, where `<name>` matches
+ *     `[A-Za-z_][A-Za-z0-9_]*` (Postgres unquoted-identifier rules).
+ *     Hyphenated preview identifiers like `pr-42` belong to AWS resource
+ *     names; convert to `pr_42` before constructing the URL.
+ *   - Other URL params (`?options=`, `?sslmode=`, etc.) ride along via
+ *     `connectionString` and are NOT interpreted by this helper. Use
+ *     `opts.poolOverrides` to set additional pg.Pool config explicitly.
+ *
+ * Throws on:
+ *   - non-URL `databaseUrl`
+ *   - `?schema=` value outside the unquoted-identifier regex
+ *   - `?schema=` set but `EVENT_PREVIEW_TAG` unset (would produce
+ *     half-isolated state: per-PR DB, canonical RabbitMQ exchange — leaks
+ *     events across PRs)
+ *   - `EVENT_PREVIEW_TAG` set but `?schema=` absent (the inverse half-
+ *     isolated state: per-PR RabbitMQ tag, default DB schema — leaks outbox
+ *     rows across PRs)
  *
  * @example
  *   const pool = createOutboxPool(process.env.DATABASE_URL!);
@@ -67,6 +86,30 @@ export function createOutboxPool(
     if (schema !== null && !SCHEMA_IDENTIFIER.test(schema)) {
         throw new Error(
             `createOutboxPool: \`?schema=\` must match ${SCHEMA_IDENTIFIER} to be safely interpolated into libpq options. Received: ${truncate(schema)}`,
+        );
+    }
+
+    // Coherence assert: the two-axis preview-isolation model
+    // (DB schema-per-PR + RabbitMQ tag-per-PR) must be applied as a pair.
+    // A half-applied state silently leaks events across PRs in production —
+    // either through the broker (schema set, no tag) or through the DB
+    // (tag set, no schema). Fail startup loudly so the misconfiguration
+    // can't make it past first boot.
+    const previewTag = (process.env.EVENT_PREVIEW_TAG ?? '').trim();
+    const hasSchema = schema !== null;
+    const hasTag = previewTag !== '';
+    if (hasSchema && !hasTag) {
+        throw new Error(
+            `createOutboxPool: DATABASE_URL contains ?schema=${schema} but EVENT_PREVIEW_TAG is unset. ` +
+                'Schema-per-PR isolation is a preview-only feature; running it without EVENT_PREVIEW_TAG would publish to the canonical RabbitMQ exchange while reading from a per-PR DB schema, leaking events across PRs. ' +
+                'Either set EVENT_PREVIEW_TAG=<your-preview-id> alongside the schema, or remove ?schema= from DATABASE_URL.',
+        );
+    }
+    if (!hasSchema && hasTag) {
+        throw new Error(
+            `createOutboxPool: EVENT_PREVIEW_TAG=${previewTag} is set but DATABASE_URL has no ?schema=. ` +
+                'RabbitMQ traffic is being routed to a tagged exchange but DB writes will hit the default schema, leaking outbox rows across PRs. ' +
+                'Either add ?schema=<your-pr-schema> to DATABASE_URL, or unset EVENT_PREVIEW_TAG.',
         );
     }
 

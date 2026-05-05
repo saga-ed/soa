@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { context, propagation } from '@opentelemetry/api';
 import { z } from 'zod';
 
+export { applyPreviewTag } from './preview-tag.js';
+
 // W3C TraceContext requires that `tracestate` only ride along with a
 // `traceparent`. The refine catches an orphan `tracestate` at parse time
 // rather than letting OTel's propagator silently discard it (which would

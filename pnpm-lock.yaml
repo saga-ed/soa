@@ -808,6 +808,43 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/node/contract-check:
+    dependencies:
+      fast-glob:
+        specifier: ^3.3.3
+        version: 3.3.3
+      js-yaml:
+        specifier: ^4.1.0
+        version: 4.1.1
+      zod-to-json-schema:
+        specifier: ^3.23.5
+        version: 3.25.2(zod@3.25.67)
+    devDependencies:
+      '@saga-ed/soa-event-envelope':
+        specifier: workspace:*
+        version: link:../event-envelope
+      '@saga-ed/soa-typescript-config':
+        specifier: workspace:*
+        version: link:../../core/typescript-config
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.0.12
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(@swc/core@1.15.7(@swc/helpers@0.5.17))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.8.2)(yaml@2.8.2)
+      typescript:
+        specifier: 5.8.2
+        version: 5.8.2
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@24.0.12)
+      zod:
+        specifier: 3.25.67
+        version: 3.25.67
+
   packages/node/db:
     dependencies:
       '@aws-sdk/client-secrets-manager':
@@ -8881,6 +8918,11 @@ packages:
   zip-stream@6.0.1:
     resolution: {integrity: sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA==}
     engines: {node: '>= 14'}
+
+  zod-to-json-schema@3.25.2:
+    resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
+    peerDependencies:
+      zod: ^3.25.28 || ^4
 
   zod@3.25.67:
     resolution: {integrity: sha512-idA2YXwpCdqUSKRCACDE6ItZD9TZzy3OZMtpfLoh6oPR47lipysRrJfjzMqFxQ3uJuUPyUeWe1r9vLH33xO/Qw==}
@@ -18835,6 +18877,10 @@ snapshots:
       archiver-utils: 5.0.2
       compress-commons: 6.0.2
       readable-stream: 4.7.0
+
+  zod-to-json-schema@3.25.2(zod@3.25.67):
+    dependencies:
+      zod: 3.25.67
 
   zod@3.25.67: {}
 

@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-event-envelope",
-    "version": "0.1.0-dev.1",
+    "version": "0.1.0-dev.2",
     "private": false,
     "type": "module",
     "main": "dist/index.js",

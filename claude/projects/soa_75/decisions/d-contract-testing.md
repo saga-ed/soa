@@ -4,7 +4,7 @@ RESOLVED 2026-04-30: Three layers, zero new infra: (1) publisher snapshot-diff i
 
 **Implementation status as of 2026-05-05:**
 - **Layer 3 (runtime Zod validation):** ✅ implemented in `@saga-ed/soa-event-consumer` and used by adopters in rostering #138 and program-hub #60.
-- **Layers 1 + 2 (snapshot + pins + CI gate):** ⚠️ documented here and demonstrated in `soa_event_driven_example` (`tools/contract-check/`), but **not yet lifted into soa**. Adopters today cannot follow the full workflow — they have runtime validation only. Lifting the PoC tooling into soa is tracked as companion work.
+- **Layers 1 + 2 (snapshot + pins + CI gate):** ✅ implemented in `@saga-ed/soa-contract-check` (a config-driven lift of the PoC tool). Adopters wire it up by adding the package, creating `contract-check.config.ts` at the repo root that exports their event registry + paths, and running `soa-contract-check check` in CI. See the package README for the full setup.
 
 ## Context
 

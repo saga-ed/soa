@@ -243,6 +243,23 @@ export class EventConsumer {
         this.opts.logger.info(`[EventConsumer:${this.opts.consumerName}] stopped`);
     }
 
+    /**
+     * Direct-dispatch entry point — bypasses the broker. Used by test
+     * helpers (e.g. MockPublisher patterns in downstream consumers) and
+     * ad-hoc seed scripts. Goes through the same consumed_events idempotency
+     * check + tx-wrapped handler invocation as the broker path, so test
+     * coverage on idempotency / tx atomicity is real and not a separate
+     * code path.
+     *
+     * Does NOT extract OTel context from envelope.meta — the broker path
+     * does that in handleMessage(). Tests exercising tracing should go
+     * through the broker path; tests exercising handler logic should use
+     * this.
+     */
+    async dispatchEnvelope(envelope: EventEnvelope): Promise<void> {
+        await this.processEnvelope(envelope);
+    }
+
     private async dispatch(msg: ConsumeMessage): Promise<void> {
         try {
             await this.handleMessage(msg.content);

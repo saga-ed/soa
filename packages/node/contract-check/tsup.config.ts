@@ -6,8 +6,11 @@ export default defineConfig({
     dts: true,
     clean: true,
     sourcemap: true,
-    // zod and @saga-ed/soa-event-envelope are peer deps. Bundling them would
-    // create a second copy at runtime; zod-to-json-schema's `instanceof` checks
-    // would then silently fail and emit an empty payload schema.
+    // zod stays external because it's a peer dep — adopters and the tool
+    // must share one zod instance. Bundling a second copy would silently
+    // break zod-to-json-schema's `instanceof ZodObject` checks and emit an
+    // empty payload schema. envelope is external for hygiene — we only
+    // import its types (PayloadDescriptor), so this just keeps the bundle
+    // smaller.
     external: ['zod', '@saga-ed/soa-event-envelope'],
 });

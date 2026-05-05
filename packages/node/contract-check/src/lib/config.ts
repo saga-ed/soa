@@ -37,6 +37,40 @@ export interface ContractCheckConfig {
     snapshotIdPrefix?: string;
 }
 
+/**
+ * Identity helper that exists purely so adopters get TypeScript type-checking
+ * on their `contract-check.config.ts` without having to remember the
+ * `: ContractCheckConfig` annotation. Mirrors the `defineConfig` convention
+ * used by vite, vitest, tsup, etc.
+ *
+ * @example
+ *   import { defineConfig } from '@saga-ed/soa-contract-check';
+ *   export default defineConfig({ registry, publishedDir, pinsGlob });
+ */
+export function defineConfig(config: ContractCheckConfig): ContractCheckConfig {
+    return config;
+}
+
+/**
+ * Verify that every `registry` key matches its descriptor's
+ * `eventType` and `eventVersion`. The registry is keyed by string for
+ * spreadability (`{ ...iamEvents, ...programsEvents }`) but the snapshot
+ * filename is derived from the key while the pins-coverage layer is derived
+ * from the descriptor's fields — so a drifting key would produce
+ * inconsistent failures across the layers. Catch it loudly at entry.
+ */
+export function assertRegistryConsistent(config: ContractCheckConfig): void {
+    for (const [eventKey, descriptor] of Object.entries(config.registry)) {
+        const expected = `${descriptor.eventType}.v${descriptor.eventVersion}`;
+        if (eventKey !== expected) {
+            throw new Error(
+                `contract-check: registry key '${eventKey}' does not match its descriptor (expected '${expected}'). ` +
+                    'Each entry must be keyed by `${eventType}.v${eventVersion}` so the snapshot path and pins path agree.',
+            );
+        }
+    }
+}
+
 const CONFIG_FILENAMES = [
     'contract-check.config.ts',
     'contract-check.config.mts',

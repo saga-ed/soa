@@ -18,7 +18,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { ContractCheckConfig } from './lib/config.js';
+import { assertRegistryConsistent, type ContractCheckConfig } from './lib/config.js';
 import { loadPinsFiles, type PinsFile } from './lib/pins.js';
 import { renderSnapshot, snapshotFilename } from './lib/snapshot.js';
 
@@ -175,6 +175,7 @@ async function checkPinsLayer(
 }
 
 export async function runCheck(config: ContractCheckConfig): Promise<CheckResult> {
+    assertRegistryConsistent(config);
     const snapshotFailures = checkSnapshots(config);
     const { failures: pinsFailures, pinsCount } = await checkPinsLayer(config);
     return {

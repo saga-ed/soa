@@ -9,9 +9,10 @@ function usage(): void {
             'Usage: soa-contract-check <command>',
             '',
             'Commands:',
-            '  check          Validate snapshots + pins against the registry. Exits 1 on failure.',
-            '  export         Render snapshots from the registry. Diff-only by default.',
-            '  export --write Write snapshots to disk.',
+            '  check                 Validate snapshots + pins against the registry. Exits 1 on failure.',
+            '  export                Render snapshots from the registry. Diff-only by default.',
+            '  export --write        Write NEW snapshots; refuses to overwrite existing versions.',
+            '  export --write --bump Allow overwriting an existing snapshot (D5/D6 opt-in).',
             '',
             'The tool walks up from the current directory looking for a',
             'contract-check.config.{ts,js,mts,mjs} that default-exports a',
@@ -51,19 +52,30 @@ async function main(): Promise<void> {
         const flags = new Set(args.slice(1));
         const write = flags.has('--write') || flags.has('-w');
         const bump = flags.has('--bump');
-        const summary = runExport(config, { write });
+        // `--bump` is the explicit gesture an adopter must make to acknowledge
+        // they are intentionally modifying an existing snapshot (D5/D6 violation
+        // territory). Without it, runExport refuses such writes and we exit 1
+        // so the developer's CI/local pipeline catches the mistake.
+        const summary = runExport(config, { write, allowModify: bump });
 
         if (write) {
+            const wrote = summary.results.length - summary.refusedCount;
             process.stdout.write(
-                `[export] wrote ${summary.results.length} schema(s) (${summary.newCount} new, ${summary.modifiedCount} modified existing) to ${config.publishedDir}\n`,
+                `[export] wrote ${wrote} schema(s) (${summary.newCount} new, ${summary.modifiedCount - summary.refusedCount} modified existing) to ${config.publishedDir}\n`,
             );
-            if (summary.modifiedCount > 0 && !bump) {
-                process.stdout.write(
-                    '[export] NOTE: existing snapshot files were modified. ' +
-                        'Per Model A (frozen-forever), modifying an existing version is forbidden. ' +
-                        'You probably want to introduce a new version (vN+1) instead. ' +
+            if (summary.refusedCount > 0) {
+                process.stderr.write(
+                    `[export] REFUSED to write ${summary.refusedCount} snapshot(s) that would modify existing version(s):\n`,
+                );
+                for (const r of summary.results.filter((r) => r.refusedWrite)) {
+                    process.stderr.write(`  ! ${r.filename}\n`);
+                }
+                process.stderr.write(
+                    '[export] Per Model A (frozen-forever), modifying an existing version is forbidden. ' +
+                        'Either revert the schema change and bump to a new version, OR re-run with --bump to confirm intent. ' +
                         'See soa_75/decisions/d-event-versioning.md.\n',
                 );
+                process.exit(1);
             }
             process.exit(0);
         }

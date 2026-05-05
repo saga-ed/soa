@@ -1,5 +1,7 @@
 export {
     type ContractCheckConfig,
+    assertRegistryConsistent,
+    defineConfig,
     loadConfig,
 } from './lib/config.js';
 export {

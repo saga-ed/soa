@@ -26,25 +26,25 @@ Place `contract-check.config.ts` (or `.js`/`.mts`/`.mjs`) at your repo root:
 // contract-check.config.ts
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { ContractCheckConfig } from '@saga-ed/soa-contract-check';
+import { defineConfig } from '@saga-ed/soa-contract-check';
 import { iamEvents } from '@saga-ed/iam-events';
 // import { programsEvents } from '@saga-ed/programs-events'; // when added
 
 const repoRoot = fileURLToPath(new URL('.', import.meta.url));
 
-const config: ContractCheckConfig = {
+export default defineConfig({
     registry: {
         ...iamEvents,
         // ...programsEvents,
     },
     publishedDir: resolve(repoRoot, 'tools/contract-check/published'),
     pinsGlob: resolve(repoRoot, 'apps/*/pins/*.yaml'),
-};
-
-export default config;
+});
 ```
 
-If your repo has no `apps/<svc>/pins/` layout (e.g., a library repo), set `pinsGlob: null` to skip the pins layers.
+`defineConfig` is an identity helper — it exists purely so you get TypeScript checks on the config object without remembering a `: ContractCheckConfig` annotation. If your repo has no `apps/<svc>/pins/` layout (e.g., a library repo), set `pinsGlob: null` to skip the pins layers.
+
+**Registry-key convention.** Each entry's key MUST be `${eventType}.v${eventVersion}` (per-family event packages typically build this for you). The tool asserts the key↔descriptor match at the start of every run and throws loudly on drift — the snapshot path is derived from the key while the pins-coverage layer is derived from the descriptor's fields, so a typo'd key would diverge silently otherwise.
 
 ## Use
 
@@ -65,8 +65,16 @@ Then:
 ```bash
 pnpm contract:check          # CI gate; non-zero on any violation
 pnpm contract:export         # diff-only — show what would change
-pnpm contract:export:write   # regenerate published/<eventType>-vN.json snapshots
+pnpm contract:export:write   # write NEW snapshots; refuses to overwrite existing versions
 ```
+
+**Modifying a published version (D5/D6 violation).** `export --write` deliberately refuses to overwrite an existing snapshot whose bytes have changed and exits non-zero. To override — e.g. you genuinely intend to bump and need to regenerate — re-run with `--bump`:
+
+```bash
+soa-contract-check export --write --bump
+```
+
+Without `--bump`, a developer who edits a frozen schema and runs `export --write` would silently launder the change through committed bytes; the next `check` would pass against the new schema, defeating the gate. `--bump` is the explicit gesture that says "I know I'm modifying an existing version."
 
 Wire `pnpm contract:check` into your CI workflow as the merge gate.
 

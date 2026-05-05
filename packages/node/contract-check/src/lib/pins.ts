@@ -16,6 +16,7 @@
 // pins file is keyed by the `eventType` field, not by directory.
 
 import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import fastGlob from 'fast-glob';
 import { load as parseYaml } from 'js-yaml';
 
@@ -124,9 +125,10 @@ function validateShape(parsed: unknown, file: string): ShapeResult {
 
     // Sanity check: pins file's eventType should match its filename (less the
     // `.yaml` extension). Catches the common foot-gun of copy-pasting a pins
-    // file and forgetting to rename one of the two.
+    // file and forgetting to rename one of the two. Use basename rather than
+    // a forward-slash endsWith so adopters on Windows CI aren't surprised.
     const expectedFilename = `${eventType}.yaml`;
-    if (!file.endsWith(`/${expectedFilename}`)) {
+    if (basename(file) !== expectedFilename) {
         return {
             error: `Filename should be ${expectedFilename} to match eventType`,
         };

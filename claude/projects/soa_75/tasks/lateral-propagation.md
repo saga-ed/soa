@@ -42,11 +42,18 @@
 
 `[soa]` `[rostering]` `[program-hub]` `[sds]` `[example]`
 
+## Status legend
+
+- 🟢 **shipped** — landed in all in-scope repos for the item
+- 🟡 **in-flight** — assigned to a running session; in progress
+- 🔵 **decision shipped** — soa-side decision-doc work landed; adopter / package code follow-up assigned elsewhere
+- ⏸️ **deferred** — forward-looking; revisit when triggered
+
 ---
 
 ## 1. Code & pattern propagation
 
-### 1.1 — `id()` UUID test helper graduation · **P1**
+### 1.1 — `id()` UUID test helper graduation · **P1** · 🟡 in-flight (Session A1)
 
 `[soa]` `[rostering]` `[program-hub]`
 
@@ -63,9 +70,11 @@ schemas validate `string().uuid()` strictly, so `'prog-1'` test IDs fail.
   in-tree copies removed; sds adopters import it from day one.
 - Source: cross-PR survey 2026-05-06.
 
-### 1.2 — OTel `initTracing()` import-order footgun · **P1**
+### 1.2 — OTel `initTracing()` import-order footgun · **P1** · 🟡 in-flight (Session A1: lint rule + README banner)
 
 `[soa]` `[rostering]` `[program-hub]` `[sds]`
+
+> Decision-doc note (`d-observability.md`) updated 2026-05-06 with footgun callout + source PRs.
 
 `initTracing(name)` MUST be the first import in `main.ts`, before any
 module that imports a tracer. Both adopters silently lost spans during
@@ -82,7 +91,7 @@ as a one-line comment; new adopters will rediscover it.
 - Source: rostering#138, program-hub#60 both hit this; d-observability
   resolved 2026-04-30 but lacks the footgun callout.
 
-### 1.3 — Outbox-pool sizing convention · **P2**
+### 1.3 — Outbox-pool sizing convention · **P2** · 🟡 in-flight (Session A1: createOutboxPool docstring default)
 
 `[soa]` `[rostering]` `[program-hub]`
 
@@ -96,9 +105,11 @@ to avoid starving the HTTP request pool. There's no canonical guidance.
   redundantly until a soa bump propagates.
 - Source: shared-package inventory + adopter PR survey 2026-05-06.
 
-### 1.4 — Bulk-mutation event-emission strategy · **P1 (decision)**
+### 1.4 — Bulk-mutation event-emission strategy · **P1 (decision)** · 🔵 decision-prep doc shipped — awaiting Seth's pick
 
 `[soa]` `[program-hub]`
+
+> [`decisions/d-bulk-mutation-events.md`](../decisions/d-bulk-mutation-events.md) (PENDING) lays out four options (A/B/C/D + E hybrid) with a 12-dimension decision matrix and recommendation criteria keyed off consumer type. Once Seth picks, flip Status to RESOLVED and update `d-publisher-migration.md` § 4.
 
 scheduling-api's `setHolidays` and `regenerate` paths would emit
 thousands of `calendar_event.*` events under the current per-mutation
@@ -113,9 +124,11 @@ selected: per-event envelopes (broker burst risk), bulk-summary events
 - Source: d-publisher-migration § Bulk-mutation strategy (OPEN, flagged
   in adopter-lessons commit `fe62c71`).
 
-### 1.5 — Consumer-queue isolation rule · **P2**
+### 1.5 — Consumer-queue isolation rule · **P2** · 🔵 decision shipped (Session A1 owns README addition)
 
 `[soa]` `[program-hub]`
+
+> Rule landed in `d-consumer-resilience.md` § 5 (2026-05-06): one `EventConsumer` per upstream event family per service. Source: program-hub#62 split. Session A1 adds the parallel README paragraph in `@saga-ed/soa-event-consumer`.
 
 program-hub#62 introduces a separate `GroupProjectionConsumer` queue
 distinct from `IamProjectionConsumer` to prevent poison-message
@@ -128,7 +141,7 @@ documented rule for when to split.
   README.
 - Source: program-hub#62 review.
 
-### 1.6 — UPSERT-handler pattern + helper · **P2**
+### 1.6 — UPSERT-handler pattern + helper · **P2** · 🟡 in-flight (Session A1)
 
 `[soa]` `[program-hub]`
 
@@ -142,9 +155,11 @@ independently built this in projection handlers; no shared helper.
 - Source: d-consumer-resilience (RESOLVED 2026-05-05); pattern lives
   inline in adopter handlers.
 
-### 1.7 — Soft-delete vs hard-delete projection guidance · **P2**
+### 1.7 — Soft-delete vs hard-delete projection guidance · **P2** · 🟢 shipped
 
 `[soa]`
+
+> Decision matrix landed in `d-consumer-resilience.md` § 2 (2026-05-06) with worked examples from scheduling-api `program_projection` (soft), program-hub `group_projection` (soft), iam-user cache (hard), analytics warehouse (hard). Includes out-of-order delete/create handling note.
 
 When a downstream service has FKs depending on a projection row,
 `status='deleted'` is required; pure read-model caches can hard-DELETE.
@@ -155,7 +170,7 @@ Neither rule is currently documented; adopters pick implicitly.
   worked examples from programs-api (soft-delete due to enrollment
   FKs) and a hypothetical analytics-only consumer (hard-delete).
 
-### 1.8 — Non-fatal-broker-startup behavior codified · **P2**
+### 1.8 — Non-fatal-broker-startup behavior codified · **P2** · 🟡 in-flight (Session A1)
 
 `[soa]` `[rostering]` `[program-hub]`
 
@@ -184,7 +199,7 @@ emitted records. Operators currently grep across two systems.
 
 ## 2. Shared-package adoption gaps
 
-### 2.1 — `@saga-ed/soa-contract-check` CI wiring in adopters · **P1**
+### 2.1 — `@saga-ed/soa-contract-check` CI wiring in adopters · **P1** · 🟡 in-flight (Sessions B + C)
 
 `[rostering]` `[program-hub]`
 
@@ -214,7 +229,7 @@ package when it joins as a publisher.
   versions tracked in d-event-package-shape; sds events package decision
   recorded when sds joins.
 
-### 2.3 — `@saga-ed/soa-event-test-harness` adoption + docs · **P2**
+### 2.3 — `@saga-ed/soa-event-test-harness` adoption + docs · **P2** · 🟡 in-flight (Session A1)
 
 `[soa]` `[rostering]` `[program-hub]`
 
@@ -229,7 +244,7 @@ suite. Adopter integration tests
   (b) `id()` helper (item 1.1), (c) "tick relay → assert message
   received on bound queue" pattern.
 
-### 2.4 — Prisma CLI runtime-deps parity audit · **P1**
+### 2.4 — Prisma CLI runtime-deps parity audit · **P1** · 🟡 in-flight (Sessions B + C)
 
 `[rostering]` `[program-hub]`
 
@@ -278,7 +293,7 @@ re-derive the binding pattern.
 > The synthesis error came from weighting a stale decision-doc claim
 > over the diff-level evidence; flagged for future re-surveys.
 
-### 3.1 — Orphan-schema reaper coverage extension · **P2**
+### 3.1 — Orphan-schema reaper coverage extension · **P2** · ⏸️ deferred (sds not imminent)
 
 `[sds]`
 
@@ -290,7 +305,7 @@ it needs its own reaper.
 - **Acceptance:** sds adds an equivalent workflow when its first
   event-driven preview deploy lands. Track here so it's not forgotten.
 
-### 3.2 — db-host `max_connections` raise (Phase 5 deferred) · **P2**
+### 3.2 — db-host `max_connections` raise (Phase 5 deferred) · **P2** · ⏸️ deferred (concurrent PR count not yet a concern)
 
 `[soa]` (external: `@saga-ed/infra-compose`)
 
@@ -303,7 +318,7 @@ With `outboxPool.max=4` and ~5 Prisma connections per service,
   consumed by db-host instances. Closes Phase 5 deferral.
 - Source: memory + d-preview-deploy-isolation.
 
-### 3.3 — DLQ Prometheus alert-rule template · **P2**
+### 3.3 — DLQ Prometheus alert-rule template · **P2** · ⏸️ deferred (P3-feel; bundle with first real Prom alerts)
 
 `[soa]`
 
@@ -318,7 +333,7 @@ No canonical rule template — next adopter rediscovers thresholds.
 
 ## 4. Decision-doc → adopter-repo propagation
 
-### 4.1 — `participantType` denormalization on group events · **P2**
+### 4.1 — `participantType` denormalization on group events · **P2** · 🟡 in-flight (Session C)
 
 `[program-hub]`
 
@@ -331,9 +346,11 @@ once present.
   `roleName`; programs-api producer + group-projection consumer
   updated; v1 events kept until soak per d-event-versioning.
 
-### 4.2 — Adopter-lesson decisions cross-link · **P3**
+### 4.2 — Adopter-lesson decisions cross-link · **P3** · 🟢 shipped
 
 `[soa]`
+
+> 6 decision docs (consumer-resilience, contract-testing, event-package-shape, observability, preview-deploy-isolation, publisher-migration) gained Source PRs lines linking rostering#138 / program-hub#60(/#62) on 2026-05-06.
 
 3 adopter-lesson decision docs landed (commit `fe62c71`). The decision
 docs themselves don't yet link to the canonical adopter PR diffs that

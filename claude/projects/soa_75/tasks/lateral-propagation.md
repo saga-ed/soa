@@ -16,6 +16,12 @@
 > live in `decisions/` — see those for follow-ups internal to a single
 > decision doc.
 >
+> **Concurrent execution:** the items below are being worked across
+> multiple Claude sessions in parallel. See [`handoffs/`](handoffs/) for
+> per-session briefings naming the repo, branch, owned items, and
+> coordination boundaries. Never bump `@saga-ed/soa-event-*` dev tags
+> outside of Session A1.
+>
 > ### How to update this file
 >
 > - Tick `[x]` when the work has shipped in **all** in-scope repos for that item.

@@ -105,11 +105,11 @@ to avoid starving the HTTP request pool. There's no canonical guidance.
   redundantly until a soa bump propagates.
 - Source: shared-package inventory + adopter PR survey 2026-05-06.
 
-### 1.4 — Bulk-mutation event-emission strategy · **P1 (decision)** · 🔵 decision-prep doc shipped — awaiting Seth's pick
+### 1.4 — Bulk-mutation event-emission strategy · **P1 (decision)** · 🟢 shipped (with deliberate deferral of high-N residual)
 
 `[soa]` `[program-hub]`
 
-> [`decisions/d-bulk-mutation-events.md`](../decisions/d-bulk-mutation-events.md) (PENDING) reframed 2026-05-06 around **information-reduction first, transmission second**. Two-step framing: upstream alternatives U1–U4 (JIT materialization, pattern-as-event, deviation events, instructions) reduce N at the source; A–D handle the residual transmission. Lean: **A as default below ~100 events; U2 (`ScheduleUpserted` — already in catalog) for `regenerate`; U3 (per-deviation events like `HolidayMarked`) for `setHolidays`; C remains defensible for paths with no consumer.** Grounded in scheduling-api's actual model — programs-api/v2 already doesn't consume per-row events. Once Seth picks, flip Status to RESOLVED and update `d-publisher-migration.md` § 4.
+> [`decisions/d-bulk-mutation-events.md`](../decisions/d-bulk-mutation-events.md) RESOLVED 2026-05-06. **Information-reduction first, transmission second.** Resolved cuts: `regenerate` → U2 (`ScheduleUpserted`, already in catalog); `setHolidays` → U3 (`HolidayMarked` per date); single-row → A (per-event, threshold ~100/txn). The high-N transmission question (B vs C vs D) is **deliberately deferred** until a real consumer needs row-level fidelity at scale that can't be expressed as a pattern or deviation event — none such exists today. Implementation follow-ups (new event types in `@saga-ed/scheduling-events`, publisher wiring in scheduling-api) tracked in the doc's "Implementation follow-ups" section.
 
 scheduling-api's `setHolidays` and `regenerate` paths would emit
 thousands of `calendar_event.*` events under the current per-mutation

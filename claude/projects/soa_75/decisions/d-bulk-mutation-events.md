@@ -1,6 +1,18 @@
 # d-bulk-mutation-events — How to publish events from bulk mutations
 
-**Status:** PENDING — pick a default + a threshold. Two-step framing: (1) reduce N at the source where possible (upstream alternatives U1–U4); (2) for the residual, pick a transmission strategy (A–D). Lean: **A as default for small-N (single-row + small bulk); pattern-level events (U2 — `ScheduleUpserted` already in the catalog) for bulk paths**. C is the de-facto status quo today and may be defensible until a consumer actually needs row-level fidelity.
+**Status:** RESOLVED 2026-05-06 (with deliberate deferral) —
+
+- **A is the default** for small-N mutations (single-row + small bulk). Proposed threshold: ~100 events per transaction; adjustable later.
+- **For paths that would emit high N, prefer information-reduction at the source (U1–U4)** rather than choosing among B/C/D. Pattern-as-event (U2) and deviation events (U3) cover the realistic scheduling-api cases without a high-N transmission ever happening.
+- **The high-N transmission strategy (B vs C vs D) is deliberately deferred** until a real adopter case forces it — i.e., a consumer that actually needs row-level fidelity at scale that *can't* be expressed as a pattern or deviation event. No such consumer exists today (programs-api/v2 reads schedule metadata, not per-row events).
+
+**Resolved cuts for scheduling-api's open paths:**
+- `SchedulesService.upsert` → **U2** (already emits `ScheduleUpsertedV1`; no change needed)
+- `CalendarEventsService.regenerate` → **U2** (one `ScheduleUpserted` per affected schedule; do not emit per-row)
+- `CalendarEventsService.setHolidays` → **U3** (one `HolidayMarkedV1` per holiday date; pair with U2 for the underlying pattern)
+- Single-row mutations (`cancelEvent`, `createManualEvent`, etc.) → **A** (per-event, status quo)
+
+**Future trigger to revisit:** if a consumer surfaces that needs to react per-row to bulk-driven changes AND the change cannot be expressed as a pattern update or per-deviation event, then this doc reopens at section "Residual transmission options A–D" and B/C/D get picked then.
 
 **Source PRs / triggers:** [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) — scheduling-api's bulk operations are wired through outbox-publishing infrastructure but `setHolidays` and `regenerate` currently emit nothing (deliberate deferral pending this decision).
 
@@ -180,18 +192,23 @@ Adjustments:
 
 The threshold isn't load-bearing once U2/U3 absorb the *common* bulk paths — most "bulk" operations in scheduling-api express as pattern changes or deviation events, leaving small-N residual that A handles.
 
-## Open questions for Seth
+## Deferred sub-decisions
 
-1. **Approve the default lean** — A < 100 < {U2 for patterns, U3 for deviations, D/B for hypothetical row-level consumers}? Or different cuts?
-2. **U1 (JIT) — pursue separately?** It's a real architectural improvement but not the right hammer for this nail. Worth its own decision doc later, or keep noted here as future work?
-3. **Threshold value** — 100 OK as a starter, or do you want a different number based on actual broker / db-host capacity in dev / prod?
-4. **For `setHolidays` specifically** — does U3 (per-deviation events) match how you want consumers to think about holidays, or is `ScheduleUpserted`-only (U2 alone) enough? (This is a question of "do consumers need to react per-holiday, or per-pattern-state-change?".)
+These were Open Questions in the PENDING draft. With the resolution above, they break down as follows:
 
-## On finish
+1. **Threshold value (100/txn)** — accepted as starter. Codify in `@saga-ed/soa-event-outbox` docstring or `claude/event-driven-conventions.md` so the next adopter inherits it; revisit if real broker / db-host capacity numbers in dev or prod show ~100 is too high or too low.
+2. **U1 (JIT materialization)** — does not get pursued from this decision. It's a real architectural improvement (memory, agility, faster pattern changes), but driven by reasons beyond event-emission. If a future reason to pursue it surfaces, it gets its own decision doc; this doc closes without it.
+3. **B vs C vs D for high-N residual** — explicitly deferred to the future trigger above. If/when reopened, the residual section already documents the tradeoffs; the work then is consumer-profile assessment, not architectural design.
+4. **Per-deviation events for `setHolidays`** — resolved as U3. The per-holiday event has standalone audit value (the holiday log is the holiday log) and pairs naturally with U2 for the pattern.
 
-When picked:
-- Flip Status to `RESOLVED <date> — <chosen rules>`
-- Update `d-publisher-migration.md` § 4 with the chosen pattern + a one-line summary
-- Update `tasks/lateral-propagation.md` § 1.4 — remove "PENDING decision", note the picks
-- For each pick that requires a new event type (likely `HolidayMarkedV1` and possibly `ScheduleRegeneratedV1`), open an issue against `program-hub` to extend `@saga-ed/scheduling-events`
-- For threshold: codify in `@saga-ed/soa-event-outbox` docstring or a `claude/event-driven-conventions.md` so the next adopter inherits it
+## Implementation follow-ups
+
+- **`@saga-ed/scheduling-events` extensions** — open an issue against `program-hub` to add:
+  - `HolidayMarkedV1 { scheduleId, date, reason?, appliedAt }`
+  - Optionally `ScheduleRegeneratedV1` if the semantic is meaningfully distinct from `ScheduleUpsertedV1` (likely yes — regenerate vs upsert convey different intent)
+- **Wire the publishers** in scheduling-api:
+  - `regenerate()` → emit `ScheduleUpserted` (or `ScheduleRegenerated`) once per affected schedule, not per-row
+  - `setHolidays()` → emit `HolidayMarkedV1` per date; cancel rows + EXDATE additions still happen as DB ops but produce no per-row events
+- **Threshold codification** — add `MAX_PER_TXN_BURST_HINT` (or similar) to soa-event-outbox docstring + `event-driven-conventions.md`
+- **Update `tasks/lateral-propagation.md` § 1.4** — flip from 🔵 decision-shipped to 🟢 shipped (this commit)
+- **Update `d-publisher-migration.md` § 4** — already points at this doc; rewrite the recommendation paragraph to reflect the resolved cuts (this commit)

@@ -42,9 +42,9 @@ describe('createOutboxPool — production-shape URLs (no schema, no tag)', () =>
         expect(getOpts(pool).connectionString).toBe(url);
     });
 
-    it('defaults max to 2', () => {
+    it('defaults max to 4', () => {
         const pool = createOutboxPool('postgresql://u:p@h:5432/db');
-        expect(getOpts(pool).max).toBe(2);
+        expect(getOpts(pool).max).toBe(4);
     });
 
     it('respects an explicit max', () => {

@@ -1,3 +1,5 @@
+export { id } from './uuid.js';
+
 import {
     PostgreSqlContainer,
     type StartedPostgreSqlContainer,

@@ -18,8 +18,10 @@
 
 ## Why this exists
 
-The `@saga-ed/soa-contract-check` package landed on `soa@soa_75` (commit
-`5cd5993` marks Layers 1+2 implemented). PR #138 (`feat/iam-events-adoption`)
+The `@saga-ed/soa-contract-check` package lives on `soa@main` at
+`packages/node/contract-check/` (current version `0.1.0-dev.1`; commit
+`5cd5993` on `soa_75` marks Layers 1+2 *documented* as implemented).
+PR #138 (`feat/iam-events-adoption`)
 defines events with `.eventType` / `.eventVersion` constants but has **not**
 committed frozen schema snapshots and has **no CI gate** running
 `soa-contract-check check`. This is the single highest-payoff lateral
@@ -50,9 +52,11 @@ schema change without a `--bump` flag.
     on every PR and fails on schema byte-diff without `--bump`.
   - Commit a deliberately-broken change locally, run the gate locally,
     confirm it fails. Revert.
-- Reference: `saga-ed/soa@soa_75:packages/{core,node}/soa-contract-check/`
-  has the package + README. `decisions/d-contract-testing.md` has the
-  rationale.
+- Reference: `saga-ed/soa@main:packages/node/contract-check/` has
+  the package + README (note the directory is `contract-check`, not
+  `soa-contract-check` — the `soa-` prefix is only in the npm package
+  name). `saga-ed/soa@soa_75:claude/projects/soa_75/decisions/d-contract-testing.md`
+  has the rationale.
 
 ### 2.4 — Prisma CLI runtime-deps parity audit (rostering side) · P1
 
@@ -108,8 +112,9 @@ rostering repo don't relearn it.
 - Source-of-truth list: `saga-ed/soa@soa_75:claude/projects/soa_75/tasks/lateral-propagation.md`
 - Decision: `saga-ed/soa@soa_75:claude/projects/soa_75/decisions/d-contract-testing.md`
 - Package + README:
-  `gh api repos/saga-ed/soa/contents/packages/node/soa-contract-check?ref=soa_75`
-  (or check `packages/core/soa-contract-check` if it lives under core)
+  `gh api repos/saga-ed/soa/contents/packages/node/contract-check?ref=main`
+  (npm name is `@saga-ed/soa-contract-check`; directory is
+  `packages/node/contract-check/` on `main`).
 - Existing PR: `gh pr view 138 --repo saga-ed/rostering`
 - Memory: `project_pr_preview_event_driven_pilot.md` — Prisma
   packaging gotchas if you need them

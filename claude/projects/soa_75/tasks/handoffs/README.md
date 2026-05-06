@@ -7,21 +7,34 @@ for which items are owned by which session.
 
 ## Active sessions
 
-| File | Repo | Owns | Status |
-|---|---|---|---|
-| [`session-a1-soa-package-bump.md`](session-a1-soa-package-bump.md) | `saga-ed/soa` | 1.1, 1.6, 1.8, 2.3, 1.2 (lint rule) | not started |
-| [`session-b-rostering-contract-check.md`](session-b-rostering-contract-check.md) | `saga-ed/rostering` | 2.1 (rostering), 2.4 (rostering) | not started |
-| [`session-c-program-hub-contract-check.md`](session-c-program-hub-contract-check.md) | `saga-ed/program-hub` | 2.1 (program-hub), 2.4 (program-hub), 4.1 | not started |
+| File | Repo | Base branch | Owns | Status |
+|---|---|---|---|---|
+| [`session-a1-soa-package-bump.md`](session-a1-soa-package-bump.md) | `saga-ed/soa` | **`main`** ⚠️ | 1.1, 1.2, 1.3 (docstring), 1.5 (README), 1.6, 1.8, 2.3 | running |
+| [`session-b-rostering-contract-check.md`](session-b-rostering-contract-check.md) | `saga-ed/rostering` | `feat/iam-events-adoption` | 2.1 (rostering), 2.4 (rostering) | running |
+| [`session-c-program-hub-contract-check.md`](session-c-program-hub-contract-check.md) | `saga-ed/program-hub` | `saga-ed/event-driven-adoption` | 2.1 (program-hub), 2.4 (program-hub), 4.1 | running |
 
 Sessions A1, B, and C run **concurrently**. Coordination boundary:
 **only A1 may bump `@saga-ed/soa-event-*` dev tags**; B and C consume
 whatever versions the existing adopter PRs already pin.
 
+> **Branch correction (2026-05-06):** an earlier draft of these
+> handoffs put A1 on `soa_75` and pointed B/C at `?ref=soa_75` for
+> package source. That was wrong — the `@saga-ed/soa-*` event-driven
+> packages live on `main`. soa_75 is the planning/decisions branch and
+> carries no package source. The handoffs have been corrected; if a
+> running session was started against the original drafts, re-read
+> the corrected briefings and re-base off `main` (or the appropriate
+> adopter base branch).
+
 ## Scheduled but not yet kicked off
 
-- **Session A2** — soa docs + decisions (1.2 banner, 1.3, 1.4 options
-  doc, 1.5, 1.7, 4.2). Currently being handled inline in Seth's primary
-  session; no handoff doc needed unless that changes.
+- **Session A2** — soa decision-doc updates on `soa_75` (1.4 options
+  doc, 1.5 decision-side rule, 1.7 projection deletion guidance, 1.3
+  rationale doc, 4.2 cross-links). Handled inline in Seth's primary
+  session. **Note:** the README/docstring portions of 1.2, 1.3, 1.5
+  are now folded into Session A1's scope (since A1 is on `main` and
+  touching those packages). A2 just owns the decision-doc updates on
+  `soa_75`.
 - **Session D** — adopter cleanup pass after A1 merges (delete in-tree
   `id()` copies, swap to `upsertProjection`, set `failureMode`
   explicitly). Will be drafted once A1 names its dev-tag set.

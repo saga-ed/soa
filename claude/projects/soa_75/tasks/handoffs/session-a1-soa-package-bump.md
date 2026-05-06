@@ -7,10 +7,31 @@
 ## Identity
 
 - **Repo:** `saga-ed/soa`
-- **Base branch:** `soa_75`
-- **Working branch:** `soa_75/lift-helpers-and-options` (or similar; pick when starting)
-- **Worktree:** create under `.claude/worktrees/<name>/` per global CLAUDE.md convention.
-- **Target:** one PR into `soa_75` that bundles a coordinated dev-tag bump across 3–4 packages.
+- **Base branch:** `main` ⚠️ **NOT `soa_75`** — the `@saga-ed/soa-*`
+  event-driven packages (`observability`, `event-outbox`,
+  `event-consumer`, `event-test-harness`, `contract-check`,
+  `event-envelope`) all live on `main`, not on `soa_75`. soa_75 is the
+  planning/decisions branch and carries no package source. (Earlier
+  draft of this handoff said `soa_75` — that was wrong; corrected
+  2026-05-06.)
+- **Package directory naming:** `packages/node/observability/` (not
+  `soa-observability/`), `packages/node/event-outbox/`, etc. The
+  package.json `name` field is `@saga-ed/soa-*` but the directory
+  shortens that prefix.
+- **Current dev-tag versions on `main` (your baseline; bump forward):**
+  - `@saga-ed/soa-observability@0.1.0-dev.1`
+  - `@saga-ed/soa-event-envelope@0.1.0-dev.3`
+  - `@saga-ed/soa-event-outbox@0.1.0-dev.4`
+  - `@saga-ed/soa-event-consumer@0.1.0-dev.3`
+  - `@saga-ed/soa-event-test-harness@0.1.0-dev.1`
+  - `@saga-ed/soa-contract-check@0.1.0-dev.1`
+- **Working branch:** `feat/lift-helpers-and-options` (pick when
+  starting; cut from `main`).
+- **Worktree:** create under `.claude/worktrees/<name>/` per global
+  CLAUDE.md convention.
+- **Target:** one PR into `main` that bundles a coordinated dev-tag
+  bump across `observability`, `event-consumer`, `event-test-harness`,
+  and `rabbitmq` (whichever subset the work below touches).
 
 ## Why this exists
 
@@ -54,8 +75,9 @@ Both adopters built this inline; no shared helper.
 - **Acceptance:** `@saga-ed/soa-event-consumer` exports an
   `upsertProjection(tx, table, key, payload, eventTs)` helper or a
   documented pattern at minimum. Worked example test in
-  `soa-event-test-harness`.
-- Reference: `decisions/d-consumer-resilience.md` (RESOLVED 2026-05-05).
+  `event-test-harness`.
+- Reference: `claude/projects/soa_75/decisions/d-consumer-resilience.md`
+  (RESOLVED 2026-05-05) — read on `soa_75`, not `main`.
 
 ### 1.8 — Non-fatal-broker-startup behavior codified · P2
 
@@ -73,30 +95,62 @@ loud. Each adopter wires this manually today.
 Package exists at `0.1.0-dev.1` but has no usage docs / example test
 suite. Adopters' integration tests are bespoke.
 
-- **Acceptance:** `packages/node/soa-event-test-harness/README.md`
+- **Acceptance:** `packages/node/event-test-harness/README.md`
   with a worked example mirroring iam-api's `outbox-roundtrip.int.test.ts`;
   covers (a) Postgres + RabbitMQ container spin-up, (b) `id()` helper
   (1.1 above), (c) "tick relay → assert message received on bound queue".
   No need to refactor adopter tests in this session — that's Session D.
 
-### 1.2 (lint-rule part only) — OTel `initTracing()` import-order check · P1
+### 1.2 — OTel `initTracing()` import-order check (lint rule + README banner) · P1
 
-The README banner part of 1.2 should land separately as a doc-only PR
-(see Session A2 below). What lands here is the **lint rule**.
+Both adopters silently lost spans when a tracer-using import preceded
+`initTracing()` in `main.ts`. Two complementary protections:
 
-- **Acceptance:** ESLint rule (or comment-based lint, or a small
-  `eslint-plugin-saga-soa` if the repo already has one) that fails when
-  any import in a `main.ts` file precedes a call to `initTracing()`.
-  Wire into the soa lint preset; verify it fires on a deliberately-broken
-  fixture.
+- **Acceptance (lint rule):** ESLint rule (or comment-based lint, or a
+  small `eslint-plugin-saga-soa` if the repo already has one) that
+  fails when any import in a `main.ts` file precedes a call to
+  `initTracing()`. Wire into the soa lint preset; verify it fires on a
+  deliberately-broken fixture.
+- **Acceptance (README banner):** loud banner at the top of
+  `packages/node/observability/README.md` documenting the rule with a
+  worked correct/incorrect example.
+
+### 1.3 — Outbox-pool sizing default (docstring) · P2
+
+`createOutboxPool` accepts `max` but adopters set it differently —
+rostering leaves default; program-hub sets `max: 4` to avoid starving
+the HTTP request pool. No canonical guidance.
+
+- **Acceptance:** `createOutboxPool` (in `packages/node/event-outbox/`)
+  defaults to `max: 4` and the docstring explains why ("avoid starving
+  the HTTP request pool; outbox traffic is bursty and short-lived"). If
+  Seth specifies a different number before you start, use that;
+  otherwise `4` is the fallback because that's what one shipped adopter
+  uses already.
+
+### 1.5 — Consumer-queue isolation rule (README addition) · P2
+
+program-hub#62 splits `GroupProjectionConsumer` from
+`IamProjectionConsumer` to prevent poison-message backpressure. Earlier
+adopters didn't split. No documented rule.
+
+- **Acceptance:** one-paragraph "queue topology" section in
+  `packages/node/event-consumer/README.md` stating the rule:
+  *"Bind one consumer per event family. If a service consumes more than
+  one event family (e.g., `iam.*` and `programs.*`), instantiate a
+  separate `EventConsumer` per family bound to a distinct queue, so a
+  poison message in one family doesn't block the other."* Reference
+  program-hub#62 as the canonical example. The corresponding decision
+  doc update lives on `soa_75` (Session A2 handles).
 
 ## Out of scope for this session
 
 - Adopter-repo work (Sessions B and C handle rostering / program-hub).
-- Decision-doc edits — A2 (the docs/decisions session) handles those.
+- Decision-doc edits on `soa_75` — Session A2 handles those (1.4
+  bulk-mutation options doc, 1.5 decision-side rule, 1.7 projection
+  deletion guidance, 1.3 sizing rationale doc).
 - Bumping adopter consumers to the new dev tags (Session D, later).
-- 1.7 soft-/hard-delete projection guidance (decision doc, A2).
-- 1.4 bulk-mutation strategy (decision, blocked on Seth).
+- Picking the bulk-mutation strategy (1.4) — blocked on Seth.
 
 ## Verification
 
@@ -107,8 +161,8 @@ The README banner part of 1.2 should land separately as a doc-only PR
 
 ## On finish
 
-- Open the PR into `soa_75` titled
-  `feat(soa_75): lift id()/UPSERT/failureMode helpers + harness docs + OTel lint rule`.
+- Open the PR into `main` titled
+  `feat: lift id()/UPSERT/failureMode helpers + harness docs + OTel lint rule + sizing/topology docs`.
 - In the PR body, name the new dev tag set explicitly (e.g.,
   `@saga-ed/soa-event-test-harness@0.1.0-dev.3`,
   `@saga-ed/soa-event-consumer@0.1.0-dev.3`,

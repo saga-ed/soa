@@ -48,8 +48,10 @@ packages are likely `@saga-ed/programs-events` and
   - CI job in `.github/workflows/` that runs `soa-contract-check check`
     on every PR for both services and fails on byte-diff without `--bump`.
   - Local + CI verification per Session B's pattern.
-- Reference: `saga-ed/soa@soa_75:packages/.../soa-contract-check` has
-  the package + README.
+- Reference: `saga-ed/soa@main:packages/node/contract-check/` has
+  the package + README (note the directory is `contract-check`, not
+  `soa-contract-check` — the `soa-` prefix is only in the npm package
+  name `@saga-ed/soa-contract-check`).
 
 ### 2.4 — Prisma CLI runtime-deps parity audit (program-hub side) · P1
 
@@ -132,7 +134,7 @@ Producer needs to include it; consumer simplifies once present.
 - Decisions:
   `saga-ed/soa@soa_75:claude/projects/soa_75/decisions/d-contract-testing.md`,
   `d-event-versioning.md`, `d-publisher-migration.md`
-- Package: `gh api repos/saga-ed/soa/contents/packages/.../soa-contract-check?ref=soa_75`
+- Package: `gh api repos/saga-ed/soa/contents/packages/node/contract-check?ref=main`
 - Existing PRs: `gh pr view 60 --repo saga-ed/program-hub`,
   `gh pr view 62 --repo saga-ed/program-hub`
 - Memory: `project_pr_preview_event_driven_pilot.md` — Prisma packaging,

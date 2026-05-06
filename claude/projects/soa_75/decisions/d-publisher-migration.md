@@ -118,7 +118,7 @@ Currently, **these bulk operations don't emit anything**. This is a deliberate d
 | **Bulk summary event** (e.g., `schedule.regenerated.v1` with `{rangeStart, rangeEnd, count}`) | Single envelope, consumers re-fetch range | Loses per-event detail; consumers need a re-fetch path |
 | **Don't emit; consumers poll** | Simplest | Stale projections; defeats the point of event-driven |
 
-**Recommendation:** when the third adopter encounters a bulk operation, design around bulk summary events with an explicit re-fetch contract (the consumer hits the publisher's read API to load affected rows). Document the pattern as `d-bulk-mutation-events.md` at that point.
+**Recommendation:** see [`d-bulk-mutation-events.md`](d-bulk-mutation-events.md) (reframed 2026-05-06) for the full breakdown. Short version: the right answer is *not* a single transmission strategy but a two-step framing — first reduce N at the source (pattern-as-event, deviation events, JIT materialization) and only then choose a transmission strategy for the residual. For scheduling-api specifically, `regenerate` → emit one `ScheduleUpserted` (the pattern-level event already in the catalog); `setHolidays` → emit per-deviation `HolidayMarked` events; single-row mutations → per-event envelopes. The "bulk summary + re-fetch" option is reserved for hypothetical future row-level consumers — programs-api/v2 doesn't qualify because it doesn't consume per-row calendar events.
 
 ## Other migration considerations
 

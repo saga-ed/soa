@@ -1,180 +1,197 @@
 # d-bulk-mutation-events — How to publish events from bulk mutations
 
-**Status:** PENDING — four options below; pick one before scheduling-api's `setHolidays` / `regenerate` paths cut over to outbox publishing. Forced by the third adopter; same shape will recur in admissions / ledger fan-outs.
+**Status:** PENDING — pick a default + a threshold. Two-step framing: (1) reduce N at the source where possible (upstream alternatives U1–U4); (2) for the residual, pick a transmission strategy (A–D). Lean: **A as default for small-N (single-row + small bulk); pattern-level events (U2 — `ScheduleUpserted` already in the catalog) for bulk paths**. C is the de-facto status quo today and may be defensible until a consumer actually needs row-level fidelity.
 
-**Source PRs / triggers:** [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) — scheduling-api's bulk operations are wired through outbox-publishing infrastructure but the `setHolidays` and `regenerate` paths currently emit **nothing** (deliberate deferral pending this decision).
+**Source PRs / triggers:** [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) — scheduling-api's bulk operations are wired through outbox-publishing infrastructure but `setHolidays` and `regenerate` currently emit nothing (deliberate deferral pending this decision).
 
-**Related:** `d-publisher-migration.md` § 4 (which sketches the same three options at lower resolution and points at this doc).
+**Related:** `d-publisher-migration.md` § 4 (which sketched three options at lower resolution and points at this doc).
 
-## Context
+## Framing
 
-scheduling-api has two operations that mutate hundreds-to-thousands of `calendar_event` rows per call:
+The earlier draft of this doc framed the question as *"how do we transmit N events per bulk operation?"* and laid out four transmission options (A/B/C/D). That framing skipped a more important question: **is N intrinsic to the operation, or is it an artifact of how we represent state?**
 
-- **`setHolidays`** — for a given school + date range, mark every regularly-scheduled session on a holiday date as cancelled. Typical scope: ~500 events per school year × ~20 schools = up to ~10k mutations per call.
-- **`regenerate`** — when a schedule template changes, drop and re-create every materialized event in the affected window. Typical scope: 5k–20k mutations.
+The architectural lever is reducing N at the source — emit pattern changes, deviations from a pattern, or instructions to reproduce — so the per-row burst question never arises for bulk operations that are *fundamentally* pattern-level changes. A/B/C/D become the residual question for the cases where row-level fidelity actually matters.
 
-Naively wired through `writeOutbox(tx, ...)` per row, each call would write thousands of outbox rows in one transaction, then the relay would publish thousands of messages to RabbitMQ in a tight burst. The pattern is symmetric to other adopters' bulk paths (admissions roll-forward, ledger end-of-month posting) so whatever this picks becomes the fleet convention.
+## Context — scheduling-api today
 
-The three failure modes to avoid:
+(Architectural reality, surveyed 2026-05-06 against `program-hub@saga-ed/event-driven-adoption`.)
 
-1. **Broker burst** — RabbitMQ accepts bursts but consumers and downstream queues don't drain at burst speed. Per-PR preview brokers will stall; production AWS MQ will throttle.
-2. **Outbox bloat** — single transaction with 10k inserts holds row locks for seconds; relay falls behind for minutes; outbox table grows hundreds of MB before pruning.
-3. **Stale consumers** — if events are skipped, projections drift from publisher state and read-API consumers (like programs-api `/v2`) return stale data without noticing.
+scheduling-api **already has a recurrence model** — it's not a flat materialized-rows-only system:
 
-A "good" answer keeps consumers eventually consistent with the publisher, doesn't blow up the broker, and doesn't reintroduce the synchronous coupling we're moving away from.
+| Table | Purpose |
+|---|---|
+| `Schedule` | one per program, declares `patternType` (`SAME_EVERY_WEEK` / `VARIES_BY_DAY_TYPE`), bounds |
+| `PeriodScheduleConfig`, `DayType`, `DayTypeBlock` | the pattern itself (period times, day-type rotations) |
+| `RecurrenceRule` | the template — RRULE string, `dtstart`, `exdates` |
+| `CalendarEvent` | **materialized rows** — `date`, `periodId`/`dayTypeId`, `origin: AUTO\|MANUAL\|HOLIDAY`, `cancelled` |
 
-## Options
+**Materialization is eager and total.** `SchedulesService.upsert()` and `CalendarEventsService.regenerate()` both expand all RecurrenceRules across the schedule's date range and `createMany()` the resulting `CalendarEvent` rows. Typical school-year window is ~8 months, ~5 periods/day × ~4 days/week × ~32 weeks ≈ 800–1200 rows per program per upsert; thousands when a school has multiple programs and `regenerate` is called.
 
-### A. Per-event envelopes (status-quo emit-everything)
+**`setHolidays` is not the row-explosion case** in current code — it cancels a small set of AUTO events per date by adding to the EXDATE list and creates one HOLIDAY row per date. Typical N: tens, not thousands.
 
-Every row mutation in the bulk path writes one outbox envelope, identical to how single-row mutations work.
+**`regenerate` is the row-explosion case** — it deletes all AUTO events for the schedule and re-expands every rule. Typical N: thousands per call.
 
-**How it works.** `setHolidays` iterates affected events, calls `writeOutbox(tx, ...)` per cancellation. Outbox table gains 10k rows. Relay batches and publishes them at its configured rate (currently ~100 msg/s per adopter).
+**The big finding: programs-api `/v2` does not consume per-row calendar events.** No event handlers in `apps/node/programs-api/src/event-handlers/` subscribe to `calendar_event.*`. The `/v2` enrollment-tree reads schedule metadata — recurrence rules, day types, period configs — and never relies on per-row CalendarEvent state. There is, today, **no consumer that would notice if scheduling-api skipped per-row event emission**.
 
-**Pros:**
-- Maximum semantic fidelity — consumers see every state change with full context
-- Idempotency works trivially per-row (UPSERT by `aggregateId`)
-- Per-aggregate ordering preserved via outbox sequence
-- No new event-shape vocabulary to design — same `calendar_event.cancelled.v1` we already have
-- Trivial to reason about: "every change emits"; no "did this path emit?" branching in consumer minds
+**Existing event catalog** (`@saga-ed/scheduling-events`):
 
-**Cons:**
-- Broker burst: 10k messages × ~3KB envelope ≈ 30MB published in seconds. AWS MQ throttle kicks in around 200MB/s aggregate.
-- Outbox transaction holds locks while inserting 10k rows; concurrent single-row mutations queue.
-- Relay falls behind: at 100 msg/s, a 10k burst takes ~100 seconds to drain.
-- Consumer projection rebuild during burst is observably laggy.
-- DLQ inflation if the burst contains any poison rows — debugging 10k similar events is painful.
+- `CalendarEventCreatedV1 { id, programId, periodId?, date }`
+- `CalendarEventCancelledV1 { id, cancelledAt }`
+- `ScheduleUpsertedV1 { programId, mode, rrule?, updatedAt }` — **already a pattern-level event**
 
-**Mitigations available** (all real, all add complexity):
-- Per-publisher rate limit at relay (Option D below is essentially this formalized)
-- Larger consumer prefetch + parallelism (helps but creates own ordering issues)
-- Dedicated bulk queue for burst-tolerant consumers
+`ScheduleUpserted` is the seed of U2 — it already exists, it already carries the RRULE, and `SchedulesService.upsert()` is the natural place to emit it. The bulk-mutation question is partly *"do we keep relying on `ScheduleUpserted` for bulk paths, or switch to per-row?"* — and the absence of any current per-row consumer makes the answer easy: keep using it.
 
-**When this is right:** consumer must take per-row side effects (audit log, billing posting, external notification per event). Anything where collapsing N rows into 1 envelope loses information consumers need.
+## Upstream alternatives — reduce N at the source
+
+These reduce the information that needs to be transmitted by changing **what** the publisher emits, not just **how** it batches per-row events. Listed roughly in order of fit-with-current-architecture.
+
+### U2 — Pattern-as-event (already partly in place) · *cheapest*
+
+The publisher emits a single envelope describing the new state of the pattern (RRULE, day-type config, period times). Consumers project the pattern locally and re-derive any materialized state on read.
+
+**In scheduling-api code today:** `ScheduleUpsertedV1` is exactly this — payload carries `mode` + `rrule`. To extend coverage to bulk paths, `regenerate()` would emit one `ScheduleUpserted` (or a peer `ScheduleRegenerated`) per affected schedule rather than per-row events. Implementation cost: low — the wire shape exists, the call site is a single transaction, the consumer-side burden depends on the consumer (programs-api `/v2` already doesn't materialize per-row, so it gains nothing to lose).
+
+**Pros:** O(1) events per bulk op regardless of row count. Aligns with how schedule changes are *thought* about ("the schedule for school X changed"). Reuses existing event vocabulary. No reduction in semantic fidelity *for consumers that already don't materialize rows*.
+
+**Cons:** Loses per-row audit trail (which mattered for whom?). New consumers that *do* need row-level state must re-derive (extra logic) or call back to scheduling-api (reintroduces sync coupling, like Option B). Tied to the publisher's pattern model — if pattern shape changes, the event shape does too (unlike per-row events which are stable per `calendar_event` row).
+
+**When it fits:** consumer is fundamentally a pattern-aware projection (programs-api `/v2` qualifies today). For pure read-models that don't care about individual events.
+
+### U3 — Deviation events (exceptions diffed from pattern) · *medium*
+
+Publisher emits one event per **deviation** from the pattern — a holiday, a manual cancellation, a one-off addition — rather than per affected row. The pattern itself is communicated via U2; deviations are layered on top.
+
+**In scheduling-api code today:** the schema already supports this — `RecurrenceRule.exdates` lists exception dates; `CalendarEvent.origin` distinguishes `AUTO` (pattern-derived) from `MANUAL` (manual additions) and `HOLIDAY` (overrides). New event types would be e.g. `HolidayMarkedV1 { scheduleId, date, reason }` and `ScheduleExceptionAddedV1 { scheduleId, date, kind }` instead of N `CalendarEventCancelledV1` events for what is conceptually one holiday application.
+
+**Pros:** N proportional to *operations* not *rows*. `setHolidays` for a winter break of 5 dates = 5 events instead of 5 × (events-per-week-cancelled). Consumers that care can apply each deviation as a delta against their projected pattern. Permanent semantic value (the holiday log is the holiday log).
+
+**Cons:** Consumer must understand pattern + apply deviations (more logic than just receiving rows). Two event vocabularies to keep coherent (pattern + deviations). Some operations don't map cleanly to deviations (e.g., a `regenerate` after a pattern change isn't really a "deviation" — it's a re-expansion).
+
+**When it fits:** the bulk operation is *itself* a pattern-deviation primitive (apply holidays, apply exceptions). Doesn't fit `regenerate` (better as U2 — a new pattern) but does fit `setHolidays` perfectly.
+
+### U1 — JIT (sliding-window) materialization · *largest refactor*
+
+Don't materialize the full 8-month range. Materialize only a sliding window (e.g., next N weeks). Bulk operations only touch what's already in the window; future-dated impacts are applied lazily as the window slides forward via a periodic job.
+
+**In scheduling-api code today:** would require:
+- Stop calling `createMany()` for the full date range on `upsert` — instead, materialize only `[today, today + N weeks]`
+- Add a sliding job (cron / cloud scheduler) that nightly extends the materialized window by 1 week and applies any pending pattern changes to the newly-materialized rows
+- Add a "lazy expand" path for read queries that ask beyond the materialized window (option: refuse and require a different read API; or option: expand into a temp table for the response)
+- Materialization-triggered events become trickle-feed (~1 week's worth nightly) rather than burst (8 months at once)
+
+**Pros:** Bulk ops have small N **always** — `setHolidays` and `regenerate` only touch the materialized window (~1 week of rows = tens, not thousands). Option A handles the residual trivially. Decoupled from pattern shape — consumers still see per-row events, just fewer of them.
+
+**Cons:** Substantial refactor of `SchedulesService` + `CalendarEventsService` + read paths. Read API semantics change for "give me this entire school year's schedule" queries. Window-sliding job becomes a new operational concern. Doesn't help if a consumer asks for a far-future window (lazy expand still does a burst, just at read time).
+
+**When it fits:** medium-term architectural direction. Worth doing for reasons beyond event-emission (memory, DB size, agility around pattern changes). Not worth doing solely to solve the bulk-mutation problem.
+
+### U4 — Instructions-to-reproduce (operation-as-event) · *speculative*
+
+Emit the operation that was applied, not its results. Consumers re-execute the operation against their local state.
+
+**In scheduling-api code today:** `BulkHolidayAppliedV1 { schoolId, holidaySetId, dateList, appliedBy }` — the consumer fetches `holidaySetId` (or has it cached) and applies the same logic to its projection. Conceptually similar to U3 but emphasizing the *operation* rather than the resulting deviations.
+
+**Pros:** Most compact. Consumers carry the same business logic as the publisher and stay in sync by re-running ops. Audit trail is operation-shaped (matches how humans think).
+
+**Cons:** **Couples publisher and consumer to share logic** — biggest deal-breaker. Any time scheduling-api changes how holidays are applied (algorithmic change, edge-case fix), every consumer must update in lockstep or diverge silently. Reintroduces the kind of coupling event-driven architecture is supposed to dissolve. Acceptable only if the operation is *trivial* (e.g., "soft-delete by date") and unlikely to evolve.
+
+**When it fits:** rare. Most "instructions" are better expressed as deviations (U3), letting consumers stay logic-free. Mention it for completeness; don't recommend it.
+
+### Comparison
+
+| | U1 JIT | U2 Pattern | U3 Deviations | U4 Instructions |
+|---|---|---|---|---|
+| Refactor cost | high | low (already partial) | medium | low |
+| Reduces N to | small (window) | 1 per op | ~ops count | 1 per op |
+| Consumer logic | unchanged | new (project pattern) | new (pattern + apply deltas) | duplicated from publisher |
+| Audit fidelity | per-row | none (pattern-only) | per-deviation | per-operation |
+| Pattern-evolution-safe? | yes | tied to pattern shape | tied to pattern shape | brittle |
+| Fits `regenerate` | yes | great | poor | poor |
+| Fits `setHolidays` | yes (small window) | OK | great | OK (but coupling) |
+| Fits future per-row consumer | yes | poor (must re-derive) | OK (apply deltas) | OK (re-execute) |
+
+## Residual transmission options A–D
+
+For mutations where N can't be reduced — typically single-row domain mutations (one user created, one program updated) — the question is genuinely *"how do we transmit N events?"*. The four options:
+
+### A. Per-event envelopes — *default for small N*
+
+Every row mutation writes one outbox envelope. Identical pattern to single-row mutations. Outbox + relay handle bursts up to a few hundred without ceremony.
+
+**Recommendation:** **default for N < threshold (proposed: 100 events per transaction).** Below that, broker burst is negligible (~30s drain at default 100 msg/s relay rate), outbox table growth is trivial, consumer drain is fast. Don't over-engineer.
 
 ### B. Bulk-summary event with re-fetch contract
 
-Emit one envelope per bulk operation describing the **scope** of the change (not the rows). Consumers receive it, then call back to the publisher's read API to fetch the affected rows.
+Publisher emits one envelope describing the scope; consumer calls back to publisher's read API to fetch affected rows, pinned to a snapshot version.
 
-**How it works.** `setHolidays` runs the mutations as one transaction, then writes a single outbox row:
+**When still useful:** *if* a future consumer needs row-level fidelity AND wants per-bulk-op atomicity AND can tolerate the HTTP fall-back. Today, no such consumer exists for scheduling-api (`programs-api/v2` doesn't materialize rows). Keep this option in the catalog for ledger / admissions analogues that may have row-level read-model consumers.
 
-```typescript
-// inside the bulk-mutation $transaction:
-await writeOutbox(tx, buildEnvelope({
-  eventType: ScheduleBulkRegeneratedV1.eventType,
-  eventVersion: 1,
-  aggregateType: 'school_schedule',
-  aggregateId: schoolId,
-  payload: {
-    scope: { schoolId, schoolYear, dateRange: [start, end] },
-    operationKind: 'set_holidays',
-    affectedCount: 478,
-    snapshotVersion: 'sch_2026_03_05T18_22Z',
-  },
-}));
+### C. Don't emit (skip bulk paths) — *current de facto state*
+
+Bulk paths bypass the outbox entirely; only single-row mutations emit. This is what scheduling-api does **today**.
+
+**Recommendation:** **defensible *as long as* no consumer needs the data.** programs-api `/v2` doesn't, so the deferral has been correct. Becomes wrong the moment a consumer needs to react to bulk-driven state changes. Pair with U2 (`ScheduleUpserted` covers schedule-shape changes) to reduce the surface where C-as-default is silently wrong.
+
+### D. Per-event with relay rate-cap
+
+Same as A, but the relay enforces a per-publisher rate cap so burst is bounded.
+
+**When useful:** if A is the right semantic model (audit-log consumer, billing consumer, etc.) and broker capacity is the only blocker. For scheduling-api specifically, no such consumer exists today; D is reserved as a backstop for adopters that would have one (ledger fan-out is the likeliest fit fleet-wide).
+
+## Decision tree
+
+```
+Is the bulk op a pattern change? (regenerate, schedule template upsert)
+  ↓ yes
+  → U2: emit ScheduleUpserted (extend coverage; already in catalog)
+  → Default until a consumer needs row-level state. Then revisit.
+
+Is the bulk op a set of pattern deviations? (setHolidays, exception application)
+  ↓ yes
+  → U3: emit per-deviation events (HolidayMarked, ExceptionAdded)
+  → Pair with U2 for the underlying pattern.
+
+Is the bulk op truly per-row with no pattern? (rare in scheduling-api; common in admissions)
+  ↓ yes
+  → Is N < threshold (proposed: 100)?
+      → A: per-event envelopes
+  → Is N >= threshold?
+      → Does any consumer need row-level fidelity?
+          → no  → C (don't emit) or U1 (JIT — reduces N at the source long-term)
+          → yes → D (rate-cap) if side-effect consumer; B (re-fetch) if read-model consumer
 ```
 
-Consumer handler receives this and calls `GET /v1/calendar-events?school={id}&from=...&to=...&snapshotVersion=sch_...` to load the new state. The `snapshotVersion` pin guarantees the consumer fetches a coherent slice (not a slice mid-mutated by another concurrent bulk op).
+For the **specific scheduling-api decision**, the tree resolves to:
 
-**Pros:**
-- Predictable broker load: 1 message per bulk op regardless of scope
-- Outbox stays small; relay never falls behind on bulk paths
-- Naturally aligns with how bulk operations are *thought* about ("we regenerated school 5's spring schedule")
-- Fits with the consumer-reconciliation pattern admissions and ledger already use for end-of-period flows
+- **`SchedulesService.upsert`**: U2 — already emits `ScheduleUpsertedV1`; keep that, don't add per-row.
+- **`CalendarEventsService.regenerate`**: U2 — emit `ScheduleUpserted` (or a peer `ScheduleRegenerated` if the semantic is meaningfully different) once per affected schedule. **Don't** emit per-row.
+- **`CalendarEventsService.setHolidays`**: U3 — emit one `HolidayMarkedV1` per holiday date; the EXDATE addition + the HOLIDAY row both summarize as the deviation event. Future consumer wanting the underlying cancellation rows can derive from pattern + deviation.
+- **Single-row mutations** (`cancelEvent`, `createManualEvent`, etc.): A — per-event envelopes; this is what `CalendarEventCreated` / `CalendarEventCancelled` are for.
 
-**Cons:**
-- **Reintroduces synchronous coupling at the consumer side** — consumer makes an HTTP call back to publisher. If publisher is down/slow, consumer falls behind. Defeats some of the point of event-driven decoupling.
-- Consumer needs a re-fetch endpoint and a snapshot-version concept; not free to build
-- Idempotency is more subtle — what if the consumer fetches mid-mutation of a *next* bulk op? Hence the `snapshotVersion` pin, which the publisher must implement
-- Loses per-row observability — can't tell from the event log which specific events changed
-- Two-tier event model (per-row + bulk-summary) means consumer code must handle both
+## Threshold
 
-**When this is right:** consumer is a read-model projection (programs-api `/v2`, ads-adm-api dashboards) that materializes "current state of schedule for school X". Re-fetching a window is cheap and the consumer doesn't care about per-row diffs.
+Proposed default: **100 events per bulk transaction.**
 
-### C. Don't emit at all (skip bulk paths)
+Rationale: relay default rate is ~100 msg/s, so a 100-event burst drains in ~1s; outbox table holds 100 extra rows briefly; consumers see eventual consistency within ~1s. Sub-perceptual lag, no broker pressure, no operational concern. Above ~100 the questions in the decision tree start to matter.
 
-Bulk paths bypass the outbox entirely. Single-row mutations still emit; only `setHolidays` / `regenerate` do not.
+Adjustments:
+- Lower (~25) if relay throughput is constrained (small instance, slow consumers)
+- Higher (~500) if relay is provisioned generously and consumer drain is verified
 
-**How it works.** No outbox writes inside the bulk transaction. Consumers eventually pick up the new state via some other channel — periodic reconciliation, manual refresh, or cache TTL expiry.
-
-**Pros:**
-- Zero broker impact
-- No new code paths or contracts
-- Hard to argue with simplicity
-
-**Cons:**
-- **Consumers stale forever** for the data the bulk path mutated, with no signal that a refresh is needed
-- Defeats the event-driven model for any consumer that actually cares about scheduling data — and `/v2` enrollment-tree (program-hub #62) does
-- Forces every consumer to build its own "is this stale?" detection (TTL, `If-Modified-Since`, manual refresh)
-- Operationally invisible — no event log shows the bulk ops happened from a consumer's view
-- Encourages per-consumer hacks: "we just refresh the page" / "we cache for 5 min" — accumulates as tech debt fast
-
-**When this is right:** the bulk path mutates data **no consumer projection cares about**. (For scheduling-api this isn't true — programs-api/`v2` does care.) Or paired with periodic full-state re-sync events as a safety net (which is essentially a degenerate version of Option B).
-
-### D. Per-event envelopes with relay-side rate limiting
-
-Same as Option A in *what* gets written — per-row envelopes — but the relay enforces a per-publisher rate cap and queues the rest.
-
-**How it works.** `OutboxRelay` keeps Option A's emit-everything pattern. The relay reads `max_outbox_publish_rate` from config (e.g., 200 msg/s). When the outbox grows faster than that, relay polls more aggressively but its publish rate stays bounded; the outbox just stays large until drained. Bulk operations finish their transaction quickly; the broker burst is smeared over minutes instead of seconds.
-
-**Pros:**
-- Keeps semantic fidelity of Option A (every change is a separate event)
-- Bounded broker burst — predictable for capacity planning
-- No new event vocabulary; consumer code unchanged from current single-row pattern
-- Cap is a knob — adopters with bigger headroom raise it
-
-**Cons:**
-- Relay becomes more complex: rate limiter, lag metrics, alerting on sustained lag
-- Outbox table can grow large during/after a bulk op (10k rows draining at 200/s ≈ 50s of backlog) — but that's OK, postgres handles it
-- Consumers see eventual consistency *delayed* by the rate-cap drain time. If a user does `setHolidays` then immediately reads through a consumer, they see partial state until the relay drains.
-- Doesn't help if the consumer is the actual bottleneck (it just shifts the queue from broker to outbox)
-
-**When this is right:** Option A is the preferred semantic model but broker burst is the only blocker. This is essentially Option A with a backstop.
-
-### E. Hybrid — bulk-summary plus per-row in payload (mentioned, not recommended)
-
-One envelope per bulk operation, with per-row diffs included in the payload. Consumer iterates the payload.
-
-**Why mention this:** technically combines A's fidelity with B's burst behavior. **Why not recommended:** RabbitMQ message-size limits (default 128MB but practical sweet spot is <1MB). 10k cancellation diffs at ~200B each = 2MB; manageable but already past the practical sweet spot. 50k diffs is hard. AWS MQ behavior is undefined past 5MB. Also: payload validation cost (Zod parsing 10k subrecords) shifts cost from broker to producer/consumer. Cleaner to just use D.
-
-## Decision matrix
-
-| Dimension | A (per-event) | B (bulk-summary + re-fetch) | C (skip) | D (per-event + rate cap) |
-|---|---|---|---|---|
-| Broker burst | high | tiny | none | bounded |
-| Outbox size during op | 10k rows | 1 row | 0 | 10k rows (drains over min) |
-| Per-row fidelity | full | none (consumers re-fetch) | none | full |
-| Consumer freshness | minutes (lag) | seconds | "stale forever" | minutes (lag) |
-| Reintroduces sync coupling? | no | yes (consumer → publisher HTTP) | no | no |
-| New publisher work | none | re-fetch endpoint + snapshot-version | none | rate-cap config + metric |
-| New consumer work | none | summary handler + re-fetch | none | none |
-| Idempotency complexity | trivial (UPSERT per row) | non-trivial (snapshot pin) | n/a | trivial |
-| Observability | per-row trail | per-op trail | none | per-row trail |
-| Fits read-model consumer | OK | great | poor | OK |
-| Fits side-effect consumer | great | poor (lose per-row) | poor | great |
-
-## Recommendation criteria
-
-The right answer depends on consumer type:
-
-- **All bulk-affected data is consumed only as read-model projections** (programs-api `/v2` is the live example) → **Option B**. Consumers naturally re-fetch on refresh anyway; the snapshot-version pin just makes that fetch coherent.
-- **Any consumer takes per-row side effects** (audit log, billing post, notification per row) → **Option D**. Option A's broker burst is the only real blocker; cap it. Option B's information loss is unrecoverable for these consumers.
-- **No consumer cares** → Option C, but verify by surveying consumers; defaulting to skip is dangerous.
-
-For scheduling-api specifically: programs-api `/v2` is read-model only (Option B fit), but the scheduling-events catalog should anticipate future side-effect consumers (audit, billing). A defensible choice is **D as default, with B available** for explicit large-scope ops where consumers opt-in to the bulk-summary contract.
-
-The deferred third option — start with D, only design B if a real burst overwhelms the cap — is also defensible and pushes the decision down the road one more adopter.
+The threshold isn't load-bearing once U2/U3 absorb the *common* bulk paths — most "bulk" operations in scheduling-api express as pattern changes or deviation events, leaving small-N residual that A handles.
 
 ## Open questions for Seth
 
-1. **Consumer survey.** Which consumers of `calendar_event.*` need per-row fidelity vs. read-model freshness? programs-api `/v2` is the only one we know is real today; are admissions / ads-adm-api going to consume scheduling events?
-2. **Rate-cap target for D.** What's the per-publisher cap? AWS MQ in dev tolerates ~500 msg/s sustained without backpressure; production limit is provisioning-dependent.
-3. **Snapshot-version contract for B.** If we go B (or even reserve it for future use), where does the version live — outbox-event row, separate `schedule_snapshot` table, content-hash of affected range? The contract leaks into the publisher's read API.
+1. **Approve the default lean** — A < 100 < {U2 for patterns, U3 for deviations, D/B for hypothetical row-level consumers}? Or different cuts?
+2. **U1 (JIT) — pursue separately?** It's a real architectural improvement but not the right hammer for this nail. Worth its own decision doc later, or keep noted here as future work?
+3. **Threshold value** — 100 OK as a starter, or do you want a different number based on actual broker / db-host capacity in dev / prod?
+4. **For `setHolidays` specifically** — does U3 (per-deviation events) match how you want consumers to think about holidays, or is `ScheduleUpserted`-only (U2 alone) enough? (This is a question of "do consumers need to react per-holiday, or per-pattern-state-change?".)
 
 ## On finish
 
-When Seth picks:
-- Flip this doc's Status to `RESOLVED <date> — Option <X> ...`
-- Update `d-publisher-migration.md` § 4 from OPEN → resolved with a one-line summary + pointer here
-- Update `tasks/lateral-propagation.md` item 1.4 with the chosen option + tick when scheduling-api's bulk paths are wired
-- If B or D: open a corresponding implementation task in scheduling-api (program-hub repo) under the existing event-driven adoption branch.
+When picked:
+- Flip Status to `RESOLVED <date> — <chosen rules>`
+- Update `d-publisher-migration.md` § 4 with the chosen pattern + a one-line summary
+- Update `tasks/lateral-propagation.md` § 1.4 — remove "PENDING decision", note the picks
+- For each pick that requires a new event type (likely `HolidayMarkedV1` and possibly `ScheduleRegeneratedV1`), open an issue against `program-hub` to extend `@saga-ed/scheduling-events`
+- For threshold: codify in `@saga-ed/soa-event-outbox` docstring or a `claude/event-driven-conventions.md` so the next adopter inherits it

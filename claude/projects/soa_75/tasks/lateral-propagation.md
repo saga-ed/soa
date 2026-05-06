@@ -109,7 +109,7 @@ to avoid starving the HTTP request pool. There's no canonical guidance.
 
 `[soa]` `[program-hub]`
 
-> [`decisions/d-bulk-mutation-events.md`](../decisions/d-bulk-mutation-events.md) (PENDING) lays out four options (A/B/C/D + E hybrid) with a 12-dimension decision matrix and recommendation criteria keyed off consumer type. Once Seth picks, flip Status to RESOLVED and update `d-publisher-migration.md` § 4.
+> [`decisions/d-bulk-mutation-events.md`](../decisions/d-bulk-mutation-events.md) (PENDING) reframed 2026-05-06 around **information-reduction first, transmission second**. Two-step framing: upstream alternatives U1–U4 (JIT materialization, pattern-as-event, deviation events, instructions) reduce N at the source; A–D handle the residual transmission. Lean: **A as default below ~100 events; U2 (`ScheduleUpserted` — already in catalog) for `regenerate`; U3 (per-deviation events like `HolidayMarked`) for `setHolidays`; C remains defensible for paths with no consumer.** Grounded in scheduling-api's actual model — programs-api/v2 already doesn't consume per-row events. Once Seth picks, flip Status to RESOLVED and update `d-publisher-migration.md` § 4.
 
 scheduling-api's `setHolidays` and `regenerate` paths would emit
 thousands of `calendar_event.*` events under the current per-mutation

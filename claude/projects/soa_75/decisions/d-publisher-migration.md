@@ -128,7 +128,7 @@ Already covered in `d-consumer-resilience.md`, but applies equally to publisher 
 
 ### Outbox pool sizing
 
-Use a dedicated `max=2` pool for the OutboxRelay, separate from request-path Prisma. See `d-preview-deploy-isolation.md` for the helper that bundles this with the libpq schema shim.
+Use a dedicated pool for the OutboxRelay, separate from request-path Prisma. The current `createOutboxPool` default is **`max=4`** (set 2026-05-06 in `@saga-ed/soa-event-outbox@0.1.0-dev.5` per [soa#91](https://github.com/saga-ed/soa/pull/91), matching what program-hub already uses; rationale: outbox traffic is bursty and short-lived, 4 keeps it from starving the HTTP request pool). See `d-preview-deploy-isolation.md` for the helper that bundles this with the libpq schema shim.
 
 ### Per-publisher event packages
 

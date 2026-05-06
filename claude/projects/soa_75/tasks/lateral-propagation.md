@@ -53,7 +53,7 @@
 
 ## 1. Code & pattern propagation
 
-### 1.1 — `id()` UUID test helper graduation · **P1** · 🟡 in-flight (Session A1)
+### 1.1 — `id()` UUID test helper graduation · **P1** · 🟡 in-flight (Session A1: PR [#91](https://github.com/saga-ed/soa/pull/91) open, mergeable)
 
 `[soa]` `[rostering]` `[program-hub]`
 
@@ -70,11 +70,11 @@ schemas validate `string().uuid()` strictly, so `'prog-1'` test IDs fail.
   in-tree copies removed; sds adopters import it from day one.
 - Source: cross-PR survey 2026-05-06.
 
-### 1.2 — OTel `initTracing()` import-order footgun · **P1** · 🟡 in-flight (Session A1: lint rule + README banner)
+### 1.2 — OTel `initTracing()` import-order footgun · **P1** · 🟡 in-flight (Session A1: PR [#91](https://github.com/saga-ed/soa/pull/91))
 
 `[soa]` `[rostering]` `[program-hub]` `[sds]`
 
-> Decision-doc note (`d-observability.md`) updated 2026-05-06 with footgun callout + source PRs.
+> Decision-doc note (`d-observability.md`) updated 2026-05-06 with footgun callout + source PRs. PR #91 ships the ESLint rule (`saga-soa/init-tracing-first` in `@saga-ed/soa-eslint-config`) + observability README banner.
 
 `initTracing(name)` MUST be the first import in `main.ts`, before any
 module that imports a tracer. Both adopters silently lost spans during
@@ -91,9 +91,11 @@ as a one-line comment; new adopters will rediscover it.
 - Source: rostering#138, program-hub#60 both hit this; d-observability
   resolved 2026-04-30 but lacks the footgun callout.
 
-### 1.3 — Outbox-pool sizing convention · **P2** · 🟡 in-flight (Session A1: createOutboxPool docstring default)
+### 1.3 — Outbox-pool sizing convention · **P2** · 🟡 in-flight (Session A1: PR [#91](https://github.com/saga-ed/soa/pull/91); default `max=4`)
 
 `[soa]` `[rostering]` `[program-hub]`
+
+> A1 picked `max=4` (matching what program-hub already uses); `d-publisher-migration.md` § 4 stale "max=2" claim corrected to match in this commit.
 
 `createOutboxPool` accepts `max` but adopters set it differently —
 rostering#138 leaves default; program-hub#60 explicitly sets `max: 4`
@@ -124,11 +126,11 @@ selected: per-event envelopes (broker burst risk), bulk-summary events
 - Source: d-publisher-migration § Bulk-mutation strategy (OPEN, flagged
   in adopter-lessons commit `fe62c71`).
 
-### 1.5 — Consumer-queue isolation rule · **P2** · 🔵 decision shipped (Session A1 owns README addition)
+### 1.5 — Consumer-queue isolation rule · **P2** · 🟡 in-flight (Session A1: README addition in PR [#91](https://github.com/saga-ed/soa/pull/91))
 
 `[soa]` `[program-hub]`
 
-> Rule landed in `d-consumer-resilience.md` § 5 (2026-05-06): one `EventConsumer` per upstream event family per service. Source: program-hub#62 split. Session A1 adds the parallel README paragraph in `@saga-ed/soa-event-consumer`.
+> Rule landed in `d-consumer-resilience.md` § 5 (2026-05-06): one `EventConsumer` per upstream event family per service. Source: program-hub#62 split. PR #91 adds the parallel README paragraph in `@saga-ed/soa-event-consumer` ("queue topology"). Flips to 🟢 shipped on PR #91 merge.
 
 program-hub#62 introduces a separate `GroupProjectionConsumer` queue
 distinct from `IamProjectionConsumer` to prevent poison-message
@@ -141,9 +143,11 @@ documented rule for when to split.
   README.
 - Source: program-hub#62 review.
 
-### 1.6 — UPSERT-handler pattern + helper · **P2** · 🟡 in-flight (Session A1)
+### 1.6 — UPSERT-handler pattern + helper · **P2** · 🟡 in-flight (Session A1: documented pattern in PR [#91](https://github.com/saga-ed/soa/pull/91), no generic helper)
 
 `[soa]` `[program-hub]`
+
+> A1 judgment call: shipped as a documented pattern in `@saga-ed/soa-event-consumer/README.md` rather than a generic `upsertProjection` helper, citing per-table SQL specificity. Defensible — generic UPSERT across postgres tables is awkward — but means adopters still hand-roll their UPSERTs. Revisit if a clean helper shape emerges from a third adopter.
 
 Out-of-order delivery is default in RabbitMQ; consumer handlers must
 UPSERT on event timestamp/version, not blind INSERT. Both adopters
@@ -170,9 +174,11 @@ Neither rule is currently documented; adopters pick implicitly.
   worked examples from programs-api (soft-delete due to enrollment
   FKs) and a hypothetical analytics-only consumer (hard-delete).
 
-### 1.8 — Non-fatal-broker-startup behavior codified · **P2** · 🟡 in-flight (Session A1)
+### 1.8 — Non-fatal-broker-startup behavior codified · **P2** · 🟡 in-flight (Session A1: PR [#91](https://github.com/saga-ed/soa/pull/91))
 
 `[soa]` `[rostering]` `[program-hub]`
+
+> PR #91 adds `failureMode: 'fatal' | 'log-and-continue'` option to `ConnectionManager` in `@saga-ed/soa-rabbitmq` + matrix in new README. Adopter swap-in scheduled for Session D after A1 merges.
 
 In dev/test, broker unavailable should log + continue (so docker-compose
 profile-gated stacks don't block local dev). In prod, it must fail loud.
@@ -199,9 +205,11 @@ emitted records. Operators currently grep across two systems.
 
 ## 2. Shared-package adoption gaps
 
-### 2.1 — `@saga-ed/soa-contract-check` CI wiring in adopters · **P1** · 🟡 in-flight (Sessions B + C)
+### 2.1 — `@saga-ed/soa-contract-check` CI wiring in adopters · **P1** · 🟢 shipped
 
 `[rostering]` `[program-hub]`
+
+> Both adopter PRs merged 2026-05-06: rostering [#170](https://github.com/saga-ed/rostering/pull/170) → `feat/iam-events-adoption` (commit `60cbe65`); program-hub [#73](https://github.com/saga-ed/program-hub/pull/73) → `saga-ed/event-driven-adoption` (commit `04752b7`, covers programs + scheduling).
 
 Package shipped + soa_75 marks Layers 1+2 as implemented (commit
 `5cd5993`). Adopter PRs (rostering#138, program-hub#60/#62) define
@@ -229,9 +237,11 @@ package when it joins as a publisher.
   versions tracked in d-event-package-shape; sds events package decision
   recorded when sds joins.
 
-### 2.3 — `@saga-ed/soa-event-test-harness` adoption + docs · **P2** · 🟡 in-flight (Session A1)
+### 2.3 — `@saga-ed/soa-event-test-harness` adoption + docs · **P2** · 🟡 in-flight (Session A1: PR [#91](https://github.com/saga-ed/soa/pull/91); README + worked example)
 
 `[soa]` `[rostering]` `[program-hub]`
+
+> README mirrors rostering's `outbox-roundtrip.int.test.ts` with Postgres + RabbitMQ container spin-up, `id()` helper, tick-relay-and-assert pattern. Adopter test refactors to use the harness scheduled for Session D.
 
 Package exists (v0.1.0-dev.1) but has no usage docs / example test
 suite. Adopter integration tests
@@ -244,9 +254,11 @@ suite. Adopter integration tests
   (b) `id()` helper (item 1.1), (c) "tick relay → assert message
   received on bound queue" pattern.
 
-### 2.4 — Prisma CLI runtime-deps parity audit · **P1** · 🟡 in-flight (Sessions B + C)
+### 2.4 — Prisma CLI runtime-deps parity audit · **P1** · 🟢 shipped
 
 `[rostering]` `[program-hub]`
+
+> rostering: code fix already shipped in PR #138 (`c86c52c` move prisma to deps; `42efa23` `pnpm rebuild prisma`; `ab5c2cb` copy migrations + dotenv); convention documented 2026-05-06 in commit `0ad2ae1`. program-hub: audited by Session C — Dockerfile uses bare `pnpm install --frozen-lockfile` (no `--prod`, no `--ignore-scripts`), so the gotcha doesn't apply; no fix needed.
 
 rostering#138 moves `prisma` from devDeps → deps so preview-deploy
 migrate ECS tasks can `pnpm exec prisma migrate deploy`. program-hub#60
@@ -333,9 +345,11 @@ No canonical rule template — next adopter rediscovers thresholds.
 
 ## 4. Decision-doc → adopter-repo propagation
 
-### 4.1 — `participantType` denormalization on group events · **P2** · 🟡 in-flight (Session C)
+### 4.1 — `participantType` denormalization on group events · **P2** · 🟢 shipped
 
 `[program-hub]`
+
+> Already shipped before this session: rostering side `5d01bf6` (`feat(iam-events,iam-api): denormalize roleName onto group_membership.added.v1`); program-hub consumer side `3319769` (`feat(programs-api): use roleName for v2 participantType mapping`). Confirmed 2026-05-06 during the post-session review.
 
 program-hub#62 review noted `participantType` defaults to `'staff'`
 because `roleName` isn't denormalized onto the group-membership event

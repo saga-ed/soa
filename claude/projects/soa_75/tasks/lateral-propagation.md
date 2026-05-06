@@ -258,38 +258,21 @@ re-derive the binding pattern.
 
 ## 3. Infra / IaC follow-ups
 
-### 3.1 — Preview-deploy IaC side not built · **P1**
+> **Note (2026-05-06):** an initial draft of this section flagged
+> "preview-deploy IaC not built" as a P1 blocker, plus a P2 cleanup-parity
+> gap between rostering and program-hub. Both items were **wrong** —
+> end-to-end smoke tests have run against CICD-deployed previews, and
+> direct inspection of `cleanup-preview-{iam,programs,scheduling}-api.yml`
+> + the underlying composite actions
+> (`.github/actions/cleanup-{iam,programs,scheduling}-api/action.yml`)
+> shows the cleanup shape is identical across all three services
+> (delete service stack → delete routing stack → delete SSM target-group-arn).
+> Schema / per-PR secret / broker resource teardown is handled by
+> CloudFormation stack delete cascade rather than orchestrated from CI.
+> The synthesis error came from weighting a stale decision-doc claim
+> over the diff-level evidence; flagged for future re-surveys.
 
-`[rostering]` `[program-hub]` `[soa]`
-
-d-preview-deploy-isolation (RESOLVED 2026-05-05) covers the schema +
-broker-tag isolation pattern at the app layer. The IaC layer — per-PR
-ALB listener-rule, ephemeral target group, schema provisioning lambda,
-broker resource-cleanup on PR-close — is NOT yet built. rostering#138
-and program-hub#60 cannot deploy to a real preview env until it exists.
-
-- **Acceptance:**
-  1. Per-service `infra/preview/*.yaml` CFN that creates listener-rule
-     in the agreed priority band, ephemeral TG, IAM policy attachments
-  2. Schema-provision + cleanup workflows wired to PR open/close events
-  3. Broker exchange/queue cleanup on PR close (rostering already does
-     this; program-hub does not — see item 3.2)
-- Source: d-preview-deploy-isolation + memory.
-
-### 3.2 — RabbitMQ preview-resource cleanup parity · **P2**
-
-`[program-hub]`
-
-rostering#138 deletes per-PR exchanges + queues on PR close.
-program-hub#60/#62 cleanup workflows DROP SCHEMA + delete SSM secrets
-but **do not** delete the tagged exchange/queue/binding.
-
-- **Acceptance:** program-hub `cleanup-preview-{programs,scheduling}-api.yml`
-  workflow includes a step matching rostering's broker cleanup. Verify
-  with manual run + AWS MQ console inspection.
-- Source: cross-PR survey 2026-05-06.
-
-### 3.3 — Orphan-schema reaper coverage extension · **P2**
+### 3.1 — Orphan-schema reaper coverage extension · **P2**
 
 `[sds]`
 
@@ -301,7 +284,7 @@ it needs its own reaper.
 - **Acceptance:** sds adds an equivalent workflow when its first
   event-driven preview deploy lands. Track here so it's not forgotten.
 
-### 3.4 — db-host `max_connections` raise (Phase 5 deferred) · **P2**
+### 3.2 — db-host `max_connections` raise (Phase 5 deferred) · **P2**
 
 `[soa]` (external: `@saga-ed/infra-compose`)
 
@@ -314,7 +297,7 @@ With `outboxPool.max=4` and ~5 Prisma connections per service,
   consumed by db-host instances. Closes Phase 5 deferral.
 - Source: memory + d-preview-deploy-isolation.
 
-### 3.5 — DLQ Prometheus alert-rule template · **P2**
+### 3.3 — DLQ Prometheus alert-rule template · **P2**
 
 `[soa]`
 
@@ -367,7 +350,7 @@ sds-specific onboarding here:
   `decisions/d-sds-adoption.md` (new doc).
 - [ ] **5.2** sds events package created if publisher (item 2.2).
 - [ ] **5.3** sds preview-deploy infra mirrored from rostering / program-hub
-  (items 3.1–3.3).
+  (items 3.1, 3.2).
 
 ---
 

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { connect, Channel, ChannelModel } from 'amqplib';
+import { connect, Channel, ChannelModel, ConfirmChannel } from 'amqplib';
 import { inject, injectable } from 'inversify';
 import type { ILogger } from '@saga-ed/soa-logger';
 import { QueueDefinition } from './queue';
@@ -134,6 +134,32 @@ export class ConnectionManager {
     }
 
     return this.channelModel.createChannel();
+  }
+
+  /**
+   * Open a publisher-confirms channel. Use this when the caller needs broker
+   * acknowledgement that a published message has been routed and persisted
+   * before considering it durable. Compared to `newChannel()`:
+   *
+   *   - publish() / sendToQueue() take an additional callback that fires
+   *     once the broker confirms (ack) or rejects (nack) the message.
+   *   - waitForConfirms() resolves only after the broker has confirmed every
+   *     message published on the channel since the last waitForConfirms().
+   *   - confirms add ~1 broker round-trip per publish (or per batch when
+   *     pipelining + waitForConfirms()), so plain newChannel() is preferable
+   *     when the caller doesn't need the durability signal.
+   *
+   * Typical use: outbox relays that mark a row "published" only after the
+   * broker confirms — without confirms, an async broker rejection (e.g. 404
+   * on an unknown exchange, mandatory-flag failure) silently leaves the
+   * row marked published and the message lost.
+   */
+  async newConfirmChannel(): Promise<ConfirmChannel> {
+    if (!this.channelModel) {
+      throw new Error('Channel model not initialized - ensure connection is established');
+    }
+
+    return this.channelModel.createConfirmChannel();
   }
 
   async assertQueues(queueDefinitions: QueueDefinition[]): Promise<void> {

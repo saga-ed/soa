@@ -1,6 +1,9 @@
 {
   "$schema": "https://turborepo.com/schema.json",
   "ui": "tui",
+  "globalEnv": [
+    "EVENT_PREVIEW_TAG"
+  ],
   "tasks": {
     "build": {
       "dependsOn": [
@@ -28,7 +31,7 @@
     },
     "check-types": {
       "dependsOn": [
-        "^check-types"
+        "^build"
       ]
     },
     "test": {

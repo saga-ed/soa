@@ -1,8 +1,8 @@
 # d-consumer-resilience — Operational patterns for event consumers
 
-**Status:** RESOLVED 2026-05-05 — Idempotent UPSERT handlers, soft-delete projections (when historical resolution matters), non-fatal broker startup in non-prod, OTel `initTracing` as the first import. Lifted from rostering #138 and program-hub #60 after both adopters independently arrived at the same set.
+**Status:** RESOLVED 2026-05-05, extended 2026-05-06 — Idempotent UPSERT handlers, soft-delete projections (when historical resolution matters), non-fatal broker startup in non-prod, OTel `initTracing` as the first import, **and one queue per event family** (added 2026-05-06 from program-hub #62). Lifted from rostering #138 and program-hub #60/#62 after adopters independently arrived at this set.
 
-**Source PRs:** [rostering #138](https://github.com/saga-ed/rostering/pull/138) (iam-api outbox + iam-events) · [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) (programs-api, scheduling-api outbox + projections)
+**Source PRs:** [rostering #138](https://github.com/saga-ed/rostering/pull/138) (iam-api outbox + iam-events; patterns 1–4) · [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) (programs-api, scheduling-api outbox + projections; patterns 1–4) · [program-hub #62](https://github.com/saga-ed/program-hub/pull/62) (group-projection consumer split — pattern 5)
 
 ## Context
 
@@ -73,6 +73,33 @@ const programDeletedHandler: EventHandler<ProgramDeletedV1Payload> = {
 
 **When to use hard-DELETE:** when the projection is purely a cache (e.g., a name lookup with no FK references), and downstream queries should treat absence as "doesn't exist." Be explicit in the handler comment which case applies.
 
+#### Decision matrix — soft-delete vs hard-delete projection rows
+
+Pick once per projection table, document the choice in the handler. Tradeoffs:
+
+| Question | Soft-delete (`deleted_at IS NOT NULL`) | Hard-delete (`DELETE FROM`) |
+|---|---|---|
+| Downstream FKs reference this row? | required | not viable |
+| Need to render "Foo (deleted)" in UI? | yes | no |
+| Need historical reporting / audit? | yes | no |
+| Read-path can simply `WHERE deleted_at IS NULL`? | yes | n/a (row gone) |
+| Storage growth concern? | grows monotonically (prune later) | bounded |
+| Concurrent re-create event after delete? | UPSERT clears `deleted_at` | INSERT works trivially |
+| Out-of-order delivery (delete arrives first, then create)? | needs careful UPSERT | row not found is fine — just INSERT |
+
+**Worked examples from the fleet:**
+
+| Projection | Choice | Why |
+|---|---|---|
+| scheduling-api `program_projection` (from `programs.program.deleted`) | soft | `calendar_event` rows hold FK; UI shows "Program X (deleted)" |
+| program-hub `group_projection` (from `iam.group.deleted`) | soft | enrollment + membership rows hold FK; same reasoning |
+| program-hub `iam_user_projection` (cache for displayName lookup, no FK) | hard | pure read cache; absent user = "unknown user" is acceptable |
+| hypothetical analytics consumer (denormalized warehouse table, replaces full snapshot daily) | hard | rebuilt nightly; soft-delete adds no value |
+
+**Rule of thumb:** if any other table in the same database holds a foreign-key to this projection, soft-delete. If not, hard-delete is fine and saves storage.
+
+**One subtlety — out-of-order delete-then-create:** if a `*.deleted` event is processed before the `*.created` (rare but possible per pattern 1), the soft-delete `UPDATE` is a no-op (row doesn't exist yet). The subsequent `*.created` `INSERT` should set `deleted_at = NULL` defensively (or use UPSERT with `deleted_at = EXCLUDED.deleted_at`). Hard-delete sidesteps this entirely — the create just inserts.
+
 ### 3. Non-fatal broker startup in non-production
 
 Both adopters wrap OutboxRelay and EventConsumer startup in a try/catch that logs but does not throw — except in production:
@@ -120,12 +147,51 @@ initTracing('iam-api'); // too late — tracers were already cached
 
 This footgun should be loud-documented in `@saga-ed/soa-observability`'s README and `d-observability.md` (see follow-ups in companion docs work).
 
+### 5. One consumer queue per event family (isolate poison messages by domain)
+
+When a service consumes events from more than one publisher domain — e.g., programs-api consumes both `iam.*` (group memberships) and `programs.*` (its own group projections) — bind a **separate `EventConsumer` to a separate queue per family**, rather than multiplexing both families through one queue.
+
+**Why this matters:** if a poison message lands in one family, the queue stalls (retries → DLQ, but the front of the queue is held while the offending message is being retried). A multiplexed queue stalls *both* families when only one is sick. A pair of queues isolates the failure.
+
+**Source:** program-hub #62 introduced `GroupProjectionConsumer` on a queue distinct from the existing `IamProjectionConsumer` precisely to prevent group-membership poison messages from blocking iam-projection processing. Earlier program-hub #60 had been single-queue per service; the split happened the moment the service consumed from a second family.
+
+**Rule of thumb:**
+
+> A consumer service should bind one `EventConsumer` per upstream event family it consumes. Two families → two `EventConsumer` instances → two distinct queues. Three families → three.
+
+**When this is overkill:** a service consuming a single family — bind one. Don't pre-split.
+
+**Wiring shape (Inversify):**
+
+```typescript
+// container.ts — programs-api
+container.bind(EventConsumer)
+  .toDynamicValue((ctx) =>
+    new EventConsumer({
+      queueName: 'programs-api.iam-projection',
+      handlers: iamProjectionHandlers,
+      ...
+    }))
+  .whenTargetTagged('family', 'iam');
+
+container.bind(EventConsumer)
+  .toDynamicValue((ctx) =>
+    new EventConsumer({
+      queueName: 'programs-api.group-projection',
+      handlers: groupProjectionHandlers,
+      ...
+    }))
+  .whenTargetTagged('family', 'groups');
+```
+
+The corresponding README guidance lives in `@saga-ed/soa-event-consumer` (Session A1 adds it). The DLQ topology is per-queue, so each family also gets its own DLQ — alerting fires on the specific family that's sick.
+
 ## Operational gaps not yet addressed
 
 - **DLQ alerting:** events that fail repeatedly land on the DLQ but no `events_in_dlq` alert is wired. Adopters should add a Prometheus alert on DLQ depth > 0 sustained, but this is per-service today. A canonical rule template would help.
 - **Consumer lag dashboards:** `outbox_unpublished_count` and `consumed_events_count` gauges exist but no shared Grafana dashboard yet captures lag per (publisher, consumer) pair. Defer until a third adopter — pattern is clear once we have it.
 - **Schema-version mismatch handling:** consumers fail loudly on `ConsumerVersionMismatch` (good — explicit pin). But there's no documented runbook for "publisher emitted v2, my consumer pinned v1, what now." Should be covered in `d-event-versioning.md` follow-up.
-- **Bulk-mutation events:** scheduling-api's `regenerate` and `setHolidays` operations would emit thousands of per-event envelopes. Currently they don't emit at all. Open question: bulk summary events (`schedule.regenerated.v1` carrying a count + range) vs per-event envelopes vs neither.
+- **Bulk-mutation events:** scheduling-api's `regenerate` and `setHolidays` operations would emit thousands of per-event envelopes. Currently they don't emit at all. Decision-prep moved to its own doc — see `d-bulk-mutation-events.md` (PENDING) for the four-option breakdown.
 
 ## Related artifacts
 

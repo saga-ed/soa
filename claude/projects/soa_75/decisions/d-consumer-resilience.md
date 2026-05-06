@@ -2,6 +2,8 @@
 
 **Status:** RESOLVED 2026-05-05 — Idempotent UPSERT handlers, soft-delete projections (when historical resolution matters), non-fatal broker startup in non-prod, OTel `initTracing` as the first import. Lifted from rostering #138 and program-hub #60 after both adopters independently arrived at the same set.
 
+**Source PRs:** [rostering #138](https://github.com/saga-ed/rostering/pull/138) (iam-api outbox + iam-events) · [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) (programs-api, scheduling-api outbox + projections)
+
 ## Context
 
 `@saga-ed/soa-event-consumer` provides the primitives — Zod-validated handlers, `consumed_events` dedup table, DLQ wiring — but says nothing about the operational shape of a *real* consumer. Both adopters discovered the same set of resilience patterns the hard way:

@@ -2,6 +2,8 @@
 
 **Status:** RESOLVED 2026-04-30 — OpenTelemetry (manual instrumentation) + Prometheus + Grafana, all OSS, all running in `infra/docker-compose.yml`. Logs stay on Pino → stdout (already in use across the soa fleet).
 
+**Source PRs:** [rostering #138](https://github.com/saga-ed/rostering/pull/138) · [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) — both adopters hit the import-order footgun where `initTracing()` must be the first import in `main.ts` before any tracer-using module loads, or spans silently no-op.
+
 ## Context
 
 A monolith-on-EC2 system has at most two debugging surfaces: the request log

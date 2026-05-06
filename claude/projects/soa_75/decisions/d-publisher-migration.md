@@ -2,6 +2,8 @@
 
 **Status:** RESOLVED 2026-05-05 — Interactive `$transaction` for outbox writes, wire-format enum mapping with runtime validation, dual-write coexistence path (when migrating off a legacy outbox), bulk-mutation strategy still open. Lifted from rostering #138 and program-hub #60.
 
+**Source PRs:** [rostering #138](https://github.com/saga-ed/rostering/pull/138) (iam-api `$transaction` migration + dual-write with legacy `event_outbox`) · [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) (programs-api + scheduling-api migration; bulk-mutation gap surfaced by scheduling-api `setHolidays` / `regenerate`)
+
 ## Context
 
 Adding outbox publishing to an existing service is more invasive than the POC suggests. The POC's services are greenfield: every mutation already runs inside `prisma.$transaction(async (tx) => { … })` and the outbox write slots in cleanly. Real services have:

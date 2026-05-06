@@ -2,6 +2,8 @@
 
 **Status:** RESOLVED 2026-05-05 — Postgres `?schema=pr_<n>` (with libpq search_path shim) + RabbitMQ `EVENT_PREVIEW_TAG=pr-<n>` exchange/queue/consumer suffix. Lifted from rostering #138 and program-hub #60 after both adopters independently invented the same pattern.
 
+**Source PRs:** [rostering #138](https://github.com/saga-ed/rostering/pull/138) (iam-api preview workflow + cleanup composite action) · [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) (programs-api + scheduling-api parallel preview workflows). End-to-end smoke tests passing as of 2026-05-06; CFN stack-delete cascade handles per-PR resource teardown.
+
 ## Context
 
 The POC (soa_event_driven_example) demonstrates the event-driven primitives but only against a single dev compose stack. Real deployment introduces a constraint the POC didn't face: **multiple PR-preview environments share one Postgres instance and one RabbitMQ broker**, and each PR needs its own isolated routing island so that:

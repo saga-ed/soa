@@ -2,6 +2,8 @@
 
 RESOLVED 2026-04-30: Four packages — `@example/envelope` + per-publisher `@example/{identity,catalog,admissions}-events`. Mirrors the back-port target shape; ownership visible in `package.json` deps.
 
+**Source PRs:** [rostering #138](https://github.com/saga-ed/rostering/pull/138) (`@saga-ed/iam-events`) · [program-hub #60](https://github.com/saga-ed/program-hub/pull/60) (`@saga-ed/programs-events`, `@saga-ed/scheduling-events`)
+
 **Validated in adopters as of 2026-05-05:** the per-family pattern was applied directly:
 
 | PoC package (in `soa_event_driven_example`) | Adopter package | Owner repo |

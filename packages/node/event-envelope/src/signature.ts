@@ -15,14 +15,20 @@ import { z } from 'zod';
  *   aggregateType || "\n" || aggregateId || "\n" || occurredAt || "\n" ||
  *   canonicalJSON(payload)
  *
- * Where canonicalJSON is RFC 8785 JSON Canonicalization Scheme. The signing
- * library (lands in P4) computes this; this file owns only the schema.
+ * `canonicalJSON` is JCS-inspired, not strictly RFC 8785 — see
+ * `./signing.ts:canonicalize` for the exact algorithm and the
+ * sufficient-within-trust-boundary rationale. The signing library lives
+ * in `./signing.ts`; this file owns only the schema and the mode types.
  */
+// HS256 produces a 32-byte HMAC; base64url with no padding is 43 chars.
+// Pin the length so a malformed signature is rejected at parse time
+// rather than producing a misleading 'invalid' on length-mismatch
+// later (which would be a small timing oracle).
 export const EventSignatureSchema = z
     .object({
         alg: z.literal('HS256'),
         keyId: z.string().min(1),
-        value: z.string().min(1),
+        value: z.string().length(43),
     })
     .strip();
 
@@ -42,9 +48,19 @@ export const SignatureModeSchema = z.enum(['off', 'shadow', 'enforce']);
 /**
  * Status reported per envelope by the verifier (used for the
  * saga_event_signature_status metric).
+ *
+ *   - 'absent'      — no signature on the envelope
+ *   - 'valid'       — signature verified
+ *   - 'invalid'     — signature present but does not match
+ *   - 'unknown_key' — signature.keyId is not in the resolver
+ *   - 'unverified'  — signature present but mode='off' so it was not
+ *                     checked. Distinct from 'absent' so dashboards
+ *                     can tell "no signature on the wire" from
+ *                     "verifier disabled by policy".
  */
 export type SignatureStatus =
     | 'absent'
     | 'valid'
     | 'invalid'
-    | 'unknown_key';
+    | 'unknown_key'
+    | 'unverified';

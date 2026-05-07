@@ -48,10 +48,21 @@ Every check is tenant-scoped. The tenant is part of the resource ID format (`pro
 ### Model lives in `packages/core/saga-authz-model/`
 
 - `model.fga` — the DSL source
-- `generated/types.ts` — emitted TypeScript types for tuple keys (build step, runs in CI)
-- `README.md` — how to read it, how to extend it
+- `src/types.ts` — hand-maintained TypeScript constants mirroring the
+  DSL types and relations (`FGA_TYPES`, `FgaRelationsByType`,
+  `FgaRelation<T>`)
+- `src/__tests__/model-fga.unit.test.ts` — CI guard that diffs the
+  `.fga` file against `src/types.ts`; build fails on drift
+- `README.md` — how to read it, how to extend it (PRs MUST update both
+  files in lockstep)
 
-The package exports tuple-key builder helpers but does not bundle the FGA SDK — services depend on `@openfga/sdk` directly when they need runtime checks.
+The TS mirror is hand-maintained, not codegen'd. A future codegen pass
+can replace `src/types.ts` without changing the package's public API
+(`FgaType`, `FgaRelation<T>`, `tupleKey<T>` are stable).
+
+The package exports tuple-key builder helpers but does not bundle the
+FGA SDK — services depend on `@openfga/sdk` directly when they need
+runtime checks.
 
 ### Today vs tomorrow
 

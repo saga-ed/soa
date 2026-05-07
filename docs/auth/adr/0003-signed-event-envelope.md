@@ -28,7 +28,15 @@ The signature is computed over the canonical byte representation of:
 eventId || "\n" || eventType || "\n" || eventVersion || "\n" || aggregateType || "\n" || aggregateId || "\n" || occurredAt || "\n" || canonicalJSON(payload)
 ```
 
-Where `canonicalJSON` is RFC 8785 (JSON Canonicalization Scheme) on the payload object.
+`canonicalJSON` is *JCS-inspired*, not strictly RFC 8785: keys sorted
+in UTF-16 lexicographic order, no whitespace, JSON.stringify-compatible
+escapes. This is sufficient for byte-identical reproduction across
+producer and consumer within the Saga trust boundary (both run Node
+V8). The exact algorithm is documented in
+`packages/node/event-envelope/src/signing.ts:canonicalize`. If we ever
+interop with a counterparty that requires strict RFC 8785, swap that
+function for a JCS implementation — everything else in this ADR is
+unchanged.
 
 ### Producer behavior
 

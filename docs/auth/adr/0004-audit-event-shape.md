@@ -35,7 +35,11 @@ Define a single canonical audit event type, `audit.decision.v1`, with this shape
     sub: string,             // SPIFFE-formatted user, ADR 0001
     tenantId: string | null, // saga.tenant claim
     sessionJti: string | null,
-    tokenJti: string,
+    tokenJti: string | null, // null on authn.login (subject known
+                             // before token issued); required by
+                             // convention for post-login events but
+                             // not enforced by the schema (too brittle
+                             // to drop an audit row over).
   } | null,                  // null only for unauthenticated events (e.g., login-failure)
 
   // What happened
@@ -86,7 +90,7 @@ Every service that participates in fleet auth emits `audit.decision.v1` for:
 
 | Phase | Writer | Storage |
 |---|---|---|
-| **Today (P5)** | `@saga-ed/soa-audit.emit()` writes via `@saga-ed/soa-logger` to a dedicated `audit` channel | App log aggregation (e.g., CloudWatch, Datadog) |
+| **Today** | `@saga-ed/soa-audit.emit()` writes via `@saga-ed/soa-logger` to a dedicated `audit` channel | App log aggregation (e.g., CloudWatch, Datadog) |
 | **Later** | Same `emit()` API, swapped writer | Hash-chained Postgres `audit_event` table; daily KMS-signed Merkle root → S3 Object Lock (compliance mode), 7-year retention |
 
 The shape is the contract; the storage is the implementation. Callers do not change between phases.

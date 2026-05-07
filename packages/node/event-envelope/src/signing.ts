@@ -31,23 +31,91 @@ import type {
  */
 
 /**
- * Deterministic JSON serialization. Recursively sorts object keys.
- * Preserves array order. Throws on circular references via the JSON
- * default behavior (TypeError).
+ * Deterministic JSON serialization. Recursively sorts object keys
+ * (UTF-16 code-unit lexicographic order), preserves array order, and
+ * matches `JSON.stringify` semantics for non-JSON values:
+ *   - `undefined` / function / symbol values: dropped from objects,
+ *     replaced with `null` in arrays (per JSON spec).
+ *   - `BigInt`: throws (consistent with `JSON.stringify`).
+ *   - Circular references: throws (own implementation; we cannot
+ *     rely on `JSON.stringify` for the recursion).
+ *
+ * Compatibility note: this implementation is *JCS-inspired*, not
+ * strictly RFC 8785. It is sufficient for byte-identical reproduction
+ * across producer and consumer within Saga's trust boundary (both run
+ * Node V8). If we ever interop with a counterparty that requires
+ * strict RFC 8785, swap this function for a JCS implementation —
+ * everything else in this file is unchanged.
  */
 export function canonicalize(value: unknown): string {
-    if (value === null || typeof value !== 'object') {
-        return JSON.stringify(value);
+    return canonicalizeWithSeen(value, new WeakSet<object>());
+}
+
+function canonicalizeWithSeen(
+    value: unknown,
+    seen: WeakSet<object>,
+): string {
+    if (typeof value === 'bigint') {
+        throw new TypeError(
+            'canonicalize: BigInt is not JSON-serializable',
+        );
     }
-    if (Array.isArray(value)) {
-        return `[${value.map((v) => canonicalize(v)).join(',')}]`;
+    // Top-level undefined / symbol / function are not legal JSON values;
+    // a caller that hands us one is misusing the canonical-bytes
+    // contract. Throw rather than return invalid output.
+    if (
+        value === undefined ||
+        typeof value === 'symbol' ||
+        typeof value === 'function'
+    ) {
+        throw new TypeError(
+            'canonicalize: undefined / symbol / function are not allowed at top level',
+        );
     }
-    const keys = Object.keys(value as Record<string, unknown>).sort();
-    const parts = keys.map((k) => {
-        const v = (value as Record<string, unknown>)[k];
-        return `${JSON.stringify(k)}:${canonicalize(v)}`;
-    });
-    return `{${parts.join(',')}}`;
+    if (value === null) return 'null';
+    if (typeof value !== 'object') return JSON.stringify(value);
+    if (seen.has(value)) {
+        throw new TypeError('canonicalize: circular reference detected');
+    }
+    seen.add(value);
+    try {
+        if (Array.isArray(value)) {
+            const parts = value.map((v) => canonicalizeArrayItem(v, seen));
+            return `[${parts.join(',')}]`;
+        }
+        // Object: sort keys, drop entries whose value is undefined / symbol /
+        // function (matches `JSON.stringify` behavior).
+        const keys = Object.keys(value as Record<string, unknown>).sort();
+        const parts: string[] = [];
+        for (const k of keys) {
+            const v = (value as Record<string, unknown>)[k];
+            if (
+                v === undefined ||
+                typeof v === 'symbol' ||
+                typeof v === 'function'
+            ) {
+                continue;
+            }
+            parts.push(`${JSON.stringify(k)}:${canonicalizeWithSeen(v, seen)}`);
+        }
+        return `{${parts.join(',')}}`;
+    } finally {
+        seen.delete(value);
+    }
+}
+
+function canonicalizeArrayItem(
+    v: unknown,
+    seen: WeakSet<object>,
+): string {
+    if (
+        v === undefined ||
+        typeof v === 'symbol' ||
+        typeof v === 'function'
+    ) {
+        return 'null';
+    }
+    return canonicalizeWithSeen(v, seen);
 }
 
 /**
@@ -193,7 +261,17 @@ export async function decideSignature(
     mode: SignatureMode,
 ): Promise<SignatureDecision> {
     if (mode === 'off') {
-        return { action: 'allow', mode, status: 'absent', keyId: null };
+        // Don't verify — but report what is actually on the wire so
+        // the metric distinguishes "no signature emitted" (producer
+        // hasn't migrated) from "signature present but verifier
+        // disabled by policy".
+        const sig = envelope.meta?.signature;
+        return {
+            action: 'allow',
+            mode,
+            status: sig ? 'unverified' : 'absent',
+            keyId: sig?.keyId ?? null,
+        };
     }
     const v = await verifyEnvelope(envelope, resolveKey);
     if (v.ok) {

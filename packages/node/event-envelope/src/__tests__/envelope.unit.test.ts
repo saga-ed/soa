@@ -101,7 +101,7 @@ describe('EventEnvelopeMetaSchema', () => {
             signature: {
                 alg: 'HS256',
                 keyId: 'rostering/v1',
-                value: 'AAAA-base64url-value',
+                value: 'A'.repeat(43),
             },
         });
         expect(result.success).toBe(true);
@@ -112,7 +112,7 @@ describe('EventEnvelopeMetaSchema', () => {
             signature: {
                 alg: 'RS256',
                 keyId: 'rostering/v1',
-                value: 'AAAA',
+                value: 'A'.repeat(43),
             },
         });
         expect(result.success).toBe(false);
@@ -122,7 +122,7 @@ describe('EventEnvelopeMetaSchema', () => {
         const result = EventEnvelopeMetaSchema.safeParse({
             signature: {
                 alg: 'HS256',
-                value: 'AAAA',
+                value: 'A'.repeat(43),
             },
         });
         expect(result.success).toBe(false);

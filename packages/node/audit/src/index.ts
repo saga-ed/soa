@@ -16,11 +16,11 @@ import type { ILogger } from '@saga-ed/soa-logger';
  *   3. Emits via the logger's `'audit'` log channel name (added as a
  *      structured field; downstream pipelines route by it).
  *
- * The writer is the structured logger today (P5). The storage tomorrow
- * is a hash-chained Postgres `audit_event` table with daily KMS-signed
- * Merkle roots written to S3 with Object Lock (compliance mode), 7-year
- * retention. Callers will not change — only the writer plugged into
- * `createAuditEmitter` will.
+ * The writer is the structured logger today. The storage tomorrow is a
+ * hash-chained Postgres `audit_event` table with daily KMS-signed
+ * Merkle roots written to S3 with Object Lock (compliance mode),
+ * 7-year retention. Callers will not change — only the writer plugged
+ * into `createAuditEmitter` will.
  *
  * See ADR 0004 (audit event shape) in saga-ed/soa.
  */
@@ -101,25 +101,18 @@ export function createAuditEmitter(
 }
 
 /**
- * Cheap fallback when there is no active OTel trace context. Generates
- * a 16-byte hex string in the W3C TraceContext shape. Distinct from the
- * `randomUUID()` shape so misuse (passing a UUID where a traceId is
- * expected) is visible.
+ * Generate a 16-byte hex string in the W3C TraceContext shape, used as
+ * a correlation id when the caller did not supply one.
+ *
+ * Requires `globalThis.crypto.getRandomValues` (Node 19+, all modern
+ * browsers, Cloudflare Workers, Deno, Bun). The audit package is
+ * intentionally Node-only per `packages/node/CLAUDE.md`, but the
+ * Web-Crypto-only pattern keeps it portable to edge runtimes if a
+ * future caller needs it.
  */
 function cryptoRandomTraceId(): string {
-    // Avoids importing node:crypto at module load — keeps the package
-    // import-side-effect-free for environments that bundle for browser.
     const bytes = new Uint8Array(16);
-    if (typeof globalThis.crypto !== 'undefined') {
-        globalThis.crypto.getRandomValues(bytes);
-    } else {
-        // Last-resort PRNG; never reached in practice (Node 19+ has
-        // globalThis.crypto). Acceptable for non-cryptographic
-        // correlation IDs.
-        for (let i = 0; i < bytes.length; i++) {
-            bytes[i] = Math.floor(Math.random() * 256);
-        }
-    }
+    globalThis.crypto.getRandomValues(bytes);
     let hex = '';
     for (const byte of bytes) {
         hex += byte!.toString(16).padStart(2, '0');

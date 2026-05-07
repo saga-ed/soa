@@ -69,6 +69,17 @@ export interface OutboxRelayOpts {
      * per ADR 0003 (signed event envelope). Defaults to identity.
      */
     transformEnvelope?: EnvelopeTransform;
+    /**
+     * Per-row retry budget. Rows whose `attempts` reach this value are
+     * skipped on subsequent polls (still selected for forensics via
+     * direct queries) — without this cap, a permanently-malformed
+     * envelope or a permanently-broken `transformEnvelope` would
+     * wedge the relay in a tight retry loop, hot-path the broker, and
+     * stall the rest of the queue. Default 5. Operators bumping this
+     * should plan for the tradeoff: more retries = more flakiness
+     * tolerance but longer poison-row dwell.
+     */
+    maxAttempts?: number;
     logger: ILogger;
 }
 
@@ -171,6 +182,7 @@ export class OutboxRelay {
             throw new Error('OutboxRelay not started');
         }
         const batchSize = this.opts.batchSize ?? 100;
+        const maxAttempts = this.opts.maxAttempts ?? 5;
         const client = await this.opts.pool.connect();
         let clientPoisoned = false;
         try {
@@ -180,10 +192,11 @@ export class OutboxRelay {
                         event_version, payload, meta, occurred_at, attempts
                  FROM outbox_event
                  WHERE published_at IS NULL
+                   AND attempts < $2
                  ORDER BY occurred_at
                  LIMIT $1
                  FOR UPDATE SKIP LOCKED`,
-                [batchSize],
+                [batchSize, maxAttempts],
             );
 
             if (result.rows.length === 0) {
@@ -192,16 +205,48 @@ export class OutboxRelay {
             }
 
             const publishedIds: string[] = [];
+            const failedIds: string[] = [];
+            let lastFailureMessage = '';
             for (const row of result.rows) {
-                await this.publishRow(row);
-                publishedIds.push(row.event_id);
+                try {
+                    await this.publishRow(row);
+                    publishedIds.push(row.event_id);
+                } catch (err) {
+                    // Per-row isolation. A bad row (failed transform,
+                    // malformed payload, AMQP refusal) bumps its
+                    // attempts counter and yields to the rest of the
+                    // batch. Without per-row isolation, one bad row
+                    // would block every subsequent row's publish.
+                    failedIds.push(row.event_id);
+                    const message =
+                        err instanceof Error ? err.message : String(err);
+                    lastFailureMessage = message;
+                    this.opts.logger.warn(
+                        `[OutboxRelay] publishRow failed for event ${row.event_id} (attempt ${row.attempts + 1}/${maxAttempts}): ${message}`,
+                    );
+                    this.opts.metrics?.onPublishFailed(
+                        row.event_type,
+                        row.event_version,
+                        message,
+                    );
+                }
             }
 
-            // Batch the published_at update — one round-trip instead of N.
-            await client.query(
-                `UPDATE outbox_event SET published_at = NOW() WHERE event_id = ANY($1::uuid[])`,
-                [publishedIds],
-            );
+            if (publishedIds.length > 0) {
+                await client.query(
+                    `UPDATE outbox_event SET published_at = NOW() WHERE event_id = ANY($1::uuid[])`,
+                    [publishedIds],
+                );
+            }
+            if (failedIds.length > 0) {
+                await client.query(
+                    `UPDATE outbox_event
+                     SET attempts = attempts + 1,
+                         last_error = $2
+                     WHERE event_id = ANY($1::uuid[])`,
+                    [failedIds, lastFailureMessage.slice(0, 1000)],
+                );
+            }
 
             await client.query('COMMIT');
         } catch (err) {

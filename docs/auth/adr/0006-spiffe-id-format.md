@@ -38,8 +38,8 @@ Where:
 |---|---|
 | iam-api in dev | `spiffe://saga.dev/iam-api` |
 | programs-api in prod | `spiffe://saga.prod/programs-api` |
-| rostering's outbox relay (separate workload identity) | `spiffe://saga.prod/iam-api/outbox-relay` |
-| FGA tuple sync worker | `spiffe://saga.prod/iam-api/fga-sync` |
+| iam-api's outbox relay (separate workload identity within iam-api) | `spiffe://saga.prod/iam-api/outbox-relay` |
+| FGA tuple sync worker (sub-workload of iam-api) | `spiffe://saga.prod/iam-api/fga-sync` |
 
 ### User identifiers (related)
 
@@ -62,12 +62,18 @@ This appears in JWT `sub` for user tokens (ADR 0001). Users are not workloads in
 
 ### Validation
 
-`@saga-ed/soa-auth-contracts` exports a parser that:
+`@saga-ed/soa-auth-contracts` exports two parsers:
 
-1. Accepts only `spiffe://` URIs.
-2. Validates the trust domain matches the active environment (rejects cross-env).
-3. Splits service and optional component.
-4. Rejects empty or wildcarded components.
+1. **`parseSpiffeId(input)`** — structural validation. Accepts only
+   `spiffe://saga.{dev|staging|prod}/...` URIs, splits service and
+   optional component, rejects empty/wildcarded components. Does **not**
+   compare the trust domain to the active environment — that's a
+   runtime concern the caller knows about, not a parse concern.
+2. **`spiffeIdForEnv(env)`** — schema factory bound to a specific env.
+   Use this at trust boundaries (mTLS handler, JWT verifier, audit
+   emitter) where cross-env tokens (a dev cert reaching prod) MUST be
+   rejected. Callers that use `parseSpiffeId` directly are responsible
+   for re-checking the env match if they care.
 
 ## Consequences
 

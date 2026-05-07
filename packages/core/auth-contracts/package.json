@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-auth-contracts",
-    "version": "0.1.0-dev.1",
+    "version": "0.1.0-dev.2",
     "private": false,
     "type": "module",
     "description": "Canonical wire shapes for fleet authentication and authorization. Zod schemas, type definitions, and parsers — runtime-agnostic, no crypto.",

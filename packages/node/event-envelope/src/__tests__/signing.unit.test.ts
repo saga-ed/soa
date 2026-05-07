@@ -52,6 +52,42 @@ describe('canonicalize', () => {
     it('produces identical output for differently-keyed equivalent objects', () => {
         expect(canonicalize({ a: 1, b: 2 })).toBe(canonicalize({ b: 2, a: 1 }));
     });
+
+    it('drops undefined / function / symbol values from objects (matches JSON.stringify)', () => {
+        const sym = Symbol('x');
+        const obj = { a: 1, b: undefined, c: () => 0, d: sym, e: 2 };
+        expect(canonicalize(obj)).toBe('{"a":1,"e":2}');
+    });
+
+    it('replaces undefined / function / symbol with null in arrays (matches JSON.stringify)', () => {
+        const sym = Symbol('x');
+        expect(canonicalize([1, undefined, () => 0, sym, 2])).toBe(
+            '[1,null,null,null,2]',
+        );
+    });
+
+    it('throws on top-level undefined', () => {
+        expect(() => canonicalize(undefined)).toThrow(TypeError);
+    });
+
+    it('throws on BigInt', () => {
+        expect(() => canonicalize({ a: 1n })).toThrow(TypeError);
+    });
+
+    it('throws on circular references', () => {
+        const obj: Record<string, unknown> = { a: 1 };
+        obj.self = obj;
+        expect(() => canonicalize(obj)).toThrow(/circular/i);
+    });
+
+    it('handles non-ASCII keys and values consistently', () => {
+        const a = canonicalize({ é: 'naïve', ñ: 1 });
+        const b = canonicalize({ ñ: 1, é: 'naïve' });
+        expect(a).toBe(b);
+        // The canonical form must include the actual characters (not hex
+        // escapes) — JSON.stringify by default leaves non-ASCII in place.
+        expect(a).toContain('"é"');
+    });
 });
 
 describe('canonicalBytes', () => {
@@ -155,6 +191,41 @@ describe('verifyEnvelope', () => {
         expect(result.status).toBe('invalid');
     });
 
+    it('returns invalid when the signature value itself is bit-flipped', async () => {
+        // Pins the comparison path. A regression where verify returned
+        // ok=true on length-match-but-value-mismatch would pass the
+        // payload-tamper test (since payload tampering also flips the
+        // computed value) but fail this one.
+        const env = signEnvelope(baseEnv(), { keyId: 'k1', secret: SECRET });
+        const sig = env.meta!.signature!;
+        // Flip one base64url char while preserving length
+        const flipped = sig.value[0] === 'A' ? 'B' : 'A';
+        const tampered: EventEnvelope = {
+            ...env,
+            meta: {
+                ...env.meta,
+                signature: {
+                    ...sig,
+                    value: flipped + sig.value.slice(1),
+                },
+            },
+        };
+        const result = await verifyEnvelope(tampered, resolver);
+        expect(result.status).toBe('invalid');
+    });
+
+    it('full envelope without signature still parses end-to-end (back-compat)', async () => {
+        // Pins ADR 0003's promise that pre-signature envelopes continue
+        // to flow. Validates the *whole* envelope (not just meta), then
+        // checks the verifier reports 'absent'.
+        const env = baseEnv();
+        const parsed = (await import('../index.js')).EventEnvelopeSchema.parse(env);
+        expect(parsed.eventType).toBe(env.eventType);
+        const result = await verifyEnvelope(parsed, resolver);
+        expect(result.status).toBe('absent');
+        expect(result.ok).toBe(false);
+    });
+
     it('returns invalid for unsupported alg', async () => {
         const env = baseEnv();
         const tampered: EventEnvelope = {
@@ -183,6 +254,24 @@ describe('decideSignature', () => {
     it('off mode always allows', async () => {
         const env = baseEnv();
         const d = await decideSignature(env, resolver, 'off');
+        expect(d.action).toBe('allow');
+    });
+
+    it('off mode reports `absent` when no signature is present', async () => {
+        const d = await decideSignature(baseEnv(), resolver, 'off');
+        expect(d.status).toBe('absent');
+        expect(d.keyId).toBeNull();
+    });
+
+    it('off mode reports `unverified` when a signature IS present (does not lie about presence)', async () => {
+        // Operator running 'off' should still be able to see "producers
+        // are emitting signatures" via the metric — distinct from
+        // "wire is unsigned". Otherwise dashboards lie during a phased
+        // rollout.
+        const signed = signEnvelope(baseEnv(), { keyId: 'k1', secret: SECRET });
+        const d = await decideSignature(signed, resolver, 'off');
+        expect(d.status).toBe('unverified');
+        expect(d.keyId).toBe('k1');
         expect(d.action).toBe('allow');
     });
 

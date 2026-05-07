@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SpiffeIdSchema } from './spiffe.js';
+import { asUserSpiffeId, parseSpiffeId, SpiffeIdSchema } from './spiffe.js';
 
 /**
  * Canonical JWT claim shape per ADR 0001.
@@ -80,15 +80,16 @@ export type CanonicalJwtClaims = z.infer<typeof CanonicalJwtClaimsSchema>;
 
 /**
  * Distinguish user tokens from service tokens by inspecting the parsed
- * claim shape:
- *   - User token: `sub` is `spiffe://saga.<env>/user/<uuid>`, tenant is set.
- *   - Service token: `sub` is `spiffe://saga.<env>/<service>[/<component>]`,
- *     tenant is omitted/null.
+ * SPIFFE id of the `sub` claim:
+ *   - User token: `sub` is `spiffe://saga.<env>/user/<uuid>`.
+ *   - Service token: anything else (workload SPIFFE id).
  *
- * This helper does not parse — it operates on already-validated claims.
+ * Reuses the canonical `parseSpiffeId` + `asUserSpiffeId` so the
+ * predicate cannot drift from the SPIFFE format definition (ADR 0006).
  */
 export function isUserToken(claims: CanonicalJwtClaims): boolean {
-    return /^spiffe:\/\/saga\.[^/]+\/user\/[0-9a-f-]{36}$/i.test(claims.sub);
+    const parsed = parseSpiffeId(claims.sub);
+    return parsed !== null && asUserSpiffeId(parsed) !== null;
 }
 
 export function isServiceToken(claims: CanonicalJwtClaims): boolean {

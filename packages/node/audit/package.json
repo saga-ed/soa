@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-audit",
-    "version": "0.1.0-dev.1",
+    "version": "0.1.0-dev.2",
     "private": false,
     "type": "module",
     "description": "Fleet audit-event emitter. Validates audit.decision.v1 events and writes them via @saga-ed/soa-logger on a dedicated audit channel. Storage is pluggable; the default writer is the structured logger. See ADR 0004.",

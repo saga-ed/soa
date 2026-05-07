@@ -49,7 +49,12 @@ export const AuditSubjectSchema = z
         sub: SpiffeIdSchema,
         tenantId: TenantIdSchema.nullable(),
         sessionJti: z.string().min(1).nullable(),
-        tokenJti: z.string().min(1),
+        // Nullable because authn.login emits a subject before any token
+        // is issued. For post-login events (mutations, logout, refresh),
+        // the JTI is required by convention but the schema does not
+        // enforce it — too brittle to fail validation on emit-site bugs
+        // when the audit row is otherwise valuable.
+        tokenJti: z.string().min(1).nullable(),
     })
     .strip();
 export type AuditSubject = z.infer<typeof AuditSubjectSchema>;

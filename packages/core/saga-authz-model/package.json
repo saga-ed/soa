@@ -1,0 +1,41 @@
+{
+    "name": "@saga-ed/saga-authz-model",
+    "version": "0.1.0-dev.1",
+    "private": false,
+    "type": "module",
+    "description": "Saga's OpenFGA authorization model (.fga DSL) and tuple-key helpers. Source of truth for ReBAC types and relations.",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        },
+        "./model.fga": "./model.fga"
+    },
+    "files": ["dist", "model.fga"],
+    "scripts": {
+        "build": "tsup",
+        "check-types": "tsc --noEmit",
+        "test": "vitest run --passWithNoTests",
+        "lint": "eslint src/",
+        "clean": "rm -rf dist"
+    },
+    "devDependencies": {
+        "@saga-ed/soa-typescript-config": "workspace:*",
+        "@types/node": "^24.0.3",
+        "tsup": "^8.5.0",
+        "typescript": "5.8.2",
+        "vitest": "^1.6.1"
+    },
+    "publishConfig": {
+        "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/saga-ed/soa.git",
+        "directory": "packages/core/saga-authz-model"
+    },
+    "keywords": ["saga-soa", "openfga", "authorization", "rebac"]
+}

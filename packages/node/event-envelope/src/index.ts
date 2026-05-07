@@ -1,19 +1,32 @@
 import { randomUUID } from 'node:crypto';
 import { context, propagation } from '@opentelemetry/api';
 import { z } from 'zod';
+import { EventSignatureSchema } from './signature.js';
 
 export { applyPreviewTag } from './preview-tag.js';
+export {
+    EventSignatureSchema,
+    SignatureModeSchema,
+    type EventSignature,
+    type SignatureMode,
+    type SignatureStatus,
+} from './signature.js';
 
 // W3C TraceContext requires that `tracestate` only ride along with a
 // `traceparent`. The refine catches an orphan `tracestate` at parse time
 // rather than letting OTel's propagator silently discard it (which would
 // look like trace continuity bug instead of a malformed envelope).
+//
+// `signature` per ADR 0003 is optional today: producers populate it when a
+// signing key is configured, and consumers verify in shadow or enforce mode.
+// Existing pre-signature envelopes continue to parse cleanly.
 export const EventEnvelopeMetaSchema = z
     .object({
         traceparent: z.string().optional(),
         tracestate: z.string().optional(),
         correlationId: z.string().optional(),
         causationId: z.string().optional(),
+        signature: EventSignatureSchema.optional(),
     })
     .strip()
     .refine((m) => !(m.tracestate && !m.traceparent), {

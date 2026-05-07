@@ -87,6 +87,56 @@ describe('EventEnvelopeMetaSchema', () => {
         const result = EventEnvelopeMetaSchema.safeParse({});
         expect(result.success).toBe(true);
     });
+
+    // ADR 0003 — signature is optional and back-compatible.
+    it('accepts a meta with no signature (back-compat)', () => {
+        const result = EventEnvelopeMetaSchema.safeParse({
+            traceparent: '00-aaaa-bbbb-01',
+        });
+        expect(result.success).toBe(true);
+    });
+
+    it('accepts a well-formed signature', () => {
+        const result = EventEnvelopeMetaSchema.safeParse({
+            signature: {
+                alg: 'HS256',
+                keyId: 'rostering/v1',
+                value: 'AAAA-base64url-value',
+            },
+        });
+        expect(result.success).toBe(true);
+    });
+
+    it('rejects a signature with unsupported alg', () => {
+        const result = EventEnvelopeMetaSchema.safeParse({
+            signature: {
+                alg: 'RS256',
+                keyId: 'rostering/v1',
+                value: 'AAAA',
+            },
+        });
+        expect(result.success).toBe(false);
+    });
+
+    it('rejects a signature missing keyId', () => {
+        const result = EventEnvelopeMetaSchema.safeParse({
+            signature: {
+                alg: 'HS256',
+                value: 'AAAA',
+            },
+        });
+        expect(result.success).toBe(false);
+    });
+});
+
+describe('SignatureModeSchema', () => {
+    it('accepts the three modes', async () => {
+        const { SignatureModeSchema } = await import('../signature.js');
+        expect(SignatureModeSchema.safeParse('off').success).toBe(true);
+        expect(SignatureModeSchema.safeParse('shadow').success).toBe(true);
+        expect(SignatureModeSchema.safeParse('enforce').success).toBe(true);
+        expect(SignatureModeSchema.safeParse('strict').success).toBe(false);
+    });
 });
 
 describe('buildEnvelope', () => {

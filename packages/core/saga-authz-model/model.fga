@@ -1,0 +1,119 @@
+# Saga Fleet Authorization Model
+#
+# Source of truth for all OpenFGA types and relations across the Saga
+# microservices fleet. See ADR 0005 for the governance model.
+#
+# Two-layer namespace per Saga IaC convention:
+#   - Identity types: tenant, user, group, role
+#   - Resource types: program, school, cohort, session, room, whiteboard,
+#                     enrollment
+#
+# Convention: every resource type defines a `parent` relation to its
+# containing tenant so cross-tenant checks are impossible by construction.
+# Every resource type also defines a small set of canonical relations
+# (`viewer`, `editor`, `admin`) that map to user-facing actions.
+#
+# This file is the v1 model; non-additive changes require a new authorization
+# model id and coordinated rollout (see ADR 0005).
+
+model
+  schema 1.1
+
+# ---------------------------------------------------------------------------
+# Identity types
+# ---------------------------------------------------------------------------
+
+# Top-level tenant (a school district). Everything else descends from one.
+type tenant
+  relations
+    define admin: [user]
+    define member: [user]
+    define support: [user]
+
+# A user identity. SPIFFE-formatted in the application layer
+# (spiffe://saga.<env>/user/<uuid>); FGA stores the bare uuid.
+type user
+
+# A group of users. Used for sections, cohorts, ad-hoc rosters.
+# Membership is tenant-scoped via `parent`.
+type group
+  relations
+    define parent: [tenant]
+    define member: [user]
+    define admin: [user] or admin from parent
+
+# A role assignment carrier. Roles are per-tenant; a user assigned a role
+# inherits the role's permissions on the resources the role grants.
+type role
+  relations
+    define parent: [tenant]
+    define holder: [user, group#member]
+
+# ---------------------------------------------------------------------------
+# Resource types
+# ---------------------------------------------------------------------------
+
+type school
+  relations
+    define parent: [tenant]
+    define admin: [user, group#member, role#holder] or admin from parent
+    define editor: [user, group#member, role#holder] or admin
+    define viewer: [user, group#member, role#holder] or editor or member from parent
+
+type cohort
+  relations
+    define parent: [school]
+    define admin: [user, group#member, role#holder] or admin from parent
+    define editor: [user, group#member, role#holder] or admin
+    define viewer: [user, group#member, role#holder] or editor
+
+type program
+  relations
+    define parent: [tenant]
+    define owner: [user]
+    define admin: [user, group#member, role#holder] or owner or admin from parent
+    define editor: [user, group#member, role#holder] or admin
+    define viewer: [user, group#member, role#holder] or editor
+
+# An enrollment links a user to a program/cohort.
+# Used by program-hub's enrollment-tree read path.
+type enrollment
+  relations
+    define parent: [tenant]
+    define program: [program]
+    define student: [user]
+    define tutor: [user]
+    define viewer: [user, group#member, role#holder]
+                 or admin from program
+                 or editor from program
+                 or student
+                 or tutor
+
+# A scheduled session (a tutoring session, a class meeting). Lives under
+# a program; participants get session-level permissions.
+type session
+  relations
+    define parent: [program]
+    define host: [user]
+    define participant: [user, group#member]
+    define observer: [user, group#member, role#holder]
+    define viewer: host or participant or observer or admin from parent
+    define can_join: host or participant or admin from parent
+
+# A real-time room (rtsm). Tenant-scoped via parent. Used to lock down
+# socket joins; the `can_join` relation is what `RoomManager.joinRoom`
+# evaluates.
+type room
+  relations
+    define parent: [tenant]
+    define session: [session]
+    define member: [user, group#member]
+    define moderator: [user, group#member, role#holder]
+    define can_join: member or moderator or can_join from session
+
+# A collaborative whiteboard surface (qboard). One whiteboard per session.
+type whiteboard
+  relations
+    define parent: [session]
+    define editor: [user, group#member] or host from parent or participant from parent
+    define viewer: editor or observer from parent

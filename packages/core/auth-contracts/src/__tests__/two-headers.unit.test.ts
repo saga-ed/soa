@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+    decideTwoHeaders,
     HEADER_AUTHORIZATION,
     HEADER_SAGA_CALLER,
     isComplete,
     parseTwoHeaders,
+    TWO_HEADERS_METRIC,
     TwoHeadersModeSchema,
 } from '../two-headers.js';
 
@@ -112,5 +114,89 @@ describe('TwoHeadersModeSchema', () => {
 
     it('rejects unknown modes', () => {
         expect(TwoHeadersModeSchema.safeParse('strict').success).toBe(false);
+    });
+});
+
+describe('decideTwoHeaders', () => {
+    const validCaller = 'spiffe://saga.dev/programs-api';
+    const validBearer = 'Bearer eyJhbGciOiJFUzI1NiJ9.payload.signature';
+
+    const completeHeaders = {
+        [HEADER_SAGA_CALLER]: validCaller,
+        [HEADER_AUTHORIZATION]: validBearer,
+    };
+
+    it('exports the canonical metric name', () => {
+        expect(TWO_HEADERS_METRIC).toBe('saga_two_headers_missing_total');
+    });
+
+    it('off mode always allows', () => {
+        const d = decideTwoHeaders({}, 'off');
+        expect(d.action).toBe('allow');
+        expect(d.metricReason).toBeUndefined();
+    });
+
+    it('off mode allows even malformed headers', () => {
+        const d = decideTwoHeaders(
+            { [HEADER_SAGA_CALLER]: 'garbage' },
+            'off',
+        );
+        expect(d.action).toBe('allow');
+    });
+
+    it('shadow mode allows complete headers', () => {
+        const d = decideTwoHeaders(completeHeaders, 'shadow');
+        expect(d.action).toBe('allow');
+        expect(d.metricReason).toBeUndefined();
+    });
+
+    it('shadow mode emits log + metric on missing caller', () => {
+        const d = decideTwoHeaders(
+            { [HEADER_AUTHORIZATION]: validBearer },
+            'shadow',
+        );
+        expect(d.action).toBe('log');
+        expect(d.metricReason).toBe('caller_missing');
+    });
+
+    it('shadow mode emits log + metric on malformed caller', () => {
+        const d = decideTwoHeaders(
+            { [HEADER_SAGA_CALLER]: 'not-spiffe', [HEADER_AUTHORIZATION]: validBearer },
+            'shadow',
+        );
+        expect(d.action).toBe('log');
+        expect(d.metricReason).toBe('caller_malformed');
+    });
+
+    it('enforce mode allows complete headers', () => {
+        const d = decideTwoHeaders(completeHeaders, 'enforce');
+        expect(d.action).toBe('allow');
+    });
+
+    it('enforce mode rejects on missing subject', () => {
+        const d = decideTwoHeaders(
+            { [HEADER_SAGA_CALLER]: validCaller },
+            'enforce',
+        );
+        expect(d.action).toBe('reject');
+        expect(d.metricReason).toBe('subject_missing');
+    });
+
+    it('enforce mode rejects on malformed subject', () => {
+        const d = decideTwoHeaders(
+            {
+                [HEADER_SAGA_CALLER]: validCaller,
+                [HEADER_AUTHORIZATION]: 'Basic dXNlcjpwYXNz',
+            },
+            'enforce',
+        );
+        expect(d.action).toBe('reject');
+        expect(d.metricReason).toBe('subject_malformed');
+    });
+
+    it('parse result is always exposed for caller introspection', () => {
+        const d = decideTwoHeaders(completeHeaders, 'shadow');
+        expect(d.parse.callerSpiffeId).toBe(validCaller);
+        expect(d.parse.bearerToken).toBeTruthy();
     });
 });

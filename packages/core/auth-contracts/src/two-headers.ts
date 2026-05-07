@@ -145,3 +145,94 @@ export const TwoHeadersModeSchema = z.enum(['off', 'shadow', 'enforce']);
 export function isComplete(result: TwoHeadersParseResult): boolean {
     return result.status === 'ok';
 }
+
+/**
+ * Outcome of `decideTwoHeaders`.
+ *
+ * - action 'allow' : headers are complete; let the request through.
+ * - action 'log'   : structural problem detected, but mode is shadow;
+ *                    let the request through and emit a metric.
+ * - action 'reject': structural problem detected and mode is enforce;
+ *                    the caller should reject with UNAUTHORIZED.
+ *
+ * `metric` is populated for both 'log' and 'reject' so the caller can
+ * always emit the same `saga_two_headers_missing_total{service, reason}`
+ * counter without branching.
+ */
+export type TwoHeadersAction = 'allow' | 'log' | 'reject';
+
+export interface TwoHeadersDecision {
+    readonly action: TwoHeadersAction;
+    readonly mode: TwoHeadersMode;
+    readonly parse: TwoHeadersParseResult;
+    /**
+     * Stable label for metric emission. `undefined` when action is 'allow'.
+     * Values are the parse statuses other than 'ok'.
+     */
+    readonly metricReason:
+        | Exclude<TwoHeadersParseStatus, 'ok'>
+        | undefined;
+}
+
+/**
+ * Combine `parseTwoHeaders` + the configured mode to produce a single
+ * decision. This is the function services call from their tRPC / HTTP
+ * middleware.
+ *
+ * The decision is *pure* — it does not log, emit metrics, or throw.
+ * The caller wires the metric and the rejection. This keeps the helper
+ * runtime-agnostic (browser, Node, edge) and trivially testable.
+ *
+ * @example
+ *   const decision = decideTwoHeaders(req.headers, 'shadow');
+ *   if (decision.metricReason) {
+ *     metrics.increment('saga_two_headers_missing_total', {
+ *       service: 'programs-api',
+ *       reason: decision.metricReason,
+ *     });
+ *   }
+ *   if (decision.action === 'reject') {
+ *     throw new TRPCError({ code: 'UNAUTHORIZED', ... });
+ *   }
+ */
+export function decideTwoHeaders(
+    headers: HeadersLike,
+    mode: TwoHeadersMode,
+): TwoHeadersDecision {
+    const parse = parseTwoHeaders(headers);
+
+    if (mode === 'off') {
+        return {
+            action: 'allow',
+            mode,
+            parse,
+            metricReason: undefined,
+        };
+    }
+
+    if (parse.status === 'ok') {
+        return {
+            action: 'allow',
+            mode,
+            parse,
+            metricReason: undefined,
+        };
+    }
+
+    return {
+        action: mode === 'enforce' ? 'reject' : 'log',
+        mode,
+        parse,
+        metricReason: parse.status,
+    };
+}
+
+/**
+ * Canonical metric name for the shadow→enforce migration. Centralized
+ * here so every service emits the same label name.
+ *
+ * Recommended labels: { service, reason }
+ *   - service: emitting service's SPIFFE ID or short name
+ *   - reason : decision.metricReason (one of the parse statuses)
+ */
+export const TWO_HEADERS_METRIC = 'saga_two_headers_missing_total' as const;

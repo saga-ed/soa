@@ -2,6 +2,7 @@ import type { Channel } from 'amqplib';
 import type { Pool } from 'pg';
 import type { ILogger } from '@saga-ed/soa-logger';
 import type { ConnectionManager } from '@saga-ed/soa-rabbitmq';
+import type { EventEnvelope } from '@saga-ed/soa-event-envelope';
 import {
     SpanKind,
     SpanStatusCode,
@@ -16,6 +17,22 @@ export interface OutboxMetrics {
     /** Called when publishing a row throws. */
     onPublishFailed: (eventType: string, eventVersion: number, reason: string) => void;
 }
+
+/**
+ * Hook for transforming an envelope between database load and AMQP publish.
+ *
+ * The primary use case is signing per ADR 0003: producers wrap an HMAC
+ * signer and pass it as `transformEnvelope`. The hook receives the
+ * envelope already enriched with the wire trace context and returns a
+ * possibly-modified envelope. Throwing aborts publication for that row;
+ * it stays unpublished and is retried on the next tick.
+ *
+ * The hook MUST be a pure function of its input — no mutation. Returning
+ * the same reference is fine when no transformation applies.
+ */
+export type EnvelopeTransform = (
+    envelope: EventEnvelope,
+) => EventEnvelope | Promise<EventEnvelope>;
 
 export interface OutboxRelayOpts {
     /** Dedicated pg pool for the relay (separate from the service's Prisma client). */
@@ -46,6 +63,12 @@ export interface OutboxRelayOpts {
     onFatalError?: (err: Error) => void;
     /** Optional Prometheus hooks. No-op when undefined. */
     metrics?: OutboxMetrics;
+    /**
+     * Optional transform applied to each envelope between database load
+     * and AMQP publish. Used by producers to attach an HMAC signature
+     * per ADR 0003 (signed event envelope). Defaults to identity.
+     */
+    transformEnvelope?: EnvelopeTransform;
     logger: ILogger;
 }
 
@@ -248,21 +271,30 @@ export class OutboxRelay {
                     wireMeta,
                 );
 
-                const message = {
+                const message: EventEnvelope = {
                     eventId: row.event_id,
                     eventType: row.event_type,
                     eventVersion: row.event_version,
                     aggregateType: row.aggregate_type,
                     aggregateId: row.aggregate_id,
                     occurredAt: row.occurred_at.toISOString(),
-                    payload: row.payload,
-                    ...(Object.keys(wireMeta).length > 0 ? { meta: wireMeta } : {}),
+                    payload: row.payload as Record<string, unknown>,
+                    ...(Object.keys(wireMeta).length > 0
+                        ? { meta: wireMeta as EventEnvelope['meta'] }
+                        : {}),
                 };
+
+                // ADR 0003 — apply optional transform (typically signing)
+                // after the trace context is in place but before publish.
+                // The transform must NOT mutate `message`; the relay
+                // continues with the returned envelope.
+                const transform = this.opts.transformEnvelope;
+                const finalMessage = transform ? await transform(message) : message;
 
                 const ok = this.channel!.publish(
                     this.opts.exchange,
                     row.event_type,
-                    Buffer.from(JSON.stringify(message)),
+                    Buffer.from(JSON.stringify(finalMessage)),
                     {
                         contentType: 'application/json',
                         persistent: true,

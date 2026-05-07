@@ -11,6 +11,19 @@ export {
     type SignatureMode,
     type SignatureStatus,
 } from './signature.js';
+export {
+    canonicalize,
+    canonicalBytes,
+    computeHmac,
+    signEnvelope,
+    verifyEnvelope,
+    decideSignature,
+    SIGNATURE_METRIC,
+    type SignatureKeyResolver,
+    type VerifyResult,
+    type SignatureAction,
+    type SignatureDecision,
+} from './signing.js';
 
 // W3C TraceContext requires that `tracestate` only ride along with a
 // `traceparent`. The refine catches an orphan `tracestate` at parse time

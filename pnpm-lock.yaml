@@ -1032,6 +1032,9 @@ importers:
 
   packages/node/event-integration-tests:
     dependencies:
+      '@saga-ed/soa-auth-contracts':
+        specifier: workspace:*
+        version: link:../../core/auth-contracts
       '@saga-ed/soa-event-envelope':
         specifier: workspace:*
         version: link:../event-envelope

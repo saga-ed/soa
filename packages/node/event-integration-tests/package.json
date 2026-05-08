@@ -11,6 +11,7 @@
         "clean": "rm -rf dist"
     },
     "dependencies": {
+        "@saga-ed/soa-auth-contracts": "workspace:*",
         "@saga-ed/soa-event-envelope": "workspace:*",
         "@saga-ed/soa-event-outbox": "workspace:*",
         "@saga-ed/soa-event-test-harness": "workspace:*",

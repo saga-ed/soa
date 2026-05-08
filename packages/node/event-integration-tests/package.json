@@ -11,6 +11,10 @@
         "clean": "rm -rf dist"
     },
     "dependencies": {
+        "@opentelemetry/api": "^1.9.0",
+        "@opentelemetry/context-async-hooks": "^1.28.0",
+        "@opentelemetry/sdk-trace-base": "^1.28.0",
+        "@saga-ed/soa-audit": "workspace:*",
         "@saga-ed/soa-auth-contracts": "workspace:*",
         "@saga-ed/soa-event-envelope": "workspace:*",
         "@saga-ed/soa-event-outbox": "workspace:*",

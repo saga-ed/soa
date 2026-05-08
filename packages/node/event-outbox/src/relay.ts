@@ -206,21 +206,19 @@ export class OutboxRelay {
 
             const publishedIds: string[] = [];
             const failedIds: string[] = [];
-            let lastFailureMessage = '';
+            const failedMessages: string[] = [];
             for (const row of result.rows) {
                 try {
                     await this.publishRow(row);
                     publishedIds.push(row.event_id);
                 } catch (err) {
-                    // Per-row isolation. A bad row (failed transform,
-                    // malformed payload, AMQP refusal) bumps its
-                    // attempts counter and yields to the rest of the
-                    // batch. Without per-row isolation, one bad row
-                    // would block every subsequent row's publish.
-                    failedIds.push(row.event_id);
+                    // Per-row isolation: one bad row bumps its own
+                    // attempts counter without blocking the rest of
+                    // the batch.
                     const message =
                         err instanceof Error ? err.message : String(err);
-                    lastFailureMessage = message;
+                    failedIds.push(row.event_id);
+                    failedMessages.push(message.slice(0, 1000));
                     this.opts.logger.warn(
                         `[OutboxRelay] publishRow failed for event ${row.event_id} (attempt ${row.attempts + 1}/${maxAttempts}): ${message}`,
                     );
@@ -242,9 +240,10 @@ export class OutboxRelay {
                 await client.query(
                     `UPDATE outbox_event
                      SET attempts = attempts + 1,
-                         last_error = $2
-                     WHERE event_id = ANY($1::uuid[])`,
-                    [failedIds, lastFailureMessage.slice(0, 1000)],
+                         last_error = u.err
+                     FROM unnest($1::uuid[], $2::text[]) AS u(id, err)
+                     WHERE outbox_event.event_id = u.id`,
+                    [failedIds, failedMessages],
                 );
             }
 

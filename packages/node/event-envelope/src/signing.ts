@@ -9,113 +9,60 @@ import type {
 /**
  * HMAC-SHA256 signing for event envelopes per ADR 0003.
  *
- * The signature is computed over the canonical byte representation:
+ * Signature is computed over canonical bytes: envelope identity fields
+ * (eventId, eventType, eventVersion, aggregateType, aggregateId,
+ * occurredAt) joined with '\n', followed by `canonicalize(payload)`.
  *
- *   eventId        ┐
- *   eventType      │
- *   eventVersion   │  joined with '\n', UTF-8
- *   aggregateType  │
- *   aggregateId    │
- *   occurredAt     │
- *   canonical(payload) ┘
- *
- * `canonical(payload)` is a deterministic JSON serialization with object
- * keys sorted in lexicographic UTF-16 order, no whitespace, and JSON-spec
- * escapes. This is sufficient for byte-identical reproduction across
- * producer and consumer (which is what HMAC needs); we do not aim for
- * full RFC 8785 (JCS) compatibility because we control both sides.
- *
- * Compatibility note: if Saga ever needs to interop with a counterparty
- * that requires RFC 8785, swap `canonicalize` for a JCS implementation —
- * the rest of this file does not change.
+ * `canonicalize` is JCS-inspired, not strict RFC 8785: object keys
+ * sorted in UTF-16 code-unit order, no whitespace, JSON-spec escapes.
+ * Sufficient for byte-identical reproduction within Saga's trust
+ * boundary (both sides run Node V8). For RFC 8785 interop, swap
+ * `canonicalize` — everything else here is unchanged.
  */
+
+const isJsonHole = (v: unknown): boolean =>
+    v === undefined || typeof v === 'symbol' || typeof v === 'function';
 
 /**
- * Deterministic JSON serialization. Recursively sorts object keys
- * (UTF-16 code-unit lexicographic order), preserves array order, and
- * matches `JSON.stringify` semantics for non-JSON values:
- *   - `undefined` / function / symbol values: dropped from objects,
- *     replaced with `null` in arrays (per JSON spec).
- *   - `BigInt`: throws (consistent with `JSON.stringify`).
- *   - Circular references: throws (own implementation; we cannot
- *     rely on `JSON.stringify` for the recursion).
- *
- * Compatibility note: this implementation is *JCS-inspired*, not
- * strictly RFC 8785. It is sufficient for byte-identical reproduction
- * across producer and consumer within Saga's trust boundary (both run
- * Node V8). If we ever interop with a counterparty that requires
- * strict RFC 8785, swap this function for a JCS implementation —
- * everything else in this file is unchanged.
+ * Deterministic JSON serialization. Matches `JSON.stringify` for
+ * non-JSON values (drop in objects, null in arrays, throws on BigInt).
+ * Throws on circular references and on a hole at the top level.
  */
 export function canonicalize(value: unknown): string {
-    return canonicalizeWithSeen(value, new WeakSet<object>());
-}
-
-function canonicalizeWithSeen(
-    value: unknown,
-    seen: WeakSet<object>,
-): string {
-    if (typeof value === 'bigint') {
-        throw new TypeError(
-            'canonicalize: BigInt is not JSON-serializable',
-        );
-    }
-    // Top-level undefined / symbol / function are not legal JSON values;
-    // a caller that hands us one is misusing the canonical-bytes
-    // contract. Throw rather than return invalid output.
-    if (
-        value === undefined ||
-        typeof value === 'symbol' ||
-        typeof value === 'function'
-    ) {
-        throw new TypeError(
-            'canonicalize: undefined / symbol / function are not allowed at top level',
-        );
-    }
-    if (value === null) return 'null';
-    if (typeof value !== 'object') return JSON.stringify(value);
-    if (seen.has(value)) {
-        throw new TypeError('canonicalize: circular reference detected');
-    }
-    seen.add(value);
-    try {
-        if (Array.isArray(value)) {
-            const parts = value.map((v) => canonicalizeArrayItem(v, seen));
-            return `[${parts.join(',')}]`;
+    const seen = new WeakSet<object>();
+    const walk = (v: unknown): string => {
+        if (typeof v === 'bigint') {
+            throw new TypeError('canonicalize: BigInt is not JSON-serializable');
         }
-        // Object: sort keys, drop entries whose value is undefined / symbol /
-        // function (matches `JSON.stringify` behavior).
-        const keys = Object.keys(value as Record<string, unknown>).sort();
-        const parts: string[] = [];
-        for (const k of keys) {
-            const v = (value as Record<string, unknown>)[k];
-            if (
-                v === undefined ||
-                typeof v === 'symbol' ||
-                typeof v === 'function'
-            ) {
-                continue;
+        if (isJsonHole(v)) {
+            throw new TypeError(
+                'canonicalize: undefined / symbol / function are not allowed at top level',
+            );
+        }
+        if (v === null) return 'null';
+        if (typeof v !== 'object') return JSON.stringify(v);
+        if (seen.has(v)) {
+            throw new TypeError('canonicalize: circular reference detected');
+        }
+        seen.add(v);
+        try {
+            if (Array.isArray(v)) {
+                const parts = v.map((item) => (isJsonHole(item) ? 'null' : walk(item)));
+                return `[${parts.join(',')}]`;
             }
-            parts.push(`${JSON.stringify(k)}:${canonicalizeWithSeen(v, seen)}`);
+            const keys = Object.keys(v as Record<string, unknown>).sort();
+            const parts: string[] = [];
+            for (const k of keys) {
+                const child = (v as Record<string, unknown>)[k];
+                if (isJsonHole(child)) continue;
+                parts.push(`${JSON.stringify(k)}:${walk(child)}`);
+            }
+            return `{${parts.join(',')}}`;
+        } finally {
+            seen.delete(v);
         }
-        return `{${parts.join(',')}}`;
-    } finally {
-        seen.delete(value);
-    }
-}
-
-function canonicalizeArrayItem(
-    v: unknown,
-    seen: WeakSet<object>,
-): string {
-    if (
-        v === undefined ||
-        typeof v === 'symbol' ||
-        typeof v === 'function'
-    ) {
-        return 'null';
-    }
-    return canonicalizeWithSeen(v, seen);
+    };
+    return walk(value);
 }
 
 /**

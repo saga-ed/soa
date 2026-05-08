@@ -1032,9 +1032,21 @@ importers:
 
   packages/node/event-integration-tests:
     dependencies:
+      '@saga-ed/soa-event-envelope':
+        specifier: workspace:*
+        version: link:../event-envelope
+      '@saga-ed/soa-event-outbox':
+        specifier: workspace:*
+        version: link:../event-outbox
       '@saga-ed/soa-event-test-harness':
         specifier: workspace:*
         version: link:../event-test-harness
+      '@saga-ed/soa-logger':
+        specifier: workspace:*
+        version: link:../logger
+      '@saga-ed/soa-rabbitmq':
+        specifier: workspace:*
+        version: link:../rabbitmq
       amqplib:
         specifier: ^0.10.4
         version: 0.10.9

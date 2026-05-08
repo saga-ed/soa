@@ -11,7 +11,11 @@
         "clean": "rm -rf dist"
     },
     "dependencies": {
+        "@saga-ed/soa-event-envelope": "workspace:*",
+        "@saga-ed/soa-event-outbox": "workspace:*",
         "@saga-ed/soa-event-test-harness": "workspace:*",
+        "@saga-ed/soa-logger": "workspace:*",
+        "@saga-ed/soa-rabbitmq": "workspace:*",
         "amqplib": "^0.10.4",
         "pg": "^8.13.0"
     },

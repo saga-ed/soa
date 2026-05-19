@@ -4,9 +4,16 @@
 // can verify the manager delegates to createConfirmChannel() and surfaces
 // the same not-initialized error contract as newChannel().
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChannelModel } from 'amqplib';
 import { ConnectionManager } from '../src/connection-manager.js';
+
+vi.mock('amqplib', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('amqplib')>();
+    return { ...actual, connect: vi.fn() };
+});
+
+const { connect: mockConnect } = await import('amqplib');
 
 const NOOP_LOGGER = {
     info: vi.fn(),
@@ -66,5 +73,56 @@ describe('ConnectionManager.newConfirmChannel', () => {
         expect(confirm).toEqual({ kind: 'confirm' });
         expect(createChannel).toHaveBeenCalledOnce();
         expect(createConfirmChannel).toHaveBeenCalledOnce();
+    });
+});
+
+describe('ConnectionManager.connect — failureMode', () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+
+    beforeEach(() => {
+        // Force `connect` to exhaust retries quickly: stub amqplib.connect so
+        // it always rejects, and use a tiny `initialDelay` so the backoff
+        // doesn't drag the test out.
+        vi.mocked(mockConnect).mockRejectedValue(new Error('boom'));
+    });
+
+    afterEach(() => {
+        vi.mocked(mockConnect).mockReset();
+        (process.env as Record<string, string | undefined>).NODE_ENV = originalNodeEnv;
+    });
+
+    function makeFailingManager(failureMode?: 'fatal' | 'log-and-continue') {
+        return new ConnectionManager(NOOP_LOGGER as never, {
+            url: 'amqp://localhost',
+            failureMode,
+            reconnect: { enabled: true, maxRetries: 1, initialDelay: 1, maxDelay: 1 },
+        });
+    }
+
+    it('throws when failureMode=fatal after retries exhaust', async () => {
+        const cm = makeFailingManager('fatal');
+        await expect(cm.connect()).rejects.toThrow(/circuit breaker opened/);
+        expect(cm.state()).toBe('CIRCUIT_OPEN');
+    });
+
+    it('returns + logs warn when failureMode=log-and-continue', async () => {
+        const cm = makeFailingManager('log-and-continue');
+        await expect(cm.connect()).resolves.toBeUndefined();
+        expect(cm.state()).toBe('CIRCUIT_OPEN');
+        expect(NOOP_LOGGER.warn).toHaveBeenCalledWith(
+            expect.stringMatching(/log-and-continue/),
+        );
+    });
+
+    it("defaults to 'fatal' when NODE_ENV=production", async () => {
+        (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
+        const cm = makeFailingManager();
+        await expect(cm.connect()).rejects.toThrow(/circuit breaker opened/);
+    });
+
+    it("defaults to 'log-and-continue' when NODE_ENV is not production", async () => {
+        (process.env as Record<string, string | undefined>).NODE_ENV = 'test';
+        const cm = makeFailingManager();
+        await expect(cm.connect()).resolves.toBeUndefined();
     });
 });

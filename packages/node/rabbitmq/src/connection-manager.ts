@@ -6,10 +6,33 @@ import { QueueDefinition } from './queue';
 
 export interface RabbitMQConfig {
   url: string; // eg. amqp://user:password@host:port
-  
+
   reconnect?: ReconnectConfig;
-  
+
   heartbeat?: number; // seconds
+
+  /**
+   * What to do when initial `connect()` exhausts retries and trips the
+   * circuit breaker:
+   *
+   * - `'fatal'`: throw, so the host process can crash and surface a clear
+   *   alert. Correct in production — a service that "soft fails" event
+   *   publication accumulates outbox debt invisibly until alerting catches
+   *   it.
+   * - `'log-and-continue'`: log a warning and return without throwing, so
+   *   the service can still serve request-path traffic while the broker is
+   *   unreachable. The outbox table absorbs the writes; the relay reconnects
+   *   when the broker returns. Correct in dev/test where the broker is more
+   *   flaky than the service itself.
+   *
+   * Default: `'fatal'` when `process.env.NODE_ENV === 'production'`,
+   * `'log-and-continue'` otherwise. Set explicitly to override that default
+   * — e.g. a CI/staging environment where you want fail-loud behavior.
+   *
+   * See `claude/projects/soa_75/decisions/d-consumer-resilience.md` pattern
+   * 3 ("non-fatal broker startup") for the rationale.
+   */
+  failureMode?: 'fatal' | 'log-and-continue';
 }
 
 export interface ReconnectConfig {
@@ -28,7 +51,7 @@ export type ConnectionState =
   | "RECONNECTING"
   | "CIRCUIT_OPEN";
 
-const DEFAULT_CONNECTION_CONFIG: Required<Omit<RabbitMQConfig, 'url'> & { reconnect: Required<ReconnectConfig> }> = {
+const DEFAULT_CONNECTION_CONFIG: Required<Omit<RabbitMQConfig, 'url' | 'failureMode'> & { reconnect: Required<ReconnectConfig> }> = {
   reconnect: {
     enabled: true,
     maxRetries: 10,
@@ -40,7 +63,7 @@ const DEFAULT_CONNECTION_CONFIG: Required<Omit<RabbitMQConfig, 'url'> & { reconn
 
 @injectable()
 export class ConnectionManager {
-  private config: Required<RabbitMQConfig & { reconnect: Required<ReconnectConfig> }>;
+  private config: Required<Omit<RabbitMQConfig, 'failureMode'> & { reconnect: Required<ReconnectConfig> }> & { failureMode?: 'fatal' | 'log-and-continue' };
   private channelModel: ChannelModel | null = null;
 
   private currentState: ConnectionState = "DISCONNECTED";
@@ -242,6 +265,20 @@ export class ConnectionManager {
     this.circuitOpenTimestamp = Date.now();
     this.circuitOpen = true;
     this.setState("CIRCUIT_OPEN");
-    throw new Error("RabbitMQ connection failed: circuit breaker opened");
+    const mode = this.resolveFailureMode();
+    const message = "RabbitMQ connection failed: circuit breaker opened";
+    if (mode === 'log-and-continue') {
+      this.logger.warn(
+        `[MQConnectionManager] ${message} — failureMode='log-and-continue', not throwing. ` +
+          'Outbox writes will accumulate; the relay will reconnect on the next attempt.',
+      );
+      return;
+    }
+    throw new Error(message);
+  }
+
+  private resolveFailureMode(): 'fatal' | 'log-and-continue' {
+    if (this.config.failureMode) return this.config.failureMode;
+    return process.env.NODE_ENV === 'production' ? 'fatal' : 'log-and-continue';
   }
 }

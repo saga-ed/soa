@@ -24,7 +24,8 @@
     "typescript-eslint": "^8.33.0"
   },
   "scripts": {
-    "clean": ":"
+    "clean": ":",
+    "test": "node ./rules/__tests__/verify-fixture.mjs"
   },
   "publishConfig": {
     "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",

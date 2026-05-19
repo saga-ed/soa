@@ -2,10 +2,15 @@ import { Pool, type PoolConfig } from 'pg';
 
 export interface CreateOutboxPoolOpts {
     /**
-     * Max connections in the dedicated relay pool. Defaults to 2 — the relay
-     * needs only one for the polling tick + one spare for liveness checks. Keep
-     * it small so it cannot starve request-path Prisma traffic, especially in
-     * preview environments where many PRs share a single Postgres instance.
+     * Max connections in the dedicated relay pool. Defaults to 4 — enough
+     * headroom for the polling tick, a concurrent retry of a failed batch,
+     * and a liveness probe without queuing. Keep it small so it cannot
+     * starve request-path Prisma traffic, especially in preview environments
+     * where many PRs share a single Postgres instance; outbox traffic is
+     * bursty and short-lived, so 4 saturates rare bursts without holding
+     * connections idle. program-hub's programs-api uses this value in
+     * production; rostering's iam-api leaves it at the default. Bump only
+     * if relay-tick latency shows actual queue depth on the pool.
      */
     max?: number;
     /**
@@ -37,7 +42,7 @@ const SCHEMA_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
  *
  * The helper is intentionally production-safe: when neither `?schema=` nor
  * `EVENT_PREVIEW_TAG` are set, it's equivalent to
- * `new Pool({ connectionString, max: 2 })`. The startup coherence assert
+ * `new Pool({ connectionString, max: 4 })`. The startup coherence assert
  * (below) ensures preview state can't leak in by accident — that's what
  * makes a single helper safe across both environments.
  *
@@ -115,7 +120,7 @@ export function createOutboxPool(
 
     return new Pool({
         connectionString: databaseUrl,
-        max: opts.max ?? 2,
+        max: opts.max ?? 4,
         ...(schema ? { options: `-c search_path=${schema}` } : {}),
         ...opts.poolOverrides,
     });

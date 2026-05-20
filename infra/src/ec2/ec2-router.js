@@ -317,6 +317,7 @@ export function create_ec2_router(config = {}) {
                 port: allocated_port,
                 volume_id,
                 db_name: effective_db_name,
+                action: 'created',
             };
 
             if (on_after_create) on_after_create(result);
@@ -557,14 +558,17 @@ export function create_ec2_router(config = {}) {
                 projects_dir,
             });
 
-            res.json({ ok: true, name, profile, ...result });
+            res.json({ ok: true, name, profile, action: 'snapshotted', snapshot: result });
         } catch (err) {
             res.status(500).json({ ok: false, error: err.message });
         }
     });
 
-    // Switch/restore handler (shared by /switch and /restore)
-    function handle_switch(req, res) {
+    // Switch/restore handler (shared by /switch and /restore). The `action`
+    // arg is the verb returned in the response so /switch and /restore are
+    // distinguishable in logs and UIs even though the implementation is
+    // identical.
+    function handle_switch(req, res, action) {
         try {
             const { name } = req.params;
             const { profile } = req.body;
@@ -640,14 +644,14 @@ export function create_ec2_router(config = {}) {
             // Update profile registry
             write_active_profile(name, profile, data_dir);
 
-            res.json({ ok: true, name, profile, action: 'switched' });
+            res.json({ ok: true, name, profile, action });
         } catch (err) {
             res.status(500).json({ ok: false, error: err.message });
         }
     }
 
-    router.post('/dbs/:name/switch', handle_switch);
-    router.post('/dbs/:name/restore', handle_switch);
+    router.post('/dbs/:name/switch', (req, res) => handle_switch(req, res, 'switched'));
+    router.post('/dbs/:name/restore', (req, res) => handle_switch(req, res, 'restored'));
 
     // DELETE /dbs/:name — stop, remove project dir, deregister, release port. Keep EBS volume.
     router.delete('/dbs/:name', (req, res) => {

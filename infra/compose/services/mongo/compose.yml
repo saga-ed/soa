@@ -10,6 +10,8 @@ services:
   mongo:
     image: mongo:6
     command: ["mongod", "--replSet", "wootmath", "--bind_ip_all"]
+    mem_limit: ${MONGO_MEM_LIMIT:-1536m}
+    cpus: ${MONGO_CPUS:-1.0}
     volumes:
       - mongo-data:/data/db
     healthcheck:

@@ -9,6 +9,8 @@ services:
 
   postgres:
     image: postgres:18
+    mem_limit: ${POSTGRES_MEM_LIMIT:-1g}
+    cpus: ${POSTGRES_CPUS:-1.0}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password123}

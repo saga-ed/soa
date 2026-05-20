@@ -12,6 +12,7 @@ export const engines = {
         default_port: 5432,
         seed_ext: 'sql',
         default_user: 'postgres_admin',
+        default_resources: { mem_limit: '1g', cpus: '1.0' },
         dump_cmd: (container, db_name, user) => [
             'docker', 'exec', container,
             'pg_dump', '-U', user || 'postgres_admin', '--no-owner', '--no-acl', db_name,
@@ -38,6 +39,7 @@ export const engines = {
         port_range: [27017, 27020],
         default_port: 27017,
         seed_ext: 'json',
+        default_resources: { mem_limit: '1536m', cpus: '1.0' },
         env_vars: ({ db_name }) => ({
             MONGO_INITDB_DATABASE: db_name,
         }),
@@ -57,6 +59,7 @@ export const engines = {
         default_port: 3306,
         seed_ext: 'sql',
         default_user: 'root',
+        default_resources: { mem_limit: '1g', cpus: '1.0' },
         dump_cmd: (container, db_name, user, password) => {
             const args = ['docker', 'exec', container, 'mysqldump', '-u', user || 'root'];
             if (password) args.push(`-p${password}`);

@@ -178,7 +178,14 @@ export function create_ec2_router(config = {}) {
 
                 // Skip if already in registry
                 if (registry[name]) {
-                    synced.push({ name, engine: registry[name].engine, port: registry[name].port, action: 'already_tracked' });
+                    synced.push({
+                        ok: true,
+                        name,
+                        action: 'already_tracked',
+                        engine: registry[name].engine,
+                        port: registry[name].port,
+                        error: null,
+                    });
                     continue;
                 }
 
@@ -189,7 +196,14 @@ export function create_ec2_router(config = {}) {
                 const image_match = content.match(/image:\s*(\w+):/);
                 const engine = image_match ? image_match[1] : null;
                 if (!engine || !engines[engine]) {
-                    synced.push({ name, error: `Unknown engine from image: ${image_match?.[1]}` });
+                    synced.push({
+                        ok: false,
+                        name,
+                        action: 'failed',
+                        engine: null,
+                        port: null,
+                        error: `Unknown engine from image: ${image_match?.[1]}`,
+                    });
                     continue;
                 }
 
@@ -197,7 +211,14 @@ export function create_ec2_router(config = {}) {
                 const port_match = content.match(/"(\d+):\d+"/);
                 const port = port_match ? Number(port_match[1]) : null;
                 if (!port) {
-                    synced.push({ name, error: 'Could not detect port' });
+                    synced.push({
+                        ok: false,
+                        name,
+                        action: 'failed',
+                        engine,
+                        port: null,
+                        error: 'Could not detect port',
+                    });
                     continue;
                 }
 
@@ -219,12 +240,26 @@ export function create_ec2_router(config = {}) {
                         const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
                         register({ name, ip, port, namespace_id, region: region || get_instance_metadata().region });
                     } catch (err) {
-                        synced.push({ name, engine, port, action: 'synced_registry_only', cloudmap_error: err.message });
+                        synced.push({
+                            ok: true,
+                            name,
+                            action: 'synced_registry_only',
+                            engine,
+                            port,
+                            error: `CloudMap registration failed: ${err.message}`,
+                        });
                         continue;
                     }
                 }
 
-                synced.push({ name, engine, port, action: 'synced' });
+                synced.push({
+                    ok: true,
+                    name,
+                    action: 'synced',
+                    engine,
+                    port,
+                    error: null,
+                });
             }
 
             res.json({ ok: true, synced });

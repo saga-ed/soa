@@ -350,8 +350,8 @@ export function create_ec2_router(config = {}) {
                 engine,
                 version: version || engines[engine].default_version,
                 port: allocated_port,
-                volume_id,
-                db_name: effective_db_name,
+                volumeId: volume_id,
+                dbName: effective_db_name,
                 action: 'created',
             };
 
@@ -485,7 +485,7 @@ export function create_ec2_router(config = {}) {
                 engine,
                 version: version || engines[engine].default_version,
                 port,
-                db_name: db_name || name,
+                dbName: db_name || name,
                 action: 'hydrated',
             });
         } catch (err) {

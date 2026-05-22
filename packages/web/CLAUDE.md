@@ -17,6 +17,7 @@ See [/packages/CLAUDE.md](../CLAUDE.md) for packages overview.
 | Package | Description |
 |---------|-------------|
 | `ui/` | React component library |
+| `rum-util/` | Datadog RUM wrapper with Saga conventions (one service per app, source-tagged errors/actions, silent no-op when unconfigured). Consumed by `saga_dash`, `qboard_connectv3`, `janus_login`. |
 
 ## Browser Constraints
 

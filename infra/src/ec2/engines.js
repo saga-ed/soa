@@ -8,7 +8,7 @@ export const engines = {
         image_template: 'postgres:{version}',
         default_version: '16',
         container_data_path: '/var/lib/postgresql/data',
-        port_range: [5432, 5440],
+        port_range: [5432, 5499],
         default_port: 5432,
         seed_ext: 'sql',
         default_user: 'postgres_admin',

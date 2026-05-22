@@ -110,7 +110,11 @@ export function attach_and_mount({ volume_id, mount_path, instance_id, region })
         '--region', region,
     ], { timeout: 180000 });
 
-    // Find next available device letter (f through p)
+    // Find next available device letter (f through z = 21 slots).
+    // t3.medium supports 27 EBS attachments and Nitro instance types
+    // support more, so the bottleneck is the device-name alphabet, not
+    // the instance limit. Was f-p (11 slots) which exhausted with one
+    // DB per main-branch service plus per-PR previews.
     const attached = JSON.parse(run('aws', [
         'ec2', 'describe-instances',
         '--instance-ids', instance_id,
@@ -120,7 +124,7 @@ export function attach_and_mount({ volume_id, mount_path, instance_id, region })
     ]));
     const used_letters = new Set(attached.map(d => d.slice(-1)));
     let device_letter = '';
-    for (const ch of 'fghijklmnop') {
+    for (const ch of 'fghijklmnopqrstuvwxyz') {
         if (!used_letters.has(ch)) { device_letter = ch; break; }
     }
     if (!device_letter) throw new Error('No available device letters for EBS attachment');

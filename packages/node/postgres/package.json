@@ -1,6 +1,7 @@
 {
-  "name": "@saga-ed/soa-db",
+  "name": "@saga-ed/soa-postgres",
   "type": "module",
+  "version": "0.1.0",
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
@@ -10,30 +11,24 @@
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "^24.0.3",
+    "@types/pg": "^8.11.10",
     "aws-sdk-client-mock": "^4.1.0",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
-    "vitest": "^1.5.0",
-    "@saga-ed/soa-config": "workspace:*"
+    "vitest": "^1.5.0"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.968.0",
     "@aws-sdk/client-ssm": "^3.968.0",
     "inversify": "^6.2.2",
-    "mongodb": "^6.12.0",
-    "mongodb-memory-server": "^10.1.4",
+    "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "zod": "3.25.67"
   },
-  "version": "1.2.0",
   "exports": {
     ".": {
       "import": "./dist/index.js",
       "require": "./dist/index.js"
-    },
-    "./mocks/mock-mongo-provider": {
-      "import": "./dist/mocks/mock-mongo-provider.js",
-      "require": "./dist/mocks/mock-mongo-provider.js"
     }
   },
   "publishConfig": {
@@ -43,6 +38,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/saga-ed/soa.git",
-    "directory": "packages/node/db"
+    "directory": "packages/node/postgres"
   }
 }

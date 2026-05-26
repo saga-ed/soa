@@ -3,8 +3,10 @@ import { datadogRum } from '@datadog/browser-rum';
 import {
   initRum,
   setRumUser,
+  removeRumUserProperty,
   clearRumUser,
   setRumGlobalContextProperty,
+  removeRumGlobalContextProperty,
   addRumError,
   addRumAction,
   isInitialized,
@@ -15,8 +17,10 @@ vi.mock('@datadog/browser-rum', () => ({
   datadogRum: {
     init: vi.fn(),
     setUserProperty: vi.fn(),
+    removeUserProperty: vi.fn(),
     clearUser: vi.fn(),
     setGlobalContextProperty: vi.fn(),
+    removeGlobalContextProperty: vi.fn(),
     addError: vi.fn(),
     addAction: vi.fn(),
   },
@@ -81,11 +85,41 @@ describe('setRumUser', () => {
     expect(datadogRum.setUserProperty).toHaveBeenCalledWith('name', 'Alice');
     expect(datadogRum.setUserProperty).toHaveBeenCalledWith('role', 'TUTOR');
     expect(datadogRum.setUserProperty).not.toHaveBeenCalledWith('org', expect.anything());
+    expect(datadogRum.removeUserProperty).not.toHaveBeenCalled();
+  });
+
+  it('removes the property when value is null', () => {
+    initRum({ service: 's', applicationId: 'a', clientToken: 'b', env: 'dev', version: '0' });
+    setRumUser({ org: null });
+    expect(datadogRum.removeUserProperty).toHaveBeenCalledWith('org');
+    expect(datadogRum.setUserProperty).not.toHaveBeenCalled();
+  });
+
+  it('mixes set and remove in a single patch', () => {
+    initRum({ service: 's', applicationId: 'a', clientToken: 'b', env: 'dev', version: '0' });
+    setRumUser({ id: 'u1', org: null, role: 'TUTOR' });
+    expect(datadogRum.setUserProperty).toHaveBeenCalledWith('id', 'u1');
+    expect(datadogRum.setUserProperty).toHaveBeenCalledWith('role', 'TUTOR');
+    expect(datadogRum.removeUserProperty).toHaveBeenCalledWith('org');
   });
 
   it('is a no-op before init', () => {
-    setRumUser({ id: 'u1' });
+    setRumUser({ id: 'u1', org: null });
     expect(datadogRum.setUserProperty).not.toHaveBeenCalled();
+    expect(datadogRum.removeUserProperty).not.toHaveBeenCalled();
+  });
+});
+
+describe('removeRumUserProperty', () => {
+  it('removes the named user property', () => {
+    initRum({ service: 's', applicationId: 'a', clientToken: 'b', env: 'dev', version: '0' });
+    removeRumUserProperty('org');
+    expect(datadogRum.removeUserProperty).toHaveBeenCalledWith('org');
+  });
+
+  it('is a no-op before init', () => {
+    removeRumUserProperty('org');
+    expect(datadogRum.removeUserProperty).not.toHaveBeenCalled();
   });
 });
 
@@ -136,5 +170,18 @@ describe('setRumGlobalContextProperty / clearRumUser', () => {
     clearRumUser();
     expect(datadogRum.setGlobalContextProperty).not.toHaveBeenCalled();
     expect(datadogRum.clearUser).not.toHaveBeenCalled();
+  });
+});
+
+describe('removeRumGlobalContextProperty', () => {
+  it('removes the named global context key', () => {
+    initRum({ service: 's', applicationId: 'a', clientToken: 'b', env: 'dev', version: '0' });
+    removeRumGlobalContextProperty('selected_program_id');
+    expect(datadogRum.removeGlobalContextProperty).toHaveBeenCalledWith('selected_program_id');
+  });
+
+  it('is a no-op before init', () => {
+    removeRumGlobalContextProperty('selected_program_id');
+    expect(datadogRum.removeGlobalContextProperty).not.toHaveBeenCalled();
   });
 });

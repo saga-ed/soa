@@ -28,7 +28,9 @@ initRum({
   clientToken: import.meta.env.VITE_DD_RUM_CLIENT_TOKEN,
   env: import.meta.env.VITE_DD_ENV ?? 'unknown',
   version: __APP_VERSION__,
-  allowedTracingUrls: [/\.wootdev\.com\//, /\.sagaeducation\.org\//],
+  // Unanchored so paths and bare hosts both get tracing headers on the
+  // dev (*.wootdev.com) and prod (*.saga.org) backends.
+  allowedTracingUrls: [/https:\/\/[^/]+\.wootdev\.com/, /https:\/\/[^/]+\.saga\.org/],
 });
 
 // later, when the user logs in
@@ -36,6 +38,9 @@ import { setRumUser, setRumGlobalContextProperty, addRumError } from '@saga-ed/s
 
 setRumUser({ id: session.user_id, name: session.screen_name, org: orgId, role: 'TUTOR' });
 setRumGlobalContextProperty('selected_program_ids', programStore.selectedIds);
+
+// reactive update — null in the patch removes the property
+setRumUser({ org: selectedOrgId }); // selectedOrgId: string | null
 
 // custom errors
 try {
@@ -50,9 +55,11 @@ try {
 | Function | Purpose |
 |---|---|
 | `initRum(opts)` | One-shot init. Returns `false` if `applicationId`/`clientToken` empty. |
-| `setRumUser(patch)` | Incremental user updates via `setUserProperty`. |
-| `clearRumUser()` | On logout. |
+| `setRumUser(patch)` | Incremental user updates. `null` removes, `undefined` preserves, string sets. |
+| `removeRumUserProperty(key)` | Explicit one-off remove for a single user field. |
+| `clearRumUser()` | On logout. Clears the user object only; remove globals separately. |
 | `setRumGlobalContextProperty(k, v)` | Pass-through for app-specific context. |
-| `addRumError(err, ctx?)` | Auto-tags `source: <service>`. |
+| `removeRumGlobalContextProperty(k)` | Remove a global context key. Prefer over `set(k, null)` so Datadog doesn't store literal null. |
+| `addRumError(err, ctx?)` | Auto-tags `source: <service>` (after spread — caller can't override). |
 | `addRumAction(name, ctx?)` | Auto-tags `source: <service>`. |
 | `isInitialized()` | Read-only — mostly for tests. |

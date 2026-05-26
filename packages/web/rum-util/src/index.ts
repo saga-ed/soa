@@ -39,15 +39,16 @@ export interface InitRumOptions {
 }
 
 export interface RumUserPatch {
-  id?: string;
-  name?: string;
-  email?: string;
+  id?: string | null;
+  name?: string | null;
+  email?: string | null;
   /** Saga org / tenant id. Surfaces as `@usr.org` in the Session Explorer. */
-  org?: string;
+  org?: string | null;
   /** Saga role enum (e.g. SCHOLAR, TUTOR, SITE_DIRECTOR). Surfaces as `@usr.role`. */
-  role?: string;
-  /** Any extra fields a consumer wants on the RUM user. */
-  [key: string]: string | number | boolean | undefined;
+  role?: string | null;
+  /** Any extra fields a consumer wants on the RUM user. `null` removes the
+   *  property; `undefined` preserves the current value. */
+  [key: string]: string | number | boolean | null | undefined;
 }
 
 let initialized = false;
@@ -91,13 +92,34 @@ export function initRum(opts: InitRumOptions): boolean {
 /**
  * Incrementally merge fields into the RUM user object. Uses setUserProperty so
  * subsequent calls don't clobber earlier ones (the v6 deprecation-free path).
+ *
+ * Patch semantics per field:
+ *  - `undefined` — preserve the existing value
+ *  - `null` — remove the property (via removeUserProperty)
+ *  - any other value — set
+ *
+ * The null-as-remove path lets reactive consumers wire a nullable source
+ * straight into a setRumUser call without branching, e.g.
+ * `setRumUser({ org: selectedOrgId })` where `selectedOrgId: string | null`.
  */
 export function setRumUser(patch: RumUserPatch): void {
   if (!initialized) return;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    datadogRum.setUserProperty(key, value);
+    if (value === null) {
+      datadogRum.removeUserProperty(key);
+    } else {
+      datadogRum.setUserProperty(key, value);
+    }
   }
+}
+
+/** Remove a single field from the RUM user object. Use this when the caller
+ *  wants a one-off explicit remove rather than the patch-style null in
+ *  setRumUser. */
+export function removeRumUserProperty(key: string): void {
+  if (!initialized) return;
+  datadogRum.removeUserProperty(key);
 }
 
 export function clearRumUser(): void {
@@ -113,6 +135,15 @@ export function clearRumUser(): void {
 export function setRumGlobalContextProperty(key: string, value: unknown): void {
   if (!initialized) return;
   datadogRum.setGlobalContextProperty(key, value);
+}
+
+/** Remove a global context key entirely. Prefer this over
+ *  `setRumGlobalContextProperty(key, null)` — Datadog stores the literal null
+ *  and it surfaces in facet queries and `:*` exists matches, polluting
+ *  dashboards. removeGlobalContextProperty makes the key absent. */
+export function removeRumGlobalContextProperty(key: string): void {
+  if (!initialized) return;
+  datadogRum.removeGlobalContextProperty(key);
 }
 
 /** Tag every error with `source: <service>` so the existing saga_web retention

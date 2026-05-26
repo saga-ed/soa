@@ -88,10 +88,41 @@ export async function loadMongoConfigFromAws(
       );
     }
 
-    // 'mirror' is the canonical name but the underlying SSM/secret paths
-    // are still under '/shared/infra/staging/*' and 'staging/mongodb-shared/*'
-    // until the IaC rename ships. Map both new and deprecated names to
-    // the same paths.
+    // env='mirror' reads from the daily-refresh workflow's paths:
+    //   SSM:    /mirror/current/mongodb-shared/{endpoint,port,replica-set-name,ca-secret-arn}
+    //   Secret: /mirror/current/{project}-mongo-password
+    // env='prod' uses the canonical prod paths.
+    // env='staging' (deprecated) keeps the legacy paths under /shared/infra/staging/*.
+    if (env === 'mirror') {
+      const [endpoint, port, replicaSetName, caSecretArn] = await Promise.all([
+        readSsm(ssm, '/mirror/current/mongodb-shared/endpoint'),
+        readSsm(ssm, '/mirror/current/mongodb-shared/port'),
+        readSsm(ssm, '/mirror/current/mongodb-shared/replica-set-name'),
+        readSsm(ssm, '/mirror/current/mongodb-shared/ca-secret-arn'),
+      ]);
+
+      const [caBundle, projectCreds] = await Promise.all([
+        readSecretJson<{ ca_cert: string }>(sm, caSecretArn),
+        readSecretJson<{ username: string; password: string }>(
+          sm,
+          `/mirror/current/${project}-mongo-password`,
+        ),
+      ]);
+
+      return {
+        configType: 'MONGO',
+        instanceName,
+        hosts: [`${endpoint}:${port}`],
+        database: dbName,
+        username: projectCreds.username,
+        password: projectCreds.password,
+        replicaSet: replicaSetName,
+        authSource: dbName,
+        tls: true,
+        tlsCAContent: caBundle.ca_cert,
+      };
+    }
+
     const pathSegment = env === 'prod' ? 'prod' : 'staging';
 
     const [hostsCsv, replicaSetName, caSecretArn] = await Promise.all([

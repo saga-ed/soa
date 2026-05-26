@@ -8,7 +8,7 @@ import {
   addRumError,
   addRumAction,
   isInitialized,
-  _resetForTest,
+  __resetForTest,
 } from './index.js';
 
 vi.mock('@datadog/browser-rum', () => ({
@@ -23,7 +23,7 @@ vi.mock('@datadog/browser-rum', () => ({
 }));
 
 afterEach(() => {
-  _resetForTest();
+  __resetForTest();
   vi.clearAllMocks();
 });
 
@@ -108,10 +108,10 @@ describe('addRumError / addRumAction', () => {
     );
   });
 
-  it('caller context overrides default source if provided explicitly', () => {
+  it('caller-supplied source cannot override the service tag', () => {
     initRum({ service: 'saga_dash', applicationId: 'a', clientToken: 'b', env: 'dev', version: '0' });
     addRumError(new Error('x'), { source: 'override' });
-    expect(datadogRum.addError).toHaveBeenCalledWith(expect.any(Error), { source: 'override' });
+    expect(datadogRum.addError).toHaveBeenCalledWith(expect.any(Error), { source: 'saga_dash' });
   });
 
   it('is a no-op before init', () => {

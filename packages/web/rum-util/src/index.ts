@@ -116,24 +116,26 @@ export function setRumGlobalContextProperty(key: string, value: unknown): void {
 }
 
 /** Tag every error with `source: <service>` so the existing saga_web retention
- *  filter pattern (`@error.source:saga_dash` etc.) works out of the box. */
+ *  filter pattern (`@error.source:saga_dash` etc.) works out of the box. The
+ *  service tag is applied last so it cannot be overridden by spread context. */
 export function addRumError(error: unknown, context?: Record<string, unknown>): void {
   if (!initialized) return;
-  datadogRum.addError(error, { source: service, ...context });
+  datadogRum.addError(error, { ...context, source: service });
 }
 
 export function addRumAction(name: string, context?: Record<string, unknown>): void {
   if (!initialized) return;
-  datadogRum.addAction(name, { source: service, ...context });
+  datadogRum.addAction(name, { ...context, source: service });
 }
 
-/** Whether initRum() has succeeded. Mostly for tests. */
+/** Whether initRum() has succeeded. */
 export function isInitialized(): boolean {
   return initialized;
 }
 
-/** For tests only — resets module state. Not part of the public stable API. */
-export function _resetForTest(): void {
+/** Test-only escape hatch — resets module state. Double-underscore prefix
+ *  signals "not part of the public API"; consumers should not import this. */
+export function __resetForTest(): void {
   initialized = false;
   service = '';
 }

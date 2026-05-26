@@ -7,8 +7,8 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
   "sideEffects": false,
@@ -18,14 +18,13 @@
     "clean": "rm -rf dist",
     "check-types": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "echo 'no lint configured'"
+    "lint": "eslint src/"
   },
   "dependencies": {
     "@datadog/browser-rum": "^6.0.0"
   },
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
-    "@vitest/web-worker": "^1.5.0",
     "jsdom": "^25.0.0",
     "tsup": "^8.5.0",
     "typescript": "^5.8.2",

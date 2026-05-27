@@ -133,6 +133,12 @@ export function create_ec2_router(config = {}) {
         next();
     });
 
+    // GET /health — liveness probe for the db-host API itself.
+    // Cheap: does not enumerate projects, query Docker, or touch S3.
+    router.get('/health', (_req, res) => {
+        res.json({ ok: true, service: 'infra-compose-ec2-router' });
+    });
+
     // GET /dbs — list all database projects with status
     router.get('/dbs', (req, res) => {
         try {
@@ -268,6 +274,32 @@ export function create_ec2_router(config = {}) {
         }
     });
 
+    // GET /dbs/:name — single-DB lookup (project status + registry entry).
+    // Returns 404 if the project directory does not exist.
+    router.get('/dbs/:name', (req, res) => {
+        try {
+            const { name } = req.params;
+            const project_dir = resolve(projects_dir, name);
+            if (!existsSync(project_dir)) {
+                return res.status(404).json({ ok: false, error: `Project ${name} not found` });
+            }
+
+            const status = get_project_status(project_dir, name);
+            const ports = get_allocated_ports({ registry_path });
+            const port_entry = ports[name];
+
+            const db = {
+                ...status,
+                engine: port_entry?.engine ?? null,
+                port: port_entry?.port ?? null,
+            };
+
+            res.json({ ok: true, db });
+        } catch (err) {
+            res.status(500).json({ ok: false, error: err.message });
+        }
+    });
+
     // POST /dbs — create a new database
     router.post('/dbs', (req, res) => {
         try {
@@ -350,8 +382,8 @@ export function create_ec2_router(config = {}) {
                 engine,
                 version: version || engines[engine].default_version,
                 port: allocated_port,
-                volume_id,
-                db_name: effective_db_name,
+                volumeId: volume_id,
+                dbName: effective_db_name,
                 action: 'created',
             };
 
@@ -485,7 +517,7 @@ export function create_ec2_router(config = {}) {
                 engine,
                 version: version || engines[engine].default_version,
                 port,
-                db_name: db_name || name,
+                dbName: db_name || name,
                 action: 'hydrated',
             });
         } catch (err) {

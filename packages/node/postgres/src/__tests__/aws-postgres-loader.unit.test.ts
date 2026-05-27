@@ -5,232 +5,254 @@ import {
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
 import {
+  GetParameterCommand,
+  SSMClient,
+} from '@aws-sdk/client-ssm';
+import {
   loadPostgresConfigFromAws,
-  postgresServiceSecretName,
+  iamHostSsmPath,
+  iamPortSsmPath,
+  devSecretName,
 } from '../aws-postgres-loader.js';
 
 const smMock = mockClient(SecretsManagerClient);
+const ssmMock = mockClient(SSMClient);
 
 beforeEach(() => {
   smMock.reset();
+  ssmMock.reset();
 });
 
-describe('postgresServiceSecretName', () => {
-  it('uses workflow path shape for mirror (leading slash, -postgres-password suffix)', () => {
-    expect(postgresServiceSecretName('mirror', 'sds-api')).toBe(
-      '/mirror/current/sds-api-postgres-password',
-    );
+describe('path helpers', () => {
+  it('iamHostSsmPath: mirror uses /mirror/current/*, prod uses /shared/infra/prod/*', () => {
+    expect(iamHostSsmPath('mirror')).toBe('/mirror/current/postgres-rds/endpoint');
+    expect(iamHostSsmPath('prod')).toBe('/shared/infra/prod/postgres-host');
   });
 
-  it('inserts dbId before -postgres-password for multi-DB mirror', () => {
-    expect(postgresServiceSecretName('mirror', 'iam-api', 'pii')).toBe(
-      '/mirror/current/iam-api-pii-postgres-password',
-    );
-    expect(postgresServiceSecretName('mirror', 'iam-api', 'main')).toBe(
-      '/mirror/current/iam-api-main-postgres-password',
-    );
+  it('iamPortSsmPath: same split by env', () => {
+    expect(iamPortSsmPath('mirror')).toBe('/mirror/current/postgres-rds/port');
+    expect(iamPortSsmPath('prod')).toBe('/shared/infra/prod/postgres-port');
   });
 
-  it('uses prod/postgres-shared/{service} for prod single-DB', () => {
-    expect(postgresServiceSecretName('prod', 'sds-api')).toBe(
-      'prod/postgres-shared/sds-api',
-    );
+  it('devSecretName: nests role under service (single-DB)', () => {
+    expect(devSecretName('chat-api', 'app')).toBe('dev/postgres-shared/chat-api/app');
+    expect(devSecretName('chat-api', 'owner')).toBe('dev/postgres-shared/chat-api/owner');
+    expect(devSecretName('chat-api', 'ro')).toBe('dev/postgres-shared/chat-api/ro');
   });
 
-  it('appends -{dbId} for prod multi-DB', () => {
-    expect(postgresServiceSecretName('prod', 'iam-api', 'main')).toBe(
-      'prod/postgres-shared/iam-api-main',
-    );
-    expect(postgresServiceSecretName('prod', 'iam-api', 'pii')).toBe(
-      'prod/postgres-shared/iam-api-pii',
+  it('devSecretName: nests dbId between service and role (multi-DB)', () => {
+    expect(devSecretName('iam-api', 'owner', 'pii')).toBe(
+      'dev/postgres-shared/iam-api/pii/owner',
     );
   });
 });
 
-describe('loadPostgresConfigFromAws', () => {
-  it('reads mirror from the workflow path with SSL=true', async () => {
-    smMock
-      .on(GetSecretValueCommand, {
-        SecretId: '/mirror/current/sds-api-postgres-password',
-      })
-      .resolves({
-        SecretString: JSON.stringify({
-          username: 'sds_api_app',
-          password: 'pw-from-mirror',
-          host: 'saga-postgres-mirror.rds.amazonaws.com',
-          port: 5432,
-          dbname: 'sds_api', // mirror workflow uses 'dbname'
-        }),
-      });
+describe('loadPostgresConfigFromAws — prod (IAM auth)', () => {
+  it('reads coords from SSM and returns config with async password callback', async () => {
+    ssmMock
+      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .resolves({ Parameter: { Value: 'saga-postgres-prod.rds.amazonaws.com' } })
+      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-port' })
+      .resolves({ Parameter: { Value: '5432' } });
 
     const config = await loadPostgresConfigFromAws({
-      env: 'mirror',
-      service: 'sds-api',
-      instanceName: 'sds-mirror',
+      env: 'prod',
+      service: 'chat-api',
+      role: 'app',
+      instanceName: 'ChatDB-prod',
     });
 
-    expect(config).toMatchObject({
-      configType: 'POSTGRES',
-      instanceName: 'sds-mirror',
-      host: 'saga-postgres-mirror.rds.amazonaws.com',
-      port: 5432,
-      database: 'sds_api',
-      username: 'sds_api_app',
-      password: 'pw-from-mirror',
-      ssl: true,
-    });
+    expect(config.host).toBe('saga-postgres-prod.rds.amazonaws.com');
+    expect(config.port).toBe(5432);
+    expect(config.database).toBe('chat_api');
+    expect(config.user).toBe('chat_api_app');
+    expect(config.ssl).toBe(true);
+    expect(typeof config.password).toBe('function');
   });
 
-  it('reads prod from prod/postgres-shared/{service} with SSL=true', async () => {
-    smMock
-      .on(GetSecretValueCommand, { SecretId: 'prod/postgres-shared/sds-api' })
-      .resolves({
-        SecretString: JSON.stringify({
-          username: 'sds_api_app',
-          password: 'pw',
-          host: 'saga-postgres-prod.rds.amazonaws.com',
-          port: 5432,
-          database: 'sds_api',
-          engine: 'postgres',
-        }),
-      });
+  it("defaults role to 'app' when omitted", async () => {
+    ssmMock
+      .on(GetParameterCommand)
+      .resolves({ Parameter: { Value: '5432' } });
+    ssmMock
+      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .resolves({ Parameter: { Value: 'h' } });
+
+    const config = await loadPostgresConfigFromAws({
+      env: 'prod',
+      service: 'chat-api',
+      instanceName: 'i',
+    });
+
+    expect(config.user).toBe('chat_api_app');
+  });
+
+  it('uses owner role for AppInfra / migration workloads', async () => {
+    ssmMock
+      .on(GetParameterCommand)
+      .resolves({ Parameter: { Value: '5432' } });
+    ssmMock
+      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .resolves({ Parameter: { Value: 'h' } });
+
+    const config = await loadPostgresConfigFromAws({
+      env: 'prod',
+      service: 'chat-api',
+      role: 'owner',
+      instanceName: 'i',
+    });
+
+    expect(config.user).toBe('chat_api_owner');
+  });
+
+  it('uses ro role for read-only workloads', async () => {
+    ssmMock
+      .on(GetParameterCommand)
+      .resolves({ Parameter: { Value: '5432' } });
+    ssmMock
+      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .resolves({ Parameter: { Value: 'h' } });
+
+    const config = await loadPostgresConfigFromAws({
+      env: 'prod',
+      service: 'chat-api',
+      role: 'ro',
+      instanceName: 'i',
+    });
+
+    expect(config.user).toBe('chat_api_ro');
+  });
+
+  it('multi-DB: dbId nests into the derived database name', async () => {
+    ssmMock
+      .on(GetParameterCommand)
+      .resolves({ Parameter: { Value: '5432' } });
+    ssmMock
+      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .resolves({ Parameter: { Value: 'h' } });
+
+    const config = await loadPostgresConfigFromAws({
+      env: 'prod',
+      service: 'iam-api',
+      role: 'app',
+      dbId: 'pii',
+      instanceName: 'iam-pii',
+    });
+
+    expect(config.database).toBe('iam_api_pii_db');
+    expect(config.user).toBe('iam_api_app');
+  });
+
+  it('username and database can be explicitly overridden', async () => {
+    ssmMock
+      .on(GetParameterCommand)
+      .resolves({ Parameter: { Value: '5432' } });
+    ssmMock
+      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .resolves({ Parameter: { Value: 'h' } });
 
     const config = await loadPostgresConfigFromAws({
       env: 'prod',
       service: 'sds-api',
-      instanceName: 'sds-prod',
+      role: 'app',
+      username: 'ledger_writer',         // legacy override
+      database: 'ledger',
+      instanceName: 'i',
     });
 
-    expect(config.ssl).toBe(true);
-    expect(config.host).toBe('saga-postgres-prod.rds.amazonaws.com');
+    expect(config.user).toBe('ledger_writer');
+    expect(config.database).toBe('ledger');
   });
+});
 
-  it('disables SSL for dev (db-host has no TLS)', async () => {
+describe('loadPostgresConfigFromAws — mirror (IAM auth, dev account)', () => {
+  it('reads coords from /mirror/current/* SSM paths', async () => {
+    ssmMock
+      .on(GetParameterCommand, { Name: '/mirror/current/postgres-rds/endpoint' })
+      .resolves({ Parameter: { Value: 'mirror-pg.dev.internal' } })
+      .on(GetParameterCommand, { Name: '/mirror/current/postgres-rds/port' })
+      .resolves({ Parameter: { Value: '5432' } });
+
+    const config = await loadPostgresConfigFromAws({
+      env: 'mirror',
+      service: 'chat-api',
+      role: 'app',
+      instanceName: 'ChatDB-mirror',
+    });
+
+    expect(config.host).toBe('mirror-pg.dev.internal');
+    expect(config.port).toBe(5432);
+    expect(config.user).toBe('chat_api_app');
+    expect(config.ssl).toBe(true);
+    expect(typeof config.password).toBe('function');
+  });
+});
+
+describe('loadPostgresConfigFromAws — dev (static password from parity secret)', () => {
+  it('reads the per-role parity secret and returns config with static password', async () => {
     smMock
-      .on(GetSecretValueCommand, { SecretId: 'dev/postgres-shared/sds-api' })
+      .on(GetSecretValueCommand, {
+        SecretId: 'dev/postgres-shared/chat-api/app',
+      })
       .resolves({
         SecretString: JSON.stringify({
-          username: 'sds_api_app',
-          password: 'dev-password-sds-api',
+          username: 'chat_api_app',
+          password: 'dev-password-chat-api',
           host: 'db-host.dbs',
           port: 5432,
-          database: 'sds_api',
+          database: 'chat_api',
+        }),
+      });
+
+    const config = await loadPostgresConfigFromAws({
+      env: 'dev',
+      service: 'chat-api',
+      role: 'app',
+      instanceName: 'ChatDB-dev',
+    });
+
+    expect(config.host).toBe('db-host.dbs');
+    expect(config.user).toBe('chat_api_app');
+    expect(config.password).toBe('dev-password-chat-api');
+    expect(config.ssl).toBe(false);
+  });
+
+  it('accepts dbname as an alternate field (mirror-workflow legacy compat)', async () => {
+    smMock
+      .on(GetSecretValueCommand, {
+        SecretId: 'dev/postgres-shared/sds-api/ro',
+      })
+      .resolves({
+        SecretString: JSON.stringify({
+          password: 'dev-password-sds-api',
+          host: 'db-host.dbs',
+          port: '5432',
+          dbname: 'sds_api',
         }),
       });
 
     const config = await loadPostgresConfigFromAws({
       env: 'dev',
       service: 'sds-api',
-      instanceName: 'sds-dev',
-    });
-
-    expect(config.ssl).toBe(false);
-  });
-
-  it('supports multi-DB via dbId — rostering iam-api PII isolation', async () => {
-    smMock
-      .on(GetSecretValueCommand, {
-        SecretId: 'prod/postgres-shared/iam-api-pii',
-      })
-      .resolves({
-        SecretString: JSON.stringify({
-          username: 'iam_api_pii_app',
-          password: 'pw',
-          host: 'h',
-          port: 5432,
-          database: 'iam_pii_db',
-        }),
-      });
-
-    const config = await loadPostgresConfigFromAws({
-      env: 'prod',
-      service: 'iam-api',
-      dbId: 'pii',
-      instanceName: 'iam-pii',
-    });
-
-    expect(config.database).toBe('iam_pii_db');
-    expect(config.username).toBe('iam_api_pii_app');
-  });
-
-  it('accepts dbname (mirror workflow) or database (CLI) interchangeably', async () => {
-    smMock
-      .on(GetSecretValueCommand, { SecretId: 'prod/postgres-shared/sds-api' })
-      .resolves({
-        SecretString: JSON.stringify({
-          username: 'u',
-          password: 'p',
-          host: 'h',
-          port: 5432,
-          database: 'd_from_database_field',
-        }),
-      });
-
-    const config = await loadPostgresConfigFromAws({
-      env: 'prod',
-      service: 'sds-api',
+      role: 'ro',
       instanceName: 'i',
     });
 
-    expect(config.database).toBe('d_from_database_field');
-  });
-
-  it('accepts string ports for SM payloads serialized that way', async () => {
-    smMock
-      .on(GetSecretValueCommand, {
-        SecretId: '/mirror/current/sds-api-postgres-password',
-      })
-      .resolves({
-        SecretString: JSON.stringify({
-          username: 'u',
-          password: 'p',
-          host: 'h',
-          port: '5432',
-          dbname: 'd',
-        }),
-      });
-
-    const config = await loadPostgresConfigFromAws({
-      env: 'mirror',
-      service: 'sds-api',
-      instanceName: 'i',
-    });
-
+    expect(config.database).toBe('sds_api');
     expect(config.port).toBe(5432);
+    expect(config.user).toBe('sds_api_ro');   // derived; secret had no username field
   });
 
-  it('throws when both database and dbname are missing', async () => {
+  it('throws when the dev parity secret is missing', async () => {
     smMock
-      .on(GetSecretValueCommand, { SecretId: 'prod/postgres-shared/sds-api' })
-      .resolves({
-        SecretString: JSON.stringify({
-          username: 'u',
-          password: 'p',
-          host: 'h',
-          port: 5432,
-        }),
-      });
-
-    await expect(
-      loadPostgresConfigFromAws({
-        env: 'prod',
-        service: 'sds-api',
-        instanceName: 'i',
-      }),
-    ).rejects.toThrow(/missing both 'database' and 'dbname'/);
-  });
-
-  it('throws when the secret is missing', async () => {
-    smMock
-      .on(GetSecretValueCommand, {
-        SecretId: '/mirror/current/sds-api-postgres-password',
-      })
+      .on(GetSecretValueCommand)
       .resolves({});
 
     await expect(
       loadPostgresConfigFromAws({
-        env: 'mirror',
-        service: 'sds-api',
+        env: 'dev',
+        service: 'chat-api',
+        role: 'app',
         instanceName: 'i',
       }),
     ).rejects.toThrow(/no SecretString/);

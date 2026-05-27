@@ -2,120 +2,268 @@ import {
   GetSecretValueCommand,
   SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
-import { PostgresProviderSchema } from './postgres-provider-config.js';
-import type { PostgresProviderConfig } from './postgres-provider-config.js';
+import {
+  GetParameterCommand,
+  SSMClient,
+} from '@aws-sdk/client-ssm';
+import { Signer } from '@aws-sdk/rds-signer';
 
 /**
- * Build a fully-resolved {@link PostgresProviderConfig} by reading the
- * Secrets Manager payload written by ``saga-provision-credentials`` (prod)
- * or by the daily mirror refresh workflow (mirror).
+ * Build a ready-to-use ``pg.Pool``-compatible config for a Saga service's
+ * Postgres connection. Handles all three envs via the same call:
  *
- * Secret paths are env-specific:
+ *   loadPostgresConfigFromAws({ env: 'prod', service: 'chat-api', role: 'app',
+ *                               instanceName: 'ChatDB' })
  *
- * - `'dev'`   — db-host container in dev account. CLI's ``--insecure-dev``
- *               writes a parity secret with trivial password and ``host: db-host.dbs``.
- *               Path: ``dev/postgres-shared/{service}[-{dbId}]``.
- * - `'mirror'` — prod-shape RDS in dev account, refreshed daily from a prod
- *                snapshot. Path matches the existing refresh workflow:
- *                ``/mirror/current/{service}-postgres-password`` (leading slash;
- *                ``-postgres-password`` suffix). For multi-DB services the
- *                ``dbId`` goes BEFORE the suffix:
- *                ``/mirror/current/{service}-{dbId}-postgres-password``.
- * - `'prod'`   — prod RDS in account 531. SSL required.
- *                Path: ``prod/postgres-shared/{service}[-{dbId}]``.
+ * **Env behavior:**
  *
- * Payload shape (both workflow and CLI write the same fields, with one
- * legacy quirk — the mirror workflow uses ``dbname`` while the CLI uses
- * ``database``. Loader accepts either.)
+ * - `'prod'`   — IAM-auth against shared RDS in prod account. Coords
+ *                (host/port) come from SSM `/shared/infra/prod/postgres-{host,port}`.
+ *                Database is derived as ``{service_snake}`` unless overridden
+ *                in the per-service spec (multi-DB services pass ``dbId`` to
+ *                pick the right one). Password is an async callback that
+ *                mints a 15-min IAM token via ``@aws-sdk/rds-signer`` on
+ *                every new pool connection.
  *
- *   { username, password, host, port, database (or dbname), engine? }
+ * - `'mirror'` — Same as prod but coords come from
+ *                ``/mirror/current/postgres-rds/{endpoint,port}``. Mirror is
+ *                in the dev account but otherwise prod-shape.
  *
- * Multi-DB postgres services (e.g., rostering's iam-api with iam_db +
- * iam_pii_db) pass ``dbId`` to address each DB's credential separately.
+ * - `'dev'`    — Local docker / db-host container. No IAM. Reads the
+ *                parity secret written by ``saga-provision-credentials
+ *                create --env dev --insecure-dev`` at
+ *                ``dev/postgres-shared/{service}/{role}``. Returns
+ *                a static password string. For services not using the
+ *                parity flow, this loader isn't the right tool — construct
+ *                config directly from env vars.
+ *
+ * **Naming convention** (derived; spec-overridable in iac):
+ *
+ *   username = `{service_snake}_{role}`   (e.g. chat_app)
+ *   database = `{service_snake}`           (e.g. chat)
+ *
+ * Where `service_snake = service.replace(/-/g, '_')` so spec ids with
+ * hyphens (`chat-api`) become valid Postgres identifiers (`chat_api`).
+ *
+ * **Multi-DB postgres** (rostering iam-api → iam_db + iam_pii_db):
+ * pass ``dbId`` to select; the database becomes ``{service_snake}_{dbId}_db``
+ * or whatever the spec declares.
  */
 export interface LoadPostgresConfigParams {
   env: 'dev' | 'mirror' | 'prod';
-  /** Service name as it appears in `db-access.yaml` (e.g. 'iam-api'). */
+
+  /** Service name as it appears in `db-access.yaml` (e.g. 'chat-api'). */
   service: string;
-  /** Name to give the PostgresProvider instance. */
-  instanceName: string;
+
   /**
-   * For multi-DB services, the database id from db-access.yaml (e.g. 'main',
-   * 'pii'). Omit for single-DB services — the secret path uses the bare
-   * service name with no suffix.
+   * Postgres role suffix. Maps onto the per-service role triplet:
+   *   'owner' — DDL / migrations (AppInfra tier or owner-only contexts)
+   *   'app'   — DML runtime (the most common case; default)
+   *   'ro'    — SELECT only (reports, debugging)
+   */
+  role?: 'owner' | 'app' | 'ro';
+
+  /** Name to give the resulting PostgresProvider / pool. */
+  instanceName: string;
+
+  /**
+   * For multi-DB services (e.g. rostering iam-api with iam_db + iam_pii_db),
+   * the database id from db-access.yaml. Omit for single-DB services.
    */
   dbId?: string;
-  /** Override AWS region. Defaults to us-west-2. */
+
+  /**
+   * Override the auto-derived database name. Defaults to
+   * ``{service_snake}`` (or ``{service_snake}_{dbId}`` for multi-DB).
+   * Use this for legacy schemas that don't follow the convention.
+   */
+  database?: string;
+
+  /**
+   * Override the auto-derived username. Defaults to
+   * ``{service_snake}_{role}``. Use for services whose role names
+   * predate this convention (e.g. `saga_api` writers).
+   */
+  username?: string;
+
+  /** AWS region. Defaults to us-west-2 (Saga's only region today). */
   region?: string;
+}
+
+/**
+ * `pg.Pool`-compatible config returned by the loader. The `password`
+ * field is a union: a static string for dev (parity secret) or an
+ * async callback for mirror/prod (mints IAM token per new pool
+ * connection). `pg.Pool` natively accepts both shapes.
+ */
+export interface PostgresPoolConfig {
+  instanceName: string;
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string | (() => Promise<string>);
+  ssl: boolean;
 }
 
 const DEFAULT_REGION = 'us-west-2';
 
 export async function loadPostgresConfigFromAws(
   params: LoadPostgresConfigParams,
-): Promise<PostgresProviderConfig> {
+): Promise<PostgresPoolConfig> {
   const region = params.region ?? DEFAULT_REGION;
-  const sm = new SecretsManagerClient({ region });
+  const role = params.role ?? 'app';
+  const serviceSnake = params.service.replace(/-/g, '_');
 
-  const secretId = postgresServiceSecretName(params.env, params.service, params.dbId);
-  const raw = await readSecretJson<{
-    username: string;
-    password: string;
-    host: string;
-    port: number | string;
-    database?: string;
-    dbname?: string;
-    engine?: string;
-  }>(sm, secretId);
+  const username =
+    params.username ?? `${serviceSnake}_${role}`;
+  const database =
+    params.database ?? (params.dbId ? `${serviceSnake}_${params.dbId}_db` : serviceSnake);
 
-  // mirror + prod are always managed RDS — SSL required.
-  // dev is the db-host container with no TLS.
-  const ssl = params.env !== 'dev';
-
-  // Accept either `database` (CLI / prod) or `dbname` (mirror refresh workflow).
-  const database = raw.database ?? raw.dbname;
-  if (!database) {
-    throw new Error(
-      `Secret ${secretId} is missing both 'database' and 'dbname' fields`,
-    );
+  if (params.env === 'dev') {
+    return loadDevConfig({
+      service: params.service,
+      role,
+      instanceName: params.instanceName,
+      dbId: params.dbId,
+      username,
+      database,
+      region,
+    });
   }
 
-  return PostgresProviderSchema.parse({
+  return loadIamConfig({
+    env: params.env,
     instanceName: params.instanceName,
-    host: raw.host,
-    port: typeof raw.port === 'string' ? parseInt(raw.port, 10) : raw.port,
+    username,
     database,
-    username: raw.username,
-    password: raw.password,
-    ssl,
+    region,
   });
 }
 
 /**
- * Compute the canonical SM secret name for a postgres service / env / dbId.
- *
- * Mirror paths align with the existing refresh workflow shape so the CLI
- * and the workflow write to the same location:
- *
- *   single-DB:  /mirror/current/{service}-postgres-password
- *   multi-DB:   /mirror/current/{service}-{dbId}-postgres-password
- *
- * Prod/dev use our CLI's path shape:
- *
- *   single-DB:  {env}/postgres-shared/{service}
- *   multi-DB:   {env}/postgres-shared/{service}-{dbId}
+ * Dev path: read the parity SM secret + return config with the static
+ * password. The parity entry is written by
+ * ``saga-provision-credentials create --env dev --insecure-dev`` and
+ * contains the role's hardcoded local-docker password.
  */
-export function postgresServiceSecretName(
-  env: 'dev' | 'mirror' | 'prod',
+async function loadDevConfig(args: {
+  service: string;
+  role: 'owner' | 'app' | 'ro';
+  instanceName: string;
+  dbId?: string;
+  username: string;
+  database: string;
+  region: string;
+}): Promise<PostgresPoolConfig> {
+  const sm = new SecretsManagerClient({ region: args.region });
+  const secretId = devSecretName(args.service, args.role, args.dbId);
+  const raw = await readSecretJson<DevSecretPayload>(sm, secretId);
+  return {
+    instanceName: args.instanceName,
+    host: raw.host,
+    port: typeof raw.port === 'string' ? parseInt(raw.port, 10) : raw.port,
+    database: raw.database ?? raw.dbname ?? args.database,
+    user: raw.username ?? args.username,
+    password: raw.password,
+    ssl: false,
+  };
+}
+
+/**
+ * Mirror/prod path: IAM auth. Coords from SSM; password is an async
+ * callback that mints a fresh 15-min token per new pool connection.
+ *
+ * `pg.Pool` calls the password callback once per connection establishment
+ * (not once per query). Long-lived pooled connections survive past the
+ * 15-min token TTL because Postgres only validates the token at connect
+ * time. New connections (pool refill, scale-out) get fresh tokens.
+ */
+async function loadIamConfig(args: {
+  env: 'mirror' | 'prod';
+  instanceName: string;
+  username: string;
+  database: string;
+  region: string;
+}): Promise<PostgresPoolConfig> {
+  const ssm = new SSMClient({ region: args.region });
+  const [host, portRaw] = await Promise.all([
+    readSsm(ssm, iamHostSsmPath(args.env)),
+    readSsm(ssm, iamPortSsmPath(args.env)),
+  ]);
+  const port = parseInt(portRaw, 10);
+
+  // Critical: the Signer must use the REAL RDS hostname + port (5432).
+  // RDS validates the token against the actual listener, not against the
+  // local tunnel port (15432) when running over SSM port-forwarding.
+  // pg.Pool can connect to localhost:tunnelPort if desired — but the
+  // Signer always signs for the real endpoint.
+  const signer = new Signer({
+    hostname: host,
+    port,
+    username: args.username,
+    region: args.region,
+  });
+
+  return {
+    instanceName: args.instanceName,
+    host,
+    port,
+    database: args.database,
+    user: args.username,
+    ssl: true,
+    password: async () => signer.getAuthToken(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Path helpers (exported for consumers that need to compute the same paths
+// in IAM policies, deploy scripts, etc.)
+// ---------------------------------------------------------------------------
+
+/**
+ * SSM path for the shared Postgres host. Distinct per env because mirror
+ * lives in the dev account under `/mirror/current/*` (the daily refresh
+ * workflow's path namespace).
+ */
+export function iamHostSsmPath(env: 'mirror' | 'prod'): string {
+  return env === 'mirror'
+    ? '/mirror/current/postgres-rds/endpoint'
+    : '/shared/infra/prod/postgres-host';
+}
+
+export function iamPortSsmPath(env: 'mirror' | 'prod'): string {
+  return env === 'mirror'
+    ? '/mirror/current/postgres-rds/port'
+    : '/shared/infra/prod/postgres-port';
+}
+
+/**
+ * Dev parity SM secret name (one per service per role, optionally per dbId
+ * for multi-DB services). Written by ``saga-provision-credentials --env
+ * dev --insecure-dev``.
+ */
+export function devSecretName(
   service: string,
+  role: 'owner' | 'app' | 'ro',
   dbId?: string,
 ): string {
-  if (env === 'mirror') {
-    const idPart = dbId ? `-${dbId}` : '';
-    return `/mirror/current/${service}${idPart}-postgres-password`;
-  }
-  const idPart = dbId ? `-${dbId}` : '';
-  return `${env}/postgres-shared/${service}${idPart}`;
+  const idPart = dbId ? `${service}/${dbId}/${role}` : `${service}/${role}`;
+  return `dev/postgres-shared/${idPart}`;
+}
+
+// ---------------------------------------------------------------------------
+// Internals
+// ---------------------------------------------------------------------------
+
+interface DevSecretPayload {
+  username?: string;
+  password: string;
+  host: string;
+  port: number | string;
+  database?: string;
+  /** Mirror refresh workflow legacy alias; not used in dev but tolerated. */
+  dbname?: string;
 }
 
 async function readSecretJson<T>(
@@ -127,4 +275,13 @@ async function readSecretJson<T>(
     throw new Error(`Secret ${secretId} has no SecretString`);
   }
   return JSON.parse(out.SecretString) as T;
+}
+
+async function readSsm(client: SSMClient, name: string): Promise<string> {
+  const out = await client.send(new GetParameterCommand({ Name: name }));
+  const value = out.Parameter?.Value;
+  if (!value) {
+    throw new Error(`SSM parameter ${name} has no value`);
+  }
+  return value;
 }

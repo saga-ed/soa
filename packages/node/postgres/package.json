@@ -20,6 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.968.0",
     "@aws-sdk/client-ssm": "^3.968.0",
+    "@aws-sdk/rds-signer": "^3.968.0",
     "inversify": "^6.2.2",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",

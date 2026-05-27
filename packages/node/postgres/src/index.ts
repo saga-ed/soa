@@ -3,8 +3,13 @@ export { PostgresProviderSchema } from './postgres-provider-config.js';
 export type { PostgresProviderConfig } from './postgres-provider-config.js';
 export {
   loadPostgresConfigFromAws,
-  postgresServiceSecretName,
+  iamHostSsmPath,
+  iamPortSsmPath,
+  devSecretName,
 } from './aws-postgres-loader.js';
-export type { LoadPostgresConfigParams } from './aws-postgres-loader.js';
+export type {
+  LoadPostgresConfigParams,
+  PostgresPoolConfig,
+} from './aws-postgres-loader.js';
 
 export const POSTGRES_PROVIDER = Symbol.for('PostgresProvider');

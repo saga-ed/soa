@@ -51,11 +51,13 @@ describe('PinoLogger', () => {
     });
   });
 
-  it('should throw if logFile is missing in production Express context', () => {
+  it('should default to stdout (fd 1) in production Express context without logFile', () => {
+    // No longer throws: a missing logFile now means "log structured JSON to
+    // stdout via a direct pino.destination stream" (CloudWatch via awslogs).
     const config: PinoLoggerConfig = { ...baseConfig, isExpressContext: true };
     process.env.NODE_ENV = 'production';
-    withTTY(true, () => {
-      expect(() => new PinoLogger(config)).toThrow(/logFile must be specified/);
+    withTTY(false, () => {
+      expect(() => new PinoLogger(config)).not.toThrow();
     });
   });
 

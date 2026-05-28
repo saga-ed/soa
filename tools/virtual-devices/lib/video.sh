@@ -58,16 +58,18 @@ video_unload_module() {
 }
 
 # video_start_feeder INDEX CLIP
+# Returns non-zero (without exiting) if the feeder can't be started or dies
+# immediately, so callers can aggregate per-device failures.
 video_start_feeder() {
   local idx="$1" clip="$2"
-  local dev pidf logf
+  local dev pidf logf pid
   dev="$(video_dev_for "$idx")"
   pidf="$VDEV_PIDS/cam${idx}.pid"
   logf="$VDEV_LOGS/cam${idx}.log"
   require_cmd ffmpeg
 
-  [[ -e "$dev" ]] || die "device $dev does not exist (load the module first)"
-  [[ -f "$clip" ]] || die "clip not found for cam$idx: $clip"
+  [[ -e "$dev" ]] || { err "cam$idx: device $dev does not exist (load the module first)"; return 1; }
+  [[ -f "$clip" ]] || { err "cam$idx: clip not found: $clip"; return 1; }
 
   video_stop_feeder "$idx"  # no-op if not running
 
@@ -77,7 +79,24 @@ video_start_feeder() {
     -an -vf "scale=${VDEV_WIDTH}:${VDEV_HEIGHT},fps=${VDEV_FPS},format=${VDEV_PIXFMT}" \
     -f v4l2 "$dev" \
     >"$logf" 2>&1 &
-  echo $! > "$pidf"
+  pid=$!
+  if ! echo "$pid" > "$pidf"; then
+    kill "$pid" 2>/dev/null || true
+    err "cam$idx: could not record pid (state dir $VDEV_PIDS not writable?)"
+    return 1
+  fi
+
+  # ffmpeg often dies within milliseconds for runtime reasons the pre-flight
+  # checks can't catch (pixfmt the device rejects, device already held by a
+  # reader, undecodable clip). Settle, then confirm it's still serving before
+  # we claim the camera is up.
+  sleep "$VDEV_FEEDER_SETTLE"
+  if ! pid_is_feeder "$pid"; then
+    rm -f "$pidf"
+    err "cam$idx feeder died immediately (clip=$clip dev=$dev pixfmt=$VDEV_PIXFMT) — last log lines:"
+    tail -n 12 "$logf" >&2 || true
+    return 1
+  fi
   meta_set "cam${idx}_clip" "$clip"
 }
 
@@ -86,7 +105,7 @@ video_stop_feeder() {
   local pidf="$VDEV_PIDS/cam${idx}.pid"
   [[ -f "$pidf" ]] || return 0
   pid="$(cat "$pidf" 2>/dev/null || true)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+  if pid_is_feeder "$pid"; then
     kill "$pid" 2>/dev/null || true
   fi
   rm -f "$pidf"
@@ -107,5 +126,5 @@ video_feeder_state() {
   local pidf="$VDEV_PIDS/cam${idx}.pid"
   [[ -f "$pidf" ]] || { echo "stopped"; return; }
   pid="$(cat "$pidf" 2>/dev/null || true)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then echo "alive ($pid)"; else echo "dead"; fi
+  if pid_is_feeder "$pid"; then echo "alive ($pid)"; else echo "dead"; fi
 }

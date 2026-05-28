@@ -51,7 +51,6 @@ gen_video() {
   local src="${SOURCES[$(( (idx - 1) % ${#SOURCES[@]} ))]}"
   local vf="format=${VDEV_PIXFMT}"
   if [[ -n "$FONT" ]]; then
-    local label
     vf="drawtext=fontfile=${FONT}:text='CAM ${idx}':fontcolor=white:fontsize=110:box=1:boxcolor=black@0.55:boxborderw=16:x=40:y=40"
     vf+=",drawtext=fontfile=${FONT}:text='%{pts\\:hms}':fontcolor=yellow:fontsize=72:box=1:boxcolor=black@0.55:boxborderw=10:x=40:y=h-120"
     vf+=",drawtext=fontfile=${FONT}:text='frame %{n}':fontcolor=cyan:fontsize=44:box=1:boxcolor=black@0.45:boxborderw=8:x=40:y=h-220"

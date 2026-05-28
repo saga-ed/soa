@@ -21,7 +21,10 @@ PipeWire/PulseAudio (`pactl`). On Ubuntu: `apt install ffmpeg v4l-utils
 v4l2loopback-dkms`. The **only** privileged operation is loading the kernel
 module (`sudo modprobe v4l2loopback`), which `vdev up`/`vdev down` invoke for
 you; everything else runs as your user. Pass `--skip-modprobe` if the module is
-already loaded (e.g. persisted at boot) to run entirely without sudo.
+already loaded (e.g. persisted at boot) to run `vdev up` without sudo — note
+that `vdev down` still unloads the module and will prompt for sudo, so with a
+boot-persisted module you'd typically stop the feeders (`vdev down` will warn it
+can't unload, or just leave them) rather than expect a fully sudo-free teardown.
 
 ## Usage
 
@@ -80,11 +83,14 @@ VDEV_WIDTH=640 VDEV_HEIGHT=480 VDEV_FPS=15 ./vdev gen --force
 | `VDEV_VIDEO_NR_BASE` | `10` | first `/dev/videoN` (avoids real `/dev/video0,1`) |
 | `VDEV_WIDTH`/`VDEV_HEIGHT`/`VDEV_FPS` | `1280`/`720`/`30` | camera caps |
 | `VDEV_PIXFMT` | `yuv420p` | set to `yuyv422` if an app rejects the format |
+| `VDEV_AUDIO_RATE` | `48000` | virtual-mic sample rate (Hz) |
 | `VDEV_CLIP_SECONDS` | `60` | generated clip length (looped at playback) |
 | `VDEV_COUNT_DEFAULT` | `2` | devices when `--count` omitted |
+| `VDEV_FEEDER_SETTLE` | `0.4` | seconds `up` waits to confirm a feeder stayed alive |
 
 State (PIDs, logs, pulse module ids) lives in `~/.local/state/vdev/`
-(`$XDG_STATE_HOME/vdev`); override with `VDEV_STATE`.
+(`$XDG_STATE_HOME/vdev`); override with `VDEV_STATE`. Clips default to `assets/`;
+override the directory with `VDEV_ASSETS`.
 
 ## Troubleshooting
 
@@ -93,6 +99,9 @@ State (PIDs, logs, pulse module ids) lives in `~/.local/state/vdev/`
   capture-only; confirm with `v4l2-ctl --list-devices`.
 - **`vdev down` says "device busy"** — a reader (browser tab, OBS) still holds the
   device. Close it and re-run `vdev down`.
+- **`vdev status` shows `feeder: dead`** — the ffmpeg feeder for that device
+  exited (often because a reader closed the loopback). Check its log under
+  `~/.local/state/vdev/logs/cam{N}.log` (or `mic{N}.log`) and re-run `vdev up`.
 - **Mic shows as "Monitor of …"** — `vdev` uses `module-remap-source` to expose a
   clean `Virtual Mic N` capture source; if your app only lists monitors, select
   `vmicN` / "Virtual Mic N" explicitly.

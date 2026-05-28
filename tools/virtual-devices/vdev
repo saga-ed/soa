@@ -8,7 +8,8 @@
 #   vdev gen  [--count N] [--out DIR] [--force]
 #   vdev attach <camN|micN> <file>
 #
-# A "device" N = Virtual Cam N (/dev/video1{N}) + Virtual Mic N (pulse source vmicN).
+# A "device" N = Virtual Cam N (/dev/video<10+N-1>, e.g. cam1 -> /dev/video10)
+# + Virtual Mic N (pulse source vmicN).
 # The only privileged step is loading/unloading the v4l2loopback kernel module
 # (sudo modprobe); everything else runs as your normal user.
 set -euo pipefail
@@ -25,8 +26,10 @@ source "$SELF_DIR/lib/audio.sh"
 usage() { awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; }
 
 # Resolve a path relative to a base dir (absolute paths pass through).
+# Empty input stays empty so an omitted column doesn't resolve to the base dir.
 resolve_path() {
   local p="$1" base="$2"
+  [[ -n "$p" ]] || return 0
   case "$p" in
     /*) echo "$p";;
     *)  echo "$base/$p";;
@@ -38,10 +41,11 @@ resolve_path() {
 # A leading purely-numeric column is treated as the index label and skipped.
 parse_config() {
   local file="$1" base
-  base="$(cd "$(dirname "$file")" && pwd)"
+  base="$(cd "$(dirname "$file")" && pwd)" || die "cannot resolve directory of config $file"
   CLIPS=(); AUDIOS=()
   local a b c
-  while read -r a b c _; do
+  # `|| [[ -n "$a" ]]` keeps the final line when the file lacks a trailing newline.
+  while read -r a b c _ || [[ -n "$a" ]]; do
     [[ -z "$a" || "$a" == \#* ]] && continue
     if [[ "$a" =~ ^[0-9]+$ && -n "$b" ]]; then
       CLIPS+=("$(resolve_path "$b" "$base")")
@@ -73,6 +77,8 @@ cmd_up() {
   CLIPS=(); AUDIOS=()
   if [[ -n "$config" ]]; then
     [[ -f "$config" ]] || die "config not found: $config"
+    [[ -z "$count$cams$mics" ]] || \
+      warn "--config given; device count comes from $config (ignoring --count/--cams/--mics)"
     parse_config "$config"
     cams="${#CLIPS[@]}"
     mics="$cams"
@@ -95,15 +101,24 @@ cmd_up() {
   fi
 
   # ---- video ----
+  local i
   if [[ $skip_modprobe -eq 1 ]]; then
     video_module_loaded || die "--skip-modprobe given but v4l2loopback is not loaded (run: sudo modprobe v4l2loopback exclusive_caps=1 devices=$cams video_nr=$(seq -s, "$VDEV_VIDEO_NR_BASE" $((VDEV_VIDEO_NR_BASE + cams - 1))))"
+    # The pre-loaded module may have fewer devices than requested; fail early
+    # with a clear message rather than dying mid-feeder on a missing node.
+    local missing=()
+    for ((i = 1; i <= cams; i++)); do
+      [[ -e "$(video_dev_for "$i")" ]] || missing+=("$(video_dev_for "$i")")
+    done
+    (( ${#missing[@]} == 0 )) || die "--skip-modprobe: v4l2loopback is loaded but these nodes are missing: ${missing[*]} — the loaded module has fewer than $cams devices. Reload it with devices=$cams, or lower --count/--cams."
     meta_set video_count "$cams"
   else
     video_load_module "$cams"
   fi
-  local i
+
+  local failed=()
   for ((i = 1; i <= cams; i++)); do
-    video_start_feeder "$i" "${CLIPS[$((i-1))]}"
+    video_start_feeder "$i" "${CLIPS[$((i-1))]}" || failed+=("cam$i")
   done
 
   # ---- audio ----
@@ -111,8 +126,11 @@ cmd_up() {
     if audio_available; then
       for ((i = 1; i <= mics; i++)); do
         [[ -n "${AUDIOS[$((i-1))]:-}" ]] || continue
-        audio_create_mic "$i"
-        audio_start_feeder "$i" "${AUDIOS[$((i-1))]}"
+        if audio_create_mic "$i"; then
+          audio_start_feeder "$i" "${AUDIOS[$((i-1))]}" || failed+=("mic$i")
+        else
+          failed+=("mic$i")
+        fi
       done
     else
       warn "pactl/pulse not available — skipping virtual mics (cameras only)"
@@ -123,6 +141,11 @@ cmd_up() {
   meta_set mics "$([[ $want_audio -eq 1 ]] && echo "$mics" || echo 0)"
   echo
   cmd_status
+
+  if (( ${#failed[@]} )); then
+    err "these devices failed to start: ${failed[*]} (logs in $VDEV_LOGS)"
+    return 1
+  fi
 }
 
 cmd_down() {
@@ -131,16 +154,26 @@ cmd_down() {
   video_stop_all
   audio_stop_all
   log "removing virtual mics"
-  audio_destroy_all
+  local audio_ok=1
+  audio_destroy_all || audio_ok=0
+  [[ $audio_ok -eq 1 ]] && meta_set mics 0
+
   # give the kernel a moment to release the loopback devices, then unload
-  local tries=0
+  local tries=0 unloaded=1
   until video_unload_module; do
     tries=$((tries + 1))
-    [[ $tries -ge 4 ]] && { err "v4l2loopback still busy; check for stray readers (browsers/OBS) and retry 'vdev down'"; break; }
+    if [[ $tries -ge 4 ]]; then unloaded=0; break; fi
     sleep 0.4
   done
-  meta_set cams 0; meta_set mics 0
-  ok "all virtual devices torn down"
+  [[ $unloaded -eq 1 ]] && meta_set cams 0
+
+  if [[ $unloaded -eq 1 && $audio_ok -eq 1 ]]; then
+    ok "all virtual devices torn down"
+  else
+    [[ $unloaded -eq 0 ]] && err "v4l2loopback still busy after $tries tries; module NOT unloaded — close stray readers (browser tabs, OBS) and retry 'vdev down'."
+    [[ $audio_ok -eq 0 ]] && err "some virtual mics could not be removed — retry 'vdev down', or unload manually with 'pactl unload-module'."
+    return 1
+  fi
 }
 
 cmd_status() {
@@ -185,7 +218,7 @@ cmd_attach() {
   file="$(resolve_path "$file" "$PWD")"
   [[ -f "$file" ]] || die "file not found: $file"
   case "$target" in
-    cam*|[0-9]*)
+    cam*)
       local idx="${target#cam}"
       [[ -e "$(video_dev_for "$idx")" ]] || die "cam$idx device missing — run 'vdev up' first"
       video_start_feeder "$idx" "$file"

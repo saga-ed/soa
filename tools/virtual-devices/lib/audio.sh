@@ -11,7 +11,16 @@
 
 audio_available() { command -v pactl >/dev/null 2>&1 && pactl info >/dev/null 2>&1; }
 
+# Unload a pactl module by id and report success if it's gone afterward —
+# treats an already-absent (stale) id as success rather than a failure.
+audio_unload_gone() {
+  local id="$1"
+  pactl unload-module "$id" 2>/dev/null || true
+  ! pactl list short modules 2>/dev/null | awk '{print $1}' | grep -qx "$id"
+}
+
 # audio_create_mic INDEX
+# Returns non-zero (without exiting) on failure so callers can aggregate.
 audio_create_mic() {
   local idx="$1" sink_id src_id
   local sink_name="vmic${idx}_sink" src_name="vmic${idx}"
@@ -22,14 +31,14 @@ audio_create_mic() {
   sink_id="$(pactl load-module module-null-sink \
     sink_name="$sink_name" \
     "sink_properties=device.description='Virtual Mic ${idx} sink'")" \
-    || die "failed to create null sink for mic$idx"
+    || { err "mic$idx: failed to create null sink"; return 1; }
 
   src_id="$(pactl load-module module-remap-source \
     master="${sink_name}.monitor" \
     source_name="$src_name" \
     "source_properties=device.description='Virtual Mic ${idx}'")" \
     || { pactl unload-module "$sink_id" 2>/dev/null || true
-         die "failed to create remap source for mic$idx"; }
+         err "mic$idx: failed to create remap source"; return 1; }
 
   ensure_state_dirs
   # replace any existing line for this mic
@@ -41,39 +50,54 @@ audio_create_mic() {
 }
 
 # audio_destroy_mic INDEX
+# Returns non-zero if a module could not be unloaded; in that case the tracking
+# line is kept so a later teardown can retry instead of orphaning the sink.
 audio_destroy_mic() {
-  local idx="$1" line sink_id src_id
+  local idx="$1" line sink_id src_id rc=0
   [[ -f "$VDEV_PULSE_MODULES" ]] || return 0
   line="$(grep "^mic${idx} " "$VDEV_PULSE_MODULES" 2>/dev/null | tail -1)" || return 0
   [[ -n "$line" ]] || return 0
   read -r _ sink_id src_id <<<"$line"
-  [[ -n "$src_id"  ]] && pactl unload-module "$src_id"  2>/dev/null || true
-  [[ -n "$sink_id" ]] && pactl unload-module "$sink_id" 2>/dev/null || true
-  local tmp; tmp="$(mktemp)"
-  grep -v "^mic${idx} " "$VDEV_PULSE_MODULES" 2>/dev/null > "$tmp" || true
-  mv "$tmp" "$VDEV_PULSE_MODULES"
+  # remap-source first, then the null-sink it depends on.
+  if [[ -n "$src_id" ]] && ! audio_unload_gone "$src_id"; then
+    warn "mic$idx: could not unload remap-source module $src_id"; rc=1
+  fi
+  if [[ -n "$sink_id" ]] && ! audio_unload_gone "$sink_id"; then
+    warn "mic$idx: could not unload null-sink module $sink_id"; rc=1
+  fi
+  if [[ $rc -eq 0 ]]; then
+    local tmp; tmp="$(mktemp)"
+    grep -v "^mic${idx} " "$VDEV_PULSE_MODULES" 2>/dev/null > "$tmp" || true
+    mv "$tmp" "$VDEV_PULSE_MODULES"
+  fi
+  return $rc
 }
 
+# Returns non-zero if any mic could not be fully removed.
 audio_destroy_all() {
   [[ -f "$VDEV_PULSE_MODULES" ]] || return 0
-  local idx
-  # collect indices first; audio_destroy_mic rewrites the file as it goes
+  local idx rc=0 indices=()
+  # snapshot indices first; audio_destroy_mic rewrites the file as it goes
   while read -r tag _; do
     [[ "$tag" == mic* ]] || continue
-    idx="${tag#mic}"
-    audio_destroy_mic "$idx"
-  done < <(cat "$VDEV_PULSE_MODULES")
-  : > "$VDEV_PULSE_MODULES"
+    indices+=("${tag#mic}")
+  done < "$VDEV_PULSE_MODULES"
+  for idx in "${indices[@]}"; do
+    audio_destroy_mic "$idx" || rc=1
+  done
+  return $rc
 }
 
 # audio_start_feeder INDEX AUDIOFILE
+# Returns non-zero (without exiting) if the feeder can't be started or dies
+# immediately, so callers can aggregate per-device failures.
 audio_start_feeder() {
   local idx="$1" audio="$2"
-  local sink="vmic${idx}_sink" pidf logf
+  local sink="vmic${idx}_sink" pidf logf pid
   pidf="$VDEV_PIDS/mic${idx}.pid"
   logf="$VDEV_LOGS/mic${idx}.log"
   require_cmd ffmpeg
-  [[ -f "$audio" ]] || die "audio not found for mic$idx: $audio"
+  [[ -f "$audio" ]] || { err "mic$idx: audio not found: $audio"; return 1; }
 
   audio_stop_feeder "$idx"
 
@@ -83,7 +107,22 @@ audio_start_feeder() {
     -ac 1 -ar "$VDEV_AUDIO_RATE" \
     -f pulse -device "$sink" "vmic${idx}-feed" \
     >"$logf" 2>&1 &
-  echo $! > "$pidf"
+  pid=$!
+  if ! echo "$pid" > "$pidf"; then
+    kill "$pid" 2>/dev/null || true
+    err "mic$idx: could not record pid (state dir $VDEV_PIDS not writable?)"
+    return 1
+  fi
+
+  # The source exists as soon as the modules load, so a dead feeder would look
+  # healthy — verify ffmpeg is actually feeding the sink before claiming up.
+  sleep "$VDEV_FEEDER_SETTLE"
+  if ! pid_is_feeder "$pid"; then
+    rm -f "$pidf"
+    err "mic$idx feeder died immediately (audio=$audio sink=$sink) — last log lines:"
+    tail -n 12 "$logf" >&2 || true
+    return 1
+  fi
   meta_set "mic${idx}_audio" "$audio"
 }
 
@@ -92,7 +131,7 @@ audio_stop_feeder() {
   local pidf="$VDEV_PIDS/mic${idx}.pid"
   [[ -f "$pidf" ]] || return 0
   pid="$(cat "$pidf" 2>/dev/null || true)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+  if pid_is_feeder "$pid"; then
     kill "$pid" 2>/dev/null || true
   fi
   rm -f "$pidf"
@@ -112,5 +151,5 @@ audio_feeder_state() {
   local pidf="$VDEV_PIDS/mic${idx}.pid"
   [[ -f "$pidf" ]] || { echo "stopped"; return; }
   pid="$(cat "$pidf" 2>/dev/null || true)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then echo "alive ($pid)"; else echo "dead"; fi
+  if pid_is_feeder "$pid"; then echo "alive ($pid)"; else echo "dead"; fi
 }

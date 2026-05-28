@@ -25,6 +25,7 @@ VDEV_PIXFMT="${VDEV_PIXFMT:-yuv420p}"            # YU12; set to yuyv422 as fallb
 VDEV_COUNT_DEFAULT="${VDEV_COUNT_DEFAULT:-2}"
 VDEV_CLIP_SECONDS="${VDEV_CLIP_SECONDS:-60}"
 VDEV_AUDIO_RATE="${VDEV_AUDIO_RATE:-48000}"
+VDEV_FEEDER_SETTLE="${VDEV_FEEDER_SETTLE:-0.4}"  # seconds to wait before confirming a feeder stayed up
 
 # ---- logging -------------------------------------------------------------
 if [[ -t 2 ]]; then
@@ -48,6 +49,16 @@ ensure_state_dirs() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+# True if PID is alive AND looks like one of our ffmpeg feeders. Guards against
+# killing an unrelated process that has since inherited a recycled PID.
+pid_is_feeder() {
+  local pid="$1"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  # /proc/PID/cmdline is NUL-separated; -a treats it as text.
+  grep -qa ffmpeg "/proc/$pid/cmdline" 2>/dev/null
 }
 
 # Map a 1-based device index to its /dev/video number.

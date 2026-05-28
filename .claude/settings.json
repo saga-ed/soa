@@ -1,4 +1,35 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(aws sts get-caller-identity:*)",
+      "Bash(aws cloudformation describe-stacks:*)",
+      "Bash(aws cloudformation get-template:*)",
+      "Bash(aws cloudformation describe-stack-events:*)",
+      "Bash(aws secretsmanager list-secrets:*)",
+      "Bash(aws iam list-attached-role-policies:*)",
+      "Bash(aws iam get-policy-version:*)",
+      "Bash(aws iam get-role:*)",
+      "Bash(aws iam list-role-policies:*)",
+      "Bash(aws iam simulate-principal-policy:*)",
+      "Bash(aws ecs describe-task-definition:*)",
+      "Bash(aws ecs describe-services:*)",
+      "Bash(aws ecs describe-tasks:*)",
+      "Bash(aws ecs list-clusters:*)",
+      "Bash(aws ecs list-tasks:*)",
+      "Bash(aws rds describe-db-instances:*)",
+      "Bash(aws events list-rules:*)",
+      "Bash(aws events list-event-buses:*)",
+      "Bash(aws route53 list-hosted-zones:*)",
+      "Bash(aws autoscaling describe-auto-scaling-groups:*)",
+      "Bash(aws s3 ls:*)",
+      "Bash(sam validate:*)",
+      "Bash(ruff check:*)",
+      "Bash(cfn-lint:*)",
+      "Bash(pnpm check-types:*)",
+      "mcp__datadog-mcp__search_datadog_logs",
+      "mcp__datadog-mcp__analyze_datadog_logs"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {

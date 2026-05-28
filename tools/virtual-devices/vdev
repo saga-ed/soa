@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# vdev — spin up OS-level virtual cameras + mics that any app can select,
+# each playing looping synthetic media. App-agnostic dev tooling.
+#
+#   vdev up   [--count N] [--cams N] [--mics N] [--config FILE] [--no-audio] [--skip-modprobe]
+#   vdev down
+#   vdev status | list
+#   vdev gen  [--count N] [--out DIR] [--force]
+#   vdev attach <camN|micN> <file>
+#
+# A "device" N = Virtual Cam N (/dev/video1{N}) + Virtual Mic N (pulse source vmicN).
+# The only privileged step is loading/unloading the v4l2loopback kernel module
+# (sudo modprobe); everything else runs as your normal user.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+source "$SELF_DIR/lib/common.sh"
+# shellcheck source=lib/video.sh
+source "$SELF_DIR/lib/video.sh"
+# shellcheck source=lib/audio.sh
+source "$SELF_DIR/lib/audio.sh"
+
+# Print the leading comment block (skip shebang, stop at first code line).
+usage() { awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; }
+
+# Resolve a path relative to a base dir (absolute paths pass through).
+resolve_path() {
+  local p="$1" base="$2"
+  case "$p" in
+    /*) echo "$p";;
+    *)  echo "$base/$p";;
+  esac
+}
+
+# Parse a --config file into the CLIPS/AUDIOS arrays (line order = device index).
+# Columns (whitespace): [index] <video-clip> <audio-clip>; '#' comments allowed.
+# A leading purely-numeric column is treated as the index label and skipped.
+parse_config() {
+  local file="$1" base
+  base="$(cd "$(dirname "$file")" && pwd)"
+  CLIPS=(); AUDIOS=()
+  local a b c
+  while read -r a b c _; do
+    [[ -z "$a" || "$a" == \#* ]] && continue
+    if [[ "$a" =~ ^[0-9]+$ && -n "$b" ]]; then
+      CLIPS+=("$(resolve_path "$b" "$base")")
+      AUDIOS+=("$(resolve_path "${c:-}" "$base")")
+    else
+      CLIPS+=("$(resolve_path "$a" "$base")")
+      AUDIOS+=("$(resolve_path "${b:-}" "$base")")
+    fi
+  done < "$file"
+  [[ ${#CLIPS[@]} -gt 0 ]] || die "config $file has no device entries"
+}
+
+cmd_up() {
+  local count="" cams="" mics="" config="" want_audio=1 skip_modprobe=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --count) count="$2"; shift 2;;
+      --cams)  cams="$2";  shift 2;;
+      --mics)  mics="$2";  shift 2;;
+      --config) config="$2"; shift 2;;
+      --no-audio) want_audio=0; shift;;
+      --skip-modprobe) skip_modprobe=1; shift;;
+      -h|--help) usage; return 0;;
+      *) die "unknown arg to up: $1";;
+    esac
+  done
+  ensure_state_dirs
+
+  CLIPS=(); AUDIOS=()
+  if [[ -n "$config" ]]; then
+    [[ -f "$config" ]] || die "config not found: $config"
+    parse_config "$config"
+    cams="${#CLIPS[@]}"
+    mics="$cams"
+  else
+    count="${count:-$VDEV_COUNT_DEFAULT}"
+    cams="${cams:-$count}"
+    mics="${mics:-$count}"
+    # default media library; auto-generate whatever is missing
+    local need_gen=0 i
+    for ((i = 1; i <= cams; i++)); do [[ -f "$VDEV_ASSETS/cam${i}.mp4" ]] || need_gen=1; done
+    if [[ $want_audio -eq 1 ]]; then
+      for ((i = 1; i <= mics; i++)); do [[ -f "$VDEV_ASSETS/mic${i}.wav" ]] || need_gen=1; done
+    fi
+    if [[ $need_gen -eq 1 ]]; then
+      log "generating missing default clips"
+      "$SELF_DIR/generate-clips.sh" --count "$(( cams > mics ? cams : mics ))"
+    fi
+    for ((i = 1; i <= cams; i++)); do CLIPS+=("$VDEV_ASSETS/cam${i}.mp4"); done
+    for ((i = 1; i <= mics; i++)); do AUDIOS+=("$VDEV_ASSETS/mic${i}.wav"); done
+  fi
+
+  # ---- video ----
+  if [[ $skip_modprobe -eq 1 ]]; then
+    video_module_loaded || die "--skip-modprobe given but v4l2loopback is not loaded (run: sudo modprobe v4l2loopback exclusive_caps=1 devices=$cams video_nr=$(seq -s, "$VDEV_VIDEO_NR_BASE" $((VDEV_VIDEO_NR_BASE + cams - 1))))"
+    meta_set video_count "$cams"
+  else
+    video_load_module "$cams"
+  fi
+  local i
+  for ((i = 1; i <= cams; i++)); do
+    video_start_feeder "$i" "${CLIPS[$((i-1))]}"
+  done
+
+  # ---- audio ----
+  if [[ $want_audio -eq 1 ]]; then
+    if audio_available; then
+      for ((i = 1; i <= mics; i++)); do
+        [[ -n "${AUDIOS[$((i-1))]:-}" ]] || continue
+        audio_create_mic "$i"
+        audio_start_feeder "$i" "${AUDIOS[$((i-1))]}"
+      done
+    else
+      warn "pactl/pulse not available — skipping virtual mics (cameras only)"
+    fi
+  fi
+
+  meta_set cams "$cams"
+  meta_set mics "$([[ $want_audio -eq 1 ]] && echo "$mics" || echo 0)"
+  echo
+  cmd_status
+}
+
+cmd_down() {
+  ensure_state_dirs
+  log "stopping feeders"
+  video_stop_all
+  audio_stop_all
+  log "removing virtual mics"
+  audio_destroy_all
+  # give the kernel a moment to release the loopback devices, then unload
+  local tries=0
+  until video_unload_module; do
+    tries=$((tries + 1))
+    [[ $tries -ge 4 ]] && { err "v4l2loopback still busy; check for stray readers (browsers/OBS) and retry 'vdev down'"; break; }
+    sleep 0.4
+  done
+  meta_set cams 0; meta_set mics 0
+  ok "all virtual devices torn down"
+}
+
+cmd_status() {
+  ensure_state_dirs
+  local cams mics
+  cams="$(meta_get cams 2>/dev/null || echo 0)"
+  mics="$(meta_get mics 2>/dev/null || echo 0)"
+
+  printf '%s== virtual cameras ==%s\n' "$_c_grn" "$_c_rst" >&2
+  if video_module_loaded; then
+    if command -v v4l2-ctl >/dev/null 2>&1; then
+      v4l2-ctl --list-devices 2>/dev/null | grep -A1 -i 'Virtual Cam' >&2 || dim "(module loaded; no Virtual Cam entries)"
+    fi
+    local i
+    for ((i = 1; i <= ${cams:-0}; i++)); do
+      printf '  cam%-2s %-13s feeder: %s  clip: %s\n' \
+        "$i" "$(video_dev_for "$i")" "$(video_feeder_state "$i")" \
+        "$(meta_get "cam${i}_clip" 2>/dev/null || echo '-')" >&2
+    done
+  else
+    dim "  v4l2loopback not loaded" >&2
+  fi
+
+  echo >&2
+  printf '%s== virtual mics ==%s\n' "$_c_grn" "$_c_rst" >&2
+  if [[ "${mics:-0}" -gt 0 ]] && audio_available; then
+    pactl list sources short 2>/dev/null | grep -E '[[:space:]]vmic[0-9]' >&2 || dim "  (no vmic sources found)"
+    local i
+    for ((i = 1; i <= mics; i++)); do
+      printf '  mic%-2s source: vmic%-2s feeder: %s  audio: %s\n' \
+        "$i" "$i" "$(audio_feeder_state "$i")" \
+        "$(meta_get "mic${i}_audio" 2>/dev/null || echo '-')" >&2
+    done
+  else
+    dim "  no virtual mics active" >&2
+  fi
+}
+
+cmd_attach() {
+  local target="${1:-}" file="${2:-}"
+  [[ -n "$target" && -n "$file" ]] || die "usage: vdev attach <camN|micN> <file>"
+  file="$(resolve_path "$file" "$PWD")"
+  [[ -f "$file" ]] || die "file not found: $file"
+  case "$target" in
+    cam*|[0-9]*)
+      local idx="${target#cam}"
+      [[ -e "$(video_dev_for "$idx")" ]] || die "cam$idx device missing — run 'vdev up' first"
+      video_start_feeder "$idx" "$file"
+      ok "cam$idx now playing $file";;
+    mic*)
+      local idx="${target#mic}"
+      audio_available || die "pulse not available"
+      audio_start_feeder "$idx" "$file"
+      ok "mic$idx now playing $file";;
+    *) die "target must be camN or micN, got: $target";;
+  esac
+}
+
+main() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    up)            cmd_up "$@";;
+    down|stop)     cmd_down "$@";;
+    status|list)   cmd_status "$@";;
+    gen|generate)  "$SELF_DIR/generate-clips.sh" "$@";;
+    attach)        cmd_attach "$@";;
+    -h|--help|help|"") usage;;
+    *) die "unknown command: $sub (try: vdev --help)";;
+  esac
+}
+main "$@"

@@ -24,14 +24,14 @@ beforeEach(() => {
 });
 
 describe('path helpers', () => {
-  it('iamHostSsmPath: mirror uses /mirror/current/*, prod uses /shared/infra/prod/*', () => {
+  it('iamHostSsmPath: mirror uses /mirror/current/*, prod uses /prod/postgres-rds/*', () => {
     expect(iamHostSsmPath('mirror')).toBe('/mirror/current/postgres-rds/endpoint');
-    expect(iamHostSsmPath('prod')).toBe('/shared/infra/prod/postgres-host');
+    expect(iamHostSsmPath('prod')).toBe('/prod/postgres-rds/endpoint');
   });
 
   it('iamPortSsmPath: same split by env', () => {
     expect(iamPortSsmPath('mirror')).toBe('/mirror/current/postgres-rds/port');
-    expect(iamPortSsmPath('prod')).toBe('/shared/infra/prod/postgres-port');
+    expect(iamPortSsmPath('prod')).toBe('/prod/postgres-rds/port');
   });
 
   it('devSecretName: nests role under service (single-DB)', () => {
@@ -50,9 +50,9 @@ describe('path helpers', () => {
 describe('loadPostgresConfigFromAws — prod (IAM auth)', () => {
   it('reads coords from SSM and returns config with async password callback', async () => {
     ssmMock
-      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .on(GetParameterCommand, { Name: '/prod/postgres-rds/endpoint' })
       .resolves({ Parameter: { Value: 'saga-postgres-prod.rds.amazonaws.com' } })
-      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-port' })
+      .on(GetParameterCommand, { Name: '/prod/postgres-rds/port' })
       .resolves({ Parameter: { Value: '5432' } });
 
     const config = await loadPostgresConfigFromAws({
@@ -75,7 +75,7 @@ describe('loadPostgresConfigFromAws — prod (IAM auth)', () => {
       .on(GetParameterCommand)
       .resolves({ Parameter: { Value: '5432' } });
     ssmMock
-      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .on(GetParameterCommand, { Name: '/prod/postgres-rds/endpoint' })
       .resolves({ Parameter: { Value: 'h' } });
 
     const config = await loadPostgresConfigFromAws({
@@ -92,7 +92,7 @@ describe('loadPostgresConfigFromAws — prod (IAM auth)', () => {
       .on(GetParameterCommand)
       .resolves({ Parameter: { Value: '5432' } });
     ssmMock
-      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .on(GetParameterCommand, { Name: '/prod/postgres-rds/endpoint' })
       .resolves({ Parameter: { Value: 'h' } });
 
     const config = await loadPostgresConfigFromAws({
@@ -110,7 +110,7 @@ describe('loadPostgresConfigFromAws — prod (IAM auth)', () => {
       .on(GetParameterCommand)
       .resolves({ Parameter: { Value: '5432' } });
     ssmMock
-      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .on(GetParameterCommand, { Name: '/prod/postgres-rds/endpoint' })
       .resolves({ Parameter: { Value: 'h' } });
 
     const config = await loadPostgresConfigFromAws({
@@ -128,7 +128,7 @@ describe('loadPostgresConfigFromAws — prod (IAM auth)', () => {
       .on(GetParameterCommand)
       .resolves({ Parameter: { Value: '5432' } });
     ssmMock
-      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .on(GetParameterCommand, { Name: '/prod/postgres-rds/endpoint' })
       .resolves({ Parameter: { Value: 'h' } });
 
     const config = await loadPostgresConfigFromAws({
@@ -148,7 +148,7 @@ describe('loadPostgresConfigFromAws — prod (IAM auth)', () => {
       .on(GetParameterCommand)
       .resolves({ Parameter: { Value: '5432' } });
     ssmMock
-      .on(GetParameterCommand, { Name: '/shared/infra/prod/postgres-host' })
+      .on(GetParameterCommand, { Name: '/prod/postgres-rds/endpoint' })
       .resolves({ Parameter: { Value: 'h' } });
 
     const config = await loadPostgresConfigFromAws({

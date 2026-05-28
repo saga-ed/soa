@@ -222,20 +222,21 @@ async function loadIamConfig(args: {
 // ---------------------------------------------------------------------------
 
 /**
- * SSM path for the shared Postgres host. Distinct per env because mirror
- * lives in the dev account under `/mirror/current/*` (the daily refresh
- * workflow's path namespace).
+ * SSM path for the shared Postgres host. Canonical pattern is
+ * `/{tier}/postgres-rds/{coord}` for both mirror and prod — they share
+ * the same shape; mirror's "tier" is `mirror/current` because the daily
+ * refresh workflow rolls instances under that namespace.
  */
 export function iamHostSsmPath(env: 'mirror' | 'prod'): string {
   return env === 'mirror'
     ? '/mirror/current/postgres-rds/endpoint'
-    : '/shared/infra/prod/postgres-host';
+    : '/prod/postgres-rds/endpoint';
 }
 
 export function iamPortSsmPath(env: 'mirror' | 'prod'): string {
   return env === 'mirror'
     ? '/mirror/current/postgres-rds/port'
-    : '/shared/infra/prod/postgres-port';
+    : '/prod/postgres-rds/port';
 }
 
 /**

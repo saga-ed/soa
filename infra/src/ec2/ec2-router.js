@@ -308,6 +308,12 @@ export function create_ec2_router(config = {}) {
             if (!name || !engine) {
                 return res.status(400).json({ ok: false, error: 'name and engine are required' });
             }
+            // Body `name` bypasses the router.param('name') guard (that only fires for
+            // path :name), so validate it here too — it feeds resolve(projects_dir/data_dir/
+            // SEEDS_BASE, name) + mkdirSync/writeFileSync below, i.e. a path-traversal sink.
+            if (!VALID_NAME.test(name)) {
+                return res.status(400).json({ ok: false, error: 'Invalid name: must be alphanumeric, hyphens, or underscores only' });
+            }
             if (!engines[engine]) {
                 return res.status(400).json({ ok: false, error: `Unknown engine: ${engine}. Use: ${Object.keys(engines).join(', ')}` });
             }

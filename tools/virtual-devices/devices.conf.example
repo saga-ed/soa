@@ -1,0 +1,20 @@
+# vdev device map — pass with: vdev up --config devices.conf
+#
+# One device per non-comment line. Line order = device index (1, 2, ...).
+# Columns are whitespace-separated:
+#
+#     [index]   <video-clip>            <audio-clip>
+#
+# - A leading numeric index column is optional (it's just a readable label;
+#   the actual /dev/video number is VDEV_VIDEO_NR_BASE + index - 1).
+# - Relative paths resolve against THIS file's directory.
+# - The video device is "Virtual Cam <index>"; the mic is pulse source "vmic<index>".
+#
+# Example: two cameras, the second reusing a real recorded audio file.
+
+1   assets/cam1.mp4   assets/mic1.wav
+2   assets/cam2.mp4   assets/mic2.wav
+
+# To feed real recorded audio instead of a synthetic tone, point the audio
+# column at any WAV, e.g.:
+#   2  assets/cam2.mp4  /path/to/voice.wav

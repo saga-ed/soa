@@ -1,0 +1,4 @@
+# Generated synthetic clips (regenerate with: ./vdev gen). Never commit binaries.
+assets/
+# A local working copy of the device map.
+devices.conf

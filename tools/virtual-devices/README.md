@@ -17,8 +17,28 @@ Each "device" N is a pair:
 ## Requirements
 
 Linux with `ffmpeg`, `v4l-utils`, the `v4l2loopback` kernel module, and
-PipeWire/PulseAudio (`pactl`). On Ubuntu: `apt install ffmpeg v4l-utils
-v4l2loopback-dkms`. The **only** privileged operation is loading the kernel
+PipeWire/PulseAudio (`pactl`). On Ubuntu:
+
+```bash
+sudo apt install ffmpeg v4l-utils v4l2loopback-dkms linux-headers-$(uname -r)
+```
+
+`v4l2loopback-dkms` compiles the module against your running kernel, so it needs
+the matching `linux-headers`; apt usually pulls them in, but custom/cloud/WSL
+kernels may need them named explicitly as above. On other distros the package
+names differ (Fedora: `dnf install v4l2loopback`; Arch: `pacman -S
+v4l2loopback-dkms`).
+
+**You must be in the `video` group.** The ffmpeg feeders run as your normal
+user, but the loopback nodes are created `root:video` — without group membership,
+opening `/dev/videoN` fails with "Permission denied" and the feeder dies
+immediately. Add yourself once, then log out and back in (or reboot):
+
+```bash
+sudo usermod -aG video "$USER"
+```
+
+The **only** privileged operation is loading the kernel
 module (`sudo modprobe v4l2loopback`), which `vdev up`/`vdev down` invoke for
 you; everything else runs as your user. Pass `--skip-modprobe` if the module is
 already loaded (e.g. persisted at boot) to run `vdev up` without sudo. Note that
@@ -104,6 +124,9 @@ override the directory with `VDEV_ASSETS`.
 - **`vdev status` shows `feeder: dead`** — the ffmpeg feeder for that device
   exited (often because a reader closed the loopback). Check its log under
   `~/.local/state/vdev/logs/cam{N}.log` (or `mic{N}.log`) and re-run `vdev up`.
+- **`feeder: dead` immediately, log shows `Permission denied` on `/dev/videoN`** —
+  you're not in the `video` group. Run `sudo usermod -aG video "$USER"`, then log
+  out and back in (see Requirements).
 - **Mic shows as "Monitor of …"** — `vdev` uses `module-remap-source` to expose a
   clean `Virtual Mic N` capture source; if your app only lists monitors, select
   `vmicN` / "Virtual Mic N" explicitly.

@@ -51,6 +51,13 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
+# require_uint NAME VALUE — die with a usage hint unless VALUE is a non-negative
+# integer. Guards arithmetic contexts (for (( )) bounds) from set -u crashes and
+# from bash silently evaluating expressions like '1+1'.
+require_uint() {
+  [[ "$2" =~ ^[0-9]+$ ]] || die "$1 must be a non-negative integer, got: '$2'"
+}
+
 # True if PID is alive AND looks like one of our ffmpeg feeders. Guards against
 # killing an unrelated process that has since inherited a recycled PID.
 pid_is_feeder() {

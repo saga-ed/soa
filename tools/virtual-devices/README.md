@@ -21,10 +21,12 @@ PipeWire/PulseAudio (`pactl`). On Ubuntu: `apt install ffmpeg v4l-utils
 v4l2loopback-dkms`. The **only** privileged operation is loading the kernel
 module (`sudo modprobe v4l2loopback`), which `vdev up`/`vdev down` invoke for
 you; everything else runs as your user. Pass `--skip-modprobe` if the module is
-already loaded (e.g. persisted at boot) to run `vdev up` without sudo — note
-that `vdev down` still unloads the module and will prompt for sudo, so with a
-boot-persisted module you'd typically stop the feeders (`vdev down` will warn it
-can't unload, or just leave them) rather than expect a fully sudo-free teardown.
+already loaded (e.g. persisted at boot) to run `vdev up` without sudo. Note that
+`vdev down` always tries to unload the module (`sudo modprobe -r`) and will
+prompt for sudo — so on a boot-persisted setup, `vdev down` will actually unload
+the module (defeating the persistence until the next boot). If you only want to
+stop the feeders without unloading, kill the ffmpeg feeders yourself instead of
+running `vdev down`.
 
 ## Usage
 

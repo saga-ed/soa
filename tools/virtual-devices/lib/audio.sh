@@ -99,6 +99,14 @@ audio_start_feeder() {
   require_cmd ffmpeg
   [[ -f "$audio" ]] || { err "mic$idx: audio not found: $audio"; return 1; }
 
+  # ffmpeg keeps running even if -device names a sink that doesn't exist, so a
+  # feeder pointed at a missing sink would survive the liveness check and falsely
+  # report "playing". Require the sink up front (e.g. `attach` before `up`).
+  if ! pactl list short sinks 2>/dev/null | awk '{print $2}' | grep -qx "$sink"; then
+    err "mic$idx: pulse sink '$sink' not found — create the mic first (run 'vdev up')"
+    return 1
+  fi
+
   audio_stop_feeder "$idx"
 
   log "mic$idx <- $audio  (sink $sink)"
@@ -115,7 +123,8 @@ audio_start_feeder() {
   fi
 
   # The source exists as soon as the modules load, so a dead feeder would look
-  # healthy — verify ffmpeg is actually feeding the sink before claiming up.
+  # healthy. We can't cheaply confirm audio is truly flowing, so settle briefly
+  # and require the ffmpeg process to still be alive before claiming the mic is up.
   sleep "$VDEV_FEEDER_SETTLE"
   if ! pid_is_feeder "$pid"; then
     rm -f "$pidf"
@@ -123,7 +132,9 @@ audio_start_feeder() {
     tail -n 12 "$logf" >&2 || true
     return 1
   fi
-  meta_set "mic${idx}_audio" "$audio"
+  # Feeder is up; don't let a metadata-write failure flip that verdict (see video.sh).
+  meta_set "mic${idx}_audio" "$audio" || warn "mic$idx: feeder up but could not record audio metadata"
+  return 0
 }
 
 audio_stop_feeder() {

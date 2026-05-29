@@ -97,7 +97,10 @@ video_start_feeder() {
     tail -n 12 "$logf" >&2 || true
     return 1
   fi
-  meta_set "cam${idx}_clip" "$clip"
+  # The feeder is up; a metadata-write failure must not flip that verdict (which
+  # would mark a live feeder "failed" and orphan its ffmpeg). Warn, don't fail.
+  meta_set "cam${idx}_clip" "$clip" || warn "cam$idx: feeder up but could not record clip metadata"
+  return 0
 }
 
 video_stop_feeder() {

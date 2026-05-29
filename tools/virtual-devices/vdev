@@ -62,10 +62,10 @@ cmd_up() {
   local count="" cams="" mics="" config="" want_audio=1 skip_modprobe=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --count) count="$2"; shift 2;;
-      --cams)  cams="$2";  shift 2;;
-      --mics)  mics="$2";  shift 2;;
-      --config) config="$2"; shift 2;;
+      --count) [[ $# -ge 2 ]] || die "--count requires a value"; count="$2"; shift 2;;
+      --cams)  [[ $# -ge 2 ]] || die "--cams requires a value";  cams="$2";  shift 2;;
+      --mics)  [[ $# -ge 2 ]] || die "--mics requires a value";  mics="$2";  shift 2;;
+      --config) [[ $# -ge 2 ]] || die "--config requires a value"; config="$2"; shift 2;;
       --no-audio) want_audio=0; shift;;
       --skip-modprobe) skip_modprobe=1; shift;;
       -h|--help) usage; return 0;;
@@ -84,13 +84,15 @@ cmd_up() {
     mics="$cams"
   else
     count="${count:-$VDEV_COUNT_DEFAULT}"
-    cams="${cams:-$count}"
-    mics="${mics:-$count}"
-    # default media library; auto-generate whatever is missing
+    require_uint --count "$count"
+    cams="${cams:-$count}"; require_uint --cams "$cams"
+    mics="${mics:-$count}"; require_uint --mics "$mics"
+    # default media library; auto-generate whatever is missing or empty (-s, not
+    # -f, so a leftover zero-byte clip from an interrupted run gets regenerated).
     local need_gen=0 i
-    for ((i = 1; i <= cams; i++)); do [[ -f "$VDEV_ASSETS/cam${i}.mp4" ]] || need_gen=1; done
+    for ((i = 1; i <= cams; i++)); do [[ -s "$VDEV_ASSETS/cam${i}.mp4" ]] || need_gen=1; done
     if [[ $want_audio -eq 1 ]]; then
-      for ((i = 1; i <= mics; i++)); do [[ -f "$VDEV_ASSETS/mic${i}.wav" ]] || need_gen=1; done
+      for ((i = 1; i <= mics; i++)); do [[ -s "$VDEV_ASSETS/mic${i}.wav" ]] || need_gen=1; done
     fi
     if [[ $need_gen -eq 1 ]]; then
       log "generating missing default clips"
@@ -101,8 +103,16 @@ cmd_up() {
   fi
 
   # ---- video ----
+  # Stop any feeders left from a previous run first: reloading v4l2loopback for a
+  # changed device count needs `modprobe -r`, which fails "device busy" while an
+  # ffmpeg feeder still holds a /dev/videoN. Makes `vdev up` safely re-runnable.
+  video_stop_all
+
   local i
-  if [[ $skip_modprobe -eq 1 ]]; then
+  if (( cams == 0 )); then
+    dim "  no cameras requested (cams=0); skipping v4l2loopback"
+    meta_set video_count 0
+  elif [[ $skip_modprobe -eq 1 ]]; then
     video_module_loaded || die "--skip-modprobe given but v4l2loopback is not loaded (run: sudo modprobe v4l2loopback exclusive_caps=1 devices=$cams video_nr=$(seq -s, "$VDEV_VIDEO_NR_BASE" $((VDEV_VIDEO_NR_BASE + cams - 1))))"
     # The pre-loaded module may have fewer devices than requested; fail early
     # with a clear message rather than dying mid-feeder on a missing node.

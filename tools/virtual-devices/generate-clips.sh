@@ -16,14 +16,15 @@ FORCE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --count) COUNT="$2"; shift 2;;
-    --out)   OUT="$2"; shift 2;;
+    --count) [[ $# -ge 2 ]] || die "--count requires a value"; COUNT="$2"; shift 2;;
+    --out)   [[ $# -ge 2 ]] || die "--out requires a value";   OUT="$2"; shift 2;;
     --force) FORCE=1; shift;;
     -h|--help) awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0;;
     *) die "unknown arg: $1";;
   esac
 done
 
+require_uint --count "$COUNT"
 require_cmd ffmpeg
 mkdir -p "$OUT"
 
@@ -57,11 +58,18 @@ gen_video() {
     vf+=",format=${VDEV_PIXFMT}"
   fi
   log "generating $out  (source=$src, ${VDEV_WIDTH}x${VDEV_HEIGHT}@${VDEV_FPS}, ${VDEV_CLIP_SECONDS}s)"
-  ffmpeg -y -hide_banner -loglevel error \
+  # Write to a sibling temp (keeps the .mp4 extension so ffmpeg picks the muxer)
+  # and only move into place on success — a Ctrl-C'd run leaves no half-written clip.
+  local tmp; tmp="$(dirname "$out")/.tmp.$(basename "$out")"
+  if ffmpeg -y -hide_banner -loglevel error \
     -f lavfi -t "$VDEV_CLIP_SECONDS" -i "${src}=size=${VDEV_WIDTH}x${VDEV_HEIGHT}:rate=${VDEV_FPS}" \
     -vf "$vf" \
     -c:v libx264 -preset veryfast -pix_fmt "$VDEV_PIXFMT" \
-    "$out"
+    "$tmp"; then
+    mv -f "$tmp" "$out"
+  else
+    rm -f "$tmp"; die "ffmpeg failed generating $out"
+  fi
 }
 
 gen_audio() {
@@ -69,19 +77,24 @@ gen_audio() {
   # Distinct, identifiable per-mic tone with a 1 Hz pulse so it's clearly audible.
   local freq=$(( 220 + idx * 110 ))
   log "generating $out  (tone ${freq}Hz, ${VDEV_CLIP_SECONDS}s)"
-  ffmpeg -y -hide_banner -loglevel error \
+  local tmp; tmp="$(dirname "$out")/.tmp.$(basename "$out")"
+  if ffmpeg -y -hide_banner -loglevel error \
     -f lavfi -t "$VDEV_CLIP_SECONDS" \
     -i "sine=frequency=${freq}:sample_rate=${VDEV_AUDIO_RATE}" \
     -af "tremolo=f=2:d=0.8,volume=0.5" \
     -ac 1 -ar "$VDEV_AUDIO_RATE" \
-    "$out"
+    "$tmp"; then
+    mv -f "$tmp" "$out"
+  else
+    rm -f "$tmp"; die "ffmpeg failed generating $out"
+  fi
 }
 
 for ((i = 1; i <= COUNT; i++)); do
   v="$OUT/cam${i}.mp4"
   a="$OUT/mic${i}.wav"
-  if [[ -f "$v" && $FORCE -eq 0 ]]; then dim "skip $v (exists; --force to regenerate)"; else gen_video "$i" "$v"; fi
-  if [[ -f "$a" && $FORCE -eq 0 ]]; then dim "skip $a (exists; --force to regenerate)"; else gen_audio "$i" "$a"; fi
+  if [[ -s "$v" && $FORCE -eq 0 ]]; then dim "skip $v (exists; --force to regenerate)"; else gen_video "$i" "$v"; fi
+  if [[ -s "$a" && $FORCE -eq 0 ]]; then dim "skip $a (exists; --force to regenerate)"; else gen_audio "$i" "$a"; fi
 done
 
 ok "clip library ready in $OUT ($COUNT camera(s) + $COUNT mic(s))"

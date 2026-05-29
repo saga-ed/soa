@@ -1,0 +1,51 @@
+{
+  "name": "@saga-ed/soa-rum-util",
+  "version": "0.1.0",
+  "description": "Datadog RUM wrapper with Saga conventions: singleton init, source-tagged errors/actions, silent no-op when unconfigured.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@datadog/browser-rum": "^6.0.0"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "jsdom": "^25.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.2",
+    "vitest": "^1.5.0"
+  },
+  "keywords": [
+    "datadog",
+    "rum",
+    "observability",
+    "browser",
+    "saga"
+  ],
+  "author": "Saga SOA Team",
+  "license": "MIT",
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saga-ed/soa.git",
+    "directory": "packages/web/rum-util"
+  }
+}

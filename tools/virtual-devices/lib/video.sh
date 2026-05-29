@@ -103,31 +103,7 @@ video_start_feeder() {
   return 0
 }
 
-video_stop_feeder() {
-  local idx="$1" pid
-  local pidf="$VDEV_PIDS/cam${idx}.pid"
-  [[ -f "$pidf" ]] || return 0
-  pid="$(cat "$pidf" 2>/dev/null || true)"
-  if pid_is_feeder "$pid"; then
-    kill "$pid" 2>/dev/null || true
-  fi
-  rm -f "$pidf"
-}
-
-video_stop_all() {
-  local pidf idx
-  for pidf in "$VDEV_PIDS"/cam*.pid; do
-    [[ -e "$pidf" ]] || continue
-    idx="$(basename "$pidf" .pid)"; idx="${idx#cam}"
-    video_stop_feeder "$idx"
-  done
-}
-
-# Print "alive"/"dead" for a cam index based on its pid file.
-video_feeder_state() {
-  local idx="$1" pid
-  local pidf="$VDEV_PIDS/cam${idx}.pid"
-  [[ -f "$pidf" ]] || { echo "stopped"; return; }
-  pid="$(cat "$pidf" 2>/dev/null || true)"
-  if pid_is_feeder "$pid"; then echo "alive ($pid)"; else echo "dead"; fi
-}
+# Camera feeder lifecycle — thin wrappers over the shared helpers in common.sh.
+video_stop_feeder()  { feeder_stop cam "$1"; }
+video_stop_all()     { feeder_stop_all cam; }
+video_feeder_state() { feeder_state cam "$1"; }

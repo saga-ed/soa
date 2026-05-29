@@ -22,9 +22,6 @@ source "$SELF_DIR/lib/video.sh"
 # shellcheck source=lib/audio.sh
 source "$SELF_DIR/lib/audio.sh"
 
-# Print the leading comment block (skip shebang, stop at first code line).
-usage() { awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; }
-
 # Resolve a path relative to a base dir (absolute paths pass through).
 # Empty input stays empty so an omitted column doesn't resolve to the base dir.
 resolve_path() {

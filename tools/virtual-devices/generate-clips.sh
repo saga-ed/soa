@@ -19,7 +19,7 @@ while [[ $# -gt 0 ]]; do
     --count) [[ $# -ge 2 ]] || die "--count requires a value"; COUNT="$2"; shift 2;;
     --out)   [[ $# -ge 2 ]] || die "--out requires a value";   OUT="$2"; shift 2;;
     --force) FORCE=1; shift;;
-    -h|--help) awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0;;
+    -h|--help) usage; exit 0;;
     *) die "unknown arg: $1";;
   esac
 done

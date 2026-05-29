@@ -137,30 +137,7 @@ audio_start_feeder() {
   return 0
 }
 
-audio_stop_feeder() {
-  local idx="$1" pid
-  local pidf="$VDEV_PIDS/mic${idx}.pid"
-  [[ -f "$pidf" ]] || return 0
-  pid="$(cat "$pidf" 2>/dev/null || true)"
-  if pid_is_feeder "$pid"; then
-    kill "$pid" 2>/dev/null || true
-  fi
-  rm -f "$pidf"
-}
-
-audio_stop_all() {
-  local pidf idx
-  for pidf in "$VDEV_PIDS"/mic*.pid; do
-    [[ -e "$pidf" ]] || continue
-    idx="$(basename "$pidf" .pid)"; idx="${idx#mic}"
-    audio_stop_feeder "$idx"
-  done
-}
-
-audio_feeder_state() {
-  local idx="$1" pid
-  local pidf="$VDEV_PIDS/mic${idx}.pid"
-  [[ -f "$pidf" ]] || { echo "stopped"; return; }
-  pid="$(cat "$pidf" 2>/dev/null || true)"
-  if pid_is_feeder "$pid"; then echo "alive ($pid)"; else echo "dead"; fi
-}
+# Mic feeder lifecycle — thin wrappers over the shared helpers in common.sh.
+audio_stop_feeder()  { feeder_stop mic "$1"; }
+audio_stop_all()     { feeder_stop_all mic; }
+audio_feeder_state() { feeder_state mic "$1"; }

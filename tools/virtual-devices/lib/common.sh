@@ -42,6 +42,12 @@ err()  { printf '%s[vdev] error:%s %s\n' "$_c_red" "$_c_rst" "$*" >&2; }
 die()  { err "$*"; exit 1; }
 dim()  { printf '%s%s%s\n' "$_c_dim" "$*" "$_c_rst" >&2; }
 
+# Print a script's leading comment block as usage text: skip the shebang, strip
+# the "# " prefix from each comment line, stop at the first code line. Uses $0,
+# which (sourcing doesn't change it) is the running script — vdev or
+# generate-clips.sh — so each prints its own header.
+usage() { awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; }
+
 ensure_state_dirs() {
   mkdir -p "$VDEV_PIDS" "$VDEV_LOGS"
   touch "$VDEV_PULSE_MODULES" "$VDEV_META"
@@ -66,6 +72,44 @@ pid_is_feeder() {
   kill -0 "$pid" 2>/dev/null || return 1
   # /proc/PID/cmdline is NUL-separated; -a treats it as text.
   grep -qa ffmpeg "/proc/$pid/cmdline" 2>/dev/null
+}
+
+# ---- feeder process lifecycle ----------------------------------------------
+# Cameras and mics track their ffmpeg feeders the same way: one pidfile per
+# device at $VDEV_PIDS/<kind><idx>.pid. These helpers take the kind prefix
+# ("cam"/"mic") so both planes share one implementation; only the per-plane
+# start_feeder (the ffmpeg invocation) genuinely differs and stays in video.sh/audio.sh.
+
+# feeder_stop KIND IDX — kill this device's feeder (only if it's really ours)
+# and drop its pidfile. No-op if not running.
+feeder_stop() {
+  local kind="$1" idx="$2" pid
+  local pidf="$VDEV_PIDS/${kind}${idx}.pid"
+  [[ -f "$pidf" ]] || return 0
+  pid="$(cat "$pidf" 2>/dev/null || true)"
+  if pid_is_feeder "$pid"; then
+    kill "$pid" 2>/dev/null || true
+  fi
+  rm -f "$pidf"
+}
+
+# feeder_stop_all KIND — stop every feeder of this kind.
+feeder_stop_all() {
+  local kind="$1" pidf idx
+  for pidf in "$VDEV_PIDS/${kind}"*.pid; do
+    [[ -e "$pidf" ]] || continue
+    idx="$(basename "$pidf" .pid)"; idx="${idx#"$kind"}"
+    feeder_stop "$kind" "$idx"
+  done
+}
+
+# feeder_state KIND IDX — print stopped | alive (pid) | dead for status output.
+feeder_state() {
+  local kind="$1" idx="$2" pid
+  local pidf="$VDEV_PIDS/${kind}${idx}.pid"
+  [[ -f "$pidf" ]] || { echo "stopped"; return; }
+  pid="$(cat "$pidf" 2>/dev/null || true)"
+  if pid_is_feeder "$pid"; then echo "alive ($pid)"; else echo "dead"; fi
 }
 
 # Map a 1-based device index to its /dev/video number.

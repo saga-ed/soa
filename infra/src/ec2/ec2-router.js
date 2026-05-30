@@ -644,9 +644,15 @@ export function create_ec2_router(config = {}) {
     function handle_switch(req, res, action) {
         try {
             const { name } = req.params;
-            const { profile } = req.body;
+            const { profile, seedFrom } = req.body;
             if (!profile) {
                 return res.status(400).json({ ok: false, error: 'profile is required' });
+            }
+            // Optional source-override: restore this DB's `profile` from another
+            // DB's S3 prefix (the stable canonical template). Validated because it
+            // becomes an S3 key + `aws s3 cp` argument.
+            if (seedFrom !== undefined && !/^[a-zA-Z0-9_-]+$/.test(seedFrom)) {
+                return res.json({ ok: false, error: 'invalid seedFrom' });
             }
 
             const ports = get_allocated_ports({ registry_path });
@@ -679,6 +685,7 @@ export function create_ec2_router(config = {}) {
                 engine: entry.engine,
                 bucket: SEED_BUCKET,
                 seeds_base: SEEDS_BASE,
+                source_name: seedFrom,
             });
 
             // Regenerate compose with seeds (preserve original db_name)
@@ -717,7 +724,7 @@ export function create_ec2_router(config = {}) {
             // Update profile registry
             write_active_profile(name, profile, data_dir);
 
-            res.json({ ok: true, name, profile, action });
+            res.json({ ok: true, name, profile, action, source: seedFrom });
         } catch (err) {
             res.status(500).json({ ok: false, error: err.message });
         }

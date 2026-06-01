@@ -1,6 +1,20 @@
 import { z } from 'zod';
 
 /**
+ * TLS options for a static {@link PostgresProviderConfig}. JSON-friendly
+ * (PEM strings, not Buffers) since this path is parsed from a Secrets
+ * Manager payload. Mirrors {@link PostgresSslConfig} from the loader so
+ * both config shapes can pin a CA bundle (e.g. the Amazon RDS roots).
+ */
+export const PostgresSslSchema = z.object({
+  ca: z.string().optional(),
+  rejectUnauthorized: z.boolean().optional(),
+  cert: z.string().optional(),
+  key: z.string().optional(),
+  servername: z.string().optional(),
+});
+
+/**
  * Config schema for {@link PostgresProvider}.
  *
  * Matches the secret payload written by ``saga-provision-credentials``
@@ -24,9 +38,11 @@ export const PostgresProviderSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
 
-  // TLS toggle. Required for managed RDS / RDS Proxy connections.
-  // Dev db-host containers can leave this off.
-  ssl: z.boolean().default(false),
+  // TLS: `true`/`false` toggle, or a CA-pinning object (see
+  // PostgresSslSchema) when the server cert chains to a root outside
+  // Node's default trust store. Required for managed RDS / RDS Proxy;
+  // dev db-host containers can leave this off.
+  ssl: z.union([z.boolean(), PostgresSslSchema]).default(false),
 
   // Optional pool tuning. Sensible defaults for an API service.
   poolSize: z.number().int().positive().default(10),

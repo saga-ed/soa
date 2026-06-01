@@ -2,7 +2,10 @@ import 'reflect-metadata';
 import { injectable } from 'inversify';
 import { Pool, type PoolClient } from 'pg';
 import type { PostgresProviderConfig } from './postgres-provider-config.js';
-import type { PostgresPoolConfig } from './aws-postgres-loader.js';
+import type {
+  PostgresPoolConfig,
+  PostgresSslConfig,
+} from './aws-postgres-loader.js';
 
 /**
  * Manages a single ``pg.Pool`` for one logical database. Provider is
@@ -63,7 +66,7 @@ interface NormalizedConfig {
   database: string;
   user: string;
   password: string | (() => Promise<string>);
-  ssl: boolean;
+  ssl: boolean | PostgresSslConfig;
   poolSize: number;
   idleTimeoutMs: number;
   connectionTimeoutMs: number;
@@ -105,9 +108,12 @@ export class PostgresProvider {
           // specifically because pg ignores a discrete password when a
           // connectionString is also present — the callback would be lost.
           password: this.cfg.password,
-          // ssl:true => full cert verification, equivalent to the previous
-          // `sslmode=require` (which pg maps to {}). RDS certs chain to the
-          // Amazon roots in Node's CA bundle. ssl:false for local dev.
+          // ssl:true => full cert verification against Node's default CA
+          // bundle (equivalent to the previous `sslmode=require`, which pg
+          // maps to {}). Pass a PostgresSslConfig object instead to pin a CA
+          // bundle (e.g. the Amazon RDS roots, which aren't always in Node's
+          // default trust store) — pg forwards it verbatim to tls.connect.
+          // ssl:false for local dev.
           ssl: this.cfg.ssl,
           max: this.cfg.poolSize,
           idleTimeoutMillis: this.cfg.idleTimeoutMs,

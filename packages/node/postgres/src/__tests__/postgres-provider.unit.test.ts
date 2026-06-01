@@ -206,4 +206,26 @@ describe('PostgresProvider config sources', () => {
     expect(state.options?.ssl).toBe(true);
     expect(state.options?.max).toBe(7);
   });
+
+  it('passes a CA-bundle ssl object straight through to pg (PostgresPoolConfig path)', async () => {
+    const ssl = { ca: '-----BEGIN CERTIFICATE-----\nMIIB...', rejectUnauthorized: true };
+    await new PostgresProvider({
+      instanceName: 'RdsDB',
+      host: 'rds.example',
+      port: 5432,
+      database: 'iam_db',
+      user: 'iam_api_app',
+      password: async () => 'iam-token',
+      ssl,
+    }).connect();
+
+    // pg forwards the object verbatim to tls.connect — the CA pin survives.
+    expect(state.options?.ssl).toEqual(ssl);
+  });
+
+  it('accepts and passes through an ssl object on the static schema path', async () => {
+    const ssl = { ca: 'PEM', rejectUnauthorized: true };
+    await new PostgresProvider(baseConfig({ ssl })).connect();
+    expect(state.options?.ssl).toEqual(ssl);
+  });
 });

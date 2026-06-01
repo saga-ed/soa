@@ -1,0 +1,93 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>vdev — virtual device check</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 2rem; background:#111; color:#eee; }
+  h1 { font-size: 1.2rem; }
+  label { display:inline-block; min-width: 5rem; }
+  select, button { font: inherit; padding: .3rem .5rem; margin: .2rem 0; }
+  video { width: 640px; max-width: 100%; background:#000; border-radius:6px; margin-top:1rem; }
+  .row { margin: .4rem 0; }
+  #meter { width: 640px; height: 14px; background:#222; border-radius:7px; overflow:hidden; }
+  #meterfill { height:100%; width:0; background:#3c6; }
+  #log { white-space: pre-wrap; color:#9ab; margin-top:1rem; font-size:13px; }
+</style>
+<h1>vdev — virtual camera / mic check</h1>
+<p>Pick a device below. Virtual ones appear as <b>Virtual Cam N</b> / <b>Virtual Mic N</b>
+once <code>vdev up</code> is running. Serve this file over http (browsers gate device
+labels behind a secure/localhost context):</p>
+<pre style="color:#7a8">  cd tools/virtual-devices &amp;&amp; python3 -m http.server 8099
+  # then open http://localhost:8099/webcam-test.html</pre>
+
+<div class="row"><label>Camera</label><select id="cam"></select></div>
+<div class="row"><label>Mic</label><select id="mic"></select></div>
+<div class="row"><button id="start">Start</button> <button id="stop">Stop</button>
+  <button id="refresh">Refresh devices</button></div>
+<div id="meter"><div id="meterfill"></div></div>
+<video id="preview" autoplay playsinline muted></video>
+<div id="log"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+const log = m => { logEl.textContent += m + "\n"; };
+let stream = null, audioCtx = null, raf = null;
+
+async function listDevices() {
+  const devs = await navigator.mediaDevices.enumerateDevices();
+  for (const [kind, sel] of [['videoinput', $('cam')], ['audioinput', $('mic')]]) {
+    sel.innerHTML = '';
+    devs.filter(d => d.kind === kind).forEach(d => {
+      const o = document.createElement('option');
+      o.value = d.deviceId;
+      o.textContent = d.label || `(${kind} ${d.deviceId.slice(0,8)})`;
+      sel.appendChild(o);
+    });
+  }
+  log(`found ${devs.filter(d=>d.kind==='videoinput').length} cameras, ` +
+      `${devs.filter(d=>d.kind==='audioinput').length} mics`);
+}
+
+function stop() {
+  if (raf) cancelAnimationFrame(raf), raf = null;
+  if (audioCtx) audioCtx.close(), audioCtx = null;
+  if (stream) stream.getTracks().forEach(t => t.stop()), stream = null;
+  $('preview').srcObject = null;
+  $('meterfill').style.width = '0';
+}
+
+async function start() {
+  stop();
+  const camId = $('cam').value, micId = $('mic').value;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: camId ? { deviceId: { exact: camId } } : true,
+      audio: micId ? { deviceId: { exact: micId } } : true,
+    });
+  } catch (e) { log('getUserMedia failed: ' + e); return; }
+  $('preview').srcObject = stream;
+  log('streaming: ' + stream.getTracks().map(t => t.kind + ':' + t.label).join(', '));
+  // simple audio level meter to confirm the mic carries the synthetic tone
+  const aTrack = stream.getAudioTracks()[0];
+  if (aTrack) {
+    audioCtx = new AudioContext();
+    const src = audioCtx.createMediaStreamSource(stream);
+    const an = audioCtx.createAnalyser(); an.fftSize = 512;
+    src.connect(an);
+    const buf = new Uint8Array(an.frequencyBinCount);
+    const tick = () => {
+      an.getByteTimeDomainData(buf);
+      let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+      $('meterfill').style.width = Math.min(100, peak / 128 * 100 * 2) + '%';
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+  await listDevices(); // labels populate after permission is granted
+}
+
+$('start').onclick = start;
+$('stop').onclick = stop;
+$('refresh').onclick = listDevices;
+listDevices();
+</script>

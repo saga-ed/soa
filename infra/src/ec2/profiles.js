@@ -56,7 +56,7 @@ function get_container_name(name, projects_dir) {
 
 // --- Snapshot (dump live DB → S3) ---
 
-export function snapshot_db({ name, profile, engine, port, db_name, db_user, db_password, bucket, projects_dir }) {
+export function snapshot_db({ name, profile, engine, port: _port, db_name, db_user, db_password, bucket, projects_dir }) {
     const eng = engines[engine];
     if (!eng) throw new Error(`Unknown engine: ${engine}`);
 
@@ -81,7 +81,7 @@ export function snapshot_db({ name, profile, engine, port, db_name, db_user, db_
     run('aws', ['s3', 'cp', tmp_file, s3_path]);
     console.log(`Uploaded snapshot to ${s3_path}`);
 
-    return { s3_path, size: readFileSync(tmp_file).length };
+    return { s3Path: s3_path, size: readFileSync(tmp_file).length };
 }
 
 function snapshot_mongo({ container, tmp_file, user, password }) {

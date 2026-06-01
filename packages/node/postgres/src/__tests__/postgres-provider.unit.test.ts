@@ -156,3 +156,54 @@ describe('PostgresProvider resilience', () => {
     vi.useRealTimers();
   });
 });
+
+describe('PostgresProvider config sources', () => {
+  it('accepts a PostgresPoolConfig with an async password callback (IAM/RDS path)', async () => {
+    const tokenFn = vi.fn(async () => 'iam-token');
+    const provider = new PostgresProvider({
+      instanceName: 'IamDB',
+      host: 'rds.example',
+      port: 5432,
+      database: 'chat',
+      user: 'chat_app',
+      password: tokenFn,
+      ssl: true,
+    });
+    await provider.connect();
+
+    expect(provider.instanceName).toBe('IamDB');
+    // Discrete options (no connectionString) so pg honors the callback —
+    // it is passed through untouched and invoked per new connection by pg.
+    expect(state.options?.password).toBe(tokenFn);
+    expect(state.options?.user).toBe('chat_app');
+    expect(state.options?.host).toBe('rds.example');
+    expect(state.options?.ssl).toBe(true);
+    expect(state.options?.keepAlive).toBe(true);
+    expect(state.options).not.toHaveProperty('connectionString');
+  });
+
+  it('applies pool-tuning defaults when a PostgresPoolConfig omits them', async () => {
+    await new PostgresProvider({
+      instanceName: 'D',
+      host: 'h',
+      port: 5432,
+      database: 'd',
+      user: 'u',
+      password: 'p',
+      ssl: false,
+    }).connect();
+
+    expect(state.options?.max).toBe(10);
+    expect(state.options?.idleTimeoutMillis).toBe(30_000);
+    expect(state.options?.connectionTimeoutMillis).toBe(10_000);
+  });
+
+  it('maps the static schema config (username + string password) onto pool options', async () => {
+    await new PostgresProvider(baseConfig({ ssl: true, poolSize: 7 })).connect();
+
+    expect(state.options?.user).toBe('tester'); // schema `username` -> pg `user`
+    expect(state.options?.password).toBe('secret');
+    expect(state.options?.ssl).toBe(true);
+    expect(state.options?.max).toBe(7);
+  });
+});

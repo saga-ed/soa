@@ -104,6 +104,16 @@ export interface PostgresPoolConfig {
   user: string;
   password: string | (() => Promise<string>);
   ssl: boolean;
+
+  // Optional pool tuning. `PostgresProvider` applies conservative defaults
+  // (matching `PostgresProviderSchema`) when these are omitted, so the
+  // loader output can be handed straight to the provider — including the
+  // IAM mirror/prod shape whose `password` is the async token callback.
+  poolSize?: number;
+  idleTimeoutMs?: number;
+  connectionTimeoutMs?: number;
+  statementTimeoutMs?: number;
+  lockTimeoutMs?: number;
 }
 
 const DEFAULT_REGION = 'us-west-2';

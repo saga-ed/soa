@@ -19,6 +19,13 @@ import type { PostgresProviderConfig } from './postgres-provider-config.js';
  *
  * Connection failures retry with exponential backoff (3 attempts, 1s
  * base) — matches the original implementation.
+ *
+ * Resilience: TCP keepAlive is enabled so half-open sockets (RDS
+ * failover, NAT/LB idle drops) are detected proactively, and an
+ * ``'error'`` listener is attached to the pool so an error on an *idle*
+ * pooled client cannot bubble out as an uncaught exception and crash the
+ * process. The pool self-heals — it discards the dead client and opens a
+ * fresh one on the next acquire — so no manual reconnect is required.
  */
 @injectable()
 export class PostgresProvider {
@@ -31,7 +38,11 @@ export class PostgresProvider {
   }
 
   async connect(): Promise<void> {
-    if (this._isConnected) return;
+    // Guard on the pool itself, not _isConnected. An idle-client error
+    // flips _isConnected to false (see the 'error' handler below) while
+    // the pool stays alive and self-heals; keying off _isConnected here
+    // would let a second connect() build a new pool and leak the first.
+    if (this.pool) return;
 
     const maxRetries = 3;
     const baseDelayMs = 1000;
@@ -43,15 +54,39 @@ export class PostgresProvider {
           max: this.config.poolSize,
           idleTimeoutMillis: this.config.idleTimeoutMs,
           connectionTimeoutMillis: this.config.connectionTimeoutMs,
+          // Detect half-open sockets (RDS failover, NAT/LB idle drops)
+          // proactively instead of only on the next query.
+          keepAlive: true,
+        });
+
+        // Without this listener, an error on an *idle* pooled client
+        // (RDS reboot/failover, network partition) is emitted on the Pool
+        // with no handler — Node re-throws it as an uncaught exception and
+        // crashes the process. Handle it: mark unhealthy + log. The pool
+        // discards the dead client and reconnects on the next acquire.
+        this.pool.on('error', (err: Error) => {
+          this._isConnected = false;
+          console.error(
+            `[PostgresProvider:${this.instanceName}] idle client error; ` +
+              `pool will reconnect on next use:`,
+            err,
+          );
         });
 
         if (this.config.statementTimeoutMs > 0 || this.config.lockTimeoutMs > 0) {
           this.pool.on('connect', (client: PoolClient) => {
+            // Fire-and-forget, but swallow rejections: an unhandled
+            // rejection here (SET against a dying backend) is another
+            // uncaught-exception path.
             if (this.config.statementTimeoutMs > 0) {
-              client.query(`SET statement_timeout = ${this.config.statementTimeoutMs}`);
+              client
+                .query(`SET statement_timeout = ${this.config.statementTimeoutMs}`)
+                .catch(() => {});
             }
             if (this.config.lockTimeoutMs > 0) {
-              client.query(`SET lock_timeout = ${this.config.lockTimeoutMs}`);
+              client
+                .query(`SET lock_timeout = ${this.config.lockTimeoutMs}`)
+                .catch(() => {});
             }
           });
         }

@@ -122,20 +122,48 @@ jobs:
         run: |
           set -e
 
+          # Every package, as a compact JSON array. The safe fallback whenever
+          # we can't reliably compute a diff.
+          ALL_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+
+          # Resolve changed packages from a turbo SCM diff against a base ref.
+          #
+          # A turbo failure or an unreachable base ref (shallow clone,
+          # force-push, freshly created branch) must NOT be silently treated as
+          # "no changes" — that skips EVERY publish, which is exactly how
+          # soa-postgres 0.1.2 failed to publish on merge. On any such
+          # uncertainty, fall back to ALL packages: the publish step is
+          # idempotent (npm publish skips versions that already exist), so a
+          # superset is safe, whereas an empty set silently drops real releases.
+          # stderr is surfaced (not /dev/null'd) so the cause is visible in logs.
+          changed_since() {
+            local base="$1"
+            if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+              echo "WARNING: base ref '${base}' is not reachable; publishing all packages" >&2
+              echo "$ALL_PACKAGES"
+              return 0
+            fi
+            local out
+            if ! out=$(pnpm turbo run build --dry=json --filter="...[${base}]"); then
+              echo "WARNING: turbo diff against '${base}' failed; publishing all packages" >&2
+              echo "$ALL_PACKAGES"
+              return 0
+            fi
+            echo "$out" | jq -r '.tasks[] | select(.package != "//") | .package' | sort -u | jq -R -s -c 'split("\n")[:-1]'
+          }
+
           # Get the list of changed packages
           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.force_publish_all }}" == "true" ]; then
             echo "Force publishing all packages requested"
-            # Get all package names
-            CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+            CHANGED_PACKAGES="$ALL_PACKAGES"
           elif [ "${{ github.event_name }}" == "push" ]; then
             # For push events, compare with previous commit
             BASE_REF="${{ github.event.before }}"
             if [ "$BASE_REF" == "0000000000000000000000000000000000000000" ]; then
-              # Initial commit, check all packages
-              CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+              # Initial push (no parent) — check all packages
+              CHANGED_PACKAGES="$ALL_PACKAGES"
             else
-              # Get changed packages using Turborepo
-              CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
+              CHANGED_PACKAGES=$(changed_since "$BASE_REF")
             fi
           elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # For manual triggers, get packages changed since last tag or main
@@ -145,10 +173,10 @@ jobs:
             else
               BASE_REF="origin/main"
             fi
-            CHANGED_PACKAGES=$(pnpm turbo run build --dry=json --filter="...[${BASE_REF}]" 2>/dev/null | jq -r '.tasks[] | select(.package != "//") | .package' | sort -u | jq -R -s -c 'split("\n")[:-1]' || echo "[]")
+            CHANGED_PACKAGES=$(changed_since "$BASE_REF")
           else
             # Default: check all packages
-            CHANGED_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
+            CHANGED_PACKAGES="$ALL_PACKAGES"
           fi
 
           echo "Changed packages: $CHANGED_PACKAGES"

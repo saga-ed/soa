@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { injectable } from 'inversify';
@@ -157,6 +157,12 @@ export class MongoProvider implements IMongoConnMgr {
     if (tlsCAContent) {
       const safeName = instanceName.replace(/[^a-zA-Z0-9_-]/g, '_');
       const path = join(tmpdir(), `saga-mongodb-ca-${safeName}.pem`);
+      // Idempotent across restarts: the previous run leaves this file mode
+      // 0o400 (read-only), so a plain writeFileSync would fail EACCES on the
+      // next boot (or whenever a provider with this instanceName is rebuilt).
+      // Remove any stale copy first, then write fresh. rmSync needs write
+      // perms on the dir (tmpdir), not the file, so the 0o400 mode is fine.
+      rmSync(path, { force: true });
       writeFileSync(path, tlsCAContent, { mode: 0o400 });
       return path;
     }

@@ -176,13 +176,18 @@ export function seed_after_start({ container, engine, seeds_dir, profile, db_use
 
 // --- Download profile seed from S3 ---
 
-export function download_profile_seed({ name, profile, engine, bucket, seeds_base }) {
+export function download_profile_seed({ name, profile, engine, bucket, seeds_base, source_name }) {
     const eng = engines[engine];
     if (!eng) throw new Error(`Unknown engine: ${engine}`);
 
     const ext = eng.seed_ext;
+    // The local seeds dir stays keyed by the TARGET db name; only the S3 source
+    // prefix is overridden when source_name (seedFrom) is provided, so a
+    // uniquely-named sandbox DB can restore a snapshot stored under a stable
+    // template name (e.g. programs-api-canonical). Used by both branches below.
+    const src = source_name || name;
     const seeds_dir = resolve(seeds_base, name);
-    const s3_path = `s3://${bucket}/${name}/profile-${profile}.${ext}`;
+    const s3_path = `s3://${bucket}/${src}/profile-${profile}.${ext}`;
 
     // Clear seeds dir
     if (existsSync(seeds_dir)) {

@@ -47,7 +47,7 @@ on:
         default: false
         type: boolean
       single_package:
-        description: "Publish ONLY this package path (e.g. packages/web/rum-util). Leave blank for the standard coordinated multi-package release."
+        description: "Publish ONLY this package path (e.g. packages/web/rum-util) at its ALREADY-COMMITTED version — bump it via a PR first, since main's ruleset blocks direct pushes. Blank = standard coordinated multi-package release."
         required: false
         default: ""
         type: string
@@ -287,29 +287,35 @@ jobs:
           PREID="${{ github.event.inputs.preid }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
-          # Publishable packages (not private). In single-package mode, bump only
-          # the requested package so the other packages keep their current version.
+          # Single-package mode publishes the version ALREADY COMMITTED on main.
+          # We can't bump-and-push here: main is guarded by a repository ruleset
+          # ("changes must be made through a pull request"), so the version is
+          # bumped via a normal PR before dispatch. Just read it and move on.
           if [ -n "$SINGLE_PACKAGE" ]; then
-            PUBLISHABLE_PACKAGES=("$SINGLE_PACKAGE")
-          else
-            PUBLISHABLE_PACKAGES=(
-              "packages/core/config"
-              "packages/node/logger"
-              "packages/node/pubsub-core"
-              "packages/node/api-util"
-              "packages/core/tgql-codegen"
-              "packages/core/trpc-base"
-              "packages/node/db"
-              "packages/node/api-core"
-              "packages/node/pubsub-client"
-              "packages/node/aws-util"
-              "packages/node/rabbitmq"
-              "packages/node/redis-core"
-              "packages/node/test-util"
-              "packages/core/fixture-deidentify"
-              "packages/node/mesh-fixture-cli"
-            )
+            NEW_VERSION=$(jq -r '.version' "$SINGLE_PACKAGE/package.json")
+            echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "📦 single-package mode: publishing committed version $NEW_VERSION of $SINGLE_PACKAGE (no bump/push)"
+            exit 0
           fi
+
+          # Multi-package coordinated release: bump every publishable package.
+          PUBLISHABLE_PACKAGES=(
+            "packages/core/config"
+            "packages/node/logger"
+            "packages/node/pubsub-core"
+            "packages/node/api-util"
+            "packages/core/tgql-codegen"
+            "packages/core/trpc-base"
+            "packages/node/db"
+            "packages/node/api-core"
+            "packages/node/pubsub-client"
+            "packages/node/aws-util"
+            "packages/node/rabbitmq"
+            "packages/node/redis-core"
+            "packages/node/test-util"
+            "packages/core/fixture-deidentify"
+            "packages/node/mesh-fixture-cli"
+          )
 
           # Build npm version command with preid for prerelease versions
           VERSION_CMD="npm version $VERSION_TYPE --no-git-tag-version"

@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-rum-util",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Datadog RUM wrapper with Saga conventions: singleton init, source-tagged errors/actions, silent no-op when unconfigured.",
   "type": "module",
   "main": "dist/index.js",

@@ -5,6 +5,7 @@ import { IMongoConnMgr } from '../i-mongo-conn-mgr.js';
 export class MockMongoProvider implements IMongoConnMgr {
   public readonly instanceName: string;
   private client: MongoClient | null = null;
+  private _connected = false;
   private mongoServer: MongoMemoryServer | null = null;
 
   constructor(instanceName: string = 'MockMongoDB') {
@@ -16,6 +17,7 @@ export class MockMongoProvider implements IMongoConnMgr {
     const uri = this.mongoServer.getUri();
     this.client = new MongoClient(uri);
     await this.client.connect();
+    this._connected = true;
   }
 
   async disconnect(): Promise<void> {
@@ -27,10 +29,21 @@ export class MockMongoProvider implements IMongoConnMgr {
       await this.mongoServer.stop();
       this.mongoServer = null;
     }
+    this._connected = false;
   }
 
   isConnected(): boolean {
-    return !!this.client && !(this.client as any).closed;
+    return this._connected;
+  }
+
+  async ping(): Promise<boolean> {
+    if (!this.client) return false;
+    try {
+      await this.client.db().command({ ping: 1 });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   getClient(): MongoClient {

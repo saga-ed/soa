@@ -91,10 +91,44 @@ export interface LoadPostgresConfigParams {
 }
 
 /**
+ * TLS options for a Postgres connection — a structural subset of Node's
+ * ``tls.ConnectionOptions`` that ``pg`` forwards verbatim to ``tls.connect``.
+ *
+ * Use this object form (instead of a bare ``true``) when the server cert
+ * chains to a root that is **not** in Node's default trust store — most
+ * notably to pin the Amazon RDS CA bundle for managed RDS:
+ *
+ *   {
+ *     ca: readFileSync(process.env.PG_RDS_CA_BUNDLE_PATH, 'utf8'),
+ *     rejectUnauthorized: true,
+ *   }
+ *
+ * ``ssl: true`` keeps full verification against Node's default CA bundle;
+ * ``ssl: false`` disables TLS (local dev).
+ */
+export interface PostgresSslConfig {
+  /** CA cert(s) to trust (PEM). Pin the RDS CA bundle here. */
+  ca?: string | Buffer | Array<string | Buffer>;
+  /** Verify the server cert against `ca` / the default store. Defaults true. */
+  rejectUnauthorized?: boolean;
+  /** Client cert (PEM) for mutual TLS. */
+  cert?: string | Buffer | Array<string | Buffer>;
+  /** Client private key (PEM) for mutual TLS. */
+  key?: string | Buffer | Array<string | Buffer>;
+  /** SNI / cert-identity hostname override. */
+  servername?: string;
+}
+
+/**
  * `pg.Pool`-compatible config returned by the loader. The `password`
  * field is a union: a static string for dev (parity secret) or an
  * async callback for mirror/prod (mints IAM token per new pool
  * connection). `pg.Pool` natively accepts both shapes.
+ *
+ * `ssl` is `boolean | PostgresSslConfig`: the loader returns a bare
+ * `true`/`false`, but a consumer may override it with a {@link
+ * PostgresSslConfig} (e.g. pinning the RDS CA bundle) before handing the
+ * config to {@link PostgresProvider}.
  */
 export interface PostgresPoolConfig {
   instanceName: string;
@@ -103,7 +137,7 @@ export interface PostgresPoolConfig {
   database: string;
   user: string;
   password: string | (() => Promise<string>);
-  ssl: boolean;
+  ssl: boolean | PostgresSslConfig;
 
   // Optional pool tuning. `PostgresProvider` applies conservative defaults
   // (matching `PostgresProviderSchema`) when these are omitted, so the

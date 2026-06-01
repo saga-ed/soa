@@ -10,6 +10,7 @@ export {
 export type {
   LoadPostgresConfigParams,
   PostgresPoolConfig,
+  PostgresSslConfig,
 } from './aws-postgres-loader.js';
 
 export const POSTGRES_PROVIDER = Symbol.for('PostgresProvider');

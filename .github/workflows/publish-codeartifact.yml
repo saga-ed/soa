@@ -46,6 +46,11 @@ on:
         required: false
         default: false
         type: boolean
+      single_package:
+        description: "Publish ONLY this package path (e.g. packages/web/rum-util). Leave blank for the standard coordinated multi-package release."
+        required: false
+        default: ""
+        type: string
 
 env:
   NODE_VERSION: "22"
@@ -54,6 +59,10 @@ env:
   CODEARTIFACT_DOMAIN: saga
   CODEARTIFACT_REPOSITORY: saga_js
   CODEARTIFACT_OWNER: "531314149529"
+  # When set (via the single_package dispatch input), every job scopes itself to
+  # this one package path instead of the standard coordinated multi-package release.
+  # Referenced as "$SINGLE_PACKAGE" in shell (never inline ${{ }}) to avoid injection.
+  SINGLE_PACKAGE: ${{ github.event.inputs.single_package }}
 
 permissions:
   id-token: write
@@ -118,6 +127,12 @@ jobs:
       - name: Build publishable packages
         run: |
           # Build first - required for type checking packages with internal deps
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+            echo "Single-package mode: building $PKG and its workspace deps"
+            pnpm turbo run build --filter="${PKG}..."
+            exit 0
+          fi
           pnpm turbo run build --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
             --filter=@saga-ed/soa-pubsub-core \
@@ -134,6 +149,11 @@ jobs:
 
       - name: Lint publishable packages
         run: |
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+            pnpm turbo run lint --filter="${PKG}"
+            exit 0
+          fi
           pnpm turbo run lint --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
             --filter=@saga-ed/soa-pubsub-core \
@@ -150,6 +170,11 @@ jobs:
 
       - name: Type check publishable packages
         run: |
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+            pnpm turbo run check-types --filter="${PKG}..."
+            exit 0
+          fi
           pnpm turbo run check-types --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
             --filter=@saga-ed/soa-pubsub-core \
@@ -166,6 +191,11 @@ jobs:
 
       - name: Test publishable packages
         run: |
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+            pnpm turbo run test --filter="${PKG}"
+            exit 0
+          fi
           # Note: soa-db excluded - its tests use mongodb-memory-server which
           # requires downloading MongoDB and times out in CI
           pnpm turbo run test --filter=@saga-ed/soa-config \
@@ -180,14 +210,21 @@ jobs:
             --filter=@saga-ed/soa-rabbitmq \
             --filter=@saga-ed/soa-redis-core \
             --filter=@saga-ed/soa-test-util
-            
+
+      # The full-repo gates below validate cross-package integrity for a
+      # coordinated release. In single-package mode they're skipped — the
+      # per-package steps above (with `...`) already cover the target + its deps,
+      # and a full-repo lint could fail on an unrelated package and block the publish.
       - name: Lint
+        if: ${{ github.event.inputs.single_package == '' }}
         run: pnpm turbo run lint
 
       - name: Type check
+        if: ${{ github.event.inputs.single_package == '' }}
         run: pnpm turbo run check-types
 
       - name: Build
+        if: ${{ github.event.inputs.single_package == '' }}
         run: pnpm turbo run build
 
   version-bump:
@@ -250,24 +287,29 @@ jobs:
           PREID="${{ github.event.inputs.preid }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
-          # Publishable packages (not private)
-          PUBLISHABLE_PACKAGES=(
-            "packages/core/config"
-            "packages/node/logger"
-            "packages/node/pubsub-core"
-            "packages/node/api-util"
-            "packages/core/tgql-codegen"
-            "packages/core/trpc-base"
-            "packages/node/db"
-            "packages/node/api-core"
-            "packages/node/pubsub-client"
-            "packages/node/aws-util"
-            "packages/node/rabbitmq"
-            "packages/node/redis-core"
-            "packages/node/test-util"
-            "packages/core/fixture-deidentify"
-            "packages/node/mesh-fixture-cli"
-          )
+          # Publishable packages (not private). In single-package mode, bump only
+          # the requested package so the other packages keep their current version.
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            PUBLISHABLE_PACKAGES=("$SINGLE_PACKAGE")
+          else
+            PUBLISHABLE_PACKAGES=(
+              "packages/core/config"
+              "packages/node/logger"
+              "packages/node/pubsub-core"
+              "packages/node/api-util"
+              "packages/core/tgql-codegen"
+              "packages/core/trpc-base"
+              "packages/node/db"
+              "packages/node/api-core"
+              "packages/node/pubsub-client"
+              "packages/node/aws-util"
+              "packages/node/rabbitmq"
+              "packages/node/redis-core"
+              "packages/node/test-util"
+              "packages/core/fixture-deidentify"
+              "packages/node/mesh-fixture-cli"
+            )
+          fi
 
           # Build npm version command with preid for prerelease versions
           VERSION_CMD="npm version $VERSION_TYPE --no-git-tag-version"
@@ -337,7 +379,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build all packages
-        run: pnpm turbo run build
+        run: |
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+            pnpm turbo run build --filter="${PKG}..."
+          else
+            pnpm turbo run build
+          fi
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -371,6 +419,12 @@ jobs:
 
           # Layer 2: Depends on Layer 1
           LAYER_2="packages/node/pubsub-client"
+
+          # Single-package mode: publish only the requested package (its deps are
+          # already published; an empty unquoted LAYER expands to zero iterations).
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            LAYER_0="$SINGLE_PACKAGE"; LAYER_1=""; LAYER_2=""
+          fi
 
           PUBLISH_FAILURES=0
 
@@ -455,7 +509,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build all packages
-        run: pnpm turbo run build
+        run: |
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+            pnpm turbo run build --filter="${PKG}..."
+          else
+            pnpm turbo run build
+          fi
 
       - name: Setup .npmrc for GitHub Packages
         run: |
@@ -467,6 +527,11 @@ jobs:
           LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base"
           LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
           LAYER_2="packages/node/pubsub-client"
+
+          # Single-package mode: publish only the requested package.
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            LAYER_0="$SINGLE_PACKAGE"; LAYER_1=""; LAYER_2=""
+          fi
 
           PUBLISH_FAILURES=0
 
@@ -525,6 +590,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${{ needs.version-bump.outputs.new-version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ github.event.inputs.publish_target }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$SINGLE_PACKAGE" ]; then
+            echo "**Scope:** single package \`$SINGLE_PACKAGE\`" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "**Version Bump:** ${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
           if [[ "${{ github.event.inputs.version }}" == pre* ]]; then
             echo "**Prerelease ID:** ${{ github.event.inputs.preid }}" >> $GITHUB_STEP_SUMMARY

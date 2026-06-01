@@ -35,10 +35,21 @@ import type { MongoProviderConfig } from './mongo-provider-config.js';
  * env vars or static wiring.
  */
 export interface LoadMongoConfigParams {
-  /** Mirror-current is the dev-account mirror; shared is staging/prod. */
+  /** Mirror-current is the dev-account mirror (admin); shared is mirror/prod. */
   scope?: 'shared' | 'mirror-current';
-  /** Required when scope is 'shared'. Ignored for 'mirror-current'. */
-  env?: 'staging' | 'prod';
+  /**
+   * Required when scope is 'shared'. Ignored for 'mirror-current'.
+   *
+   * - `'mirror'` — canonical name for the prod-shape RDS-managed mirror.
+   * - `'prod'`   — production.
+   * - `'staging'` — deprecated alias for `'mirror'`; emits a warning.
+   *                 Removed in next major.
+   *
+   * Until the SSM/Secrets-Manager rename ships, `'mirror'` resolves to
+   * the same underlying paths as `'staging'` ({@link _STAGING_PATH_PREFIX}
+   * below). This is a one-cycle compat shim.
+   */
+  env?: 'mirror' | 'prod' | 'staging';
   /** Project name (e.g. 'ledger-api'). Hyphens become underscores in db/user names. */
   project: string;
   /** Name to give the MongoProvider instance. */
@@ -63,21 +74,68 @@ export async function loadMongoConfigFromAws(
 
   if (scope === 'shared') {
     const env = params.env;
-    if (env !== 'staging' && env !== 'prod') {
-      throw new Error(`scope='shared' requires env='staging'|'prod', got: ${String(env)}`);
+    if (env !== 'mirror' && env !== 'prod' && env !== 'staging') {
+      throw new Error(
+        `scope='shared' requires env='mirror'|'prod' (or deprecated 'staging'), got: ${String(env)}`,
+      );
     }
 
+    if (env === 'staging') {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[@saga-ed/soa-db] env='staging' is deprecated; use env='mirror'. " +
+          "Will be removed in next major.",
+      );
+    }
+
+    // env='mirror' reads from the daily-refresh workflow's paths:
+    //   SSM:    /mirror/current/mongodb-shared/{endpoint,port,replica-set-name,ca-secret-arn}
+    //   Secret: /mirror/current/{project}-mongo-password
+    // env='prod' uses the canonical prod paths.
+    // env='staging' (deprecated) keeps the legacy paths under /shared/infra/staging/*.
+    if (env === 'mirror') {
+      const [endpoint, port, replicaSetName, caSecretArn] = await Promise.all([
+        readSsm(ssm, '/mirror/current/mongodb-shared/endpoint'),
+        readSsm(ssm, '/mirror/current/mongodb-shared/port'),
+        readSsm(ssm, '/mirror/current/mongodb-shared/replica-set-name'),
+        readSsm(ssm, '/mirror/current/mongodb-shared/ca-secret-arn'),
+      ]);
+
+      const [caBundle, projectCreds] = await Promise.all([
+        readSecretJson<{ ca_cert: string }>(sm, caSecretArn),
+        readSecretJson<{ username: string; password: string }>(
+          sm,
+          `/mirror/current/${project}-mongo-password`,
+        ),
+      ]);
+
+      return {
+        configType: 'MONGO',
+        instanceName,
+        hosts: [`${endpoint}:${port}`],
+        database: dbName,
+        username: projectCreds.username,
+        password: projectCreds.password,
+        replicaSet: replicaSetName,
+        authSource: dbName,
+        tls: true,
+        tlsCAContent: caBundle.ca_cert,
+      };
+    }
+
+    const pathSegment = env === 'prod' ? 'prod' : 'staging';
+
     const [hostsCsv, replicaSetName, caSecretArn] = await Promise.all([
-      readSsm(ssm, `/shared/infra/${env}/mongodb-hosts`),
-      readSsm(ssm, `/shared/infra/${env}/mongodb-replica-set-name`),
-      readSsm(ssm, `/shared/infra/${env}/mongodb-ca-secret-arn`),
+      readSsm(ssm, `/shared/infra/${pathSegment}/mongodb-hosts`),
+      readSsm(ssm, `/shared/infra/${pathSegment}/mongodb-replica-set-name`),
+      readSsm(ssm, `/shared/infra/${pathSegment}/mongodb-ca-secret-arn`),
     ]);
 
     const [caBundle, projectCreds] = await Promise.all([
       readSecretJson<{ ca_cert: string }>(sm, caSecretArn),
       readSecretJson<{ username: string; password: string }>(
         sm,
-        `${env}/mongodb-shared/${project}-password`,
+        `${pathSegment}/mongodb-shared/${project}-password`,
       ),
     ]);
 

@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { injectable } from 'inversify';
@@ -10,6 +10,7 @@ import { IMongoConnMgr } from './i-mongo-conn-mgr.js';
 export class MongoProvider implements IMongoConnMgr {
   public readonly instanceName: string;
   private client: MongoClient | null = null;
+  private _connected = false;
   private config: MongoProviderConfig;
   // Resolved CA path — either the caller-provided tlsCAFile, or a tmp path
   // we wrote tlsCAContent to. Computed once at construction so writes don't
@@ -25,8 +26,32 @@ export class MongoProvider implements IMongoConnMgr {
   async connect(): Promise<void> {
     if (this.isConnected()) return;
     const uri = this._buildConnectionString();
-    this.client = null;
-    this.client = await new MongoClient(uri, this.config.options).connect();
+
+    const maxRetries = 3;
+    const baseDelayMs = 1000;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.client = await new MongoClient(uri, this.config.options).connect();
+        this._connected = true;
+        return;
+      } catch (err) {
+        this.client = null;
+        this._connected = false;
+        // The driver's own server selection (serverSelectionTimeoutMS,
+        // default ~30s) already absorbs transient unavailability within a
+        // single connect(). This loop adds coverage for connects that fail
+        // fast and then recover (e.g. a brief DNS/RS-election blip at boot).
+        // Auth/authz failures are NOT transient — retrying just burns
+        // another full server-selection window, so fail fast on those.
+        if (MongoProvider.isNonRetryableAuthError(err) || attempt === maxRetries) {
+          throw err;
+        }
+        await new Promise((resolve) =>
+          setTimeout(resolve, baseDelayMs * Math.pow(2, attempt - 1)),
+        );
+      }
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -34,10 +59,32 @@ export class MongoProvider implements IMongoConnMgr {
       await this.client.close();
       this.client = null;
     }
+    this._connected = false;
   }
 
+  /**
+   * Whether connect() has succeeded and disconnect() hasn't run. This is a
+   * cheap synchronous flag, not a live reachability check — the driver can
+   * lose every server while this still reads true. For a real probe (e.g.
+   * a readiness endpoint) use {@link ping}.
+   */
   isConnected(): boolean {
-    return !!this.client && !(this.client as any).closed;
+    return this._connected;
+  }
+
+  /**
+   * Real liveness probe: issues an ``admin.ping`` against the current
+   * topology, confirming a server is reachable right now. Returns false
+   * instead of throwing so it's safe to call from health checks.
+   */
+  async ping(): Promise<boolean> {
+    if (!this.client) return false;
+    try {
+      await this.client.db().command({ ping: 1 });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   getClient(): MongoClient {
@@ -45,6 +92,15 @@ export class MongoProvider implements IMongoConnMgr {
       throw new Error('MongoClient is not connected');
     }
     return this.client;
+  }
+
+  /**
+   * MongoServerError auth/authz failures (AuthenticationFailed=18,
+   * Unauthorized=13) won't fix themselves on retry.
+   */
+  private static isNonRetryableAuthError(err: unknown): boolean {
+    const code = (err as { code?: number | string } | null)?.code;
+    return code === 18 || code === 13 || code === '18' || code === '13';
   }
 
   /**
@@ -101,6 +157,12 @@ export class MongoProvider implements IMongoConnMgr {
     if (tlsCAContent) {
       const safeName = instanceName.replace(/[^a-zA-Z0-9_-]/g, '_');
       const path = join(tmpdir(), `saga-mongodb-ca-${safeName}.pem`);
+      // Idempotent across restarts: the previous run leaves this file mode
+      // 0o400 (read-only), so a plain writeFileSync would fail EACCES on the
+      // next boot (or whenever a provider with this instanceName is rebuilt).
+      // Remove any stale copy first, then write fresh. rmSync needs write
+      // perms on the dir (tmpdir), not the file, so the 0o400 mode is fine.
+      rmSync(path, { force: true });
       writeFileSync(path, tlsCAContent, { mode: 0o400 });
       return path;
     }

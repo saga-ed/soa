@@ -118,4 +118,17 @@ describe('MongoProvider._buildConnectionString', () => {
     const caFile = params.get('tlsCAFile');
     expect(caFile).toMatch(/saga-mongodb-ca-cert-from-content-test\.pem$/);
   });
+
+  it('re-writing the CA file is idempotent across constructions (restart-safe)', () => {
+    const cfg = {
+      ...baseConfig,
+      instanceName: 'restart-safe-test',
+      tls: true,
+      tlsCAContent: '-----BEGIN CERTIFICATE-----\nidempotent\n-----END CERTIFICATE-----\n',
+    };
+    // The first write leaves the file mode 0o400; constructing again (as a
+    // restarted process would) must not fail with EACCES.
+    new MongoProvider(cfg);
+    expect(() => new MongoProvider(cfg)).not.toThrow();
+  });
 });

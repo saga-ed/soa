@@ -58,7 +58,8 @@ Adopting this in a new app (e.g. `qboard_connectv3`, `janus_login`):
 4. [Vite config](#4-vite-config) — propagate `VITE_DD_*` and `__APP_VERSION__`
 5. [Ambient types](#5-ambient-types) — declare `__APP_VERSION__` and `ImportMetaEnv`
 6. [CSP](#6-csp-additions) — allow Datadog intake
-7. [Bootstrap](#7-bootstrap-pattern) — `initRum` + wrap bootstrap catches with `addRumError`
+7. [Backend CORS](#7-backend-cors) — allow the 7 tracing headers on every backend `allowedTracingUrls` hits
+8. [Bootstrap](#8-bootstrap-pattern) — `initRum` + wrap bootstrap catches with `addRumError`
 
 Reference implementation: saga-dash —
 [`apps/web/dash/src/lib/rum.ts`](https://github.com/saga-ed/saga-dash/blob/main/apps/web/dash/src/lib/rum.ts)
@@ -192,7 +193,60 @@ If you already have a `connect-src` for backend APIs, append the two Datadog
 hosts to it — don't add a second `connect-src` directive (the browser will use
 only the most restrictive intersection).
 
-### 7. Bootstrap pattern
+### 7. Backend CORS
+
+`allowedTracingUrls` (used in [Bootstrap](#8-bootstrap-pattern) below) makes the
+RUM SDK inject **distributed-tracing headers onto every cross-origin `fetch`/XHR**
+whose URL matches. Every backend the frontend calls cross-origin must list all
+seven in its CORS `allowedHeaders`, or the browser fails the preflight — and the
+CORS error only ever names *one* missing header even though any single missing
+one fails the whole request:
+
+```
+traceparent
+tracestate
+x-datadog-trace-id
+x-datadog-parent-id
+x-datadog-origin
+x-datadog-sampling-priority
+x-datadog-tags
+```
+
+Express `cors` example:
+
+```ts
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+  allowedHeaders: [
+    'Content-Type', 'Authorization', /* …your existing headers… */
+    'traceparent', 'tracestate', 'x-datadog-trace-id', 'x-datadog-parent-id',
+    'x-datadog-origin', 'x-datadog-sampling-priority', 'x-datadog-tags',
+  ],
+}));
+```
+
+Handlers that **echo** `Access-Control-Request-Headers` back (instead of using a
+static allowlist) are covered automatically and need no change.
+
+**⚠️ Validate on main/stable, not previews.** A CORS preflight (`OPTIONS`) is sent
+by the browser *without cookies and without custom headers* (per the Fetch spec),
+so cookie/header-based preview routing (`x-saga-preview-*`) never applies to it —
+the preflight always hits the **default (main/stable)** target. Pointing a
+frontend preview at a backend preview does NOT exercise the preview's CORS code.
+Verify with a direct `OPTIONS` against the stable host:
+
+```bash
+curl -sD - -o /dev/null -X OPTIONS https://<backend-host>/<path> \
+  -H 'Origin: https://<frontend-host>' \
+  -H 'Access-Control-Request-Method: GET' \
+  -H 'Access-Control-Request-Headers: x-datadog-origin,traceparent' \
+  | grep -i access-control-allow-headers
+```
+
+Tracking issue + per-service status: [hipponot/iac#358](https://github.com/hipponot/iac/issues/358).
+
+### 8. Bootstrap pattern
 
 Call `initRum` once at module load — the app entry: `main.ts` for vanilla Vite,
 `+layout.ts` for SvelteKit.

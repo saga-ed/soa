@@ -69,19 +69,38 @@ open_url() {
 }
 
 # Best-effort: warn if the browser that will be used is a sandboxed (snap/flatpak)
-# build, since JumpCloud Go can't run there. Never fails the script.
+# build, since JumpCloud Go can't run there. Resolves $BROWSER, or the xdg default's
+# Exec= line, down to a real binary and checks its path. Never fails the script.
+# (Advisory only -- it won't catch a snap /usr/bin/firefox wrapper shim, but the
+# login itself works either way, so a missed hint just means no proactive nudge.)
 warn_if_sandboxed_browser() {
-    local b cmd
+    local b cmd target df desktop label sandboxed=0
     if [[ -n "$BROWSER" ]]; then
-        b="${BROWSER%%:*}"; b="${b%% *}"        # strip args / %s
+        b="${BROWSER%%:*}"; b="${b%% *}"            # first list entry, strip args/%s
+        label="$BROWSER"
+        cmd="$(command -v "$b" 2>/dev/null || echo "$b")"
     else
-        b="$(xdg-settings get default-web-browser 2>/dev/null || true)"
+        desktop="$(xdg-settings get default-web-browser 2>/dev/null || true)"
+        label="$desktop"
+        if [[ "$desktop" == *_*.desktop ]]; then     # snap desktop ids look like name_name.desktop
+            sandboxed=1
+        else
+            for d in "$HOME/.local/share/applications" /usr/local/share/applications \
+                     /usr/share/applications /var/lib/snapd/desktop/applications; do
+                [[ -f "$d/$desktop" ]] && { df="$d/$desktop"; break; }
+            done
+            # pull the binary out of the .desktop Exec= line (awk, no grep dependency)
+            [[ -n "$df" ]] && cmd="$(awk '/^Exec=/{sub(/^Exec=/,"",$0); sub(/ .*/,"",$0); print; exit}' "$df")"
+        fi
     fi
-    [[ -z "$b" ]] && return 0
-    cmd="$(command -v "${b%.desktop}" 2>/dev/null || true)"
-    if [[ "$b" == *snap* || "$b" == firefox_firefox.desktop || "$b" == chromium_chromium.desktop \
-          || "$cmd" == /snap/* || "$cmd" == /var/lib/flatpak/* ]]; then
-        echo -e "${YELLOW}  Heads up: your browser ($b) looks like a snap/flatpak build.${NC}"
+
+    if [[ $sandboxed -eq 0 && -n "$cmd" ]]; then
+        target="$(readlink -f "$cmd" 2>/dev/null || echo "$cmd")"
+        [[ "$cmd" == /snap/* || "$target" == /snap/* || "$target" == */flatpak/* ]] && sandboxed=1
+    fi
+
+    if [[ $sandboxed -eq 1 ]]; then
+        echo -e "${YELLOW}  Heads up: your browser (${label:-unknown}) looks like a snap/flatpak build.${NC}"
         echo -e "  JumpCloud Go's one-tap won't work there — you'll get the normal JumpCloud"
         echo -e "  password + MFA form instead (that works fine). For one-tap, use a .deb browser"
         echo -e "  and set ${GREEN}BROWSER=google-chrome${NC}. Setup: ${BLUE}https://github.com/hipponot/nimbee/wiki/JumpCloud-Go-Setup${NC}"

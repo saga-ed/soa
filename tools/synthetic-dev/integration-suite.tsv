@@ -1,0 +1,24 @@
+# integration-suite.tsv — the pinned set of not-yet-landed PRs the synthetic-dev
+# stack runs against. `refresh-suite.sh` reads this and rebuilds each repo's
+# local/integration branch as origin/main + exactly these PRs (via
+# refresh-integration.sh --prs), so every engineer lands in the SAME state.
+#
+# Why pin instead of the default `gh pr list --author @me`? Two reasons:
+#   1. The default is per-author — Adam's @me ≠ Sean's @me, so they'd never
+#      match without pinning.
+#   2. Even for one author, the running stack uses a CURATED subset: snapshot-
+#      rename, prod-only caps, and WIP branches are intentionally EXCLUDED.
+#      Pinning is the only way to reproduce that exact subset.
+#
+# Format: <repo><TAB><comma-separated PR numbers>.  '#' comments + blank lines
+# ignored. Repos not listed (soa, student-data-system) stay on origin/main.
+#
+# MAINTENANCE: when a PR merges to main, delete it here (sibling repos pull main
+# in up.sh's prep, so the fix arrives via main and no longer needs replaying).
+# Snapshot as of 2026-06-02 — see decisions/d1.8.
+# (2026-06-02 landed on main, dropped: rostering #366; saga-dash #124,#130,#132,#133.)
+# (2026-06-02 saga-dash #131 dropped — PR CLOSED: #129 fixed by rostering#366;
+#  "remember district" re-homed server-side as saga-dash#138.)
+# (2026-06-02 program-hub #126 dropped — landed on main; program-hub back on main.)
+
+saga-dash	136

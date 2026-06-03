@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# verify.sh — assert the synthetic-dev stack is fully up and seeded.
+#
+# Unlike `up.sh --status` (which just prints), this EXITS NON-ZERO on any red,
+# so it's a one-shot "is my setup correct?" gate for a new engineer (or CI).
+# Checks:
+#   • all six service health endpoints return 200,
+#   • the mesh Postgres is reachable + the iam roster is seeded (users > 0),
+#   • SOURCE POSTURE (manifest-aware): each sibling repo is on the branch the
+#     integration suite expects, and every pinned PR is actually merged into
+#     its local/integration. This is what makes "same state as the team" an
+#     assertion, not a hope — health alone passes even on stale/wrong code.
+#     (Caveat: it verifies the CHECKOUT; a running service built before a
+#     refresh can still lag — restart/HMR closes that. See getting-started.md.)
+#
+# Usage:  ./verify.sh        (run after ./up.sh up --reset --seed roster)
+#   DEV=~/work ./verify.sh   non-default sibling-repo parent
+# ─────────────────────────────────────────────────────────────────────────────
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MANIFEST="$SCRIPT_DIR/integration-suite.tsv"
+DEV=${DEV:-$HOME/dev}
+# Repos refresh-suite manages / up.sh builds from sibling branches. A managed
+# repo with manifest pins is expected on local/integration (with those PRs
+# merged); without pins, on main. soa + student-data-system are always on main.
+MANAGED_REPOS="rostering program-hub saga-dash"
+ALWAYS_MAIN_REPOS="soa student-data-system"
+
+pass=0; fail=0
+okline()  { printf "  \033[32m✓\033[0m %s\n" "$*"; pass=$((pass+1)); }
+badline() { printf "  \033[31m✗\033[0m %s\n" "$*"; fail=$((fail+1)); }
+
+probe(){ # name port path
+  local name=$1 port=$2 path=$3 code
+  # curl's -w always emits a code (000 on connect failure); it exits non-zero
+  # then, but we don't `set -e`, so capture it directly. ${code:-000} covers
+  # the degenerate no-curl case without doubling the 000.
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://localhost:$port$path" 2>/dev/null); code=${code:-000}
+  if [[ "$code" == 200 ]]; then okline "$(printf '%-15s :%s%s → 200' "$name" "$port" "$path")"
+  else badline "$(printf '%-15s :%s%s → %s (expected 200)' "$name" "$port" "$path" "$code")"; fi
+}
+
+printf "\033[1m── service health ──\033[0m\n"
+probe iam-api        3010 /health
+probe sis-api        3100 /health
+probe programs-api   3006 /health
+probe scheduling-api 3008 /health
+probe ads-adm-api    5005 /health
+probe saga-dash      8900 /
+
+printf "\033[1m── data ──\033[0m\n"
+users=$(docker exec soa-postgres-1 psql -U iam -d iam_local -tAc "SELECT count(*) FROM users" 2>/dev/null || echo "")
+if [[ -z "$users" ]]; then
+  badline "iam_local unreachable (is the mesh up?)"
+elif [[ "$users" -gt 0 ]]; then
+  okline "iam roster seeded — users=$users"
+else
+  badline "iam roster EMPTY (users=0) — run: ./up.sh --reset --seed roster"
+fi
+
+# sis_db schema present (sis-api's reconciliation tables)
+if docker exec soa-postgres-1 psql -U postgres_admin -d sis_db -tAc \
+     "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" 2>/dev/null | grep -q t; then
+  okline "sis_db migrated"
+else
+  badline "sis_db not migrated (run ./up.sh up — prep deploys the schema)"
+fi
+
+# ── source posture (manifest-aware) ──────────────────────────────────
+# Read the pinned suite, then assert each repo's checkout matches it. A repo
+# on the wrong branch — or on local/integration but missing a pinned PR (stale,
+# forgot to re-run refresh-suite) — fails here even though health is green.
+printf "\033[1m── source posture ──\033[0m\n"
+declare -A PINS=()
+if [[ -f "$MANIFEST" ]]; then
+  while IFS=$'\t' read -r repo prs; do
+    repo="${repo//[[:space:]]/}"; [[ -z "$repo" ]] && continue
+    PINS["$repo"]="${prs//[[:space:]]/}"
+  done < <(grep -vE '^\s*(#|$)' "$MANIFEST")
+else
+  badline "manifest not found: $MANIFEST"
+fi
+
+# Flag any manifest repo we don't know how to posture-check (avoid silent skips).
+for repo in "${!PINS[@]}"; do
+  case " $MANAGED_REPOS " in *" $repo "*) ;; *) badline "manifest pins '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it"; esac
+done
+
+on_branch(){ git -C "$DEV/$1" branch --show-current 2>/dev/null; }
+
+check_posture(){ # repo expected_branch
+  local repo=$1 want=$2 dir="$DEV/$repo" have
+  [[ -d "$dir/.git" ]] || { badline "$repo: not a git repo at $dir"; return; }
+  have=$(on_branch "$repo")
+  if [[ "$have" == "$want" ]]; then okline "$(printf '%-20s on %s' "$repo" "$want")"
+  else badline "$(printf '%-20s on '\''%s'\'' (expected '\''%s'\'')' "$repo" "$have" "$want")"; fi
+}
+
+# pinned PR actually merged into the current checkout? (resolve #→head SHA via gh)
+check_pin_merged(){ # repo pr#
+  local repo=$1 n=$2 dir="$DEV/$repo" oid
+  oid=$( cd "$dir" && gh pr view "$n" --json headRefOid --jq '.headRefOid' 2>/dev/null || true )
+  if [[ -z "$oid" ]]; then badline "$repo #$n: couldn't resolve head via gh (auth? PR exists?)"; return; fi
+  if git -C "$dir" merge-base --is-ancestor "$oid" HEAD 2>/dev/null; then
+    okline "$(printf '%-20s #%s merged in' "$repo" "$n")"
+  else
+    badline "$(printf '%-20s #%s NOT in checkout — run ./refresh-suite.sh' "$repo" "$n")"
+  fi
+}
+
+for repo in $MANAGED_REPOS; do
+  prs="${PINS[$repo]:-}"
+  if [[ -n "$prs" ]]; then
+    check_posture "$repo" "local/integration"
+    if [[ "$(on_branch "$repo")" == "local/integration" ]]; then   # only meaningful if branch is right
+      IFS=',' read -ra nums <<<"$prs"
+      for n in "${nums[@]}"; do [[ -n "$n" ]] && check_pin_merged "$repo" "$n"; done
+    fi
+  else
+    check_posture "$repo" "main"
+  fi
+done
+for repo in $ALWAYS_MAIN_REPOS; do check_posture "$repo" "main"; done
+
+printf "\n"
+if [[ $fail -eq 0 ]]; then
+  printf "\033[32m✓ all %d checks passed — stack is ready\033[0m\n" "$pass"; exit 0
+else
+  printf "\033[31m✗ %d/%d checks failed\033[0m — tail /tmp/sds-synthetic/<service>.log for reds\n" "$fail" "$((pass+fail))"; exit 1
+fi

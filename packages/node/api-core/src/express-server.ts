@@ -1,11 +1,22 @@
 import express, { Application } from 'express';
 import cors from 'cors';
 import { injectable, inject } from 'inversify';
+import { DATADOG_RUM_TRACING_HEADERS } from '@saga-ed/soa-api-util';
 import type { ExpressServerConfig } from './express-server-schema.js';
 import type { ILogger } from '@saga-ed/soa-logger';
 import { useContainer, useExpressServer, getMetadataArgsStorage } from 'routing-controllers';
 import { Container } from 'inversify';
 import { SectorsController } from './sectors-controller.js';
+
+// Default CORS `Access-Control-Allow-Headers`: the baseline request headers
+// every Saga API accepts, plus the Datadog browser-RUM distributed-tracing
+// headers. Once a frontend enables RUM, those headers ride on every cross-origin
+// request and the browser fails the preflight if any one is missing — so
+// allowing them by default keeps RUM-instrumented frontends working with no
+// per-service config. Services needing extra headers set `allowedHeaders` in
+// their ExpressServerConfig (spread `DATADOG_RUM_TRACING_HEADERS` to keep RUM
+// working). See hipponot/iac#358.
+const DEFAULT_ALLOWED_HEADERS: string[] = ['Content-Type', 'Authorization', ...DATADOG_RUM_TRACING_HEADERS];
 
 @injectable()
 export class ExpressServer {
@@ -29,12 +40,14 @@ export class ExpressServer {
     //   any exact match or subdomain of a listed domain is allowed.
     // When omitted/empty, defaults to origin: true (reflect any origin) for backward compatibility.
     // credentials is always true — Saga apps use cross-origin cookie auth.
+    // allowedHeaders defaults to DEFAULT_ALLOWED_HEADERS (baseline + Datadog RUM);
+    // services override via the `allowedHeaders` config field.
     const domains = this.config.corsAllowedDomains ?? [];
 
     const corsOptions: cors.CorsOptions = {
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: this.config.allowedHeaders ?? DEFAULT_ALLOWED_HEADERS,
     };
 
     if (domains.length > 0) {

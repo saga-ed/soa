@@ -21,6 +21,13 @@ export const ExpressServerSchema = z.object({
   corsAllowedDomains: z
     .array(z.string())
     .optional(),
+  // CORS `Access-Control-Allow-Headers`. When omitted, defaults to the baseline
+  // request headers plus the Datadog RUM tracing headers (see ExpressServer).
+  // Set this to override — spread `DATADOG_RUM_TRACING_HEADERS` from
+  // `@saga-ed/soa-api-util` to keep Datadog browser RUM working.
+  allowedHeaders: z
+    .array(z.string())
+    .optional(),
 });
 
 export type ExpressServerConfig = z.infer<typeof ExpressServerSchema>;

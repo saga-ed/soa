@@ -7,6 +7,7 @@ import { TestSector } from './test-sector.js';
 import { fetch } from 'undici';
 import { useContainer, createExpressServer } from 'routing-controllers';
 import { ExpressServer } from '../express-server.js';
+import { DATADOG_RUM_TRACING_HEADERS } from '@saga-ed/soa-api-util';
 import { JsonController, Get, Post, Body } from 'routing-controllers';
 
 function getRandomPort() {
@@ -183,6 +184,7 @@ describe('ExpressServer (integration)', () => {
     async function withCorsServer(
       domains: string[] | undefined,
       fn: (port: number, warnings: string[]) => Promise<void>,
+      extraConfig: Record<string, unknown> = {},
     ) {
       const container = new Container();
       const warnings: string[] = [];
@@ -199,6 +201,7 @@ describe('ExpressServer (integration)', () => {
         logLevel: 'info' as const,
         name: 'CORS Test Server',
         ...(domains !== undefined ? { corsAllowedDomains: domains } : {}),
+        ...extraConfig,
       };
 
       container.bind('ExpressServerConfig').toConstantValue(config);
@@ -277,6 +280,49 @@ describe('ExpressServer (integration)', () => {
         expect(res.headers.get('access-control-allow-origin')).toBe('https://coach.saga.org');
         expect(res.headers.get('access-control-allow-credentials')).toBe('true');
         expect(res.headers.get('access-control-allow-methods')).toContain('POST');
+      });
+    });
+
+    describe('allowed headers (Datadog RUM)', () => {
+      it('default allow-headers include the baseline + every Datadog RUM tracing header', async () => {
+        await withCorsServer(['saga.org'], async (port) => {
+          const res = await fetch(`http://localhost:${port}/simple/`, {
+            method: 'OPTIONS',
+            headers: {
+              Origin: 'https://coach.saga.org',
+              'Access-Control-Request-Method': 'GET',
+              'Access-Control-Request-Headers': 'x-datadog-trace-id',
+            },
+          });
+          const allow = res.headers.get('access-control-allow-headers') ?? '';
+          expect(allow).toContain('Content-Type');
+          expect(allow).toContain('Authorization');
+          for (const header of DATADOG_RUM_TRACING_HEADERS) {
+            expect(allow).toContain(header);
+          }
+        });
+      });
+
+      it('config.allowedHeaders overrides the default (replaces, not merges)', async () => {
+        await withCorsServer(
+          ['saga.org'],
+          async (port) => {
+            const res = await fetch(`http://localhost:${port}/simple/`, {
+              method: 'OPTIONS',
+              headers: {
+                Origin: 'https://coach.saga.org',
+                'Access-Control-Request-Method': 'GET',
+                'Access-Control-Request-Headers': 'x-custom-header',
+              },
+            });
+            const allow = res.headers.get('access-control-allow-headers') ?? '';
+            expect(allow).toContain('X-Custom-Header');
+            // A caller-supplied list fully replaces the default — Datadog headers
+            // are not auto-merged, so a service overriding must spread them itself.
+            expect(allow).not.toContain('x-datadog-trace-id');
+          },
+          { allowedHeaders: ['Content-Type', 'X-Custom-Header'] },
+        );
       });
     });
   });

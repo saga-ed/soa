@@ -29,6 +29,12 @@ import { checkSeedIdContract } from '@saga-ed/seed-ids-kit/contract';
 ```
 
 - **`uuidv5(name, namespace)`** — RFC 4122 v5 (SHA-1) UUID, browser-safe.
+  **Deterministic** — same input, same id. The basis of the seed-ids contract.
+- **`uuidv7()`** — RFC 9562 v7, **time-ordered** (48-bit ms timestamp + random).
+  For **runtime-generated primary keys**, where time-ordering improves DB index
+  locality. **Not** for seed ids — it is non-deterministic (no name input), so
+  independent services can't reproduce the same id. `uuidv7(timestamp?)` exposes
+  the timestamp only for testing/backfill.
 - **`makeHashDeriver(rootNamespace)`** — the **hash** strategy. `derive(key)` is
   order-independent; any service computes the same id from a stable key. Use for
   **new** domains. `rootNamespace` is the contract — never change it.

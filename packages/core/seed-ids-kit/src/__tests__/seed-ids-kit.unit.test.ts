@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { uuidv5, makeHashDeriver, makePositionDeriver, checkSeedIdContract } from '../index.js';
+import { uuidv5, uuidv7, makeHashDeriver, makePositionDeriver, checkSeedIdContract } from '../index.js';
 
 // The root namespace + known literals from rostering's iam-seed-ids, frozen on
 // origin/main. These are the regression oracle: if the browser-safe uuidv5 here
@@ -31,6 +31,30 @@ describe('uuidv5 (browser-safe v5)', () => {
     expect(uuidv5('x:y', IAM_ROOT)).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
+  });
+});
+
+describe('uuidv7 (time-ordered)', () => {
+  it('emits a well-formed v7 UUID', () => {
+    expect(uuidv7()).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('encodes the 48-bit millisecond timestamp big-endian', () => {
+    // 0x0123456789ab -> first 12 hex are the timestamp, then the version nibble
+    expect(uuidv7(0x0123456789ab).startsWith('01234567-89ab-7')).toBe(true);
+  });
+
+  it('sorts lexicographically by time', () => {
+    const ts = [1_700_000_000_000, 1_700_000_000_001, 1_700_000_005_000, 1_700_001_000_000];
+    const ids = ts.map((t) => uuidv7(t));
+    expect([...ids].sort()).toEqual(ids);
+  });
+
+  it('is unique within the same millisecond (random low bits)', () => {
+    const t = 1_700_000_000_000;
+    expect(uuidv7(t)).not.toBe(uuidv7(t));
   });
 });
 

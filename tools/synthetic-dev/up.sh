@@ -76,6 +76,13 @@ SIS_DB_URL="postgresql://sis:sis@localhost:5432/sis_db"     # sis-api owns a ded
 # config/.env.development — see drift #7) rather than edit its tracked config.
 PROGRAMS_DB_URL="postgresql://saga_user:password123@localhost:5432/programs"
 SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
+# iam-api/.env sets JWT_ISSUER=https://iam.wootdev.com, so the iam_session JWTs it
+# mints carry iss=…wootdev.com. programs-api/scheduling-api verify that JWT via
+# @saga-ed/rostering-client's createIamAuth, which DEFAULTS the expected issuer to
+# https://iam.saga.org (iam-auth.ts) — so without this override their verify throws
+# "unexpected iss claim value", userId stays unset, and the --seed full programs
+# scenario 401s on programs.create. Inject the real local issuer at launch.
+IAM_JWT_ISSUER="https://iam.wootdev.com"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
 STATE=/tmp/sds-synthetic; mkdir -p "$STATE"
@@ -346,8 +353,8 @@ services_up(){
      IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token"
   # DATABASE_URL injected → mesh (:5432); program-hub config defaults to its own :5433 stack,
   # but process-env is authoritative over config/.env.development (drift #7).
-  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
-  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
+  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false JWT_ISSUER="$IAM_JWT_ISSUER"
+  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false JWT_ISSUER="$IAM_JWT_ISSUER"
   launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \

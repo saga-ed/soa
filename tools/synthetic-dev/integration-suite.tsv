@@ -20,5 +20,8 @@
 # (2026-06-02 saga-dash #131 dropped — PR CLOSED: #129 fixed by rostering#366;
 #  "remember district" re-homed server-side as saga-dash#138.)
 # (2026-06-02 program-hub #126 dropped — landed on main; program-hub back on main.)
+# (2026-06-04 program-hub #144 added — getDistrictTree district-enrollments endpoint
+#  for the saga-dash #137 roster work; per Nathan's 2026-06-03 note. PR still open.)
 
 saga-dash	136
+program-hub	144

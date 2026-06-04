@@ -70,6 +70,12 @@ IAM_PORT=3010                                               # iam-api port — m
 IAM_URL="http://localhost:$IAM_PORT"
 SIS_PORT=3100                                               # sis-api port (SisConfigSchema default; rostering apps/node/sis-api)
 SIS_DB_URL="postgresql://sis:sis@localhost:5432/sis_db"     # sis-api owns a dedicated DB (read direct from SIS_DATABASE_URL; see d1.7)
+# program-hub's programs/scheduling config defaults to its OWN standalone postgres
+# (:5433); the mesh hosts these DBs on :5432 as saga_user. We INJECT these at
+# migrate + launch time (program-hub treats process-env as authoritative over
+# config/.env.development — see drift #7) rather than edit its tracked config.
+PROGRAMS_DB_URL="postgresql://saga_user:password123@localhost:5432/programs"
+SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
 STATE=/tmp/sds-synthetic; mkdir -p "$STATE"
@@ -83,6 +89,17 @@ BROWSER_PROFILE="$STATE/browser-profile"                    # persistent Chromiu
 PG=( postgresql://iam:iam@localhost:5432/iam_local )
 say(){ printf "\033[34m→\033[0m %s\n" "$*"; }
 ok(){ printf "\033[32m✓\033[0m %s\n" "$*"; }
+
+# Set KEY=VALUE in an env file: rewrite in place if the key is present (even with
+# a different value), else append. Used to RECONCILE connection URLs to the mesh —
+# a pre-existing .env.local from a standalone rostering stack may point DB/redis/
+# broker at other ports (e.g. postgres :5434), which silently breaks prep's prisma
+# migrate + iam-api. (Random secrets like AUTH_* stay append-if-absent below so we
+# don't churn them every run.)
+ensure_kv(){ # file key value
+  local f=$1 k=$2 v=$3
+  if grep -q "^$k=" "$f"; then sed -i "s|^$k=.*|$k=$v|" "$f"; else printf '%s=%s\n' "$k" "$v" >>"$f"; fi
+}
 
 # ── branch posture sanity (warn only, manifest-aware) ────────────────
 # A repo with pins in integration-suite.tsv is EXPECTED on local/integration
@@ -126,14 +143,20 @@ PII_CRYPTO_PIIHMACKEYHEX=fedcba9876543210fedcba9876543210fedcba9876543210fedcba9
 PII_CRYPTO_PIIDEKVERSION=1
 REDIS_URL=redis://localhost:6379
 EOF
-  grep -q '^NODE_ENV='                     "$L" || echo "NODE_ENV=development" >>"$L"
-  grep -q '^AUTH_EMAIL_LOOKUP_SECRET='     "$L" || echo "AUTH_EMAIL_LOOKUP_SECRET=$(openssl rand -hex 32)" >>"$L"
+  # Generated/random values: append only if absent (don't churn them every run).
+  grep -q '^NODE_ENV='                       "$L" || echo "NODE_ENV=development" >>"$L"
+  grep -q '^AUTH_EMAIL_LOOKUP_SECRET='       "$L" || echo "AUTH_EMAIL_LOOKUP_SECRET=$(openssl rand -hex 32)" >>"$L"
   grep -q '^AUTH_EMAIL_VERIFICATION_SECRET=' "$L" || echo "AUTH_EMAIL_VERIFICATION_SECRET=$(openssl rand -hex 32)" >>"$L"
-  grep -q '^RABBITMQ_URL='                 "$L" || echo "RABBITMQ_URL=$MESH_MQ" >>"$L"
-  # sis-api / sis-db read SIS_DATABASE_URL directly (sis-db/prisma.config.ts
-  # loads this repo-root .env.local), so it must live here for `migrate deploy`
-  # AND the running service to see the same DB. See d1.7.
-  grep -q '^SIS_DATABASE_URL='             "$L" || echo "SIS_DATABASE_URL=$SIS_DB_URL" >>"$L"
+  # Connection URLs: RECONCILE to the mesh (rewrite if present-but-wrong) — a
+  # standalone-stack .env.local pointing these elsewhere (postgres :5434, broker
+  # :5673…) silently breaks prep's prisma migrate + iam-api. sis-db reads
+  # SIS_DATABASE_URL directly (sis-db/prisma.config.ts loads this root .env.local),
+  # so it must be correct here for `migrate deploy` AND the running service (d1.7).
+  ensure_kv "$L" DATABASE_URL     "postgresql://iam:iam@localhost:5432/iam_local"
+  ensure_kv "$L" PII_DATABASE_URL "postgresql://iam_pii:iam_pii@localhost:5432/iam_pii_local"
+  ensure_kv "$L" REDIS_URL        "redis://localhost:6379"
+  ensure_kv "$L" RABBITMQ_URL     "$MESH_MQ"
+  ensure_kv "$L" SIS_DATABASE_URL "$SIS_DB_URL"
 
   # 2. iam-api/.env — dev user must be a UUID (audit_log.actor is uuid); raise rate limit for bulk seed
   local IE="$ROSTERING/apps/node/iam-api/.env"
@@ -172,34 +195,82 @@ EOF
 
   # 5. saga-dash static/config.json — teach the dash where sis-api lives so a
   #    dash sis-api client resolves to :3100 with no hand-editing (d1.7, dec 2).
-  #    Idempotent: only adds the `sis-api` localDefaults key if absent. NOTE:
-  #    config.json is a TRACKED file — this leaves a saga-dash working-tree edit
-  #    (expected; remove the key if you'd rather Adam own it). The key name is a
-  #    best-guess until dash sis-api code lands; rename to match if it differs.
+  #    Idempotent: only adds the `sis-api` localDefaults key if absent.
+  #
+  #    config.json is a TRACKED file and the dash has no local-override file (it
+  #    reads /config.json directly), so the sis-api default has to live here. A
+  #    naked edit would leave saga-dash's working tree dirty — which makes
+  #    refresh-integration.sh (hence refresh-suite / bootstrap step 1) ABORT with
+  #    "modified/staged changes — skipping". So after editing we mark the file
+  #    `skip-worktree`: git then treats our local override as unchanged (hidden
+  #    from `git status`) AND keeps it across `checkout -B`/merge, so the
+  #    integration-branch rebuild stays clean. To hand the key back to the repo,
+  #    undo with:
+  #      git -C "$SAGA_DASH" update-index --no-skip-worktree apps/web/dash/static/config.json
+  #    The key name is a best-guess until dash sis-api code lands; rename if it differs.
   local DASH_CFG="$SAGA_DASH/apps/web/dash/static/config.json"
-  if [[ -f "$DASH_CFG" ]] && ! grep -q '"sis-api"' "$DASH_CFG"; then
-    if node -e '
-      const fs=require("fs"); const [p,port]=process.argv.slice(1);
-      const c=JSON.parse(fs.readFileSync(p,"utf8"));
-      c.localDefaults=c.localDefaults||{};
-      c.localDefaults["sis-api"]={type:"localhost",port:Number(port)};
-      fs.writeFileSync(p, JSON.stringify(c,null,2)+"\n");
-    ' "$DASH_CFG" "$SIS_PORT" 2>/dev/null; then
-      ok "saga-dash config.json: sis-api → :$SIS_PORT"
-    else
-      printf "\033[33m⚠\033[0m could not patch %s (add sis-api → :%s by hand)\n" "$DASH_CFG" "$SIS_PORT"
+  local DASH_CFG_REL="apps/web/dash/static/config.json"
+  if [[ -f "$DASH_CFG" ]]; then
+    if ! grep -q '"sis-api"' "$DASH_CFG"; then
+      if node -e '
+        const fs=require("fs"); const [p,port]=process.argv.slice(1);
+        const c=JSON.parse(fs.readFileSync(p,"utf8"));
+        c.localDefaults=c.localDefaults||{};
+        c.localDefaults["sis-api"]={type:"localhost",port:Number(port)};
+        fs.writeFileSync(p, JSON.stringify(c,null,2)+"\n");
+      ' "$DASH_CFG" "$SIS_PORT" 2>/dev/null; then
+        ok "saga-dash config.json: sis-api → :$SIS_PORT"
+      else
+        printf "\033[33m⚠\033[0m could not patch %s (add sis-api → :%s by hand)\n" "$DASH_CFG" "$SIS_PORT"
+      fi
+    fi
+    # Hide our local override from git so refresh-integration sees a clean tree
+    # and checkout -B won't clobber it. Only if tracked and not already flagged.
+    if git -C "$SAGA_DASH" ls-files --error-unmatch "$DASH_CFG_REL" >/dev/null 2>&1 \
+       && ! git -C "$SAGA_DASH" ls-files -v "$DASH_CFG_REL" 2>/dev/null | grep -q '^S'; then
+      if git -C "$SAGA_DASH" update-index --skip-worktree "$DASH_CFG_REL" 2>/dev/null; then
+        ok "saga-dash config.json marked skip-worktree (local sis-api override hidden from git)"
+      fi
     fi
   fi
 }
 
+# Mesh is "up" only if ALL THREE services are running AND answering — not just
+# postgres. The old check looked solely at soa-postgres-1, so a half-up mesh
+# (redis/rabbitmq dead on a port clash, or rabbitmq crash-looping on a stale
+# .erlang.cookie) was reported as healthy and `up` marched on into flaky,
+# hard-to-trace failures downstream (programs/scheduling-api circuit-break and
+# die without the broker — README drift #7). Any miss returns non-zero so the
+# caller (re)runs `make up` or fails loudly.
+mesh_healthy(){
+  local c
+  for c in soa-postgres-1 soa-redis-1 soa-rabbitmq-1; do
+    [[ "$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null)" == running ]] || return 1
+  done
+  docker exec soa-postgres-1  pg_isready -U postgres_admin   >/dev/null 2>&1 || return 1
+  docker exec soa-redis-1     redis-cli ping 2>/dev/null | grep -q PONG      || return 1
+  docker exec soa-rabbitmq-1  rabbitmq-diagnostics -q ping   >/dev/null 2>&1 || return 1
+  return 0
+}
+
 mesh_up(){
-  if docker ps --format '{{.Names}}' | grep -q '^soa-postgres-1$'; then ok "mesh already up"; return; fi
+  if mesh_healthy; then ok "mesh already up (pg + redis + rabbitmq healthy)"; return; fi
   say "starting mesh (postgres + redis + rabbitmq)…"
   ( cd "$SOA/infra" && EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
       make up PROJECT=saga-mesh PROFILE=empty \
-      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 >"$STATE/mesh.log" 2>&1 )
-  for _ in $(seq 1 20); do docker exec soa-postgres-1 pg_isready -U postgres_admin >/dev/null 2>&1 && break; sleep 1; done
-  ok "mesh up — pg :5432  redis :6379  rabbitmq :5672"
+      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 >"$STATE/mesh.log" 2>&1 ) \
+    || { printf "\033[31m✗\033[0m mesh 'make up' failed (port clash? see check-ports output) — tail %s\n" "$STATE/mesh.log"; return 1; }
+  # Wait for ALL THREE to answer, not just postgres — rabbitmq cold-boots slowest.
+  local i
+  for i in $(seq 1 45); do mesh_healthy && break; sleep 1; done
+  if mesh_healthy; then
+    ok "mesh up — pg :5432  redis :6379  rabbitmq :5672"
+  else
+    printf "\033[31m✗\033[0m mesh came up incomplete — redis/rabbitmq not healthy. Containers:\n"
+    docker ps -a --format '  {{.Names}}\t{{.Status}}' | grep -E 'soa-(postgres|redis|rabbitmq)-1' || true
+    printf "  tail %s (a stale rabbitmq cookie reads as '\''.erlang.cookie: eacces'\'')\n" "$STATE/mesh.log"
+    return 1
+  fi
 }
 
 # Provision an API's DB the canonical way — `prisma migrate deploy` (db:deploy),
@@ -211,13 +282,16 @@ mesh_up(){
 # but no `_prisma_migrations` history, so migrate deploy P3005s; detect that
 # (one-time legacy/empty case) and convert via `migrate reset` (drops + replays
 # from scratch — synthetic data is re-seeded via --seed).
-migrate_db(){ # dir db_name
-  local dir=$1 db=$2
+migrate_db(){ # dir db_name [database_url]
+  # Optional 3rd arg overrides the repo's configured DATABASE_URL — used to point
+  # program-hub's programs/scheduling at the mesh (:5432) instead of its standalone
+  # config default (:5433). Empty → repo config is used as-is (sis/iam read .env.local).
+  local dir=$1 db=$2 url=${3:-}
   if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -d "$db" -tAc \
         "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" 2>/dev/null)" == t ]]; then
-    ( cd "$dir" && pnpm db:deploy >/dev/null 2>&1 )                         # migration-managed → apply pending (non-destructive)
+    ( cd "$dir" && env ${url:+DATABASE_URL="$url"} pnpm db:deploy >/dev/null 2>&1 )                         # migration-managed → apply pending (non-destructive)
   else
-    ( cd "$dir" && pnpm prisma migrate reset --force >/dev/null 2>&1 )  # unmanaged (db:push'd / empty) → drop + replay all migrations (no seed configured in prisma.config.ts)
+    ( cd "$dir" && env ${url:+DATABASE_URL="$url"} pnpm prisma migrate reset --force >/dev/null 2>&1 )  # unmanaged (db:push'd / empty) → drop + replay all migrations (no seed configured in prisma.config.ts)
   fi
 }
 
@@ -226,12 +300,22 @@ prep(){
   ( cd "$ROSTERING" && pnpm install >/dev/null 2>&1 && pnpm build >/dev/null 2>&1 ) || true
   say "reconciling program-hub deps + workspace build (new deps / stale workspace dist after a main pull)..."
   ( cd "$PROGRAM_HUB" && pnpm install >/dev/null 2>&1 && pnpm build >/dev/null 2>&1 ) || true
+  # student-data-system: ads-adm-api imports the workspace pkg @saga-ed/ads-adm-db,
+  # which needs (a) its prisma client GENERATED (src/prisma/generated — migrate
+  # deploy does NOT generate it) and (b) a built dist. Without these, ads-adm-api's
+  # tsup dev build fails (Cannot find ads-adm-db / generated client) and the service
+  # never starts. Build ONLY ads-adm-api's dep closure so an unrelated broken pkg
+  # (e.g. transcripts-db) doesn't abort it. (up.sh skipped SDS prep entirely before.)
+  say "preparing student-data-system (ads-adm-api deps: prisma client + dist)…"
+  ( cd "$SDS" && pnpm install >/dev/null 2>&1 ) || true
+  ( cd "$SDS/packages/node/ads-adm-db" && pnpm db:generate >/dev/null 2>&1 ) || true
+  ( cd "$SDS" && pnpm --filter '@saga-ed/ads-adm-api^...' build >/dev/null 2>&1 ) || true
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   ( cd "$ROSTERING/packages/node/iam-db"       && pnpm prisma migrate deploy >/dev/null 2>&1 )
   ( cd "$ROSTERING/packages/node/iam-pii-db"   && pnpm prisma db push        >/dev/null 2>&1 )
-  migrate_db "$PROGRAM_HUB/apps/node/programs-api"   programs
-  migrate_db "$PROGRAM_HUB/apps/node/scheduling-api" scheduling
-  migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7)
+  migrate_db "$PROGRAM_HUB/apps/node/programs-api"   programs   "$PROGRAMS_DB_URL"   # mesh, not program-hub's :5433 default
+  migrate_db "$PROGRAM_HUB/apps/node/scheduling-api" scheduling "$SCHEDULING_DB_URL"
+  migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7) — reads .env.local (mesh)
   ( cd "$SDS/packages/node/ads-adm-db"         && pnpm prisma migrate deploy >/dev/null 2>&1 )
   say "seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true
@@ -260,8 +344,10 @@ services_up(){
      NODE_ENV=development PORT="$SIS_PORT" \
      SIS_DATABASE_URL="$SIS_DB_URL" \
      IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token"
-  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
-  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
+  # DATABASE_URL injected → mesh (:5432); program-hub config defaults to its own :5433 stack,
+  # but process-env is authoritative over config/.env.development (drift #7).
+  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
+  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
   launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \

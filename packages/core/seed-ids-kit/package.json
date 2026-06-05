@@ -1,0 +1,49 @@
+{
+  "name": "@saga-ed/seed-ids-kit",
+  "version": "0.1.0-dev.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./uuid": {
+      "types": "./dist/uuid.d.ts",
+      "import": "./dist/uuid.js"
+    },
+    "./derivers": {
+      "types": "./dist/derivers.d.ts",
+      "import": "./dist/derivers.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.js"
+    }
+  },
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/"
+  },
+  "scripts": {
+    "build": "tsup",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "prepublishOnly": "pnpm run build",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.8.0"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "24.0.12",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^1.6.1"
+  }
+}

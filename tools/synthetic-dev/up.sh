@@ -416,7 +416,9 @@ status(){
 # ── arg parsing: verbs (up/down/status/help) + composable flags ──────
 DO_UP=0; DO_RESET=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER
 case "${1:-up}" in
-  up|--up)                       DO_UP=1; shift ;;
+  # `shift || true`: bare `./up.sh` defaults ${1:-up} to "up" but leaves $# at 0,
+  # so an unguarded shift returns 1 and `set -e` kills the script before it runs.
+  up|--up)                       DO_UP=1; shift || true ;;
   --down)                        services_down; exit 0 ;;
   --status)                      status; exit 0 ;;
   -h|--help)                     sed -n '2,51p' "$0"; exit 0 ;;

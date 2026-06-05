@@ -3,8 +3,10 @@
 # synthetic-dev/up.sh — stand up the local synthetic-dev stack for sds_92.
 #
 # Goal: dockerized postgres + redis + rabbitmq + the six APIs, EMPTY, ready to
-# seed with SYNTHETIC iam rosters / programs / schedules via the scenario
-# scripts (no VPN, no prod-mirror fixture).
+# seed SYNTHETIC iam rosters / programs via the deterministic `db:seed`
+# (@saga-ed/*-seed-ids — same data as preview/CI, stable ids across --reset; no
+# VPN, no prod-mirror fixture). See synthetic-dev-align. The old scenario-runner
+# seed was retired here (scenario scripts stay in-repo for future journey data).
 #
 # The sixth API is sis-api (rostering, on main as of 2026-06 — Adam's SIS
 # reconciliation / CSV-roster service). It runs on :3100 against a dedicated
@@ -296,20 +298,37 @@ reset_data(){
   ok "reset complete — empty roster/programs/scheduling baseline"
 }
 
-# ── seeding ──────────────────────────────────────────────────────────
+# ── seeding (db:seed — Seth's deterministic model, synthetic-dev-align) ──
+# Base seed is now `db:seed` (deterministic @saga-ed/*-seed-ids ids written
+# STRAIGHT to the DB) — NOT the old scenario-over-HTTP. So seeding no longer
+# needs a running iam-api, JANUS off, the rate-limit bump, or the JWT cookie
+# contract; the data matches preview/CI exactly and stable ids survive --reset.
+# (LOGIN still uses iam-api devLogin + JANUS_REQUIRED=false — see login_user();
+# that bypass is independent of seeding and is preserved.) The scenario scripts
+# remain in their repos as the future "journey" layer. See plan
+# soa/claude/projects/synthetic-dev-align/plans/up-sh-db-seed-transition.md and
+# d2.1 (db:seed = 205 users: 190 roster + 6 personas + dev + 8 Connect Demo).
 seed_iam(){
-  say "seeding SYNTHETIC iam roster (rostering program-hub scenario)…"
-  ( cd "$ROSTERING" && pnpm tsx scripts/scenarios/src/run.ts program-hub --url "$IAM_URL" )
-  ok "synthetic roster seeded — see --status"
+  say "seeding iam roster (db:seed — deterministic seed-ids, direct DB)…"
+  # Load DATABASE_URL/PII_DATABASE_URL + PII_DEK/HMAC from .env.local so the seed
+  # writes encrypted names/emails too (without the PII keys it silently skips
+  # them and the dash shows blanks). Same env-load the dev-user seed uses.
+  ( cd "$ROSTERING/packages/node/iam-db" \
+      && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) pnpm db:seed )
+  ok "iam roster seeded (db:seed; deterministic ids) — see --status"
 }
 
-# Seeds programs/periods/enrollment against the already-seeded roster. The
-# iam↔programs auth-contract drift that used to block this is RESOLVED (d1.2):
-# iam-api issues a JWT iam_session cookie and programs-api verifies it locally.
+# Seeds programs/periods/enrollment via programs-api's db:seed. Deterministic and
+# OFFLINE — derives org/district ids from @saga-ed/iam-seed-ids (agrees with
+# iam-db) with no HTTP. We pass DATABASE_URL explicitly (mesh :5432, matching
+# programs-api/.env) and deliberately OMIT IAM_API_URL: with it set the seed
+# attempts a protected groups lookup that 401s in a script context before falling
+# back to derived ids anyway. See plan R3.
 seed_programs(){
-  say "seeding SYNTHETIC programs (program-hub programs scenario)…"
-  ( cd "$PROGRAM_HUB/scripts/scenarios" && pnpm tsx src/run.ts programs --iam-url "$IAM_URL" --url http://localhost:3006 )
-  ok "synthetic programs seeded"
+  say "seeding programs (db:seed — deterministic, offline derived ids)…"
+  ( cd "$PROGRAM_HUB/apps/node/programs-api" \
+      && env DATABASE_URL="postgresql://saga_user:password123@localhost:5432/programs" pnpm db:seed )
+  ok "programs seeded (db:seed)"
 }
 
 # roster = iam only (programs empty); full = roster + programs.

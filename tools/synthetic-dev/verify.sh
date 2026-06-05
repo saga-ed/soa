@@ -56,6 +56,22 @@ if [[ -z "$users" ]]; then
   badline "iam_local unreachable (is the mesh up?)"
 elif [[ "$users" -gt 0 ]]; then
   okline "iam roster seeded — users=$users"
+  # Determinism (db:seed model, synthetic-dev-align d2.1): the canonical seed is
+  # 205 (190 roster + 6 personas + dev + 8 Connect Demo). A non-205 count isn't a
+  # hard fail (partial/journey seeds vary) but is worth flagging.
+  [[ "$users" == 205 ]] || printf "    \033[33m·\033[0m note: users=%s — canonical db:seed is 205 (190 roster+6 personas+dev+8 demo)\n" "$users"
+  # Deterministic dev id = userId('dev') from @saga-ed/iam-seed-ids. Present ⇒
+  # seeded via db:seed; ABSENT ⇒ the old scenario (random UUIDs) seeded it.
+  if docker exec soa-postgres-1 psql -U iam -d iam_local -tAc \
+       "SELECT 1 FROM users WHERE id='1e2ca0d8-8f6a-5a97-a141-b38d472a1186'" 2>/dev/null | grep -q 1; then
+    okline "deterministic ids present (dev = userId('dev'))"
+  else
+    badline "deterministic dev id absent — not seeded via db:seed (scenario uses random ids)"
+  fi
+  # Per-district admin personas (#397): seed + Lincoln + riverside/metro/oakdale/frontier = 6.
+  ap=$(docker exec soa-postgres-1 psql -U iam -d iam_local -tAc "SELECT count(*) FROM personas WHERE name='admin'" 2>/dev/null || echo 0)
+  if [[ "${ap:-0}" -ge 6 ]]; then okline "admin personas present ($ap — incl 4 per-district, #397)"
+  else badline "admin personas=$ap (<6) — per-district admins missing (#397 not seeded)"; fi
 else
   badline "iam roster EMPTY (users=0) — run: ./up.sh --reset --seed roster"
 fi

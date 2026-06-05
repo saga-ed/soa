@@ -1,10 +1,16 @@
 #!/bin/bash
 # morning-auth.sh - Daily JumpCloud + AWS SSO authentication
-# Run this first thing in the morning to refresh all credentials
+# Run this first thing in the morning to refresh all credentials.
+#
+# `aws sso login` drives the JumpCloud auth right in your browser:
+#   - JumpCloud Go set up (in a .deb browser) -> one device tap
+#   - otherwise                               -> normal JumpCloud password + MFA
+# Either way this works; Go just makes it a tap. Setup + gotchas:
+#   https://github.com/hipponot/nimbee/wiki/JumpCloud-Go-Setup
 
 set -e
 
-VERSION="1.1.0"
+VERSION="2.0.0"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -13,19 +19,28 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 SKIP_AWS_CLI_UPDATE=0
+SKIP_LOGOUT=0
 for arg in "$@"; do
     case "$arg" in
         --no-update)
             SKIP_AWS_CLI_UPDATE=1
             ;;
+        --no-logout)
+            SKIP_LOGOUT=1
+            ;;
         -h|--help)
             cat <<EOF
 morning-auth.sh v${VERSION} - Daily JumpCloud + AWS SSO authentication
 
-Usage: $(basename "$0") [--no-update] [-h|--help]
+Usage: $(basename "$0") [--no-update] [--no-logout] [-h|--help]
 
   --no-update   Skip AWS CLI version check (useful when GitHub API is unreachable)
+  --no-logout   Don't clear the JumpCloud browser session first (reuse existing login)
   -h, --help    Show this help
+
+Browser: this script (and 'aws sso login') open \$BROWSER if set, else the system
+default. For JumpCloud Go's one-tap login you need a .deb browser, not a snap/flatpak
+one — set e.g. BROWSER=google-chrome. See the wiki link at the top of this file.
 EOF
             exit 0
             ;;
@@ -35,6 +50,63 @@ EOF
             ;;
     esac
 done
+
+# Open a URL in $BROWSER if set (xdg-open does not reliably honor it), else xdg-open.
+# $BROWSER may be a colon-list and entries may contain a %s URL placeholder.
+open_url() {
+    local url="$1" b
+    if [[ -n "$BROWSER" ]]; then
+        b="${BROWSER%%:*}"                      # first entry of the list
+        if [[ "$b" == *"%s"* ]]; then
+            # shellcheck disable=SC2086
+            ${b//%s/$url} 2>/dev/null &
+        else
+            "$b" "$url" 2>/dev/null &
+        fi
+    else
+        xdg-open "$url" 2>/dev/null &
+    fi
+}
+
+# Best-effort: warn if the browser that will be used is a sandboxed (snap/flatpak)
+# build, since JumpCloud Go can't run there. Resolves $BROWSER, or the xdg default's
+# Exec= line, down to a real binary and checks its path. Never fails the script.
+# (Advisory only -- it won't catch a snap /usr/bin/firefox wrapper shim, but the
+# login itself works either way, so a missed hint just means no proactive nudge.)
+warn_if_sandboxed_browser() {
+    local b cmd target df desktop label sandboxed=0
+    if [[ -n "$BROWSER" ]]; then
+        b="${BROWSER%%:*}"; b="${b%% *}"            # first list entry, strip args/%s
+        label="$BROWSER"
+        cmd="$(command -v "$b" 2>/dev/null || echo "$b")"
+    else
+        desktop="$(xdg-settings get default-web-browser 2>/dev/null || true)"
+        label="$desktop"
+        if [[ "$desktop" == *_*.desktop ]]; then     # snap desktop ids look like name_name.desktop
+            sandboxed=1
+        else
+            for d in "$HOME/.local/share/applications" /usr/local/share/applications \
+                     /usr/share/applications /var/lib/snapd/desktop/applications; do
+                [[ -f "$d/$desktop" ]] && { df="$d/$desktop"; break; }
+            done
+            # pull the binary out of the .desktop Exec= line (awk, no grep dependency)
+            [[ -n "$df" ]] && cmd="$(awk '/^Exec=/{sub(/^Exec=/,"",$0); sub(/ .*/,"",$0); print; exit}' "$df")"
+        fi
+    fi
+
+    if [[ $sandboxed -eq 0 && -n "$cmd" ]]; then
+        target="$(readlink -f "$cmd" 2>/dev/null || echo "$cmd")"
+        [[ "$cmd" == /snap/* || "$target" == /snap/* || "$target" == */flatpak/* ]] && sandboxed=1
+    fi
+
+    if [[ $sandboxed -eq 1 ]]; then
+        echo -e "${YELLOW}  Heads up: your browser (${label:-unknown}) looks like a snap/flatpak build.${NC}"
+        echo -e "  JumpCloud Go's one-tap won't work there — you'll get the normal JumpCloud"
+        echo -e "  password + MFA form instead (that works fine). For one-tap, use a .deb browser"
+        echo -e "  and set ${GREEN}BROWSER=google-chrome${NC}. Setup: ${BLUE}https://github.com/hipponot/nimbee/wiki/JumpCloud-Go-Setup${NC}"
+    fi
+    return 0
+}
 
 echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
 echo -e "${BLUE}             Morning Authentication  v${VERSION}                    ${NC}"
@@ -180,25 +252,28 @@ if check_aws_session; then
     fi
 fi
 
+# Step 2: (optional) clear the JumpCloud browser session so the login below is clean.
+# Skipped with --no-logout. Opens in $BROWSER so it logs out the same browser
+# 'aws sso login' will use.
 echo ""
-echo -e "${YELLOW}Step 2: Logging out of JumpCloud...${NC}"
-xdg-open "https://console.jumpcloud.com/logout" 2>/dev/null &
-sleep 2
+if [[ $SKIP_LOGOUT -eq 1 ]]; then
+    echo -e "${YELLOW}Step 2: Reusing existing JumpCloud session (--no-logout)${NC}"
+else
+    echo -e "${YELLOW}Step 2: Clearing JumpCloud session for a clean login...${NC}"
+    open_url "https://console.jumpcloud.com/logout"
+    sleep 2
+fi
 
-echo -e "${YELLOW}Step 3: Opening JumpCloud login...${NC}"
-echo -e "  ${BLUE}→ Complete the JumpCloud login + MFA in your browser${NC}"
+# Step 3: aws sso login drives the JumpCloud auth in the browser itself — a JumpCloud
+# Go device tap if set up, otherwise the normal JumpCloud password + MFA form. No
+# separate manual login step needed.
 echo ""
-xdg-open "https://console.jumpcloud.com/login" 2>/dev/null &
-
-echo -e "${YELLOW}Waiting for you to complete JumpCloud authentication...${NC}"
-echo -e "Press ${GREEN}Enter${NC} when you've logged in to JumpCloud"
-read -r
-
-echo ""
-echo -e "${YELLOW}Step 4: Running AWS SSO login...${NC}"
+echo -e "${YELLOW}Step 3: Running AWS SSO login...${NC}"
+warn_if_sandboxed_browser
+echo -e "  ${BLUE}→ A browser will open. Approve with JumpCloud Go (one tap), or complete${NC}"
+echo -e "  ${BLUE}  the JumpCloud password + MFA, then approve the access request.${NC}"
 echo ""
 
-# Run AWS SSO login - this will open browser for the final auth step
 if aws sso login --profile default; then
     echo ""
     echo -e "${GREEN}✓ AWS SSO login successful${NC}"
@@ -208,9 +283,9 @@ if aws sso login --profile default; then
     echo -e "${BLUE}Verifying credentials...${NC}"
     aws sts get-caller-identity --profile default
 
-    # Step 5: Refresh CodeArtifact tokens
+    # Step 4: Refresh CodeArtifact tokens
     echo ""
-    echo -e "${YELLOW}Step 5: Refreshing AWS CodeArtifact tokens...${NC}"
+    echo -e "${YELLOW}Step 4: Refreshing AWS CodeArtifact tokens...${NC}"
 
     if bash "$(dirname "$0")/co-login.sh"; then
       echo -e "${GREEN}  ✓ CodeArtifact configured (12h expiry)${NC}"

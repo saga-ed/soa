@@ -98,6 +98,25 @@ check_posture(){ # repo expected_branch
   else badline "$(printf '%-20s on '\''%s'\'' (expected '\''%s'\'')' "$repo" "$have" "$want")"; fi
 }
 
+# Unpinned managed repo: expected on main. But refresh-suite leaves the repo on
+# local/integration even when the suite is empty — and an empty local/integration
+# is identical to main (refresh-integration builds it as origin/main + pins; with
+# zero pins that's just origin/main). Accept that as equivalent instead of crying
+# wolf; only fail if the tree actually differs from main — a stray overlaid PR not
+# in the manifest, or a stale/behind branch — both real drift worth flagging.
+check_posture_main(){ # repo
+  local repo=$1 dir="$DEV/$repo" have
+  [[ -d "$dir/.git" ]] || { badline "$repo: not a git repo at $dir"; return; }
+  have=$(on_branch "$repo")
+  if [[ "$have" == main ]]; then
+    okline "$(printf '%-20s on main' "$repo")"
+  elif [[ "$have" == local/integration ]] && git -C "$dir" diff --quiet origin/main HEAD 2>/dev/null; then
+    okline "$(printf '%-20s on local/integration ≡ main (suite empty)' "$repo")"
+  else
+    badline "$(printf '%-20s on '\''%s'\'' (expected '\''main'\'')' "$repo" "$have")"
+  fi
+}
+
 # pinned PR actually merged into the current checkout? (resolve #→head SHA via gh)
 check_pin_merged(){ # repo pr#
   local repo=$1 n=$2 dir="$DEV/$repo" oid
@@ -119,9 +138,10 @@ for repo in $MANAGED_REPOS; do
       for n in "${nums[@]}"; do [[ -n "$n" ]] && check_pin_merged "$repo" "$n"; done
     fi
   else
-    check_posture "$repo" "main"
+    check_posture_main "$repo"   # main, or an empty local/integration that ≡ main
   fi
 done
+# soa + student-data-system must be literally main (never integration-parked).
 for repo in $ALWAYS_MAIN_REPOS; do check_posture "$repo" "main"; done
 
 printf "\n"

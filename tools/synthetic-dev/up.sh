@@ -101,9 +101,14 @@ check_branches(){
   fi
   for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash"; do
     r=${kv%:*}; repo=${kv#*:}
-    want=main; [[ -n "${PINS[$repo]:-}" ]] && want=local/integration
     have=$(git -C "$r" branch --show-current)
-    [[ "$have" == "$want" ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected '%s')\n" "$repo" "$have" "$want"
+    if [[ -n "${PINS[$repo]:-}" ]]; then
+      [[ "$have" == local/integration ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected 'local/integration')\n" "$repo" "$have"
+    elif [[ "$have" == main ]] || { [[ "$have" == local/integration ]] && git -C "$r" diff --quiet origin/main HEAD 2>/dev/null; }; then
+      : # on main, or an empty local/integration that's identical to main — fine
+    else
+      printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
+    fi
   done
   for kv in "$SOA:soa" "$SDS:student-data-system"; do
     r=${kv%:*}; repo=${kv#*:}; have=$(git -C "$r" branch --show-current)

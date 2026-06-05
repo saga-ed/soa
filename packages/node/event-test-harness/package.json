@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-event-test-harness",
-    "version": "0.1.0-dev.2",
+    "version": "0.1.0-dev.3",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -9,6 +9,10 @@
         ".": {
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
+        },
+        "./uuid": {
+            "types": "./dist/uuid.d.ts",
+            "default": "./dist/uuid.js"
         }
     },
     "files": ["dist"],

@@ -27,3 +27,21 @@
 #  the roster stack landed alongside it: saga-dash #159 + rostering #384,#387,#396,#398.)
 # (2026-06-05 saga-dash #136 dropped — LANDED on main. Suite now EMPTY: every repo
 #  back on origin/main, nothing in flight to replay.)
+# (2026-06-05 saga-dash #161 added — drag-resizable columns + truncate/copy UUID
+#  User ID for the roster grid; DRAFT, overlaid for local dev on the landed stack.)
+# (2026-06-08 saga-dash #165 added — wire Roster page Upload Roster button to
+#  Adam's CSV wizard (sd-164 integration); DRAFT, overlaid for manual testing.)
+# (2026-06-08 rostering #410 added — 'Empty Org' seed scenario (admin + empty
+#  district) for upload-from-scratch testing; overlaid for manual testing.)
+# (2026-06-08 rostering #423 added — TEMP sd-164 stopgap: re-homes csv-shadow
+#  groups under Empty Org so the example CSV renders on the roster page before
+#  Adam's tier-2 dynamic group creation. DRAFT, stacked on #410. DROP this (and
+#  the PR) once tier-2 auto-create ships.)
+# (2026-06-09 rostering #423 dropped — tier-2 CSV auto-create SHIPPED on main
+#  (#424, merges c915b43/d49b8cc/529e9f8 + #430 baseline). The engine now
+#  auto-creates referenced school/section groups, so the csv-shadow re-home
+#  stopgap is obsolete. CLOSE PR #423. #410 (Empty Org) stays — it's the
+#  truly-empty upload-from-scratch fixture auto-create needs.)
+
+saga-dash	161,165
+rostering	410

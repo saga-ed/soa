@@ -32,7 +32,13 @@
 #   ./up.sh --seed [roster|full] seed synthetic data (default: roster)
 #                                  roster = iam roster only (programs empty → from-scratch)
 #                                  full   = iam roster + programs/periods/enrollment
-#   ./up.sh --reset              truncate synthetic data → empty baseline (keeps migrations)
+#   ./up.sh --reset              truncate synthetic data → empty baseline (keeps migrations);
+#                                  also clean-restarts services + clears vite caches
+#   ./up.sh restart              clean restart ONLY: stop services + clear vite + start,
+#                                  NO data wipe. Use after refresh-suite when the dash UI
+#                                  is stale/unresponsive (a rewritten branch corrupts vite's
+#                                  module graph and HMR doesn't recover) — same recovery as
+#                                  --reset but without truncating your seeded data.
 #   ./up.sh --login [email]      auto-login via iam-api devLogin (default: dev@saga.org)
 #   ./up.sh --user  [email]      alias for --login
 #   ./up.sh --down               stop services (leaves mesh up)
@@ -444,6 +450,11 @@ case "${1:-up}" in
   # so an unguarded shift returns 1 and `set -e` kills the script before it runs.
   up|--up)                       DO_UP=1; shift || true ;;
   --down)                        services_down; exit 0 ;;
+  # Clean restart WITHOUT a data wipe: bounce services + clear vite caches, then
+  # start fresh on current code. The recovery for a stale dash bundle after a
+  # refresh-suite branch rewrite (corrupted vite module graph / unresponsive UI)
+  # — same restart+nuke_vite as --reset, minus reset_data.
+  restart|--restart)             services_down; nuke_vite; services_up; exit 0 ;;
   --status)                      status; exit 0 ;;
   -h|--help)                     sed -n '2,51p' "$0"; exit 0 ;;
   --reset|--seed|--login|--user) ;;        # flag-only invocation; skip up
@@ -459,16 +470,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# `up` does first-run prep (branch posture, fixups, mesh, schema). A bare
+# `--reset` (no `up` verb) skips prep and assumes a running mesh.
 if [[ $DO_UP == 1 ]]; then
   check_branches; apply_fixes; mesh_up; prep
-  # With --reset, do a CLEAN restart: stop running services (incl. stale tsup /
-  # vite watchers that accumulate across runs) and clear vite caches, so
-  # services_up starts FRESH on current code rather than reusing stale
-  # "already up" processes / cached bundles.
-  if [[ $DO_RESET == 1 ]]; then
-    say "reset: clean restart — stopping running services + clearing vite caches..."
-    services_down; nuke_vite
-  fi
+fi
+
+# A --reset ALWAYS means a CLEAN restart on current code — independent of the
+# `up` verb, so a bare `./up.sh --reset` clears caches too (it used to only
+# truncate data, leaving stale services up). Stop running services (incl. stale
+# tsup / vite watchers that accumulate across runs), clear vite caches, then
+# bring services back up FRESH. This is what escapes the stale-cached-bundle
+# trap: a dead Vite watcher serving old JS even though the source changed (e.g.
+# after a refresh-suite branch swap). Plain `up` (no --reset) reuses "already
+# up" processes / cached bundles.
+if [[ $DO_RESET == 1 ]]; then
+  say "reset: clean restart — stopping services + clearing vite caches..."
+  services_down; nuke_vite; services_up
+  ok "stack up (clean) — try: $0 --status"
+elif [[ $DO_UP == 1 ]]; then
   services_up
   ok "stack up — try: $0 --status"
 fi

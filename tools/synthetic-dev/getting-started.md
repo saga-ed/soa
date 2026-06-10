@@ -21,55 +21,74 @@ Seeds a realistic synthetic roster: **7 districts / 15 schools / 32 sections
 prod-mirror fixture. The 7 dev personas are admin/PM accounts you log in as
 (separate from the roster).
 
-## Fastest path — land in the team's exact state
+## Fastest path — stand it up on main
 
-The stack runs against a `local/integration` branch in each repo = `main` +
-a **pinned set of not-yet-landed PRs** (the curated subset we're all
-developing against). One command reproduces that state, brings everything up,
-seeds a roster, and verifies it's green:
+**By default the stack runs every repo on `origin/main`.** No shared manifest,
+nothing to coordinate — one command brings everything up, seeds a roster, and
+verifies it's green:
 
 ```bash
 cd ~/dev/soa/tools/synthetic-dev
-./bootstrap.sh                 # refresh-suite → up.sh up --reset --seed roster → verify
+./bootstrap.sh                 # ensure repos → (overlay if any) → up --reset --seed roster → verify
 ```
 
-`bootstrap.sh` chains three steps (run them individually if you prefer):
+`bootstrap.sh` chains the steps (run them individually if you prefer):
 
 ```bash
-./refresh-suite.sh             # rebuild local/integration = main + the pinned PRs (integration-suite.tsv)
+./refresh-suite.sh             # apply your local overlay if present — else a no-op (everyone on main)
 ./up.sh up --reset --seed roster
-./verify.sh                    # asserts 6 services @ 200 + roster + sis_db + SOURCE POSTURE (right branches, pinned PRs merged); non-zero on any red
+./verify.sh                    # asserts 6 services @ 200 + roster + sis_db + SOURCE POSTURE (right branches); non-zero on any red
 ```
 
-> **Why `refresh-suite.sh` and not `refresh-integration.sh`?**
-> `refresh-integration.sh` defaults to *your own* open PRs (`--author @me`) and
-> picks up the **full** open set — so two engineers never match, and even one
-> engineer gets WIP/prod-only branches we don't run locally. `refresh-suite.sh`
-> applies the **pinned** PR numbers in `integration-suite.tsv` (author- and
-> account-independent), so everyone lands identically. See `decisions/d1.8`.
+On a clean checkout there's no overlay, so `refresh-suite.sh` is a no-op and
+every repo stays on `main`. You're done — skip to **TL;DR** below.
 
-The pinned suite (snapshot — `./refresh-suite.sh --list` for the live list):
+### Overlaying your own in-flight PRs (optional, per-developer)
 
-| repo | pinned PRs |
-|---|---|
-| rostering | #410 (Empty Org seed — the truly-empty upload-from-scratch fixture) |
-| saga-dash, program-hub, soa, student-data-system | none — stay on `origin/main` |
+When you want the stack to also carry **your own** not-yet-landed PRs, give each
+repo's `local/integration` branch a base of `main` + those PRs. `refresh-suite.sh`
+does it, two ways:
 
-**Maintenance:** when one of these PRs merges to `main`, delete its line from
-`integration-suite.tsv` — the fix then arrives via `main` (up.sh's `prep`
-pulls + builds the sibling repos), so it no longer needs replaying. If that
-was a repo's *last* pin (as rostering's #366 was), also `git checkout main`
-in that repo so it leaves `local/integration` — `refresh-suite.sh` no longer
-manages it.
+**Ad-hoc** (quickest — explicit PRs, no file):
+```bash
+./refresh-suite.sh --prs 165 saga-dash        # saga-dash main + PR #165
+./refresh-suite.sh --prs 410,432 rostering    # several PRs in one repo
+```
 
-> `refresh-suite.sh` leaves pinned repos (currently just **rostering**) **on
-> `local/integration`**; unpinned ones (saga-dash, program-hub, soa,
-> student-data-system) stay on `main`. Both `up.sh`'s `check_branches` and `verify.sh` are
-> **manifest-aware** — they expect exactly that, so the *correct* setup is
-> silent. A `⚠` (or a `verify.sh` posture failure) now means **real drift**:
-> wrong branch, or a pinned PR not actually merged into your `local/integration`
-> (usually "forgot to re-run `refresh-suite.sh`"). `verify.sh` makes this a hard,
-> exit-code check; `check_branches` stays a warning so `up` still proceeds.
+**Reproducible** (a set you re-apply as main moves) — a **personal, gitignored**
+overlay file:
+```bash
+cp integration-suite.example.tsv integration-suite.local.tsv   # one-time
+# edit integration-suite.local.tsv — one row per repo: <repo>\t<PR#s>
+./refresh-suite.sh                                             # apply it (no args)
+./refresh-suite.sh --list                                      # show what's overlaid
+```
+
+> **Why a *local* overlay and not a shared committed one?**
+> `integration-suite.local.tsv` is `.gitignored` — it's **yours alone**, so your
+> in-flight PRs never land on a teammate. (Earlier this was a single shared,
+> source-controlled manifest so everyone ran the same pinned set; with several
+> developers on the stack at once that file collides and churns, so the overlay
+> is now per-dev and **main is the default**. Supersedes `decisions/d1.8`.)
+
+**Maintenance:** when one of your overlaid PRs merges to `main`, delete its row
+from `integration-suite.local.tsv` — the fix then arrives via `main` (up.sh's
+`prep` pulls + builds the sibling repos), so it no longer needs replaying.
+
+**Backing out entirely** (return to the all-main default): `./refresh-suite.sh
+--reset` moves every overlaid repo back to `main` and deletes its disposable
+`local/integration` branch. That leaves your overlay *file* alone — empty or
+delete `integration-suite.local.tsv` too if you want the backout to stick across
+the next `refresh-suite`. (Reset one repo with `--reset saga-dash`.)
+
+> `refresh-suite.sh` leaves overlaid repos **on `local/integration`**; everything
+> else stays on `main`. Both `up.sh`'s `check_branches` and `verify.sh` are
+> **overlay-aware** — they expect exactly that, so the *correct* setup (including
+> the no-overlay default) is silent. A `⚠` (or a `verify.sh` posture failure)
+> means **real drift**: wrong branch, or an overlaid PR not actually merged into
+> your `local/integration` (usually "forgot to re-run `refresh-suite.sh`").
+> `verify.sh` makes this a hard, exit-code check; `check_branches` stays a
+> warning so `up` still proceeds.
 
 ## TL;DR (steady-state, once you're set up)
 
@@ -78,7 +97,7 @@ manages it.
 ./up.sh --status                   # health + row counts
 ./up.sh --login                    # mint a session + open an auto-logged-in Chromium
 ./up.sh --down                     # stop services (mesh left up)
-./refresh-suite.sh                 # re-pull the pinned PRs after main moves / a PR updates
+./refresh-suite.sh                 # re-apply your overlay after main moves (no-op if you have none)
 ```
 
 Then open `http://localhost:3010/demo#auth` → **devLogin** as `dev@saga.org`
@@ -116,7 +135,7 @@ captured by `../training/capture/capture.mjs` (regenerable; see
 1. **Docker** daemon running.
 2. **Node 22+** and **pnpm**.
 3. **`gh` CLI authenticated** (`gh auth status`) — `refresh-suite.sh` resolves
-   the pinned PR numbers to branches via `gh`.
+   your overlay's PR numbers to branches via `gh`.
 4. **AWS CLI** + IAM credentials with read access to Saga's CodeArtifact
    (the npm registry for the private `@saga-ed/*` packages). Without it
    `pnpm install` in rostering/program-hub/saga-dash will 401 on every
@@ -156,10 +175,12 @@ services with the right env, and reports green.
 ## Verbs
 
 ```bash
-./bootstrap.sh                   # one-shot: pinned PRs + up + seed + verify
-./refresh-suite.sh               # rebuild local/integration = main + pinned PRs (all repos)
-./refresh-suite.sh --list        # print the pinned suite, no changes
-./verify.sh                      # assert 6 services + roster + sis_db + source posture (right branches, pins merged) — exit code
+./bootstrap.sh                   # one-shot: ensure repos + (overlay if any) + up + seed + verify
+./refresh-suite.sh               # apply your local overlay (no-op → everyone on main if you have none)
+./refresh-suite.sh --list        # print your personal overlay, no changes
+./refresh-suite.sh --prs 165 saga-dash      # ad-hoc: overlay explicit PR(s) onto main, no file
+./refresh-suite.sh --reset       # back out: overlaid repos → main (deletes local/integration)
+./verify.sh                      # assert 6 services + roster + sis_db + source posture (right branches) — exit code
 
 ./up.sh up                       # bring up mesh + 6 services (empty databases)
 ./up.sh up --reset --seed roster # from-scratch: empty baseline + synthetic IAM roster
@@ -169,8 +190,6 @@ services with the right env, and reports green.
 ./up.sh --status                 # GET /health on each, iam user count
 ./up.sh --login [email]          # mint a session + open an auto-logged-in Chromium
 ./up.sh --down                   # stop services (mesh stays up)
-./refresh-integration.sh saga-dash         # YOUR open PRs (per-author; prefer refresh-suite for the shared set)
-./refresh-integration.sh --prs 95 saga-dash # ad-hoc: scope to specific PR numbers
 ```
 
 A reset re-seeds iam users with **new UUIDs**, so any browser session you
@@ -196,10 +215,10 @@ Each persona's UUID is printed at the end of every `--seed roster` run.
 
 ## What `up` actually does, step by step
 
-1. `check_branches` — **manifest-aware** branch-posture warning: pinned repos
-   are expected on `local/integration`, unpinned on `main`, so the correct
-   setup is silent; a `⚠` means real drift (warning only — `up` still proceeds;
-   `verify.sh` makes posture a hard check + confirms the pins are merged).
+1. `check_branches` — **overlay-aware** branch-posture warning: overlaid repos
+   are expected on `local/integration`, the rest on `main` (the default), so the
+   correct setup is silent; a `⚠` means real drift (warning only — `up` still
+   proceeds; `verify.sh` makes posture a hard check + confirms overlays merged).
 2. `apply_fixes` — idempotent edits for known main-vs-tooling drifts (see
    the **Drift log** at the bottom of `README.md`); also writes
    `SIS_DATABASE_URL` and seeds the dash's `sis-api → :3100` config key.
@@ -245,9 +264,9 @@ short-list of things to know:
 - **CodeArtifact tokens expire** every ~12 h. If `pnpm install` 401s,
   `pnpm co:login` in the affected repo refreshes it.
 - **Re-login after every `--reset`** (cookie ↔ user_id mismatch).
-- **A pinned PR conflicts on refresh:** `refresh-suite.sh` aborts that one
+- **An overlaid PR conflicts on refresh:** `refresh-suite.sh` aborts that one
   merge and reports it (the rest still apply). Resolve it in the
-  `local/integration` branch, or drop the offending PR from the manifest.
+  `local/integration` branch, or drop the offending PR from your overlay.
 - **Vite cache stickiness:** if you ship a code change in saga-dash and
   HMR shows it merged but the browser still behaves old, the per-package
   `.vite` optimize-deps caches are the usual culprit. Quick recipe: kill dash,
@@ -263,7 +282,8 @@ short-list of things to know:
 - `README.md` (this directory) — the full drift log + service map + why
   the script exists.
 - `../decisions/` — RESOLVED decision docs that shaped the stack
-  (pinned integration suite = `d1.8`, sis-api integration = `d1.7`,
+  (pinned integration suite = `d1.8`, now superseded by the per-dev local
+  overlay + main-default described above; sis-api integration = `d1.7`,
   provisioning via migrate deploy = `d1.5`, programs↔iam auth contract
   = `d1.2`, branch posture = `d1.1`, etc.).
 - `../plans/` — design plans (e.g. the saga-dash Internal/External-SIS

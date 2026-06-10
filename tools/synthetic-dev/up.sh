@@ -105,12 +105,13 @@ PG=( postgresql://iam:iam@localhost:5432/iam_local )
 say(){ printf "\033[34m→\033[0m %s\n" "$*"; }
 ok(){ printf "\033[32m✓\033[0m %s\n" "$*"; }
 
-# ── branch posture sanity (warn only, manifest-aware) ────────────────
-# A repo with pins in integration-suite.tsv is EXPECTED on local/integration
-# (that's where refresh-suite parks it); without pins it's expected on main.
-# So we only warn on ACTUAL drift — not on the correct pinned-suite state.
-# (verify.sh turns this into a hard, exit-code check + confirms the pinned PRs
-# are merged; here it stays a warning so `up` proceeds.)
+# ── branch posture sanity (warn only, overlay-aware) ─────────────────
+# A repo with PRs in your integration-suite.local.tsv overlay is EXPECTED on
+# local/integration (that's where refresh-suite parks it); without an overlay
+# it's expected on main. So we only warn on ACTUAL drift — not on the correct
+# overlaid state. With no local overlay (the default) every repo is expected on
+# main. (verify.sh turns this into a hard, exit-code check + confirms the
+# overlaid PRs are merged; here it stays a warning so `up` proceeds.)
 check_branches(){
   # ── preflight: every sibling repo must actually be cloned ────────────
   # A missing dir otherwise surfaces only as git's raw "fatal: cannot change
@@ -130,7 +131,7 @@ check_branches(){
     printf "  Run ./bootstrap.sh to clone + install them (or clone each by hand), then re-run.\n"
     exit 1
   fi
-  local MANIFEST="$SCRIPT_DIR/integration-suite.tsv" repo have want
+  local MANIFEST="$SCRIPT_DIR/integration-suite.local.tsv" repo have want
   declare -A PINS=()
   if [[ -f "$MANIFEST" ]]; then
     while IFS=$'\t' read -r repo _prs; do

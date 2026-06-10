@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# bootstrap.sh — one command to land in the team's exact synthetic-dev state.
+# bootstrap.sh — one command to stand up the synthetic-dev stack on main.
 #
 # Chains the steps a new engineer (e.g. Adam) needs:
 #   1. ensure-repos       — clone any missing of the 5 siblings + co:login & install
-#   2. refresh-suite.sh   — rebuild local/integration = main + the pinned PRs
+#   2. refresh-suite.sh   — apply your local overlay if present (else everyone on main)
 #   3. up.sh up --reset --seed roster — mesh + 6 services, fresh synthetic roster
 #   4. verify.sh          — assert every service is green and the roster seeded
 #
@@ -87,7 +87,7 @@ step "1/4 ensure repos — clone + install any missing of the 5 siblings"
 ensure_repos
 
 if [[ $DO_REFRESH == 1 ]]; then
-  step "2/4 refresh-suite — pinned in-flight PRs onto local/integration"
+  step "2/4 refresh-suite — apply local overlay if present (else everyone on main)"
   "$DIR/refresh-suite.sh" || { echo "refresh-suite failed — resolve above, then re-run"; exit 1; }
 else
   step "2/4 refresh-suite — SKIPPED (--no-refresh)"

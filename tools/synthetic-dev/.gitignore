@@ -1,0 +1,3 @@
+# Per-developer overlay of in-flight PRs (see integration-suite.example.tsv).
+# Never committed — yours alone, so it can't collide with a teammate's.
+integration-suite.local.tsv

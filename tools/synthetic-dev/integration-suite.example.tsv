@@ -1,0 +1,39 @@
+# integration-suite.example.tsv — TEMPLATE for your PERSONAL overlay.
+#
+# synthetic-dev runs against origin/main for EVERY repo by default. You only
+# need an overlay when you want the stack to also carry your own not-yet-landed
+# PRs (rebuilt into each repo's local/integration branch by refresh-suite.sh).
+#
+# This file is a tracked template — DO NOT pin PRs here. Instead:
+#
+#   cp integration-suite.example.tsv integration-suite.local.tsv
+#   # edit integration-suite.local.tsv, then:
+#   ./refresh-suite.sh
+#
+# integration-suite.local.tsv is .gitignored — it's YOURS, never committed, so
+# your in-flight overlay never lands on a teammate. If it's absent, every repo
+# stays on origin/main (the default) and refresh-suite.sh is a no-op.
+#
+# (Historically this was a single shared, source-controlled manifest so the
+#  whole team ran the same pinned set. With several developers on the stack at
+#  once that shared file collides and churns, so the overlay is now per-dev and
+#  main is the default. See README.md "Local overlay" for the rationale —
+#  supersedes decision d1.8.)
+#
+# ── Format ───────────────────────────────────────────────────────────────────
+# One row per repo:  <repo><TAB><comma-separated PR numbers or branch names>
+# '#' comments + blank lines are ignored. Repos not listed stay on origin/main.
+# Numeric tokens resolve to PR head refs via `gh pr view`; bare names are used
+# as-is. Managed repos: rostering, program-hub, saga-dash (soa and
+# student-data-system always stay on origin/main).
+#
+# Example (a saga-dash draft + two rostering PRs) — uncomment & adapt in your
+# integration-suite.local.tsv:
+#
+# saga-dash	165
+# rostering	410,432
+#
+# MAINTENANCE: when one of your pinned PRs merges to main, delete its row — the
+# fix then arrives via main (up.sh's prep pulls + builds the sibling repos), so
+# it no longer needs replaying. When a repo's LAST pin is gone, `git checkout
+# main` in that repo so it leaves local/integration.

@@ -358,6 +358,16 @@ prep(){
   say "reconciling program-hub deps + workspace build (new deps / stale workspace dist after a main pull)..."
   pnpm_install "$PROGRAM_HUB"
   ( cd "$PROGRAM_HUB" && pnpm build >/dev/null 2>&1 ) || true
+  # ads-adm-api imports the @saga-ed/ads-adm-db workspace package from dist/ —
+  # on a fresh clone that dist/ doesn't exist until the sds workspace is built,
+  # so install + build sds too (mirrors rostering/program-hub above). ads-adm-db's
+  # build (tsup) assumes its Prisma client is already generated at src/prisma/
+  # generated/ — turbo build won't do it, so `db:generate` must run FIRST or both
+  # the build and the runtime import of dist/prisma/generated fail.
+  say "reconciling student-data-system deps + workspace build (ads-adm-db dist for ads-adm-api)..."
+  pnpm_install "$SDS"
+  ( cd "$SDS/packages/node/ads-adm-db" && pnpm db:generate >/dev/null 2>&1 ) || true
+  ( cd "$SDS" && pnpm build >/dev/null 2>&1 ) || true
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
@@ -384,7 +394,19 @@ launch(){ # name port dir extra_env...
 }
 
 services_up(){
-  launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT"
+  # Drift: soa-logger/soa-config on main now require a PINO_LOGGER config with
+  # no defaults — `level` + `isExpressContext` (DotenvConfigManager reads them as
+  # PINO_LOGGER_LEVEL / PINO_LOGGER_ISEXPRESSCONTEXT). Every soa node service
+  # validates this at startup, so export once here; all `env "$@" pnpm dev`
+  # children inherit it. `:-` lets an external override win. Seed paths use
+  # seed-mode (logger config inline) so they're unaffected.
+  export PINO_LOGGER_LEVEL="${PINO_LOGGER_LEVEL:-info}"
+  export PINO_LOGGER_ISEXPRESSCONTEXT="${PINO_LOGGER_ISEXPRESSCONTEXT:-true}"
+  # AUTH_DEVUSERID must be the seeded dev-user UUID (iam-api refuses to boot with
+  # the 'dev-user-001' default when AUTH_ENABLED=false). apply_fixes only set this
+  # via sed on iam-api/.env, which doesn't exist on a fresh clone — pass it on the
+  # launch env so it's independent of that file.
+  launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID"
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7.

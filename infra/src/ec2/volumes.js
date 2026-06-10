@@ -101,6 +101,46 @@ export function create_volume({ name, size, az, region, env_name }) {
  *
  * @param {{ volume_id: string, mount_path: string, instance_id: string, region: string }} config
  */
+/**
+ * Best-effort cleanup of a volume from a failed provision: unmount if
+ * mounted, detach if attached, delete. Every step tolerates "already
+ * done" — the volume may have failed anywhere between create and mount.
+ * Never throws; returns true when the volume is confirmed deleted.
+ *
+ * @param {{ volume_id: string, mount_path?: string, region: string }} config
+ * @returns {boolean}
+ */
+export function cleanup_volume({ volume_id, mount_path, region }) {
+    try {
+        if (mount_path) {
+            spawnSync('umount', [mount_path], { encoding: 'utf8', stdio: 'pipe' });
+        }
+        const state = run('aws', [
+            'ec2', 'describe-volumes',
+            '--volume-ids', volume_id,
+            '--query', 'Volumes[0].State',
+            '--output', 'text',
+            '--region', region,
+        ]);
+        if (state === 'in-use') {
+            run('aws', ['ec2', 'detach-volume', '--volume-id', volume_id, '--region', region]);
+        }
+        if (state !== 'available') {
+            run('aws', [
+                'ec2', 'wait', 'volume-available',
+                '--volume-ids', volume_id,
+                '--region', region,
+            ], { timeout: 120000 });
+        }
+        run('aws', ['ec2', 'delete-volume', '--volume-id', volume_id, '--region', region]);
+        console.log(`Cleaned up volume ${volume_id} from failed provision`);
+        return true;
+    } catch (err) {
+        console.log(`Volume cleanup for ${volume_id} incomplete: ${err.message}`);
+        return false;
+    }
+}
+
 export function attach_and_mount({ volume_id, mount_path, instance_id, region }) {
     // The volume may still be detaching from a recently-terminated
     // instance. Wait for it to be available before attaching.

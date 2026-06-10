@@ -12,7 +12,7 @@ import { resolve } from 'path';
 import { engines } from './engines.js';
 import { generate_compose } from './compose-generator.js';
 import { allocate_port, register_port, release_port, get_allocated_ports } from './ports.js';
-import { create_volume, attach_and_mount, get_instance_metadata } from './volumes.js';
+import { create_volume, attach_and_mount, cleanup_volume, get_instance_metadata } from './volumes.js';
 import { register, deregister } from './cloudmap.js';
 import { snapshot_db, download_profile_seed, seed_after_start, list_s3_profiles, read_profile_registry, write_active_profile } from './profiles.js';
 
@@ -321,65 +321,99 @@ export function create_ec2_router(config = {}) {
             const effective_db_name = db_name || name;
             const project_dir = resolve(projects_dir, name);
 
-            if (existsSync(project_dir)) {
-                return res.status(409).json({ ok: false, error: `Project ${name} already exists` });
+            // Reserve the name ATOMICALLY before the slow create path
+            // (volume create + attach + mount + seed sync runs 30-60s).
+            // An existsSync check here leaves that whole window open for a
+            // concurrent duplicate provision (e.g. a caller's transport
+            // retry) to create+attach a second volume for the same name —
+            // the loser never lands in any registry and its volume leaks.
+            try {
+                mkdirSync(project_dir);
+            } catch (err) {
+                if (err.code === 'EEXIST') {
+                    return res.status(409).json({ ok: false, error: `Project ${name} already exists` });
+                }
+                throw err;
             }
 
-            // Allocate port
-            const allocated_port = port || allocate_port(engine, name, { registry_path });
-
-            // Create EBS volume and mount
+            // Past the reservation, every failure must roll back what was
+            // built so the host stays clean and a retry can succeed —
+            // otherwise the half-provisioned volume holds a device letter
+            // that no teardown path can ever find.
+            let allocated_port;
+            let volume_id;
+            const mount_path = resolve(data_dir, name);
             const meta = get_instance_metadata();
             const effective_region = region || meta.region;
-            const volume_id = create_volume({
-                name,
-                size: volume_size,
-                az: meta.az,
-                region: effective_region,
-                env_name: process.env.ENV_NAME,
-            });
+            try {
+                // Allocate port
+                allocated_port = port || allocate_port(engine, name, { registry_path });
 
-            const mount_path = resolve(data_dir, name);
-            attach_and_mount({
-                volume_id,
-                mount_path,
-                instance_id: meta.instance_id,
-                region: effective_region,
-            });
-
-            // Pull S3 seed data if available
-            const seeds_dir = sync_seeds(name);
-
-            // Generate compose file
-            const compose_content = generate_compose({
-                name,
-                engine,
-                version,
-                port: allocated_port,
-                db_name: effective_db_name,
-                data_dir,
-                seeds_dir,
-            });
-
-            mkdirSync(project_dir, { recursive: true });
-            writeFileSync(resolve(project_dir, 'docker-compose.yml'), compose_content);
-
-            // Start the service
-            const up = compose_cmd(project_dir, ['up', '-d']);
-            if (up.status !== 0) {
-                return res.status(500).json({ ok: false, error: `docker compose up failed: ${up.stderr}` });
-            }
-
-            // Register with CloudMap
-            if (namespace_id) {
-                const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
-                register({
+                // Create EBS volume and mount
+                volume_id = create_volume({
                     name,
-                    ip,
-                    port: allocated_port,
-                    namespace_id,
+                    size: volume_size,
+                    az: meta.az,
+                    region: effective_region,
+                    env_name: process.env.ENV_NAME,
+                });
+
+                attach_and_mount({
+                    volume_id,
+                    mount_path,
+                    instance_id: meta.instance_id,
                     region: effective_region,
                 });
+
+                // Pull S3 seed data if available
+                const seeds_dir = sync_seeds(name);
+
+                // Generate compose file
+                const compose_content = generate_compose({
+                    name,
+                    engine,
+                    version,
+                    port: allocated_port,
+                    db_name: effective_db_name,
+                    data_dir,
+                    seeds_dir,
+                });
+
+                writeFileSync(resolve(project_dir, 'docker-compose.yml'), compose_content);
+
+                // Start the service
+                const up = compose_cmd(project_dir, ['up', '-d']);
+                if (up.status !== 0) {
+                    throw new Error(`docker compose up failed: ${up.stderr}`);
+                }
+
+                // Register with CloudMap
+                if (namespace_id) {
+                    const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
+                    register({
+                        name,
+                        ip,
+                        port: allocated_port,
+                        namespace_id,
+                        region: effective_region,
+                    });
+                }
+            } catch (err) {
+                console.log(`Provision of ${name} failed (${err.message}); rolling back`);
+                try {
+                    if (existsSync(resolve(project_dir, 'docker-compose.yml'))) {
+                        compose_cmd(project_dir, ['down']);
+                    }
+                    if (volume_id) {
+                        cleanup_volume({ volume_id, mount_path, region: effective_region });
+                    }
+                    if (allocated_port) {
+                        release_port(name, { registry_path });
+                    }
+                } finally {
+                    rmSync(project_dir, { recursive: true, force: true });
+                }
+                throw err;
             }
 
             const result = {

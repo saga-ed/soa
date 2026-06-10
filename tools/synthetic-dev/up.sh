@@ -282,6 +282,42 @@ mesh_up(){
   ok "mesh up — pg :5432  redis :6379  rabbitmq :5672"
 }
 
+# Run `pnpm install` in a repo, surfacing failures instead of swallowing them.
+# A CodeArtifact 401 (token expires ~12h) is the most common prep failure — on a
+# TTY, offer to refresh it (pnpm co:login) and retry inline; else exit with the
+# fix. Previously this was `|| true`, so a 401 sailed on and died two steps later
+# as a cryptic "prisma not found" (exit 254).
+pnpm_install(){ # repo_dir
+  local dir=$1 name=${1##*/} log="$STATE/prep-install.log" ans
+  ( cd "$dir" && pnpm install ) >"$log" 2>&1 && return 0
+  if grep -qiE 'ERR_PNPM_FETCH_401|Unauthorized' "$log"; then
+    printf "\033[33m⚠\033[0m %s: pnpm install hit a CodeArtifact 401 (token expires ~12h)\n" "$name"
+    if [[ -t 0 ]]; then
+      printf "  Refresh the token now (pnpm co:login) and retry? [Y/n] "; read -r ans || ans=
+      if [[ "${ans:-y}" != [nN]* ]]; then
+        say "pnpm co:login…"
+        if ( cd "$dir" && pnpm co:login ) >>"$log" 2>&1 && ( cd "$dir" && pnpm install ) >>"$log" 2>&1; then
+          ok "token refreshed + $name installed"; return 0
+        fi
+      fi
+    fi
+    printf "\033[31m✗\033[0m %s: install still failing on auth — run 'pnpm co:login' in %s, then re-run.\n" "$name" "$dir"
+    exit 1
+  fi
+  printf "\033[31m✗\033[0m %s: pnpm install failed:\n" "$name"; tail -15 "$log" | sed 's/^/    /'; exit 1
+}
+
+# Run a prisma/db command in $2, surfacing output on failure. These used to go to
+# /dev/null with no `|| true`, so a failure died under set -e with nothing shown.
+db_step(){ # label dir cmd...
+  local label=$1 dir=$2; shift 2
+  ( cd "$dir" && "$@" ) >"$STATE/prep-db.log" 2>&1 && return 0
+  printf "\033[31m✗\033[0m %s failed:\n" "$label"; tail -15 "$STATE/prep-db.log" | sed 's/^/    /'
+  grep -qiE 'prisma" not found|RECURSIVE_EXEC' "$STATE/prep-db.log" \
+    && printf "  → looks like %s isn't installed — run 'pnpm install' there first.\n" "$dir"
+  exit 1
+}
+
 # Provision an API's DB the canonical way — `prisma migrate deploy` (db:deploy),
 # exactly what program-hub's ECS `migrate` job runs. migrate deploy replays the
 # ordered migration SQL, so migration-only DDL that `schema.prisma` can't express
@@ -295,24 +331,26 @@ migrate_db(){ # dir db_name
   local dir=$1 db=$2
   if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -d "$db" -tAc \
         "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" 2>/dev/null)" == t ]]; then
-    ( cd "$dir" && pnpm db:deploy >/dev/null 2>&1 )                         # migration-managed → apply pending (non-destructive)
+    db_step "$db migrate deploy" "$dir" pnpm db:deploy                       # migration-managed → apply pending (non-destructive)
   else
-    ( cd "$dir" && pnpm prisma migrate reset --force >/dev/null 2>&1 )  # unmanaged (db:push'd / empty) → drop + replay all migrations (no seed configured in prisma.config.ts)
+    db_step "$db migrate reset"  "$dir" pnpm prisma migrate reset --force    # unmanaged (db:push'd / empty) → drop + replay all migrations
   fi
 }
 
 prep(){
   say "reconciling rostering deps + workspace build (main switch is not dep-neutral)…"
-  ( cd "$ROSTERING" && pnpm install >/dev/null 2>&1 && pnpm build >/dev/null 2>&1 ) || true
+  pnpm_install "$ROSTERING"
+  ( cd "$ROSTERING" && pnpm build >/dev/null 2>&1 ) || true        # build hiccups are non-fatal
   say "reconciling program-hub deps + workspace build (new deps / stale workspace dist after a main pull)..."
-  ( cd "$PROGRAM_HUB" && pnpm install >/dev/null 2>&1 && pnpm build >/dev/null 2>&1 ) || true
+  pnpm_install "$PROGRAM_HUB"
+  ( cd "$PROGRAM_HUB" && pnpm build >/dev/null 2>&1 ) || true
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
-  ( cd "$ROSTERING/packages/node/iam-db"       && pnpm prisma migrate deploy >/dev/null 2>&1 )
-  ( cd "$ROSTERING/packages/node/iam-pii-db"   && pnpm prisma db push        >/dev/null 2>&1 )
+  db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
+  db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
   migrate_db "$PROGRAM_HUB/apps/node/programs-api"   programs
   migrate_db "$PROGRAM_HUB/apps/node/scheduling-api" scheduling
   migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7)
-  ( cd "$SDS/packages/node/ads-adm-db"         && pnpm prisma migrate deploy >/dev/null 2>&1 )
+  db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
   say "seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true
   ok "schemas + dev user ready"

@@ -28,9 +28,12 @@ DEV=${DEV:-$HOME/dev}
 MANAGED_REPOS="rostering program-hub saga-dash"
 ALWAYS_MAIN_REPOS="soa student-data-system"
 
-pass=0; fail=0
+pass=0; fail=0; warn=0
 okline()  { printf "  \033[32m✓\033[0m %s\n" "$*"; pass=$((pass+1)); }
 badline() { printf "  \033[31m✗\033[0m %s\n" "$*"; fail=$((fail+1)); }
+# Warn = real drift worth surfacing but not a failure (e.g. a legitimate ad-hoc
+# overlay). Does NOT touch pass/fail, so it never flips the exit code.
+warnline(){ printf "  \033[33m⚠\033[0m %s\n" "$*"; warn=$((warn+1)); }
 
 probe(){ # name port path
   local name=$1 port=$2 path=$3 code
@@ -145,6 +148,43 @@ check_pin_merged(){ # repo pr#
   fi
 }
 
+# What's ACTUALLY overlaid vs what the manifest pins. The manifest checks above
+# only ask "is every pin present?" — they're blind to branches merged in by an
+# ad-hoc `refresh-integration --prs` that AREN'T pinned. Those are legitimate
+# (warn, not fail) but invisible and silently dropped by the next refresh-suite,
+# so surface them. Overlay set = PR-branch merges in origin/main..HEAD (commits
+# local/integration carries but main hasn't landed — landed PRs are ancestors of
+# main and fall out of the range automatically). Subtract the pinned branches;
+# whatever's left is an unpinned overlay.
+check_unpinned_overlays(){ # repo  pinned_csv
+  local repo=$1 pins=$2 dir="$DEV/$repo" b n num
+  [[ "$(on_branch "$repo")" == local/integration ]] || return   # only meaningful on integration
+  local merged
+  merged=$( cd "$dir" && git log --merges --pretty=%s origin/main..HEAD 2>/dev/null \
+            | sed -nE "s/.*Merge remote-tracking branch 'origin\/([^']+)'.*/\1/p" \
+            | grep -vxE 'main|master' | sort -u )
+  [[ -z "$merged" ]] && return
+  # pinned branches: resolve each pinned # → headRefName (the branch that gets merged)
+  declare -A PINNED_BRANCH=()
+  IFS=',' read -ra nums <<<"$pins"
+  for n in "${nums[@]}"; do
+    [[ -z "$n" ]] && continue
+    b=$( cd "$dir" && gh pr view "$n" --json headRefName --jq '.headRefName' 2>/dev/null || true )
+    [[ -n "$b" ]] && PINNED_BRANCH["$b"]=$n
+  done
+  local extras=()
+  while IFS= read -r b; do
+    [[ -z "$b" ]] && continue
+    [[ -n "${PINNED_BRANCH[$b]:-}" ]] && continue            # pinned — already reported as ✓
+    num=$( cd "$dir" && gh pr list --head "$b" --state all --json number --jq '.[0].number' 2>/dev/null || true )
+    extras+=( "${num:+#$num }$b" )
+  done <<<"$merged"
+  if [[ ${#extras[@]} -gt 0 ]]; then
+    warnline "$(printf '%-20s +%d unpinned overlay(s): %s' "$repo" "${#extras[@]}" "${extras[*]}")"
+    warnline "$(printf '%-20s   ad-hoc (refresh-integration --prs) — not in manifest; dropped on next refresh-suite' '')"
+  fi
+}
+
 for repo in $MANAGED_REPOS; do
   prs="${PINS[$repo]:-}"
   if [[ -n "$prs" ]]; then
@@ -152,6 +192,7 @@ for repo in $MANAGED_REPOS; do
     if [[ "$(on_branch "$repo")" == "local/integration" ]]; then   # only meaningful if branch is right
       IFS=',' read -ra nums <<<"$prs"
       for n in "${nums[@]}"; do [[ -n "$n" ]] && check_pin_merged "$repo" "$n"; done
+      check_unpinned_overlays "$repo" "$prs"   # surface ad-hoc overlays not in the manifest
     fi
   else
     check_posture_main "$repo"   # main, or an empty local/integration that ≡ main
@@ -162,7 +203,12 @@ for repo in $ALWAYS_MAIN_REPOS; do check_posture "$repo" "main"; done
 
 printf "\n"
 if [[ $fail -eq 0 ]]; then
-  printf "\033[32m✓ all %d checks passed — stack is ready\033[0m\n" "$pass"; exit 0
+  if [[ $warn -gt 0 ]]; then
+    printf "\033[32m✓ all %d checks passed\033[0m \033[33m(%d warning(s) — see ⚠ above)\033[0m — stack is ready\n" "$pass" "$warn"
+  else
+    printf "\033[32m✓ all %d checks passed — stack is ready\033[0m\n" "$pass"
+  fi
+  exit 0
 else
   printf "\033[31m✗ %d/%d checks failed\033[0m — tail /tmp/sds-synthetic/<service>.log for reds\n" "$fail" "$((pass+fail))"; exit 1
 fi

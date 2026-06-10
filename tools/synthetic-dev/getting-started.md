@@ -16,9 +16,9 @@ saga-dash**. It's a dockerized, fully-local **six-service** stack:
 | 6379 | redis | mesh |
 | 5672 / 15672 | rabbitmq | mesh |
 
-Seeds a realistic synthetic roster: **5 districts / 13 schools / 28 sections
-/ 168 students / 22 tutors / 6 named dev personas** — no PII, no VPN, no
-prod-mirror fixture. The 6 dev personas are admin/PM accounts you log in as
+Seeds a realistic synthetic roster: **7 districts / 15 schools / 32 sections
+/ 168 students / 22 tutors / 7 named dev personas** — no PII, no VPN, no
+prod-mirror fixture. The 7 dev personas are admin/PM accounts you log in as
 (separate from the roster).
 
 ## Fastest path — land in the team's exact state
@@ -52,8 +52,8 @@ The pinned suite (snapshot — `./refresh-suite.sh --list` for the live list):
 
 | repo | pinned PRs |
 |---|---|
-| saga-dash | #136 (program-details stale-on-switch) |
-| program-hub, rostering, soa, student-data-system | none — stay on `origin/main` |
+| rostering | #410 (Empty Org seed — the truly-empty upload-from-scratch fixture) |
+| saga-dash, program-hub, soa, student-data-system | none — stay on `origin/main` |
 
 **Maintenance:** when one of these PRs merges to `main`, delete its line from
 `integration-suite.tsv` — the fix then arrives via `main` (up.sh's `prep`
@@ -62,9 +62,9 @@ was a repo's *last* pin (as rostering's #366 was), also `git checkout main`
 in that repo so it leaves `local/integration` — `refresh-suite.sh` no longer
 manages it.
 
-> `refresh-suite.sh` leaves pinned repos (program-hub, saga-dash) **on
-> `local/integration`**; unpinned ones (rostering, soa, student-data-system)
-> stay on `main`. Both `up.sh`'s `check_branches` and `verify.sh` are
+> `refresh-suite.sh` leaves pinned repos (currently just **rostering**) **on
+> `local/integration`**; unpinned ones (saga-dash, program-hub, soa,
+> student-data-system) stay on `main`. Both `up.sh`'s `check_branches` and `verify.sh` are
 > **manifest-aware** — they expect exactly that, so the *correct* setup is
 > silent. A `⚠` (or a `verify.sh` posture failure) now means **real drift**:
 > wrong branch, or a pinned PR not actually merged into your `local/integration`
@@ -185,11 +185,12 @@ The reset is data-only — it truncates synthetic rows but **preserves
 | email | role |
 |---|---|
 | `dev@saga.org` | Seed District admin (the default — most things work) |
-| `multi@saga.org` | belongs to multiple districts |
-| `new@saga.org` | district admin for a fresh district |
-| `many@saga.org` | admin for many programs |
+| `multi@saga.org` | belongs to multiple districts (seed + riverside) |
+| `many@saga.org` | admin for many programs (metro) |
+| `new@saga.org` | district admin for a fresh district (oakdale) |
+| `frontier@saga.org` | admin for the Frontier district |
+| `empty@saga.org` | Empty Org admin — district with NO schools/sections/roster (the CSV upload-from-scratch fixture; `./up.sh --reset --seed roster --login empty@saga.org`) |
 | `none@saga.org` | belongs to no district |
-| `frontier@saga.org` | empty-district admin |
 
 Each persona's UUID is printed at the end of every `--seed roster` run.
 

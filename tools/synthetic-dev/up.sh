@@ -48,6 +48,14 @@
 # recipes (no post-deletes — selectivity is in what you seed):
 #   ./up.sh --reset --seed roster --login  from-scratch roster + dev@saga.org session
 #   ./up.sh --reset --seed full --login    roster + 9 programs + a fresh dev@saga.org session
+#   ./up.sh --reset --seed roster --login empty@saga.org
+#                                          same db:seed, but log in as the EMPTY ORG
+#                                          admin. db:seed always builds an Empty Org too
+#                                          (an admin on a district with NO schools/sections/
+#                                          roster) — the persona you --login picks which
+#                                          district you see. Use empty@saga.org for CSV
+#                                          upload-from-scratch testing; dev@saga.org lands
+#                                          you in the fully-rostered Seed District.
 # (--reset / --seed / --login against an already-running stack skip the up step.)
 #
 # IMPORTANT: the default --login persona (dev@saga.org) is the rostered Seed

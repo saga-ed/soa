@@ -11,9 +11,11 @@ cross-developed against saga-dash on this stack. See
 `../decisions/d1.7`.
 
 > **New here?** Read **`getting-started.md`** — onboarding + the
-> one-command path (`./bootstrap.sh`) that lands you in the team's exact
-> state (pinned in-flight PRs via `refresh-suite.sh`, then up + seed +
-> `verify.sh`). This README is the deeper drift log + service map.
+> one-command path (`./bootstrap.sh`) that stands the stack up **on `main`**
+> (the default; up + seed + `verify.sh`). To overlay your own in-flight PRs,
+> `refresh-suite.sh` reads a personal, gitignored `integration-suite.local.tsv`
+> (or `--prs` ad-hoc) — see getting-started's "Overlaying your own in-flight
+> PRs". This README is the deeper drift log + service map.
 
 ## TL;DR
 

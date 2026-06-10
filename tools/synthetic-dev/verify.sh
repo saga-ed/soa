@@ -7,10 +7,11 @@
 # Checks:
 #   • all six service health endpoints return 200,
 #   • the mesh Postgres is reachable + the iam roster is seeded (users > 0),
-#   • SOURCE POSTURE (manifest-aware): each sibling repo is on the branch the
-#     integration suite expects, and every pinned PR is actually merged into
-#     its local/integration. This is what makes "same state as the team" an
-#     assertion, not a hope — health alone passes even on stale/wrong code.
+#   • SOURCE POSTURE (overlay-aware): each sibling repo is on the branch your
+#     personal overlay expects (main by default, or local/integration for repos
+#     you've overlaid), and every overlaid PR is actually merged into its
+#     local/integration. This makes "the code I think I'm running" an assertion,
+#     not a hope — health alone passes even on stale/wrong code.
 #     (Caveat: it verifies the CHECKOUT; a running service built before a
 #     refresh can still lag — restart/HMR closes that. See getting-started.md.)
 #
@@ -20,11 +21,12 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MANIFEST="$SCRIPT_DIR/integration-suite.tsv"
+MANIFEST="$SCRIPT_DIR/integration-suite.local.tsv"
 DEV=${DEV:-$HOME/dev}
 # Repos refresh-suite manages / up.sh builds from sibling branches. A managed
-# repo with manifest pins is expected on local/integration (with those PRs
-# merged); without pins, on main. soa + student-data-system are always on main.
+# repo listed in your local overlay is expected on local/integration (with those
+# PRs merged); without an overlay entry, on main. soa + student-data-system are
+# always on main.
 MANAGED_REPOS="rostering program-hub saga-dash"
 ALWAYS_MAIN_REPOS="soa student-data-system"
 
@@ -87,10 +89,11 @@ else
   badline "sis_db not migrated (run ./up.sh up — prep deploys the schema)"
 fi
 
-# ── source posture (manifest-aware) ──────────────────────────────────
-# Read the pinned suite, then assert each repo's checkout matches it. A repo
-# on the wrong branch — or on local/integration but missing a pinned PR (stale,
-# forgot to re-run refresh-suite) — fails here even though health is green.
+# ── source posture (overlay-aware) ───────────────────────────────────
+# Read your local overlay, then assert each repo's checkout matches it. A repo
+# on the wrong branch — or on local/integration but missing an overlaid PR
+# (stale, forgot to re-run refresh-suite) — fails here even though health is
+# green. No overlay is the DEFAULT: every managed repo is asserted on main below.
 printf "\033[1m── source posture ──\033[0m\n"
 declare -A PINS=()
 if [[ -f "$MANIFEST" ]]; then
@@ -99,12 +102,12 @@ if [[ -f "$MANIFEST" ]]; then
     PINS["$repo"]="${prs//[[:space:]]/}"
   done < <(grep -vE '^\s*(#|$)' "$MANIFEST")
 else
-  badline "manifest not found: $MANIFEST"
+  printf "  \033[2m· no local overlay — asserting every repo on origin/main\033[0m\n"
 fi
 
-# Flag any manifest repo we don't know how to posture-check (avoid silent skips).
+# Flag any overlay repo we don't know how to posture-check (avoid silent skips).
 for repo in "${!PINS[@]}"; do
-  case " $MANAGED_REPOS " in *" $repo "*) ;; *) badline "manifest pins '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it"; esac
+  case " $MANAGED_REPOS " in *" $repo "*) ;; *) badline "overlay lists '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it"; esac
 done
 
 on_branch(){ git -C "$DEV/$1" branch --show-current 2>/dev/null; }
@@ -117,12 +120,12 @@ check_posture(){ # repo expected_branch
   else badline "$(printf '%-20s on '\''%s'\'' (expected '\''%s'\'')' "$repo" "$have" "$want")"; fi
 }
 
-# Unpinned managed repo: expected on main. But refresh-suite leaves the repo on
-# local/integration even when the suite is empty — and an empty local/integration
-# is identical to main (refresh-integration builds it as origin/main + pins; with
-# zero pins that's just origin/main). Accept that as equivalent instead of crying
+# Un-overlaid managed repo: expected on main. But refresh-suite can leave the
+# repo on local/integration even with no overlay — and an empty local/integration
+# is identical to main (refresh-suite builds it as origin/main + PRs; with
+# zero PRs that's just origin/main). Accept that as equivalent instead of crying
 # wolf; only fail if the tree actually differs from main — a stray overlaid PR not
-# in the manifest, or a stale/behind branch — both real drift worth flagging.
+# in your overlay, or a stale/behind branch — both real drift worth flagging.
 check_posture_main(){ # repo
   local repo=$1 dir="$DEV/$repo" have
   [[ -d "$dir/.git" ]] || { badline "$repo: not a git repo at $dir"; return; }
@@ -130,7 +133,7 @@ check_posture_main(){ # repo
   if [[ "$have" == main ]]; then
     okline "$(printf '%-20s on main' "$repo")"
   elif [[ "$have" == local/integration ]] && git -C "$dir" diff --quiet origin/main HEAD 2>/dev/null; then
-    okline "$(printf '%-20s on local/integration ≡ main (suite empty)' "$repo")"
+    okline "$(printf '%-20s on local/integration ≡ main (no overlay)' "$repo")"
   else
     badline "$(printf '%-20s on '\''%s'\'' (expected '\''main'\'')' "$repo" "$have")"
   fi
@@ -148,9 +151,9 @@ check_pin_merged(){ # repo pr#
   fi
 }
 
-# What's ACTUALLY overlaid vs what the manifest pins. The manifest checks above
-# only ask "is every pin present?" — they're blind to branches merged in by an
-# ad-hoc `refresh-integration --prs` that AREN'T pinned. Those are legitimate
+# What's ACTUALLY overlaid vs what your overlay lists. The overlay checks above
+# only ask "is every listed PR present?" — they're blind to branches merged in by
+# an ad-hoc `refresh-suite --prs` that AREN'T listed. Those are legitimate
 # (warn, not fail) but invisible and silently dropped by the next refresh-suite,
 # so surface them. Overlay set = PR-branch merges in origin/main..HEAD (commits
 # local/integration carries but main hasn't landed — landed PRs are ancestors of
@@ -181,7 +184,7 @@ check_unpinned_overlays(){ # repo  pinned_csv
   done <<<"$merged"
   if [[ ${#extras[@]} -gt 0 ]]; then
     warnline "$(printf '%-20s +%d unpinned overlay(s): %s' "$repo" "${#extras[@]}" "${extras[*]}")"
-    warnline "$(printf '%-20s   ad-hoc (refresh-integration --prs) — not in manifest; dropped on next refresh-suite' '')"
+    warnline "$(printf '%-20s   ad-hoc (refresh-suite --prs) — not in your overlay; dropped on next refresh-suite' '')"
   fi
 }
 
@@ -192,7 +195,7 @@ for repo in $MANAGED_REPOS; do
     if [[ "$(on_branch "$repo")" == "local/integration" ]]; then   # only meaningful if branch is right
       IFS=',' read -ra nums <<<"$prs"
       for n in "${nums[@]}"; do [[ -n "$n" ]] && check_pin_merged "$repo" "$n"; done
-      check_unpinned_overlays "$repo" "$prs"   # surface ad-hoc overlays not in the manifest
+      check_unpinned_overlays "$repo" "$prs"   # surface ad-hoc overlays not in your overlay file
     fi
   else
     check_posture_main "$repo"   # main, or an empty local/integration that ≡ main

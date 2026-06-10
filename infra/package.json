@@ -30,6 +30,7 @@
         ".env.defaults"
     ],
     "dependencies": {
+        "bson": "^6.10.4",
         "express": "^4.22.1",
         "mongodb": "^6.0.0",
         "mysql2": "^3.0.0"

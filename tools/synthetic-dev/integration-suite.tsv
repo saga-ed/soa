@@ -46,5 +46,11 @@
 #  83fb857 / b4d0408). #161 (resizable columns + User ID truncation) and #165
 #  (roster ↔ CSV-upload wiring, sd-164) now arrive via main; saga-dash back on
 #  origin/main. Only rostering #410 (Empty Org seed) remains in flight.)
+# (2026-06-10 rostering #432 added — org-scopes group identity (adds groups.org_id
+#  NOT NULL + unique (org_id, source, source_id); fixes cross-district CSV sourceId
+#  collisions). Its migration 20260609000000_group_org_scoped_identity is ALREADY
+#  applied to the live iam DB (so iam-api/sis-api run the #432 build), but its seed
+#  — which sets orgId on every group.create — must be overlaid or db:seed P2011s on
+#  the NOT NULL org_id. PIN alongside #410 until #432 lands on main.)
 
-rostering	410
+rostering	410,432

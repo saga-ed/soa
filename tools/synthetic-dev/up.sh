@@ -223,12 +223,61 @@ EOF
   fi
 }
 
+# Ports the mesh publishes on the host. A pre-check here names ALL conflicts up
+# front and — crucially — PRINTS them: mesh_up sends `make up` to a log, so the
+# infra Makefile's own (docker-only) port-conflict message otherwise dies in the
+# log while set -e exits the script with nothing on screen.
+MESH_PORTS=( "5432:postgres" "6379:redis" "5672:rabbitmq" "15672:rabbitmq-mgmt" )
+
+# Is host port $1 bound by a LISTENING socket? Tests the real listener table
+# (ss → netstat → lsof → bash /dev/tcp), so it catches NATIVE processes AND
+# host-network containers — not just port-mapped containers. (A docker-ps-only
+# check misses a host redis on 6379, which is exactly how one slipped through.)
+port_listening(){
+  local p=$1
+  if   command -v ss      >/dev/null 2>&1; then ss -ltnH 2>/dev/null     | awk '{print $4}' | grep -qE "[:.]$p$"
+  elif command -v netstat >/dev/null 2>&1; then netstat -ltn 2>/dev/null  | awk '{print $4}' | grep -qE "[:.]$p$"
+  elif command -v lsof    >/dev/null 2>&1; then lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1
+  else ( exec 3<>"/dev/tcp/127.0.0.1/$p" ) 2>/dev/null && exec 3>&- 3<&-
+  fi
+}
+
+check_ports(){
+  local conflict=0 entry p name dock
+  for entry in "${MESH_PORTS[@]}"; do
+    p=${entry%:*}; name=${entry#*:}
+    # A port-mapped docker container shows in `docker ps` — gives a clean name +
+    # `docker stop`. Our own mesh containers are fine (make up reconciles them).
+    dock=$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E "[:.]$p->" | head -1 | cut -f1 || true)
+    [[ "$dock" =~ ^soa-(postgres|redis|rabbitmq)-1$ ]] && continue
+    if [[ -n "$dock" ]]; then
+      printf "\033[31m✗\033[0m mesh port %s (%s) held by container '%s' — free it:  docker stop %s\n" "$p" "$name" "$dock" "$dock"
+      conflict=1
+    elif port_listening "$p"; then
+      # native process or host-network container — no Ports mapping to name it
+      printf "\033[31m✗\033[0m mesh port %s (%s) in use by a non-docker listener — find it:  sudo lsof -iTCP:%s -sTCP:LISTEN  (or: sudo ss -lptn 'sport = :%s')\n" "$p" "$name" "$p" "$p"
+      conflict=1
+    fi
+  done
+  [[ $conflict -eq 0 ]] || { printf "  The mesh needs 5432/6379/5672/15672 free. Clear the holder(s) above, then re-run.\n"; exit 1; }
+}
+
 mesh_up(){
-  if docker ps --format '{{.Names}}' | grep -q '^soa-postgres-1$'; then ok "mesh already up"; return; fi
+  # "already up" only if ALL three mesh containers are running. A partial mesh
+  # (e.g. redis failed to bind its port last run) must reconcile via make up,
+  # not masquerade as up — otherwise we skip straight past a missing service.
+  local running; running=$(docker ps --format '{{.Names}}' | grep -cE '^soa-(postgres|redis|rabbitmq)-1$' || true)
+  if [[ "$running" -eq 3 ]]; then ok "mesh already up"; return; fi
+  [[ "$running" -gt 0 ]] && say "partial mesh ($running/3 up) — reconciling…"
+  check_ports
   say "starting mesh (postgres + redis + rabbitmq)…"
-  ( cd "$SOA/infra" && EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
+  if ! ( cd "$SOA/infra" && EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
       make up PROJECT=saga-mesh PROFILE=empty \
-      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 >"$STATE/mesh.log" 2>&1 )
+      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 >"$STATE/mesh.log" 2>&1 ); then
+    printf "\033[31m✗\033[0m mesh failed to start — 'make up' output (%s):\n" "$STATE/mesh.log"
+    sed 's/^/    /' "$STATE/mesh.log" 2>/dev/null
+    exit 1
+  fi
   for _ in $(seq 1 20); do docker exec soa-postgres-1 pg_isready -U postgres_admin >/dev/null 2>&1 && break; sleep 1; done
   ok "mesh up — pg :5432  redis :6379  rabbitmq :5672"
 }

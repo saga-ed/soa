@@ -99,6 +99,24 @@ ok(){ printf "\033[32m✓\033[0m %s\n" "$*"; }
 # (verify.sh turns this into a hard, exit-code check + confirms the pinned PRs
 # are merged; here it stays a warning so `up` proceeds.)
 check_branches(){
+  # ── preflight: every sibling repo must actually be cloned ────────────
+  # A missing dir otherwise surfaces only as git's raw "fatal: cannot change
+  # to '…'" from the probes below (or a late prep/launch failure). up.sh is
+  # the repeatable runner, so it only ASSERTS here — provisioning (clone +
+  # co:login + install) is bootstrap.sh's "ensure repos" step.
+  local _miss=()
+  for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system"; do
+    [[ -d "${kv%:*}/.git" ]] || _miss+=("$kv")
+  done
+  if [[ ${#_miss[@]} -gt 0 ]]; then
+    printf "\033[31m✗\033[0m %d sibling repo(s) not cloned:\n" "${#_miss[@]}"
+    for kv in "${_miss[@]}"; do
+      printf "    %-20s (expected at %s)\n" "${kv#*:}" "${kv%:*}"
+    done
+    printf "  Run ./bootstrap.sh to clone + install them (or clone each by hand), then re-run.\n"
+    exit 1
+  fi
   local MANIFEST="$SCRIPT_DIR/integration-suite.tsv" repo have want
   declare -A PINS=()
   if [[ -f "$MANIFEST" ]]; then

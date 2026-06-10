@@ -96,13 +96,39 @@ describe('POST /dbs provision race + rollback', () => {
     it('409s a duplicate provision without touching AWS (name reserved before create)', async () => {
         await api(test_server.base_url, 'POST', '/dbs', { name: 'svc-pr-1', engine: 'postgres' });
         create_volume.mockClear();
+        release_port.mockClear();
 
         const { status, data } = await api(test_server.base_url, 'POST', '/dbs', {
             name: 'svc-pr-1', engine: 'postgres',
         });
         expect(status).toBe(409);
+        // 'already exists' is load-bearing: provision triage in the caller
+        // repos greps for it to pick the reuse path.
         expect(data.error).toMatch(/already exists/);
         expect(create_volume).not.toHaveBeenCalled();
+        // The 409 must never disturb the winner's live project.
+        expect(existsSync(join(projects_dir, 'svc-pr-1'))).toBe(true);
+        expect(release_port).not.toHaveBeenCalled();
+        expect(cleanup_volume).not.toHaveBeenCalled();
+    });
+
+    it('preserves the original error when a rollback step itself throws', async () => {
+        spawnSync.mockImplementation((cmd, args) => {
+            if (cmd === 'docker' && args.includes('up')) {
+                return { status: 1, stdout: '', stderr: 'compose exploded' };
+            }
+            return { status: 0, stdout: '', stderr: '' };
+        });
+        release_port.mockImplementationOnce(() => { throw new Error('registry disk full'); });
+
+        const { status, data } = await api(test_server.base_url, 'POST', '/dbs', {
+            name: 'svc-pr-4', engine: 'postgres',
+        });
+        expect(status).toBe(500);
+        expect(data.error).toMatch(/compose exploded/);
+        expect(data.error).not.toMatch(/disk full/);
+        expect(cleanup_volume).toHaveBeenCalled();
+        expect(existsSync(join(projects_dir, 'svc-pr-4'))).toBe(false);
     });
 
     it('rolls back the reservation when volume creation fails, so a retry succeeds', async () => {

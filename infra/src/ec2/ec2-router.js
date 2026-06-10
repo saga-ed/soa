@@ -7,12 +7,12 @@
 
 import express from 'express';
 import { spawnSync } from 'child_process';
-import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { readdirSync, readFileSync, existsSync, writeFileSync, mkdirSync, rmSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { engines } from './engines.js';
 import { generate_compose } from './compose-generator.js';
 import { allocate_port, register_port, release_port, get_allocated_ports } from './ports.js';
-import { create_volume, attach_and_mount, get_instance_metadata } from './volumes.js';
+import { create_volume, attach_and_mount, cleanup_volume, get_instance_metadata } from './volumes.js';
 import { register, deregister } from './cloudmap.js';
 import { snapshot_db, download_profile_seed, seed_after_start, list_s3_profiles, read_profile_registry, write_active_profile } from './profiles.js';
 
@@ -121,6 +121,9 @@ export function create_ec2_router(config = {}) {
     } = config;
 
     const VALID_NAME = /^[a-zA-Z0-9_-]+$/;
+    // Reservations older than this with no compose file are crash leftovers
+    // (a live provision finishes in tens of seconds), safe to reclaim.
+    const RESERVATION_STALE_MS = 30 * 60 * 1000;
 
     const router = express.Router();
     router.use(express.json());
@@ -283,6 +286,12 @@ export function create_ec2_router(config = {}) {
             if (!existsSync(project_dir)) {
                 return res.status(404).json({ ok: false, error: `Project ${name} not found` });
             }
+            // A reservation dir without a compose file is not a usable DB
+            // (in-flight or crashed provision) — don't report a hollow
+            // ok:true that callers would wire a connection string to.
+            if (!existsSync(resolve(project_dir, 'docker-compose.yml'))) {
+                return res.status(404).json({ ok: false, error: `Project ${name} reserved but not provisioned` });
+            }
 
             const status = get_project_status(project_dir, name);
             const ports = get_allocated_ports({ registry_path });
@@ -321,65 +330,131 @@ export function create_ec2_router(config = {}) {
             const effective_db_name = db_name || name;
             const project_dir = resolve(projects_dir, name);
 
-            if (existsSync(project_dir)) {
-                return res.status(409).json({ ok: false, error: `Project ${name} already exists` });
+            // Reserve the name ATOMICALLY before the slow create path
+            // (volume create + attach + mount + seed sync takes tens of
+            // seconds). An existsSync check here left that whole window
+            // open for a concurrent duplicate provision (e.g. a caller's
+            // transport retry) to create+attach a second volume for the
+            // same name — the loser landed in no registry and leaked.
+            //
+            // A reservation without a compose file means a previous
+            // provision died mid-flight (crash/power-off skips the
+            // rollback); reclaim it once it's old enough that it can't be
+            // an in-flight provision, so the name doesn't 409 forever.
+            if (existsSync(project_dir)
+                && !existsSync(resolve(project_dir, 'docker-compose.yml'))
+                && Date.now() - statSync(project_dir).mtimeMs > RESERVATION_STALE_MS) {
+                console.log(`Reclaiming stale reservation for ${name} (no compose file)`);
+                rmSync(project_dir, { recursive: true, force: true });
+            }
+            try {
+                mkdirSync(project_dir);
+            } catch (err) {
+                if (err.code === 'EEXIST') {
+                    // The 'already exists' phrase is load-bearing: the
+                    // orchestrator's callers (program-hub / rostering
+                    // provision triage) grep for it to pick the reuse path.
+                    return res.status(409).json({ ok: false, error: `Project ${name} already exists (or a provision is in flight)` });
+                }
+                throw err;
             }
 
-            // Allocate port
-            const allocated_port = port || allocate_port(engine, name, { registry_path });
-
-            // Create EBS volume and mount
+            // Past the reservation, every failure must roll back what was
+            // built so the host stays clean and a retry can succeed —
+            // otherwise the half-provisioned volume holds a device letter
+            // that no teardown path can ever find.
+            let allocated_port;
+            let volume_id;
+            const mount_path = resolve(data_dir, name);
             const meta = get_instance_metadata();
             const effective_region = region || meta.region;
-            const volume_id = create_volume({
-                name,
-                size: volume_size,
-                az: meta.az,
-                region: effective_region,
-                env_name: process.env.ENV_NAME,
-            });
+            try {
+                // Allocate port
+                allocated_port = port || allocate_port(engine, name, { registry_path });
 
-            const mount_path = resolve(data_dir, name);
-            attach_and_mount({
-                volume_id,
-                mount_path,
-                instance_id: meta.instance_id,
-                region: effective_region,
-            });
-
-            // Pull S3 seed data if available
-            const seeds_dir = sync_seeds(name);
-
-            // Generate compose file
-            const compose_content = generate_compose({
-                name,
-                engine,
-                version,
-                port: allocated_port,
-                db_name: effective_db_name,
-                data_dir,
-                seeds_dir,
-            });
-
-            mkdirSync(project_dir, { recursive: true });
-            writeFileSync(resolve(project_dir, 'docker-compose.yml'), compose_content);
-
-            // Start the service
-            const up = compose_cmd(project_dir, ['up', '-d']);
-            if (up.status !== 0) {
-                return res.status(500).json({ ok: false, error: `docker compose up failed: ${up.stderr}` });
-            }
-
-            // Register with CloudMap
-            if (namespace_id) {
-                const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
-                register({
+                // Create EBS volume and mount
+                volume_id = create_volume({
                     name,
-                    ip,
-                    port: allocated_port,
-                    namespace_id,
+                    size: volume_size,
+                    az: meta.az,
+                    region: effective_region,
+                    env_name: process.env.ENV_NAME,
+                });
+
+                attach_and_mount({
+                    volume_id,
+                    mount_path,
+                    instance_id: meta.instance_id,
                     region: effective_region,
                 });
+
+                // Pull S3 seed data if available
+                const seeds_dir = sync_seeds(name);
+
+                // Generate compose file
+                const compose_content = generate_compose({
+                    name,
+                    engine,
+                    version,
+                    port: allocated_port,
+                    db_name: effective_db_name,
+                    data_dir,
+                    seeds_dir,
+                });
+
+                writeFileSync(resolve(project_dir, 'docker-compose.yml'), compose_content);
+
+                // Start the service
+                const up = compose_cmd(project_dir, ['up', '-d']);
+                if (up.status !== 0) {
+                    throw new Error(`docker compose up failed: ${up.stderr}`);
+                }
+
+                // Register with CloudMap
+                if (namespace_id) {
+                    const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
+                    register({
+                        name,
+                        ip,
+                        port: allocated_port,
+                        namespace_id,
+                        region: effective_region,
+                    });
+                }
+            } catch (err) {
+                // Rollback is best-effort: each step logs its own failure
+                // and the ORIGINAL provisioning error is always what the
+                // caller sees — a rollback failure must never mask it.
+                console.log(`Provision of ${name} failed (${err.message}); rolling back`);
+                if (existsSync(resolve(project_dir, 'docker-compose.yml'))) {
+                    const down = compose_cmd(project_dir, ['down']);
+                    if (down.status !== 0) {
+                        console.log(`Rollback of ${name}: compose down failed: ${down.stderr}`);
+                    }
+                }
+                const rollback_volume_id = volume_id || err.volume_id;
+                if (rollback_volume_id
+                    && !cleanup_volume({ volume_id: rollback_volume_id, mount_path, region: effective_region })) {
+                    console.log(`ROLLBACK INCOMPLETE: volume ${rollback_volume_id} (${name}) left on ${meta.instance_id} — needs a reap pass`);
+                }
+                if (namespace_id) {
+                    try {
+                        deregister({ name, namespace_id, region: effective_region });
+                    } catch (cleanup_err) {
+                        console.log(`Rollback of ${name}: CloudMap deregister failed: ${cleanup_err.message}`);
+                    }
+                }
+                try {
+                    if (allocated_port) release_port(name, { registry_path });
+                } catch (cleanup_err) {
+                    console.log(`Rollback of ${name}: port release failed: ${cleanup_err.message}`);
+                }
+                try {
+                    rmSync(project_dir, { recursive: true, force: true });
+                } catch (cleanup_err) {
+                    console.log(`Rollback of ${name}: reservation removal failed (name stays 409-blocked): ${cleanup_err.message}`);
+                }
+                throw err;
             }
 
             const result = {

@@ -52,5 +52,11 @@
 #  applied to the live iam DB (so iam-api/sis-api run the #432 build), but its seed
 #  — which sets orgId on every group.create — must be overlaid or db:seed P2011s on
 #  the NOT NULL org_id. PIN alongside #410 until #432 lands on main.)
-
-rostering	410,432
+# (2026-06-10 rostering #432 dropped — LANDED on main (merge 9870cd9); its branch
+#  worktree-csv-group-org-scoped-identity was deleted post-merge. The org-scoped
+#  group identity fix + seed now arrive via main; no longer needs replaying.)
+# (2026-06-10 rostering #410 dropped — its merge onto post-#432 main conflicts in
+#  iam-db seed.ts and we opted not to carry the Empty Org fixture locally. #410 is
+#  still OPEN; re-add it here (and resolve the seed.ts comment-header conflict) if
+#  the empty@saga.org upload-from-scratch scenario is needed again. With this drop
+#  the suite is EMPTY: every repo back on origin/main, nothing in flight to replay.)

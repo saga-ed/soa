@@ -42,6 +42,9 @@
 #  auto-creates referenced school/section groups, so the csv-shadow re-home
 #  stopgap is obsolete. CLOSE PR #423. #410 (Empty Org) stays — it's the
 #  truly-empty upload-from-scratch fixture auto-create needs.)
+# (2026-06-09 saga-dash #161,#165 dropped — both LANDED on main (merges
+#  83fb857 / b4d0408). #161 (resizable columns + User ID truncation) and #165
+#  (roster ↔ CSV-upload wiring, sd-164) now arrive via main; saga-dash back on
+#  origin/main. Only rostering #410 (Empty Org seed) remains in flight.)
 
-saga-dash	161,165
 rostering	410

@@ -78,6 +78,11 @@ IAM_PORT=3010                                               # iam-api port — m
 IAM_URL="http://localhost:$IAM_PORT"
 SIS_PORT=3100                                               # sis-api port (SisConfigSchema default; rostering apps/node/sis-api)
 SIS_DB_URL="postgresql://sis:sis@localhost:5432/sis_db"     # sis-api owns a dedicated DB (read direct from SIS_DATABASE_URL; see d1.7)
+# program-hub config defaults to its OWN standalone-dev postgres on :5433; in this
+# stack programs/scheduling live in the mesh on :5432, so override DATABASE_URL
+# everywhere we run program-hub (migrate + runtime), matching seed_programs.
+PROGRAMS_DB_URL="postgresql://saga_user:password123@localhost:5432/programs"
+SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
 STATE=/tmp/sds-synthetic; mkdir -p "$STATE"
@@ -327,13 +332,14 @@ db_step(){ # label dir cmd...
 # but no `_prisma_migrations` history, so migrate deploy P3005s; detect that
 # (one-time legacy/empty case) and convert via `migrate reset` (drops + replays
 # from scratch — synthetic data is re-seeded via --seed).
-migrate_db(){ # dir db_name
-  local dir=$1 db=$2
+migrate_db(){ # dir db_name [database_url — override to point prisma at the mesh]
+  local dir=$1 db=$2 url=${3:-} pre=()
+  [[ -n "$url" ]] && pre=(env "DATABASE_URL=$url")
   if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -d "$db" -tAc \
         "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" 2>/dev/null)" == t ]]; then
-    db_step "$db migrate deploy" "$dir" pnpm db:deploy                       # migration-managed → apply pending (non-destructive)
+    db_step "$db migrate deploy" "$dir" "${pre[@]+"${pre[@]}"}" pnpm db:deploy                    # migration-managed → apply pending (non-destructive)
   else
-    db_step "$db migrate reset"  "$dir" pnpm prisma migrate reset --force    # unmanaged (db:push'd / empty) → drop + replay all migrations
+    db_step "$db migrate reset"  "$dir" "${pre[@]+"${pre[@]}"}" pnpm prisma migrate reset --force  # unmanaged (db:push'd / empty) → drop + replay all
   fi
 }
 
@@ -347,9 +353,9 @@ prep(){
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
-  migrate_db "$PROGRAM_HUB/apps/node/programs-api"   programs
-  migrate_db "$PROGRAM_HUB/apps/node/scheduling-api" scheduling
-  migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7)
+  migrate_db "$PROGRAM_HUB/apps/node/programs-api"   programs   "$PROGRAMS_DB_URL"
+  migrate_db "$PROGRAM_HUB/apps/node/scheduling-api" scheduling "$SCHEDULING_DB_URL"
+  migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7); uses sis-db's own config
   db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
   say "seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true
@@ -378,8 +384,8 @@ services_up(){
      NODE_ENV=development PORT="$SIS_PORT" \
      SIS_DATABASE_URL="$SIS_DB_URL" \
      IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token"
-  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
-  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
+  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
+  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
   launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
@@ -438,7 +444,7 @@ seed_iam(){
 seed_programs(){
   say "seeding programs (db:seed — deterministic, offline derived ids)…"
   ( cd "$PROGRAM_HUB/apps/node/programs-api" \
-      && env DATABASE_URL="postgresql://saga_user:password123@localhost:5432/programs" pnpm db:seed )
+      && env DATABASE_URL="$PROGRAMS_DB_URL" pnpm db:seed )
   ok "programs seeded (db:seed)"
 }
 

@@ -73,6 +73,7 @@ jobs:
   test:
     name: Test All Packages
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     if: ${{ github.event.inputs.skip_tests != 'true' }}
     steps:
       - name: Checkout code
@@ -230,6 +231,7 @@ jobs:
   version-bump:
     name: Version Bump
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: test
     if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
     outputs:
@@ -355,6 +357,7 @@ jobs:
   publish-codeartifact:
     name: Publish to CodeArtifact
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: version-bump
     if: |
       always() &&
@@ -483,6 +486,7 @@ jobs:
   publish-github:
     name: Publish to GitHub Packages
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: version-bump
     if: |
       always() &&
@@ -587,6 +591,7 @@ jobs:
   summary:
     name: Create Release Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [version-bump, publish-codeartifact, publish-github]
     if: always()
     steps:

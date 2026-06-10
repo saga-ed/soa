@@ -35,14 +35,25 @@ err()  { printf "\033[31m✗\033[0m %s\n" "$*"; }
 
 # Strip comments + blank lines; keep "<repo>\t<prs>" rows.
 rows="$(grep -vE '^\s*(#|$)' "$MANIFEST" || true)"
-[[ -n "$rows" ]] || { err "manifest has no repo rows"; exit 1; }
 
 if [[ "${1:-}" == "--list" ]]; then
   printf "\033[1mPinned integration suite (%s):\033[0m\n" "$MANIFEST"
-  while IFS=$'\t' read -r repo prs; do
-    [[ -z "${repo:-}" ]] && continue
-    printf "  %-20s PRs: %s\n" "$repo" "$prs"
-  done <<<"$rows"
+  if [[ -z "$rows" ]]; then
+    echo "  (none — every repo stays on origin/main)"
+  else
+    while IFS=$'\t' read -r repo prs; do
+      [[ -z "${repo:-}" ]] && continue
+      printf "  %-20s PRs: %s\n" "$repo" "$prs"
+    done <<<"$rows"
+  fi
+  exit 0
+fi
+
+# An empty manifest is a VALID, common state: every pinned PR has landed, so the
+# whole stack just runs on origin/main. Treat it as success (not an error), so
+# bootstrap proceeds — there's simply nothing to replay onto local/integration.
+if [[ -z "$rows" ]]; then
+  ok "no pinned PRs — every repo stays on origin/main (nothing to refresh)"
   exit 0
 fi
 

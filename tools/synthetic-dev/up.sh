@@ -86,6 +86,11 @@ IAM_PORT=3010                                               # iam-api port — m
 IAM_URL="http://localhost:$IAM_PORT"
 SIS_PORT=3100                                               # sis-api port (SisConfigSchema default; rostering apps/node/sis-api)
 SIS_DB_URL="postgresql://sis:sis@localhost:5432/sis_db"     # sis-api owns a dedicated DB (read direct from SIS_DATABASE_URL; see d1.7)
+# program-hub config defaults to its OWN standalone-dev postgres on :5433; in this
+# stack programs/scheduling live in the mesh on :5432, so override DATABASE_URL
+# everywhere we run program-hub (migrate + runtime), matching seed_programs.
+PROGRAMS_DB_URL="postgresql://saga_user:password123@localhost:5432/programs"
+SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
 STATE=/tmp/sds-synthetic; mkdir -p "$STATE"
@@ -107,6 +112,24 @@ ok(){ printf "\033[32m✓\033[0m %s\n" "$*"; }
 # (verify.sh turns this into a hard, exit-code check + confirms the pinned PRs
 # are merged; here it stays a warning so `up` proceeds.)
 check_branches(){
+  # ── preflight: every sibling repo must actually be cloned ────────────
+  # A missing dir otherwise surfaces only as git's raw "fatal: cannot change
+  # to '…'" from the probes below (or a late prep/launch failure). up.sh is
+  # the repeatable runner, so it only ASSERTS here — provisioning (clone +
+  # co:login + install) is bootstrap.sh's "ensure repos" step.
+  local _miss=()
+  for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system"; do
+    [[ -d "${kv%:*}/.git" ]] || _miss+=("$kv")
+  done
+  if [[ ${#_miss[@]} -gt 0 ]]; then
+    printf "\033[31m✗\033[0m %d sibling repo(s) not cloned:\n" "${#_miss[@]}"
+    for kv in "${_miss[@]}"; do
+      printf "    %-20s (expected at %s)\n" "${kv#*:}" "${kv%:*}"
+    done
+    printf "  Run ./bootstrap.sh to clone + install them (or clone each by hand), then re-run.\n"
+    exit 1
+  fi
   local MANIFEST="$SCRIPT_DIR/integration-suite.tsv" repo have want
   declare -A PINS=()
   if [[ -f "$MANIFEST" ]]; then
@@ -213,14 +236,99 @@ EOF
   fi
 }
 
+# Ports the mesh publishes on the host. A pre-check here names ALL conflicts up
+# front and — crucially — PRINTS them: mesh_up sends `make up` to a log, so the
+# infra Makefile's own (docker-only) port-conflict message otherwise dies in the
+# log while set -e exits the script with nothing on screen.
+MESH_PORTS=( "5432:postgres" "6379:redis" "5672:rabbitmq" "15672:rabbitmq-mgmt" )
+
+# Is host port $1 bound by a LISTENING socket? Tests the real listener table
+# (ss → netstat → lsof → bash /dev/tcp), so it catches NATIVE processes AND
+# host-network containers — not just port-mapped containers. (A docker-ps-only
+# check misses a host redis on 6379, which is exactly how one slipped through.)
+port_listening(){
+  local p=$1
+  if   command -v ss      >/dev/null 2>&1; then ss -ltnH 2>/dev/null     | awk '{print $4}' | grep -qE "[:.]$p$"
+  elif command -v netstat >/dev/null 2>&1; then netstat -ltn 2>/dev/null  | awk '{print $4}' | grep -qE "[:.]$p$"
+  elif command -v lsof    >/dev/null 2>&1; then lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1
+  else ( exec 3<>"/dev/tcp/127.0.0.1/$p" ) 2>/dev/null && exec 3>&- 3<&-
+  fi
+}
+
+check_ports(){
+  local conflict=0 entry p name dock
+  for entry in "${MESH_PORTS[@]}"; do
+    p=${entry%:*}; name=${entry#*:}
+    # A port-mapped docker container shows in `docker ps` — gives a clean name +
+    # `docker stop`. Our own mesh containers are fine (make up reconciles them).
+    dock=$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep -E "[:.]$p->" | head -1 | cut -f1 || true)
+    [[ "$dock" =~ ^soa-(postgres|redis|rabbitmq)-1$ ]] && continue
+    if [[ -n "$dock" ]]; then
+      printf "\033[31m✗\033[0m mesh port %s (%s) held by container '%s' — free it:  docker stop %s\n" "$p" "$name" "$dock" "$dock"
+      conflict=1
+    elif port_listening "$p"; then
+      # native process or host-network container — no Ports mapping to name it
+      printf "\033[31m✗\033[0m mesh port %s (%s) in use by a non-docker listener — find it:  sudo lsof -iTCP:%s -sTCP:LISTEN  (or: sudo ss -lptn 'sport = :%s')\n" "$p" "$name" "$p" "$p"
+      conflict=1
+    fi
+  done
+  [[ $conflict -eq 0 ]] || { printf "  The mesh needs 5432/6379/5672/15672 free. Clear the holder(s) above, then re-run.\n"; exit 1; }
+}
+
 mesh_up(){
-  if docker ps --format '{{.Names}}' | grep -q '^soa-postgres-1$'; then ok "mesh already up"; return; fi
+  # "already up" only if ALL three mesh containers are running. A partial mesh
+  # (e.g. redis failed to bind its port last run) must reconcile via make up,
+  # not masquerade as up — otherwise we skip straight past a missing service.
+  local running; running=$(docker ps --format '{{.Names}}' | grep -cE '^soa-(postgres|redis|rabbitmq)-1$' || true)
+  if [[ "$running" -eq 3 ]]; then ok "mesh already up"; return; fi
+  [[ "$running" -gt 0 ]] && say "partial mesh ($running/3 up) — reconciling…"
+  check_ports
   say "starting mesh (postgres + redis + rabbitmq)…"
-  ( cd "$SOA/infra" && EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
+  if ! ( cd "$SOA/infra" && EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
       make up PROJECT=saga-mesh PROFILE=empty \
-      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 >"$STATE/mesh.log" 2>&1 )
+      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 >"$STATE/mesh.log" 2>&1 ); then
+    printf "\033[31m✗\033[0m mesh failed to start — 'make up' output (%s):\n" "$STATE/mesh.log"
+    sed 's/^/    /' "$STATE/mesh.log" 2>/dev/null
+    exit 1
+  fi
   for _ in $(seq 1 20); do docker exec soa-postgres-1 pg_isready -U postgres_admin >/dev/null 2>&1 && break; sleep 1; done
   ok "mesh up — pg :5432  redis :6379  rabbitmq :5672"
+}
+
+# Run `pnpm install` in a repo, surfacing failures instead of swallowing them.
+# A CodeArtifact 401 (token expires ~12h) is the most common prep failure — on a
+# TTY, offer to refresh it (pnpm co:login) and retry inline; else exit with the
+# fix. Previously this was `|| true`, so a 401 sailed on and died two steps later
+# as a cryptic "prisma not found" (exit 254).
+pnpm_install(){ # repo_dir
+  local dir=$1 name=${1##*/} log="$STATE/prep-install.log" ans
+  ( cd "$dir" && pnpm install ) >"$log" 2>&1 && return 0
+  if grep -qiE 'ERR_PNPM_FETCH_401|Unauthorized' "$log"; then
+    printf "\033[33m⚠\033[0m %s: pnpm install hit a CodeArtifact 401 (token expires ~12h)\n" "$name"
+    if [[ -t 0 ]]; then
+      printf "  Refresh the token now (pnpm co:login) and retry? [Y/n] "; read -r ans || ans=
+      if [[ "${ans:-y}" != [nN]* ]]; then
+        say "pnpm co:login…"
+        if ( cd "$dir" && pnpm co:login ) >>"$log" 2>&1 && ( cd "$dir" && pnpm install ) >>"$log" 2>&1; then
+          ok "token refreshed + $name installed"; return 0
+        fi
+      fi
+    fi
+    printf "\033[31m✗\033[0m %s: install still failing on auth — run 'pnpm co:login' in %s, then re-run.\n" "$name" "$dir"
+    exit 1
+  fi
+  printf "\033[31m✗\033[0m %s: pnpm install failed:\n" "$name"; tail -15 "$log" | sed 's/^/    /'; exit 1
+}
+
+# Run a prisma/db command in $2, surfacing output on failure. These used to go to
+# /dev/null with no `|| true`, so a failure died under set -e with nothing shown.
+db_step(){ # label dir cmd...
+  local label=$1 dir=$2; shift 2
+  ( cd "$dir" && "$@" ) >"$STATE/prep-db.log" 2>&1 && return 0
+  printf "\033[31m✗\033[0m %s failed:\n" "$label"; tail -15 "$STATE/prep-db.log" | sed 's/^/    /'
+  grep -qiE 'prisma" not found|RECURSIVE_EXEC' "$STATE/prep-db.log" \
+    && printf "  → looks like %s isn't installed — run 'pnpm install' there first.\n" "$dir"
+  exit 1
 }
 
 # Provision an API's DB the canonical way — `prisma migrate deploy` (db:deploy),
@@ -232,28 +340,31 @@ mesh_up(){
 # but no `_prisma_migrations` history, so migrate deploy P3005s; detect that
 # (one-time legacy/empty case) and convert via `migrate reset` (drops + replays
 # from scratch — synthetic data is re-seeded via --seed).
-migrate_db(){ # dir db_name
-  local dir=$1 db=$2
+migrate_db(){ # dir db_name [database_url — override to point prisma at the mesh]
+  local dir=$1 db=$2 url=${3:-} pre=()
+  [[ -n "$url" ]] && pre=(env "DATABASE_URL=$url")
   if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -d "$db" -tAc \
         "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" 2>/dev/null)" == t ]]; then
-    ( cd "$dir" && pnpm db:deploy >/dev/null 2>&1 )                         # migration-managed → apply pending (non-destructive)
+    db_step "$db migrate deploy" "$dir" "${pre[@]+"${pre[@]}"}" pnpm db:deploy                    # migration-managed → apply pending (non-destructive)
   else
-    ( cd "$dir" && pnpm prisma migrate reset --force >/dev/null 2>&1 )  # unmanaged (db:push'd / empty) → drop + replay all migrations (no seed configured in prisma.config.ts)
+    db_step "$db migrate reset"  "$dir" "${pre[@]+"${pre[@]}"}" pnpm prisma migrate reset --force  # unmanaged (db:push'd / empty) → drop + replay all
   fi
 }
 
 prep(){
   say "reconciling rostering deps + workspace build (main switch is not dep-neutral)…"
-  ( cd "$ROSTERING" && pnpm install >/dev/null 2>&1 && pnpm build >/dev/null 2>&1 ) || true
+  pnpm_install "$ROSTERING"
+  ( cd "$ROSTERING" && pnpm build >/dev/null 2>&1 ) || true        # build hiccups are non-fatal
   say "reconciling program-hub deps + workspace build (new deps / stale workspace dist after a main pull)..."
-  ( cd "$PROGRAM_HUB" && pnpm install >/dev/null 2>&1 && pnpm build >/dev/null 2>&1 ) || true
+  pnpm_install "$PROGRAM_HUB"
+  ( cd "$PROGRAM_HUB" && pnpm build >/dev/null 2>&1 ) || true
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
-  ( cd "$ROSTERING/packages/node/iam-db"       && pnpm prisma migrate deploy >/dev/null 2>&1 )
-  ( cd "$ROSTERING/packages/node/iam-pii-db"   && pnpm prisma db push        >/dev/null 2>&1 )
-  migrate_db "$PROGRAM_HUB/apps/node/programs-api"   programs
-  migrate_db "$PROGRAM_HUB/apps/node/scheduling-api" scheduling
-  migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7)
-  ( cd "$SDS/packages/node/ads-adm-db"         && pnpm prisma migrate deploy >/dev/null 2>&1 )
+  db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
+  db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
+  migrate_db "$PROGRAM_HUB/apps/node/programs-api"   programs   "$PROGRAMS_DB_URL"
+  migrate_db "$PROGRAM_HUB/apps/node/scheduling-api" scheduling "$SCHEDULING_DB_URL"
+  migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7); uses sis-db's own config
+  db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
   say "seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true
   ok "schemas + dev user ready"
@@ -281,8 +392,8 @@ services_up(){
      NODE_ENV=development PORT="$SIS_PORT" \
      SIS_DATABASE_URL="$SIS_DB_URL" \
      IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token"
-  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
-  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
+  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
+  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
   launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
@@ -341,7 +452,7 @@ seed_iam(){
 seed_programs(){
   say "seeding programs (db:seed — deterministic, offline derived ids)…"
   ( cd "$PROGRAM_HUB/apps/node/programs-api" \
-      && env DATABASE_URL="postgresql://saga_user:password123@localhost:5432/programs" pnpm db:seed )
+      && env DATABASE_URL="$PROGRAMS_DB_URL" pnpm db:seed )
   ok "programs seeded (db:seed)"
 }
 

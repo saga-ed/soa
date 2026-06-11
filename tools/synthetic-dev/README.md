@@ -78,7 +78,7 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | saga-dash | 8900 | saga-dash main |
 | connect-api | 6106 | qboard main — Connect session API (Express + mongo; health at `/connectv3/v1/health`) |
 | connect-web | 6210 | qboard main — Connect web app (vite); reaches local rtsm via `VITE_RTSM_BOOTSTRAP_URL` |
-| rtsm-api | 6110 | rtsm main — single-instance CRDT/socket node (no `/opt/fleet.json` → fleet machinery inert; stateless, no DB, `SOCKET_AUTHMODE=none`) |
+| rtsm-api | 6110 | rtsm main — ONE-NODE FLEET (`rtsm-fleet-local.json` via `FLEET_CONFIG_PATH`; rtsm-client requires `/fleet/discover`, which only fleet mode serves); stateless, no DB, `SOCKET_AUTHMODE=none` |
 | postgres / redis / rabbitmq | 5432 / 6379 / 5672 (mgmt 15672) | soa-mesh (`soa-postgres-1` etc.) |
 | mongo (connect) | 27037 | `connect-mongo` — synthetic-dev's own `compose/connect-mongo.yml` (standalone, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's :27017) |
 | livekit / coturn | 7880 / — | qboard docker-compose (AV; best-effort — Connect runs CRDT-only without them) |

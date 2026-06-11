@@ -38,14 +38,16 @@
 # localhost host-scoped cookies reach every port — same trick the dash uses.
 #
 # Service ten is rtsm-api (rtsm repo, :6110) — the CRDT/socket service Connect
-# syncs through. With no /opt/fleet.json it runs as a plain SINGLE-INSTANCE
-# node: stateless, in-memory, no DB/redis, SOCKET_AUTHMODE=none, ws:// — so it
-# has no migrate/seed step and survives nothing (by design; rooms die ~20s
-# after the last client leaves). connect-web reaches it via
+# syncs through. It runs as a ONE-NODE FLEET (FLEET_CONFIG_PATH=
+# rtsm-fleet-local.json + FLEET_NODE_NAME=local): rtsm-client always
+# discovers via GET /fleet/discover, which only fleet mode serves, so bare
+# single-instance mode 404s the client. With itself as the only member the
+# mesh half stays idle. Still stateless: in-memory, no DB/redis,
+# SOCKET_AUTHMODE=none, ws:// — no migrate/seed step, and rooms die ~20s
+# after the last client leaves (by design). connect-web reaches it via
 # VITE_RTSM_BOOTSTRAP_URL (qboard plumbs it through to rtsm-client's
-# bootstrapUrl, which overrides domain-based fleet discovery; on a qboard
-# checkout without that plumb the env var is ignored and connect-web falls
-# back to the wootdev.com fleet).
+# bootstrapUrl; on a qboard checkout without that plumb the env var is
+# ignored and connect-web falls back to the wootdev.com fleet).
 #
 # Deferred: the fleek recording stack, dash→connect linking. SAGA_API_TARGET
 # (legacy poll content, unauthenticated endpoint) stays remote until
@@ -605,11 +607,18 @@ services_up(){
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
   launch saga-dash 8900 "$SAGA_DASH/apps/web/dash"
-  # rtsm-api: single-instance CRDT/socket node (no /opt/fleet.json → fleet
-  # machinery inert). Its committed .env already sets port 6110 + auth none;
+  # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
+  # always discovers via GET /fleet/discover (404 without fleet mode → the
+  # browser's "Fleet discovery failed … Fleet mode may not be active"), so the
+  # local node must serve it. FLEET_CONFIG_PATH (overrides /opt/fleet.json —
+  # no sudo) names this node as the fleet's only member with the
+  # browser-visible endpoint http://localhost:6110; with no peers the mesh
+  # half stays idle. Its committed .env already sets port 6110 + auth none;
   # EXPRESS_SERVER_PORT is passed anyway so the stack pins it explicitly.
   # CORS allows localhost/127.0.0.1 origins unconditionally in its config.
-  launch rtsm-api "$RTSM_PORT" "$RTSM/apps/node/rtsm-api" EXPRESS_SERVER_PORT="$RTSM_PORT"
+  launch rtsm-api "$RTSM_PORT" "$RTSM/apps/node/rtsm-api" \
+     EXPRESS_SERVER_PORT="$RTSM_PORT" \
+     FLEET_CONFIG_PATH="$SCRIPT_DIR/rtsm-fleet-local.json" FLEET_NODE_NAME=local
   # connect-api: verifies the SAME iam_session JWT the dash flow mints (JWKS
   # from local iam). Its issuer default is the wootdev iam, so override
   # JWT_ISSUER to local iam-api's JwtConfigSchema default (rostering

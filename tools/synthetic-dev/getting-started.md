@@ -181,9 +181,12 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
 - **AV (LiveKit):** `up.sh` starts qboard's `livekit` + `coturn` containers
   best-effort (`devkey`/`devsecret`). If they fail, Connect still runs
   whiteboard/CRDT-only.
-- **RTSM is local** — rtsm-api runs as a single-instance node on **:6110**
-  (no `/opt/fleet.json` → fleet machinery inert; stateless, in-memory, no
-  DB/redis, auth off, plain `ws://`). connect-web reaches it via
+- **RTSM is local** — rtsm-api runs on **:6110** as a **one-node fleet**
+  (`rtsm-fleet-local.json` via `FLEET_CONFIG_PATH` + `FLEET_NODE_NAME=local`):
+  rtsm-client always discovers via `GET /fleet/discover`, which only fleet
+  mode serves — bare single-instance mode 404s the client. The node is the
+  fleet's only member (mesh idle) and stays stateless: in-memory, no
+  DB/redis, auth off, plain `ws://`. connect-web reaches it via
   `VITE_RTSM_BOOTSTRAP_URL=http://localhost:6110` (qboard plumbs that through
   to rtsm-client's `bootstrapUrl`, which overrides domain-based fleet
   discovery; `?rtsm_url=` on the Connect URL overrides per-tab). On a qboard

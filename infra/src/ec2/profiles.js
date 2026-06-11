@@ -54,9 +54,36 @@ function get_container_name(name, projects_dir) {
     return container || name;
 }
 
+// --- Schema-rev extraction (Prisma/postgres only) ---
+
+// The snapshot's schema version is the latest applied Prisma migration NAME, read
+// from the `_prisma_migrations` table inside the just-dumped DB. It is the
+// orderable token the restore-time compatibility gate compares against the app's
+// HEAD (see services/switchboard/docs/snapshot-schema-versioning.md in the
+// microservices repo). Order by `finished_at`, NOT max(migration_name): they agree
+// for linear history but diverge when a migration is applied out of name-order.
+//
+// Returns null (never throws) when the table is absent (non-Prisma DB) or empty
+// (fresh DB, zero migrations) — both mean "no schema rev", which the gate treats
+// as `unknown`. A failure here must not fail the snapshot: the .sql is still valid.
+function extract_prisma_rev({ container, db_name, db_user }) {
+    const sql =
+        'SELECT migration_name FROM _prisma_migrations ' +
+        'WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ' +
+        'ORDER BY finished_at DESC LIMIT 1';
+    const result = spawnSync(
+        'docker',
+        ['exec', container, 'psql', '-U', db_user || 'postgres_admin', '-d', db_name, '-t', '-A', '-c', sql],
+        { encoding: 'utf8', stdio: 'pipe' },
+    );
+    if (result.status !== 0) return null; // e.g. relation "_prisma_migrations" does not exist
+    const rev = (result.stdout || '').trim();
+    return rev.length ? rev : null;
+}
+
 // --- Snapshot (dump live DB → S3) ---
 
-export function snapshot_db({ name, profile, engine, port: _port, db_name, db_user, db_password, bucket, projects_dir }) {
+export function snapshot_db({ name, profile, engine, port: _port, db_name, db_user, db_password, bucket, projects_dir, seed_ids_version, app_git_sha }) {
     const eng = engines[engine];
     if (!eng) throw new Error(`Unknown engine: ${engine}`);
 
@@ -77,11 +104,55 @@ export function snapshot_db({ name, profile, engine, port: _port, db_name, db_us
         console.log(`Dumped ${engine} (${container}) to ${tmp_file} (${output.length} bytes)`);
     }
 
-    // Upload to S3
+    // Upload the dump FIRST so a sidecar never points at a missing/stale artifact.
     run('aws', ['s3', 'cp', tmp_file, s3_path]);
     console.log(`Uploaded snapshot to ${s3_path}`);
+    const dump_bytes = readFileSync(tmp_file).length;
 
-    return { s3Path: s3_path, size: readFileSync(tmp_file).length };
+    // Schema sidecar is postgres/Prisma-only. Writing it for mongo/mysql would be
+    // useless (no Prisma rev) AND harmful for mongo: its seed_ext is `json`, so the
+    // sidecar `profile-<p>.meta.json` collides with list_s3_profiles' `profile-(.+)
+    // \.json$` pattern and surfaces a phantom `<p>.meta` profile. So gate strictly:
+    // non-postgres snapshots stay byte-for-byte unchanged.
+    if (engine !== 'postgres') {
+        return { s3Path: s3_path, metaPath: null, schemaRev: null, sidecarOk: false, size: dump_bytes };
+    }
+
+    // Write the authoritative schema sidecar SECOND, next to the dump. The two
+    // uploads are not atomic: if this one fails the dump exists with no sidecar,
+    // which downstream reads as `unknown` (safe-degrade) — report partial success.
+    const schema_rev = extract_prisma_rev({ container, db_name: effective_db_name, db_user });
+    const meta = {
+        sidecarVersion: 1,
+        schemaRev: schema_rev,
+        engine,
+        takenAt: new Date().toISOString(),
+        takenFromDb: name,
+        profile,
+        seedIdsVersion: seed_ids_version ?? null,
+        appGitSha: app_git_sha ?? null,
+        dumpBytes: dump_bytes,
+    };
+    const meta_tmp = `/tmp/profile-${profile}.meta.json`;
+    const meta_s3 = `s3://${bucket}/${name}/profile-${profile}.meta.json`;
+    let sidecar_ok = true;
+    try {
+        writeFileSync(meta_tmp, JSON.stringify(meta, null, 2));
+        run('aws', ['s3', 'cp', meta_tmp, meta_s3]);
+        console.log(`Uploaded schema sidecar to ${meta_s3} (schemaRev=${schema_rev})`);
+    } catch (err) {
+        // Dump already uploaded; degrade to a sidecar-less snapshot rather than fail.
+        sidecar_ok = false;
+        console.log(`WARNING: sidecar upload failed for ${meta_s3}: ${err.message}`);
+    }
+
+    return {
+        s3Path: s3_path,
+        metaPath: sidecar_ok ? meta_s3 : null,
+        schemaRev: schema_rev,
+        sidecarOk: sidecar_ok,
+        size: dump_bytes,
+    };
 }
 
 function snapshot_mongo({ container, tmp_file, user, password }) {

@@ -682,7 +682,9 @@ export function create_ec2_router(config = {}) {
     router.post('/dbs/:name/snapshot', (req, res) => {
         try {
             const { name } = req.params;
-            const { profile } = req.body;
+            // seedIdsVersion + appGitSha are optional provenance fields the caller
+            // (orchestrator / CI) may pass through into the schema sidecar.
+            const { profile, seedIdsVersion, appGitSha } = req.body;
             if (!profile) {
                 return res.status(400).json({ ok: false, error: 'profile is required' });
             }
@@ -704,6 +706,8 @@ export function create_ec2_router(config = {}) {
                 db_password: config.password,
                 bucket: SEED_BUCKET,
                 projects_dir,
+                seed_ids_version: seedIdsVersion,
+                app_git_sha: appGitSha,
             });
 
             res.json({ ok: true, name, profile, action: 'snapshotted', snapshot: result });

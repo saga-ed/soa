@@ -580,7 +580,10 @@ services_up(){
   # it the browser blocks the dash's cross-origin calls and the dash shows
   # "can't reach the identity service" (iam whoami) / silently drops programs.
   # Pass it to every dash-facing API (ads-adm-api already sets it below).
-  launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL"
+  # CORS_ORIGIN is COMMA-SEPARATED (api-util ≥1.2.0) — iam-api also gets the
+  # connect-web origin, because connect-web's iam-client calls iam DIRECTLY
+  # from the browser (personas.getMyPermissions, memberships, whoami…).
+  launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL"
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7.

@@ -586,7 +586,7 @@ status(){
 }
 
 # ── arg parsing: verbs (up/down/status/help) + composable flags ──────
-DO_UP=0; DO_RESET=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER
+DO_UP=0; DO_RESET=0; DO_RESTART=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER
 case "${1:-up}" in
   # `shift || true`: bare `./up.sh` defaults ${1:-up} to "up" but leaves $# at 0,
   # so an unguarded shift returns 1 and `set -e` kills the script before it runs.
@@ -595,8 +595,9 @@ case "${1:-up}" in
   # Clean restart WITHOUT a data wipe: bounce services + clear vite caches, then
   # start fresh on current code. The recovery for a stale dash bundle after a
   # refresh-suite branch rewrite (corrupted vite module graph / unresponsive UI)
-  # — same restart+nuke_vite as --reset, minus reset_data.
-  restart|--restart)             services_down; nuke_vite; services_up; exit 0 ;;
+  # — same restart+nuke_vite as --reset, minus reset_data. Composes with trailing
+  # flags: `restart --login [email]` re-opens the logged-in browser the bounce kills.
+  restart|--restart)             DO_RESTART=1; shift || true ;;
   --status)                      status; exit 0 ;;
   -h|--help)                     sed -n '2,51p' "$0"; exit 0 ;;
   --reset|--seed|--login|--user) ;;        # flag-only invocation; skip up
@@ -626,8 +627,8 @@ fi
 # trap: a dead Vite watcher serving old JS even though the source changed (e.g.
 # after a refresh-suite branch swap). Plain `up` (no --reset) reuses "already
 # up" processes / cached bundles.
-if [[ $DO_RESET == 1 ]]; then
-  say "reset: clean restart — stopping services + clearing vite caches..."
+if [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
+  say "clean restart — stopping services + clearing vite caches..."
   services_down; nuke_vite; services_up
   ok "stack up (clean) — try: $0 --status"
 elif [[ $DO_UP == 1 ]]; then

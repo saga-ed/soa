@@ -204,6 +204,24 @@ done
 # soa + student-data-system must be literally main (never integration-parked).
 for repo in $ALWAYS_MAIN_REPOS; do check_posture "$repo" "main"; done
 
+# ── freshness (behind origin) ─────────────────────────────────────────
+# A repo can be on the right branch yet stale — origin moved under it. The posture
+# checks above compare against a possibly-stale local origin ref, so they miss it
+# (how program-hub sat hundreds of commits behind and 404'd new endpoints). Fetch,
+# then flag any repo behind origin/main. WARN (main moves constantly) — fix with
+# ./up.sh up --pull. Feature-branch repos are skipped (posture already flagged them).
+printf "\033[1m── freshness (behind origin) ──\033[0m\n"
+for repo in $MANAGED_REPOS $ALWAYS_MAIN_REPOS; do
+  dir="$DEV/$repo"
+  [[ -d "$dir/.git" ]] || continue
+  case "$(on_branch "$repo")" in main|local/integration) ;; *) continue ;; esac
+  git -C "$dir" fetch -q origin 2>/dev/null || { warnline "$(printf '%-20s fetch failed — freshness unknown' "$repo")"; continue; }
+  behind=$(git -C "$dir" rev-list --count "HEAD..origin/main" 2>/dev/null || echo "?")
+  if   [[ "$behind" == 0 ]];   then okline   "$(printf '%-20s current with origin/main' "$repo")"
+  elif [[ "$behind" == "?" ]]; then warnline "$(printf '%-20s could not compare to origin/main' "$repo")"
+  else                              warnline "$(printf '%-20s %s behind origin/main — run ./up.sh up --pull' "$repo" "$behind")"; fi
+done
+
 printf "\n"
 if [[ $fail -eq 0 ]]; then
   if [[ $warn -gt 0 ]]; then

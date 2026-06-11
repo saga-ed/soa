@@ -27,6 +27,10 @@
 #   ./refresh-suite.sh --prs 165 saga-dash               ad-hoc: one repo, one PR
 #   ./refresh-suite.sh --prs 410,432 rostering           ad-hoc: several PRs
 #   ./refresh-suite.sh --prs fix/foo saga-dash           ad-hoc: an explicit branch
+#   ./refresh-suite.sh --compose-rest dev                compose the NOT-pinned
+#                                                        services as cloud sandbox 'dev'
+#                                                        (the complement of your overlay),
+#                                                        then ./up.sh --only <svc> --sandbox dev
 #   BASE=develop ./refresh-suite.sh --prs 5 saga-dash    non-main base
 #   DEV=~/work   ./refresh-suite.sh                      non-default sibling parent
 #
@@ -55,12 +59,39 @@ INT=local/integration
 # student-data-system are always on main and never overlaid.
 MANAGED_REPOS="rostering program-hub saga-dash"
 
+# repo → the deployable services it provides (for --compose-rest). The overlay
+# is per-REPO but a sandbox composes per-SERVICE, so this expands one to the
+# other. ads-adm-api (student-data-system) is intentionally absent: it's not a
+# fleet sandbox service here. Keep in sync with up.sh's service list.
+declare -A REPO_SERVICES=(
+  [rostering]="iam-api sis-api"
+  [program-hub]="programs-api scheduling-api sessions-api"
+  [saga-dash]="saga-dash"
+)
+
+# Sandbox composition API (dev fleet). The CI bearer satisfies the app-layer
+# auth; the perimeter (ALB OIDC) is cleared by a bypass header — see
+# SANDBOX_BYPASS_HEADER below and SYNTHETIC-DEV-INTEGRATION.md.
+SANDBOX_API="${SANDBOX_API:-https://sandbox-api.wootdev.com}"
+SANDBOX_API_PREFIX="/api/v1"
+SANDBOX_CI_KEY_SECRET="${SANDBOX_CI_KEY_SECRET:-sandbox-api/ci-api-key}"  # Secrets Manager id
+SANDBOX_REGION="${SANDBOX_REGION:-us-west-2}"
+SANDBOX_AWS_PROFILE="${SANDBOX_AWS_PROFILE:-saga-dev}"
+# Perimeter bypass: the sandbox-api ALB OIDC-challenges interactive-less
+# requests. Set SANDBOX_BYPASS_HEADER='Header-Name: value' to clear it (a
+# dedicated x-saga-compose-cli rule is the sanctioned path; the e2e WAF-bypass
+# header works as a POC). Unset → we don't POST, we just print the spec for the
+# operator to compose in the OIDC'd UI. The value is NEVER hardcoded here.
+SANDBOX_BYPASS_HEADER="${SANDBOX_BYPASS_HEADER:-}"
+SANDBOX_TTL_HOURS="${SANDBOX_TTL_HOURS:-4}"
+SANDBOX_SEED_PROFILE="${SANDBOX_SEED_PROFILE:-canonical}"
+
 say()  { printf "\033[34m→\033[0m %s\n" "$*"; }
 ok()   { printf "\033[32m✓\033[0m %s\n" "$*"; }
 warn() { printf "\033[33m⚠\033[0m %s\n" "$*"; }
 err()  { printf "\033[31m✗\033[0m %s\n" "$*"; }
 
-usage(){ sed -n '23,31p' "$0" | sed 's/^# \{0,1\}//'; }
+usage(){ sed -n '23,35p' "$0" | sed 's/^# \{0,1\}//'; }
 
 # ── engine: rebuild ONE repo's local/integration = origin/BASE + the given
 # PR#s/branches. Echoes progress; returns non-zero if anything didn't apply.
@@ -132,14 +163,103 @@ refresh_repo(){ # name  prs_csv
   return $rc
 }
 
+# ── --compose-rest: compose the NOT-pinned services as a cloud sandbox ───
+# The complement of your overlay: every MANAGED repo you are NOT editing locally
+# becomes a service in a sandbox, so you can run just the pinned one against it
+# (./up.sh --only <svc> --sandbox <name>). Reads the same overlay file as the
+# rest of the toolchain; no new state.
+#
+# Pinned-set source (mirrors up.sh check_branches): integration-suite.local.tsv,
+# rows are `<repo>\t<prs>`. A repo present with PRs = pinned (edited locally) →
+# excluded from the sandbox. Everything else in MANAGED_REPOS → composed.
+read_pins(){ # populates the caller's `PINS` assoc array: repo → prs
+  [[ -f "$MANIFEST" ]] || return 0
+  local repo prs
+  while IFS=$'\t' read -r repo prs; do
+    repo="${repo//[[:space:]]/}"; [[ -z "$repo" ]] && continue
+    PINS["$repo"]="${prs//[[:space:]]/}"
+  done < <(grep -vE '^\s*(#|$)' "$MANIFEST")
+}
+
+compose_rest(){ # name
+  local name=$1
+  [[ "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]] || { err "sandbox name '$name' must match [a-zA-Z0-9][a-zA-Z0-9-]{0,39}"; return 1; }
+
+  local -A PINS=(); read_pins
+  # Complement = MANAGED_REPOS minus pinned, expanded repo→services. dbProfiles
+  # defaults every service to $SANDBOX_SEED_PROFILE so cross-service seed ids align.
+  local repo svc services=() pinned=()
+  for repo in $MANAGED_REPOS; do
+    if [[ -n "${PINS[$repo]:-}" ]]; then pinned+=("$repo ($(echo "${PINS[$repo]}"))"); continue; fi
+    for svc in ${REPO_SERVICES[$repo]:-}; do services+=("$svc"); done
+  done
+  [[ ${#services[@]} -gt 0 ]] || { err "nothing to compose — every managed repo is pinned (or overlay empty). Pin the one you're editing, leave the rest."; return 1; }
+
+  # Build {name, services:{svc:"main"}, dbProfiles:{svc:profile}, ttlHours} with jq.
+  local svc_json db_json
+  svc_json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -s 'map({(.):"main"}) | add')
+  db_json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -s --arg p "$SANDBOX_SEED_PROFILE" 'map({(.):$p}) | add')
+  local body
+  body=$(jq -nc --arg n "$name" --argjson s "$svc_json" --argjson d "$db_json" --argjson t "$SANDBOX_TTL_HOURS" \
+            '{name:$n, services:$s, dbProfiles:$d, ttlHours:$t}')
+
+  [[ ${#pinned[@]} -gt 0 ]] && say "pinned (you edit locally): ${pinned[*]}"
+  say "composing sandbox '$name' with: ${services[*]}  (profile=$SANDBOX_SEED_PROFILE, ttl=${SANDBOX_TTL_HOURS}h)"
+
+  # Without a perimeter bypass we cannot POST (the ALB OIDC-challenges us); print
+  # the spec for the operator to paste into the OIDC'd switchboard/console UI.
+  if [[ -z "$SANDBOX_BYPASS_HEADER" ]]; then
+    warn "no SANDBOX_BYPASS_HEADER set — can't reach sandbox-api headlessly (ALB OIDC). Compose this in the UI:"
+    echo "$body" | jq .
+    echo "  then run: ./up.sh --only <your-service> --sandbox $name"
+    return 0
+  fi
+
+  # Headless self-serve: bypass header clears the ALB perimeter, CI bearer
+  # satisfies the app. Fetch the CI key from Secrets Manager (never inlined).
+  local ci_key
+  ci_key=$(aws secretsmanager get-secret-value --secret-id "$SANDBOX_CI_KEY_SECRET" \
+             --region "$SANDBOX_REGION" --profile "$SANDBOX_AWS_PROFILE" \
+             --query SecretString --output text 2>/dev/null) \
+    || { err "couldn't read CI key '$SANDBOX_CI_KEY_SECRET' (profile $SANDBOX_AWS_PROFILE) — aws creds?"; return 1; }
+
+  local resp status
+  resp=$(curl -fsS -X POST "$SANDBOX_API$SANDBOX_API_PREFIX/compositions" \
+            -H 'Content-Type: application/json' \
+            -H "$SANDBOX_BYPASS_HEADER" \
+            -H "Authorization: Bearer $ci_key" \
+            -d "$body" 2>/dev/null) \
+    || { err "POST /compositions failed (perimeter? bearer? name '$name' taken?)"; return 1; }
+  status=$(echo "$resp" | jq -r '.status // "?"')
+  ok "composition '$name' dispatched (status=$status). Components:"
+  echo "$resp" | jq -r '.components[]? | "  \(.service)/\(.variantId): \(.status)\(if .error then " — "+.error else "" end)"'
+
+  # Poll until ready/terminal (each component CI run takes minutes).
+  say "polling $SANDBOX_API_PREFIX/compositions/$name (up to ~20m)…"
+  local i overall
+  for i in $(seq 1 120); do
+    sleep 10
+    overall=$(curl -fsS "$SANDBOX_API$SANDBOX_API_PREFIX/compositions/$name" \
+                -H "$SANDBOX_BYPASS_HEADER" 2>/dev/null | jq -r '.overallStatus // "?"') || continue
+    printf '\r  [%3d/120] overallStatus=%s        ' "$i" "$overall"
+    case "$overall" in
+      ready)            printf '\n'; ok "sandbox '$name' READY"; echo "  run: ./up.sh --only <your-service> --sandbox $name"; return 0 ;;
+      failed|partial)   printf '\n'; err "sandbox '$name' ended '$overall' — inspect in the console / GH runs"; return 1 ;;
+    esac
+  done
+  printf '\n'; warn "still provisioning after ~20m — check $SANDBOX_API_PREFIX/compositions/$name"; return 1
+}
+
 # ── arg parse (flags then repo names) ────────────────────────────────
-PRS_OVERRIDE=""; REPOS=(); LIST=0; RESET=0
+PRS_OVERRIDE=""; REPOS=(); LIST=0; RESET=0; COMPOSE_REST=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prs)     PRS_OVERRIDE="$2"; shift 2 ;;
     --prs=*)   PRS_OVERRIDE="${1#--prs=}"; shift ;;
     --list)    LIST=1; shift ;;
     --reset)   RESET=1; shift ;;
+    --compose-rest)   COMPOSE_REST="${2:-}"; [[ -z "$COMPOSE_REST" || "$COMPOSE_REST" == -* ]] && { err "--compose-rest needs a sandbox name, e.g. --compose-rest dev"; exit 1; }; shift 2 ;;
+    --compose-rest=*) COMPOSE_REST="${1#--compose-rest=}"; shift ;;
     -h|--help) usage; exit 0 ;;
     --)        shift; while [[ $# -gt 0 ]]; do REPOS+=("$1"); shift; done ;;
     -*)        err "unknown flag: $1"; usage; exit 1 ;;
@@ -164,6 +284,12 @@ if [[ $LIST -eq 1 ]]; then
     echo "  (no local overlay — every repo stays on origin/main; cp ${EXAMPLE##*/} ${MANIFEST##*/} to add one)"
   fi
   exit 0
+fi
+
+# ── --compose-rest <name>: compose the not-pinned services as a sandbox ──
+if [[ -n "$COMPOSE_REST" ]]; then
+  for bin in jq curl aws; do command -v "$bin" >/dev/null || { err "--compose-rest needs '$bin' on PATH"; exit 1; }; done
+  compose_rest "$COMPOSE_REST"; exit $?
 fi
 
 # ── --reset: back out the overlay — return repos to main ─────────────

@@ -56,6 +56,18 @@
 #   ./up.sh --down               stop services (leaves mesh up)
 #   ./up.sh --status             health + row counts
 #
+# HYBRID mode (edit ONE service locally; the rest live in a cloud sandbox):
+#   ./up.sh --only <svc> --sandbox <name>
+#                                launch ONLY <svc> locally and point its
+#                                cross-service deps (today: iam-api) at the dev
+#                                fleet sandbox <name> via preview-header routing
+#                                (x-saga-preview-iam-api: sandbox-<name>) instead
+#                                of the local mesh. Compose the sandbox first
+#                                (refresh-suite.sh --compose-rest, or the UI).
+#                                NOTE: the cloud iam-api runs auth ON, so a real
+#                                S2S token is required (no local dev-bypass) — see
+#                                services/console/SYNTHETIC-DEV-INTEGRATION.md.
+#
 # Flags compose, applied in order up → reset → seed → login. Reproducible
 # recipes (no post-deletes — selectivity is in what you seed):
 #   ./up.sh --reset --seed roster --login  from-scratch roster + dev@saga.org session
@@ -107,6 +119,16 @@ SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
+# ── hybrid mode (--only / --sandbox): run ONE service locally, point its
+# cross-service deps at a CLOUD sandbox instead of the local mesh. Empty by
+# default (pure-local stack). When SANDBOX_NAME is set, the dependency URLs
+# below flip from localhost to the dev fleet host and the launched service
+# forwards the preview-routing header `x-saga-preview-<svc>: sandbox-<name>`
+# on its outbound calls (see sandbox_env() + the fleet-mesh handoff). Override
+# the host with SANDBOX_BASE=... for non-dev fleets.
+ONLY_SERVICE=""                                             # --only <svc>: launch just this one
+SANDBOX_NAME=""                                             # --sandbox <name>: compose name the deps live under
+SANDBOX_BASE="${SANDBOX_BASE:-wootdev.com}"                # dev fleet base domain (preview-header routed)
 STATE=/tmp/sds-synthetic; mkdir -p "$STATE"
 COOKIE_JAR="$STATE/cookies.txt"                             # devLogin session jar (for headless harnesses)
 DEFAULT_LOGIN_USER="dev@saga.org"                          # --login default persona (Seed District admin)
@@ -445,6 +467,40 @@ prep(){
   ok "schemas + dev user ready"
 }
 
+# ── hybrid helpers (--only / --sandbox) ─────────────────────────────────
+# want_service: under --only, launch ONLY the named service; otherwise launch
+# all (the normal full-local stack). Used to gate each launch line below.
+want_service(){ # svc
+  [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "$1" ]]
+}
+# sandbox_env: emit the env-var KEY=VAL pairs that repoint a locally-run
+# service's CROSS-SERVICE dependency URLs at a cloud sandbox, instead of the
+# local mesh. Prints nothing when SANDBOX_NAME is unset (pure-local mode), so
+# it's a no-op safe to splat into every launch line: `launch x ... $(sandbox_env x)`.
+#
+# This ONLY flips the dependency URL (localhost → https://<dep-host>.$SANDBOX_BASE).
+# It deliberately does NOT try to set the preview-routing header via env: the
+# services read it from getPreviewHeaders() (AsyncLocalStorage populated per
+# INBOUND request) — there is no env var that makes a service ORIGINATE
+# `x-saga-preview-<dep>: sandbox-<name>` for its own outbound calls. The header
+# must enter at the request boundary (the dash, or your curl/test harness) and
+# forward-propagate. A backend hit WITHOUT that header silently routes its iam
+# calls to MAIN (empty variant), not the sandbox — see the warning printed at
+# launch and services/console/SYNTHETIC-DEV-INTEGRATION.md.
+# Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
+# sessions deps are additive once the multi-service mesh compose is unblocked.
+sandbox_env(){ # svc
+  [[ -z "$SANDBOX_NAME" ]] && return 0
+  local svc=$1 iam_host="https://iam.$SANDBOX_BASE"
+  case "$svc" in
+    sis-api)
+      printf '%s\n' "IAM_BASEURL=$iam_host/trpc" "IAM_TOKENURL=$iam_host/v1/oauth/token" ;;
+    programs-api|scheduling-api|sessions-api)
+      printf '%s\n' "IAM_API_URL=$iam_host" ;;
+    *) ;; # iam-api itself / saga-dash / ads-adm: no iam dependency to repoint
+  esac
+}
+
 launch(){ # name port dir extra_env...
   local name=$1 port=$2 dir=$3; shift 3
   [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port/health 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
@@ -477,28 +533,46 @@ services_up(){
   # it the browser blocks the dash's cross-origin calls and the dash shows
   # "can't reach the identity service" (iam whoami) / silently drops programs.
   # Pass it to every dash-facing API (ads-adm-api already sets it below).
-  launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL"
+  # Each launch is gated by want_service (so --only <svc> runs just one) and
+  # splats $(sandbox_env <svc>) — a no-op unless --sandbox repoints its deps at
+  # a cloud sandbox. Order/env are otherwise unchanged from the full-local stack.
+  want_service iam-api && \
+    launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL"
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
-  # point at iam on :3010 (sis-api defaults to :3000). See d1.7.
-  launch sis-api "$SIS_PORT" "$ROSTERING/apps/node/sis-api" \
-     NODE_ENV=development PORT="$SIS_PORT" \
-     SIS_DATABASE_URL="$SIS_DB_URL" CORS_ORIGIN="$DASH_URL" \
-     IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token"
-  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL"
-  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL"
+  # point at iam on :3010 (sis-api defaults to :3000). See d1.7. Under --sandbox
+  # those two flip to the cloud iam host (sandbox_env), and a REAL S2S token is
+  # then required — the cloud iam has auth ON (no dev-bypass); see integration doc.
+  want_service sis-api && \
+    launch sis-api "$SIS_PORT" "$ROSTERING/apps/node/sis-api" \
+       NODE_ENV=development PORT="$SIS_PORT" \
+       SIS_DATABASE_URL="$SIS_DB_URL" CORS_ORIGIN="$DASH_URL" \
+       IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token" \
+       $(sandbox_env sis-api)
+  want_service programs-api && \
+    launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env programs-api)
+  want_service scheduling-api && \
+    launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env scheduling-api)
   # sessions-api: DATABASE_URL + IAM_API_URL are REQUIRED (it throws without
   # them); its RABBITMQ_URL default is program-hub's standalone :5673, so point
   # it at the mesh. SCHEDULING_API_URL defaults to :3008 (already the mesh
   # port) and it doesn't read JANUS_REQUIRED, so neither is set. Pre-existing
   # program data needs a one-time manual replay (see header note).
-  launch sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL"
-  launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
-     ADS_ADM_SCHEDULE_PROVIDER=mock \
-     ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
-     DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
-     CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
-  launch saga-dash 8900 "$SAGA_DASH/apps/web/dash"
+  want_service sessions-api && \
+    launch sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(sandbox_env sessions-api)
+  want_service ads-adm-api && \
+    launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
+       ADS_ADM_SCHEDULE_PROVIDER=mock \
+       ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
+       DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
+       CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
+  want_service saga-dash && \
+    launch saga-dash 8900 "$SAGA_DASH/apps/web/dash"
+  # Always succeed: the last `want_service … && launch` is `false` whenever
+  # --only names anything but saga-dash, which would otherwise make this
+  # function return 1 and abort the set -e caller (skipping the ok/reset/seed
+  # that follow) even though the target service came up fine.
+  return 0
 }
 
 # ── reset: truncate synthetic data to an empty baseline ──────────────
@@ -678,7 +752,7 @@ case "${1:-up}" in
   restart|--restart)             DO_RESTART=1; shift || true ;;
   --status)                      status; exit 0 ;;
   -h|--help)                     sed -n '2,51p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull) ;; # flag-only invocation; skip up
+  --reset|--seed|--login|--user|--pull|--only|--sandbox) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
@@ -688,9 +762,39 @@ while [[ $# -gt 0 ]]; do
     # --login / --user [email]: optional positional email; bare or next-flag → default persona
     --login|--user) DO_LOGIN=1; shift; case "${1:-}" in ''|--*) ;; *) LOGIN_USER=$1; shift ;; esac ;;
     --pull) DO_PULL=1; shift ;;
+    # --only <svc>: launch just one service (the one you're editing); the rest
+    # are expected to live in a cloud sandbox. --sandbox <name>: the compose name
+    # those deps live under — flips the launched service's dep URLs + preview
+    # header to the dev fleet (see sandbox_env). Either implies the hybrid path.
+    --only)    ONLY_SERVICE="${2:-}"; [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == --* ]] && { echo "--only needs a service name"; exit 1; }; shift 2 ;;
+    --sandbox) SANDBOX_NAME="${2:-}"; [[ -z "$SANDBOX_NAME" || "$SANDBOX_NAME" == --* ]] && { echo "--sandbox needs a name"; exit 1; }; shift 2 ;;
     *) echo "unknown flag: $1 (use --help)"; exit 1 ;;
   esac
 done
+
+# Hybrid-mode sanity: --only takes a real service; --sandbox is only meaningful
+# with --only (running the full local stack against a cloud iam is not the point).
+if [[ -n "$ONLY_SERVICE" ]]; then
+  case "$ONLY_SERVICE" in
+    iam-api|sis-api|programs-api|scheduling-api|sessions-api|ads-adm-api|saga-dash) ;;
+    *) echo "--only: unknown service '$ONLY_SERVICE' (iam-api|sis-api|programs-api|scheduling-api|sessions-api|ads-adm-api|saga-dash)"; exit 1 ;;
+  esac
+  # --only is a launch directive: a bare `./up.sh --only <svc>` (no `up` verb)
+  # should still bring that one service up, so imply DO_UP unless the user
+  # already asked for a reset/restart (which run services_up themselves).
+  [[ $DO_RESET == 1 || $DO_RESTART == 1 ]] || DO_UP=1
+fi
+if [[ -n "$SANDBOX_NAME" && -z "$ONLY_SERVICE" ]]; then
+  echo "--sandbox <name> requires --only <svc> (point ONE local service at the sandbox; the rest are the sandbox)"; exit 1
+fi
+if [[ -n "$SANDBOX_NAME" ]]; then
+  say "hybrid: $ONLY_SERVICE local → iam dep at https://iam.$SANDBOX_BASE (sandbox '$SANDBOX_NAME')"
+  warn "ROUTING IS NOT AUTOMATIC: $ONLY_SERVICE only reaches sandbox iam if its INBOUND"
+  warn "request carries  x-saga-preview-iam-api: sandbox-$SANDBOX_NAME  (it forward-propagates"
+  warn "from there). Drive via the dash (which originates it) or set that header on each"
+  warn "curl/test request. WITHOUT it, iam calls hit MAIN — and main has SVCCRED auth ON, so"
+  warn "an unauthenticated S2S call is rejected. See SYNTHETIC-DEV-INTEGRATION.md (Seam 2/3)."
+fi
 
 # `up` does first-run prep (branch posture, fixups, mesh, schema). A bare
 # `--reset` (no `up` verb) skips prep and assumes a running mesh.

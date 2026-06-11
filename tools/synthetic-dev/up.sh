@@ -67,7 +67,7 @@
 #                                NOTE: the cloud iam-api runs auth ON, so a real
 #                                S2S token is required (no local dev-bypass) — see
 #                                the design doc (hipponot/microservices:
-#                                services/console/SYNTHETIC-DEV-INTEGRATION.md).
+#                                docs/sandbox/synthetic-dev-integration.md).
 #
 # Flags compose, applied in order up → reset → seed → login. Reproducible
 # recipes (no post-deletes — selectivity is in what you seed):
@@ -503,7 +503,7 @@ launch_if(){ # svc port dir extra_env...
 # forward-propagate. A backend hit WITHOUT that header silently routes its iam
 # calls to MAIN (empty variant), not the sandbox — see the warning printed at
 # launch, and the design doc (hipponot/microservices:
-# services/console/SYNTHETIC-DEV-INTEGRATION.md).
+# docs/sandbox/synthetic-dev-integration.md).
 # Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
 # sessions deps are additive once the multi-service mesh compose is unblocked.
 sandbox_env(){ # svc

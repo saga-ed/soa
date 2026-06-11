@@ -73,7 +73,7 @@ declare -A REPO_SERVICES=(
 # Sandbox composition API (dev fleet). The CI bearer satisfies the app-layer
 # auth; the perimeter (ALB OIDC) is cleared by a bypass header — see
 # SANDBOX_BYPASS_HEADER below and the design doc (hipponot/microservices:
-# services/console/SYNTHETIC-DEV-INTEGRATION.md).
+# docs/sandbox/synthetic-dev-integration.md).
 SANDBOX_API="${SANDBOX_API:-https://sandbox-api.wootdev.com}"
 SANDBOX_API_PREFIX="/api/v1"
 SANDBOX_CI_KEY_SECRET="${SANDBOX_CI_KEY_SECRET:-sandbox-api/ci-api-key}"  # Secrets Manager id

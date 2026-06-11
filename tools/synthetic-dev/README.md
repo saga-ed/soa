@@ -65,7 +65,7 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | sis-api | 3100 | rostering main — SIS reconciliation / CSV-roster (d1.7); calls iam-api `service.*` (S2S, dev-bypass locally) |
 | programs-api | 3006 | program-hub main |
 | scheduling-api | 3008 | program-hub main |
-| sessions-api | 3007 | program-hub main — sessions read/lifecycle (harvested from programs-api in program-hub #148); projections converge via producer outbox replay |
+| sessions-api | 3007 | program-hub main — sessions read/lifecycle (harvested from programs-api in program-hub #148); event-built projections (pre-existing data needs the one-time manual replay — see getting-started.md) |
 | ads-adm-api | 5005 | student-data-system **main** (canonical checkout) |
 | saga-dash | 8900 | saga-dash main |
 | postgres / redis / rabbitmq | 5432 / 6379 / 5672 (mgmt 15672) | soa-mesh (`soa-postgres-1` etc.) |

@@ -20,9 +20,12 @@
 # programs-api in program-hub #148, 2026-06). It owns a `sessions` DB of
 # event-built projections (programs.* / scheduling.* / iam.* consumers over the
 # mesh broker) + TutoringSession, and serves the dash's /sessions page
-# (sessions.dayList / rangeList / lifecycle). Joining late is fine: programs-api
-# and scheduling-api replay their outbox to late-joining consumers (program-hub
-# #160/#161), so its projections converge after first boot. See soa#146.
+# (sessions.dayList / rangeList / lifecycle). On the canonical --reset --seed
+# lane it's up before any program exists, so projections build live. If your
+# mesh ALREADY had program data when sessions-api first joined, catch it up
+# once with the manual per-program replay CLIs (program-hub #160/#161:
+# `pnpm replay:program-outbox <id>` / `replay:schedule-outbox <id>` — see
+# getting-started.md). See soa#146.
 #
 # Branch posture (see decisions/d1.1): iam/programs/scheduling/saga-dash/soa on
 # MAIN; ads-adm from the canonical ~/dev/student-data-system checkout (sds_92 is
@@ -358,8 +361,16 @@ migrate_db(){ # dir db_name [database_url — override to point prisma at the me
   if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -d "$db" -tAc \
         "SELECT to_regclass('public._prisma_migrations') IS NOT NULL" 2>/dev/null)" == t ]]; then
     db_step "$db migrate deploy" "$dir" "${pre[@]+"${pre[@]}"}" pnpm db:deploy                    # migration-managed → apply pending (non-destructive)
+  elif [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -d "$db" -tAc \
+        "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>/dev/null)" == 0 ]]; then
+    # Truly EMPTY DB (fresh mesh volume / just-created): migrate deploy replays
+    # the full migration history non-destructively — same end state as reset
+    # with nothing to drop. Keeps the destructive path off fresh provisions
+    # (prisma 7 also gates `migrate reset` behind an AI-consent prompt when it
+    # detects an agent, which would wedge an unattended bootstrap here).
+    db_step "$db migrate deploy (empty db)" "$dir" "${pre[@]+"${pre[@]}"}" pnpm db:deploy
   else
-    db_step "$db migrate reset"  "$dir" "${pre[@]+"${pre[@]}"}" pnpm prisma migrate reset --force  # unmanaged (db:push'd / empty) → drop + replay all
+    db_step "$db migrate reset"  "$dir" "${pre[@]+"${pre[@]}"}" pnpm prisma migrate reset --force  # unmanaged (db:push'd, no history) → drop + replay all
   fi
 }
 
@@ -479,8 +490,8 @@ services_up(){
   # sessions-api: DATABASE_URL + IAM_API_URL are REQUIRED (it throws without
   # them); its RABBITMQ_URL default is program-hub's standalone :5673, so point
   # it at the mesh. SCHEDULING_API_URL defaults to :3008 (already the mesh
-  # port) and it doesn't read JANUS_REQUIRED, so neither is set. Started after
-  # its producers (programs/scheduling); projections converge via outbox replay.
+  # port) and it doesn't read JANUS_REQUIRED, so neither is set. Pre-existing
+  # program data needs a one-time manual replay (see header note).
   launch sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL"
   launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \

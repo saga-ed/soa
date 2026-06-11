@@ -130,10 +130,28 @@ sessions-api (`~/dev/program-hub/apps/node/sessions-api`, on program-hub
 `static/config.json` already expects) against a dedicated `sessions` DB of
 event-built projections: it consumes `programs.*` / `scheduling.*` / `iam.*`
 events over the mesh broker, and TutoringSessions materialize lazily from
-(slot × pod × date). Starting it after its producers is fine — programs-api
-and scheduling-api replay their outbox to late-joining consumers (program-hub
-#160/#161), so the projections converge on first boot. Until a schedule +
-pods exist, `dayList` legitimately returns empty days. See soa#146.
+(slot × pod × date). Until a schedule + pods exist, `dayList` legitimately
+returns empty days. See soa#146.
+
+One-time catch-up note: the outbox replay to late-joining consumers
+(program-hub #160/#161) is a **manual, per-program CLI**, not automatic — a
+freshly-bound queue has no backlog, so events published *before* sessions-api
+first joined never reach it. On the canonical `--reset --seed` lane this
+never matters (sessions-api is up before any program exists). But if your
+mesh already had program data when sessions-api first started, replay it
+once per program:
+
+```bash
+cd ~/dev/program-hub/apps/node/programs-api && \
+  DATABASE_URL=postgresql://saga_user:password123@localhost:5432/programs \
+  pnpm replay:program-outbox <programId>
+cd ../scheduling-api && \
+  DATABASE_URL=postgresql://saga_user:password123@localhost:5432/scheduling \
+  pnpm replay:schedule-outbox <programId>   # only if a schedule existed
+```
+
+The running relay re-publishes; idempotent consumption makes it a no-op for
+already-caught-up consumers.
 
 ## Walkthrough deck (start here for the UX flow)
 

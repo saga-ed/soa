@@ -5,7 +5,7 @@
 # Unlike `up.sh --status` (which just prints), this EXITS NON-ZERO on any red,
 # so it's a one-shot "is my setup correct?" gate for a new engineer (or CI).
 # Checks:
-#   • all six service health endpoints return 200,
+#   • all seven service health endpoints return 200,
 #   • the mesh Postgres is reachable + the iam roster is seeded (users > 0),
 #   • SOURCE POSTURE (overlay-aware): each sibling repo is on the branch your
 #     personal overlay expects (main by default, or local/integration for repos
@@ -52,6 +52,7 @@ probe iam-api        3010 /health
 probe sis-api        3100 /health
 probe programs-api   3006 /health
 probe scheduling-api 3008 /health
+probe sessions-api   3007 /health
 probe ads-adm-api    5005 /health
 probe saga-dash      8900 /
 

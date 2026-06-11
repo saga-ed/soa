@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # synthetic-dev/up.sh — stand up the local synthetic-dev stack for sds_92.
 #
-# Goal: dockerized postgres + redis + rabbitmq + the six APIs, EMPTY, ready to
+# Goal: dockerized postgres + redis + rabbitmq + the seven APIs, EMPTY, ready to
 # seed SYNTHETIC iam rosters / programs via the deterministic `db:seed`
 # (@saga-ed/*-seed-ids — same data as preview/CI, stable ids across --reset; no
 # VPN, no prod-mirror fixture). See synthetic-dev-align. The old scenario-runner
@@ -16,6 +16,14 @@
 # run iam-api in here. See decisions/d1.7. Its `sis_db` is created by the
 # canonical mesh seed (soa profile-empty.sql, soa#112) like the other app DBs.
 #
+# The seventh API is sessions-api (program-hub, :3007 — harvested out of
+# programs-api in program-hub #148, 2026-06). It owns a `sessions` DB of
+# event-built projections (programs.* / scheduling.* / iam.* consumers over the
+# mesh broker) + TutoringSession, and serves the dash's /sessions page
+# (sessions.dayList / rangeList / lifecycle). Joining late is fine: programs-api
+# and scheduling-api replay their outbox to late-joining consumers (program-hub
+# #160/#161), so its projections converge after first boot. See soa#146.
+#
 # Branch posture (see decisions/d1.1): iam/programs/scheduling/saga-dash/soa on
 # MAIN; ads-adm from the canonical ~/dev/student-data-system checkout (sds_92 is
 # merged to main; the sds_92 worktree has been retired). Override with SDS=...
@@ -28,7 +36,7 @@
 # such drift + fix is documented in README.md and applied idempotently below.
 #
 # Usage:
-#   ./up.sh                      bring up mesh + 6 services (empty)
+#   ./up.sh                      bring up mesh + 7 services (empty)
 #   ./up.sh up --pull            ff-only sync all siblings to origin, then build/migrate
 #   ./up.sh --seed [roster|full] seed synthetic data (default: roster)
 #                                  roster = iam roster only (programs empty → from-scratch)
@@ -88,10 +96,12 @@ IAM_URL="http://localhost:$IAM_PORT"
 SIS_PORT=3100                                               # sis-api port (SisConfigSchema default; rostering apps/node/sis-api)
 SIS_DB_URL="postgresql://sis:sis@localhost:5432/sis_db"     # sis-api owns a dedicated DB (read direct from SIS_DATABASE_URL; see d1.7)
 # program-hub config defaults to its OWN standalone-dev postgres on :5433; in this
-# stack programs/scheduling live in the mesh on :5432, so override DATABASE_URL
-# everywhere we run program-hub (migrate + runtime), matching seed_programs.
+# stack programs/scheduling/sessions live in the mesh on :5432, so override
+# DATABASE_URL everywhere we run program-hub (migrate + runtime), matching
+# seed_programs.
 PROGRAMS_DB_URL="postgresql://saga_user:password123@localhost:5432/programs"
 SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
+SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
 STATE=/tmp/sds-synthetic; mkdir -p "$STATE"
@@ -408,6 +418,15 @@ prep(){
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
   migrate_db "$PROGRAM_HUB/apps/node/programs-api"   programs   "$PROGRAMS_DB_URL"
   migrate_db "$PROGRAM_HUB/apps/node/scheduling-api" scheduling "$SCHEDULING_DB_URL"
+  # sessions-api (program-hub #148 harvest) owns a `sessions` DB. The mesh seed
+  # (profile-empty.sql) creates it on FIRST postgres init only — a mesh volume
+  # initialized before sessions-api existed won't have it, so ensure it here.
+  if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='sessions'" 2>/dev/null)" != 1 ]]; then
+    db_step "sessions db create" "$SOA" docker exec soa-postgres-1 \
+      psql -U postgres_admin -c "CREATE DATABASE sessions OWNER saga_user"
+  fi
+  migrate_db "$PROGRAM_HUB/apps/node/sessions-api"   sessions   "$SESSIONS_DB_URL"
   migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7); uses sis-db's own config
   db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
   say "seeding dev user ($DEV_USER_UUID)…"
@@ -457,6 +476,12 @@ services_up(){
      IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token"
   launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL"
   launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL"
+  # sessions-api: DATABASE_URL + IAM_API_URL are REQUIRED (it throws without
+  # them); its RABBITMQ_URL default is program-hub's standalone :5673, so point
+  # it at the mesh. SCHEDULING_API_URL defaults to :3008 (already the mesh
+  # port) and it doesn't read JANUS_REQUIRED, so neither is set. Started after
+  # its producers (programs/scheduling); projections converge via outbox replay.
+  launch sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL"
   launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
@@ -472,9 +497,11 @@ services_up(){
 # Preserves _prisma_migrations so no re-migrate. Uses the mesh superuser
 # (postgres_admin) so it can truncate tables owned by iam / saga_user / etc.
 reset_data(){
-  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sis)…"
+  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis)…"
   local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
-  for db in iam_local iam_pii_local programs scheduling sis_db; do
+  # `sessions` truncation also clears its consumed-event cursors, so its
+  # event-built projections re-converge from the producers' outbox replay.
+  for db in iam_local iam_pii_local programs scheduling sessions sis_db; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then
       ok "truncated $db"
     else
@@ -592,7 +619,7 @@ open_login_browser(){
   printf "\033[33m⚠\033[0m Chromium still starting — watch %s\n" "$STATE/browser-login.log"
 }
 
-services_down(){ for n in iam-api sis-api programs-api scheduling-api ads-adm-api saga-dash; do
+services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api ads-adm-api saga-dash; do
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
@@ -601,7 +628,7 @@ done
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
-for _p in "$IAM_PORT" "$SIS_PORT" 3006 3008 5005 8900; do fuser -k "$_p/tcp" 2>/dev/null||true; done
+for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 8900; do fuser -k "$_p/tcp" 2>/dev/null||true; done
 ok "services down (mesh left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
@@ -617,7 +644,7 @@ nuke_vite(){
 }
 
 status(){
-  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 ads-adm-api:5005 saga-dash:8900; do
+  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 ads-adm-api:5005 saga-dash:8900; do
     n=${kv%:*}; p=${kv#*:}; probe=/health; [[ "$n" == saga-dash ]] && probe=/
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done

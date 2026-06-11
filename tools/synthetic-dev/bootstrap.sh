@@ -5,7 +5,7 @@
 # Chains the steps a new engineer (e.g. Adam) needs:
 #   1. ensure-repos       — clone any missing of the 5 siblings + co:login & install
 #   2. refresh-suite.sh   — apply your local overlay if present (else everyone on main)
-#   3. up.sh up --reset --seed roster — mesh + 6 services, fresh synthetic roster
+#   3. up.sh up --reset --seed roster — mesh + 7 services, fresh synthetic roster
 #   4. verify.sh          — assert every service is green and the roster seeded
 #
 # Stops at the first failing step (so you fix it before the next). For the
@@ -93,7 +93,7 @@ else
   step "2/4 refresh-suite — SKIPPED (--no-refresh)"
 fi
 
-step "3/4 up.sh — mesh + 6 services + reset + seed $SEED_MODE"
+step "3/4 up.sh — mesh + 7 services + reset + seed $SEED_MODE"
 "$DIR/up.sh" up --reset --seed "$SEED_MODE" || { echo "up.sh failed — tail /tmp/sds-synthetic/*.log"; exit 1; }
 
 step "4/4 verify — assert all green"

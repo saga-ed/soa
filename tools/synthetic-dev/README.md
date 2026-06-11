@@ -44,7 +44,7 @@ won't stop the run.
 |---|---|---|---|
 | **soa** | `~/dev/soa` | `main` | mesh infra (`infra/` + `projects/saga-mesh/seed`) for pg/redis/rabbitmq; shared `@saga-ed/soa-*` packages (registry mode — `soa:link:off`) |
 | **rostering** | `~/dev/rostering` | `main` | iam-api (**:3010**); **sis-api (:3100)** + sis-db prisma; iam-db / iam-pii-db prisma; the `program-hub` roster scenario (`scripts/scenarios`) |
-| **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**); the `programs` scenario (`scripts/scenarios`) |
+| **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**) + sessions-api (**:3007**); the `programs` scenario (`scripts/scenarios`) |
 | **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. Override the path with `SDS=...` |
 | **saga-dash** | `~/dev/saga-dash` | `main` | dash web UI (**:8900**) |
 
@@ -65,14 +65,17 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | sis-api | 3100 | rostering main — SIS reconciliation / CSV-roster (d1.7); calls iam-api `service.*` (S2S, dev-bypass locally) |
 | programs-api | 3006 | program-hub main |
 | scheduling-api | 3008 | program-hub main |
+| sessions-api | 3007 | program-hub main — sessions read/lifecycle (harvested from programs-api in program-hub #148); projections converge via producer outbox replay |
 | ads-adm-api | 5005 | student-data-system **main** (canonical checkout) |
 | saga-dash | 8900 | saga-dash main |
 | postgres / redis / rabbitmq | 5432 / 6379 / 5672 (mgmt 15672) | soa-mesh (`soa-postgres-1` etc.) |
 
 Mesh rabbitmq creds: **`rabbitmq_admin:password123`** (not `saga_user`).
-Seven empty DBs: `iam_local`, `iam_pii_local`, `programs`, `scheduling`,
-`ads_adm_local`, `ledger_local`, `sis_db` (all created by the canonical
-mesh seed — `sis_db` added in soa#112; d1.7).
+Eight empty DBs: `iam_local`, `iam_pii_local`, `programs`, `scheduling`,
+`sessions`, `ads_adm_local`, `ledger_local`, `sis_db` (all created by the
+canonical mesh seed — `sis_db` added in soa#112, d1.7; `sessions` in soa#146.
+The seed only runs on first postgres init, so `up.sh` prep also ensures
+`sessions` exists on meshes initialized before it was added).
 
 ## Status as of 2026-05-26 (after rostering + program-hub pulled to latest origin/main)
 

@@ -36,9 +36,20 @@
 # AV comes from qboard's livekit+coturn containers (best-effort). No HTTPS /
 # domain-spoof proxy (qboard's proxy-dev.sh) is needed here: iam is local, so
 # localhost host-scoped cookies reach every port — same trick the dash uses.
-# Deferred: local RTSM (:6110, needs a qboard bootstrapUrl plumb), the fleek
-# recording stack, dash→connect linking. SAGA_API_TARGET (legacy poll content,
-# unauthenticated endpoint) stays remote until content-api lands.
+#
+# Service ten is rtsm-api (rtsm repo, :6110) — the CRDT/socket service Connect
+# syncs through. With no /opt/fleet.json it runs as a plain SINGLE-INSTANCE
+# node: stateless, in-memory, no DB/redis, SOCKET_AUTHMODE=none, ws:// — so it
+# has no migrate/seed step and survives nothing (by design; rooms die ~20s
+# after the last client leaves). connect-web reaches it via
+# VITE_RTSM_BOOTSTRAP_URL (qboard plumbs it through to rtsm-client's
+# bootstrapUrl, which overrides domain-based fleet discovery; on a qboard
+# checkout without that plumb the env var is ignored and connect-web falls
+# back to the wootdev.com fleet).
+#
+# Deferred: the fleek recording stack, dash→connect linking. SAGA_API_TARGET
+# (legacy poll content, unauthenticated endpoint) stays remote until
+# content-api lands.
 #
 # Branch posture (see decisions/d1.1): iam/programs/scheduling/saga-dash/soa on
 # MAIN; ads-adm from the canonical ~/dev/student-data-system checkout (sds_92 is
@@ -52,7 +63,7 @@
 # such drift + fix is documented in README.md and applied idempotently below.
 #
 # Usage:
-#   ./up.sh                      bring up mesh + 9 services (empty)
+#   ./up.sh                      bring up mesh + 10 services (empty)
 #   ./up.sh up --pull            ff-only sync all siblings to origin, then build/migrate
 #   ./up.sh --seed [roster|full] seed synthetic data (default: roster)
 #                                  roster = iam roster only (programs empty → from-scratch)
@@ -107,6 +118,7 @@ PROGRAM_HUB=$DEV/program-hub
 SAGA_DASH=$DEV/saga-dash
 SDS=${SDS:-$DEV/student-data-system}         # ads-adm from the canonical checkout (sds_92 merged to main; worktree retired)
 QBOARD=${QBOARD:-$DEV/qboard}                # Connect app (connect-api + connect-web)
+RTSM=${RTSM:-$DEV/rtsm}                      # RTSM CRDT/socket service (single-node local)
 
 IAM_PORT=3010                                               # iam-api port — matches saga-dash main's static/config.json default (post Janus auth rewrite, d1.4)
 IAM_URL="http://localhost:$IAM_PORT"
@@ -130,6 +142,8 @@ CONNECT_MONGO_PORT=27037
 CONNECT_MONGO_URI="mongodb://localhost:$CONNECT_MONGO_PORT/connectv3_local"
 CONNECT_API_URL="http://localhost:$CONNECT_API_PORT"
 CONNECT_WEB_URL="http://localhost:$CONNECT_WEB_PORT"
+RTSM_PORT=6110                               # rtsm-api (EXPRESS_SERVER_PORT — its committed .env default)
+RTSM_URL="http://localhost:$RTSM_PORT"
 # Legacy poll-content source (REQUIRED by connect-api's config; the poll
 # endpoint is unauthenticated so no saga cookie is needed). Export your own
 # (e.g. SAGA_API_TARGET=https://jw.wootmath.com) to override. Goes away when
@@ -163,7 +177,8 @@ check_branches(){
   # co:login + install) is bootstrap.sh's "ensure repos" step.
   local _miss=()
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
-            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard"; do
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
+            "$RTSM:rtsm"; do
     [[ -d "${kv%:*}/.git" ]] || _miss+=("$kv")
   done
   if [[ ${#_miss[@]} -gt 0 ]]; then
@@ -182,7 +197,7 @@ check_branches(){
       PINS["$repo"]="${_prs//[[:space:]]/}"
     done < <(grep -vE '^\s*(#|$)' "$MANIFEST")
   fi
-  for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash" "$QBOARD:qboard"; do
+  for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash" "$QBOARD:qboard" "$RTSM:rtsm"; do
     r=${kv%:*}; repo=${kv#*:}
     have=$(git -C "$r" branch --show-current)
     if [[ -n "${PINS[$repo]:-}" ]]; then
@@ -447,7 +462,8 @@ pull_repos(){
   say "pulling siblings to upstream (ff-only)…"
   local kv dir name dirty br behind
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
-            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard"; do
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
+            "$RTSM:rtsm"; do
     dir=${kv%:*}; name=${kv#*:}
     [[ -d "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
     dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -v '^??' || true)
@@ -495,6 +511,11 @@ prep(){
   say "reconciling qboard deps + workspace build (connect-api/-web)…"
   pnpm_install "$QBOARD"
   ( cd "$QBOARD" && pnpm build >/dev/null 2>&1 ) || true
+  # rtsm: stateless single-node service — install + build its workspace deps;
+  # no migrate/seed step (no DB at all).
+  say "reconciling rtsm deps + workspace build (rtsm-api)…"
+  pnpm_install "$RTSM"
+  ( cd "$RTSM" && pnpm build >/dev/null 2>&1 ) || true
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
@@ -581,6 +602,11 @@ services_up(){
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
   launch saga-dash 8900 "$SAGA_DASH/apps/web/dash"
+  # rtsm-api: single-instance CRDT/socket node (no /opt/fleet.json → fleet
+  # machinery inert). Its committed .env already sets port 6110 + auth none;
+  # EXPRESS_SERVER_PORT is passed anyway so the stack pins it explicitly.
+  # CORS allows localhost/127.0.0.1 origins unconditionally in its config.
+  launch rtsm-api "$RTSM_PORT" "$RTSM/apps/node/rtsm-api" EXPRESS_SERVER_PORT="$RTSM_PORT"
   # connect-api: verifies the SAME iam_session JWT the dash flow mints (JWKS
   # from local iam). Its issuer default is the wootdev iam, so override
   # JWT_ISSUER to local iam-api's JwtConfigSchema default (rostering
@@ -598,13 +624,16 @@ services_up(){
      SAGA_API_TARGET="$SAGA_API_TARGET" \
      PUBLIC_API_URL="$CONNECT_API_URL" \
      LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret
-  # connect-web: vite on :6210 (its own config default). VITE_RTSM_DOMAIN is
-  # left at its wootdev.com default for now — local single-node RTSM is the
-  # next phase (needs a qboard plumb of the rtsm-client bootstrapUrl override).
+  # connect-web: vite on :6210 (its own config default). VITE_RTSM_BOOTSTRAP_URL
+  # points the rtsm-client at the LOCAL single-node rtsm-api (it overrides
+  # domain-based fleet discovery). On a qboard checkout without the plumb the
+  # var is ignored and connect-web falls back to the wootdev.com fleet —
+  # graceful either way. `?rtsm_url=` on the Connect URL overrides per-tab.
   launch connect-web "$CONNECT_WEB_PORT" "$QBOARD/apps/web/connectv3" \
      VITE_CONNECTV3_API_URL="$CONNECT_API_URL" \
      VITE_IAM_API_URL="$IAM_URL" \
-     VITE_SAGA_API_TARGET="$SAGA_API_TARGET"
+     VITE_SAGA_API_TARGET="$SAGA_API_TARGET" \
+     VITE_RTSM_BOOTSTRAP_URL="$RTSM_URL"
 }
 
 # ── reset: truncate synthetic data to an empty baseline ──────────────
@@ -745,7 +774,7 @@ open_login_browser(){
   printf "\033[33m⚠\033[0m Chromium still starting — watch %s\n" "$STATE/browser-login.log"
 }
 
-services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api ads-adm-api saga-dash connect-api connect-web; do
+services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api ads-adm-api saga-dash rtsm-api connect-api connect-web; do
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
@@ -754,7 +783,7 @@ done
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
-for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 8900 "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
+for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 8900 "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
 ok "services down (mesh + connect-mongo + AV containers left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
@@ -772,7 +801,7 @@ nuke_vite(){
 }
 
 status(){
-  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 ads-adm-api:5005 saga-dash:8900 connect-api:$CONNECT_API_PORT connect-web:$CONNECT_WEB_PORT; do
+  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 ads-adm-api:5005 saga-dash:8900 rtsm-api:$RTSM_PORT connect-api:$CONNECT_API_PORT connect-web:$CONNECT_WEB_PORT; do
     n=${kv%:*}; p=${kv#*:}; probe=$(probe_path "$n")
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done

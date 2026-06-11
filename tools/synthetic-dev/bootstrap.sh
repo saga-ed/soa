@@ -3,9 +3,9 @@
 # bootstrap.sh — one command to stand up the synthetic-dev stack on main.
 #
 # Chains the steps a new engineer (e.g. Adam) needs:
-#   1. ensure-repos       — clone any missing of the 6 siblings + co:login & install
+#   1. ensure-repos       — clone any missing of the 7 siblings + co:login & install
 #   2. refresh-suite.sh   — apply your local overlay if present (else everyone on main)
-#   3. up.sh up --reset --seed roster — mesh + 9 services, fresh synthetic roster
+#   3. up.sh up --reset --seed roster — mesh + 10 services, fresh synthetic roster
 #   4. verify.sh          — assert every service is green and the roster seeded
 #
 # Stops at the first failing step (so you fix it before the next). For the
@@ -18,7 +18,7 @@
 #   DEV=~/work ./bootstrap.sh       non-default sibling-repo parent
 #
 # Prereqs (see getting-started.md): Docker running, `gh` authenticated, and AWS
-# creds for CodeArtifact. The 6 sibling repos no longer need pre-cloning — step 1
+# creds for CodeArtifact. The 7 sibling repos no longer need pre-cloning — step 1
 # clones + installs any that are missing (under $DEV, default ~/dev).
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
@@ -43,18 +43,19 @@ err(){  printf "\033[31m✗\033[0m %s\n" "$*"; }
 DEV=${DEV:-$HOME/dev}
 SDS=${SDS:-$DEV/student-data-system}
 
-# Step 1 — the real one-time machine bootstrap: make sure all six sibling repos
+# Step 1 — the real one-time machine bootstrap: make sure all seven sibling repos
 # are cloned, and fully provision (co:login + install) any we have to clone, so a
 # fresh clone is launch-ready and the run continues without a manual re-run.
-# Idempotent: a no-op when all six are present. Only freshly-cloned repos are
+# Idempotent: a no-op when all seven are present. Only freshly-cloned repos are
 # installed (re-runs stay fast). Fails fast when non-interactive.
 ensure_repos(){
   local miss=()
   for kv in "$DEV/soa:soa" "$DEV/rostering:rostering" "$DEV/program-hub:program-hub" \
-            "$DEV/saga-dash:saga-dash" "$SDS:student-data-system" "$DEV/qboard:qboard"; do
+            "$DEV/saga-dash:saga-dash" "$SDS:student-data-system" "$DEV/qboard:qboard" \
+            "$DEV/rtsm:rtsm"; do
     [[ -d "${kv%:*}/.git" ]] || miss+=("$kv")
   done
-  if [[ ${#miss[@]} -eq 0 ]]; then ok "all 6 sibling repos present"; return 0; fi
+  if [[ ${#miss[@]} -eq 0 ]]; then ok "all 7 sibling repos present"; return 0; fi
 
   err "${#miss[@]} sibling repo(s) not cloned under $DEV:"
   for kv in "${miss[@]}"; do printf "    %-20s → %s\n" "${kv#*:}" "${kv%:*}"; done
@@ -83,7 +84,7 @@ ensure_repos(){
   ok "repos ensured"
 }
 
-step "1/4 ensure repos — clone + install any missing of the 6 siblings"
+step "1/4 ensure repos — clone + install any missing of the 7 siblings"
 ensure_repos
 
 if [[ $DO_REFRESH == 1 ]]; then
@@ -93,7 +94,7 @@ else
   step "2/4 refresh-suite — SKIPPED (--no-refresh)"
 fi
 
-step "3/4 up.sh — mesh + 9 services + reset + seed $SEED_MODE"
+step "3/4 up.sh — mesh + 10 services + reset + seed $SEED_MODE"
 "$DIR/up.sh" up --reset --seed "$SEED_MODE" || { echo "up.sh failed — tail /tmp/sds-synthetic/*.log"; exit 1; }
 
 step "4/4 verify — assert all green"

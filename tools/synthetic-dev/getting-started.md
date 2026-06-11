@@ -3,7 +3,7 @@
 This is the local "synthetic-dev" stack we use for the attendance-UI /
 People-step work on saga-dash, for **cross-developing sis-api against
 saga-dash**, and now for the **Connect app**. It's a dockerized, fully-local
-**nine-service** stack:
+**ten-service** stack:
 
 | port | service | repo |
 |---|---|---|
@@ -16,6 +16,7 @@ saga-dash**, and now for the **Connect app**. It's a dockerized, fully-local
 | 8900 | saga-dash | `~/dev/saga-dash` |
 | 6106 | connect-api | `~/dev/qboard` |
 | 6210 | connect-web | `~/dev/qboard` |
+| 6110 | rtsm-api (single-node) | `~/dev/rtsm` |
 | 5432 | postgres (`soa-postgres-1`) | mesh, from `~/dev/soa/infra` |
 | 6379 | redis | mesh |
 | 5672 / 15672 | rabbitmq | mesh |
@@ -43,7 +44,7 @@ cd ~/dev/soa/tools/synthetic-dev
 ```bash
 ./refresh-suite.sh             # apply your local overlay if present — else a no-op (everyone on main)
 ./up.sh up --reset --seed roster
-./verify.sh                    # asserts 9 services @ 200 + roster + sis_db + connect-mongo + SOURCE POSTURE (right branches); non-zero on any red
+./verify.sh                    # asserts 10 services @ 200 + roster + sis_db + connect-mongo + SOURCE POSTURE (right branches); non-zero on any red
 ```
 
 On a clean checkout there's no overlay, so `refresh-suite.sh` is a no-op and
@@ -180,10 +181,16 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
 - **AV (LiveKit):** `up.sh` starts qboard's `livekit` + `coturn` containers
   best-effort (`devkey`/`devsecret`). If they fail, Connect still runs
   whiteboard/CRDT-only.
-- **RTSM is still remote for now** (connect-web's default
-  `rtsm_domain=wootdev.com`). Local single-node rtsm-api (:6110) is the next
-  phase — it needs a small qboard PR to plumb the rtsm-client `bootstrapUrl`
-  override.
+- **RTSM is local** — rtsm-api runs as a single-instance node on **:6110**
+  (no `/opt/fleet.json` → fleet machinery inert; stateless, in-memory, no
+  DB/redis, auth off, plain `ws://`). connect-web reaches it via
+  `VITE_RTSM_BOOTSTRAP_URL=http://localhost:6110` (qboard plumbs that through
+  to rtsm-client's `bootstrapUrl`, which overrides domain-based fleet
+  discovery; `?rtsm_url=` on the Connect URL overrides per-tab). On a qboard
+  checkout WITHOUT that plumb the env var is ignored and connect-web falls
+  back to the wootdev.com fleet — graceful either way. Rooms are ephemeral by
+  design (destroyed ~20s after the last client leaves); a restart loses
+  nothing that matters.
 - **Legacy poll content:** connect-api requires `SAGA_API_TARGET` (the poll
   endpoint is unauthenticated — no saga cookie needed). `up.sh` defaults it;
   export your own (e.g. `SAGA_API_TARGET=https://jw.wootmath.com`) to override.
@@ -213,7 +220,7 @@ captured by `../training/capture/capture.mjs` (regenerable; see
    `pnpm install` in rostering/program-hub/saga-dash will 401 on every
    private package. Get a fresh token any time with
    `pnpm co:login` (defined in each repo's root `package.json`).
-5. **Six sibling repos cloned under a shared parent**, by default `~/dev/`:
+5. **Seven sibling repos cloned under a shared parent**, by default `~/dev/`:
    ```
    ~/dev/
      ├── soa                  # mesh infra (provides docker compose for pg/redis/rabbitmq)
@@ -221,7 +228,8 @@ captured by `../training/capture/capture.mjs` (regenerable; see
      ├── program-hub          # programs-api + scheduling-api + sessions-api
      ├── saga-dash            # the dash itself
      ├── student-data-system  # ads-adm-api + this synthetic-dev tooling
-     └── qboard               # connect-api + connect-web (+ livekit/coturn compose)
+     ├── qboard               # connect-api + connect-web (+ livekit/coturn compose)
+     └── rtsm                 # rtsm-api (Connect's CRDT/socket service; single-node here)
    ```
    Override the base with `DEV=~/work ./bootstrap.sh`.
 6. Each sibling repo's `pnpm install` should succeed at least once (post-
@@ -243,7 +251,7 @@ That's the canonical soa-mesh compose definition. So with zero containers
 running and Docker just booted, `./up.sh up` does the right thing in one
 command — brings up the mesh (plus `connect-mongo` and qboard's AV
 containers), applies prisma schemas (via `migrate deploy` — matches the
-deployed pipeline; see `decisions/d1.5`), launches all nine services with the
+deployed pipeline; see `decisions/d1.5`), launches all ten services with the
 right env, and reports green.
 
 ## Verbs
@@ -254,9 +262,9 @@ right env, and reports green.
 ./refresh-suite.sh --list        # print your personal overlay, no changes
 ./refresh-suite.sh --prs 165 saga-dash      # ad-hoc: overlay explicit PR(s) onto main, no file
 ./refresh-suite.sh --reset       # back out: overlaid repos → main (deletes local/integration)
-./verify.sh                      # assert 9 services + roster + sis_db + connect-mongo + source posture (right branches) — exit code
+./verify.sh                      # assert 10 services + roster + sis_db + connect-mongo + source posture (right branches) — exit code
 
-./up.sh up                       # bring up mesh + 9 services (empty databases)
+./up.sh up                       # bring up mesh + 10 services (empty databases)
 ./up.sh up --reset --seed roster # from-scratch: empty baseline + synthetic IAM roster
 ./up.sh up --reset --seed full   # roster + 9 programs + periods + enrollment
 ./up.sh --reset                  # truncate synthetic data → empty baseline (services stay up)
@@ -299,12 +307,12 @@ Each persona's UUID is printed at the end of every `--seed roster` run.
 3. `mesh_up` — starts soa-mesh if not running.
 4. `connect_infra_up` — starts `connect-mongo` (:27037, hard requirement) and
    qboard's livekit + coturn (AV, best-effort).
-5. `prep` — `pnpm install + build` in rostering / program-hub / qboard;
+5. `prep` — `pnpm install + build` in rostering / program-hub / qboard / rtsm;
    `prisma migrate deploy` for iam / programs / scheduling / sessions / sis /
    ads-adm DBs (via the `migrate_db` helper — matches what
-   `_deploy-ecs-api.yml`'s migrate job runs on production). Connect has no
-   migrate step (mongo collections auto-create).
-6. `services_up` — launches the nine services with the right env
+   `_deploy-ecs-api.yml`'s migrate job runs on production). Connect and rtsm
+   have no migrate step (mongo collections auto-create; rtsm has no DB).
+6. `services_up` — launches the ten services with the right env
    (IAM_API_URL, RABBITMQ_URL, JWT_ACCESSTOKENTTLSECONDS, etc.) via
    `nohup pnpm dev` per service. PID files in `/tmp/sds-synthetic/`.
 

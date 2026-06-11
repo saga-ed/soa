@@ -1,6 +1,6 @@
 # Local synthetic-dev stack (sds_92)
 
-A dockerized local stack (postgres + redis + rabbitmq + mongo + the nine
+A dockerized local stack (postgres + redis + rabbitmq + mongo + the ten
 services) for developing **synthetic** iam rosters / programs / schedules —
 no VPN, no prod-mirror fixture. Built 2026-05-26 in response to
 `sources/prompt-3.md`.
@@ -12,7 +12,9 @@ cross-developed against saga-dash on this stack. See
 harvest; soa#146). Eight + nine are the **Connect app** (qboard:
 connect-api :6106 + connect-web :6210) — see getting-started.md's
 Connect section for what's different (dedicated mongo :27037, no
-fixtures, no proxy, RTSM/recording deferred).
+fixtures, no proxy, recording deferred). Ten is **rtsm-api** (rtsm,
+:6110) — Connect's CRDT/socket service as a local single-instance node
+(stateless, no DB, auth off).
 
 > **New here?** Read **`getting-started.md`** — onboarding + the
 > one-command path (`./bootstrap.sh`) that stands the stack up **on `main`**
@@ -24,7 +26,7 @@ fixtures, no proxy, RTSM/recording deferred).
 ## TL;DR
 
 ```bash
-./up.sh           # mesh + 9 services, EMPTY
+./up.sh           # mesh + 10 services, EMPTY
 ./up.sh --reset --seed roster   # from-scratch: empty baseline, then synthetic IAM roster only (programs empty)
 ./up.sh --reset --seed full     # roster + programs/periods/enrollment
 ./up.sh --seed [roster|full]    # seed without resetting (roster = default; iam groups don't dedup — prefer --reset)
@@ -52,6 +54,7 @@ won't stop the run.
 | **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. Override the path with `SDS=...` |
 | **saga-dash** | `~/dev/saga-dash` | `main` | dash web UI (**:8900**) |
 | **qboard** | `~/dev/qboard` | `main` | connect-api (**:6106**) + connect-web (**:6210**); livekit/coturn compose (AV). Override the path with `QBOARD=...` |
+| **rtsm** | `~/dev/rtsm` | `main` | rtsm-api (**:6110**) — Connect's CRDT/socket service, single-node here. Override the path with `RTSM=...` |
 
 Mesh containers (`soa-postgres-1` / `soa-redis-1` / `soa-rabbitmq-1`) are
 brought up from `soa` by `up.sh` itself — no separate clone.
@@ -74,7 +77,8 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | ads-adm-api | 5005 | student-data-system **main** (canonical checkout) |
 | saga-dash | 8900 | saga-dash main |
 | connect-api | 6106 | qboard main — Connect session API (Express + mongo; health at `/connectv3/v1/health`) |
-| connect-web | 6210 | qboard main — Connect web app (vite) |
+| connect-web | 6210 | qboard main — Connect web app (vite); reaches local rtsm via `VITE_RTSM_BOOTSTRAP_URL` |
+| rtsm-api | 6110 | rtsm main — single-instance CRDT/socket node (no `/opt/fleet.json` → fleet machinery inert; stateless, no DB, `SOCKET_AUTHMODE=none`) |
 | postgres / redis / rabbitmq | 5432 / 6379 / 5672 (mgmt 15672) | soa-mesh (`soa-postgres-1` etc.) |
 | mongo (connect) | 27037 | `connect-mongo` — synthetic-dev's own `compose/connect-mongo.yml` (standalone, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's :27017) |
 | livekit / coturn | 7880 / — | qboard docker-compose (AV; best-effort — Connect runs CRDT-only without them) |

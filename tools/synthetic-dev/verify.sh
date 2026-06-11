@@ -5,7 +5,7 @@
 # Unlike `up.sh --status` (which just prints), this EXITS NON-ZERO on any red,
 # so it's a one-shot "is my setup correct?" gate for a new engineer (or CI).
 # Checks:
-#   • all nine service health endpoints return 200,
+#   • all ten service health endpoints return 200,
 #   • the mesh Postgres is reachable + the iam roster is seeded (users > 0),
 #   • SOURCE POSTURE (overlay-aware): each sibling repo is on the branch your
 #     personal overlay expects (main by default, or local/integration for repos
@@ -27,7 +27,7 @@ DEV=${DEV:-$HOME/dev}
 # repo listed in your local overlay is expected on local/integration (with those
 # PRs merged); without an overlay entry, on main. soa + student-data-system are
 # always on main.
-MANAGED_REPOS="rostering program-hub saga-dash qboard"
+MANAGED_REPOS="rostering program-hub saga-dash qboard rtsm"
 ALWAYS_MAIN_REPOS="soa student-data-system"
 
 pass=0; fail=0; warn=0
@@ -55,6 +55,7 @@ probe scheduling-api 3008 /health
 probe sessions-api   3007 /health
 probe ads-adm-api    5005 /health
 probe saga-dash      8900 /
+probe rtsm-api       6110 /health
 probe connect-api    6106 /connectv3/v1/health
 probe connect-web    6210 /
 

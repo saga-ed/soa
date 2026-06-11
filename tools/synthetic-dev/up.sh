@@ -710,7 +710,8 @@ services_up(){
      PUBLIC_API_URL="$CONNECT_API_URL" \
      LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret \
      RECORDING_SERVICE_TOKEN="$RECORDING_TOKEN" \
-     RECORDER_URL_TEMPLATE="http://127.0.0.1:$RECORDER_CONTROL_PORT"
+     RECORDER_URL_TEMPLATE="http://127.0.0.1:$RECORDER_CONTROL_PORT" \
+     FLEEK_TOPOLOGY_JSON='{"cityMap":{"_default":"ws://localhost:7880"},"nodes":{"local":{"url":"ws://localhost:7880"}}}'
   # connect-web: vite on :6210 (its own config default). VITE_RTSM_BOOTSTRAP_URL
   # points the rtsm-client at the LOCAL single-node rtsm-api (it overrides
   # domain-based fleet discovery). On a qboard checkout without the plumb the
@@ -721,6 +722,11 @@ services_up(){
   # recording stack is down (plan pushes only happen when a session records;
   # playback only fetches when manifests exist), and it means a later
   # `./up.sh --record` works without relaunching connect-api/-web.
+  # FLEEK_TOPOLOGY_JSON: REQUIRED for plan pushes to happen at all locally —
+  # fleekNodeFromUrl(ws://localhost:7880) is null via the prod hostname
+  # pattern (plan push silently skipped, recorder logs skipped_plan_missing);
+  # the topology's nodes.url block maps the local LiveKit URL → node "local",
+  # which RECORDER_URL_TEMPLATE then resolves (no {node} placeholder needed).
   launch connect-web "$CONNECT_WEB_PORT" "$QBOARD/apps/web/connectv3" \
      VITE_CONNECTV3_API_URL="$CONNECT_API_URL" \
      VITE_IAM_API_URL="$IAM_URL" \

@@ -141,7 +141,9 @@ MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds 
 CONNECT_API_PORT=6106
 CONNECT_WEB_PORT=6210
 CONNECT_MONGO_PORT=27037
-CONNECT_MONGO_URI="mongodb://localhost:$CONNECT_MONGO_PORT/connectv3_local"
+# NOTE: connect-api selects its database from MONGO_DB_NAME (default
+# `connectv3`), NOT the URI path — keep the path matching so there's one name.
+CONNECT_MONGO_URI="mongodb://localhost:$CONNECT_MONGO_PORT/connectv3"
 CONNECT_API_URL="http://localhost:$CONNECT_API_PORT"
 CONNECT_WEB_URL="http://localhost:$CONNECT_WEB_PORT"
 RTSM_PORT=6110                               # rtsm-api (EXPRESS_SERVER_PORT — its committed .env default)
@@ -669,11 +671,13 @@ reset_data(){
   # Connect's mongo: drop the whole DB (session-scoped CRDT/chat/lifecycle data
   # — all of it is "synthetic session residue"; collections auto-recreate on
   # first write, so a drop IS the empty baseline; no migrations to preserve).
+  # `connectv3` is connect-api's MONGO_DB_NAME default — the db it actually
+  # writes (NOT the URI path).
   if docker exec connect-mongo mongosh --quiet --eval \
-       'db.getSiblingDB("connectv3_local").dropDatabase()' >/dev/null 2>&1; then
-    ok "dropped connectv3_local (connect mongo)"
+       'db.getSiblingDB("connectv3").dropDatabase()' >/dev/null 2>&1; then
+    ok "dropped connectv3 (connect mongo)"
   else
-    printf "\033[33m⚠\033[0m could not drop connectv3_local (is connect-mongo up?)\n"
+    printf "\033[33m⚠\033[0m could not drop connectv3 (is connect-mongo up?)\n"
   fi
   say "re-seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true

@@ -12,8 +12,10 @@
 ## NON-DEFAULT host port (27037) so it never contends with a default-port mongo
 ## (qboard-mongo, another stack, a system mongod).
 ##
-## connect-api connects via:  mongodb://localhost:27037/connectv3_local
-## Collections are created on first write — no migrations, no seed fixtures.
+## connect-api connects via:  mongodb://localhost:27037/connectv3
+## (the db name comes from connect-api's MONGO_DB_NAME default `connectv3`,
+## not the URI path — keep them matching). Collections are created on first
+## write — no migrations, no seed fixtures.
 ##
 ## Usage (up.sh does this for you):
 ##   docker compose -f compose/connect-mongo.yml up -d

@@ -171,7 +171,8 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
 - **Dedicated mongo.** `up.sh` runs Connect against its own synthetic-dev
   container — `compose/connect-mongo.yml`, standalone, no auth, host port
   **:27037** (non-default on purpose, so it never contends with qboard's old
-  `:27017` container or a system mongod). `--reset` drops `connectv3_local`.
+  `:27017` container or a system mongod). `--reset` drops `connectv3` (the db
+  connect-api's `MONGO_DB_NAME` default actually writes).
 - **No HTTPS / domain-spoof proxy.** qboard's `scripts/proxy-dev.sh` (mkcert +
   /etc/hosts + ssl-proxy) exists only because that workflow authenticates at
   `.wootdev.com`. Here iam is local, so the `iam_session` cookie is host-scoped

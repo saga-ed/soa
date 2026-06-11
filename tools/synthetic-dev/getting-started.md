@@ -2,7 +2,7 @@
 
 This is the local "synthetic-dev" stack we use for the attendance-UI /
 People-step work on saga-dash, and now for **cross-developing sis-api against
-saga-dash**. It's a dockerized, fully-local **six-service** stack:
+saga-dash**. It's a dockerized, fully-local **seven-service** stack:
 
 | port | service | repo |
 |---|---|---|
@@ -10,6 +10,7 @@ saga-dash**. It's a dockerized, fully-local **six-service** stack:
 | 3100 | sis-api | `~/dev/rostering` |
 | 3006 | programs-api | `~/dev/program-hub` |
 | 3008 | scheduling-api | `~/dev/program-hub` |
+| 3007 | sessions-api | `~/dev/program-hub` |
 | 5005 | ads-adm-api | `~/dev/student-data-system` |
 | 8900 | saga-dash | `~/dev/saga-dash` |
 | 5432 | postgres (`soa-postgres-1`) | mesh, from `~/dev/soa/infra` |
@@ -37,7 +38,7 @@ cd ~/dev/soa/tools/synthetic-dev
 ```bash
 ./refresh-suite.sh             # apply your local overlay if present — else a no-op (everyone on main)
 ./up.sh up --reset --seed roster
-./verify.sh                    # asserts 6 services @ 200 + roster + sis_db + SOURCE POSTURE (right branches); non-zero on any red
+./verify.sh                    # asserts 7 services @ 200 + roster + sis_db + SOURCE POSTURE (right branches); non-zero on any red
 ```
 
 On a clean checkout there's no overlay, so `refresh-suite.sh` is a no-op and
@@ -119,6 +120,39 @@ hot-reload (sis-api via `tsup --watch`, dash via Vite HMR). The dash already
 knows where sis-api lives — `up.sh` seeds a `sis-api → :3100` entry into
 saga-dash's `static/config.json`.
 
+## sessions-api (the seventh service)
+
+sessions-api (`~/dev/program-hub/apps/node/sessions-api`, on program-hub
+`main`) serves the dash's `/sessions` page — `sessions.dayList` /
+`rangeList`, the lifecycle commands (`start`/`end`/`cancel`), overrides, and
+`adhoc.create`. It was harvested out of programs-api in program-hub #148
+(2026-06). `up.sh` stands it up on **:3007** (the port saga-dash main's
+`static/config.json` already expects) against a dedicated `sessions` DB of
+event-built projections: it consumes `programs.*` / `scheduling.*` / `iam.*`
+events over the mesh broker, and TutoringSessions materialize lazily from
+(slot × pod × date). Until a schedule + pods exist, `dayList` legitimately
+returns empty days. See soa#146.
+
+One-time catch-up note: the outbox replay to late-joining consumers
+(program-hub #160/#161) is a **manual, per-program CLI**, not automatic — a
+freshly-bound queue has no backlog, so events published *before* sessions-api
+first joined never reach it. On the canonical `--reset --seed` lane this
+never matters (sessions-api is up before any program exists). But if your
+mesh already had program data when sessions-api first started, replay it
+once per program:
+
+```bash
+cd ~/dev/program-hub/apps/node/programs-api && \
+  DATABASE_URL=postgresql://saga_user:password123@localhost:5432/programs \
+  pnpm replay:program-outbox <programId>
+cd ../scheduling-api && \
+  DATABASE_URL=postgresql://saga_user:password123@localhost:5432/scheduling \
+  pnpm replay:schedule-outbox <programId>   # only if a schedule existed
+```
+
+The running relay re-publishes; idempotent consumption makes it a no-op for
+already-caught-up consumers.
+
 ## Walkthrough deck (start here for the UX flow)
 
 `../training/saga-dash-walkthrough.html` — open in a browser or serve via
@@ -146,7 +180,7 @@ captured by `../training/capture/capture.mjs` (regenerable; see
    ~/dev/
      ├── soa                  # mesh infra (provides docker compose for pg/redis/rabbitmq)
      ├── rostering            # iam-api + sis-api + iam-db / sis-db
-     ├── program-hub          # programs-api + scheduling-api
+     ├── program-hub          # programs-api + scheduling-api + sessions-api
      ├── saga-dash            # the dash itself
      └── student-data-system  # ads-adm-api + this synthetic-dev tooling
    ```
@@ -169,7 +203,7 @@ shells out to:
 That's the canonical soa-mesh compose definition. So with zero containers
 running and Docker just booted, `./up.sh up` does the right thing in one
 command — brings up the mesh, applies prisma schemas (via `migrate deploy`
-— matches the deployed pipeline; see `decisions/d1.5`), launches all six
+— matches the deployed pipeline; see `decisions/d1.5`), launches all seven
 services with the right env, and reports green.
 
 ## Verbs
@@ -180,9 +214,9 @@ services with the right env, and reports green.
 ./refresh-suite.sh --list        # print your personal overlay, no changes
 ./refresh-suite.sh --prs 165 saga-dash      # ad-hoc: overlay explicit PR(s) onto main, no file
 ./refresh-suite.sh --reset       # back out: overlaid repos → main (deletes local/integration)
-./verify.sh                      # assert 6 services + roster + sis_db + source posture (right branches) — exit code
+./verify.sh                      # assert 7 services + roster + sis_db + source posture (right branches) — exit code
 
-./up.sh up                       # bring up mesh + 6 services (empty databases)
+./up.sh up                       # bring up mesh + 7 services (empty databases)
 ./up.sh up --reset --seed roster # from-scratch: empty baseline + synthetic IAM roster
 ./up.sh up --reset --seed full   # roster + 9 programs + periods + enrollment
 ./up.sh --reset                  # truncate synthetic data → empty baseline (services stay up)
@@ -224,10 +258,10 @@ Each persona's UUID is printed at the end of every `--seed roster` run.
    `SIS_DATABASE_URL` and seeds the dash's `sis-api → :3100` config key.
 3. `mesh_up` — starts soa-mesh if not running.
 4. `prep` — `pnpm install + build` in rostering / program-hub; `prisma migrate
-   deploy` for iam / programs / scheduling / sis / ads-adm DBs (via the
-   `migrate_db` helper — matches what `_deploy-ecs-api.yml`'s migrate job runs
-   on production).
-5. `services_up` — launches the six API services / dash with the right
+   deploy` for iam / programs / scheduling / sessions / sis / ads-adm DBs (via
+   the `migrate_db` helper — matches what `_deploy-ecs-api.yml`'s migrate job
+   runs on production).
+5. `services_up` — launches the seven API services / dash with the right
    env (IAM_API_URL, RABBITMQ_URL, JWT_ACCESSTOKENTTLSECONDS, etc.) via
    `nohup pnpm dev` per service. PID files in `/tmp/sds-synthetic/`.
 
@@ -297,7 +331,7 @@ After cloning the 5 sibling repos and ensuring CodeArtifact + `gh` auth work:
 ```bash
 cd ~/dev/soa/tools/synthetic-dev
 ./bootstrap.sh
-# expect: refresh-suite green → 6 services @ 200 → "all checks passed"
+# expect: refresh-suite green → 7 services @ 200 → "all checks passed"
 ```
 
 If any service is red, `verify.sh` tells you which; tail its log under

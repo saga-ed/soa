@@ -66,8 +66,7 @@
 #                                (refresh-suite.sh --compose-rest, or the UI).
 #                                NOTE: the cloud iam-api runs auth ON, so a real
 #                                S2S token is required (no local dev-bypass) — see
-#                                the design doc (hipponot/microservices:
-#                                docs/sandbox/synthetic-dev-integration.md).
+#                                the design doc (INTEGRATION.md, alongside this script).
 #
 # Flags compose, applied in order up → reset → seed → login. Reproducible
 # recipes (no post-deletes — selectivity is in what you seed):
@@ -502,8 +501,7 @@ launch_if(){ # svc port dir extra_env...
 # must enter at the request boundary (the dash, or your curl/test harness) and
 # forward-propagate. A backend hit WITHOUT that header silently routes its iam
 # calls to MAIN (empty variant), not the sandbox — see the warning printed at
-# launch, and the design doc (hipponot/microservices:
-# docs/sandbox/synthetic-dev-integration.md).
+# launch, and the design doc (INTEGRATION.md, alongside this script).
 # Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
 # sessions deps are additive once the multi-service mesh compose is unblocked.
 sandbox_env(){ # svc
@@ -808,7 +806,7 @@ if [[ -n "$SANDBOX_NAME" ]]; then
   warn "request carries  x-saga-preview-iam-api: sandbox-$SANDBOX_NAME  (it forward-propagates"
   warn "from there). Drive via the dash (which originates it) or set that header on each"
   warn "curl/test request. WITHOUT it, iam calls hit MAIN — and main has SVCCRED auth ON, so"
-  warn "an unauthenticated S2S call is rejected. See the design doc (hipponot/microservices)."
+  warn "an unauthenticated S2S call is rejected. See the design doc (INTEGRATION.md)."
 fi
 
 # `up` does first-run prep (branch posture, fixups, mesh, schema). A bare

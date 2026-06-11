@@ -398,6 +398,11 @@ prep(){
   pnpm_install "$SDS"
   ( cd "$SDS/packages/node/ads-adm-db" && pnpm db:generate >/dev/null 2>&1 ) || true
   ( cd "$SDS" && pnpm build >/dev/null 2>&1 ) || true
+  # saga-dash runs via `vite dev` (no prebuild), but vite must be installed or the
+  # launch dies with "vite: not found" — and prep installs it nowhere else, so a
+  # freshly-cloned or freshly-pulled dash would 404 the whole UI. Install it here.
+  say "reconciling saga-dash deps (vite)…"
+  pnpm_install "$SAGA_DASH"
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push

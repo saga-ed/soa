@@ -717,10 +717,25 @@ seed_programs(){
   ok "programs seeded (db:seed)"
 }
 
-# roster = iam only (programs empty); full = roster + programs.
+# sessions-api db:seed — the Connect-demo DIRECT-PROJECTION seed. Writes
+# sessions-api's local projection tables (demo programs/periods/pods/slots,
+# deterministic @saga-ed/demo-seed-ids — pairs with the 8 Connect Demo users
+# in iam's db:seed) AND the `projection_readiness` warm row, straight to the
+# DB. Cold-start immune by design: no relay/consumers needed, so the read
+# gate ("projection sessions-api.authz-projection is warming" → 408 → connect
+# /my-sessions 500s) opens even on the event-less db:seed lane.
+seed_sessions(){
+  say "seeding sessions projections (db:seed — Connect demo, direct projections + readiness)…"
+  ( cd "$PROGRAM_HUB/apps/node/sessions-api" \
+      && env DATABASE_URL="$SESSIONS_DB_URL" pnpm db:seed )
+  ok "sessions projections seeded (demo programs render + authorize)"
+}
+
+# roster = iam + sessions demo (programs empty); full = + programs.
 seed_stack(){
   local mode=${1:-roster}
   seed_iam
+  seed_sessions
   [[ "$mode" == full ]] && seed_programs
   return 0
 }
@@ -871,13 +886,18 @@ fi
 # up" processes / cached bundles.
 if [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
   say "clean restart — stopping services + clearing vite caches..."
-  services_down; nuke_vite; services_up
+  services_down; nuke_vite
+  # reset_data MUST precede services_up: it truncates `projection_readiness`
+  # (sessions DB) among everything else, and sessions-api only re-warms at
+  # STARTUP (warm-on-caught-up). Truncating after the service started left it
+  # gated — every read 408 "projection … is warming" until the next restart.
+  [[ $DO_RESET == 1 ]] && reset_data
+  services_up
   ok "stack up (clean) — try: $0 --status"
 elif [[ $DO_UP == 1 ]]; then
   services_up
   ok "stack up — try: $0 --status"
 fi
-[[ $DO_RESET == 1 ]] && reset_data
 [[ $DO_SEED == 1 ]]  && seed_stack "$SEED_MODE"
 [[ $DO_LOGIN == 1 ]] && login_user "$LOGIN_USER"
 exit 0

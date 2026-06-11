@@ -165,9 +165,16 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
 (`~/dev/qboard/apps/web/connectv3`, **:6210**) are the Connect session app
 (whiteboard / CRDT / AV). Notes that differ from the other services:
 
-- **No fixtures, no migrations.** Connect's MongoDB collections auto-create on
-  first write; the databases simply support running sessions. "Session data"
-  comes from **sessions-api (:3007)**.
+- **No fixtures, no migrations** on the mongo side — Connect's collections
+  auto-create on first write; the databases simply support running sessions.
+  "Session data" comes from **sessions-api (:3007)**, and `--seed` runs
+  sessions-api's `db:seed` (the Connect-demo **direct-projection** seed): it
+  writes the demo programs/sessions projections AND the
+  `projection_readiness` warm row straight to the DB, so reads work on the
+  event-less db:seed lane (without it, every sessions read 408s "projection …
+  is warming" and Connect's `/my-sessions` 500s). The demo sessions belong to
+  the `demo-*@saga.org` personas (e.g. `demo-lead-north@saga.org`,
+  `demo-student-1@saga.org`) — log in as one of those to see them.
 - **Dedicated mongo.** `up.sh` runs Connect against its own synthetic-dev
   container — `compose/connect-mongo.yml`, standalone, no auth, host port
   **:27037** (non-default on purpose, so it never contends with qboard's old

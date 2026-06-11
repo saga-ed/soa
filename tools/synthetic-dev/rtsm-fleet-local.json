@@ -2,16 +2,24 @@
     "_comment": "synthetic-dev: ONE-NODE rtsm fleet. rtsm-client always discovers via GET /fleet/discover — served only in fleet mode — so the local node runs as a single-node FLEET (itself the only member; no peers to mesh with) rather than bare single-instance mode. up.sh launches rtsm-api with FLEET_CONFIG_PATH=<this file> + FLEET_NODE_NAME=local. endpoint is the BROWSER-visible host and must be a BARE host:port (no scheme) — rtsm-client builds `${scheme}://${endpoint}` itself, deriving the scheme from its bootstrap URL (http for the local stack); a scheme here produces the mangled ws://http/… socket URL.",
     "domain": "localhost",
     "awsProfile": "",
-    "coreNodes": { "a": "local", "b": null },
+    "coreNodes": {
+        "a": "local",
+        "b": null
+    },
     "nodes": {
         "local": {
             "ip": "127.0.0.1",
             "endpoint": "localhost:6110",
             "city": "loc",
             "user": "dev",
-            "roles": ["core"],
+            "roles": [
+                "core"
+            ],
             "addedAt": "2026-06-11T00:00:00Z",
             "lastDeployAt": null
         }
+    },
+    "selection": {
+        "goodEnoughMultiplier": 1.5
     }
 }

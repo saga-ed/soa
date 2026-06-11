@@ -29,6 +29,7 @@
 #
 # Usage:
 #   ./up.sh                      bring up mesh + 6 services (empty)
+#   ./up.sh up --pull            ff-only sync all siblings to origin, then build/migrate
 #   ./up.sh --seed [roster|full] seed synthetic data (default: roster)
 #                                  roster = iam roster only (programs empty → from-scratch)
 #                                  full   = iam roster + programs/periods/enrollment
@@ -352,6 +353,34 @@ migrate_db(){ # dir db_name [database_url — override to point prisma at the me
   fi
 }
 
+# --pull: fast-forward each sibling repo to its upstream before building. ff-ONLY,
+# skipping repos that are dirty, detached, upstream-less, or diverged (with a
+# warning) — so it never clobbers local work or moves you off a feature branch.
+# Kills the recurring trap of building/migrating a checkout silently behind origin
+# (e.g. program-hub hundreds of commits stale → 404s on new endpoints).
+pull_repos(){
+  say "pulling siblings to upstream (ff-only)…"
+  local kv dir name dirty br behind
+  for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system"; do
+    dir=${kv%:*}; name=${kv#*:}
+    [[ -d "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
+    dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -v '^??' || true)
+    [[ -z "$dirty" ]] || { printf "\033[33m⚠\033[0m %-20s uncommitted changes — skipping\n" "$name"; continue; }
+    git -C "$dir" fetch -q origin 2>/dev/null || { printf "\033[33m⚠\033[0m %-20s fetch failed — skipping\n" "$name"; continue; }
+    br=$(git -C "$dir" branch --show-current 2>/dev/null)
+    [[ -n "$br" ]] || { printf "\033[33m⚠\033[0m %-20s detached HEAD — skipping\n" "$name"; continue; }
+    git -C "$dir" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 || { printf "\033[33m⚠\033[0m %-20s %s has no upstream — skipping\n" "$name" "$br"; continue; }
+    behind=$(git -C "$dir" rev-list --count "HEAD..@{u}" 2>/dev/null || echo 0)
+    if [[ "$behind" -eq 0 ]]; then ok "$name up to date ($br)"; continue; fi
+    if git -C "$dir" merge --ff-only '@{u}' >/dev/null 2>&1; then
+      ok "$name fast-forwarded $behind commit(s) ($br)"
+    else
+      printf "\033[33m⚠\033[0m %-20s %s diverged from upstream — skipping (pull by hand)\n" "$name" "$br"
+    fi
+  done
+}
+
 prep(){
   say "reconciling rostering deps + workspace build (main switch is not dep-neutral)…"
   pnpm_install "$ROSTERING"
@@ -586,7 +615,7 @@ status(){
 }
 
 # ── arg parsing: verbs (up/down/status/help) + composable flags ──────
-DO_UP=0; DO_RESET=0; DO_RESTART=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER
+DO_UP=0; DO_RESET=0; DO_RESTART=0; DO_PULL=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER
 case "${1:-up}" in
   # `shift || true`: bare `./up.sh` defaults ${1:-up} to "up" but leaves $# at 0,
   # so an unguarded shift returns 1 and `set -e` kills the script before it runs.
@@ -600,7 +629,7 @@ case "${1:-up}" in
   restart|--restart)             DO_RESTART=1; shift || true ;;
   --status)                      status; exit 0 ;;
   -h|--help)                     sed -n '2,51p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user) ;;        # flag-only invocation; skip up
+  --reset|--seed|--login|--user|--pull) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
@@ -609,12 +638,14 @@ while [[ $# -gt 0 ]]; do
     --seed)  DO_SEED=1; shift; case "${1:-}" in roster|full) SEED_MODE=$1; shift ;; esac ;;
     # --login / --user [email]: optional positional email; bare or next-flag → default persona
     --login|--user) DO_LOGIN=1; shift; case "${1:-}" in ''|--*) ;; *) LOGIN_USER=$1; shift ;; esac ;;
+    --pull) DO_PULL=1; shift ;;
     *) echo "unknown flag: $1 (use --help)"; exit 1 ;;
   esac
 done
 
 # `up` does first-run prep (branch posture, fixups, mesh, schema). A bare
 # `--reset` (no `up` verb) skips prep and assumes a running mesh.
+[[ $DO_PULL == 1 ]] && pull_repos        # ff-only sync siblings BEFORE we build/migrate
 if [[ $DO_UP == 1 ]]; then
   check_branches; apply_fixes; mesh_up; prep
 fi

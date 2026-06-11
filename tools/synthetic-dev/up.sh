@@ -407,16 +407,22 @@ services_up(){
   # the 'dev-user-001' default when AUTH_ENABLED=false). apply_fixes only set this
   # via sed on iam-api/.env, which doesn't exist on a fresh clone — pass it on the
   # launch env so it's independent of that file.
-  launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID"
+  # CORS_ORIGIN: the dash runs on :8900, but every soa API's dev CORS allowlist
+  # (@saga-ed/soa-api-util buildSagaOriginAllowlist) hardcodes only 5173/3006 +
+  # *.wootdev.com — it adds the dash origin only if CORS_ORIGIN is set. Without
+  # it the browser blocks the dash's cross-origin calls and the dash shows
+  # "can't reach the identity service" (iam whoami) / silently drops programs.
+  # Pass it to every dash-facing API (ads-adm-api already sets it below).
+  launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL"
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7.
   launch sis-api "$SIS_PORT" "$ROSTERING/apps/node/sis-api" \
      NODE_ENV=development PORT="$SIS_PORT" \
-     SIS_DATABASE_URL="$SIS_DB_URL" \
+     SIS_DATABASE_URL="$SIS_DB_URL" CORS_ORIGIN="$DASH_URL" \
      IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token"
-  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
-  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false
+  launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL"
+  launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL"
   launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \

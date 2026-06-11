@@ -66,7 +66,8 @@
 #                                (refresh-suite.sh --compose-rest, or the UI).
 #                                NOTE: the cloud iam-api runs auth ON, so a real
 #                                S2S token is required (no local dev-bypass) — see
-#                                services/console/SYNTHETIC-DEV-INTEGRATION.md.
+#                                the design doc (hipponot/microservices:
+#                                services/console/SYNTHETIC-DEV-INTEGRATION.md).
 #
 # Flags compose, applied in order up → reset → seed → login. Reproducible
 # recipes (no post-deletes — selectivity is in what you seed):
@@ -140,6 +141,8 @@ BROWSER_PROFILE="$STATE/browser-profile"                    # persistent Chromiu
 PG=( postgresql://iam:iam@localhost:5432/iam_local )
 say(){ printf "\033[34m→\033[0m %s\n" "$*"; }
 ok(){ printf "\033[32m✓\033[0m %s\n" "$*"; }
+warn(){ printf "\033[33m⚠\033[0m %s\n" "$*"; }
+err(){ printf "\033[31m✗\033[0m %s\n" "$*"; }
 
 # ── branch posture sanity (warn only, overlay-aware) ─────────────────
 # A repo with PRs in your integration-suite.local.tsv overlay is EXPECTED on
@@ -469,9 +472,22 @@ prep(){
 
 # ── hybrid helpers (--only / --sandbox) ─────────────────────────────────
 # want_service: under --only, launch ONLY the named service; otherwise launch
-# all (the normal full-local stack). Used to gate each launch line below.
+# all (the normal full-local stack).
 want_service(){ # svc
   [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "$1" ]]
+}
+# launch_if: gate launch by want_service and RECORD any real failure. A service
+# filtered out by --only is a clean skip; a launched service that fails its
+# health check (launch → 1) sets SERVICES_RC=1, which services_up returns so the
+# set -e caller aborts before reset/seed/login. We accumulate into SERVICES_RC
+# rather than relying on each call's own exit code because services_up's return
+# is only its LAST statement — a failing non-last service would otherwise be
+# masked by a later clean skip. (We also avoid the inline `want_service x &&
+# launch x` form: launch on the right of && is set -e-exempt, silently ignored.)
+SERVICES_RC=0
+launch_if(){ # svc port dir extra_env...
+  want_service "$1" || return 0
+  launch "$@" || SERVICES_RC=1
 }
 # sandbox_env: emit the env-var KEY=VAL pairs that repoint a locally-run
 # service's CROSS-SERVICE dependency URLs at a cloud sandbox, instead of the
@@ -486,7 +502,8 @@ want_service(){ # svc
 # must enter at the request boundary (the dash, or your curl/test harness) and
 # forward-propagate. A backend hit WITHOUT that header silently routes its iam
 # calls to MAIN (empty variant), not the sandbox — see the warning printed at
-# launch and services/console/SYNTHETIC-DEV-INTEGRATION.md.
+# launch, and the design doc (hipponot/microservices:
+# services/console/SYNTHETIC-DEV-INTEGRATION.md).
 # Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
 # sessions deps are additive once the multi-service mesh compose is unblocked.
 sandbox_env(){ # svc
@@ -515,6 +532,7 @@ launch(){ # name port dir extra_env...
 }
 
 services_up(){
+  SERVICES_RC=0   # reset so a second call (restart) doesn't carry a stale failure
   # Drift: soa-logger/soa-config on main now require a PINO_LOGGER config with
   # no defaults — `level` + `isExpressContext` (DotenvConfigManager reads them as
   # PINO_LOGGER_LEVEL / PINO_LOGGER_ISEXPRESSCONTEXT). Every soa node service
@@ -533,46 +551,38 @@ services_up(){
   # it the browser blocks the dash's cross-origin calls and the dash shows
   # "can't reach the identity service" (iam whoami) / silently drops programs.
   # Pass it to every dash-facing API (ads-adm-api already sets it below).
-  # Each launch is gated by want_service (so --only <svc> runs just one) and
+  # Each service goes through launch_if (so --only <svc> runs just one) and
   # splats $(sandbox_env <svc>) — a no-op unless --sandbox repoints its deps at
   # a cloud sandbox. Order/env are otherwise unchanged from the full-local stack.
-  want_service iam-api && \
-    launch iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL"
+  # launch_if preserves launch's exit code, so a real boot failure still aborts
+  # the set -e caller before reset/seed/login (fail-fast), while a service merely
+  # filtered out by --only is a clean skip.
+  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL"
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7. Under --sandbox
   # those two flip to the cloud iam host (sandbox_env), and a REAL S2S token is
   # then required — the cloud iam has auth ON (no dev-bypass); see integration doc.
-  want_service sis-api && \
-    launch sis-api "$SIS_PORT" "$ROSTERING/apps/node/sis-api" \
-       NODE_ENV=development PORT="$SIS_PORT" \
-       SIS_DATABASE_URL="$SIS_DB_URL" CORS_ORIGIN="$DASH_URL" \
-       IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token" \
-       $(sandbox_env sis-api)
-  want_service programs-api && \
-    launch programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env programs-api)
-  want_service scheduling-api && \
-    launch scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env scheduling-api)
+  launch_if sis-api "$SIS_PORT" "$ROSTERING/apps/node/sis-api" \
+     NODE_ENV=development PORT="$SIS_PORT" \
+     SIS_DATABASE_URL="$SIS_DB_URL" CORS_ORIGIN="$DASH_URL" \
+     IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token" \
+     $(sandbox_env sis-api)
+  launch_if programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env programs-api)
+  launch_if scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env scheduling-api)
   # sessions-api: DATABASE_URL + IAM_API_URL are REQUIRED (it throws without
   # them); its RABBITMQ_URL default is program-hub's standalone :5673, so point
   # it at the mesh. SCHEDULING_API_URL defaults to :3008 (already the mesh
   # port) and it doesn't read JANUS_REQUIRED, so neither is set. Pre-existing
   # program data needs a one-time manual replay (see header note).
-  want_service sessions-api && \
-    launch sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(sandbox_env sessions-api)
-  want_service ads-adm-api && \
-    launch ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
-       ADS_ADM_SCHEDULE_PROVIDER=mock \
-       ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
-       DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
-       CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
-  want_service saga-dash && \
-    launch saga-dash 8900 "$SAGA_DASH/apps/web/dash"
-  # Always succeed: the last `want_service … && launch` is `false` whenever
-  # --only names anything but saga-dash, which would otherwise make this
-  # function return 1 and abort the set -e caller (skipping the ok/reset/seed
-  # that follow) even though the target service came up fine.
-  return 0
+  launch_if sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(sandbox_env sessions-api)
+  launch_if ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
+     ADS_ADM_SCHEDULE_PROVIDER=mock \
+     ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
+     DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
+     CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
+  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash"
+  return "$SERVICES_RC"   # non-zero iff a LAUNCHED service failed (skips don't count)
 }
 
 # ── reset: truncate synthetic data to an empty baseline ──────────────
@@ -766,8 +776,8 @@ while [[ $# -gt 0 ]]; do
     # are expected to live in a cloud sandbox. --sandbox <name>: the compose name
     # those deps live under — flips the launched service's dep URLs + preview
     # header to the dev fleet (see sandbox_env). Either implies the hybrid path.
-    --only)    ONLY_SERVICE="${2:-}"; [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == --* ]] && { echo "--only needs a service name"; exit 1; }; shift 2 ;;
-    --sandbox) SANDBOX_NAME="${2:-}"; [[ -z "$SANDBOX_NAME" || "$SANDBOX_NAME" == --* ]] && { echo "--sandbox needs a name"; exit 1; }; shift 2 ;;
+    --only)    ONLY_SERVICE="${2:-}"; [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == -* ]] && { echo "--only needs a service name"; exit 1; }; shift 2 ;;
+    --sandbox) SANDBOX_NAME="${2:-}"; [[ -z "$SANDBOX_NAME" || "$SANDBOX_NAME" == -* ]] && { echo "--sandbox needs a name"; exit 1; }; shift 2 ;;
     *) echo "unknown flag: $1 (use --help)"; exit 1 ;;
   esac
 done
@@ -787,13 +797,18 @@ fi
 if [[ -n "$SANDBOX_NAME" && -z "$ONLY_SERVICE" ]]; then
   echo "--sandbox <name> requires --only <svc> (point ONE local service at the sandbox; the rest are the sandbox)"; exit 1
 fi
+# Validate the sandbox name — it flows into the host URL and the preview header,
+# so constrain it to the same shape the composition API enforces.
+if [[ -n "$SANDBOX_NAME" && ! "$SANDBOX_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]]; then
+  echo "--sandbox: '$SANDBOX_NAME' must match [a-zA-Z0-9][a-zA-Z0-9-]{0,39}"; exit 1
+fi
 if [[ -n "$SANDBOX_NAME" ]]; then
   say "hybrid: $ONLY_SERVICE local → iam dep at https://iam.$SANDBOX_BASE (sandbox '$SANDBOX_NAME')"
   warn "ROUTING IS NOT AUTOMATIC: $ONLY_SERVICE only reaches sandbox iam if its INBOUND"
   warn "request carries  x-saga-preview-iam-api: sandbox-$SANDBOX_NAME  (it forward-propagates"
   warn "from there). Drive via the dash (which originates it) or set that header on each"
   warn "curl/test request. WITHOUT it, iam calls hit MAIN — and main has SVCCRED auth ON, so"
-  warn "an unauthenticated S2S call is rejected. See SYNTHETIC-DEV-INTEGRATION.md (Seam 2/3)."
+  warn "an unauthenticated S2S call is rejected. See the design doc (hipponot/microservices)."
 fi
 
 # `up` does first-run prep (branch posture, fixups, mesh, schema). A bare

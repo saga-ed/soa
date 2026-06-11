@@ -61,8 +61,9 @@ MANAGED_REPOS="rostering program-hub saga-dash"
 
 # repo → the deployable services it provides (for --compose-rest). The overlay
 # is per-REPO but a sandbox composes per-SERVICE, so this expands one to the
-# other. ads-adm-api (student-data-system) is intentionally absent: it's not a
-# fleet sandbox service here. Keep in sync with up.sh's service list.
+# other. Mirrors up.sh's services EXCEPT ads-adm-api: up.sh runs it locally, but
+# it's deliberately not sandbox-composed here (not a fleet sandbox service), so
+# its absence is intentional — do not "reconcile" it by adding ads-adm-api.
 declare -A REPO_SERVICES=(
   [rostering]="iam-api sis-api"
   [program-hub]="programs-api scheduling-api sessions-api"
@@ -71,7 +72,8 @@ declare -A REPO_SERVICES=(
 
 # Sandbox composition API (dev fleet). The CI bearer satisfies the app-layer
 # auth; the perimeter (ALB OIDC) is cleared by a bypass header — see
-# SANDBOX_BYPASS_HEADER below and SYNTHETIC-DEV-INTEGRATION.md.
+# SANDBOX_BYPASS_HEADER below and the design doc (hipponot/microservices:
+# services/console/SYNTHETIC-DEV-INTEGRATION.md).
 SANDBOX_API="${SANDBOX_API:-https://sandbox-api.wootdev.com}"
 SANDBOX_API_PREFIX="/api/v1"
 SANDBOX_CI_KEY_SECRET="${SANDBOX_CI_KEY_SECRET:-sandbox-api/ci-api-key}"  # Secrets Manager id
@@ -196,55 +198,99 @@ compose_rest(){ # name
   [[ ${#services[@]} -gt 0 ]] || { err "nothing to compose — every managed repo is pinned (or overlay empty). Pin the one you're editing, leave the rest."; return 1; }
 
   # Build {name, services:{svc:"main"}, dbProfiles:{svc:profile}, ttlHours} with jq.
-  local svc_json db_json
-  svc_json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -s 'map({(.):"main"}) | add')
-  db_json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -s --arg p "$SANDBOX_SEED_PROFILE" 'map({(.):$p}) | add')
-  local body
-  body=$(jq -nc --arg n "$name" --argjson s "$svc_json" --argjson d "$db_json" --argjson t "$SANDBOX_TTL_HOURS" \
-            '{name:$n, services:$s, dbProfiles:$d, ttlHours:$t}')
+  # Guard each step: a bad SANDBOX_TTL_HOURS / SANDBOX_SEED_PROFILE override (or a
+  # jq failure) must not yield an empty body that gets POSTed silently. (--argjson
+  # on a non-numeric ttl fails here rather than shipping garbage.)
+  local svc_json db_json body
+  svc_json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -s 'map({(.):"main"}) | add') \
+    && db_json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -s --arg p "$SANDBOX_SEED_PROFILE" 'map({(.):$p}) | add') \
+    && body=$(jq -nc --arg n "$name" --argjson s "$svc_json" --argjson d "$db_json" --argjson t "$SANDBOX_TTL_HOURS" \
+                 '{name:$n, services:$s, dbProfiles:$d, ttlHours:$t}') \
+    || { err "failed to build request body — is SANDBOX_TTL_HOURS ('$SANDBOX_TTL_HOURS') numeric?"; return 1; }
+  [[ -n "$body" ]] || { err "request body came out empty — refusing to POST"; return 1; }
 
   [[ ${#pinned[@]} -gt 0 ]] && say "pinned (you edit locally): ${pinned[*]}"
   say "composing sandbox '$name' with: ${services[*]}  (profile=$SANDBOX_SEED_PROFILE, ttl=${SANDBOX_TTL_HOURS}h)"
 
   # Without a perimeter bypass we cannot POST (the ALB OIDC-challenges us); print
-  # the spec for the operator to paste into the OIDC'd switchboard/console UI.
+  # the spec for the operator to paste into the OIDC'd switchboard/console UI, and
+  # return DISTINCT non-zero (2 = "spec printed, composed NOTHING") so a `&&`
+  # chain / wrapper doesn't mistake this for a real compose. Interactive humans
+  # see the warning; automation sees the exit code.
   if [[ -z "$SANDBOX_BYPASS_HEADER" ]]; then
-    warn "no SANDBOX_BYPASS_HEADER set — can't reach sandbox-api headlessly (ALB OIDC). Compose this in the UI:"
+    warn "no SANDBOX_BYPASS_HEADER set — can't reach sandbox-api headlessly (ALB OIDC)."
+    warn "NOTHING was composed. Paste this into the switchboard/console UI instead:"
     echo "$body" | jq .
     echo "  then run: ./up.sh --only <your-service> --sandbox $name"
-    return 0
+    return 2
   fi
 
   # Headless self-serve: bypass header clears the ALB perimeter, CI bearer
   # satisfies the app. Fetch the CI key from Secrets Manager (never inlined).
-  local ci_key
+  local ci_key aws_err
+  aws_err=$(mktemp)
   ci_key=$(aws secretsmanager get-secret-value --secret-id "$SANDBOX_CI_KEY_SECRET" \
              --region "$SANDBOX_REGION" --profile "$SANDBOX_AWS_PROFILE" \
-             --query SecretString --output text 2>/dev/null) \
-    || { err "couldn't read CI key '$SANDBOX_CI_KEY_SECRET' (profile $SANDBOX_AWS_PROFILE) — aws creds?"; return 1; }
+             --query SecretString --output text 2>"$aws_err") \
+    || { err "couldn't read CI key '$SANDBOX_CI_KEY_SECRET' (profile $SANDBOX_AWS_PROFILE): $(head -c200 "$aws_err")"; rm -f "$aws_err"; return 1; }
+  rm -f "$aws_err"
+  # get-secret-value exits 0 even when the value is unusable: empty, the literal
+  # 'None' (SecretBinary-only), or a JSON blob. Validate / unwrap before it
+  # becomes `Authorization: Bearer <garbage>` and a misleading 401 downstream.
+  [[ -n "$ci_key" && "$ci_key" != None ]] || { err "CI key secret '$SANDBOX_CI_KEY_SECRET' is empty or has no SecretString"; return 1; }
+  if [[ "$ci_key" == '{'* ]]; then
+    ci_key=$(jq -r '.apiKey // .token // .ciApiKey // empty' <<<"$ci_key" 2>/dev/null) \
+      || { err "CI key secret is JSON but couldn't be parsed"; return 1; }
+    [[ -n "$ci_key" ]] || { err "CI key secret is JSON with no apiKey/token/ciApiKey field"; return 1; }
+  fi
 
-  local resp status
-  resp=$(curl -fsS -X POST "$SANDBOX_API$SANDBOX_API_PREFIX/compositions" \
-            -H 'Content-Type: application/json' \
-            -H "$SANDBOX_BYPASS_HEADER" \
-            -H "Authorization: Bearer $ci_key" \
-            -d "$body" 2>/dev/null) \
-    || { err "POST /compositions failed (perimeter? bearer? name '$name' taken?)"; return 1; }
-  status=$(echo "$resp" | jq -r '.status // "?"')
+  # sandbox_api: METHOD PATH [data] → echoes "<http_code>\n<body>" (body may be
+  # multi-line). Both the bypass header AND the bearer ride every request (the
+  # status endpoint enforces app auth too, not just the POST). No -f, so the
+  # server's error body survives for the caller to surface.
+  sandbox_api(){ # method path [data]
+    local m=$1 p=$2 d=${3:-} args=(-sS -o - -w $'\n%{http_code}' -X "$m"
+      -H "$SANDBOX_BYPASS_HEADER" -H "Authorization: Bearer $ci_key")
+    [[ -n "$d" ]] && args+=(-H 'Content-Type: application/json' -d "$d")
+    curl "${args[@]}" "$SANDBOX_API$SANDBOX_API_PREFIX$p" 2>/dev/null
+  }
+
+  local out http resp status
+  out=$(sandbox_api POST /compositions "$body") || { err "POST /compositions — curl failed (network/DNS?)"; return 1; }
+  http=${out##*$'\n'}; resp=${out%$'\n'*}
+  if [[ "$http" != 2* ]]; then
+    err "POST /compositions → HTTP $http: $(head -c300 <<<"$resp")"; return 1
+  fi
+  status=$(jq -r '.status // empty' <<<"$resp" 2>/dev/null) \
+    || { err "compose response was not JSON (HTTP $http): $(head -c200 <<<"$resp")"; return 1; }
+  [[ -n "$status" ]] || { err "compose response had no .status — body: $(head -c200 <<<"$resp")"; return 1; }
   ok "composition '$name' dispatched (status=$status). Components:"
-  echo "$resp" | jq -r '.components[]? | "  \(.service)/\(.variantId): \(.status)\(if .error then " — "+.error else "" end)"'
+  jq -r '.components[]? | "  \(.service)/\(.variantId): \(.status)\(if .error then " — "+.error else "" end)"' <<<"$resp"
 
-  # Poll until ready/terminal (each component CI run takes minutes).
+  # Poll until ready/terminal (each component CI run takes minutes). Distinguish
+  # three outcomes a naive `|| continue` would conflate: terminal (ready/failed/
+  # partial), persistent error (404 gone / 401-403 auth expired → stop, don't
+  # spin 20m), and transient (5xx / non-JSON → retry).
   say "polling $SANDBOX_API_PREFIX/compositions/$name (up to ~20m)…"
   local i overall
   for i in $(seq 1 120); do
     sleep 10
-    overall=$(curl -fsS "$SANDBOX_API$SANDBOX_API_PREFIX/compositions/$name" \
-                -H "$SANDBOX_BYPASS_HEADER" 2>/dev/null | jq -r '.overallStatus // "?"') || continue
-    printf '\r  [%3d/120] overallStatus=%s        ' "$i" "$overall"
+    out=$(sandbox_api GET "/compositions/$name") || { printf '\r  [%3d/120] curl error (retrying)        ' "$i"; continue; }
+    http=${out##*$'\n'}; resp=${out%$'\n'*}
+    case "$http" in
+      404)     printf '\n'; err "composition '$name' no longer exists (404) — deleted or never created"; return 1 ;;
+      401|403) printf '\n'; err "auth rejected mid-poll (HTTP $http) — bypass header / bearer expired"; return 1 ;;
+      2*)      ;; # ok, parse below
+      *)       printf '\r  [%3d/120] transient HTTP %s (retrying)   ' "$i" "$http"; continue ;;
+    esac
+    overall=$(jq -r '.overallStatus // empty' <<<"$resp" 2>/dev/null) \
+      || { printf '\r  [%3d/120] non-JSON body (retrying)      ' "$i"; continue; }
+    printf '\r  [%3d/120] overallStatus=%-12s' "$i" "${overall:-?}"
     case "$overall" in
-      ready)            printf '\n'; ok "sandbox '$name' READY"; echo "  run: ./up.sh --only <your-service> --sandbox $name"; return 0 ;;
-      failed|partial)   printf '\n'; err "sandbox '$name' ended '$overall' — inspect in the console / GH runs"; return 1 ;;
+      ready)          printf '\n'; ok "sandbox '$name' READY"; echo "  run: ./up.sh --only <your-service> --sandbox $name"; return 0 ;;
+      failed|partial) printf '\n'; err "sandbox '$name' ended '$overall' — inspect in the console / GH runs"; return 1 ;;
+      provisioning|tearing-down|'') ;; # still in flight — keep polling
+      *)              printf '\n'; err "unknown status '$overall' — stopping (check the API)"; return 1 ;;
     esac
   done
   printf '\n'; warn "still provisioning after ~20m — check $SANDBOX_API_PREFIX/compositions/$name"; return 1

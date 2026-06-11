@@ -58,6 +58,14 @@ probe saga-dash      8900 /
 probe rtsm-api       6110 /health
 probe connect-api    6106 /connectv3/v1/health
 probe connect-web    6210 /
+# Recording stack is OPT-IN (./up.sh --record) — assert it only when its
+# containers are actually up; otherwise note it without failing.
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx fleek-recorder; then
+  probe recorder       7890 /v1/health
+  probe recordings-api 8444 /healthz
+else
+  printf "  \033[2m· recording stack off (opt-in: ./up.sh --record [crdt|av])\033[0m\n"
+fi
 
 printf "\033[1m── data ──\033[0m\n"
 users=$(docker exec soa-postgres-1 psql -U iam -d iam_local -tAc "SELECT count(*) FROM users" 2>/dev/null || echo "")

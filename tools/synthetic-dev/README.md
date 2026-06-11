@@ -82,6 +82,7 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | postgres / redis / rabbitmq | 5432 / 6379 / 5672 (mgmt 15672) | soa-mesh (`soa-postgres-1` etc.) |
 | mongo (connect) | 27037 | `connect-mongo` — synthetic-dev's own `compose/connect-mongo.yml` (standalone, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's :27017) |
 | livekit / coturn | 7880 / — | qboard docker-compose (AV; best-effort — Connect runs CRDT-only without them) |
+| recorder / recordings-api / minio / egress | 7890 (webhook 7889) / 8444 / 9000 / — | OPT-IN (`./up.sh --record [crdt|av]`) — fleek compose + local overlay from `~/dev/fleek`; recordings in `~/.fleek-local/recordings` |
 
 Mesh rabbitmq creds: **`rabbitmq_admin:password123`** (not `saga_user`).
 Eight empty DBs: `iam_local`, `iam_pii_local`, `programs`, `scheduling`,

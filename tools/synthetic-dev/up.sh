@@ -77,6 +77,10 @@
 #                                  is stale/unresponsive (a rewritten branch corrupts vite's
 #                                  module graph and HMR doesn't recover) — same recovery as
 #                                  --reset but without truncating your seeded data.
+#   ./up.sh --record [crdt|av]   opt-in fleek recording stack (recorder + recordings-api
+#                                  + MinIO; `av` adds the LiveKit egress sidecar). Needs
+#                                  the fleek repo cloned + AWS CLI (CodeArtifact token
+#                                  for the image builds). Composes with up/reset/seed.
 #   ./up.sh --login [email]      auto-login via iam-api devLogin (default: dev@saga.org)
 #   ./up.sh --user  [email]      alias for --login
 #   ./up.sh --down               stop services (leaves mesh up)
@@ -121,6 +125,7 @@ SAGA_DASH=$DEV/saga-dash
 SDS=${SDS:-$DEV/student-data-system}         # ads-adm from the canonical checkout (sds_92 merged to main; worktree retired)
 QBOARD=${QBOARD:-$DEV/qboard}                # Connect app (connect-api + connect-web)
 RTSM=${RTSM:-$DEV/rtsm}                      # RTSM CRDT/socket service (single-node local)
+FLEEK=${FLEEK:-$DEV/fleek}                   # fleek recording stack (opt-in: --record)
 
 IAM_PORT=3010                                               # iam-api port — matches saga-dash main's static/config.json default (post Janus auth rewrite, d1.4)
 IAM_URL="http://localhost:$IAM_PORT"
@@ -148,6 +153,12 @@ CONNECT_API_URL="http://localhost:$CONNECT_API_PORT"
 CONNECT_WEB_URL="http://localhost:$CONNECT_WEB_PORT"
 RTSM_PORT=6110                               # rtsm-api (EXPRESS_SERVER_PORT — its committed .env default)
 RTSM_URL="http://localhost:$RTSM_PORT"
+# Recording (opt-in --record). The recorder/recordings-api run from fleek's
+# compose + local overlay; ports are the overlay's local-dev values.
+FLEEK_REC_DIR="$HOME/.fleek-local/recordings" # per-user recordings (same dir proxy-dev uses)
+RECORDER_CONTROL_PORT=7890                    # fleek-recorder control (plan push + /v1/health)
+RECORDINGS_API_PORT=8444                      # fleek-recordings-api (8443 is its prod port)
+RECORDING_TOKEN="local-dev-token"             # shared bearer, matches the fleek local overlay
 # Legacy poll-content source (REQUIRED by connect-api's config; the poll
 # endpoint is unauthenticated so no saga cookie is needed). Export your own
 # (e.g. SAGA_API_TARGET=https://jw.wootmath.com) to override. Goes away when
@@ -391,6 +402,66 @@ connect_infra_up(){
   else
     printf "\033[33m⚠\033[0m livekit/coturn failed to start (AV unavailable; Connect still works CRDT-only) — see %s\n" "$STATE/connect-av.log"
   fi
+}
+
+# ── Recording stack (opt-in: --record [crdt|av]) ─────────────────────────────
+# fleek's recorder + recordings-api + MinIO S3 stand-in (and, for av, the
+# LiveKit egress sidecar) via fleek's compose + LOCAL overlay. `--no-deps` is
+# load-bearing: the base compose would start fleek's bundled livekit, but
+# locally qboard's livekit serves :7880 and its livekit.yaml already webhooks
+# the recorder unconditionally (host.docker.internal:7889). Images build from
+# source and need a CodeArtifact token (12h TTL; build-time only). Recording
+# observes the LOCAL single-node RTSM via RTSM_BOOTSTRAP_URL (fleek recorder
+# plumb — fleek feat/rtsm-bootstrap-url), and recordings-api runs with auth
+# OFF + a dev identity (no saga cookie exists in this stack).
+record_up(){ # mode: crdt|av
+  local mode=${1:-crdt} token
+  [[ -d "$FLEEK/.git" ]] || { printf "\033[31m✗\033[0m --record needs the fleek repo at %s (clone git@github.com:saga-ed/fleek.git)\n" "$FLEEK"; exit 1; }
+  mkdir -p "$FLEEK_REC_DIR"
+  # qboard's redis first (livekit.yaml names it; egress subscribes via the
+  # :6380 host mapping — NOT the mesh redis on :6379), then recreate livekit
+  # so it serves the CURRENT livekit.yaml webhook block.
+  say "ensuring qboard redis + recreating livekit (recording wiring)…"
+  if ! ( cd "$QBOARD" && docker compose up -d redis >>"$STATE/connect-av.log" 2>&1 \
+        && docker compose up -d --force-recreate livekit >>"$STATE/connect-av.log" 2>&1 ); then
+    printf "\033[31m✗\033[0m qboard redis/livekit failed — see %s\n" "$STATE/connect-av.log"; exit 1
+  fi
+  command -v aws >/dev/null 2>&1 || { printf "\033[31m✗\033[0m --record needs the AWS CLI (CodeArtifact token for the recorder image builds)\n"; exit 1; }
+  say "fetching CodeArtifact token for the image builds (12h TTL; not written to disk)…"
+  token=$(aws codeartifact get-authorization-token \
+    --domain saga --domain-owner 531314149529 --region us-west-2 \
+    ${AWS_PROFILE:+--profile "$AWS_PROFILE"} \
+    --query authorizationToken --output text 2>"$STATE/record.log") || {
+    printf "\033[31m✗\033[0m CodeArtifact token fetch failed (try: aws sso login):\n"
+    sed 's/^/    /' "$STATE/record.log" 2>/dev/null; exit 1; }
+  [[ -n "$token" && "$token" != None ]] || { printf "\033[31m✗\033[0m CodeArtifact returned an empty token\n"; exit 1; }
+  local services=(recorder recordings-api minio minio-init)
+  [[ "$mode" == av ]] && services+=(egress)
+  say "building + starting recording stack: ${services[*]} (first build takes a while)…"
+  if ! env CODEARTIFACT_AUTH_TOKEN="$token" \
+      FLEEK_LOCAL_RECORDINGS_DIR="$FLEEK_REC_DIR" \
+      FLEEK_LOCAL_EGRESS_CONFIG="$FLEEK/configs/egress-local.yaml" \
+      RTSM_BOOTSTRAP_URL="http://127.0.0.1:$RTSM_PORT" \
+      RECORDINGS_AUTH_ENABLED=false \
+      RECORDINGS_DEV_USER_ID="$DEV_USER_UUID" \
+      RECORDINGS_DEV_USER_ROLE=TUTOR \
+      RECORDINGS_ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
+      SAGA_API_TARGET="$SAGA_API_TARGET" \
+      docker compose -f "$FLEEK/docker-compose.yml" -f "$FLEEK/docker-compose.local.yml" \
+        up -d --build --no-deps "${services[@]}" >>"$STATE/record.log" 2>&1; then
+    printf "\033[31m✗\033[0m recording stack failed — tail %s\n" "$STATE/record.log"; exit 1
+  fi
+  for _ in $(seq 1 30); do
+    [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$RECORDER_CONTROL_PORT/v1/health" 2>/dev/null)" == 200 ]] && break; sleep 1
+  done
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$RECORDER_CONTROL_PORT/v1/health" 2>/dev/null)" == 200 ]] \
+    && ok "fleek-recorder up :$RECORDER_CONTROL_PORT (webhook :7889)" \
+    || printf "\033[33m⚠\033[0m fleek-recorder not healthy yet — tail %s\n" "$STATE/record.log"
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$RECORDINGS_API_PORT/healthz" 2>/dev/null)" == 200 ]] \
+    && ok "fleek-recordings-api up :$RECORDINGS_API_PORT (auth off, dev identity)" \
+    || printf "\033[33m⚠\033[0m fleek-recordings-api not healthy yet — tail %s\n" "$STATE/record.log"
+  [[ "$mode" == av ]] && ok "egress up (AV recording; Chromium + 2GiB shm)" || true
+  ok "recording stack up (mode: $mode) — recordings land in $FLEEK_REC_DIR"
 }
 
 # Run `pnpm install` in a repo, surfacing failures instead of swallowing them.
@@ -637,17 +708,25 @@ services_up(){
      SESSIONS_API_BASE_URL="http://localhost:3007" \
      SAGA_API_TARGET="$SAGA_API_TARGET" \
      PUBLIC_API_URL="$CONNECT_API_URL" \
-     LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret
+     LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret \
+     RECORDING_SERVICE_TOKEN="$RECORDING_TOKEN" \
+     RECORDER_URL_TEMPLATE="http://127.0.0.1:$RECORDER_CONTROL_PORT"
   # connect-web: vite on :6210 (its own config default). VITE_RTSM_BOOTSTRAP_URL
   # points the rtsm-client at the LOCAL single-node rtsm-api (it overrides
   # domain-based fleet discovery). On a qboard checkout without the plumb the
   # var is ignored and connect-web falls back to the wootdev.com fleet —
   # graceful either way. `?rtsm_url=` on the Connect URL overrides per-tab.
+  # Recorder env (RECORDING_SERVICE_TOKEN / RECORDER_URL_TEMPLATE above) and
+  # the playback override here are set UNCONDITIONALLY: harmless when the
+  # recording stack is down (plan pushes only happen when a session records;
+  # playback only fetches when manifests exist), and it means a later
+  # `./up.sh --record` works without relaunching connect-api/-web.
   launch connect-web "$CONNECT_WEB_PORT" "$QBOARD/apps/web/connectv3" \
      VITE_CONNECTV3_API_URL="$CONNECT_API_URL" \
      VITE_IAM_API_URL="$IAM_URL" \
      VITE_SAGA_API_TARGET="$SAGA_API_TARGET" \
-     VITE_RTSM_BOOTSTRAP_URL="$RTSM_URL"
+     VITE_RTSM_BOOTSTRAP_URL="$RTSM_URL" \
+     VITE_PLAYBACK_ASSET_BASE_OVERRIDE="http://localhost:$RECORDINGS_API_PORT"
 }
 
 # ── reset: truncate synthetic data to an empty baseline ──────────────
@@ -836,12 +915,19 @@ status(){
     n=${kv%:*}; p=${kv#*:}; probe=$(probe_path "$n")
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done
+  # Recording stack is opt-in — only report when its containers exist.
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx fleek-recorder; then
+    printf "  %-15s :%s → %s\n" "recorder" "$RECORDER_CONTROL_PORT" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:$RECORDER_CONTROL_PORT/v1/health 2>/dev/null)"
+    printf "  %-15s :%s → %s\n" "recordings-api" "$RECORDINGS_API_PORT" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:$RECORDINGS_API_PORT/healthz 2>/dev/null)"
+  else
+    printf "  %-15s off (opt-in: ./up.sh --record [crdt|av])\n" "recording"
+  fi
   docker exec soa-postgres-1 psql -U iam -d iam_local -tAc \
     "SELECT 'iam users='||count(*) FROM users" 2>/dev/null | sed 's/^/  /'
 }
 
 # ── arg parsing: verbs (up/down/status/help) + composable flags ──────
-DO_UP=0; DO_RESET=0; DO_RESTART=0; DO_PULL=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER
+DO_UP=0; DO_RESET=0; DO_RESTART=0; DO_PULL=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER; DO_RECORD=0; RECORD_MODE=crdt
 case "${1:-up}" in
   # `shift || true`: bare `./up.sh` defaults ${1:-up} to "up" but leaves $# at 0,
   # so an unguarded shift returns 1 and `set -e` kills the script before it runs.
@@ -854,14 +940,17 @@ case "${1:-up}" in
   # flags: `restart --login [email]` re-opens the logged-in browser the bounce kills.
   restart|--restart)             DO_RESTART=1; shift || true ;;
   --status)                      status; exit 0 ;;
-  -h|--help)                     sed -n '2,51p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull) ;; # flag-only invocation; skip up
+  -h|--help)                     sed -n '67,116p' "$0"; exit 0 ;;  # the "Usage:" block of the header
+  --reset|--seed|--login|--user|--pull|--record) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reset) DO_RESET=1; shift ;;
     --seed)  DO_SEED=1; shift; case "${1:-}" in roster|full) SEED_MODE=$1; shift ;; esac ;;
+    # --record [crdt|av]: opt-in fleek recording stack. crdt (default) =
+    # recorder + recordings-api + minio; av adds the LiveKit egress sidecar.
+    --record) DO_RECORD=1; shift; case "${1:-}" in crdt|av) RECORD_MODE=$1; shift ;; esac ;;
     # --login / --user [email]: optional positional email; bare or next-flag → default persona
     --login|--user) DO_LOGIN=1; shift; case "${1:-}" in ''|--*) ;; *) LOGIN_USER=$1; shift ;; esac ;;
     --pull) DO_PULL=1; shift ;;
@@ -898,6 +987,7 @@ elif [[ $DO_UP == 1 ]]; then
   services_up
   ok "stack up — try: $0 --status"
 fi
+[[ $DO_RECORD == 1 ]] && record_up "$RECORD_MODE"
 [[ $DO_SEED == 1 ]]  && seed_stack "$SEED_MODE"
 [[ $DO_LOGIN == 1 ]] && login_user "$LOGIN_USER"
 exit 0

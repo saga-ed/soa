@@ -206,8 +206,20 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
   endpoint is unauthenticated — no saga cookie needed). `up.sh` defaults it;
   export your own (e.g. `SAGA_API_TARGET=https://jw.wootmath.com`) to override.
   Goes away when content-api lands.
-- **Deferred:** the fleek recording stack (recorder / recordings-api / egress)
-  and dash→connect session linking.
+- **Recording is opt-in** — `./up.sh --record` brings up fleek's recorder +
+  recordings-api + a MinIO S3 stand-in (CRDT recording); `--record av` adds
+  the LiveKit egress sidecar (Chromium, 2 GiB /dev/shm) for AV. Needs the
+  **fleek repo** as an OPTIONAL eighth sibling (`~/dev/fleek` — not required
+  by the base stack, so bootstrap/posture don't demand it) and the AWS CLI
+  (the recorder images build from source against CodeArtifact). The recorder
+  observes the LOCAL RTSM via its `RTSM_BOOTSTRAP_URL` plumb (fleek
+  `feat/rtsm-bootstrap-url`); recordings-api runs auth-off with a dev
+  identity (no saga cookie here); recordings land in
+  `~/.fleek-local/recordings`. qboard's `livekit.yaml` webhooks the local
+  recorder unconditionally, so the non-recording stack is unaffected either
+  way. Playback: connect-web is launched with
+  `VITE_PLAYBACK_ASSET_BASE_OVERRIDE=http://localhost:8444`.
+- **Deferred:** dash→connect session linking.
 
 ## Walkthrough deck (start here for the UX flow)
 
@@ -281,6 +293,8 @@ right env, and reports green.
 ./up.sh --reset                  # truncate synthetic data → empty baseline (services stay up)
 ./up.sh --seed roster            # seed against an already-empty stack
 ./up.sh --status                 # GET /health on each, iam user count
+./up.sh --record                 # opt-in: fleek recording stack (CRDT tier — recorder + recordings-api + minio)
+./up.sh --record av              # …plus the LiveKit egress sidecar (AV recording)
 ./up.sh --login [email]          # mint a session + open an auto-logged-in Chromium
 ./up.sh --down                   # stop services (mesh stays up)
 ```

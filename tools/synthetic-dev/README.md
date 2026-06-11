@@ -1,14 +1,18 @@
 # Local synthetic-dev stack (sds_92)
 
-A dockerized local stack (postgres + redis + rabbitmq + the six APIs)
-for developing **synthetic** iam rosters / programs / schedules — no
-VPN, no prod-mirror fixture. Built 2026-05-26 in response to
+A dockerized local stack (postgres + redis + rabbitmq + mongo + the nine
+services) for developing **synthetic** iam rosters / programs / schedules —
+no VPN, no prod-mirror fixture. Built 2026-05-26 in response to
 `sources/prompt-3.md`.
 
 The sixth API is **sis-api** (rostering, on main as of 2026-06 — Adam's
 SIS reconciliation / CSV-roster service), added so it can be
 cross-developed against saga-dash on this stack. See
-`../decisions/d1.7`.
+`../decisions/d1.7`. The seventh is **sessions-api** (program-hub #148
+harvest; soa#146). Eight + nine are the **Connect app** (qboard:
+connect-api :6106 + connect-web :6210) — see getting-started.md's
+Connect section for what's different (dedicated mongo :27037, no
+fixtures, no proxy, RTSM/recording deferred).
 
 > **New here?** Read **`getting-started.md`** — onboarding + the
 > one-command path (`./bootstrap.sh`) that stands the stack up **on `main`**
@@ -20,7 +24,7 @@ cross-developed against saga-dash on this stack. See
 ## TL;DR
 
 ```bash
-./up.sh           # mesh + 6 services, EMPTY
+./up.sh           # mesh + 9 services, EMPTY
 ./up.sh --reset --seed roster   # from-scratch: empty baseline, then synthetic IAM roster only (programs empty)
 ./up.sh --reset --seed full     # roster + programs/periods/enrollment
 ./up.sh --seed [roster|full]    # seed without resetting (roster = default; iam groups don't dedup — prefer --reset)
@@ -47,6 +51,7 @@ won't stop the run.
 | **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**) + sessions-api (**:3007**); the `programs` scenario (`scripts/scenarios`) |
 | **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. Override the path with `SDS=...` |
 | **saga-dash** | `~/dev/saga-dash` | `main` | dash web UI (**:8900**) |
+| **qboard** | `~/dev/qboard` | `main` | connect-api (**:6106**) + connect-web (**:6210**); livekit/coturn compose (AV). Override the path with `QBOARD=...` |
 
 Mesh containers (`soa-postgres-1` / `soa-redis-1` / `soa-rabbitmq-1`) are
 brought up from `soa` by `up.sh` itself — no separate clone.
@@ -68,7 +73,11 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | sessions-api | 3007 | program-hub main — sessions read/lifecycle (harvested from programs-api in program-hub #148); event-built projections (pre-existing data needs the one-time manual replay — see getting-started.md) |
 | ads-adm-api | 5005 | student-data-system **main** (canonical checkout) |
 | saga-dash | 8900 | saga-dash main |
+| connect-api | 6106 | qboard main — Connect session API (Express + mongo; health at `/connectv3/v1/health`) |
+| connect-web | 6210 | qboard main — Connect web app (vite) |
 | postgres / redis / rabbitmq | 5432 / 6379 / 5672 (mgmt 15672) | soa-mesh (`soa-postgres-1` etc.) |
+| mongo (connect) | 27037 | `connect-mongo` — synthetic-dev's own `compose/connect-mongo.yml` (standalone, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's :27017) |
+| livekit / coturn | 7880 / — | qboard docker-compose (AV; best-effort — Connect runs CRDT-only without them) |
 
 Mesh rabbitmq creds: **`rabbitmq_admin:password123`** (not `saga_user`).
 Eight empty DBs: `iam_local`, `iam_pii_local`, `programs`, `scheduling`,

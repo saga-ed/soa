@@ -1,8 +1,9 @@
 # getting-started.md — synthetic-dev stack onboarding
 
 This is the local "synthetic-dev" stack we use for the attendance-UI /
-People-step work on saga-dash, and now for **cross-developing sis-api against
-saga-dash**. It's a dockerized, fully-local **seven-service** stack:
+People-step work on saga-dash, for **cross-developing sis-api against
+saga-dash**, and now for the **Connect app**. It's a dockerized, fully-local
+**nine-service** stack:
 
 | port | service | repo |
 |---|---|---|
@@ -13,9 +14,13 @@ saga-dash**. It's a dockerized, fully-local **seven-service** stack:
 | 3007 | sessions-api | `~/dev/program-hub` |
 | 5005 | ads-adm-api | `~/dev/student-data-system` |
 | 8900 | saga-dash | `~/dev/saga-dash` |
+| 6106 | connect-api | `~/dev/qboard` |
+| 6210 | connect-web | `~/dev/qboard` |
 | 5432 | postgres (`soa-postgres-1`) | mesh, from `~/dev/soa/infra` |
 | 6379 | redis | mesh |
 | 5672 / 15672 | rabbitmq | mesh |
+| 27037 | mongo (`connect-mongo`) | synthetic-dev's own `compose/connect-mongo.yml` |
+| 7880 | livekit (+ coturn) | qboard's docker-compose (AV; best-effort) |
 
 Seeds a realistic synthetic roster: **7 districts / 15 schools / 32 sections
 / 168 students / 22 tutors / 7 named dev personas** — no PII, no VPN, no
@@ -38,7 +43,7 @@ cd ~/dev/soa/tools/synthetic-dev
 ```bash
 ./refresh-suite.sh             # apply your local overlay if present — else a no-op (everyone on main)
 ./up.sh up --reset --seed roster
-./verify.sh                    # asserts 7 services @ 200 + roster + sis_db + SOURCE POSTURE (right branches); non-zero on any red
+./verify.sh                    # asserts 9 services @ 200 + roster + sis_db + connect-mongo + SOURCE POSTURE (right branches); non-zero on any red
 ```
 
 On a clean checkout there's no overlay, so `refresh-suite.sh` is a no-op and
@@ -153,6 +158,39 @@ cd ../scheduling-api && \
 The running relay re-publishes; idempotent consumption makes it a no-op for
 already-caught-up consumers.
 
+## Connect (services eight + nine)
+
+connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
+(`~/dev/qboard/apps/web/connectv3`, **:6210**) are the Connect session app
+(whiteboard / CRDT / AV). Notes that differ from the other services:
+
+- **No fixtures, no migrations.** Connect's MongoDB collections auto-create on
+  first write; the databases simply support running sessions. "Session data"
+  comes from **sessions-api (:3007)**.
+- **Dedicated mongo.** `up.sh` runs Connect against its own synthetic-dev
+  container — `compose/connect-mongo.yml`, standalone, no auth, host port
+  **:27037** (non-default on purpose, so it never contends with qboard's old
+  `:27017` container or a system mongod). `--reset` drops `connectv3_local`.
+- **No HTTPS / domain-spoof proxy.** qboard's `scripts/proxy-dev.sh` (mkcert +
+  /etc/hosts + ssl-proxy) exists only because that workflow authenticates at
+  `.wootdev.com`. Here iam is local, so the `iam_session` cookie is host-scoped
+  to `localhost` and reaches every port — Connect rides the same `--login`
+  session as the dash. Janus is off (`JANUS_REQUIRED=false`), and connect-api
+  verifies JWTs against local iam's JWKS (`JWT_ISSUER=https://iam.saga.org`).
+- **AV (LiveKit):** `up.sh` starts qboard's `livekit` + `coturn` containers
+  best-effort (`devkey`/`devsecret`). If they fail, Connect still runs
+  whiteboard/CRDT-only.
+- **RTSM is still remote for now** (connect-web's default
+  `rtsm_domain=wootdev.com`). Local single-node rtsm-api (:6110) is the next
+  phase — it needs a small qboard PR to plumb the rtsm-client `bootstrapUrl`
+  override.
+- **Legacy poll content:** connect-api requires `SAGA_API_TARGET` (the poll
+  endpoint is unauthenticated — no saga cookie needed). `up.sh` defaults it;
+  export your own (e.g. `SAGA_API_TARGET=https://jw.wootmath.com`) to override.
+  Goes away when content-api lands.
+- **Deferred:** the fleek recording stack (recorder / recordings-api / egress)
+  and dash→connect session linking.
+
 ## Walkthrough deck (start here for the UX flow)
 
 `../training/saga-dash-walkthrough.html` — open in a browser or serve via
@@ -175,14 +213,15 @@ captured by `../training/capture/capture.mjs` (regenerable; see
    `pnpm install` in rostering/program-hub/saga-dash will 401 on every
    private package. Get a fresh token any time with
    `pnpm co:login` (defined in each repo's root `package.json`).
-5. **Five sibling repos cloned under a shared parent**, by default `~/dev/`:
+5. **Six sibling repos cloned under a shared parent**, by default `~/dev/`:
    ```
    ~/dev/
      ├── soa                  # mesh infra (provides docker compose for pg/redis/rabbitmq)
      ├── rostering            # iam-api + sis-api + iam-db / sis-db
      ├── program-hub          # programs-api + scheduling-api + sessions-api
      ├── saga-dash            # the dash itself
-     └── student-data-system  # ads-adm-api + this synthetic-dev tooling
+     ├── student-data-system  # ads-adm-api + this synthetic-dev tooling
+     └── qboard               # connect-api + connect-web (+ livekit/coturn compose)
    ```
    Override the base with `DEV=~/work ./bootstrap.sh`.
 6. Each sibling repo's `pnpm install` should succeed at least once (post-
@@ -202,9 +241,10 @@ shells out to:
 
 That's the canonical soa-mesh compose definition. So with zero containers
 running and Docker just booted, `./up.sh up` does the right thing in one
-command — brings up the mesh, applies prisma schemas (via `migrate deploy`
-— matches the deployed pipeline; see `decisions/d1.5`), launches all seven
-services with the right env, and reports green.
+command — brings up the mesh (plus `connect-mongo` and qboard's AV
+containers), applies prisma schemas (via `migrate deploy` — matches the
+deployed pipeline; see `decisions/d1.5`), launches all nine services with the
+right env, and reports green.
 
 ## Verbs
 
@@ -214,9 +254,9 @@ services with the right env, and reports green.
 ./refresh-suite.sh --list        # print your personal overlay, no changes
 ./refresh-suite.sh --prs 165 saga-dash      # ad-hoc: overlay explicit PR(s) onto main, no file
 ./refresh-suite.sh --reset       # back out: overlaid repos → main (deletes local/integration)
-./verify.sh                      # assert 7 services + roster + sis_db + source posture (right branches) — exit code
+./verify.sh                      # assert 9 services + roster + sis_db + connect-mongo + source posture (right branches) — exit code
 
-./up.sh up                       # bring up mesh + 7 services (empty databases)
+./up.sh up                       # bring up mesh + 9 services (empty databases)
 ./up.sh up --reset --seed roster # from-scratch: empty baseline + synthetic IAM roster
 ./up.sh up --reset --seed full   # roster + 9 programs + periods + enrollment
 ./up.sh --reset                  # truncate synthetic data → empty baseline (services stay up)
@@ -257,12 +297,15 @@ Each persona's UUID is printed at the end of every `--seed roster` run.
    the **Drift log** at the bottom of `README.md`); also writes
    `SIS_DATABASE_URL` and seeds the dash's `sis-api → :3100` config key.
 3. `mesh_up` — starts soa-mesh if not running.
-4. `prep` — `pnpm install + build` in rostering / program-hub; `prisma migrate
-   deploy` for iam / programs / scheduling / sessions / sis / ads-adm DBs (via
-   the `migrate_db` helper — matches what `_deploy-ecs-api.yml`'s migrate job
-   runs on production).
-5. `services_up` — launches the seven API services / dash with the right
-   env (IAM_API_URL, RABBITMQ_URL, JWT_ACCESSTOKENTTLSECONDS, etc.) via
+4. `connect_infra_up` — starts `connect-mongo` (:27037, hard requirement) and
+   qboard's livekit + coturn (AV, best-effort).
+5. `prep` — `pnpm install + build` in rostering / program-hub / qboard;
+   `prisma migrate deploy` for iam / programs / scheduling / sessions / sis /
+   ads-adm DBs (via the `migrate_db` helper — matches what
+   `_deploy-ecs-api.yml`'s migrate job runs on production). Connect has no
+   migrate step (mongo collections auto-create).
+6. `services_up` — launches the nine services with the right env
+   (IAM_API_URL, RABBITMQ_URL, JWT_ACCESSTOKENTTLSECONDS, etc.) via
    `nohup pnpm dev` per service. PID files in `/tmp/sds-synthetic/`.
 
 Logs land in `/tmp/sds-synthetic/<service>.log` — tail those when something

@@ -2,8 +2,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # synthetic-dev/up.sh — stand up the local synthetic-dev stack for sds_92.
 #
-# Goal: dockerized postgres + redis + rabbitmq + the seven APIs, EMPTY, ready to
-# seed SYNTHETIC iam rosters / programs via the deterministic `db:seed`
+# Goal: dockerized postgres + redis + rabbitmq + mongo + the nine services,
+# EMPTY, ready to seed SYNTHETIC iam rosters / programs via the deterministic `db:seed`
 # (@saga-ed/*-seed-ids — same data as preview/CI, stable ids across --reset; no
 # VPN, no prod-mirror fixture). See synthetic-dev-align. The old scenario-runner
 # seed was retired here (scenario scripts stay in-repo for future journey data).
@@ -27,6 +27,19 @@
 # `pnpm replay:program-outbox <id>` / `replay:schedule-outbox <id>` — see
 # getting-started.md). See soa#146.
 #
+# Services eight + nine are the Connect app (qboard repo): connect-api (:6106,
+# Express + MongoDB) and connect-web (:6210, Vite). Connect needs NO seed
+# fixtures — its mongo collections auto-create on first write; "session data"
+# comes from sessions-api (:3007). Its mongo is a DEDICATED synthetic-dev
+# container (compose/connect-mongo.yml, :27037 — standalone, no auth; NOT the
+# legacy saga-api/wootmath template, NOT qboard's bespoke :27017 container).
+# AV comes from qboard's livekit+coturn containers (best-effort). No HTTPS /
+# domain-spoof proxy (qboard's proxy-dev.sh) is needed here: iam is local, so
+# localhost host-scoped cookies reach every port — same trick the dash uses.
+# Deferred: local RTSM (:6110, needs a qboard bootstrapUrl plumb), the fleek
+# recording stack, dash→connect linking. SAGA_API_TARGET (legacy poll content,
+# unauthenticated endpoint) stays remote until content-api lands.
+#
 # Branch posture (see decisions/d1.1): iam/programs/scheduling/saga-dash/soa on
 # MAIN; ads-adm from the canonical ~/dev/student-data-system checkout (sds_92 is
 # merged to main; the sds_92 worktree has been retired). Override with SDS=...
@@ -39,7 +52,7 @@
 # such drift + fix is documented in README.md and applied idempotently below.
 #
 # Usage:
-#   ./up.sh                      bring up mesh + 7 services (empty)
+#   ./up.sh                      bring up mesh + 9 services (empty)
 #   ./up.sh up --pull            ff-only sync all siblings to origin, then build/migrate
 #   ./up.sh --seed [roster|full] seed synthetic data (default: roster)
 #                                  roster = iam roster only (programs empty → from-scratch)
@@ -93,6 +106,7 @@ ROSTERING=$DEV/rostering
 PROGRAM_HUB=$DEV/program-hub
 SAGA_DASH=$DEV/saga-dash
 SDS=${SDS:-$DEV/student-data-system}         # ads-adm from the canonical checkout (sds_92 merged to main; worktree retired)
+QBOARD=${QBOARD:-$DEV/qboard}                # Connect app (connect-api + connect-web)
 
 IAM_PORT=3010                                               # iam-api port — matches saga-dash main's static/config.json default (post Janus auth rewrite, d1.4)
 IAM_URL="http://localhost:$IAM_PORT"
@@ -106,6 +120,21 @@ PROGRAMS_DB_URL="postgresql://saga_user:password123@localhost:5432/programs"
 SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
+# Connect (qboard). Ports are the apps' own defaults (vite.config.ts / config.ts).
+# Its mongo is the dedicated synthetic-dev container — compose/connect-mongo.yml,
+# host :27037 (non-default on purpose: no contention with qboard-mongo/:27017),
+# standalone, no auth. Collections auto-create; no migrate step, no seed.
+CONNECT_API_PORT=6106
+CONNECT_WEB_PORT=6210
+CONNECT_MONGO_PORT=27037
+CONNECT_MONGO_URI="mongodb://localhost:$CONNECT_MONGO_PORT/connectv3_local"
+CONNECT_API_URL="http://localhost:$CONNECT_API_PORT"
+CONNECT_WEB_URL="http://localhost:$CONNECT_WEB_PORT"
+# Legacy poll-content source (REQUIRED by connect-api's config; the poll
+# endpoint is unauthenticated so no saga cookie is needed). Export your own
+# (e.g. SAGA_API_TARGET=https://jw.wootmath.com) to override. Goes away when
+# content-api lands.
+SAGA_API_TARGET="${SAGA_API_TARGET:-https://wootmath.com}"
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
 STATE=/tmp/sds-synthetic; mkdir -p "$STATE"
 COOKIE_JAR="$STATE/cookies.txt"                             # devLogin session jar (for headless harnesses)
@@ -134,7 +163,7 @@ check_branches(){
   # co:login + install) is bootstrap.sh's "ensure repos" step.
   local _miss=()
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
-            "$SAGA_DASH:saga-dash" "$SDS:student-data-system"; do
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard"; do
     [[ -d "${kv%:*}/.git" ]] || _miss+=("$kv")
   done
   if [[ ${#_miss[@]} -gt 0 ]]; then
@@ -153,7 +182,7 @@ check_branches(){
       PINS["$repo"]="${_prs//[[:space:]]/}"
     done < <(grep -vE '^\s*(#|$)' "$MANIFEST")
   fi
-  for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash"; do
+  for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash" "$QBOARD:qboard"; do
     r=${kv%:*}; repo=${kv#*:}
     have=$(git -C "$r" branch --show-current)
     if [[ -n "${PINS[$repo]:-}" ]]; then
@@ -310,6 +339,41 @@ mesh_up(){
   ok "mesh up — pg :5432  redis :6379  rabbitmq :5672"
 }
 
+# ── Connect infra: dedicated mongo (:27037) + qboard's AV containers ─────────
+# The mongo is OURS (compose/connect-mongo.yml) — standalone, no auth, loopback
+# :27037 — not qboard's bespoke :27017 container and not the legacy
+# saga-api/wootmath template. livekit+coturn come from qboard's compose (the
+# single-node AV path; the fleek repo only adds recording sidecars — deferred)
+# and are BEST-EFFORT: without them Connect still runs whiteboard/CRDT-only.
+connect_infra_up(){
+  # mongo: hard requirement (connect-api won't boot without it)
+  if docker ps --format '{{.Names}}' | grep -qx connect-mongo; then
+    ok "connect-mongo already up :$CONNECT_MONGO_PORT"
+  else
+    if port_listening "$CONNECT_MONGO_PORT"; then
+      printf "\033[31m✗\033[0m connect mongo port %s in use by a non-docker listener — find it:  sudo lsof -iTCP:%s -sTCP:LISTEN\n" "$CONNECT_MONGO_PORT" "$CONNECT_MONGO_PORT"
+      exit 1
+    fi
+    say "starting connect-mongo (:$CONNECT_MONGO_PORT)…"
+    if ! docker compose -f "$SCRIPT_DIR/compose/connect-mongo.yml" up -d >"$STATE/connect-mongo.log" 2>&1; then
+      printf "\033[31m✗\033[0m connect-mongo failed to start — %s:\n" "$STATE/connect-mongo.log"
+      sed 's/^/    /' "$STATE/connect-mongo.log" 2>/dev/null
+      exit 1
+    fi
+    for _ in $(seq 1 20); do
+      docker exec connect-mongo mongosh --quiet --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break; sleep 1
+    done
+    ok "connect-mongo up :$CONNECT_MONGO_PORT"
+  fi
+  # livekit + coturn (AV): best-effort — start ONLY those two services from
+  # qboard's compose (never its mongo; ours is on :27037).
+  if docker compose -f "$QBOARD/docker-compose.yml" up -d livekit coturn >"$STATE/connect-av.log" 2>&1; then
+    ok "connect AV up — livekit :7880 + coturn (qboard compose)"
+  else
+    printf "\033[33m⚠\033[0m livekit/coturn failed to start (AV unavailable; Connect still works CRDT-only) — see %s\n" "$STATE/connect-av.log"
+  fi
+}
+
 # Run `pnpm install` in a repo, surfacing failures instead of swallowing them.
 # A CodeArtifact 401 (token expires ~12h) is the most common prep failure — on a
 # TTY, offer to refresh it (pnpm co:login) and retry inline; else exit with the
@@ -383,7 +447,7 @@ pull_repos(){
   say "pulling siblings to upstream (ff-only)…"
   local kv dir name dirty br behind
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
-            "$SAGA_DASH:saga-dash" "$SDS:student-data-system"; do
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard"; do
     dir=${kv%:*}; name=${kv#*:}
     [[ -d "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
     dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -v '^??' || true)
@@ -424,6 +488,13 @@ prep(){
   # freshly-cloned or freshly-pulled dash would 404 the whole UI. Install it here.
   say "reconciling saga-dash deps (vite)…"
   pnpm_install "$SAGA_DASH"
+  # qboard: connect-api runs via tsx watch and connect-web via vite (no
+  # prebuild), but their workspace deps (qboard-lib, qboard-sync, iam-auth…)
+  # resolve from dist/, so install + best-effort build like the others. NO
+  # migrate step: Connect's mongo has no schema — collections auto-create.
+  say "reconciling qboard deps + workspace build (connect-api/-web)…"
+  pnpm_install "$QBOARD"
+  ( cd "$QBOARD" && pnpm build >/dev/null 2>&1 ) || true
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
@@ -445,13 +516,24 @@ prep(){
   ok "schemas + dev user ready"
 }
 
+# Health-probe path per service. APIs expose /health; the two vite apps
+# (saga-dash, connect-web) answer on /; connect-api mounts its router under
+# /connectv3/v1 (qboard apps/node/connectv3-api/src/app.ts).
+probe_path(){ # name
+  case "$1" in
+    saga-dash|connect-web) echo / ;;
+    connect-api)           echo /connectv3/v1/health ;;
+    *)                     echo /health ;;
+  esac
+}
+
 launch(){ # name port dir extra_env...
-  local name=$1 port=$2 dir=$3; shift 3
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port/health 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
+  local name=$1 port=$2 dir=$3 probe; shift 3
+  probe=$(probe_path "$name")
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
   say "starting $name on :$port…"
   ( cd "$dir"; env "$@" nohup pnpm dev >"$STATE/$name.log" 2>&1 & echo $! >"$STATE/$name.pid" )
   for _ in $(seq 1 40); do
-    local probe=/health; [[ "$name" == saga-dash ]] && probe=/
     [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name up :$port"; return; }
     sleep 1
   done
@@ -499,6 +581,30 @@ services_up(){
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
   launch saga-dash 8900 "$SAGA_DASH/apps/web/dash"
+  # connect-api: verifies the SAME iam_session JWT the dash flow mints (JWKS
+  # from local iam). Its issuer default is the wootdev iam, so override
+  # JWT_ISSUER to local iam-api's JwtConfigSchema default (rostering
+  # config/schemas.ts: https://iam.saga.org); audience already matches
+  # (saga-platform). JANUS_REQUIRED=false = same literal-false bypass as the
+  # other services. SAGA_API_TARGET is legacy poll content (unauthenticated
+  # endpoint — see header). LiveKit creds match qboard's local container.
+  launch connect-api "$CONNECT_API_PORT" "$QBOARD/apps/node/connectv3-api" \
+     PORT="$CONNECT_API_PORT" \
+     MONGO_URI="$CONNECT_MONGO_URI" \
+     AUTH_ENABLED=true JANUS_REQUIRED=false \
+     IAM_API_URL="$IAM_URL" JWT_ISSUER="https://iam.saga.org" \
+     ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
+     SESSIONS_API_BASE_URL="http://localhost:3007" \
+     SAGA_API_TARGET="$SAGA_API_TARGET" \
+     PUBLIC_API_URL="$CONNECT_API_URL" \
+     LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret
+  # connect-web: vite on :6210 (its own config default). VITE_RTSM_DOMAIN is
+  # left at its wootdev.com default for now — local single-node RTSM is the
+  # next phase (needs a qboard plumb of the rtsm-client bootstrapUrl override).
+  launch connect-web "$CONNECT_WEB_PORT" "$QBOARD/apps/web/connectv3" \
+     VITE_CONNECTV3_API_URL="$CONNECT_API_URL" \
+     VITE_IAM_API_URL="$IAM_URL" \
+     VITE_SAGA_API_TARGET="$SAGA_API_TARGET"
 }
 
 # ── reset: truncate synthetic data to an empty baseline ──────────────
@@ -508,7 +614,7 @@ services_up(){
 # Preserves _prisma_migrations so no re-migrate. Uses the mesh superuser
 # (postgres_admin) so it can truncate tables owned by iam / saga_user / etc.
 reset_data(){
-  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis)…"
+  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis, connect)…"
   local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
   # `sessions` truncation also clears its consumed-event cursors, so its
   # event-built projections re-converge from the producers' outbox replay.
@@ -519,6 +625,15 @@ reset_data(){
       printf "\033[33m⚠\033[0m could not truncate %s (does it exist? is mesh up?)\n" "$db"
     fi
   done
+  # Connect's mongo: drop the whole DB (session-scoped CRDT/chat/lifecycle data
+  # — all of it is "synthetic session residue"; collections auto-recreate on
+  # first write, so a drop IS the empty baseline; no migrations to preserve).
+  if docker exec connect-mongo mongosh --quiet --eval \
+       'db.getSiblingDB("connectv3_local").dropDatabase()' >/dev/null 2>&1; then
+    ok "dropped connectv3_local (connect mongo)"
+  else
+    printf "\033[33m⚠\033[0m could not drop connectv3_local (is connect-mongo up?)\n"
+  fi
   say "re-seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true
   ok "reset complete — empty roster/programs/scheduling baseline"
@@ -630,7 +745,7 @@ open_login_browser(){
   printf "\033[33m⚠\033[0m Chromium still starting — watch %s\n" "$STATE/browser-login.log"
 }
 
-services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api ads-adm-api saga-dash; do
+services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api ads-adm-api saga-dash connect-api connect-web; do
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
@@ -639,8 +754,8 @@ done
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
-for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 8900; do fuser -k "$_p/tcp" 2>/dev/null||true; done
-ok "services down (mesh left up)"; }
+for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 8900 "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
+ok "services down (mesh + connect-mongo + AV containers left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
 # code/branch change. The dep-optimizer cache survives restarts and silently
@@ -651,12 +766,14 @@ nuke_vite(){
   say "clearing dash vite caches (stale optimized bundles)..."
   rm -rf "$SAGA_DASH/apps/web/dash/node_modules/.vite" 2>/dev/null||true
   find "$SAGA_DASH/apps" "$SAGA_DASH/packages" -type d -name .vite -prune -exec rm -rf {} + 2>/dev/null||true
+  # connect-web is vite too — same stale-optimize-cache trap.
+  rm -rf "$QBOARD/apps/web/connectv3/node_modules/.vite" 2>/dev/null||true
   ok "vite caches cleared"
 }
 
 status(){
-  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 ads-adm-api:5005 saga-dash:8900; do
-    n=${kv%:*}; p=${kv#*:}; probe=/health; [[ "$n" == saga-dash ]] && probe=/
+  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 ads-adm-api:5005 saga-dash:8900 connect-api:$CONNECT_API_PORT connect-web:$CONNECT_WEB_PORT; do
+    n=${kv%:*}; p=${kv#*:}; probe=$(probe_path "$n")
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done
   docker exec soa-postgres-1 psql -U iam -d iam_local -tAc \
@@ -696,7 +813,7 @@ done
 # `--reset` (no `up` verb) skips prep and assumes a running mesh.
 [[ $DO_PULL == 1 ]] && pull_repos        # ff-only sync siblings BEFORE we build/migrate
 if [[ $DO_UP == 1 ]]; then
-  check_branches; apply_fixes; mesh_up; prep
+  check_branches; apply_fixes; mesh_up; connect_infra_up; prep
 fi
 
 # A --reset ALWAYS means a CLEAN restart on current code — independent of the

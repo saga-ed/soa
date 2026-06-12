@@ -37,6 +37,22 @@ export interface OutboxRelayOpts {
      */
     drainTimeoutMs?: number;
     /**
+     * Per-transaction `idle_in_transaction_session_timeout` (ms) for the relay's
+     * drain transaction. The relay holds ONE transaction open across the whole
+     * publish loop (BEGIN → SELECT … FOR UPDATE SKIP LOCKED → publish each row →
+     * UPDATE → COMMIT), so the connection sits *idle in transaction* during
+     * broker I/O — by design (the row locks are the multi-relay claim). If the
+     * pool carries a server-side `idle_in_transaction_session_timeout` (e.g.
+     * `@saga-ed/soa-postgres` >=0.1.3 defaults it ON at 30s as the gh-186
+     * ack'd-but-not-durable guard), that timer would terminate the relay
+     * mid-batch under broker backpressure. The relay therefore overrides it for
+     * its own transaction via `SET LOCAL`. Defaults to 300_000 (5 min): a
+     * generous backstop that clears any healthy or moderately-backpressured
+     * batch while still bounding a truly-wedged relay. Set 0 to disable the
+     * timeout entirely for the relay tx (rely solely on `drainTimeoutMs`).
+     */
+    txIdleTimeoutMs?: number;
+    /**
      * Called when the relay encounters an unrecoverable pg error
      * (auth failure, missing role, missing database, missing table). Default
      * behavior: rethrow out of `tick()` so the parent process surfaces it via
@@ -152,6 +168,15 @@ export class OutboxRelay {
         let clientPoisoned = false;
         try {
             await client.query('BEGIN');
+            // The relay holds this transaction open across the publish loop
+            // (idle-in-transaction during broker I/O). Override any pool-level
+            // idle_in_transaction_session_timeout for THIS tx so a server-side
+            // guard (e.g. soa-postgres' default-ON 30s gh-186 guard) can't
+            // terminate the relay mid-batch under backpressure. SET LOCAL is
+            // scoped to this transaction and reverts on COMMIT/ROLLBACK.
+            await client.query(
+                `SET LOCAL idle_in_transaction_session_timeout = ${this.opts.txIdleTimeoutMs ?? 300_000}`,
+            );
             const result = await client.query<OutboxRow>(
                 `SELECT event_id, aggregate_type, aggregate_id, event_type,
                         event_version, payload, meta, occurred_at, attempts

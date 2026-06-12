@@ -3,9 +3,9 @@
 # bootstrap.sh — one command to stand up the synthetic-dev stack on main.
 #
 # Chains the steps a new engineer (e.g. Adam) needs:
-#   1. ensure-repos       — clone any missing of the 5 siblings + co:login & install
+#   1. ensure-repos       — clone any missing of the 7 siblings + co:login & install
 #   2. refresh-suite.sh   — apply your local overlay if present (else everyone on main)
-#   3. up.sh up --reset --seed roster — mesh + 7 services, fresh synthetic roster
+#   3. up.sh up --reset --seed roster — mesh + 10 services, fresh synthetic roster
 #   4. verify.sh          — assert every service is green and the roster seeded
 #
 # Stops at the first failing step (so you fix it before the next). For the
@@ -18,7 +18,7 @@
 #   DEV=~/work ./bootstrap.sh       non-default sibling-repo parent
 #
 # Prereqs (see getting-started.md): Docker running, `gh` authenticated, and AWS
-# creds for CodeArtifact. The 5 sibling repos no longer need pre-cloning — step 1
+# creds for CodeArtifact. The 7 sibling repos no longer need pre-cloning — step 1
 # clones + installs any that are missing (under $DEV, default ~/dev).
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
@@ -43,38 +43,51 @@ err(){  printf "\033[31m✗\033[0m %s\n" "$*"; }
 DEV=${DEV:-$HOME/dev}
 SDS=${SDS:-$DEV/student-data-system}
 
-# Step 1 — the real one-time machine bootstrap: make sure all five sibling repos
-# are cloned, and fully provision (co:login + install) any we have to clone, so a
-# fresh clone is launch-ready and the run continues without a manual re-run.
-# Idempotent: a no-op when all five are present. Only freshly-cloned repos are
-# installed (re-runs stay fast). Fails fast when non-interactive.
+# Step 1 — the real one-time machine bootstrap: make sure all seven sibling repos
+# are cloned AND installed, and fully provision (clone if missing, then
+# co:login + install) any that aren't, so the run continues without a manual
+# re-run. "Installed" = node_modules exists where a package.json does — this
+# catches the cloned-long-ago-but-never-installed repo (it used to sail
+# through and die much later at service launch). Idempotent and fast on
+# re-runs (directory-existence checks only). Fails fast when non-interactive.
 ensure_repos(){
-  local miss=()
+  local need=() kv dir name reason rest ans
   for kv in "$DEV/soa:soa" "$DEV/rostering:rostering" "$DEV/program-hub:program-hub" \
-            "$DEV/saga-dash:saga-dash" "$SDS:student-data-system"; do
-    [[ -d "${kv%:*}/.git" ]] || miss+=("$kv")
+            "$DEV/saga-dash:saga-dash" "$SDS:student-data-system" "$DEV/qboard:qboard" \
+            "$DEV/rtsm:rtsm"; do
+    dir=${kv%:*}
+    if [[ ! -d "$dir/.git" ]]; then
+      need+=("$kv:clone")
+    elif [[ -f "$dir/package.json" && ! -d "$dir/node_modules" ]]; then
+      need+=("$kv:install")
+    fi
   done
-  if [[ ${#miss[@]} -eq 0 ]]; then ok "all 5 sibling repos present"; return 0; fi
+  if [[ ${#need[@]} -eq 0 ]]; then ok "all 7 sibling repos present + installed"; return 0; fi
 
-  err "${#miss[@]} sibling repo(s) not cloned under $DEV:"
-  for kv in "${miss[@]}"; do printf "    %-20s → %s\n" "${kv#*:}" "${kv%:*}"; done
+  err "${#need[@]} sibling repo(s) need provisioning under $DEV:"
+  for kv in "${need[@]}"; do
+    reason=${kv##*:}; rest=${kv%:*}
+    printf "    %-20s → %s (%s)\n" "${rest#*:}" "${rest%:*}" "$reason"
+  done
 
   if [[ ! -t 0 ]]; then
-    err "non-interactive — clone them (git clone git@github.com:saga-ed/<repo>.git), then re-run"
+    err "non-interactive — provision them (git clone git@github.com:saga-ed/<repo>.git; pnpm co:login && pnpm install), then re-run"
     exit 1
   fi
-  printf "  Clone + install the missing repo(s) now? [y/N] "; read -r ans || ans=
-  [[ "${ans:-}" == [yY]* ]] || { err "cannot continue without all sibling repos"; exit 1; }
+  printf "  Provision the repo(s) above now? [y/N] "; read -r ans || ans=
+  [[ "${ans:-}" == [yY]* ]] || { err "cannot continue without all sibling repos provisioned"; exit 1; }
 
-  for kv in "${miss[@]}"; do
-    local dir=${kv%:*} name=${kv#*:}
-    say "cloning $name → $dir…"
-    git clone "git@github.com:saga-ed/$name.git" "$dir" \
-      || { err "clone failed for $name — clone it by hand, then re-run"; exit 1; }
+  for kv in "${need[@]}"; do
+    reason=${kv##*:}; rest=${kv%:*}; dir=${rest%:*}; name=${rest#*:}
+    if [[ "$reason" == clone ]]; then
+      say "cloning $name → $dir…"
+      git clone "git@github.com:saga-ed/$name.git" "$dir" \
+        || { err "clone failed for $name — clone it by hand, then re-run"; exit 1; }
+    fi
     say "provisioning $name (co:login + install)…"
     ( cd "$dir" && pnpm co:login ) || warn "co:login failed in $name — continuing (install may 401 without a valid CodeArtifact token)"
     if ( cd "$dir" && pnpm install ); then
-      ok "$name cloned + installed"
+      ok "$name provisioned"
     else
       err "$name: pnpm install failed (likely CodeArtifact auth). Run 'pnpm co:login && pnpm install' in $dir, then re-run."
       exit 1
@@ -83,7 +96,7 @@ ensure_repos(){
   ok "repos ensured"
 }
 
-step "1/4 ensure repos — clone + install any missing of the 5 siblings"
+step "1/4 ensure repos — clone + install any missing of the 7 siblings"
 ensure_repos
 
 if [[ $DO_REFRESH == 1 ]]; then
@@ -93,7 +106,7 @@ else
   step "2/4 refresh-suite — SKIPPED (--no-refresh)"
 fi
 
-step "3/4 up.sh — mesh + 7 services + reset + seed $SEED_MODE"
+step "3/4 up.sh — mesh + 10 services + reset + seed $SEED_MODE"
 "$DIR/up.sh" up --reset --seed "$SEED_MODE" || { echo "up.sh failed — tail /tmp/sds-synthetic/*.log"; exit 1; }
 
 step "4/4 verify — assert all green"

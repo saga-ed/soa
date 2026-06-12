@@ -2,8 +2,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # synthetic-dev/up.sh — stand up the local synthetic-dev stack for sds_92.
 #
-# Goal: dockerized postgres + redis + rabbitmq + the seven APIs, EMPTY, ready to
-# seed SYNTHETIC iam rosters / programs via the deterministic `db:seed`
+# Goal: dockerized postgres + redis + rabbitmq + mongo + the nine services,
+# EMPTY, ready to seed SYNTHETIC iam rosters / programs via the deterministic `db:seed`
 # (@saga-ed/*-seed-ids — same data as preview/CI, stable ids across --reset; no
 # VPN, no prod-mirror fixture). See synthetic-dev-align. The old scenario-runner
 # seed was retired here (scenario scripts stay in-repo for future journey data).
@@ -27,6 +27,33 @@
 # `pnpm replay:program-outbox <id>` / `replay:schedule-outbox <id>` — see
 # getting-started.md). See soa#146.
 #
+# Services eight + nine are the Connect app (qboard repo): connect-api (:6106,
+# Express + MongoDB) and connect-web (:6210, Vite). Connect needs NO seed
+# fixtures — its mongo collections auto-create on first write; "session data"
+# comes from sessions-api (:3007). Its mongo is part of the MESH (infra-compose
+# saga-mesh includes services/connect-mongo → soa-connect-mongo-1, :27037 —
+# standalone, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's
+# bespoke :27017 container).
+# AV comes from qboard's livekit+coturn containers (best-effort). No HTTPS /
+# domain-spoof proxy (qboard's proxy-dev.sh) is needed here: iam is local, so
+# localhost host-scoped cookies reach every port — same trick the dash uses.
+#
+# Service ten is rtsm-api (rtsm repo, :6110) — the CRDT/socket service Connect
+# syncs through. It runs as a ONE-NODE FLEET (FLEET_CONFIG_PATH=
+# rtsm-fleet-local.json + FLEET_NODE_NAME=local): rtsm-client always
+# discovers via GET /fleet/discover, which only fleet mode serves, so bare
+# single-instance mode 404s the client. With itself as the only member the
+# mesh half stays idle. Still stateless: in-memory, no DB/redis,
+# SOCKET_AUTHMODE=none, ws:// — no migrate/seed step, and rooms die ~20s
+# after the last client leaves (by design). connect-web reaches it via
+# VITE_RTSM_BOOTSTRAP_URL (qboard plumbs it through to rtsm-client's
+# bootstrapUrl; on a qboard checkout without that plumb the env var is
+# ignored and connect-web falls back to the wootdev.com fleet).
+#
+# Deferred: the fleek recording stack, dash→connect linking. SAGA_API_TARGET
+# (legacy poll content, unauthenticated endpoint) stays remote until
+# content-api lands.
+#
 # Branch posture (see decisions/d1.1): iam/programs/scheduling/saga-dash/soa on
 # MAIN; ads-adm from the canonical ~/dev/student-data-system checkout (sds_92 is
 # merged to main; the sds_92 worktree has been retired). Override with SDS=...
@@ -39,7 +66,7 @@
 # such drift + fix is documented in README.md and applied idempotently below.
 #
 # Usage:
-#   ./up.sh                      bring up mesh + 7 services (empty)
+#   ./up.sh                      bring up mesh + 10 services (empty)
 #   ./up.sh up --pull            ff-only sync all siblings to origin, then build/migrate
 #   ./up.sh --seed [roster|full] seed synthetic data (default: roster)
 #                                  roster = iam roster only (programs empty → from-scratch)
@@ -51,6 +78,10 @@
 #                                  is stale/unresponsive (a rewritten branch corrupts vite's
 #                                  module graph and HMR doesn't recover) — same recovery as
 #                                  --reset but without truncating your seeded data.
+#   ./up.sh --record [crdt|av]   opt-in fleek recording stack (recorder + recordings-api
+#                                  + MinIO; `av` adds the LiveKit egress sidecar). Needs
+#                                  the fleek repo cloned + AWS CLI (CodeArtifact token
+#                                  for the image builds). Composes with up/reset/seed.
 #   ./up.sh --login [email]      auto-login via iam-api devLogin (default: dev@saga.org)
 #   ./up.sh --user  [email]      alias for --login
 #   ./up.sh --down               stop services (leaves mesh up)
@@ -105,6 +136,9 @@ ROSTERING=$DEV/rostering
 PROGRAM_HUB=$DEV/program-hub
 SAGA_DASH=$DEV/saga-dash
 SDS=${SDS:-$DEV/student-data-system}         # ads-adm from the canonical checkout (sds_92 merged to main; worktree retired)
+QBOARD=${QBOARD:-$DEV/qboard}                # Connect app (connect-api + connect-web)
+RTSM=${RTSM:-$DEV/rtsm}                      # RTSM CRDT/socket service (single-node local)
+FLEEK=${FLEEK:-$DEV/fleek}                   # fleek recording stack (opt-in: --record)
 
 IAM_PORT=3010                                               # iam-api port — matches saga-dash main's static/config.json default (post Janus auth rewrite, d1.4)
 IAM_URL="http://localhost:$IAM_PORT"
@@ -118,6 +152,31 @@ PROGRAMS_DB_URL="postgresql://saga_user:password123@localhost:5432/programs"
 SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
+# Connect (qboard). Ports are the apps' own defaults (vite.config.ts / config.ts).
+# Its mongo is the mesh's soa-connect-mongo-1 (infra-compose services/connect-mongo),
+# host :27037 (non-default on purpose: no contention with qboard-mongo/:27017),
+# standalone, no auth. Collections auto-create; no migrate step, no seed.
+CONNECT_API_PORT=6106
+CONNECT_WEB_PORT=6210
+CONNECT_MONGO_PORT=27037
+# NOTE: connect-api selects its database from MONGO_DB_NAME (default
+# `connectv3`), NOT the URI path — keep the path matching so there's one name.
+CONNECT_MONGO_URI="mongodb://localhost:$CONNECT_MONGO_PORT/connectv3"
+CONNECT_API_URL="http://localhost:$CONNECT_API_PORT"
+CONNECT_WEB_URL="http://localhost:$CONNECT_WEB_PORT"
+RTSM_PORT=6110                               # rtsm-api (EXPRESS_SERVER_PORT — its committed .env default)
+RTSM_URL="http://localhost:$RTSM_PORT"
+# Recording (opt-in --record). The recorder/recordings-api run from fleek's
+# compose + local overlay; ports are the overlay's local-dev values.
+FLEEK_REC_DIR="$HOME/.fleek-local/recordings" # per-user recordings (same dir proxy-dev uses)
+RECORDER_CONTROL_PORT=7890                    # fleek-recorder control (plan push + /v1/health)
+RECORDINGS_API_PORT=8444                      # fleek-recordings-api (8443 is its prod port)
+RECORDING_TOKEN="local-dev-token"             # shared bearer, matches the fleek local overlay
+# Legacy poll-content source (REQUIRED by connect-api's config; the poll
+# endpoint is unauthenticated so no saga cookie is needed). Export your own
+# (e.g. SAGA_API_TARGET=https://jw.wootmath.com) to override. Goes away when
+# content-api lands.
+SAGA_API_TARGET="${SAGA_API_TARGET:-https://wootmath.com}"
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
 # ── hybrid mode (--only / --sandbox): run ONE service locally, point its
 # cross-service deps at a CLOUD sandbox instead of the local mesh. Empty by
@@ -158,7 +217,8 @@ check_branches(){
   # co:login + install) is bootstrap.sh's "ensure repos" step.
   local _miss=()
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
-            "$SAGA_DASH:saga-dash" "$SDS:student-data-system"; do
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
+            "$RTSM:rtsm"; do
     [[ -d "${kv%:*}/.git" ]] || _miss+=("$kv")
   done
   if [[ ${#_miss[@]} -gt 0 ]]; then
@@ -177,7 +237,7 @@ check_branches(){
       PINS["$repo"]="${_prs//[[:space:]]/}"
     done < <(grep -vE '^\s*(#|$)' "$MANIFEST")
   fi
-  for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash"; do
+  for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash" "$QBOARD:qboard" "$RTSM:rtsm"; do
     r=${kv%:*}; repo=${kv#*:}
     have=$(git -C "$r" branch --show-current)
     if [[ -n "${PINS[$repo]:-}" ]]; then
@@ -188,10 +248,35 @@ check_branches(){
       printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
     fi
   done
+  # soa/sds: always main — except a soa manifest row, which pins soa itself
+  # (testing a synthetic-dev/infra tooling PR; mirrors verify.sh's posture loop).
   for kv in "$SOA:soa" "$SDS:student-data-system"; do
     r=${kv%:*}; repo=${kv#*:}; have=$(git -C "$r" branch --show-current)
-    [[ "$have" == main ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
+    if [[ "$repo" == soa && -n "${PINS[soa]:-}" ]]; then
+      [[ "$have" == local/integration ]] || printf "\033[33m⚠\033[0m soa on '%s' (overlay pins soa — expected 'local/integration')\n" "$have"
+    else
+      [[ "$have" == main ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
+    fi
   done
+}
+
+# ── preflight: launch directories must exist ─────────────────────────
+# The Connect/RTSM launch dirs only exist on reasonably-current checkouts
+# (qboard's monorepo restructure, rtsm's apps/ split). A cloned-but-stale repo
+# otherwise dies mid-launch with a raw `cd: No such file or directory` —
+# assert up front, with the actual fix. Runs on BOTH the `up` and the
+# flag-only --reset/restart paths (anything that launches services).
+check_layout(){
+  local missing=0 d
+  for d in "$QBOARD/apps/node/connectv3-api" "$QBOARD/apps/web/connectv3" \
+           "$RTSM/apps/node/rtsm-api"; do
+    [[ -d "$d" ]] || { err "missing $d"; missing=1; }
+  done
+  if [[ $missing == 1 ]]; then
+    printf "  a sibling repo predates the layout this stack launches from —\n"
+    printf "  run ./up.sh --pull (or git -C <repo> pull), then re-run.\n"
+    exit 1
+  fi
 }
 
 # ── idempotent fixes (all the main-vs-tooling drifts) ────────────────
@@ -315,23 +400,112 @@ check_ports(){
 }
 
 mesh_up(){
-  # "already up" only if ALL three mesh containers are running. A partial mesh
+  # "already up" only if ALL four mesh containers are running. A partial mesh
   # (e.g. redis failed to bind its port last run) must reconcile via make up,
   # not masquerade as up — otherwise we skip straight past a missing service.
-  local running; running=$(docker ps --format '{{.Names}}' | grep -cE '^soa-(postgres|redis|rabbitmq)-1$' || true)
-  if [[ "$running" -eq 3 ]]; then ok "mesh already up"; return; fi
-  [[ "$running" -gt 0 ]] && say "partial mesh ($running/3 up) — reconciling…"
+  local running; running=$(docker ps --format '{{.Names}}' | grep -cE '^soa-(postgres|redis|rabbitmq|connect-mongo)-1$' || true)
+  if [[ "$running" -eq 4 ]]; then ok "mesh already up"; return; fi
+  [[ "$running" -gt 0 ]] && say "partial mesh ($running/4 up) — reconciling…"
+  # One-time migration: pre-infra-compose-1.4.0 stacks ran connect-mongo as a
+  # standalone synthetic-dev container (compose/connect-mongo.yml). It holds
+  # :27037 and the connect-mongo-data volume name against the mesh-managed
+  # service — remove both (synthetic data; collections auto-create on write).
+  if docker ps -a --format '{{.Names}}' | grep -qx connect-mongo; then
+    say "migrating: removing legacy standalone connect-mongo (mongo is mesh-managed now)"
+    docker rm -f connect-mongo >/dev/null 2>&1 || true
+    docker volume rm connect-mongo-data >/dev/null 2>&1 || true
+  fi
   check_ports
-  say "starting mesh (postgres + redis + rabbitmq)…"
+  say "starting mesh (postgres + redis + rabbitmq + connect-mongo)…"
   if ! ( cd "$SOA/infra" && EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
       make up PROJECT=saga-mesh PROFILE=empty \
-      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 >"$STATE/mesh.log" 2>&1 ); then
+      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 \
+      CONNECT_MONGO_PORT="$CONNECT_MONGO_PORT" >"$STATE/mesh.log" 2>&1 ); then
     printf "\033[31m✗\033[0m mesh failed to start — 'make up' output (%s):\n" "$STATE/mesh.log"
     sed 's/^/    /' "$STATE/mesh.log" 2>/dev/null
     exit 1
   fi
   for _ in $(seq 1 20); do docker exec soa-postgres-1 pg_isready -U postgres_admin >/dev/null 2>&1 && break; sleep 1; done
-  ok "mesh up — pg :5432  redis :6379  rabbitmq :5672"
+  for _ in $(seq 1 20); do
+    docker exec soa-connect-mongo-1 mongosh --quiet --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break; sleep 1
+  done
+  ok "mesh up — pg :5432  redis :6379  rabbitmq :5672  connect-mongo :$CONNECT_MONGO_PORT"
+}
+
+# ── Connect AV: qboard's livekit + coturn containers ─────────────────────────
+# Connect's mongo is part of the MESH now (infra-compose saga-mesh includes
+# services/connect-mongo — standalone mongo:8, loopback :27037; mesh_up starts
+# and health-waits it). livekit+coturn come from qboard's compose (the
+# single-node AV path; the fleek repo only adds recording sidecars — deferred)
+# and are BEST-EFFORT: without them Connect still runs whiteboard/CRDT-only.
+connect_av_up(){
+  # best-effort — start ONLY these two services from qboard's compose (never
+  # its mongo; the mesh's soa-connect-mongo-1 serves :27037).
+  if docker compose -f "$QBOARD/docker-compose.yml" up -d livekit coturn >"$STATE/connect-av.log" 2>&1; then
+    ok "connect AV up — livekit :7880 + coturn (qboard compose)"
+  else
+    printf "\033[33m⚠\033[0m livekit/coturn failed to start (AV unavailable; Connect still works CRDT-only) — see %s\n" "$STATE/connect-av.log"
+  fi
+}
+
+# ── Recording stack (opt-in: --record [crdt|av]) ─────────────────────────────
+# fleek's recorder + recordings-api + MinIO S3 stand-in (and, for av, the
+# LiveKit egress sidecar) via fleek's compose + LOCAL overlay. `--no-deps` is
+# load-bearing: the base compose would start fleek's bundled livekit, but
+# locally qboard's livekit serves :7880 and its livekit.yaml already webhooks
+# the recorder unconditionally (host.docker.internal:7889). Images build from
+# source and need a CodeArtifact token (12h TTL; build-time only). Recording
+# observes the LOCAL single-node RTSM via RTSM_BOOTSTRAP_URL (fleek recorder
+# plumb — fleek feat/rtsm-bootstrap-url), and recordings-api runs with auth
+# OFF + a dev identity (no saga cookie exists in this stack).
+record_up(){ # mode: crdt|av
+  local mode=${1:-crdt} token
+  [[ -d "$FLEEK/.git" ]] || { printf "\033[31m✗\033[0m --record needs the fleek repo at %s (clone git@github.com:saga-ed/fleek.git)\n" "$FLEEK"; exit 1; }
+  mkdir -p "$FLEEK_REC_DIR"
+  # qboard's redis first (livekit.yaml names it; egress subscribes via the
+  # :6380 host mapping — NOT the mesh redis on :6379), then recreate livekit
+  # so it serves the CURRENT livekit.yaml webhook block.
+  say "ensuring qboard redis + recreating livekit (recording wiring)…"
+  if ! ( cd "$QBOARD" && docker compose up -d redis >>"$STATE/connect-av.log" 2>&1 \
+        && docker compose up -d --force-recreate livekit >>"$STATE/connect-av.log" 2>&1 ); then
+    printf "\033[31m✗\033[0m qboard redis/livekit failed — see %s\n" "$STATE/connect-av.log"; exit 1
+  fi
+  command -v aws >/dev/null 2>&1 || { printf "\033[31m✗\033[0m --record needs the AWS CLI (CodeArtifact token for the recorder image builds)\n"; exit 1; }
+  say "fetching CodeArtifact token for the image builds (12h TTL; not written to disk)…"
+  token=$(aws codeartifact get-authorization-token \
+    --domain saga --domain-owner 531314149529 --region us-west-2 \
+    ${AWS_PROFILE:+--profile "$AWS_PROFILE"} \
+    --query authorizationToken --output text 2>"$STATE/record.log") || {
+    printf "\033[31m✗\033[0m CodeArtifact token fetch failed (try: aws sso login):\n"
+    sed 's/^/    /' "$STATE/record.log" 2>/dev/null; exit 1; }
+  [[ -n "$token" && "$token" != None ]] || { printf "\033[31m✗\033[0m CodeArtifact returned an empty token\n"; exit 1; }
+  local services=(recorder recordings-api minio minio-init)
+  [[ "$mode" == av ]] && services+=(egress)
+  say "building + starting recording stack: ${services[*]} (first build takes a while)…"
+  if ! env CODEARTIFACT_AUTH_TOKEN="$token" \
+      FLEEK_LOCAL_RECORDINGS_DIR="$FLEEK_REC_DIR" \
+      FLEEK_LOCAL_EGRESS_CONFIG="$FLEEK/configs/egress-local.yaml" \
+      RTSM_BOOTSTRAP_URL="http://127.0.0.1:$RTSM_PORT" \
+      RECORDINGS_AUTH_ENABLED=false \
+      RECORDINGS_DEV_USER_ID="$DEV_USER_UUID" \
+      RECORDINGS_DEV_USER_ROLE=TUTOR \
+      RECORDINGS_ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
+      SAGA_API_TARGET="$SAGA_API_TARGET" \
+      docker compose -f "$FLEEK/docker-compose.yml" -f "$FLEEK/docker-compose.local.yml" \
+        up -d --build --no-deps "${services[@]}" >>"$STATE/record.log" 2>&1; then
+    printf "\033[31m✗\033[0m recording stack failed — tail %s\n" "$STATE/record.log"; exit 1
+  fi
+  for _ in $(seq 1 30); do
+    [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$RECORDER_CONTROL_PORT/v1/health" 2>/dev/null)" == 200 ]] && break; sleep 1
+  done
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$RECORDER_CONTROL_PORT/v1/health" 2>/dev/null)" == 200 ]] \
+    && ok "fleek-recorder up :$RECORDER_CONTROL_PORT (webhook :7889)" \
+    || printf "\033[33m⚠\033[0m fleek-recorder not healthy yet — tail %s\n" "$STATE/record.log"
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$RECORDINGS_API_PORT/healthz" 2>/dev/null)" == 200 ]] \
+    && ok "fleek-recordings-api up :$RECORDINGS_API_PORT (auth off, dev identity)" \
+    || printf "\033[33m⚠\033[0m fleek-recordings-api not healthy yet — tail %s\n" "$STATE/record.log"
+  [[ "$mode" == av ]] && ok "egress up (AV recording; Chromium + 2GiB shm)" || true
+  ok "recording stack up (mode: $mode) — recordings land in $FLEEK_REC_DIR"
 }
 
 # Run `pnpm install` in a repo, surfacing failures instead of swallowing them.
@@ -344,19 +518,43 @@ pnpm_install(){ # repo_dir
   ( cd "$dir" && pnpm install ) >"$log" 2>&1 && return 0
   if grep -qiE 'ERR_PNPM_FETCH_401|Unauthorized' "$log"; then
     printf "\033[33m⚠\033[0m %s: pnpm install hit a CodeArtifact 401 (token expires ~12h)\n" "$name"
+    # Interactive: ask before minting. Non-interactive (the e2e runner, CI-ish
+    # wrappers): just try co:login — it's non-destructive and the alternative
+    # is a guaranteed abort with the same command as homework.
+    ans=y
     if [[ -t 0 ]]; then
       printf "  Refresh the token now (pnpm co:login) and retry? [Y/n] "; read -r ans || ans=
-      if [[ "${ans:-y}" != [nN]* ]]; then
-        say "pnpm co:login…"
-        if ( cd "$dir" && pnpm co:login ) >>"$log" 2>&1 && ( cd "$dir" && pnpm install ) >>"$log" 2>&1; then
-          ok "token refreshed + $name installed"; return 0
-        fi
+    fi
+    if [[ "${ans:-y}" != [nN]* ]]; then
+      say "pnpm co:login…"
+      if ( cd "$dir" && pnpm co:login ) >>"$log" 2>&1 && ( cd "$dir" && pnpm install ) >>"$log" 2>&1; then
+        ok "token refreshed + $name installed"; return 0
       fi
     fi
     printf "\033[31m✗\033[0m %s: install still failing on auth — run 'pnpm co:login' in %s, then re-run.\n" "$name" "$dir"
     exit 1
   fi
   printf "\033[31m✗\033[0m %s: pnpm install failed:\n" "$name"; tail -15 "$log" | sed 's/^/    /'; exit 1
+}
+
+# Run `pnpm build` in a repo, capturing output to $STATE/<name>-build.log.
+# fatal=1 → a failure aborts with the log tail (qboard/rtsm: their services
+# import workspace dist/ at launch, so an unbuilt tree is a guaranteed crash
+# later with a far worse error). fatal=0 → loud-warn with the tail but
+# continue (the pre-Connect repos keep their build-hiccups-are-non-fatal
+# semantics — just visibly now, instead of `>/dev/null || true`).
+build_step(){ # name dir fatal
+  local name=$1 dir=$2 fatal=${3:-0}
+  local log="$STATE/$name-build.log"   # separate statement: a single `local` expands all words before assigning (set -u)
+  ( cd "$dir" && pnpm build ) >"$log" 2>&1 && return 0
+  if [[ "$fatal" == 1 ]]; then
+    printf "\033[31m✗\033[0m %s: pnpm build failed (%s):\n" "$name" "$log"
+    tail -15 "$log" | sed 's/^/    /'
+    exit 1
+  fi
+  printf "\033[33m⚠\033[0m %s: pnpm build failed (continuing — %s):\n" "$name" "$log"
+  tail -5 "$log" | sed 's/^/    /'
+  return 0
 }
 
 # Run a prisma/db command in $2, surfacing output on failure. These used to go to
@@ -407,7 +605,8 @@ pull_repos(){
   say "pulling siblings to upstream (ff-only)…"
   local kv dir name dirty br behind
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
-            "$SAGA_DASH:saga-dash" "$SDS:student-data-system"; do
+            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
+            "$RTSM:rtsm"; do
     dir=${kv%:*}; name=${kv#*:}
     [[ -d "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
     dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -v '^??' || true)
@@ -429,10 +628,10 @@ pull_repos(){
 prep(){
   say "reconciling rostering deps + workspace build (main switch is not dep-neutral)…"
   pnpm_install "$ROSTERING"
-  ( cd "$ROSTERING" && pnpm build >/dev/null 2>&1 ) || true        # build hiccups are non-fatal
+  build_step rostering "$ROSTERING"                                # build hiccups are non-fatal (but visible)
   say "reconciling program-hub deps + workspace build (new deps / stale workspace dist after a main pull)..."
   pnpm_install "$PROGRAM_HUB"
-  ( cd "$PROGRAM_HUB" && pnpm build >/dev/null 2>&1 ) || true
+  build_step program-hub "$PROGRAM_HUB"
   # ads-adm-api imports the @saga-ed/ads-adm-db workspace package from dist/ —
   # on a fresh clone that dist/ doesn't exist until the sds workspace is built,
   # so install + build sds too (mirrors rostering/program-hub above). ads-adm-db's
@@ -442,12 +641,29 @@ prep(){
   say "reconciling student-data-system deps + workspace build (ads-adm-db dist for ads-adm-api)..."
   pnpm_install "$SDS"
   ( cd "$SDS/packages/node/ads-adm-db" && pnpm db:generate >/dev/null 2>&1 ) || true
-  ( cd "$SDS" && pnpm build >/dev/null 2>&1 ) || true
+  # chat-db: same tsup-assumes-generated-prisma-client shape as ads-adm-db
+  # (newer sds package; guard the dir so older checkouts keep working).
+  if [[ -d "$SDS/packages/node/chat-db" ]]; then
+    ( cd "$SDS/packages/node/chat-db" && pnpm db:generate >/dev/null 2>&1 ) || true
+  fi
+  build_step student-data-system "$SDS"
   # saga-dash runs via `vite dev` (no prebuild), but vite must be installed or the
   # launch dies with "vite: not found" — and prep installs it nowhere else, so a
   # freshly-cloned or freshly-pulled dash would 404 the whole UI. Install it here.
   say "reconciling saga-dash deps (vite)…"
   pnpm_install "$SAGA_DASH"
+  # qboard: connect-api runs via tsx watch and connect-web via vite (no
+  # prebuild), but their workspace deps (qboard-lib, qboard-sync, iam-auth…)
+  # resolve from dist/, so install + best-effort build like the others. NO
+  # migrate step: Connect's mongo has no schema — collections auto-create.
+  say "reconciling qboard deps + workspace build (connect-api/-web)…"
+  pnpm_install "$QBOARD"
+  build_step qboard "$QBOARD" 1
+  # rtsm: stateless single-node service — install + build its workspace deps;
+  # no migrate/seed step (no DB at all).
+  say "reconciling rtsm deps + workspace build (rtsm-api)…"
+  pnpm_install "$RTSM"
+  build_step rtsm "$RTSM" 1
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
@@ -467,6 +683,17 @@ prep(){
   say "seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true
   ok "schemas + dev user ready"
+}
+
+# Health-probe path per service. APIs expose /health; the two vite apps
+# (saga-dash, connect-web) answer on /; connect-api mounts its router under
+# /connectv3/v1 (qboard apps/node/connectv3-api/src/app.ts).
+probe_path(){ # name
+  case "$1" in
+    saga-dash|connect-web) echo / ;;
+    connect-api)           echo /connectv3/v1/health ;;
+    *)                     echo /health ;;
+  esac
 }
 
 # ── hybrid helpers (--only / --sandbox) ─────────────────────────────────
@@ -512,17 +739,17 @@ sandbox_env(){ # svc
       printf '%s\n' "IAM_BASEURL=$iam_host/trpc" "IAM_TOKENURL=$iam_host/v1/oauth/token" ;;
     programs-api|scheduling-api|sessions-api)
       printf '%s\n' "IAM_API_URL=$iam_host" ;;
-    *) ;; # iam-api itself / saga-dash / ads-adm: no iam dependency to repoint
+    *) ;; # iam-api itself / saga-dash / ads-adm / rtsm / connect: no repoint wired (yet)
   esac
 }
 
 launch(){ # name port dir extra_env...
-  local name=$1 port=$2 dir=$3; shift 3
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port/health 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
+  local name=$1 port=$2 dir=$3 probe; shift 3
+  probe=$(probe_path "$name")
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
   say "starting $name on :$port…"
   ( cd "$dir"; env "$@" nohup pnpm dev >"$STATE/$name.log" 2>&1 & echo $! >"$STATE/$name.pid" )
   for _ in $(seq 1 40); do
-    local probe=/health; [[ "$name" == saga-dash ]] && probe=/
     [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name up :$port"; return; }
     sleep 1
   done
@@ -555,7 +782,10 @@ services_up(){
   # launch_if preserves launch's exit code, so a real boot failure still aborts
   # the set -e caller before reset/seed/login (fail-fast), while a service merely
   # filtered out by --only is a clean skip.
-  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL"
+  # CORS_ORIGIN is COMMA-SEPARATED (api-util ≥1.2.0) — iam-api also gets the
+  # connect-web origin, because connect-web's iam-client calls iam DIRECTLY
+  # from the browser (personas.getMyPermissions, memberships, whoami…).
+  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL"
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7. Under --sandbox
@@ -580,6 +810,59 @@ services_up(){
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
   launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash"
+  # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
+  # always discovers via GET /fleet/discover (404 without fleet mode → the
+  # browser's "Fleet discovery failed … Fleet mode may not be active"), so the
+  # local node must serve it. FLEET_CONFIG_PATH (overrides /opt/fleet.json —
+  # no sudo) names this node as the fleet's only member with the
+  # browser-visible endpoint http://localhost:6110; with no peers the mesh
+  # half stays idle. Its committed .env already sets port 6110 + auth none;
+  # EXPRESS_SERVER_PORT is passed anyway so the stack pins it explicitly.
+  # CORS allows localhost/127.0.0.1 origins unconditionally in its config.
+  launch_if rtsm-api "$RTSM_PORT" "$RTSM/apps/node/rtsm-api" \
+     EXPRESS_SERVER_PORT="$RTSM_PORT" \
+     FLEET_CONFIG_PATH="$SCRIPT_DIR/rtsm-fleet-local.json" FLEET_NODE_NAME=local
+  # connect-api: verifies the SAME iam_session JWT the dash flow mints (JWKS
+  # from local iam). Its issuer default is the wootdev iam, so override
+  # JWT_ISSUER to local iam-api's JwtConfigSchema default (rostering
+  # config/schemas.ts: https://iam.saga.org); audience already matches
+  # (saga-platform). JANUS_REQUIRED=false = same literal-false bypass as the
+  # other services. SAGA_API_TARGET is legacy poll content (unauthenticated
+  # endpoint — see header). LiveKit creds match qboard's local container.
+  launch_if connect-api "$CONNECT_API_PORT" "$QBOARD/apps/node/connectv3-api" \
+     PORT="$CONNECT_API_PORT" \
+     MONGO_URI="$CONNECT_MONGO_URI" \
+     AUTH_ENABLED=true JANUS_REQUIRED=false \
+     IAM_API_URL="$IAM_URL" JWT_ISSUER="https://iam.saga.org" \
+     ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
+     SESSIONS_API_BASE_URL="http://localhost:3007" \
+     SAGA_API_TARGET="$SAGA_API_TARGET" \
+     PUBLIC_API_URL="$CONNECT_API_URL" \
+     LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret \
+     RECORDING_SERVICE_TOKEN="$RECORDING_TOKEN" \
+     RECORDER_URL_TEMPLATE="http://127.0.0.1:$RECORDER_CONTROL_PORT" \
+     FLEEK_TOPOLOGY_JSON='{"cityMap":{"_default":"ws://localhost:7880"},"nodes":{"local":{"url":"ws://localhost:7880"}}}'
+  # connect-web: vite on :6210 (its own config default). VITE_RTSM_BOOTSTRAP_URL
+  # points the rtsm-client at the LOCAL single-node rtsm-api (it overrides
+  # domain-based fleet discovery). On a qboard checkout without the plumb the
+  # var is ignored and connect-web falls back to the wootdev.com fleet —
+  # graceful either way. `?rtsm_url=` on the Connect URL overrides per-tab.
+  # Recorder env (RECORDING_SERVICE_TOKEN / RECORDER_URL_TEMPLATE above) and
+  # the playback override here are set UNCONDITIONALLY: harmless when the
+  # recording stack is down (plan pushes only happen when a session records;
+  # playback only fetches when manifests exist), and it means a later
+  # `./up.sh --record` works without relaunching connect-api/-web.
+  # FLEEK_TOPOLOGY_JSON: REQUIRED for plan pushes to happen at all locally —
+  # fleekNodeFromUrl(ws://localhost:7880) is null via the prod hostname
+  # pattern (plan push silently skipped, recorder logs skipped_plan_missing);
+  # the topology's nodes.url block maps the local LiveKit URL → node "local",
+  # which RECORDER_URL_TEMPLATE then resolves (no {node} placeholder needed).
+  launch_if connect-web "$CONNECT_WEB_PORT" "$QBOARD/apps/web/connectv3" \
+     VITE_CONNECTV3_API_URL="$CONNECT_API_URL" \
+     VITE_IAM_API_URL="$IAM_URL" \
+     VITE_SAGA_API_TARGET="$SAGA_API_TARGET" \
+     VITE_RTSM_BOOTSTRAP_URL="$RTSM_URL" \
+     VITE_PLAYBACK_ASSET_BASE_OVERRIDE="http://localhost:$RECORDINGS_API_PORT"
   return "$SERVICES_RC"   # non-zero iff a LAUNCHED service failed (skips don't count)
 }
 
@@ -590,7 +873,7 @@ services_up(){
 # Preserves _prisma_migrations so no re-migrate. Uses the mesh superuser
 # (postgres_admin) so it can truncate tables owned by iam / saga_user / etc.
 reset_data(){
-  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis)…"
+  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis, connect)…"
   local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
   # `sessions` truncation also clears its consumed-event cursors, so its
   # event-built projections re-converge from the producers' outbox replay.
@@ -601,6 +884,17 @@ reset_data(){
       printf "\033[33m⚠\033[0m could not truncate %s (does it exist? is mesh up?)\n" "$db"
     fi
   done
+  # Connect's mongo: drop the whole DB (session-scoped CRDT/chat/lifecycle data
+  # — all of it is "synthetic session residue"; collections auto-recreate on
+  # first write, so a drop IS the empty baseline; no migrations to preserve).
+  # `connectv3` is connect-api's MONGO_DB_NAME default — the db it actually
+  # writes (NOT the URI path).
+  if docker exec soa-connect-mongo-1 mongosh --quiet --eval \
+       'db.getSiblingDB("connectv3").dropDatabase()' >/dev/null 2>&1; then
+    ok "dropped connectv3 (connect mongo)"
+  else
+    printf "\033[33m⚠\033[0m could not drop connectv3 (is connect-mongo up?)\n"
+  fi
   say "re-seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true
   ok "reset complete — empty roster/programs/scheduling baseline"
@@ -639,10 +933,25 @@ seed_programs(){
   ok "programs seeded (db:seed)"
 }
 
-# roster = iam only (programs empty); full = roster + programs.
+# sessions-api db:seed — the Connect-demo DIRECT-PROJECTION seed. Writes
+# sessions-api's local projection tables (demo programs/periods/pods/slots,
+# deterministic @saga-ed/demo-seed-ids — pairs with the 8 Connect Demo users
+# in iam's db:seed) AND the `projection_readiness` warm row, straight to the
+# DB. Cold-start immune by design: no relay/consumers needed, so the read
+# gate ("projection sessions-api.authz-projection is warming" → 408 → connect
+# /my-sessions 500s) opens even on the event-less db:seed lane.
+seed_sessions(){
+  say "seeding sessions projections (db:seed — Connect demo, direct projections + readiness)…"
+  ( cd "$PROGRAM_HUB/apps/node/sessions-api" \
+      && env DATABASE_URL="$SESSIONS_DB_URL" pnpm db:seed )
+  ok "sessions projections seeded (demo programs render + authorize)"
+}
+
+# roster = iam + sessions demo (programs empty); full = + programs.
 seed_stack(){
   local mode=${1:-roster}
   seed_iam
+  seed_sessions
   [[ "$mode" == full ]] && seed_programs
   return 0
 }
@@ -712,7 +1021,7 @@ open_login_browser(){
   printf "\033[33m⚠\033[0m Chromium still starting — watch %s\n" "$STATE/browser-login.log"
 }
 
-services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api ads-adm-api saga-dash; do
+services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api ads-adm-api saga-dash rtsm-api connect-api connect-web; do
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
@@ -721,8 +1030,8 @@ done
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
-for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 8900; do fuser -k "$_p/tcp" 2>/dev/null||true; done
-ok "services down (mesh left up)"; }
+for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 8900 "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
+ok "services down (mesh incl. connect-mongo + AV containers left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
 # code/branch change. The dep-optimizer cache survives restarts and silently
@@ -733,20 +1042,29 @@ nuke_vite(){
   say "clearing dash vite caches (stale optimized bundles)..."
   rm -rf "$SAGA_DASH/apps/web/dash/node_modules/.vite" 2>/dev/null||true
   find "$SAGA_DASH/apps" "$SAGA_DASH/packages" -type d -name .vite -prune -exec rm -rf {} + 2>/dev/null||true
+  # connect-web is vite too — same stale-optimize-cache trap.
+  rm -rf "$QBOARD/apps/web/connectv3/node_modules/.vite" 2>/dev/null||true
   ok "vite caches cleared"
 }
 
 status(){
-  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 ads-adm-api:5005 saga-dash:8900; do
-    n=${kv%:*}; p=${kv#*:}; probe=/health; [[ "$n" == saga-dash ]] && probe=/
+  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 ads-adm-api:5005 saga-dash:8900 rtsm-api:$RTSM_PORT connect-api:$CONNECT_API_PORT connect-web:$CONNECT_WEB_PORT; do
+    n=${kv%:*}; p=${kv#*:}; probe=$(probe_path "$n")
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done
+  # Recording stack is opt-in — only report when its containers exist.
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx fleek-recorder; then
+    printf "  %-15s :%s → %s\n" "recorder" "$RECORDER_CONTROL_PORT" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:$RECORDER_CONTROL_PORT/v1/health 2>/dev/null)"
+    printf "  %-15s :%s → %s\n" "recordings-api" "$RECORDINGS_API_PORT" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:$RECORDINGS_API_PORT/healthz 2>/dev/null)"
+  else
+    printf "  %-15s off (opt-in: ./up.sh --record [crdt|av])\n" "recording"
+  fi
   docker exec soa-postgres-1 psql -U iam -d iam_local -tAc \
     "SELECT 'iam users='||count(*) FROM users" 2>/dev/null | sed 's/^/  /'
 }
 
 # ── arg parsing: verbs (up/down/status/help) + composable flags ──────
-DO_UP=0; DO_RESET=0; DO_RESTART=0; DO_PULL=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER
+DO_UP=0; DO_RESET=0; DO_RESTART=0; DO_PULL=0; DO_SEED=0; SEED_MODE=roster; DO_LOGIN=0; LOGIN_USER=$DEFAULT_LOGIN_USER; DO_RECORD=0; RECORD_MODE=crdt
 case "${1:-up}" in
   # `shift || true`: bare `./up.sh` defaults ${1:-up} to "up" but leaves $# at 0,
   # so an unguarded shift returns 1 and `set -e` kills the script before it runs.
@@ -759,14 +1077,19 @@ case "${1:-up}" in
   # flags: `restart --login [email]` re-opens the logged-in browser the bounce kills.
   restart|--restart)             DO_RESTART=1; shift || true ;;
   --status)                      status; exit 0 ;;
-  -h|--help)                     sed -n '2,51p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull|--only|--sandbox) ;; # flag-only invocation; skip up
+  # Self-maintaining: print the header's "Usage:" block through its closing
+  # ruler, instead of a hardcoded line range that drifts as the header grows.
+  -h|--help)                     sed -n '/^# Usage:/,/^# ─────/p' "$0"; exit 0 ;;
+  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reset) DO_RESET=1; shift ;;
     --seed)  DO_SEED=1; shift; case "${1:-}" in roster|full) SEED_MODE=$1; shift ;; esac ;;
+    # --record [crdt|av]: opt-in fleek recording stack. crdt (default) =
+    # recorder + recordings-api + minio; av adds the LiveKit egress sidecar.
+    --record) DO_RECORD=1; shift; case "${1:-}" in crdt|av) RECORD_MODE=$1; shift ;; esac ;;
     # --login / --user [email]: optional positional email; bare or next-flag → default persona
     --login|--user) DO_LOGIN=1; shift; case "${1:-}" in ''|--*) ;; *) LOGIN_USER=$1; shift ;; esac ;;
     --pull) DO_PULL=1; shift ;;
@@ -784,8 +1107,8 @@ done
 # with --only (running the full local stack against a cloud iam is not the point).
 if [[ -n "$ONLY_SERVICE" ]]; then
   case "$ONLY_SERVICE" in
-    iam-api|sis-api|programs-api|scheduling-api|sessions-api|ads-adm-api|saga-dash) ;;
-    *) echo "--only: unknown service '$ONLY_SERVICE' (iam-api|sis-api|programs-api|scheduling-api|sessions-api|ads-adm-api|saga-dash)"; exit 1 ;;
+    iam-api|sis-api|programs-api|scheduling-api|sessions-api|ads-adm-api|saga-dash|rtsm-api|connect-api|connect-web) ;;
+    *) echo "--only: unknown service '$ONLY_SERVICE' (iam-api|sis-api|programs-api|scheduling-api|sessions-api|ads-adm-api|saga-dash|rtsm-api|connect-api|connect-web)"; exit 1 ;;
   esac
   # --only is a launch directive: a bare `./up.sh --only <svc>` (no `up` verb)
   # should still bring that one service up, so imply DO_UP unless the user
@@ -810,10 +1133,18 @@ if [[ -n "$SANDBOX_NAME" ]]; then
 fi
 
 # `up` does first-run prep (branch posture, fixups, mesh, schema). A bare
-# `--reset` (no `up` verb) skips prep and assumes a running mesh.
+# `--reset`/`restart` (no `up` verb) skips the posture/fixup preamble but still
+# ENSURES its launch assumptions: mesh (incl. connect-mongo), AV, and prep —
+# they're idempotent and cheap when already satisfied. Any invocation that
+# launches services has provisioned them (the e2e runner's `--reset --seed`
+# previously launched ten services against an unprepped tree / missing mongo).
+# SKIP_PREP=1 skips the install+build pass for tight iteration loops.
 [[ $DO_PULL == 1 ]] && pull_repos        # ff-only sync siblings BEFORE we build/migrate
 if [[ $DO_UP == 1 ]]; then
-  check_branches; apply_fixes; mesh_up; prep
+  check_branches; check_layout; apply_fixes; mesh_up; connect_av_up; prep
+elif [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
+  check_layout; mesh_up; connect_av_up
+  if [[ "${SKIP_PREP:-0}" == "1" ]]; then say "SKIP_PREP=1 — skipping install+build prep"; else prep; fi
 fi
 
 # A --reset ALWAYS means a CLEAN restart on current code — independent of the
@@ -826,13 +1157,19 @@ fi
 # up" processes / cached bundles.
 if [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
   say "clean restart — stopping services + clearing vite caches..."
-  services_down; nuke_vite; services_up
+  services_down; nuke_vite
+  # reset_data MUST precede services_up: it truncates `projection_readiness`
+  # (sessions DB) among everything else, and sessions-api only re-warms at
+  # STARTUP (warm-on-caught-up). Truncating after the service started left it
+  # gated — every read 408 "projection … is warming" until the next restart.
+  [[ $DO_RESET == 1 ]] && reset_data
+  services_up
   ok "stack up (clean) — try: $0 --status"
 elif [[ $DO_UP == 1 ]]; then
   services_up
   ok "stack up — try: $0 --status"
 fi
-[[ $DO_RESET == 1 ]] && reset_data
+[[ $DO_RECORD == 1 ]] && record_up "$RECORD_MODE"
 [[ $DO_SEED == 1 ]]  && seed_stack "$SEED_MODE"
 [[ $DO_LOGIN == 1 ]] && login_user "$LOGIN_USER"
 exit 0

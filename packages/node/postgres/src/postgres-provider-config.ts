@@ -54,6 +54,16 @@ export const PostgresProviderSchema = z.object({
   // should set these explicitly.
   statementTimeoutMs: z.number().int().nonnegative().default(0),
   lockTimeoutMs: z.number().int().nonnegative().default(0),
+
+  // Reap connections left `idle in transaction` past this many ms. Unlike the
+  // two timeouts above (opt-in performance deadlines), this is a SAFETY GUARD
+  // and defaults ON: it bounds the @prisma/adapter-pg "ack'd-but-not-durable"
+  // leak (program-hub gh-186) where a $transaction discarded on a maxWait
+  // timeout returns a connection to the pool still inside an open transaction
+  // (released without ROLLBACK), so later writes are acknowledged but never
+  // committed. 30s is safe — Prisma interactive-transaction bodies cap at 5s.
+  // Set 0 to disable (e.g. a service with legitimate long idle-in-tx work).
+  idleInTransactionSessionTimeoutMs: z.number().int().nonnegative().default(30_000),
 });
 
 export type PostgresProviderConfig = z.infer<typeof PostgresProviderSchema>;

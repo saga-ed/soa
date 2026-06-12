@@ -101,12 +101,13 @@ else
   badline "sis_db not migrated (run ./up.sh up — prep deploys the schema)"
 fi
 
-# Connect's mongo (dedicated synthetic-dev container, :27037). No schema/seed
-# to assert — collections auto-create — so reachability IS the data check.
-if docker exec connect-mongo mongosh --quiet --eval 'db.runCommand({ping:1}).ok' 2>/dev/null | grep -q 1; then
+# Connect's mongo (mesh-managed: infra-compose services/connect-mongo, :27037).
+# No schema/seed to assert — collections auto-create — so reachability IS the
+# data check.
+if docker exec soa-connect-mongo-1 mongosh --quiet --eval 'db.runCommand({ping:1}).ok' 2>/dev/null | grep -q 1; then
   okline "connect-mongo reachable (:27037)"
 else
-  badline "connect-mongo unreachable (run ./up.sh up — connect_infra_up starts it)"
+  badline "connect-mongo unreachable (run ./up.sh up — mesh_up starts it)"
 fi
 
 # ── source posture (overlay-aware) ───────────────────────────────────

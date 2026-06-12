@@ -80,7 +80,7 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | connect-web | 6210 | qboard main — Connect web app (vite); reaches local rtsm via `VITE_RTSM_BOOTSTRAP_URL` |
 | rtsm-api | 6110 | rtsm main — ONE-NODE FLEET (`rtsm-fleet-local.json` via `FLEET_CONFIG_PATH`; rtsm-client requires `/fleet/discover`, which only fleet mode serves); stateless, no DB, `SOCKET_AUTHMODE=none` |
 | postgres / redis / rabbitmq | 5432 / 6379 / 5672 (mgmt 15672) | soa-mesh (`soa-postgres-1` etc.) |
-| mongo (connect) | 27037 | `soa-connect-mongo-1` — mesh-managed (infra-compose `services/connect-mongo`; standalone mongo:7, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's :27017) |
+| mongo (connect) | 27037 | `soa-connect-mongo-1` — mesh-managed (infra-compose `services/connect-mongo`; standalone mongo:8, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's :27017) |
 | livekit / coturn | 7880 / — | qboard docker-compose (AV; best-effort — Connect runs CRDT-only without them) |
 | recorder / recordings-api / minio / egress | 7890 (webhook 7889) / 8444 / 9000 / — | OPT-IN (`./up.sh --record [crdt|av]`) — fleek compose + local overlay from `~/dev/fleek`; recordings in `~/.fleek-local/recordings` |
 

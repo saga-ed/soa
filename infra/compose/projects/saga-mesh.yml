@@ -2,7 +2,7 @@
 ##
 ## Shared infra for the rostering + program-hub + student-data-system
 ## trio (+ Connect): one postgres (multi-DB) + redis + rabbitmq +
-## connect-mongo (standalone mongo:7 on :27037 for connect-api — see
+## connect-mongo (standalone mongo:8 on :27037 for connect-api — see
 ## ../services/connect-mongo/compose.yml; no seed, collections
 ## auto-create), all on a single docker network managed by infra-compose.
 ##

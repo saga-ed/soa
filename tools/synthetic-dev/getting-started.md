@@ -177,7 +177,7 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
   `demo-student-1@saga.org`) — log in as one of those to see them.
 - **Dedicated mongo.** Connect's mongo is part of the mesh (infra-compose
   `services/connect-mongo` → container `soa-connect-mongo-1`): standalone
-  mongo:7, no auth, host port **:27037** (non-default on purpose, so it never
+  mongo:8, no auth, host port **:27037** (non-default on purpose, so it never
   contends with qboard's old `:27017` container or a system mongod). `mesh_up`
   starts it (and auto-removes the pre-mesh standalone `connect-mongo`
   container if one is lingering); `--reset` drops `connectv3` (the db

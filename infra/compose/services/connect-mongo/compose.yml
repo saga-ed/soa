@@ -23,7 +23,7 @@
 services:
 
   connect-mongo:
-    image: mongo:7
+    image: mongo:8
     ports:
       # Loopback only — no remote access to the dev machine.
       - "127.0.0.1:${CONNECT_MONGO_PORT:-27037}:27017"

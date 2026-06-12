@@ -434,7 +434,7 @@ mesh_up(){
 
 # ── Connect AV: qboard's livekit + coturn containers ─────────────────────────
 # Connect's mongo is part of the MESH now (infra-compose saga-mesh includes
-# services/connect-mongo — standalone mongo:7, loopback :27037; mesh_up starts
+# services/connect-mongo — standalone mongo:8, loopback :27037; mesh_up starts
 # and health-waits it). livekit+coturn come from qboard's compose (the
 # single-node AV path; the fleek repo only adds recording sidecars — deferred)
 # and are BEST-EFFORT: without them Connect still runs whiteboard/CRDT-only.

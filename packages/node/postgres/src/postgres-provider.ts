@@ -56,6 +56,9 @@ const POOL_DEFAULTS = {
   connectionTimeoutMs: 10_000,
   statementTimeoutMs: 0,
   lockTimeoutMs: 0,
+  // Safety guard, defaults ON (see PostgresProviderSchema) — bounds the
+  // adapter-pg ack'd-but-not-durable leak (gh-186).
+  idleInTransactionSessionTimeoutMs: 30_000,
 } as const;
 
 /** Internal canonical shape both accepted configs normalize into. */
@@ -72,6 +75,7 @@ interface NormalizedConfig {
   connectionTimeoutMs: number;
   statementTimeoutMs: number;
   lockTimeoutMs: number;
+  idleInTransactionSessionTimeoutMs: number;
 }
 
 @injectable()
@@ -137,7 +141,11 @@ export class PostgresProvider {
           );
         });
 
-        if (this.cfg.statementTimeoutMs > 0 || this.cfg.lockTimeoutMs > 0) {
+        if (
+          this.cfg.statementTimeoutMs > 0 ||
+          this.cfg.lockTimeoutMs > 0 ||
+          this.cfg.idleInTransactionSessionTimeoutMs > 0
+        ) {
           this.pool.on('connect', (client: PoolClient) => {
             // Fire-and-forget, but swallow rejections: an unhandled
             // rejection here (SET against a dying backend) is another
@@ -150,6 +158,15 @@ export class PostgresProvider {
             if (this.cfg.lockTimeoutMs > 0) {
               client
                 .query(`SET lock_timeout = ${this.cfg.lockTimeoutMs}`)
+                .catch(() => {});
+            }
+            // Safety guard (gh-186): reap connections left idle-in-transaction
+            // (e.g. an adapter-pg discard that released without ROLLBACK).
+            if (this.cfg.idleInTransactionSessionTimeoutMs > 0) {
+              client
+                .query(
+                  `SET idle_in_transaction_session_timeout = ${this.cfg.idleInTransactionSessionTimeoutMs}`,
+                )
                 .catch(() => {});
             }
           });
@@ -222,6 +239,9 @@ export class PostgresProvider {
         statementTimeoutMs:
           config.statementTimeoutMs ?? POOL_DEFAULTS.statementTimeoutMs,
         lockTimeoutMs: config.lockTimeoutMs ?? POOL_DEFAULTS.lockTimeoutMs,
+        idleInTransactionSessionTimeoutMs:
+          config.idleInTransactionSessionTimeoutMs ??
+          POOL_DEFAULTS.idleInTransactionSessionTimeoutMs,
       };
     }
 
@@ -238,6 +258,7 @@ export class PostgresProvider {
       connectionTimeoutMs: config.connectionTimeoutMs,
       statementTimeoutMs: config.statementTimeoutMs,
       lockTimeoutMs: config.lockTimeoutMs,
+      idleInTransactionSessionTimeoutMs: config.idleInTransactionSessionTimeoutMs,
     };
   }
 }

@@ -148,6 +148,8 @@ export interface PostgresPoolConfig {
   connectionTimeoutMs?: number;
   statementTimeoutMs?: number;
   lockTimeoutMs?: number;
+  // Safety guard (gh-186); the provider defaults it ON (30s) when omitted.
+  idleInTransactionSessionTimeoutMs?: number;
 }
 
 const DEFAULT_REGION = 'us-west-2';

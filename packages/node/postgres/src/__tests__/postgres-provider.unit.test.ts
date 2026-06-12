@@ -114,8 +114,27 @@ describe('PostgresProvider resilience', () => {
     await new Promise((r) => setTimeout(r, 0));
   });
 
-  it('does not register a connect handler when no session timeouts are set', async () => {
-    await new PostgresProvider(baseConfig()).connect();
+  it('registers a connect handler that sets the idle-in-transaction guard by default (gh-186)', async () => {
+    // The idle guard defaults ON, so a connect handler is registered even with
+    // no statement/lock timeouts — and it issues only the idle SET.
+    const provider = new PostgresProvider(baseConfig());
+    await provider.connect();
+
+    expect(state.handlers.connect).toBeTypeOf('function');
+    const client = { query: vi.fn().mockResolvedValue(undefined) };
+    state.handlers.connect(client);
+    expect(client.query).toHaveBeenCalledWith(
+      'SET idle_in_transaction_session_timeout = 30000',
+    );
+    expect(client.query).not.toHaveBeenCalledWith(expect.stringContaining('statement_timeout'));
+    expect(client.query).not.toHaveBeenCalledWith(expect.stringContaining('lock_timeout'));
+    await new Promise((r) => setTimeout(r, 0));
+  });
+
+  it('registers no connect handler when every session timeout (incl. the idle guard) is disabled', async () => {
+    await new PostgresProvider(
+      baseConfig({ idleInTransactionSessionTimeoutMs: 0 }),
+    ).connect();
     expect(state.handlers.connect).toBeUndefined();
   });
 

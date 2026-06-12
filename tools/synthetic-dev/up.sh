@@ -544,7 +544,8 @@ pnpm_install(){ # repo_dir
 # continue (the pre-Connect repos keep their build-hiccups-are-non-fatal
 # semantics — just visibly now, instead of `>/dev/null || true`).
 build_step(){ # name dir fatal
-  local name=$1 dir=$2 fatal=${3:-0} log="$STATE/$name-build.log"
+  local name=$1 dir=$2 fatal=${3:-0}
+  local log="$STATE/$name-build.log"   # separate statement: a single `local` expands all words before assigning (set -u)
   ( cd "$dir" && pnpm build ) >"$log" 2>&1 && return 0
   if [[ "$fatal" == 1 ]]; then
     printf "\033[31m✗\033[0m %s: pnpm build failed (%s):\n" "$name" "$log"

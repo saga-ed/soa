@@ -634,18 +634,19 @@ prep(){
   build_step program-hub "$PROGRAM_HUB"
   # ads-adm-api imports the @saga-ed/ads-adm-db workspace package from dist/ —
   # on a fresh clone that dist/ doesn't exist until the sds workspace is built,
-  # so install + build sds too (mirrors rostering/program-hub above). ads-adm-db's
-  # build (tsup) assumes its Prisma client is already generated at src/prisma/
-  # generated/ — turbo build won't do it, so `db:generate` must run FIRST or both
-  # the build and the runtime import of dist/prisma/generated fail.
+  # so install + build sds too (mirrors rostering/program-hub above). The sds
+  # *-db packages' builds (tsup) assume an already-generated Prisma client at
+  # src/prisma/generated/ — turbo's build graph doesn't run db:generate, so
+  # generate FIRST for every package that declares the script (ads-adm-db,
+  # chat-db, insights-db, ledger-db, transcripts-db, and whatever arrives
+  # next) or the build and the runtime import of dist/prisma/generated fail.
   say "reconciling student-data-system deps + workspace build (ads-adm-db dist for ads-adm-api)..."
   pnpm_install "$SDS"
-  ( cd "$SDS/packages/node/ads-adm-db" && pnpm db:generate >/dev/null 2>&1 ) || true
-  # chat-db: same tsup-assumes-generated-prisma-client shape as ads-adm-db
-  # (newer sds package; guard the dir so older checkouts keep working).
-  if [[ -d "$SDS/packages/node/chat-db" ]]; then
-    ( cd "$SDS/packages/node/chat-db" && pnpm db:generate >/dev/null 2>&1 ) || true
-  fi
+  local dbpkg
+  for dbpkg in "$SDS"/packages/node/*/; do
+    grep -q '"db:generate"' "$dbpkg/package.json" 2>/dev/null || continue
+    ( cd "$dbpkg" && pnpm db:generate >/dev/null 2>&1 ) || true
+  done
   build_step student-data-system "$SDS"
   # saga-dash runs via `vite dev` (no prebuild), but vite must be installed or the
   # launch dies with "vite: not found" — and prep installs it nowhere else, so a

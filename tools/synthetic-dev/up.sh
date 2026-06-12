@@ -641,6 +641,11 @@ prep(){
   say "reconciling student-data-system deps + workspace build (ads-adm-db dist for ads-adm-api)..."
   pnpm_install "$SDS"
   ( cd "$SDS/packages/node/ads-adm-db" && pnpm db:generate >/dev/null 2>&1 ) || true
+  # chat-db: same tsup-assumes-generated-prisma-client shape as ads-adm-db
+  # (newer sds package; guard the dir so older checkouts keep working).
+  if [[ -d "$SDS/packages/node/chat-db" ]]; then
+    ( cd "$SDS/packages/node/chat-db" && pnpm db:generate >/dev/null 2>&1 ) || true
+  fi
   build_step student-data-system "$SDS"
   # saga-dash runs via `vite dev` (no prebuild), but vite must be installed or the
   # launch dies with "vite: not found" — and prep installs it nowhere else, so a

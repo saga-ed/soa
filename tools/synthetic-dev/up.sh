@@ -30,9 +30,10 @@
 # Services eight + nine are the Connect app (qboard repo): connect-api (:6106,
 # Express + MongoDB) and connect-web (:6210, Vite). Connect needs NO seed
 # fixtures — its mongo collections auto-create on first write; "session data"
-# comes from sessions-api (:3007). Its mongo is a DEDICATED synthetic-dev
-# container (compose/connect-mongo.yml, :27037 — standalone, no auth; NOT the
-# legacy saga-api/wootmath template, NOT qboard's bespoke :27017 container).
+# comes from sessions-api (:3007). Its mongo is part of the MESH (infra-compose
+# saga-mesh includes services/connect-mongo → soa-connect-mongo-1, :27037 —
+# standalone, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's
+# bespoke :27017 container).
 # AV comes from qboard's livekit+coturn containers (best-effort). No HTTPS /
 # domain-spoof proxy (qboard's proxy-dev.sh) is needed here: iam is local, so
 # localhost host-scoped cookies reach every port — same trick the dash uses.
@@ -152,7 +153,7 @@ SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 # Connect (qboard). Ports are the apps' own defaults (vite.config.ts / config.ts).
-# Its mongo is the dedicated synthetic-dev container — compose/connect-mongo.yml,
+# Its mongo is the mesh's soa-connect-mongo-1 (infra-compose services/connect-mongo),
 # host :27037 (non-default on purpose: no contention with qboard-mongo/:27017),
 # standalone, no auth. Collections auto-create; no migrate step, no seed.
 CONNECT_API_PORT=6106
@@ -247,10 +248,35 @@ check_branches(){
       printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
     fi
   done
+  # soa/sds: always main — except a soa manifest row, which pins soa itself
+  # (testing a synthetic-dev/infra tooling PR; mirrors verify.sh's posture loop).
   for kv in "$SOA:soa" "$SDS:student-data-system"; do
     r=${kv%:*}; repo=${kv#*:}; have=$(git -C "$r" branch --show-current)
-    [[ "$have" == main ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
+    if [[ "$repo" == soa && -n "${PINS[soa]:-}" ]]; then
+      [[ "$have" == local/integration ]] || printf "\033[33m⚠\033[0m soa on '%s' (overlay pins soa — expected 'local/integration')\n" "$have"
+    else
+      [[ "$have" == main ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
+    fi
   done
+}
+
+# ── preflight: launch directories must exist ─────────────────────────
+# The Connect/RTSM launch dirs only exist on reasonably-current checkouts
+# (qboard's monorepo restructure, rtsm's apps/ split). A cloned-but-stale repo
+# otherwise dies mid-launch with a raw `cd: No such file or directory` —
+# assert up front, with the actual fix. Runs on BOTH the `up` and the
+# flag-only --reset/restart paths (anything that launches services).
+check_layout(){
+  local missing=0 d
+  for d in "$QBOARD/apps/node/connectv3-api" "$QBOARD/apps/web/connectv3" \
+           "$RTSM/apps/node/rtsm-api"; do
+    [[ -d "$d" ]] || { err "missing $d"; missing=1; }
+  done
+  if [[ $missing == 1 ]]; then
+    printf "  a sibling repo predates the layout this stack launches from —\n"
+    printf "  run ./up.sh --pull (or git -C <repo> pull), then re-run.\n"
+    exit 1
+  fi
 }
 
 # ── idempotent fixes (all the main-vs-tooling drifts) ────────────────
@@ -374,53 +400,47 @@ check_ports(){
 }
 
 mesh_up(){
-  # "already up" only if ALL three mesh containers are running. A partial mesh
+  # "already up" only if ALL four mesh containers are running. A partial mesh
   # (e.g. redis failed to bind its port last run) must reconcile via make up,
   # not masquerade as up — otherwise we skip straight past a missing service.
-  local running; running=$(docker ps --format '{{.Names}}' | grep -cE '^soa-(postgres|redis|rabbitmq)-1$' || true)
-  if [[ "$running" -eq 3 ]]; then ok "mesh already up"; return; fi
-  [[ "$running" -gt 0 ]] && say "partial mesh ($running/3 up) — reconciling…"
+  local running; running=$(docker ps --format '{{.Names}}' | grep -cE '^soa-(postgres|redis|rabbitmq|connect-mongo)-1$' || true)
+  if [[ "$running" -eq 4 ]]; then ok "mesh already up"; return; fi
+  [[ "$running" -gt 0 ]] && say "partial mesh ($running/4 up) — reconciling…"
+  # One-time migration: pre-infra-compose-1.4.0 stacks ran connect-mongo as a
+  # standalone synthetic-dev container (compose/connect-mongo.yml). It holds
+  # :27037 and the connect-mongo-data volume name against the mesh-managed
+  # service — remove both (synthetic data; collections auto-create on write).
+  if docker ps -a --format '{{.Names}}' | grep -qx connect-mongo; then
+    say "migrating: removing legacy standalone connect-mongo (mongo is mesh-managed now)"
+    docker rm -f connect-mongo >/dev/null 2>&1 || true
+    docker volume rm connect-mongo-data >/dev/null 2>&1 || true
+  fi
   check_ports
-  say "starting mesh (postgres + redis + rabbitmq)…"
+  say "starting mesh (postgres + redis + rabbitmq + connect-mongo)…"
   if ! ( cd "$SOA/infra" && EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
       make up PROJECT=saga-mesh PROFILE=empty \
-      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 >"$STATE/mesh.log" 2>&1 ); then
+      POSTGRES_PORT=5432 REDIS_PORT=6379 RABBITMQ_PORT=5672 RABBITMQ_MGMT_PORT=15672 \
+      CONNECT_MONGO_PORT="$CONNECT_MONGO_PORT" >"$STATE/mesh.log" 2>&1 ); then
     printf "\033[31m✗\033[0m mesh failed to start — 'make up' output (%s):\n" "$STATE/mesh.log"
     sed 's/^/    /' "$STATE/mesh.log" 2>/dev/null
     exit 1
   fi
   for _ in $(seq 1 20); do docker exec soa-postgres-1 pg_isready -U postgres_admin >/dev/null 2>&1 && break; sleep 1; done
-  ok "mesh up — pg :5432  redis :6379  rabbitmq :5672"
+  for _ in $(seq 1 20); do
+    docker exec soa-connect-mongo-1 mongosh --quiet --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break; sleep 1
+  done
+  ok "mesh up — pg :5432  redis :6379  rabbitmq :5672  connect-mongo :$CONNECT_MONGO_PORT"
 }
 
-# ── Connect infra: dedicated mongo (:27037) + qboard's AV containers ─────────
-# The mongo is OURS (compose/connect-mongo.yml) — standalone, no auth, loopback
-# :27037 — not qboard's bespoke :27017 container and not the legacy
-# saga-api/wootmath template. livekit+coturn come from qboard's compose (the
+# ── Connect AV: qboard's livekit + coturn containers ─────────────────────────
+# Connect's mongo is part of the MESH now (infra-compose saga-mesh includes
+# services/connect-mongo — standalone mongo:8, loopback :27037; mesh_up starts
+# and health-waits it). livekit+coturn come from qboard's compose (the
 # single-node AV path; the fleek repo only adds recording sidecars — deferred)
 # and are BEST-EFFORT: without them Connect still runs whiteboard/CRDT-only.
-connect_infra_up(){
-  # mongo: hard requirement (connect-api won't boot without it)
-  if docker ps --format '{{.Names}}' | grep -qx connect-mongo; then
-    ok "connect-mongo already up :$CONNECT_MONGO_PORT"
-  else
-    if port_listening "$CONNECT_MONGO_PORT"; then
-      printf "\033[31m✗\033[0m connect mongo port %s in use by a non-docker listener — find it:  sudo lsof -iTCP:%s -sTCP:LISTEN\n" "$CONNECT_MONGO_PORT" "$CONNECT_MONGO_PORT"
-      exit 1
-    fi
-    say "starting connect-mongo (:$CONNECT_MONGO_PORT)…"
-    if ! docker compose -f "$SCRIPT_DIR/compose/connect-mongo.yml" up -d >"$STATE/connect-mongo.log" 2>&1; then
-      printf "\033[31m✗\033[0m connect-mongo failed to start — %s:\n" "$STATE/connect-mongo.log"
-      sed 's/^/    /' "$STATE/connect-mongo.log" 2>/dev/null
-      exit 1
-    fi
-    for _ in $(seq 1 20); do
-      docker exec connect-mongo mongosh --quiet --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break; sleep 1
-    done
-    ok "connect-mongo up :$CONNECT_MONGO_PORT"
-  fi
-  # livekit + coturn (AV): best-effort — start ONLY those two services from
-  # qboard's compose (never its mongo; ours is on :27037).
+connect_av_up(){
+  # best-effort — start ONLY these two services from qboard's compose (never
+  # its mongo; the mesh's soa-connect-mongo-1 serves :27037).
   if docker compose -f "$QBOARD/docker-compose.yml" up -d livekit coturn >"$STATE/connect-av.log" 2>&1; then
     ok "connect AV up — livekit :7880 + coturn (qboard compose)"
   else
@@ -498,19 +518,43 @@ pnpm_install(){ # repo_dir
   ( cd "$dir" && pnpm install ) >"$log" 2>&1 && return 0
   if grep -qiE 'ERR_PNPM_FETCH_401|Unauthorized' "$log"; then
     printf "\033[33m⚠\033[0m %s: pnpm install hit a CodeArtifact 401 (token expires ~12h)\n" "$name"
+    # Interactive: ask before minting. Non-interactive (the e2e runner, CI-ish
+    # wrappers): just try co:login — it's non-destructive and the alternative
+    # is a guaranteed abort with the same command as homework.
+    ans=y
     if [[ -t 0 ]]; then
       printf "  Refresh the token now (pnpm co:login) and retry? [Y/n] "; read -r ans || ans=
-      if [[ "${ans:-y}" != [nN]* ]]; then
-        say "pnpm co:login…"
-        if ( cd "$dir" && pnpm co:login ) >>"$log" 2>&1 && ( cd "$dir" && pnpm install ) >>"$log" 2>&1; then
-          ok "token refreshed + $name installed"; return 0
-        fi
+    fi
+    if [[ "${ans:-y}" != [nN]* ]]; then
+      say "pnpm co:login…"
+      if ( cd "$dir" && pnpm co:login ) >>"$log" 2>&1 && ( cd "$dir" && pnpm install ) >>"$log" 2>&1; then
+        ok "token refreshed + $name installed"; return 0
       fi
     fi
     printf "\033[31m✗\033[0m %s: install still failing on auth — run 'pnpm co:login' in %s, then re-run.\n" "$name" "$dir"
     exit 1
   fi
   printf "\033[31m✗\033[0m %s: pnpm install failed:\n" "$name"; tail -15 "$log" | sed 's/^/    /'; exit 1
+}
+
+# Run `pnpm build` in a repo, capturing output to $STATE/<name>-build.log.
+# fatal=1 → a failure aborts with the log tail (qboard/rtsm: their services
+# import workspace dist/ at launch, so an unbuilt tree is a guaranteed crash
+# later with a far worse error). fatal=0 → loud-warn with the tail but
+# continue (the pre-Connect repos keep their build-hiccups-are-non-fatal
+# semantics — just visibly now, instead of `>/dev/null || true`).
+build_step(){ # name dir fatal
+  local name=$1 dir=$2 fatal=${3:-0}
+  local log="$STATE/$name-build.log"   # separate statement: a single `local` expands all words before assigning (set -u)
+  ( cd "$dir" && pnpm build ) >"$log" 2>&1 && return 0
+  if [[ "$fatal" == 1 ]]; then
+    printf "\033[31m✗\033[0m %s: pnpm build failed (%s):\n" "$name" "$log"
+    tail -15 "$log" | sed 's/^/    /'
+    exit 1
+  fi
+  printf "\033[33m⚠\033[0m %s: pnpm build failed (continuing — %s):\n" "$name" "$log"
+  tail -5 "$log" | sed 's/^/    /'
+  return 0
 }
 
 # Run a prisma/db command in $2, surfacing output on failure. These used to go to
@@ -584,10 +628,10 @@ pull_repos(){
 prep(){
   say "reconciling rostering deps + workspace build (main switch is not dep-neutral)…"
   pnpm_install "$ROSTERING"
-  ( cd "$ROSTERING" && pnpm build >/dev/null 2>&1 ) || true        # build hiccups are non-fatal
+  build_step rostering "$ROSTERING"                                # build hiccups are non-fatal (but visible)
   say "reconciling program-hub deps + workspace build (new deps / stale workspace dist after a main pull)..."
   pnpm_install "$PROGRAM_HUB"
-  ( cd "$PROGRAM_HUB" && pnpm build >/dev/null 2>&1 ) || true
+  build_step program-hub "$PROGRAM_HUB"
   # ads-adm-api imports the @saga-ed/ads-adm-db workspace package from dist/ —
   # on a fresh clone that dist/ doesn't exist until the sds workspace is built,
   # so install + build sds too (mirrors rostering/program-hub above). ads-adm-db's
@@ -597,7 +641,12 @@ prep(){
   say "reconciling student-data-system deps + workspace build (ads-adm-db dist for ads-adm-api)..."
   pnpm_install "$SDS"
   ( cd "$SDS/packages/node/ads-adm-db" && pnpm db:generate >/dev/null 2>&1 ) || true
-  ( cd "$SDS" && pnpm build >/dev/null 2>&1 ) || true
+  # chat-db: same tsup-assumes-generated-prisma-client shape as ads-adm-db
+  # (newer sds package; guard the dir so older checkouts keep working).
+  if [[ -d "$SDS/packages/node/chat-db" ]]; then
+    ( cd "$SDS/packages/node/chat-db" && pnpm db:generate >/dev/null 2>&1 ) || true
+  fi
+  build_step student-data-system "$SDS"
   # saga-dash runs via `vite dev` (no prebuild), but vite must be installed or the
   # launch dies with "vite: not found" — and prep installs it nowhere else, so a
   # freshly-cloned or freshly-pulled dash would 404 the whole UI. Install it here.
@@ -609,12 +658,12 @@ prep(){
   # migrate step: Connect's mongo has no schema — collections auto-create.
   say "reconciling qboard deps + workspace build (connect-api/-web)…"
   pnpm_install "$QBOARD"
-  ( cd "$QBOARD" && pnpm build >/dev/null 2>&1 ) || true
+  build_step qboard "$QBOARD" 1
   # rtsm: stateless single-node service — install + build its workspace deps;
   # no migrate/seed step (no DB at all).
   say "reconciling rtsm deps + workspace build (rtsm-api)…"
   pnpm_install "$RTSM"
-  ( cd "$RTSM" && pnpm build >/dev/null 2>&1 ) || true
+  build_step rtsm "$RTSM" 1
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
@@ -840,7 +889,7 @@ reset_data(){
   # first write, so a drop IS the empty baseline; no migrations to preserve).
   # `connectv3` is connect-api's MONGO_DB_NAME default — the db it actually
   # writes (NOT the URI path).
-  if docker exec connect-mongo mongosh --quiet --eval \
+  if docker exec soa-connect-mongo-1 mongosh --quiet --eval \
        'db.getSiblingDB("connectv3").dropDatabase()' >/dev/null 2>&1; then
     ok "dropped connectv3 (connect mongo)"
   else
@@ -982,7 +1031,7 @@ pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
 for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 8900 "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
-ok "services down (mesh + connect-mongo + AV containers left up)"; }
+ok "services down (mesh incl. connect-mongo + AV containers left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
 # code/branch change. The dep-optimizer cache survives restarts and silently
@@ -1084,10 +1133,18 @@ if [[ -n "$SANDBOX_NAME" ]]; then
 fi
 
 # `up` does first-run prep (branch posture, fixups, mesh, schema). A bare
-# `--reset` (no `up` verb) skips prep and assumes a running mesh.
+# `--reset`/`restart` (no `up` verb) skips the posture/fixup preamble but still
+# ENSURES its launch assumptions: mesh (incl. connect-mongo), AV, and prep —
+# they're idempotent and cheap when already satisfied. Any invocation that
+# launches services has provisioned them (the e2e runner's `--reset --seed`
+# previously launched ten services against an unprepped tree / missing mongo).
+# SKIP_PREP=1 skips the install+build pass for tight iteration loops.
 [[ $DO_PULL == 1 ]] && pull_repos        # ff-only sync siblings BEFORE we build/migrate
 if [[ $DO_UP == 1 ]]; then
-  check_branches; apply_fixes; mesh_up; connect_infra_up; prep
+  check_branches; check_layout; apply_fixes; mesh_up; connect_av_up; prep
+elif [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
+  check_layout; mesh_up; connect_av_up
+  if [[ "${SKIP_PREP:-0}" == "1" ]]; then say "SKIP_PREP=1 — skipping install+build prep"; else prep; fi
 fi
 
 # A --reset ALWAYS means a CLEAN restart on current code — independent of the

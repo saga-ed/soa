@@ -26,7 +26,8 @@ DEV=${DEV:-$HOME/dev}
 # Repos refresh-suite manages / up.sh builds from sibling branches. A managed
 # repo listed in your local overlay is expected on local/integration (with those
 # PRs merged); without an overlay entry, on main. soa + student-data-system are
-# always on main.
+# always on main — except a soa overlay-manifest row, which pins soa itself
+# (testing a synthetic-dev/infra tooling PR end-to-end; see the posture loop).
 MANAGED_REPOS="rostering program-hub saga-dash qboard rtsm"
 ALWAYS_MAIN_REPOS="soa student-data-system"
 
@@ -101,12 +102,13 @@ else
   badline "sis_db not migrated (run ./up.sh up — prep deploys the schema)"
 fi
 
-# Connect's mongo (dedicated synthetic-dev container, :27037). No schema/seed
-# to assert — collections auto-create — so reachability IS the data check.
-if docker exec connect-mongo mongosh --quiet --eval 'db.runCommand({ping:1}).ok' 2>/dev/null | grep -q 1; then
+# Connect's mongo (mesh-managed: infra-compose services/connect-mongo, :27037).
+# No schema/seed to assert — collections auto-create — so reachability IS the
+# data check.
+if docker exec soa-connect-mongo-1 mongosh --quiet --eval 'db.runCommand({ping:1}).ok' 2>/dev/null | grep -q 1; then
   okline "connect-mongo reachable (:27037)"
 else
-  badline "connect-mongo unreachable (run ./up.sh up — connect_infra_up starts it)"
+  badline "connect-mongo unreachable (run ./up.sh up — mesh_up starts it)"
 fi
 
 # ── source posture (overlay-aware) ───────────────────────────────────
@@ -126,8 +128,10 @@ else
 fi
 
 # Flag any overlay repo we don't know how to posture-check (avoid silent skips).
+# soa is accepted here even though it isn't "managed": a soa manifest row is
+# how a synthetic-dev/infra tooling PR gets tested end-to-end (see below).
 for repo in "${!PINS[@]}"; do
-  case " $MANAGED_REPOS " in *" $repo "*) ;; *) badline "overlay lists '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it"; esac
+  case " $MANAGED_REPOS soa " in *" $repo "*) ;; *) badline "overlay lists '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it"; esac
 done
 
 on_branch(){ git -C "$DEV/$1" branch --show-current 2>/dev/null; }
@@ -221,8 +225,23 @@ for repo in $MANAGED_REPOS; do
     check_posture_main "$repo"   # main, or an empty local/integration that ≡ main
   fi
 done
-# soa + student-data-system must be literally main (never integration-parked).
-for repo in $ALWAYS_MAIN_REPOS; do check_posture "$repo" "main"; done
+# soa + student-data-system must be literally main (never integration-parked) —
+# EXCEPT a soa row in the overlay manifest, which pins soa itself: that's the
+# only way to verify a synthetic-dev/infra tooling PR end-to-end (the e2e lane
+# gates on this script, and an unconditional red here blocked exactly that).
+# Pinned soa gets the same treatment as a managed repo; sds stays always-main.
+for repo in $ALWAYS_MAIN_REPOS; do
+  if [[ "$repo" == soa && -n "${PINS[soa]:-}" ]]; then
+    check_posture soa "local/integration"
+    if [[ "$(on_branch soa)" == "local/integration" ]]; then
+      IFS=',' read -ra nums <<<"${PINS[soa]}"
+      for n in "${nums[@]}"; do [[ -n "$n" ]] && check_pin_merged soa "$n"; done
+      check_unpinned_overlays soa "${PINS[soa]}"
+    fi
+  else
+    check_posture "$repo" "main"
+  fi
+done
 
 # ── freshness (behind origin) ─────────────────────────────────────────
 # A repo can be on the right branch yet stale — origin moved under it. The posture

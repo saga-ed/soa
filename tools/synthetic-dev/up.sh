@@ -254,6 +254,25 @@ check_branches(){
   done
 }
 
+# ── preflight: launch directories must exist ─────────────────────────
+# The Connect/RTSM launch dirs only exist on reasonably-current checkouts
+# (qboard's monorepo restructure, rtsm's apps/ split). A cloned-but-stale repo
+# otherwise dies mid-launch with a raw `cd: No such file or directory` —
+# assert up front, with the actual fix. Runs on BOTH the `up` and the
+# flag-only --reset/restart paths (anything that launches services).
+check_layout(){
+  local missing=0 d
+  for d in "$QBOARD/apps/node/connectv3-api" "$QBOARD/apps/web/connectv3" \
+           "$RTSM/apps/node/rtsm-api"; do
+    [[ -d "$d" ]] || { err "missing $d"; missing=1; }
+  done
+  if [[ $missing == 1 ]]; then
+    printf "  a sibling repo predates the layout this stack launches from —\n"
+    printf "  run ./up.sh --pull (or git -C <repo> pull), then re-run.\n"
+    exit 1
+  fi
+}
+
 # ── idempotent fixes (all the main-vs-tooling drifts) ────────────────
 apply_fixes(){
   # 1. rostering root .env.local — main iam-api needs NODE_ENV + AUTH secrets + broker
@@ -493,19 +512,42 @@ pnpm_install(){ # repo_dir
   ( cd "$dir" && pnpm install ) >"$log" 2>&1 && return 0
   if grep -qiE 'ERR_PNPM_FETCH_401|Unauthorized' "$log"; then
     printf "\033[33m⚠\033[0m %s: pnpm install hit a CodeArtifact 401 (token expires ~12h)\n" "$name"
+    # Interactive: ask before minting. Non-interactive (the e2e runner, CI-ish
+    # wrappers): just try co:login — it's non-destructive and the alternative
+    # is a guaranteed abort with the same command as homework.
+    ans=y
     if [[ -t 0 ]]; then
       printf "  Refresh the token now (pnpm co:login) and retry? [Y/n] "; read -r ans || ans=
-      if [[ "${ans:-y}" != [nN]* ]]; then
-        say "pnpm co:login…"
-        if ( cd "$dir" && pnpm co:login ) >>"$log" 2>&1 && ( cd "$dir" && pnpm install ) >>"$log" 2>&1; then
-          ok "token refreshed + $name installed"; return 0
-        fi
+    fi
+    if [[ "${ans:-y}" != [nN]* ]]; then
+      say "pnpm co:login…"
+      if ( cd "$dir" && pnpm co:login ) >>"$log" 2>&1 && ( cd "$dir" && pnpm install ) >>"$log" 2>&1; then
+        ok "token refreshed + $name installed"; return 0
       fi
     fi
     printf "\033[31m✗\033[0m %s: install still failing on auth — run 'pnpm co:login' in %s, then re-run.\n" "$name" "$dir"
     exit 1
   fi
   printf "\033[31m✗\033[0m %s: pnpm install failed:\n" "$name"; tail -15 "$log" | sed 's/^/    /'; exit 1
+}
+
+# Run `pnpm build` in a repo, capturing output to $STATE/<name>-build.log.
+# fatal=1 → a failure aborts with the log tail (qboard/rtsm: their services
+# import workspace dist/ at launch, so an unbuilt tree is a guaranteed crash
+# later with a far worse error). fatal=0 → loud-warn with the tail but
+# continue (the pre-Connect repos keep their build-hiccups-are-non-fatal
+# semantics — just visibly now, instead of `>/dev/null || true`).
+build_step(){ # name dir fatal
+  local name=$1 dir=$2 fatal=${3:-0} log="$STATE/$name-build.log"
+  ( cd "$dir" && pnpm build ) >"$log" 2>&1 && return 0
+  if [[ "$fatal" == 1 ]]; then
+    printf "\033[31m✗\033[0m %s: pnpm build failed (%s):\n" "$name" "$log"
+    tail -15 "$log" | sed 's/^/    /'
+    exit 1
+  fi
+  printf "\033[33m⚠\033[0m %s: pnpm build failed (continuing — %s):\n" "$name" "$log"
+  tail -5 "$log" | sed 's/^/    /'
+  return 0
 }
 
 # Run a prisma/db command in $2, surfacing output on failure. These used to go to
@@ -579,10 +621,10 @@ pull_repos(){
 prep(){
   say "reconciling rostering deps + workspace build (main switch is not dep-neutral)…"
   pnpm_install "$ROSTERING"
-  ( cd "$ROSTERING" && pnpm build >/dev/null 2>&1 ) || true        # build hiccups are non-fatal
+  build_step rostering "$ROSTERING"                                # build hiccups are non-fatal (but visible)
   say "reconciling program-hub deps + workspace build (new deps / stale workspace dist after a main pull)..."
   pnpm_install "$PROGRAM_HUB"
-  ( cd "$PROGRAM_HUB" && pnpm build >/dev/null 2>&1 ) || true
+  build_step program-hub "$PROGRAM_HUB"
   # ads-adm-api imports the @saga-ed/ads-adm-db workspace package from dist/ —
   # on a fresh clone that dist/ doesn't exist until the sds workspace is built,
   # so install + build sds too (mirrors rostering/program-hub above). ads-adm-db's
@@ -592,7 +634,7 @@ prep(){
   say "reconciling student-data-system deps + workspace build (ads-adm-db dist for ads-adm-api)..."
   pnpm_install "$SDS"
   ( cd "$SDS/packages/node/ads-adm-db" && pnpm db:generate >/dev/null 2>&1 ) || true
-  ( cd "$SDS" && pnpm build >/dev/null 2>&1 ) || true
+  build_step student-data-system "$SDS"
   # saga-dash runs via `vite dev` (no prebuild), but vite must be installed or the
   # launch dies with "vite: not found" — and prep installs it nowhere else, so a
   # freshly-cloned or freshly-pulled dash would 404 the whole UI. Install it here.
@@ -604,12 +646,12 @@ prep(){
   # migrate step: Connect's mongo has no schema — collections auto-create.
   say "reconciling qboard deps + workspace build (connect-api/-web)…"
   pnpm_install "$QBOARD"
-  ( cd "$QBOARD" && pnpm build >/dev/null 2>&1 ) || true
+  build_step qboard "$QBOARD" 1
   # rtsm: stateless single-node service — install + build its workspace deps;
   # no migrate/seed step (no DB at all).
   say "reconciling rtsm deps + workspace build (rtsm-api)…"
   pnpm_install "$RTSM"
-  ( cd "$RTSM" && pnpm build >/dev/null 2>&1 ) || true
+  build_step rtsm "$RTSM" 1
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
@@ -1087,9 +1129,9 @@ fi
 # SKIP_PREP=1 skips the install+build pass for tight iteration loops.
 [[ $DO_PULL == 1 ]] && pull_repos        # ff-only sync siblings BEFORE we build/migrate
 if [[ $DO_UP == 1 ]]; then
-  check_branches; apply_fixes; mesh_up; connect_av_up; prep
+  check_branches; check_layout; apply_fixes; mesh_up; connect_av_up; prep
 elif [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
-  mesh_up; connect_av_up
+  check_layout; mesh_up; connect_av_up
   if [[ "${SKIP_PREP:-0}" == "1" ]]; then say "SKIP_PREP=1 — skipping install+build prep"; else prep; fi
 fi
 

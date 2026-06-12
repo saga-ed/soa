@@ -20,7 +20,7 @@ saga-dash**, and now for the **Connect app**. It's a dockerized, fully-local
 | 5432 | postgres (`soa-postgres-1`) | mesh, from `~/dev/soa/infra` |
 | 6379 | redis | mesh |
 | 5672 / 15672 | rabbitmq | mesh |
-| 27037 | mongo (`connect-mongo`) | synthetic-dev's own `compose/connect-mongo.yml` |
+| 27037 | mongo (`soa-connect-mongo-1`) | mesh (infra-compose `services/connect-mongo`) |
 | 7880 | livekit (+ coturn) | qboard's docker-compose (AV; best-effort) |
 
 Seeds a realistic synthetic roster: **7 districts / 15 schools / 32 sections
@@ -175,10 +175,12 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
   is warming" and Connect's `/my-sessions` 500s). The demo sessions belong to
   the `demo-*@saga.org` personas (e.g. `demo-lead-north@saga.org`,
   `demo-student-1@saga.org`) — log in as one of those to see them.
-- **Dedicated mongo.** `up.sh` runs Connect against its own synthetic-dev
-  container — `compose/connect-mongo.yml`, standalone, no auth, host port
-  **:27037** (non-default on purpose, so it never contends with qboard's old
-  `:27017` container or a system mongod). `--reset` drops `connectv3` (the db
+- **Dedicated mongo.** Connect's mongo is part of the mesh (infra-compose
+  `services/connect-mongo` → container `soa-connect-mongo-1`): standalone
+  mongo:7, no auth, host port **:27037** (non-default on purpose, so it never
+  contends with qboard's old `:27017` container or a system mongod). `mesh_up`
+  starts it (and auto-removes the pre-mesh standalone `connect-mongo`
+  container if one is lingering); `--reset` drops `connectv3` (the db
   connect-api's `MONGO_DB_NAME` default actually writes).
 - **No HTTPS / domain-spoof proxy.** qboard's `scripts/proxy-dev.sh` (mkcert +
   /etc/hosts + ssl-proxy) exists only because that workflow authenticates at
@@ -272,8 +274,8 @@ shells out to:
 
 That's the canonical soa-mesh compose definition. So with zero containers
 running and Docker just booted, `./up.sh up` does the right thing in one
-command — brings up the mesh (plus `connect-mongo` and qboard's AV
-containers), applies prisma schemas (via `migrate deploy` — matches the
+command — brings up the mesh (postgres + redis + rabbitmq + connect-mongo,
+plus qboard's AV containers), applies prisma schemas (via `migrate deploy` — matches the
 deployed pipeline; see `decisions/d1.5`), launches all ten services with the
 right env, and reports green.
 
@@ -290,7 +292,8 @@ right env, and reports green.
 ./up.sh up                       # bring up mesh + 10 services (empty databases)
 ./up.sh up --reset --seed roster # from-scratch: empty baseline + synthetic IAM roster
 ./up.sh up --reset --seed full   # roster + 9 programs + periods + enrollment
-./up.sh --reset                  # truncate synthetic data → empty baseline (services stay up)
+./up.sh --reset                  # clean restart on current code: self-provisions (mesh + AV + prep), truncates data
+SKIP_PREP=1 ./up.sh --reset      # …skipping the install+build pass (tight iteration loops)
 ./up.sh --seed roster            # seed against an already-empty stack
 ./up.sh --status                 # GET /health on each, iam user count
 ./up.sh --record                 # opt-in: fleek recording stack (CRDT tier — recorder + recordings-api + minio)
@@ -329,10 +332,12 @@ Each persona's UUID is printed at the end of every `--seed roster` run.
 2. `apply_fixes` — idempotent edits for known main-vs-tooling drifts (see
    the **Drift log** at the bottom of `README.md`); also writes
    `SIS_DATABASE_URL` and seeds the dash's `sis-api → :3100` config key.
-3. `mesh_up` — starts soa-mesh if not running.
-4. `connect_infra_up` — starts `connect-mongo` (:27037, hard requirement) and
-   qboard's livekit + coturn (AV, best-effort).
-5. `prep` — `pnpm install + build` in rostering / program-hub / qboard / rtsm;
+3. `mesh_up` — starts soa-mesh (postgres + redis + rabbitmq + connect-mongo)
+   if not running; migrates away a pre-mesh standalone `connect-mongo`.
+4. `connect_av_up` — qboard's livekit + coturn (AV, best-effort).
+5. `prep` — `pnpm install + build` in rostering / program-hub / qboard / rtsm
+   (builds log to `/tmp/sds-synthetic/<repo>-build.log`; qboard/rtsm build
+   failures abort — their services import workspace `dist/` at launch);
    `prisma migrate deploy` for iam / programs / scheduling / sessions / sis /
    ads-adm DBs (via the `migrate_db` helper — matches what
    `_deploy-ecs-api.yml`'s migrate job runs on production). Connect and rtsm

@@ -248,9 +248,15 @@ check_branches(){
       printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
     fi
   done
+  # soa/sds: always main — except a soa manifest row, which pins soa itself
+  # (testing a synthetic-dev/infra tooling PR; mirrors verify.sh's posture loop).
   for kv in "$SOA:soa" "$SDS:student-data-system"; do
     r=${kv%:*}; repo=${kv#*:}; have=$(git -C "$r" branch --show-current)
-    [[ "$have" == main ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
+    if [[ "$repo" == soa && -n "${PINS[soa]:-}" ]]; then
+      [[ "$have" == local/integration ]] || printf "\033[33m⚠\033[0m soa on '%s' (overlay pins soa — expected 'local/integration')\n" "$have"
+    else
+      [[ "$have" == main ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
+    fi
   done
 }
 

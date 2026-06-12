@@ -56,7 +56,11 @@ DEV=${DEV:-$HOME/dev}
 BASE=${BASE:-main}
 INT=local/integration
 # Repos this stack overlays (the ones up.sh/verify.sh posture-check); soa +
-# student-data-system are always on main and never overlaid.
+# student-data-system are always on main and never overlaid — with ONE
+# exception: to test a synthetic-dev/infra tooling PR end-to-end, overlay soa
+# itself (`./refresh-suite.sh --prs <N> soa`) AND add the manifest row
+# (`printf 'soa\t<N>\n' >> integration-suite.local.tsv`) so up.sh/verify.sh
+# expect the pin instead of redding soa's posture. Drop the row when it lands.
 MANAGED_REPOS="rostering program-hub saga-dash"
 
 # repo → the deployable services it provides (for --compose-rest). The overlay

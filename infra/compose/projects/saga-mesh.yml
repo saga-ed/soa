@@ -1,8 +1,10 @@
 ## saga-mesh — cross-repo fixture mesh for the SDS #80 initiative.
 ##
 ## Shared infra for the rostering + program-hub + student-data-system
-## trio. One postgres (multi-DB) + redis + rabbitmq, all on a single
-## docker network managed by infra-compose.
+## trio (+ Connect): one postgres (multi-DB) + redis + rabbitmq +
+## connect-mongo (standalone mongo:7 on :27037 for connect-api — see
+## ../services/connect-mongo/compose.yml; no seed, collections
+## auto-create), all on a single docker network managed by infra-compose.
 ##
 ## Databases created by projects/saga-mesh/seed/profile-empty.sql on
 ## first boot (before any app's migrations run):
@@ -34,3 +36,4 @@ include:
   - path: ../services/postgres/compose.yml
   - path: ../services/redis/compose.yml
   - path: ../services/rabbitmq/compose.yml
+  - path: ../services/connect-mongo/compose.yml

@@ -38,7 +38,7 @@ export SEED_PROFILE := $(PROFILE)
 ## Pre-flight check: fail fast if any required port is already taken.
 check-ports:
 	@conflicts=""; stop_cmds=""; down_projects=""; \
-	for port in $(POSTGRES_PORT) $(MONGO_PORT) $(MYSQL_PORT) $(REDIS_PORT) $(RABBITMQ_PORT) $(RABBITMQ_MGMT_PORT); do \
+	for port in $(POSTGRES_PORT) $(MONGO_PORT) $(CONNECT_MONGO_PORT) $(MYSQL_PORT) $(REDIS_PORT) $(RABBITMQ_PORT) $(RABBITMQ_MGMT_PORT); do \
 		[ -z "$$port" ] && continue; \
 		match=$$(docker ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' \
 			| grep -E "0\.0\.0\.0:$$port->" | head -1); \

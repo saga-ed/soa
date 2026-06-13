@@ -32,6 +32,9 @@ fixtures, no proxy, recording deferred). Ten is **rtsm-api** (rtsm,
 ./up.sh --seed [roster|full]    # seed without resetting (roster = default; iam groups don't dedup — prefer --reset)
 ./up.sh --status  # health + row counts
 ./up.sh --down    # stop services (mesh stays up)
+./up.sh --reset --tunnel --seed roster --login   # ALSO expose the browser plane at
+                  # https://<svc>.<moniker>.vms.wootdev.com for other users
+                  # (multi-user Connect) — see getting-started.md "tunnel mode"
 ```
 
 Branch posture (decision `../decisions/d1.1`): everything on **main**.

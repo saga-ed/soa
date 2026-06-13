@@ -82,6 +82,15 @@
 #                                  + MinIO; `av` adds the LiveKit egress sidecar). Needs
 #                                  the fleek repo cloned + AWS CLI (CodeArtifact token
 #                                  for the image builds). Composes with up/reset/seed.
+#   ./up.sh --tunnel             ALSO expose the browser-facing services to other
+#                                  users at https://<svc>.<moniker>.vms.wootdev.com
+#                                  (multi-user Connect). Moniker comes from
+#                                  .vms-moniker (first run prompts + registers;
+#                                  never a CLI arg). Composes: `--reset --tunnel
+#                                  --seed roster --login`. Needs AWS SSO creds +
+#                                  the vms box (vms/README.md). Services must
+#                                  (re)launch to pick up tunnel env — prefer
+#                                  `restart --tunnel` / `--reset --tunnel`.
 #   ./up.sh --login [email]      auto-login via iam-api devLogin (default: dev@saga.org)
 #   ./up.sh --user  [email]      alias for --login
 #   ./up.sh --down               stop services (leaves mesh up)
@@ -188,6 +197,18 @@ DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-d
 ONLY_SERVICE=""                                             # --only <svc>: launch just this one
 SANDBOX_NAME=""                                             # --sandbox <name>: compose name the deps live under
 SANDBOX_BASE="${SANDBOX_BASE:-wootdev.com}"                # dev fleet base domain (preview-header routed)
+# ── tunnel mode (--tunnel): expose the browser-facing services to OTHER users
+# via the vms rendezvous box — https://<svc>.<moniker>.$VMS_BASE → this laptop
+# (tunnel.sh + vms/; built for multi-user Connect sessions). The moniker comes
+# from .vms-moniker (tunnel.sh bootstraps it on first use), deliberately NEVER
+# from the command line. tunnel_env() flips ONLY the browser-plane env (cookie
+# domain, connect CORS/VITE_* URLs); service-to-service URLs stay localhost.
+TUNNEL=0
+TUNNEL_DOMAIN=""                                            # <moniker>.$VMS_BASE once resolved
+TUNNEL_LK_KEY=""; TUNNEL_LK_SECRET=""; TUNNEL_FLEEK_TOPOLOGY=""  # AV-via-fleek (set in the tunnel block)
+VMS_BASE="${VMS_BASE:-vms.wootdev.com}"                     # rendezvous domain (vms/template.yaml)
+LOGIN_IAM_URL=""                                            # tunnel mode: login flows use the PUBLIC iam…
+LOGIN_DASH_URL=""                                           # …and dash URLs (domain cookie can't be set via localhost)
 STATE=/tmp/sds-synthetic; mkdir -p "$STATE"
 COOKIE_JAR="$STATE/cookies.txt"                             # devLogin session jar (for headless harnesses)
 DEFAULT_LOGIN_USER="dev@saga.org"                          # --login default persona (Seed District admin)
@@ -743,6 +764,135 @@ sandbox_env(){ # svc
     *) ;; # iam-api itself / saga-dash / ads-adm / rtsm / connect: no repoint wired (yet)
   esac
 }
+# tunnel_env: browser-plane env overrides for --tunnel (sandbox_env's sibling;
+# same splat-no-op contract — prints nothing unless TUNNEL=1). Splatted LAST on
+# each launch line, so its keys win over the local defaults (`env A=1 A=2` →
+# last wins). What flips, and why only this:
+#   - iam-api: AUTH_SESSIONCOOKIEDOMAIN=.<moniker>.$VMS_BASE — the iam_session
+#     cookie must flow across iam./connect-api./dash. tunnel hosts (locally the
+#     same trick is free: localhost cookies ignore ports). Env name follows the
+#     verified AUTH flattening (devUserId ↔ AUTH_DEVUSERID; AuthConfigSchema
+#     sessionCookieDomain, rostering schemas.ts:173). Scoped per-moniker, NOT
+#     .$VMS_BASE, so two devs' instances can't read each other's sessions.
+#     CORS needs nothing: soa-api-util's dev allowlist already wildcard-matches
+#     *.wootdev.com at any depth (cors.test.ts: pr-12.dash.wootdev.com passes),
+#     and rtsm subdomain-matches its parent-domain list (wootdev.com included).
+#   - connect-api: ALLOWED_ORIGINS gains the tunnel connect-web origin (qboard
+#     uses an exact-origin list, not the soa wildcard); PUBLIC_API_URL becomes
+#     the public name (recorder callbacks / absolute-URL surfaces).
+#   - connect-web: VITE_* dependency URLs flip to the tunnel hosts — these are
+#     BROWSER-side (a remote coworker's browser must reach connect-api/iam/rtsm
+#     via public names). Server-to-server URLs (IAM_API_URL etc.) stay local.
+#   - vite host check: __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS lets the vite dev
+#     servers accept the tunnel Host header (DNS-rebind protection would 403 an
+#     unknown host). Best-effort: vite ≥6.1 reads it; older vite either has no
+#     host check or needs server.allowedHosts in the app's vite config.
+# REMOTE dash: works when saga-dash carries PR #194 (the `url` override type —
+# pin it in integration-suite.local.tsv until it lands); services_up's
+# sync_dash_local_defaults rewrites config.json localDefaults to url-type
+# entries pointing at the tunnel hosts. AV (LiveKit) is UDP and doesn't
+# traverse tunnels: remote users get CRDT/chat (rtsm is websockets); for AV
+# point FLEEK_TOPOLOGY_JSON at the real fleek dev cluster.
+tunnel_env(){ # svc
+  [[ "$TUNNEL" == 0 ]] && return 0
+  local svc=$1
+  # CORS: do NOT rely on each service's built-in wootdev wildcard — iam-api
+  # (api-util allowlist) has one, but sis-api is a plain `cors` exact-string
+  # list (rostering sis-api/src/main.ts:71 — found the hard way: tunnel dash
+  # got 'no Access-Control-Allow-Origin' from sis), and the others are
+  # unaudited. Tunnel mode passes the tunnel origins EXPLICITLY everywhere a
+  # browser calls; these splat after the launch line's CORS_ORIGIN, so they
+  # win (env last-wins).
+  case "$svc" in
+    iam-api)
+      printf '%s\n' "AUTH_SESSIONCOOKIEDOMAIN=.$TUNNEL_DOMAIN" \
+                    "CORS_ORIGIN=$DASH_URL,$CONNECT_WEB_URL,https://dash.$TUNNEL_DOMAIN,https://connect.$TUNNEL_DOMAIN" ;;
+    sis-api)
+      # include the iam demo-page origins (local + tunnel): the demo page
+      # drives sis directly, and setting CORS_ORIGIN overrides sis's built-in
+      # localhost:3010 default (rostering #391)
+      printf '%s\n' "CORS_ORIGIN=$DASH_URL,http://localhost:$IAM_PORT,https://dash.$TUNNEL_DOMAIN,https://iam.$TUNNEL_DOMAIN" ;;
+    programs-api|scheduling-api|sessions-api|ads-adm-api)
+      printf '%s\n' "CORS_ORIGIN=$DASH_URL,https://dash.$TUNNEL_DOMAIN" ;;
+    connect-api)
+      # JANUS_LOGIN_HOST: where 401s send the browser. Default is the REAL dev
+      # fleet's login (login.wootdev.com), which "succeeds" via the employee
+      # janus gate and mints a real-dev iam_session our local iam can't verify
+      # → redirect LOOP. Point it at the tunneled iam's demo page (devLogin)
+      # instead — buildIamLoginUrl/new URL preserves the /demo path.
+      printf '%s\n' "ALLOWED_ORIGINS=$CONNECT_WEB_URL,https://connect.$TUNNEL_DOMAIN" \
+                    "PUBLIC_API_URL=https://connect-api.$TUNNEL_DOMAIN" \
+                    "JANUS_LOGIN_HOST=iam.$TUNNEL_DOMAIN/demo"
+      # AV → fleek dev cluster when the creds fetch succeeded (tunnel block).
+      # Splatted after the launch line's local FLEEK_TOPOLOGY_JSON/LIVEKIT_*,
+      # so these win (env last-wins). Values are space-free by construction
+      # (compact JSON) — safe through the $() splat.
+      if [[ -n "$TUNNEL_LK_KEY" && -n "$TUNNEL_LK_SECRET" ]]; then
+        printf '%s\n' "FLEEK_TOPOLOGY_JSON=$TUNNEL_FLEEK_TOPOLOGY" \
+                      "LIVEKIT_API_KEY=$TUNNEL_LK_KEY" \
+                      "LIVEKIT_API_SECRET=$TUNNEL_LK_SECRET"
+      fi ;;
+    connect-web)
+      printf '%s\n' "VITE_CONNECTV3_API_URL=https://connect-api.$TUNNEL_DOMAIN" \
+                    "VITE_IAM_API_URL=https://iam.$TUNNEL_DOMAIN" \
+                    "VITE_RTSM_BOOTSTRAP_URL=https://rtsm.$TUNNEL_DOMAIN" \
+                    "VITE_JANUS_LOGIN_HOST=https://iam.$TUNNEL_DOMAIN/demo" \
+                    "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=connect.$TUNNEL_DOMAIN" ;;
+    rtsm-api)
+      # Generated in the --tunnel resolution block; advertises the tunnel host
+      # as the node endpoint so discovery returns a reachable URL.
+      printf '%s\n' "FLEET_CONFIG_PATH=$STATE/rtsm-fleet-tunnel.json" ;;
+    saga-dash)
+      printf '%s\n' "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=dash.$TUNNEL_DOMAIN" ;;
+    *) ;; # everything else: dev CORS wildcard already admits *.wootdev.com
+  esac
+}
+
+# sync_dash_local_defaults: keep saga-dash's static/config.json localDefaults
+# in step with the launch mode. The dash resolves its API URLs from this file
+# (browser-side), so tunnel mode must rewrite the entries to url-type overrides
+# pointing at the public tunnel hosts — and a later non-tunnel run must restore
+# the committed localhost shape. Idempotent both directions; only touches keys
+# that already exist in localDefaults. Same tracked-file-patch precedent as the
+# apply_fixes sis-api edit (working-tree change on saga-dash — expected; note:
+# `git -C $SAGA_DASH checkout -- apps/web/dash/static/config.json` before a
+# refresh-suite run, which refuses dirty repos).
+# REQUIRES saga-dash PR #194 (the `url` override type) when TUNNEL=1: without
+# it the dash treats url entries as tag-less tags and silently resolves to
+# https://<svc>.wootdev.com — the REAL dev fleet. Pin #194 in your
+# integration-suite.local.tsv until it lands.
+sync_dash_local_defaults(){
+  local DASH_CFG="$SAGA_DASH/apps/web/dash/static/config.json"
+  [[ -f "$DASH_CFG" ]] || return 0
+  if node -e '
+    const fs = require("fs");
+    const [p, tunnel, domain] = process.argv.slice(1);
+    // dash service key → [tunnel host label, committed localhost port]
+    const map = {
+      "iam":            ["iam",        3010],
+      "program-hub":    ["programs",   3006],
+      "enrollment-api": ["programs",   3006],
+      "scheduling-api": ["scheduling", 3008],
+      "sessions-api":   ["sessions",   3007],
+      "sis-api":        ["sis",        3100],
+      "connect":        ["connect",    5173],
+    };
+    const c = JSON.parse(fs.readFileSync(p, "utf8"));
+    if (!c.localDefaults) process.exit(0);
+    for (const [key, [label, port]] of Object.entries(map)) {
+      if (!(key in c.localDefaults)) continue;
+      c.localDefaults[key] = tunnel === "1"
+        ? { type: "url", url: `https://${label}.${domain}` }
+        : { type: "localhost", port };
+    }
+    fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
+  ' "$DASH_CFG" "$TUNNEL" "$TUNNEL_DOMAIN" 2>/dev/null; then
+    if [[ "$TUNNEL" == 1 ]]; then ok "saga-dash config.json: localDefaults → https://<svc>.$TUNNEL_DOMAIN (url overrides; needs dash #194)"
+    else ok "saga-dash config.json: localDefaults → localhost ports"; fi
+  else
+    printf "\033[33m⚠\033[0m could not sync %s for tunnel mode (patch localDefaults by hand)\n" "$DASH_CFG"
+  fi
+}
 
 launch(){ # name port dir extra_env...
   local name=$1 port=$2 dir=$3 probe; shift 3
@@ -759,6 +909,9 @@ launch(){ # name port dir extra_env...
 
 services_up(){
   SERVICES_RC=0   # reset so a second call (restart) doesn't carry a stale failure
+  # Config-file deps first: the dash reads localDefaults at page load, so the
+  # file must match the mode BEFORE saga-dash (re)launches/HMRs.
+  sync_dash_local_defaults
   # Drift: soa-logger/soa-config on main now require a PINO_LOGGER config with
   # no defaults — `level` + `isExpressContext` (DotenvConfigManager reads them as
   # PINO_LOGGER_LEVEL / PINO_LOGGER_ISEXPRESSCONTEXT). Every soa node service
@@ -786,7 +939,7 @@ services_up(){
   # CORS_ORIGIN is COMMA-SEPARATED (api-util ≥1.2.0) — iam-api also gets the
   # connect-web origin, because connect-web's iam-client calls iam DIRECTLY
   # from the browser (personas.getMyPermissions, memberships, whoami…).
-  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL"
+  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL" $(tunnel_env iam-api)
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7. Under --sandbox
@@ -796,21 +949,21 @@ services_up(){
      NODE_ENV=development PORT="$SIS_PORT" \
      SIS_DATABASE_URL="$SIS_DB_URL" CORS_ORIGIN="$DASH_URL" \
      IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token" \
-     $(sandbox_env sis-api)
-  launch_if programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env programs-api)
-  launch_if scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env scheduling-api)
+     $(sandbox_env sis-api) $(tunnel_env sis-api)
+  launch_if programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env programs-api) $(tunnel_env programs-api)
+  launch_if scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env scheduling-api) $(tunnel_env scheduling-api)
   # sessions-api: DATABASE_URL + IAM_API_URL are REQUIRED (it throws without
   # them); its RABBITMQ_URL default is program-hub's standalone :5673, so point
   # it at the mesh. SCHEDULING_API_URL defaults to :3008 (already the mesh
   # port) and it doesn't read JANUS_REQUIRED, so neither is set. Pre-existing
   # program data needs a one-time manual replay (see header note).
-  launch_if sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(sandbox_env sessions-api)
+  launch_if sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(sandbox_env sessions-api) $(tunnel_env sessions-api)
   launch_if ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
-     CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ"
-  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash"
+     CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)
+  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" $(tunnel_env saga-dash)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
   # always discovers via GET /fleet/discover (404 without fleet mode → the
   # browser's "Fleet discovery failed … Fleet mode may not be active"), so the
@@ -822,7 +975,8 @@ services_up(){
   # CORS allows localhost/127.0.0.1 origins unconditionally in its config.
   launch_if rtsm-api "$RTSM_PORT" "$RTSM/apps/node/rtsm-api" \
      EXPRESS_SERVER_PORT="$RTSM_PORT" \
-     FLEET_CONFIG_PATH="$SCRIPT_DIR/rtsm-fleet-local.json" FLEET_NODE_NAME=local
+     FLEET_CONFIG_PATH="$SCRIPT_DIR/rtsm-fleet-local.json" FLEET_NODE_NAME=local \
+     $(tunnel_env rtsm-api)
   # connect-api: verifies the SAME iam_session JWT the dash flow mints (JWKS
   # from local iam). Its issuer default is the wootdev iam, so override
   # JWT_ISSUER to local iam-api's JwtConfigSchema default (rostering
@@ -842,7 +996,8 @@ services_up(){
      LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret \
      RECORDING_SERVICE_TOKEN="$RECORDING_TOKEN" \
      RECORDER_URL_TEMPLATE="http://127.0.0.1:$RECORDER_CONTROL_PORT" \
-     FLEEK_TOPOLOGY_JSON='{"cityMap":{"_default":"ws://localhost:7880"},"nodes":{"local":{"url":"ws://localhost:7880"}}}'
+     FLEEK_TOPOLOGY_JSON='{"cityMap":{"_default":"ws://localhost:7880"},"nodes":{"local":{"url":"ws://localhost:7880"}}}' \
+     $(tunnel_env connect-api)
   # connect-web: vite on :6210 (its own config default). VITE_RTSM_BOOTSTRAP_URL
   # points the rtsm-client at the LOCAL single-node rtsm-api (it overrides
   # domain-based fleet discovery). On a qboard checkout without the plumb the
@@ -863,7 +1018,8 @@ services_up(){
      VITE_IAM_API_URL="$IAM_URL" \
      VITE_SAGA_API_TARGET="$SAGA_API_TARGET" \
      VITE_RTSM_BOOTSTRAP_URL="$RTSM_URL" \
-     VITE_PLAYBACK_ASSET_BASE_OVERRIDE="http://localhost:$RECORDINGS_API_PORT"
+     VITE_PLAYBACK_ASSET_BASE_OVERRIDE="http://localhost:$RECORDINGS_API_PORT" \
+     $(tunnel_env connect-web)
   return "$SERVICES_RC"   # non-zero iff a LAUNCHED service failed (skips don't count)
 }
 
@@ -969,11 +1125,15 @@ seed_stack(){
 #      don't land on the Janus redirect. Falls back gracefully if Playwright /
 #      saga-dash isn't available — the cookie jar half still succeeds.
 login_user(){
-  local email=${1:-$DEFAULT_LOGIN_USER} code
+  # Tunnel mode logs in through the PUBLIC iam URL: with AUTH_SESSIONCOOKIEDOMAIN
+  # set to .<moniker>.$VMS_BASE, a browser/jar rejects that Set-Cookie on a
+  # localhost response (host mismatch) — the cookie only lands via the tunnel
+  # host. The tunnel origin passes iam's allowlist (*.wootdev.com wildcard).
+  local email=${1:-$DEFAULT_LOGIN_USER} code iam_url="${LOGIN_IAM_URL:-$IAM_URL}"
   say "auto-login via iam-api devLogin as $email…"
   code=$(curl -s -o "$STATE/devlogin.json" -w '%{http_code}' --max-time 10 \
-    -X POST "$IAM_URL/trpc/auth.devLogin" \
-    -H 'Content-Type: application/json' -H "Origin: $IAM_URL" \
+    -X POST "$iam_url/trpc/auth.devLogin" \
+    -H 'Content-Type: application/json' -H "Origin: $iam_url" \
     -c "$COOKIE_JAR" -d "{\"email\":\"$email\"}" 2>/dev/null) || code=000
   if [[ "$code" != 200 ]]; then
     printf "\033[31m✗\033[0m devLogin failed (HTTP %s) for '%s'.\n" "$code" "$email"
@@ -1004,7 +1164,7 @@ open_login_browser(){
     kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null || true; rm -f "$STATE/browser-login.pid"; sleep 1
   fi
   say "opening auto-logged-in dash in Chromium (profile $BROWSER_PROFILE)…"
-  ( IAM_URL="$IAM_URL" DASH_URL="$DASH_URL" LOGIN_EMAIL="$email" \
+  ( IAM_URL="${LOGIN_IAM_URL:-$IAM_URL}" DASH_URL="${LOGIN_DASH_URL:-$DASH_URL}" LOGIN_EMAIL="$email" \
       PROFILE_DIR="$BROWSER_PROFILE" SAGA_DASH_DASH="$SAGA_DASH/apps/web/dash" \
       nohup node "$BROWSER_LOGIN" >"$STATE/browser-login.log" 2>&1 & echo $! >"$STATE/browser-login.pid" )
   for _ in $(seq 1 40); do
@@ -1026,6 +1186,8 @@ services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-a
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
+# tunnels: a tunnel with no services behind it is just public 502s — drop it too.
+[[ -f "$STATE/frpc.pid" ]] && { kill "$(cat "$STATE/frpc.pid")" 2>/dev/null||true; rm -f "$STATE/frpc.pid"; pkill -f "frpc -c $STATE/frpc.toml" 2>/dev/null||true; }
 # tsup watchers: match the real cmdline (node .../tsup/dist/cli-default.js --watch);
 # the literal "tsup --watch" never matches, so watchers used to survive --down.
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
@@ -1062,6 +1224,9 @@ status(){
   fi
   docker exec soa-postgres-1 psql -U iam -d iam_local -tAc \
     "SELECT 'iam users='||count(*) FROM users" 2>/dev/null | sed 's/^/  /'
+  if [[ -f "$STATE/frpc.pid" ]] && kill -0 "$(cat "$STATE/frpc.pid")" 2>/dev/null; then
+    printf "  %-15s up — ./tunnel.sh status for public URLs\n" "tunnel"
+  fi
 }
 
 # ── arg parsing: verbs (up/down/status/help) + composable flags ──────
@@ -1081,7 +1246,7 @@ case "${1:-up}" in
   # Self-maintaining: print the header's "Usage:" block through its closing
   # ruler, instead of a hardcoded line range that drifts as the header grows.
   -h|--help)                     sed -n '/^# Usage:/,/^# ─────/p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox) ;; # flag-only invocation; skip up
+  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--tunnel) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
@@ -1100,6 +1265,10 @@ while [[ $# -gt 0 ]]; do
     # header to the dev fleet (see sandbox_env). Either implies the hybrid path.
     --only)    ONLY_SERVICE="${2:-}"; [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == -* ]] && { echo "--only needs a service name"; exit 1; }; shift 2 ;;
     --sandbox) SANDBOX_NAME="${2:-}"; [[ -z "$SANDBOX_NAME" || "$SANDBOX_NAME" == -* ]] && { echo "--sandbox needs a name"; exit 1; }; shift 2 ;;
+    # --tunnel: NO argument — the moniker comes from .vms-moniker (tunnel.sh
+    # bootstraps it interactively on first use), keeping monikers out of shared
+    # command lines (no placeholders, no cross-contamination).
+    --tunnel)  TUNNEL=1; shift ;;
     *) echo "unknown flag: $1 (use --help)"; exit 1 ;;
   esac
 done
@@ -1124,6 +1293,71 @@ fi
 if [[ -n "$SANDBOX_NAME" && ! "$SANDBOX_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]]; then
   echo "--sandbox: '$SANDBOX_NAME' must match [a-zA-Z0-9][a-zA-Z0-9-]{0,39}"; exit 1
 fi
+# Tunnel-mode resolution. The moniker prompt (first run) talks on stderr, so
+# the $() capture stays clean. tunnel_env() needs TUNNEL_DOMAIN before any
+# launch line runs; LOGIN_*_URLs flip the login flow to the public hosts (the
+# domain cookie can't be minted via localhost). --tunnel is a LAUNCH-ENV
+# directive: services must (re)start to pick the env up, so a bare
+# `./up.sh --tunnel` implies up — but already-running services keep their
+# localhost env (warned below); `--reset --tunnel` / `restart --tunnel` flips
+# everything cleanly.
+if [[ $TUNNEL == 1 ]]; then
+  TUNNEL_MONIKER="$("$SCRIPT_DIR/tunnel.sh" moniker)" || { err "could not resolve a moniker (see tunnel.sh)"; exit 1; }
+  TUNNEL_DOMAIN="$TUNNEL_MONIKER.$VMS_BASE"
+  LOGIN_IAM_URL="https://iam.$TUNNEL_DOMAIN"
+  LOGIN_DASH_URL="https://dash.$TUNNEL_DOMAIN"
+  # rtsm fleet config, tunnel flavor. The node's `endpoint` is the
+  # BROWSER-visible host (bare, no scheme — rtsm-client composes
+  # `${scheme}://${endpoint}`, deriving the scheme from its bootstrap URL).
+  # With the https tunnel bootstrap, a localhost:6110 endpoint makes every
+  # client probe https://localhost:6110 → "no reachable fleet nodes" — so in
+  # tunnel mode the fleet must advertise the tunnel host instead.
+  # tunnel_env(rtsm-api) points FLEET_CONFIG_PATH at this generated file.
+  node -e '
+    const fs = require("fs");
+    const [src, dst, host] = process.argv.slice(1);
+    const c = JSON.parse(fs.readFileSync(src, "utf8"));
+    c._comment = "GENERATED by up.sh --tunnel from rtsm-fleet-local.json — endpoint swapped to the tunnel host (browser-visible; scheme comes from the bootstrap URL).";
+    c.nodes.local.endpoint = host;
+    fs.writeFileSync(dst, JSON.stringify(c, null, 4) + "\n");
+  ' "$SCRIPT_DIR/rtsm-fleet-local.json" "$STATE/rtsm-fleet-tunnel.json" "rtsm.$TUNNEL_DOMAIN" \
+    || { err "could not render $STATE/rtsm-fleet-tunnel.json"; exit 1; }
+  # AV via the REAL fleek dev cluster. Local LiveKit (ws://localhost:7880) is
+  # unreachable from a guest's browser (WebRTC media is UDP — it can't ride
+  # the HTTP tunnels), so tunnel mode points connect-api at the fleek dev
+  # nodes instead: the deployed topology (qboard infra/connectv3-api/
+  # samconfig.yaml — keep in sync) + the cluster's real LiveKit creds from
+  # Secrets Manager (same JSON secret the ECS task injects). Best-effort: no
+  # creds → warn and stay on local AV (guests get CRDT-only, same as before).
+  TUNNEL_LK_KEY=""; TUNNEL_LK_SECRET=""
+  TUNNEL_FLEEK_TOPOLOGY='{"domain":"fleek.wootdev.com","cityMap":{"phx":"wss://phx-1.fleek.wootdev.com","chi":"wss://chi-1.fleek.wootdev.com","nyc":"wss://nyc-1.fleek.wootdev.com","_default":"wss://chi-1.fleek.wootdev.com"}}'
+  TUNNEL_AWS_PROFILE="$("$SCRIPT_DIR/tunnel.sh" aws-profile 2>/dev/null)" || TUNNEL_AWS_PROFILE=""
+  _lk_json=$(aws secretsmanager get-secret-value --secret-id qboard/fleek/livekit-creds \
+      --region us-west-2 ${TUNNEL_AWS_PROFILE:+--profile "$TUNNEL_AWS_PROFILE"} \
+      --query SecretString --output text 2>/dev/null) || _lk_json=""
+  if [[ -n "$_lk_json" ]]; then
+    TUNNEL_LK_KEY=$(node -e 'console.log(JSON.parse(process.argv[1]).api_key||"")' "$_lk_json" 2>/dev/null) || TUNNEL_LK_KEY=""
+    TUNNEL_LK_SECRET=$(node -e 'console.log(JSON.parse(process.argv[1]).api_secret||"")' "$_lk_json" 2>/dev/null) || TUNNEL_LK_SECRET=""
+  fi
+  unset _lk_json
+  if [[ -n "$TUNNEL_LK_KEY" && -n "$TUNNEL_LK_SECRET" ]]; then
+    ok "tunnel AV: fleek dev cluster (wss://*.fleek.wootdev.com; creds from qboard/fleek/livekit-creds)"
+    [[ $DO_RECORD == 1 && "$RECORD_MODE" == av ]] \
+      && warn "--record av + --tunnel: AV rides the fleek CLUSTER, so the LOCAL egress can't capture media; CRDT recording still works."
+  else
+    warn "could not fetch qboard/fleek/livekit-creds — AV stays LOCAL (guests get CRDT-only; aws sso login and re-run for cluster AV)"
+  fi
+  say "tunnel mode: browser plane at https://<svc>.$TUNNEL_DOMAIN (Connect: https://connect.$TUNNEL_DOMAIN)"
+  warn "remote users: Connect + dash are wired (dash needs PR #194 pinned — see"
+  warn "integration-suite.local.tsv); AV is CRDT-only over tunnels (LiveKit/UDP —"
+  warn "see vms/README.md known limitations)."
+  if [[ $DO_RESET == 0 && $DO_RESTART == 0 ]]; then
+    DO_UP=1
+    warn "services already running keep their LOCALHOST env — use './up.sh restart --tunnel'"
+    warn "(or --reset --tunnel) to relaunch everything tunnel-aware."
+  fi
+fi
+
 if [[ -n "$SANDBOX_NAME" ]]; then
   say "hybrid: $ONLY_SERVICE local → iam dep at https://iam.$SANDBOX_BASE (sandbox '$SANDBOX_NAME')"
   warn "ROUTING IS NOT AUTOMATIC: $ONLY_SERVICE only reaches sandbox iam if its INBOUND"
@@ -1169,6 +1403,11 @@ if [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
 elif [[ $DO_UP == 1 ]]; then
   services_up
   ok "stack up — try: $0 --status"
+fi
+# Tunnels come up AFTER services (so the end-to-end probe has something to
+# hit) and BEFORE --login (which routes through the public iam in tunnel mode).
+if [[ $TUNNEL == 1 ]]; then
+  "$SCRIPT_DIR/tunnel.sh" up
 fi
 [[ $DO_RECORD == 1 ]] && record_up "$RECORD_MODE"
 [[ $DO_SEED == 1 ]]  && seed_stack "$SEED_MODE"

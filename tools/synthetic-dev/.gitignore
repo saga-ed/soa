@@ -1,3 +1,8 @@
 # Per-developer overlay of in-flight PRs (see integration-suite.example.tsv).
 # Never committed — yours alone, so it can't collide with a teammate's.
 integration-suite.local.tsv
+
+# Per-developer tunnel moniker (see tunnel.sh — prompted on first use).
+# Never committed: it's your namespace label, same isolation rationale as
+# the integration overlay above.
+.vms-moniker

@@ -223,6 +223,74 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
   `VITE_PLAYBACK_ASSET_BASE_OVERRIDE=http://localhost:8444`.
 - **Deferred:** dash→connect session linking.
 
+## Multi-user access — tunnel mode (`--tunnel`)
+
+Connect is multi-user; your stack is localhost. Tunnel mode bridges that: it
+exposes the **browser-facing** services at stable public HTTPS names so other
+people (a coworker joining your Connect session, QA, a second device) can use
+*your running stack* — services keep running locally under `pnpm dev` with
+HMR. Infra is one shared rendezvous box (`vms/README.md`); day-to-day:
+
+```bash
+./up.sh --reset --tunnel --seed roster --login
+```
+
+First run prompts for your **moniker** (standard: your initials — saved to the
+gitignored `.vms-moniker`, registered automatically; the cert mint takes ~2
+min once). After that your stack is at:
+
+```
+https://connect.<moniker>.vms.wootdev.com        # Connect web — share THIS
+https://connect-api.<moniker>.vms.wootdev.com    # its API
+https://rtsm.<moniker>.vms.wootdev.com           # CRDT/socket sync
+https://iam.<moniker>.vms.wootdev.com            # login (/demo#auth for guests)
+```
+
+`./tunnel.sh status|urls|down` manages the tunnels alone (e.g. re-attach after
+a laptop sleep).
+
+**How a guest joins:** log in at `https://iam.<m>.vms.wootdev.com/demo#auth`
+(any seeded persona), then open the Connect URL. An unauthenticated guest who
+opens the Connect link directly gets bounced to that same demo page
+(tunnel mode overrides `JANUS_LOGIN_HOST` — by default Connect would send
+them to the REAL dev fleet's `login.wootdev.com`, which mints a session our
+local iam can't verify and loops). After logging in on the demo page, re-open
+the Connect link — the demo page doesn't auto-follow the `next=` param.
+
+**Saga-employee guests, one cookie gotcha:** a browser that has used the real
+dev fleet (or that hit the old redirect loop) carries an `iam_session` cookie
+on `.wootdev.com`, which is ALSO sent to `*.<m>.vms.wootdev.com` alongside our
+`.<m>.vms.wootdev.com` one — and connect-api reads the cookie name
+`iam_session` (hardcoded), so the stale real-dev one can win and 401 you even
+after a demo login. Fix: delete the `.wootdev.com` `iam_session` cookie in
+devtools (or just use an incognito window for guesting).
+
+Know these three caveats:
+
+- **Tunnel env applies at launch** — `--tunnel` on an already-running stack
+  warns and only affects newly-launched services; use `restart --tunnel` or
+  `--reset --tunnel`. In tunnel mode the session cookie is domain-scoped to
+  `.<m>.vms.wootdev.com`, so **log in via the tunnel URLs** (the `--login`
+  flow does this automatically), not localhost.
+- **AV rides the real fleek dev cluster** (`wss://*.fleek.wootdev.com`) —
+  local LiveKit is unreachable from a guest's browser (WebRTC media is UDP),
+  so tunnel mode auto-fetches the cluster creds (`qboard/fleek/livekit-creds`,
+  Secrets Manager) and repoints connect-api. If the fetch fails (expired SSO)
+  it warns and guests get CRDT-only — whiteboard/chat/sync still work.
+  Caveat: with cluster AV, `--record av`'s local egress can't capture media
+  (CRDT recording is unaffected).
+- **Remote dash needs saga-dash PR #194** (`url` service-override type) —
+  pin it in `integration-suite.local.tsv` (`saga-dash<TAB>194`) until it
+  lands. Tunnel mode then rewrites the dash's `config.json` `localDefaults`
+  to the tunnel hosts automatically (restored on the next non-tunnel run).
+  Note the config.json edit dirties the saga-dash working tree —
+  `git -C ~/dev/saga-dash checkout -- apps/web/dash/static/config.json`
+  before a `refresh-suite.sh` run (it refuses dirty repos).
+
+Prereqs: AWS SSO creds in the dev account (`aws sso login`) — tunnel
+registration reads the shared frp token from SSM. The rendezvous box itself is
+provisioned once for the whole team: `vms/README.md`.
+
 ## Walkthrough deck (start here for the UX flow)
 
 `../training/saga-dash-walkthrough.html` — open in a browser or serve via

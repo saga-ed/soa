@@ -1,0 +1,388 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  vms - synthetic-dev tunnel rendezvous server (saga-ed/soa
+  tools/synthetic-dev/vms). One small EC2 box with a permanent EIP behind
+  vms.wootdev.com / *.vms.wootdev.com. Runs Caddy (TLS termination; per-dev
+  wildcard certs via Route53 DNS-01) and frps (reverse tunnels from dev
+  laptops), so a developer's local synthetic-dev stack is reachable at
+  https://<service>.<moniker>.vms.wootdev.com. Shared dev-infra utility, not
+  an app service - no ECS, no ALB, dev account only. See README.md alongside.
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: vms.wootdev.com
+    Description: >-
+      Apex DNS name for the rendezvous box. The template creates A records for
+      this name and its wildcard (*.DomainName), both pointing at the EIP.
+  HostedZoneId:
+    Type: String
+    Default: Z06686211OOAM6WWKX6KW
+    Description: >-
+      Route53 public hosted zone the DNS records live in (wootdev.com in the
+      dev account). Also the zone the instance role may write ACME DNS-01
+      challenge records into (Caddy cert issuance).
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    Description: >-
+      EC2 instance type. arm64 (t4g) - the AMI parameter below is arm64; pick
+      a Graviton type or change both. t4g.small is plenty for proxying dev
+      HTTP traffic.
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: >-
+      AL2023 arm64 AMI, resolved from the public SSM alias at deploy time so
+      stack updates pick up patched images.
+  VpcId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::VPC::Id>
+    Default: /shared/infra/dev/vpc-id
+    Description: Shared dev VPC (resolved from the canonical shared SSM param).
+  PublicSubnetIds:
+    Type: AWS::SSM::Parameter::Value<List<String>>
+    Default: /shared/infra/dev/public-subnet-ids
+    Description: >-
+      Shared dev public subnets; the instance lands in the first one (it needs
+      a public IP - it IS the public front door).
+  FrpVersion:
+    Type: String
+    Default: 0.61.1
+    Description: >-
+      Pinned frp release installed on the box (github.com/fatedier/frp).
+      tunnel.sh pins the same version client-side; bump both together.
+  FrpTokenParameterName:
+    Type: String
+    Default: /vms/frp-token
+    Description: >-
+      SSM SecureString holding the shared frps auth token. Created out-of-band
+      (CloudFormation cannot create SecureStrings) - see README.md step 1.
+      Read by the instance at render time and by tunnel.sh on each dev laptop.
+  MonikersParameterName:
+    Type: String
+    Default: /vms/monikers
+    Description: >-
+      SSM StringList of registered dev monikers (e.g. "jw,sean"). tunnel.sh
+      appends on first run; the box polls it every minute and renders one
+      Caddy site block (and one wildcard cert) per moniker.
+  AcmeEmail:
+    Type: String
+    Default: jward@saga.org
+    Description: Contact email for Let's Encrypt cert issuance notifications.
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: vms tunnel rendezvous - public HTTPS + frp control plane
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS - Caddy TLS termination for *.DomainName
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP - ACME HTTP-01 fallback and redirect-to-HTTPS
+        # frp's control connection is a raw long-lived TCP listener; it is
+        # gated by the shared token (SSM SecureString) + TLS, not by source
+        # IP, because devs connect from arbitrary home networks.
+        - IpProtocol: tcp
+          FromPort: 7000
+          ToPort: 7000
+          CidrIp: 0.0.0.0/0
+          Description: frps control port - token-gated reverse-tunnel registration
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+          Description: all outbound
+      Tags:
+        - { Key: Project, Value: synthetic-dev }
+        - { Key: Environment, Value: dev }
+        - { Key: ManagedBy, Value: SAM }
+        - { Key: Service, Value: vms }
+
+  # No SSH ingress by design - shell access is via SSM Session Manager
+  # (AmazonSSMManagedInstanceCore): aws ssm start-session --target <instance-id>
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: synthetic-dev-vms-instance-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        # Caddy mints per-moniker wildcard certs via ACME DNS-01: it writes a
+        # TXT challenge record into the zone and deletes it after issuance.
+        - PolicyName: Route53Dns01
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - route53:ChangeResourceRecordSets
+                  - route53:ListResourceRecordSets
+                Resource: !Sub arn:aws:route53:::hostedzone/${HostedZoneId}
+              - Effect: Allow
+                Action: route53:GetChange
+                Resource: arn:aws:route53:::change/*
+              # The caddy-dns/route53 plugin locates the zone by name at
+              # startup; list calls have no resource-level scoping.
+              - Effect: Allow
+                Action: route53:ListHostedZonesByName
+                Resource: '*'
+        - PolicyName: VmsSsmRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/vms/*
+      Tags:
+        - { Key: Project, Value: synthetic-dev }
+        - { Key: Environment, Value: dev }
+        - { Key: ManagedBy, Value: SAM }
+        - { Key: Service, Value: vms }
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # The permanent public address. DNS (below) points here, so replacing the
+  # instance (stack update / AMI refresh) keeps the same IP and certs stay
+  # valid - the box is disposable, the EIP is the identity.
+  Eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Tags:
+        - { Key: Project, Value: synthetic-dev }
+        - { Key: Environment, Value: dev }
+        - { Key: ManagedBy, Value: SAM }
+        - { Key: Service, Value: vms }
+
+  EipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt Eip.AllocationId
+      InstanceId: !Ref Instance
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Select [0, !Ref PublicSubnetIds]
+      SecurityGroupIds: [!Ref SecurityGroup]
+      Tags:
+        - { Key: Name, Value: synthetic-dev-vms }
+        - { Key: Project, Value: synthetic-dev }
+        - { Key: Environment, Value: dev }
+        - { Key: ManagedBy, Value: SAM }
+        - { Key: Service, Value: vms }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/env bash
+          # vms bootstrap - everything on this box is laid down here, so the
+          # instance is fully regenerable (the EIP + DNS are the identity).
+          set -euxo pipefail
+          exec >/var/log/vms-init.log 2>&1
+
+          # First boot can precede the EIP association; if the subnet doesn't
+          # auto-assign public IPs there is no egress until it lands. Wait.
+          i=0
+          until curl -fsS -m 5 https://checkip.amazonaws.com >/dev/null 2>&1; do
+              i=$((i+1)); [ "$i" -gt 60 ] && { echo "no egress after 5m"; exit 1; }
+              sleep 5
+          done
+
+          dnf -y install tar gzip
+
+          # ── Caddy with the route53 DNS plugin (official build service) ──
+          curl -fsSL -o /usr/local/bin/caddy \
+              "https://caddyserver.com/api/download?os=linux&arch=arm64&p=github.com%2Fcaddy-dns%2Froute53"
+          chmod +x /usr/local/bin/caddy
+          useradd --system --home-dir /var/lib/caddy --create-home --shell /sbin/nologin caddy || true
+          mkdir -p /etc/caddy
+          # Bind to 80/443 as the unprivileged caddy user.
+          setcap cap_net_bind_service=+ep /usr/local/bin/caddy
+
+          # ── frps (pinned; tunnel.sh pins the same client version) ──
+          curl -fsSL "https://github.com/fatedier/frp/releases/download/v${FrpVersion}/frp_${FrpVersion}_linux_arm64.tar.gz" \
+              | tar xz -C /tmp
+          install -m 0755 "/tmp/frp_${FrpVersion}_linux_arm64/frps" /usr/local/bin/frps
+
+          # ── config renderer: SSM (token + monikers) -> frps.toml + Caddyfile ──
+          # Runs at boot and every minute (timer below), so registering a new
+          # moniker is laptop-side only: tunnel.sh appends to the SSM list and
+          # this picks it up, renders a new wildcard site block, and Caddy
+          # mints the cert. No SSH, no manual steps on the box.
+          cat >/usr/local/bin/vms-render <<'RENDER'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          export AWS_DEFAULT_REGION="__REGION__"
+          DOMAIN="__DOMAIN__"
+          TOKEN=$(aws ssm get-parameter --name "__TOKEN_PARAM__" --with-decryption \
+                      --query Parameter.Value --output text)
+          MONIKERS=$(aws ssm get-parameter --name "__MONIKERS_PARAM__" \
+                      --query Parameter.Value --output text 2>/dev/null || echo "")
+
+          new_frps=$(mktemp)
+          cat >"$new_frps" <<EOF
+          # rendered by vms-render - do not edit
+          bindPort = 7000
+          # vhost port is loopback-reachable only in practice: the SG opens
+          # 443/80/7000 exclusively; Caddy is the sole consumer of :8080.
+          vhostHTTPPort = 8080
+          auth.method = "token"
+          auth.token = "$TOKEN"
+          EOF
+
+          new_caddy=$(mktemp)
+          {
+              printf '{\n    email __ACME_EMAIL__\n}\n\n'
+              # Apex: a human-readable index, useful as a liveness probe.
+              printf '%s {\n    respond "vms tunnel rendezvous - see saga-ed/soa tools/synthetic-dev/vms" 200\n}\n\n' "$DOMAIN"
+              # One wildcard site (and so one DNS-01 wildcard cert) per
+              # registered moniker: *.<moniker>.<domain>. X.509 wildcards match
+              # a single label, which is why this is per-moniker rather than
+              # one *.<domain> cert. Host header passes through to frps, which
+              # routes to the matching laptop tunnel (customDomains).
+              # (no shell brace-expansions in this script - it lives inside
+              # Fn::Sub, which interprets every dollar-brace sequence)
+              for m in $(printf '%s' "$MONIKERS" | tr ',' ' '); do
+                  m=$(printf '%s' "$m" | tr -d '[:space:]'); [[ -z "$m" ]] && continue
+                  printf '*.%s.%s {\n    tls {\n        dns route53\n    }\n    reverse_proxy 127.0.0.1:8080\n}\n\n' "$m" "$DOMAIN"
+              done
+          } >"$new_caddy"
+
+          if ! cmp -s "$new_frps" /etc/frps.toml 2>/dev/null; then
+              mv "$new_frps" /etc/frps.toml; chmod 0600 /etc/frps.toml
+              systemctl restart frps || true
+          else rm -f "$new_frps"; fi
+          if ! cmp -s "$new_caddy" /etc/caddy/Caddyfile 2>/dev/null; then
+              mv "$new_caddy" /etc/caddy/Caddyfile
+              chown caddy:caddy /etc/caddy/Caddyfile
+              systemctl reload caddy || systemctl restart caddy || true
+          else rm -f "$new_caddy"; fi
+          RENDER
+          chmod +x /usr/local/bin/vms-render
+          sed -i \
+              -e "s|__REGION__|${AWS::Region}|" \
+              -e "s|__DOMAIN__|${DomainName}|" \
+              -e "s|__TOKEN_PARAM__|${FrpTokenParameterName}|" \
+              -e "s|__MONIKERS_PARAM__|${MonikersParameterName}|" \
+              -e "s|__ACME_EMAIL__|${AcmeEmail}|" \
+              /usr/local/bin/vms-render
+
+          # ── systemd units ──
+          cat >/etc/systemd/system/frps.service <<'EOF'
+          [Unit]
+          Description=frp server (synthetic-dev vms tunnels)
+          After=network-online.target
+          [Service]
+          ExecStart=/usr/local/bin/frps -c /etc/frps.toml
+          Restart=always
+          RestartSec=5
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          cat >/etc/systemd/system/caddy.service <<'EOF'
+          [Unit]
+          Description=Caddy (synthetic-dev vms TLS front door)
+          After=network-online.target
+          [Service]
+          User=caddy
+          Group=caddy
+          Environment=AWS_REGION=us-west-2
+          Environment=XDG_DATA_HOME=/var/lib/caddy
+          Environment=XDG_CONFIG_HOME=/var/lib/caddy
+          ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile
+          ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile
+          Restart=always
+          RestartSec=5
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          cat >/etc/systemd/system/vms-render.service <<'EOF'
+          [Unit]
+          Description=Render frps + Caddy config from SSM (token + monikers)
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/vms-render
+          EOF
+
+          cat >/etc/systemd/system/vms-render.timer <<'EOF'
+          [Unit]
+          Description=Re-render vms config every minute (moniker registry poll)
+          [Timer]
+          OnBootSec=30
+          OnUnitActiveSec=60
+          [Install]
+          WantedBy=timers.target
+          EOF
+
+          systemctl daemon-reload
+          /usr/local/bin/vms-render
+          systemctl enable --now frps caddy vms-render.timer
+
+  ApexRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub '${DomainName}.'
+      Type: A
+      TTL: '300'
+      ResourceRecords: [!Ref Eip]
+
+  # DNS wildcards (unlike TLS wildcards) match multiple labels, so this single
+  # record also resolves connect-api.jw.vms.wootdev.com etc. - one record
+  # covers every dev and service forever.
+  WildcardRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub '*.${DomainName}.'
+      Type: A
+      TTL: '300'
+      ResourceRecords: [!Ref Eip]
+
+  PublicIpParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /vms/infra/dev/public-ip
+      Type: String
+      Value: !Ref Eip
+      Description: vms rendezvous EIP (synthetic-dev tunnel server)
+
+  InstanceIdParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /vms/infra/dev/instance-id
+      Type: String
+      Value: !Ref Instance
+      Description: vms rendezvous instance id (SSM Session Manager target)
+
+Outputs:
+  PublicIp:
+    Value: !Ref Eip
+    Description: The permanent public address behind DomainName.
+  InstanceId:
+    Value: !Ref Instance
+    Description: Shell access via - aws ssm start-session --target <this>
+  ApexUrl:
+    Value: !Sub https://${DomainName}
+    Description: Liveness probe URL (Caddy answers 200 with an index line).

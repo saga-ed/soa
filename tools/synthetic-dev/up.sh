@@ -787,12 +787,13 @@ sandbox_env(){ # svc
 #     servers accept the tunnel Host header (DNS-rebind protection would 403 an
 #     unknown host). Best-effort: vite ≥6.1 reads it; older vite either has no
 #     host check or needs server.allowedHosts in the app's vite config.
-# REMOTE dash: works when saga-dash carries PR #194 (the `url` override type —
-# pin it in integration-suite.local.tsv until it lands); services_up's
-# sync_dash_local_defaults rewrites config.json localDefaults to url-type
-# entries pointing at the tunnel hosts. AV (LiveKit) is UDP and doesn't
-# traverse tunnels: remote users get CRDT/chat (rtsm is websockets); for AV
-# point FLEEK_TOPOLOGY_JSON at the real fleek dev cluster.
+# REMOTE dash: works when saga-dash carries PR #194 (the `url` override type +
+# the config.local.json local-override seam — pin it in
+# integration-suite.local.tsv until it lands); services_up's
+# sync_dash_local_defaults writes an untracked config.local.json the dash
+# overlays onto its tracked config.json (no tracked-file mutation). AV (LiveKit)
+# is UDP and doesn't traverse tunnels: remote users get CRDT/chat (rtsm is
+# websockets); for AV point FLEEK_TOPOLOGY_JSON at the real fleek dev cluster.
 tunnel_env(){ # svc
   [[ "$TUNNEL" == 0 ]] && return 0
   local svc=$1
@@ -848,49 +849,38 @@ tunnel_env(){ # svc
   esac
 }
 
-# sync_dash_local_defaults: keep saga-dash's static/config.json localDefaults
-# in step with the launch mode. The dash resolves its API URLs from this file
-# (browser-side), so tunnel mode must rewrite the entries to url-type overrides
-# pointing at the public tunnel hosts — and a later non-tunnel run must restore
-# the committed localhost shape. Idempotent both directions; only touches keys
-# that already exist in localDefaults. Same tracked-file-patch precedent as the
-# apply_fixes sis-api edit (working-tree change on saga-dash — expected; note:
-# `git -C $SAGA_DASH checkout -- apps/web/dash/static/config.json` before a
-# refresh-suite run, which refuses dirty repos).
-# REQUIRES saga-dash PR #194 (the `url` override type) when TUNNEL=1: without
-# it the dash treats url entries as tag-less tags and silently resolves to
-# https://<svc>.wootdev.com — the REAL dev fleet. Pin #194 in your
-# integration-suite.local.tsv until it lands.
+# sync_dash_local_defaults: point the dash's API routing at the tunnel hosts in
+# tunnel mode — via an UNTRACKED static/config.local.json that the dash overlays
+# onto its tracked config.json (saga-dash #194's dev-only local-override seam;
+# lib/api/config.ts mergeLocalTopology). Tunnel mode WRITES it (url-type
+# localDefaults → https://<svc>.<moniker>.vms…); any other mode REMOVES it so
+# the dash falls back to the tracked localhost defaults. Deliberately never
+# touches the tracked config.json — no dirty tree, no moniker baked into a
+# committed file, no `git checkout` dance before refresh-suite.
+# REQUIRES saga-dash #194 (the `url` type + the config.local.json seam): on a
+# dash without it the file is simply ignored and the dash uses localhost (so a
+# remote browser can't reach the APIs — but it fails safe, no real-fleet
+# misroute). Pin #194 in integration-suite.local.tsv until it lands.
 sync_dash_local_defaults(){
-  local DASH_CFG="$SAGA_DASH/apps/web/dash/static/config.json"
-  [[ -f "$DASH_CFG" ]] || return 0
+  local LOCAL_CFG="$SAGA_DASH/apps/web/dash/static/config.local.json"
+  [[ -d "$SAGA_DASH/apps/web/dash/static" ]] || return 0
+  if [[ "$TUNNEL" != 1 ]]; then
+    [[ -f "$LOCAL_CFG" ]] && { rm -f "$LOCAL_CFG"; ok "saga-dash: removed config.local.json (localhost defaults)"; }
+    return 0
+  fi
+  # dash service key → tunnel host label (<label>.<TUNNEL_DOMAIN>)
   if node -e '
     const fs = require("fs");
-    const [p, tunnel, domain] = process.argv.slice(1);
-    // dash service key → [tunnel host label, committed localhost port]
-    const map = {
-      "iam":            ["iam",        3010],
-      "program-hub":    ["programs",   3006],
-      "enrollment-api": ["programs",   3006],
-      "scheduling-api": ["scheduling", 3008],
-      "sessions-api":   ["sessions",   3007],
-      "sis-api":        ["sis",        3100],
-      "connect":        ["connect",    5173],
-    };
-    const c = JSON.parse(fs.readFileSync(p, "utf8"));
-    if (!c.localDefaults) process.exit(0);
-    for (const [key, [label, port]] of Object.entries(map)) {
-      if (!(key in c.localDefaults)) continue;
-      c.localDefaults[key] = tunnel === "1"
-        ? { type: "url", url: `https://${label}.${domain}` }
-        : { type: "localhost", port };
-    }
-    fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
-  ' "$DASH_CFG" "$TUNNEL" "$TUNNEL_DOMAIN" 2>/dev/null; then
-    if [[ "$TUNNEL" == 1 ]]; then ok "saga-dash config.json: localDefaults → https://<svc>.$TUNNEL_DOMAIN (url overrides; needs dash #194)"
-    else ok "saga-dash config.json: localDefaults → localhost ports"; fi
+    const [out, domain] = process.argv.slice(1);
+    const map = { "iam":"iam", "program-hub":"programs", "enrollment-api":"programs",
+      "scheduling-api":"scheduling", "sessions-api":"sessions", "sis-api":"sis", "connect":"connect" };
+    const localDefaults = {};
+    for (const [key, label] of Object.entries(map)) localDefaults[key] = { type: "url", url: `https://${label}.${domain}` };
+    fs.writeFileSync(out, JSON.stringify({ localDefaults }, null, 2) + "\n");
+  ' "$LOCAL_CFG" "$TUNNEL_DOMAIN" 2>/dev/null; then
+    ok "saga-dash: wrote config.local.json → https://<svc>.$TUNNEL_DOMAIN (untracked; needs dash #194)"
   else
-    printf "\033[33m⚠\033[0m could not sync %s for tunnel mode (patch localDefaults by hand)\n" "$DASH_CFG"
+    printf "\033[33m⚠\033[0m could not write %s (tunnel dash routing falls back to localhost)\n" "$LOCAL_CFG"
   fi
 }
 

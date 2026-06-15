@@ -279,13 +279,14 @@ Know these three caveats:
   it warns and guests get CRDT-only — whiteboard/chat/sync still work.
   Caveat: with cluster AV, `--record av`'s local egress can't capture media
   (CRDT recording is unaffected).
-- **Remote dash needs saga-dash PR #194** (`url` service-override type) —
-  pin it in `integration-suite.local.tsv` (`saga-dash<TAB>194`) until it
-  lands. Tunnel mode then rewrites the dash's `config.json` `localDefaults`
-  to the tunnel hosts automatically (restored on the next non-tunnel run).
-  Note the config.json edit dirties the saga-dash working tree —
-  `git -C ~/dev/saga-dash checkout -- apps/web/dash/static/config.json`
-  before a `refresh-suite.sh` run (it refuses dirty repos).
+- **Remote dash needs saga-dash PR #194** (the `url` service-override type +
+  its dev-only `config.local.json` local-override seam) — pin it in
+  `integration-suite.local.tsv` (`saga-dash<TAB>194`) until it lands. Tunnel
+  mode then writes an **untracked** `static/config.local.json` (url-type
+  localDefaults → the tunnel hosts) which the dash overlays onto the tracked
+  `config.json`; a non-tunnel run removes it. No tracked-file edit, so the
+  saga-dash tree stays clean (nothing to `git checkout` before
+  `refresh-suite.sh`).
 
 Prereqs: AWS SSO creds in the dev account (`aws sso login`) — tunnel
 registration reads the shared frp token from SSM. The rendezvous box itself is

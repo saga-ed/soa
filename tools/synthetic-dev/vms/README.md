@@ -126,10 +126,11 @@ it falls out of use, `sam delete` and re-provision later in ~5 minutes.
   creds fetch fails. CRDT/whiteboard/chat always work (rtsm is websockets —
   tunnels fine).
 - **saga-dash for REMOTE users** needs saga-dash PR #194 (the `url` service
-  override type) — pin it in `integration-suite.local.tsv` until it lands.
-  With it, `up.sh --tunnel` rewrites the dash's `config.json` `localDefaults`
-  to url-type entries pointing at the tunnel hosts (and restores the
-  localhost shape on the next non-tunnel run).
+  override type + its `config.local.json` local-override seam) — pin it in
+  `integration-suite.local.tsv` until it lands. With it, `up.sh --tunnel`
+  writes an untracked `static/config.local.json` (url-type localDefaults → the
+  tunnel hosts) that the dash overlays onto the tracked `config.json`; a
+  non-tunnel run removes it. No tracked-file mutation.
 - frps/frpc versions are pinned in lockstep (`FrpVersion` here,
   `FRP_VERSION` in `tunnel.sh`) — bump both together.
 - The Caddy binary comes from the official caddyserver.com build service

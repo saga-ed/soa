@@ -173,8 +173,15 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
   `projection_readiness` warm row straight to the DB, so reads work on the
   event-less db:seed lane (without it, every sessions read 408s "projection …
   is warming" and Connect's `/my-sessions` 500s). The demo sessions belong to
-  the `demo-*@saga.org` personas (e.g. `demo-lead-north@saga.org`,
-  `demo-student-1@saga.org`) — log in as one of those to see them.
+  the **`demo` district**, NOT the roster personas — log in as a `demo-*@saga.org`
+  user (`demo-dadmin@saga.org` is the district admin → sees all of them; all
+  loginable with `password123` / devLogin). **To reach them via the dash
+  `/sessions` page, seed with `--seed full`**: the dash's program-list gate reads
+  **programs-api** and redirects to `/programs/new/config` when your org has no
+  programs — and only `--seed full` seeds the demo programs into programs-api
+  (`--seed roster` seeds just the sessions-api projections, which Connect reads
+  directly but the dash gate does not). Opening Connect by direct URL
+  (`:6210/?slsid=…`) works on either seed.
 - **Dedicated mongo.** Connect's mongo is part of the mesh (infra-compose
   `services/connect-mongo` → container `soa-connect-mongo-1`): standalone
   mongo:8, no auth, host port **:27037** (non-default on purpose, so it never
@@ -389,8 +396,12 @@ The reset is data-only — it truncates synthetic rows but **preserves
 | `frontier@saga.org` | admin for the Frontier district |
 | `empty@saga.org` | Empty Org admin — district with NO schools/sections/roster (the CSV upload-from-scratch fixture; `./up.sh --reset --seed roster --login empty@saga.org`) |
 | `none@saga.org` | belongs to no district |
+| `demo-dadmin@saga.org` | **Connect demo** `demo`-district admin — the persona for clicking into Connect: sees all demo programs/sessions on `/sessions` (**needs `--seed full`**) |
+| `demo-lead-north@saga.org` | Connect demo North lead tutor — the tutor view of the demo sessions |
 
-Each persona's UUID is printed at the end of every `--seed roster` run.
+The roster personas above do **not** see the Connect demo sessions (those live
+in the separate `demo` district — use a `demo-*` persona). Each persona's UUID
+is printed at the end of every `--seed roster` run.
 
 ## What `up` actually does, step by step
 

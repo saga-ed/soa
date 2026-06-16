@@ -834,10 +834,15 @@ tunnel_env(){ # svc
                       "LIVEKIT_API_SECRET=$TUNNEL_LK_SECRET"
       fi ;;
     connect-web)
+      # VITE_DASHBOARD_URL is Connect's "Back to Dashboard" target (qboard
+      # getDashboardReturn): the tunnelled dash, NOT the host-derived
+      # dash.wootdev.com guess. The dash also passes ?dash_rtn_url= per-launch,
+      # which overrides this — but the env covers a direct (no-dash) open.
       printf '%s\n' "VITE_CONNECTV3_API_URL=https://connect-api.$TUNNEL_DOMAIN" \
                     "VITE_IAM_API_URL=https://iam.$TUNNEL_DOMAIN" \
                     "VITE_RTSM_BOOTSTRAP_URL=https://rtsm.$TUNNEL_DOMAIN" \
                     "VITE_JANUS_LOGIN_HOST=https://iam.$TUNNEL_DOMAIN/demo" \
+                    "VITE_DASHBOARD_URL=https://dash.$TUNNEL_DOMAIN" \
                     "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=connect.$TUNNEL_DOMAIN" ;;
     rtsm-api)
       # Generated in the --tunnel resolution block; advertises the tunnel host
@@ -1003,11 +1008,18 @@ services_up(){
   # pattern (plan push silently skipped, recorder logs skipped_plan_missing);
   # the topology's nodes.url block maps the local LiveKit URL → node "local",
   # which RECORDER_URL_TEMPLATE then resolves (no {node} placeholder needed).
+  # VITE_DASHBOARD_URL: Connect's "Back to Dashboard" target (qboard
+  # getDashboardReturn) — the local dash, not a host-derived guess (on
+  # localhost the host has no dot, so Connect would otherwise show no button).
+  # VITE_JANUS_LOGIN_HOST: session-expiry redirects land on the LOCAL iam demo,
+  # not prod login.wootdev.com (tunnel_env sets the tunnel equivalent).
   launch_if connect-web "$CONNECT_WEB_PORT" "$QBOARD/apps/web/connectv3" \
      VITE_CONNECTV3_API_URL="$CONNECT_API_URL" \
      VITE_IAM_API_URL="$IAM_URL" \
      VITE_SAGA_API_TARGET="$SAGA_API_TARGET" \
      VITE_RTSM_BOOTSTRAP_URL="$RTSM_URL" \
+     VITE_DASHBOARD_URL="$DASH_URL" \
+     VITE_JANUS_LOGIN_HOST="$IAM_URL/demo" \
      VITE_PLAYBACK_ASSET_BASE_OVERRIDE="http://localhost:$RECORDINGS_API_PORT" \
      $(tunnel_env connect-web)
   return "$SERVICES_RC"   # non-zero iff a LAUNCHED service failed (skips don't count)

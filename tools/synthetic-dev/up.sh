@@ -88,6 +88,10 @@
 #                                  (slsid fixture-playback-001). Composes:
 #                                  `--with-playback --seed full`. Lets colleagues query
 #                                  non-empty transcripts/insights/chat without a real CU run.
+#                                  On `--seed full` it ALSO seeds the connect-mongo side of
+#                                  the same session (recording manifest + participant roster
+#                                  + lifecycle bounds) so the playback dashboard's time
+#                                  scrubber has authoritative bounds + a roster.
 #   ./up.sh --tunnel             ALSO expose the browser-facing services to other
 #                                  users at https://<svc>.<moniker>.vms.wootdev.com
 #                                  (multi-user Connect). Moniker comes from
@@ -1253,6 +1257,19 @@ seed_playback(){
       POSTGRES_USERNAME=chat_app POSTGRES_PASSWORD=chat_app_local_pw \
       POSTGRES_INSTANCENAME=ChatDB pnpm seed )
   ok "playback seeded (transcripts/insights/chat)"
+  # connect-mongo side of the SAME fixture session: the recording manifest +
+  # participant roster + lifecycle bounds the playback dashboard's time scrubber
+  # reads (connectv3-api's own stores → cv3_recording_manifests /
+  # cv3_session_participants / cv3_session_lifecycle). Same slsid
+  # (fixture-playback-001) and same roster userIds (iam-seed-ids t-1/s-1/s-2) as
+  # the postgres fixtures above, so the dashboard timeline correlates with the
+  # transcripts/insights/chat content. Idempotent (CAS-aware upsert); reuses the
+  # mesh connect-mongo via CONNECT_MONGO_URI + the connectv3 db (MONGO_DB_NAME
+  # default). connect-api auto-creates these collections on first write, so no
+  # provisioning step is needed.
+  ( cd "$QBOARD/apps/node/connectv3-api" \
+      && env MONGO_URI="$CONNECT_MONGO_URI" pnpm seed:playback )
+  ok "playback seeded (connect manifest/roster/lifecycle — fixture-playback-001)"
 }
 
 # roster = iam + sessions demo (programs empty); full = + programs + content

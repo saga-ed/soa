@@ -875,15 +875,23 @@ tunnel_env(){ # svc
   # win (env last-wins).
   case "$svc" in
     iam-api)
+      # MAIL_FRONTEND_BASE_URL drives the iam-realm SagaAuth login= base — point
+      # it at the tunnelled iam demo so a dash 401 re-logs-in locally, not at
+      # prod login.wootdev.com.
       printf '%s\n' "AUTH_SESSIONCOOKIEDOMAIN=.$TUNNEL_DOMAIN" \
-                    "CORS_ORIGIN=$DASH_URL,$CONNECT_WEB_URL,https://dash.$TUNNEL_DOMAIN,https://connect.$TUNNEL_DOMAIN" ;;
+                    "CORS_ORIGIN=$DASH_URL,$CONNECT_WEB_URL,https://dash.$TUNNEL_DOMAIN,https://connect.$TUNNEL_DOMAIN" \
+                    "MAIL_FRONTEND_BASE_URL=https://iam.$TUNNEL_DOMAIN/demo" ;;
     sis-api)
       # include the iam demo-page origins (local + tunnel): the demo page
       # drives sis directly, and setting CORS_ORIGIN overrides sis's built-in
       # localhost:3010 default (rostering #391)
       printf '%s\n' "CORS_ORIGIN=$DASH_URL,http://localhost:$IAM_PORT,https://dash.$TUNNEL_DOMAIN,https://iam.$TUNNEL_DOMAIN" ;;
     programs-api|scheduling-api|sessions-api|ads-adm-api)
-      printf '%s\n' "CORS_ORIGIN=$DASH_URL,https://dash.$TUNNEL_DOMAIN" ;;
+      # JANUS_LOGIN_HOST drives the SagaAuth login= base on programs/scheduling
+      # 401s (sessions/ads-adm don't emit it) → tunnelled iam demo, not prod.
+      # Bare host; the services' resolveLoginBaseUrl prefixes https for it.
+      printf '%s\n' "CORS_ORIGIN=$DASH_URL,https://dash.$TUNNEL_DOMAIN" \
+                    "JANUS_LOGIN_HOST=iam.$TUNNEL_DOMAIN/demo" ;;
     connect-api)
       # JANUS_LOGIN_HOST: where 401s send the browser. Default is the REAL dev
       # fleet's login (login.wootdev.com), which "succeeds" via the employee
@@ -999,7 +1007,10 @@ services_up(){
   # CORS_ORIGIN is COMMA-SEPARATED (api-util ≥1.2.0) — iam-api also gets the
   # connect-web origin, because connect-web's iam-client calls iam DIRECTLY
   # from the browser (personas.getMyPermissions, memberships, whoami…).
-  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL" $(tunnel_env iam-api)
+  # MAIL_FRONTEND_BASE_URL: the iam-realm SagaAuth login= base on 401s — the
+  # local iam demo (devLogin), so a lapsed session re-logs-in here, not at prod
+  # login.wootdev.com. tunnel_env overrides it with the tunnelled iam.
+  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL" MAIL_FRONTEND_BASE_URL="http://localhost:$IAM_PORT/demo" $(tunnel_env iam-api)
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7. Under --sandbox
@@ -1010,8 +1021,8 @@ services_up(){
      SIS_DATABASE_URL="$SIS_DB_URL" CORS_ORIGIN="$DASH_URL" \
      IAM_BASEURL="$IAM_URL/trpc" IAM_TOKENURL="$IAM_URL/v1/oauth/token" \
      $(sandbox_env sis-api) $(tunnel_env sis-api)
-  launch_if programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env programs-api) $(tunnel_env programs-api)
-  launch_if scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" $(sandbox_env scheduling-api) $(tunnel_env scheduling-api)
+  launch_if programs-api 3006 "$PROGRAM_HUB/apps/node/programs-api"     NODE_ENV=development DATABASE_URL="$PROGRAMS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" JANUS_LOGIN_HOST="localhost:$IAM_PORT/demo" $(sandbox_env programs-api) $(tunnel_env programs-api)
+  launch_if scheduling-api 3008 "$PROGRAM_HUB/apps/node/scheduling-api" NODE_ENV=development DATABASE_URL="$SCHEDULING_DB_URL" IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL" JANUS_LOGIN_HOST="localhost:$IAM_PORT/demo" $(sandbox_env scheduling-api) $(tunnel_env scheduling-api)
   # sessions-api: DATABASE_URL + IAM_API_URL are REQUIRED (it throws without
   # them); its RABBITMQ_URL default is program-hub's standalone :5673, so point
   # it at the mesh. SCHEDULING_API_URL defaults to :3008 (already the mesh

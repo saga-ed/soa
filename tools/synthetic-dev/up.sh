@@ -248,7 +248,7 @@ check_branches(){
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
             "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
             "$RTSM:rtsm"; do
-    [[ -d "${kv%:*}/.git" ]] || _miss+=("$kv")
+    [[ -e "${kv%:*}/.git" ]] || _miss+=("$kv")   # -e, not -d: a git WORKTREE's .git is a file
   done
   if [[ ${#_miss[@]} -gt 0 ]]; then
     printf "\033[31m✗\033[0m %d sibling repo(s) not cloned:\n" "${#_miss[@]}"
@@ -637,7 +637,7 @@ pull_repos(){
             "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
             "$RTSM:rtsm"; do
     dir=${kv%:*}; name=${kv#*:}
-    [[ -d "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
+    [[ -e "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
     dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -v '^??' || true)
     [[ -z "$dirty" ]] || { printf "\033[33m⚠\033[0m %-20s uncommitted changes — skipping\n" "$name"; continue; }
     git -C "$dir" fetch -q origin 2>/dev/null || { printf "\033[33m⚠\033[0m %-20s fetch failed — skipping\n" "$name"; continue; }

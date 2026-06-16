@@ -166,6 +166,7 @@ SIS_DB_URL="postgresql://sis:sis@localhost:5432/sis_db"     # sis-api owns a ded
 PROGRAMS_DB_URL="postgresql://saga_user:password123@localhost:5432/programs"
 SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
+CONTENT_DB_URL="postgresql://saga_user:password123@localhost:5432/content"      # content-api owns the `content` mesh DB
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 # ── sds_93 playback stack (opt-in: --with-playback) ──────────────────────────
 # insights/transcripts/chat APIs (student-data-system). Each *-db package owns
@@ -211,6 +212,13 @@ RECORDING_TOKEN="local-dev-token"             # shared bearer, matches the fleek
 # (e.g. SAGA_API_TARGET=https://jw.wootmath.com) to override. Goes away when
 # content-api lands.
 SAGA_API_TARGET="${SAGA_API_TARGET:-https://wootmath.com}"
+# content-api: the MODERN poll/content source — the "content-api lands" wiring the
+# note above anticipates. connect-api resolves contentRef→body from it via
+# CONTENT_API_URL and the dash content picker reads it. Its app default :3010
+# collides with iam-api on :3010, so run it on :3009. SAGA_API_TARGET stays as the
+# legacy fallback for poll-backed pages until the corpus is fully migrated.
+CONTENT_PORT=3009
+CONTENT_API_URL="http://localhost:$CONTENT_PORT"
 DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-dev-user.ts
 # ── hybrid mode (--only / --sandbox): run ONE service locally, point its
 # cross-service deps at a CLOUD sandbox instead of the local mesh. Empty by
@@ -265,7 +273,7 @@ check_branches(){
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
             "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
             "$RTSM:rtsm"; do
-    [[ -d "${kv%:*}/.git" ]] || _miss+=("$kv")
+    [[ -e "${kv%:*}/.git" ]] || _miss+=("$kv")   # -e, not -d: a git WORKTREE's .git is a file
   done
   if [[ ${#_miss[@]} -gt 0 ]]; then
     printf "\033[31m✗\033[0m %d sibling repo(s) not cloned:\n" "${#_miss[@]}"
@@ -680,7 +688,7 @@ pull_repos(){
             "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
             "$RTSM:rtsm"; do
     dir=${kv%:*}; name=${kv#*:}
-    [[ -d "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
+    [[ -e "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
     dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -v '^??' || true)
     [[ -z "$dirty" ]] || { printf "\033[33m⚠\033[0m %-20s uncommitted changes — skipping\n" "$name"; continue; }
     git -C "$dir" fetch -q origin 2>/dev/null || { printf "\033[33m⚠\033[0m %-20s fetch failed — skipping\n" "$name"; continue; }
@@ -751,6 +759,13 @@ prep(){
       psql -U postgres_admin -c "CREATE DATABASE sessions OWNER saga_user"
   fi
   migrate_db "$PROGRAM_HUB/apps/node/sessions-api"   sessions   "$SESSIONS_DB_URL"
+  # content-api owns a `content` DB (same first-postgres-init caveat as sessions).
+  if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='content'" 2>/dev/null)" != 1 ]]; then
+    db_step "content db create" "$SOA" docker exec soa-postgres-1 \
+      psql -U postgres_admin -c "CREATE DATABASE content OWNER saga_user"
+  fi
+  migrate_db "$PROGRAM_HUB/apps/node/content-api"    content    "$CONTENT_DB_URL"
   migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7); uses sis-db's own config
   db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
   # sds_93 playback DBs (transcripts/insights/chat) — opt-in, own their DB+role
@@ -1002,6 +1017,10 @@ services_up(){
   # port) and it doesn't read JANUS_REQUIRED, so neither is set. Pre-existing
   # program data needs a one-time manual replay (see header note).
   launch_if sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(sandbox_env sessions-api) $(tunnel_env sessions-api)
+  # content-api (:3009 — default :3010 collides with iam): the MODERN poll/content
+  # store. The dash picker reads it from the browser (CORS → dash origin) and
+  # connect-api resolves contentRef→body from it S2S. RABBITMQ for its outbox events.
+  launch_if content-api "$CONTENT_PORT" "$PROGRAM_HUB/apps/node/content-api"     NODE_ENV=development PORT="$CONTENT_PORT" DATABASE_URL="$CONTENT_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(tunnel_env content-api)
   launch_if ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
      ADS_ADM_SCHEDULE_PROVIDER=mock \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
@@ -1069,6 +1088,7 @@ services_up(){
      ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
      SESSIONS_API_BASE_URL="http://localhost:3007" \
      SAGA_API_TARGET="$SAGA_API_TARGET" \
+     CONTENT_API_URL="$CONTENT_API_URL" \
      PUBLIC_API_URL="$CONNECT_API_URL" \
      LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret \
      RECORDING_SERVICE_TOKEN="$RECORDING_TOKEN" \
@@ -1115,7 +1135,7 @@ reset_data(){
   # leaves seeded fixtures intact. NOTE: `--reset --with-playback` truncates them
   # but re-seed runs only on --seed full — so follow such a reset with `--seed
   # full` (or `--with-playback --seed full`) to repopulate, else they stay empty.
-  local dbs=(iam_local iam_pii_local programs scheduling sessions sis_db)
+  local dbs=(iam_local iam_pii_local programs scheduling sessions content sis_db)
   [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local)
   for db in "${dbs[@]}"; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then
@@ -1187,6 +1207,28 @@ seed_sessions(){
   ok "sessions projections seeded (demo programs render + authorize)"
 }
 
+# content-api: catalog (db:seed, direct DB) + obvious demo polls (HTTP authoring),
+# plus an optional REAL decoded legacy poll IF the (unmerged) migration tool is
+# present. Runs after services_up, so the HTTP steps reach content-api on :3009.
+# Each step is self-guarding so a content-api that's down only warns.
+seed_content(){
+  say "seeding content (catalog db:seed + demo polls)…"
+  ( cd "$PROGRAM_HUB/apps/node/content-api" && env DATABASE_URL="$CONTENT_DB_URL" pnpm db:seed >/dev/null 2>&1 ) \
+    && ok "content catalog seeded (db:seed)" || printf "\033[33m⚠\033[0m content catalog seed failed\n"
+  ( CONTENT_API="$CONTENT_API_URL" node "$SCRIPT_DIR/seed-demo-polls.mjs" >/dev/null 2>&1 ) \
+    && ok "demo polls authored → demo-poll-arithmetic|fractions|exit-ticket" \
+    || printf "\033[33m⚠\033[0m demo-poll seeding skipped (content-api up on :%s?)\n" "$CONTENT_PORT"
+  # The legacy→content migration tool lives on an UNMERGED program-hub branch; run
+  # it only when present so this stays green against program-hub main too.
+  if [[ -f "$PROGRAM_HUB/apps/node/content-api/tools/legacy-poll-migrate/migrate.ts" ]]; then
+    ( cd "$PROGRAM_HUB/apps/node/content-api" \
+        && env DATABASE_URL="$CONTENT_DB_URL" pnpm exec tsx tools/legacy-poll-migrate/migrate.ts \
+             --fixture bwo8my5mgprq9ran --target "$CONTENT_API_URL" >/dev/null 2>&1 ) \
+      && ok "demo legacy poll migrated → legacy-poll-bwo8my5mgprq9ran" \
+      || printf "\033[33m⚠\033[0m legacy-poll migration skipped (tsx present?)\n"
+  fi
+}
+
 # sds_93 playback fixtures (transcripts/insights/chat). Each app's `seed` script
 # (tsx src/bin/seed.ts) upserts deterministic fixture data from
 # @saga-ed/sds-fixtures (default slsid fixture-playback-001) so playback /
@@ -1212,15 +1254,19 @@ seed_playback(){
   ok "playback seeded (transcripts/insights/chat)"
 }
 
-# roster = iam + sessions demo (programs empty); full = + programs (+ playback
-# fixtures when --with-playback). Playback rides `full` so `--seed roster` stays
-# minimal; it only runs when the playback APIs were actually provisioned.
+# roster = iam + sessions demo (programs empty); full = + programs + content
+# (+ playback fixtures when --with-playback). Playback rides `full` so
+# `--seed roster` stays minimal; it only runs when the playback APIs were
+# actually provisioned.
 seed_stack(){
   local mode=${1:-roster}
   seed_iam
   seed_sessions
-  [[ "$mode" == full ]] && seed_programs
-  [[ "$mode" == full && $DO_PLAYBACK == 1 ]] && seed_playback
+  if [[ "$mode" == full ]]; then
+    seed_programs
+    seed_content
+    [[ $DO_PLAYBACK == 1 ]] && seed_playback
+  fi
   return 0
 }
 
@@ -1293,7 +1339,7 @@ open_login_browser(){
   printf "\033[33m⚠\033[0m Chromium still starting — watch %s\n" "$STATE/browser-login.log"
 }
 
-services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api ads-adm-api insights-api transcripts-api chat-api saga-dash rtsm-api connect-api connect-web; do
+services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api content-api ads-adm-api insights-api transcripts-api chat-api saga-dash rtsm-api connect-api connect-web; do
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
@@ -1304,7 +1350,7 @@ done
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
-for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 3008 5005 6301 6302 6303 8900 "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
+for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 "$CONTENT_PORT" 3008 5005 6301 6302 6303 8900 "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
 ok "services down (mesh incl. connect-mongo + AV containers left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
@@ -1322,7 +1368,7 @@ nuke_vite(){
 }
 
 status(){
-  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 ads-adm-api:5005 saga-dash:8900 rtsm-api:$RTSM_PORT connect-api:$CONNECT_API_PORT connect-web:$CONNECT_WEB_PORT; do
+  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 content-api:$CONTENT_PORT ads-adm-api:5005 saga-dash:8900 rtsm-api:$RTSM_PORT connect-api:$CONNECT_API_PORT connect-web:$CONNECT_WEB_PORT; do
     n=${kv%:*}; p=${kv#*:}; probe=$(probe_path "$n")
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done
@@ -1400,8 +1446,8 @@ done
 # with --only (running the full local stack against a cloud iam is not the point).
 if [[ -n "$ONLY_SERVICE" ]]; then
   case "$ONLY_SERVICE" in
-    iam-api|sis-api|programs-api|scheduling-api|sessions-api|ads-adm-api|saga-dash|rtsm-api|connect-api|connect-web) ;;
-    *) echo "--only: unknown service '$ONLY_SERVICE' (iam-api|sis-api|programs-api|scheduling-api|sessions-api|ads-adm-api|saga-dash|rtsm-api|connect-api|connect-web)"; exit 1 ;;
+    iam-api|sis-api|programs-api|scheduling-api|sessions-api|content-api|ads-adm-api|saga-dash|rtsm-api|connect-api|connect-web) ;;
+    *) echo "--only: unknown service '$ONLY_SERVICE' (iam-api|sis-api|programs-api|scheduling-api|sessions-api|content-api|ads-adm-api|saga-dash|rtsm-api|connect-api|connect-web)"; exit 1 ;;
   esac
   # --only is a launch directive: a bare `./up.sh --only <svc>` (no `up` verb)
   # should still bring that one service up, so imply DO_UP unless the user

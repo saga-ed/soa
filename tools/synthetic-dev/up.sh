@@ -942,7 +942,8 @@ sync_dash_local_defaults(){
     const fs = require("fs");
     const [out, domain] = process.argv.slice(1);
     const map = { "iam":"iam", "program-hub":"programs", "enrollment-api":"programs",
-      "scheduling-api":"scheduling", "sessions-api":"sessions", "sis-api":"sis", "connect":"connect" };
+      "scheduling-api":"scheduling", "sessions-api":"sessions", "sis-api":"sis",
+      "content-api":"content", "connect":"connect" };
     const localDefaults = {};
     for (const [key, label] of Object.entries(map)) localDefaults[key] = { type: "url", url: `https://${label}.${domain}` };
     fs.writeFileSync(out, JSON.stringify({ localDefaults }, null, 2) + "\n");

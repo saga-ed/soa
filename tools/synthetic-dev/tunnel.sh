@@ -58,6 +58,7 @@ SERVICES=(
     "programs:3006"
     "scheduling:3008"
     "sessions:3007"
+    "content:3009"
     "ads-adm:5005"
     "dash:8900"
     "connect:6210"

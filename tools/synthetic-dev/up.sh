@@ -82,6 +82,12 @@
 #                                  + MinIO; `av` adds the LiveKit egress sidecar). Needs
 #                                  the fleek repo cloned + AWS CLI (CodeArtifact token
 #                                  for the image builds). Composes with up/reset/seed.
+#   ./up.sh --with-playback      opt-in sds_93 playback APIs (transcripts :6302,
+#                                  insights :6301, chat :6303) — provisioned + launched
+#                                  against the mesh, fixture-seeded on `--seed full`
+#                                  (slsid fixture-playback-001). Composes:
+#                                  `--with-playback --seed full`. Lets colleagues query
+#                                  non-empty transcripts/insights/chat without a real CU run.
 #   ./up.sh --tunnel             ALSO expose the browser-facing services to other
 #                                  users at https://<svc>.<moniker>.vms.wootdev.com
 #                                  (multi-user Connect). Moniker comes from
@@ -162,6 +168,25 @@ SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
 CONTENT_DB_URL="postgresql://saga_user:password123@localhost:5432/content"      # content-api owns the `content` mesh DB
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
+# ── sds_93 playback stack (opt-in: --with-playback) ──────────────────────────
+# insights/transcripts/chat APIs (student-data-system). Each *-db package owns
+# its DB + a least-privilege app role via seed/local-bootstrap.sql (written for
+# an infra-compose Postgres — which the mesh IS), applied in
+# provision_playback_dbs(). MIGRATIONS run as the mesh MASTER (postgres_admin)
+# via these DATABASE_URLs; the SERVICES boot as their own app role via discrete
+# POSTGRES_* vars on the launch lines (the runbook invariant: migrations are
+# driven as master, never as the app role — master owns the migrated tables).
+# Ports come from each app's checked-in .env (EXPRESS_SERVER_PORT, required —
+# insights 6301 / transcripts 6302 / chat 6303); passed explicitly on the launch
+# lines so the stack pins them, and chosen to not clash with the rest of the
+# stack. RabbitMQ is not a boot blocker: the URL must just be present +
+# URL-shaped (Zod), and main.ts log-and-continues if the relay can't connect in
+# non-prod — so the mesh broker URL suffices. (Cross-repo claims about SDS app
+# boot verified against student-data-system main; re-check if SDS boot changes.)
+TRANSCRIPTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/transcripts_local"
+INSIGHTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/insights_local"
+CHAT_DB_URL="postgresql://postgres_admin:password123@localhost:5432/chat_local"
+DO_PLAYBACK=0                                               # --with-playback: add the 3 playback APIs
 # Connect (qboard). Ports are the apps' own defaults (vite.config.ts / config.ts).
 # Its mongo is the mesh's soa-connect-mongo-1 (infra-compose services/connect-mongo),
 # host :27037 (non-default on purpose: no contention with qboard-mongo/:27017),
@@ -625,6 +650,32 @@ migrate_db(){ # dir db_name [database_url — override to point prisma at the me
   fi
 }
 
+# Provision the sds_93 playback DBs (transcripts/insights/chat) on the mesh
+# Postgres. Each *-db package's seed/local-bootstrap.sql creates the DB +
+# least-privilege app role + grants — hardcoded for the docker-compose Postgres
+# (`postgres_admin`/`password123`/:5432), which is exactly the mesh, so the same
+# SQL applies here. It's idempotent (\gexec + IF NOT EXISTS), so re-runs skip
+# existing DBs/roles. Then migrate each as MASTER (postgres_admin) via
+# migrate_db — the app role boots later and is never used to run migrations
+# (master owns the migrated tables). The SDS *-db builds (db:generate + tsup)
+# already ran in prep() for every *-db package.
+provision_playback_dbs(){
+  say "provisioning playback DBs + roles (transcripts/insights/chat — bootstrap SQL on the mesh)…"
+  local app
+  for app in transcripts insights chat; do
+    if docker exec -i soa-postgres-1 psql -U postgres_admin -d postgres -v ON_ERROR_STOP=1 \
+         < "$SDS/packages/node/${app}-db/seed/local-bootstrap.sql" >"$STATE/playback-bootstrap-$app.log" 2>&1; then
+      ok "db+role: ${app}_local / ${app}_app"
+    else
+      printf "\033[31m✗\033[0m %s-db bootstrap failed:\n" "$app"; tail -10 "$STATE/playback-bootstrap-$app.log" | sed 's/^/    /'; exit 1
+    fi
+  done
+  migrate_db "$SDS/packages/node/transcripts-db" transcripts_local "$TRANSCRIPTS_DB_URL"
+  migrate_db "$SDS/packages/node/insights-db"    insights_local    "$INSIGHTS_DB_URL"
+  migrate_db "$SDS/packages/node/chat-db"        chat_local        "$CHAT_DB_URL"
+  ok "playback DBs migrated (transcripts/insights/chat)"
+}
+
 # --pull: fast-forward each sibling repo to its upstream before building. ff-ONLY,
 # skipping repos that are dirty, detached, upstream-less, or diverged (with a
 # warning) — so it never clobbers local work or moves you off a feature branch.
@@ -717,6 +768,9 @@ prep(){
   migrate_db "$PROGRAM_HUB/apps/node/content-api"    content    "$CONTENT_DB_URL"
   migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7); uses sis-db's own config
   db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
+  # sds_93 playback DBs (transcripts/insights/chat) — opt-in, own their DB+role
+  # via each package's local-bootstrap.sql (see provision_playback_dbs).
+  [[ $DO_PLAYBACK == 1 ]] && provision_playback_dbs
   say "seeding dev user ($DEV_USER_UUID)…"
   ( cd "$ROSTERING/packages/node/iam-db" && env $(grep -v '^#' "$ROSTERING/.env.local" | xargs) node dist/seed-dev-user.js >/dev/null 2>&1 ) || true
   ok "schemas + dev user ready"
@@ -972,6 +1026,39 @@ services_up(){
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)
+  # ── sds_93 playback APIs (opt-in: --with-playback) ──────────────────────────
+  # transcripts/insights/chat. Each boots as its OWN least-privilege app role via
+  # discrete POSTGRES_* (provision_playback_dbs migrated the schema as master).
+  # Ports are the apps' EXPRESS_SERVER_PORT defaults; passed explicitly so the
+  # stack pins them. RABBITMQ_URL must be present + URL-shaped (Zod) — the mesh
+  # broker satisfies it; the outbox relay log-and-continues if it can't connect
+  # (non-prod). AUTH disabled (dev-bypass viewer), like the other local APIs.
+  # CORS: these apps DON'T read CORS_ORIGIN (unlike ads-adm-api) — each hardcodes
+  # a localhost/127.0.0.1/::1 allowlist in main.ts, so the dash reaches them
+  # directly; to add a new origin, edit the app's valid-domains, not env here.
+  if [[ $DO_PLAYBACK == 1 ]]; then
+    launch_if insights-api 6301 "$SDS/apps/node/insights-api" \
+       NODE_ENV=development \
+       POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=insights_local \
+       POSTGRES_USERNAME=insights_app POSTGRES_PASSWORD=insights_app_local_pw \
+       POSTGRES_INSTANCENAME=InsightsDB \
+       EXPRESS_SERVER_PORT=6301 RABBITMQ_URL="$MESH_MQ" \
+       AUTH_AUTHENABLED=false $(tunnel_env insights-api)
+    launch_if transcripts-api 6302 "$SDS/apps/node/transcripts-api" \
+       NODE_ENV=development \
+       POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=transcripts_local \
+       POSTGRES_USERNAME=transcripts_app POSTGRES_PASSWORD=transcripts_app_local_pw \
+       POSTGRES_INSTANCENAME=TranscriptsDB \
+       EXPRESS_SERVER_PORT=6302 RABBITMQ_URL="$MESH_MQ" \
+       AUTH_AUTHENABLED=false $(tunnel_env transcripts-api)
+    launch_if chat-api 6303 "$SDS/apps/node/chat-api" \
+       NODE_ENV=development \
+       POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=chat_local \
+       POSTGRES_USERNAME=chat_app POSTGRES_PASSWORD=chat_app_local_pw \
+       POSTGRES_INSTANCENAME=ChatDB \
+       EXPRESS_SERVER_PORT=6303 RABBITMQ_URL="$MESH_MQ" \
+       AUTH_AUTHENABLED=false $(tunnel_env chat-api)
+  fi
   launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" $(tunnel_env saga-dash)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
   # always discovers via GET /fleet/discover (404 without fleet mode → the
@@ -1044,7 +1131,13 @@ reset_data(){
   local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
   # `sessions` truncation also clears its consumed-event cursors, so its
   # event-built projections re-converge from the producers' outbox replay.
-  for db in iam_local iam_pii_local programs scheduling sessions content sis_db; do
+  # playback DBs are truncated only under --with-playback, so a bare `--reset`
+  # leaves seeded fixtures intact. NOTE: `--reset --with-playback` truncates them
+  # but re-seed runs only on --seed full — so follow such a reset with `--seed
+  # full` (or `--with-playback --seed full`) to repopulate, else they stay empty.
+  local dbs=(iam_local iam_pii_local programs scheduling sessions content sis_db)
+  [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local)
+  for db in "${dbs[@]}"; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then
       ok "truncated $db"
     else
@@ -1136,12 +1229,44 @@ seed_content(){
   fi
 }
 
-# roster = iam + sessions demo (programs empty); full = + programs + content.
+# sds_93 playback fixtures (transcripts/insights/chat). Each app's `seed` script
+# (tsx src/bin/seed.ts) upserts deterministic fixture data from
+# @saga-ed/sds-fixtures (default slsid fixture-playback-001) so playback /
+# saga-dash queries return non-empty results without a real CU run. The seeds
+# write as each app's role, so we pass the app-role POSTGRES_* INLINE here
+# (independent of any checked-in .env — same self-contained pattern as
+# seed_programs' DATABASE_URL override). Idempotent: re-running upserts on the
+# apps' unique keys (no dupes).
+seed_playback(){
+  say "seeding playback fixtures (transcripts/insights/chat — db fixtures, slsid fixture-playback-001)…"
+  ( cd "$SDS/apps/node/transcripts-api" && env \
+      POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=transcripts_local \
+      POSTGRES_USERNAME=transcripts_app POSTGRES_PASSWORD=transcripts_app_local_pw \
+      POSTGRES_INSTANCENAME=TranscriptsDB pnpm seed )
+  ( cd "$SDS/apps/node/insights-api" && env \
+      POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=insights_local \
+      POSTGRES_USERNAME=insights_app POSTGRES_PASSWORD=insights_app_local_pw \
+      POSTGRES_INSTANCENAME=InsightsDB pnpm seed )
+  ( cd "$SDS/apps/node/chat-api" && env \
+      POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=chat_local \
+      POSTGRES_USERNAME=chat_app POSTGRES_PASSWORD=chat_app_local_pw \
+      POSTGRES_INSTANCENAME=ChatDB pnpm seed )
+  ok "playback seeded (transcripts/insights/chat)"
+}
+
+# roster = iam + sessions demo (programs empty); full = + programs + content
+# (+ playback fixtures when --with-playback). Playback rides `full` so
+# `--seed roster` stays minimal; it only runs when the playback APIs were
+# actually provisioned.
 seed_stack(){
   local mode=${1:-roster}
   seed_iam
   seed_sessions
-  if [[ "$mode" == full ]]; then seed_programs; seed_content; fi
+  if [[ "$mode" == full ]]; then
+    seed_programs
+    seed_content
+    [[ $DO_PLAYBACK == 1 ]] && seed_playback
+  fi
   return 0
 }
 
@@ -1214,7 +1339,7 @@ open_login_browser(){
   printf "\033[33m⚠\033[0m Chromium still starting — watch %s\n" "$STATE/browser-login.log"
 }
 
-services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api content-api ads-adm-api saga-dash rtsm-api connect-api connect-web; do
+services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api content-api ads-adm-api insights-api transcripts-api chat-api saga-dash rtsm-api connect-api connect-web; do
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
@@ -1225,7 +1350,7 @@ done
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
-for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 "$CONTENT_PORT" 3008 5005 8900 "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
+for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 "$CONTENT_PORT" 3008 5005 6301 6302 6303 8900 "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
 ok "services down (mesh incl. connect-mongo + AV containers left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
@@ -1247,6 +1372,15 @@ status(){
     n=${kv%:*}; p=${kv#*:}; probe=$(probe_path "$n")
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done
+  # Playback APIs are opt-in (--with-playback) — only report when launched (pid file present).
+  if [[ -f "$STATE/transcripts-api.pid" || -f "$STATE/insights-api.pid" || -f "$STATE/chat-api.pid" ]]; then
+    for kv in insights-api:6301 transcripts-api:6302 chat-api:6303; do
+      n=${kv%:*}; p=${kv#*:}
+      printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p/health 2>/dev/null)"
+    done
+  else
+    printf "  %-15s off (opt-in: ./up.sh --with-playback)\n" "playback"
+  fi
   # Recording stack is opt-in — only report when its containers exist.
   if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx fleek-recorder; then
     printf "  %-15s :%s → %s\n" "recorder" "$RECORDER_CONTROL_PORT" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:$RECORDER_CONTROL_PORT/v1/health 2>/dev/null)"
@@ -1278,7 +1412,7 @@ case "${1:-up}" in
   # Self-maintaining: print the header's "Usage:" block through its closing
   # ruler, instead of a hardcoded line range that drifts as the header grows.
   -h|--help)                     sed -n '/^# Usage:/,/^# ─────/p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--tunnel) ;; # flag-only invocation; skip up
+  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--tunnel|--with-playback) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
@@ -1291,6 +1425,9 @@ while [[ $# -gt 0 ]]; do
     # --login / --user [email]: optional positional email; bare or next-flag → default persona
     --login|--user) DO_LOGIN=1; shift; case "${1:-}" in ''|--*) ;; *) LOGIN_USER=$1; shift ;; esac ;;
     --pull) DO_PULL=1; shift ;;
+    # --with-playback: also provision + launch + (on --seed full) seed the sds_93
+    # playback APIs (transcripts/insights/chat). Composes with up/reset/seed.
+    --with-playback) DO_PLAYBACK=1; shift ;;
     # --only <svc>: launch just one service (the one you're editing); the rest
     # are expected to live in a cloud sandbox. --sandbox <name>: the compose name
     # those deps live under — flips the launched service's dep URLs + preview
@@ -1319,6 +1456,12 @@ if [[ -n "$ONLY_SERVICE" ]]; then
 fi
 if [[ -n "$SANDBOX_NAME" && -z "$ONLY_SERVICE" ]]; then
   echo "--sandbox <name> requires --only <svc> (point ONE local service at the sandbox; the rest are the sandbox)"; exit 1
+fi
+# --with-playback is a launch directive: a bare `./up.sh --with-playback` (no
+# verb) should bring the stack up WITH the playback APIs. Imply DO_UP unless a
+# reset/restart was asked (those run prep + services_up themselves).
+if [[ $DO_PLAYBACK == 1 ]]; then
+  [[ $DO_RESET == 1 || $DO_RESTART == 1 ]] || DO_UP=1
 fi
 # Validate the sandbox name — it flows into the host URL and the preview header,
 # so constrain it to the same shape the composition API enforces.

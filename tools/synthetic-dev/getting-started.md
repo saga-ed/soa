@@ -105,6 +105,7 @@ the next `refresh-suite`. (Reset one repo with `--reset saga-dash`.)
 ./up.sh --login                    # mint a session + open an auto-logged-in Chromium
 ./up.sh --down                     # stop services (mesh left up)
 ./refresh-suite.sh                 # re-apply your overlay after main moves (no-op if you have none)
+./up.sh --with-playback --seed full   # ALSO run the sds_93 playback APIs, fixture-seeded (see below)
 ```
 
 Then open `http://localhost:3010/demo#auth` → **devLogin** as `dev@saga.org`
@@ -222,6 +223,40 @@ connect-api (`~/dev/qboard/apps/node/connectv3-api`, **:6106**) and connect-web
   way. Playback: connect-web is launched with
   `VITE_PLAYBACK_ASSET_BASE_OVERRIDE=http://localhost:8444`.
 - **Deferred:** dash→connect session linking.
+
+## Playback APIs — opt-in (`--with-playback`)
+
+The sds_93 playback stack — **insights-api (:6301)**, **transcripts-api (:6302)**,
+**chat-api (:6303)** (student-data-system) — serves session-derived data
+(Glow/Grow insights, CU transcript segments + enrichment, queryable chat) over
+tRPC + REST. It's **opt-in** so the default stack stays lean.
+
+```bash
+./up.sh --with-playback --seed full   # provision + launch + fixture-seed all three
+./up.sh --with-playback --status      # the three show under "playback" in --status
+```
+
+- **DBs + roles:** each app owns `{insights,transcripts,chat}_local` + a
+  least-privilege role (`{insights,transcripts,chat}_app`) on the mesh Postgres,
+  created from each package's `packages/node/*-db/seed/local-bootstrap.sql` (the
+  same idempotent SQL the SDS docker-compose uses; the mesh is an infra-compose
+  Postgres, so it applies as-is). Migrations run as the mesh master
+  (`postgres_admin`); the apps boot as their reduced-privilege role.
+- **Seed:** rides `--seed full` (not `roster`). Each app's `bin/seed.ts` upserts
+  deterministic fixtures from `@saga-ed/sds-fixtures` under slsid
+  **`fixture-playback-001`**, so playback / saga-dash queries return non-empty
+  results without a real CU run. Idempotent (upserts on unique keys).
+- **RabbitMQ:** the apps validate `RABBITMQ_URL` at boot but log-and-continue if
+  the outbox relay can't connect (non-prod), so the mesh broker satisfies them.
+- **Query the seeded data** (auth is off locally — no cookie needed):
+  ```bash
+  curl -s 'http://localhost:6302/transcripts/v1/trpc/transcripts.segmentsBySession?input=%7B%22session_id%22%3A%22fixture-playback-001%22%7D'
+  curl -s 'http://localhost:6301/insights/v1/trpc/insights.listInsights?input=%7B%22session_id%22%3A%22fixture-playback-001%22%7D'
+  curl -s 'http://localhost:6303/chat/v1/trpc/chat.messagesBySession?input=%7B%22session_id%22%3A%22fixture-playback-001%22%7D'
+  ```
+- **`recording-extractor`** (the 4th sds_93 app, an SQS/S3 CRDT decoder) is **not**
+  in the stack — it exposes only health endpoints (no queryable data routes) and
+  has no seed; the three HTTP APIs above are what colleagues query.
 
 ## Multi-user access — tunnel mode (`--tunnel`)
 

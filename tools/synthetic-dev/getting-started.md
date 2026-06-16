@@ -255,8 +255,8 @@ tRPC + REST. It's **opt-in** so the default stack stays lean.
   curl -s 'http://localhost:6303/chat/v1/trpc/chat.messagesBySession?input=%7B%22session_id%22%3A%22fixture-playback-001%22%7D'
   ```
 - **`recording-extractor`** (the 4th sds_93 app, an SQS/S3 CRDT decoder) is **not**
-  in the stack — it has no HTTP surface or seed; the three HTTP APIs above are
-  what colleagues query.
+  in the stack — it exposes only health endpoints (no queryable data routes) and
+  has no seed; the three HTTP APIs above are what colleagues query.
 
 ## Multi-user access — tunnel mode (`--tunnel`)
 

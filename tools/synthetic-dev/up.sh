@@ -168,16 +168,20 @@ SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
 # ── sds_93 playback stack (opt-in: --with-playback) ──────────────────────────
-# transcripts/insights/chat APIs (student-data-system). Each *-db package owns
+# insights/transcripts/chat APIs (student-data-system). Each *-db package owns
 # its DB + a least-privilege app role via seed/local-bootstrap.sql (written for
 # an infra-compose Postgres — which the mesh IS), applied in
 # provision_playback_dbs(). MIGRATIONS run as the mesh MASTER (postgres_admin)
 # via these DATABASE_URLs; the SERVICES boot as their own app role via discrete
-# POSTGRES_* vars on the launch lines (the runbook invariant: the app role never
-# runs schema DDL). Ports are the apps' EXPRESS_SERVER_PORT defaults (6301/02/03
-# — no clash with the rest of the stack). RabbitMQ is not a boot blocker: the
-# URL must just be present + URL-shaped (Zod), and main.ts log-and-continues if
-# the relay can't connect in non-prod — so the mesh broker URL suffices.
+# POSTGRES_* vars on the launch lines (the runbook invariant: migrations are
+# driven as master, never as the app role — master owns the migrated tables).
+# Ports come from each app's checked-in .env (EXPRESS_SERVER_PORT, required —
+# insights 6301 / transcripts 6302 / chat 6303); passed explicitly on the launch
+# lines so the stack pins them, and chosen to not clash with the rest of the
+# stack. RabbitMQ is not a boot blocker: the URL must just be present +
+# URL-shaped (Zod), and main.ts log-and-continues if the relay can't connect in
+# non-prod — so the mesh broker URL suffices. (Cross-repo claims about SDS app
+# boot verified against student-data-system main; re-check if SDS boot changes.)
 TRANSCRIPTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/transcripts_local"
 INSIGHTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/insights_local"
 CHAT_DB_URL="postgresql://postgres_admin:password123@localhost:5432/chat_local"
@@ -644,8 +648,9 @@ migrate_db(){ # dir db_name [database_url — override to point prisma at the me
 # (`postgres_admin`/`password123`/:5432), which is exactly the mesh, so the same
 # SQL applies here. It's idempotent (\gexec + IF NOT EXISTS), so re-runs skip
 # existing DBs/roles. Then migrate each as MASTER (postgres_admin) via
-# migrate_db — the app role boots later with no schema-DDL rights. The SDS *-db
-# builds (db:generate + tsup) already ran in prep() for every *-db package.
+# migrate_db — the app role boots later and is never used to run migrations
+# (master owns the migrated tables). The SDS *-db builds (db:generate + tsup)
+# already ran in prep() for every *-db package.
 provision_playback_dbs(){
   say "provisioning playback DBs + roles (transcripts/insights/chat — bootstrap SQL on the mesh)…"
   local app
@@ -1009,7 +1014,9 @@ services_up(){
   # stack pins them. RABBITMQ_URL must be present + URL-shaped (Zod) — the mesh
   # broker satisfies it; the outbox relay log-and-continues if it can't connect
   # (non-prod). AUTH disabled (dev-bypass viewer), like the other local APIs.
-  # CORS_ORIGIN lets the dash (and any browser client) reach them cross-origin.
+  # CORS: these apps DON'T read CORS_ORIGIN (unlike ads-adm-api) — each hardcodes
+  # a localhost/127.0.0.1/::1 allowlist in main.ts, so the dash reaches them
+  # directly; to add a new origin, edit the app's valid-domains, not env here.
   if [[ $DO_PLAYBACK == 1 ]]; then
     launch_if insights-api 6301 "$SDS/apps/node/insights-api" \
        NODE_ENV=development \
@@ -1017,21 +1024,21 @@ services_up(){
        POSTGRES_USERNAME=insights_app POSTGRES_PASSWORD=insights_app_local_pw \
        POSTGRES_INSTANCENAME=InsightsDB \
        EXPRESS_SERVER_PORT=6301 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false CORS_ORIGIN="$DASH_URL" $(tunnel_env insights-api)
+       AUTH_AUTHENABLED=false $(tunnel_env insights-api)
     launch_if transcripts-api 6302 "$SDS/apps/node/transcripts-api" \
        NODE_ENV=development \
        POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=transcripts_local \
        POSTGRES_USERNAME=transcripts_app POSTGRES_PASSWORD=transcripts_app_local_pw \
        POSTGRES_INSTANCENAME=TranscriptsDB \
        EXPRESS_SERVER_PORT=6302 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false CORS_ORIGIN="$DASH_URL" $(tunnel_env transcripts-api)
+       AUTH_AUTHENABLED=false $(tunnel_env transcripts-api)
     launch_if chat-api 6303 "$SDS/apps/node/chat-api" \
        NODE_ENV=development \
        POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=chat_local \
        POSTGRES_USERNAME=chat_app POSTGRES_PASSWORD=chat_app_local_pw \
        POSTGRES_INSTANCENAME=ChatDB \
        EXPRESS_SERVER_PORT=6303 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false CORS_ORIGIN="$DASH_URL" $(tunnel_env chat-api)
+       AUTH_AUTHENABLED=false $(tunnel_env chat-api)
   fi
   launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" $(tunnel_env saga-dash)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
@@ -1104,8 +1111,10 @@ reset_data(){
   local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
   # `sessions` truncation also clears its consumed-event cursors, so its
   # event-built projections re-converge from the producers' outbox replay.
-  # playback DBs are reset only under --with-playback, so a bare `--reset` doesn't
-  # wipe seeded fixtures it won't re-seed (playback re-seeds only on --seed full).
+  # playback DBs are truncated only under --with-playback, so a bare `--reset`
+  # leaves seeded fixtures intact. NOTE: `--reset --with-playback` truncates them
+  # but re-seed runs only on --seed full — so follow such a reset with `--seed
+  # full` (or `--with-playback --seed full`) to repopulate, else they stay empty.
   local dbs=(iam_local iam_pii_local programs scheduling sessions sis_db)
   [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local)
   for db in "${dbs[@]}"; do

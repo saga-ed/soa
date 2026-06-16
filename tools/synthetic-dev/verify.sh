@@ -67,6 +67,16 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx fleek-recorder; then
 else
   printf "  \033[2m· recording stack off (opt-in: ./up.sh --record [crdt|av])\033[0m\n"
 fi
+# Playback APIs are OPT-IN (./up.sh --with-playback) — assert only when launched
+# (pid file present), so a default verify run stays green without them.
+PB_STATE=${STATE:-/tmp/sds-synthetic}
+if [[ -f "$PB_STATE/transcripts-api.pid" || -f "$PB_STATE/insights-api.pid" || -f "$PB_STATE/chat-api.pid" ]]; then
+  probe insights-api    6301 /health
+  probe transcripts-api 6302 /health
+  probe chat-api        6303 /health
+else
+  printf "  \033[2m· playback APIs off (opt-in: ./up.sh --with-playback)\033[0m\n"
+fi
 
 printf "\033[1m── data ──\033[0m\n"
 users=$(docker exec soa-postgres-1 psql -U iam -d iam_local -tAc "SELECT count(*) FROM users" 2>/dev/null || echo "")

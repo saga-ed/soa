@@ -54,7 +54,7 @@ won't stop the run.
 | **soa** | `~/dev/soa` | `main` | mesh infra (`infra/` + `projects/saga-mesh/seed`) for pg/redis/rabbitmq; shared `@saga-ed/soa-*` packages (registry mode — `soa:link:off`) |
 | **rostering** | `~/dev/rostering` | `main` | iam-api (**:3010**); **sis-api (:3100)** + sis-db prisma; iam-db / iam-pii-db prisma; the `program-hub` roster scenario (`scripts/scenarios`) |
 | **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**) + sessions-api (**:3007**); the `programs` scenario (`scripts/scenarios`) |
-| **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. Override the path with `SDS=...` |
+| **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. OPT-IN (`--with-playback`): the sds_93 playback APIs — insights-api (**:6301**), transcripts-api (**:6302**), chat-api (**:6303**) + their `*-db` prisma. Override the path with `SDS=...` |
 | **saga-dash** | `~/dev/saga-dash` | `main` | dash web UI (**:8900**) |
 | **qboard** | `~/dev/qboard` | `main` | connect-api (**:6106**) + connect-web (**:6210**); livekit/coturn compose (AV). Override the path with `QBOARD=...` |
 | **rtsm** | `~/dev/rtsm` | `main` | rtsm-api (**:6110**) — Connect's CRDT/socket service, single-node here. Override the path with `RTSM=...` |
@@ -86,6 +86,7 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | mongo (connect) | 27037 | `soa-connect-mongo-1` — mesh-managed (infra-compose `services/connect-mongo`; standalone mongo:8, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's :27017) |
 | livekit / coturn | 7880 / — | qboard docker-compose (AV; best-effort — Connect runs CRDT-only without them) |
 | recorder / recordings-api / minio / egress | 7890 (webhook 7889) / 8444 / 9000 / — | OPT-IN (`./up.sh --record [crdt|av]`) — fleek compose + local overlay from `~/dev/fleek`; recordings in `~/.fleek-local/recordings` |
+| insights-api / transcripts-api / chat-api | 6301 / 6302 / 6303 | OPT-IN (`./up.sh --with-playback`) — sds_93 playback APIs (student-data-system **main**). Own DBs `{insights,transcripts,chat}_local` + least-privilege roles on the mesh (each `*-db/seed/local-bootstrap.sql`); fixture-seeded on `--seed full` (slsid `fixture-playback-001`). RabbitMQ via the mesh broker (relay log-and-continues if down). |
 
 Mesh rabbitmq creds: **`rabbitmq_admin:password123`** (not `saga_user`).
 Eight empty DBs: `iam_local`, `iam_pii_local`, `programs`, `scheduling`,

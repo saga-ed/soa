@@ -43,6 +43,29 @@ err(){  printf "\033[31m✗\033[0m %s\n" "$*"; }
 DEV=${DEV:-$HOME/dev}
 SDS=${SDS:-$DEV/student-data-system}
 
+# Resolve a sibling repo's checkout path, honoring the per-repo override env
+# vars up.sh exposes (SOA/ROSTERING/PROGRAM_HUB/SAGA_DASH/SDS/QBOARD/RTSM/FLEEK)
+# so bootstrap provisions the SAME checkout up.sh will run — e.g. a clean
+# `git worktree` of main when your primary checkout is dirty. Defaults to
+# $DEV/<name>. The name→var map is explicit because SDS doesn't follow the
+# uppercase-with-dashes-to-underscores rule.
+repo_path(){ # name
+  case "$1" in
+    soa)                 echo "${SOA:-$DEV/soa}" ;;
+    rostering)           echo "${ROSTERING:-$DEV/rostering}" ;;
+    program-hub)         echo "${PROGRAM_HUB:-$DEV/program-hub}" ;;
+    saga-dash)           echo "${SAGA_DASH:-$DEV/saga-dash}" ;;
+    student-data-system) echo "${SDS:-$DEV/student-data-system}" ;;
+    qboard)              echo "${QBOARD:-$DEV/qboard}" ;;
+    rtsm)                echo "${RTSM:-$DEV/rtsm}" ;;
+    fleek)               echo "${FLEEK:-$DEV/fleek}" ;;
+    *)                   echo "$DEV/$1" ;;
+  esac
+}
+# True when a repo's resolved path differs from the $DEV/<name> default —
+# i.e. the user pointed it at an alternate checkout (e.g. a main worktree).
+repo_overridden(){ [[ "$(repo_path "$1")" != "$DEV/$1" ]]; }
+
 # Step 1 — the real one-time machine bootstrap: make sure all seven sibling repos
 # are cloned AND installed, and fully provision (clone if missing, then
 # co:login + install) any that aren't, so the run continues without a manual
@@ -52,11 +75,13 @@ SDS=${SDS:-$DEV/student-data-system}
 # re-runs (directory-existence checks only). Fails fast when non-interactive.
 ensure_repos(){
   local need=() kv dir name reason rest ans
-  for kv in "$DEV/soa:soa" "$DEV/rostering:rostering" "$DEV/program-hub:program-hub" \
-            "$DEV/saga-dash:saga-dash" "$SDS:student-data-system" "$DEV/qboard:qboard" \
-            "$DEV/rtsm:rtsm"; do
+  for name in soa rostering program-hub saga-dash student-data-system qboard rtsm; do
+    kv="$(repo_path "$name"):$name"
     dir=${kv%:*}
-    if [[ ! -d "$dir/.git" ]]; then
+    # `.git` is a DIR in a normal clone but a FILE (a `gitdir:` pointer) in a
+    # `git worktree` — accept either so an overridden worktree isn't mistaken
+    # for "needs clone" (which would `git clone` over a populated worktree).
+    if [[ ! -e "$dir/.git" ]]; then
       need+=("$kv:clone")
     elif [[ -f "$dir/package.json" && ! -d "$dir/node_modules" ]]; then
       need+=("$kv:install")

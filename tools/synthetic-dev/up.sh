@@ -519,7 +519,7 @@ connect_av_up(){
 # OFF + a dev identity (no saga cookie exists in this stack).
 record_up(){ # mode: crdt|av
   local mode=${1:-crdt} token
-  [[ -d "$FLEEK/.git" ]] || { printf "\033[31m✗\033[0m --record needs the fleek repo at %s (clone git@github.com:saga-ed/fleek.git)\n" "$FLEEK"; exit 1; }
+  [[ -e "$FLEEK/.git" ]] || { printf "\033[31m✗\033[0m --record needs the fleek repo at %s (clone git@github.com:saga-ed/fleek.git)\n" "$FLEEK"; exit 1; }  # -e: a worktree's .git is a file
   mkdir -p "$FLEEK_REC_DIR"
   # qboard's redis first (livekit.yaml names it; egress subscribes via the
   # :6380 host mapping — NOT the mesh redis on :6379), then recreate livekit

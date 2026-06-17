@@ -50,16 +50,22 @@ on the branch below — `check_branches` only **warns** on a mismatch, it
 won't stop the run.
 
 Every repo path is **individually overridable** (the `<VAR>=...` in each
-row). The most useful case: point a repo at a `git worktree` of clean
-`main` when your primary checkout is dirty or on a feature branch.
-`refresh-suite` skips dirty repos, so a clean worktree is how you keep your
-in-flight work untouched while the stack runs on `main`. For example, with
-your `rostering` checkout mid-feature:
+row), and the override is honored by `up.sh`, `bootstrap.sh`, and
+`refresh-suite.sh` alike (export it once; all three read it). The most
+useful case: point a repo at a `git worktree` of clean `main` when your
+primary checkout is dirty or on a feature branch — so the stack runs on
+`main` while your in-flight work stays untouched:
 
 ```bash
 git -C ~/dev/rostering worktree add ~/dev/rostering-main origin/main
-ROSTERING=~/dev/rostering-main ./up.sh up --seed full --login
+( cd ~/dev/rostering-main && pnpm install )   # worktrees don't share node_modules
+ROSTERING=~/dev/rostering-main ./bootstrap.sh --seed full   # or: ./up.sh up --seed full --login
 ```
+
+An overridden repo is **left as-is** by `refresh-suite` (it's not overlaid
+onto `local/integration` — a clean detached-`main` worktree must not be
+re-`checkout`-ed), and `bootstrap`'s repo provisioning checks the overridden
+path (a worktree's `.git` is a file, not a dir — handled).
 
 | repo | presumed location | branch | provides (port) |
 |---|---|---|---|

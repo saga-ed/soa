@@ -49,13 +49,25 @@ All paths are relative to `$DEV` (default `~/dev`; override by exporting
 on the branch below — `check_branches` only **warns** on a mismatch, it
 won't stop the run.
 
+Every repo path is **individually overridable** (the `<VAR>=...` in each
+row). The most useful case: point a repo at a `git worktree` of clean
+`main` when your primary checkout is dirty or on a feature branch.
+`refresh-suite` skips dirty repos, so a clean worktree is how you keep your
+in-flight work untouched while the stack runs on `main`. For example, with
+your `rostering` checkout mid-feature:
+
+```bash
+git -C ~/dev/rostering worktree add ~/dev/rostering-main origin/main
+ROSTERING=~/dev/rostering-main ./up.sh up --seed full --login
+```
+
 | repo | presumed location | branch | provides (port) |
 |---|---|---|---|
-| **soa** | `~/dev/soa` | `main` | mesh infra (`infra/` + `projects/saga-mesh/seed`) for pg/redis/rabbitmq; shared `@saga-ed/soa-*` packages (registry mode — `soa:link:off`) |
-| **rostering** | `~/dev/rostering` | `main` | iam-api (**:3010**); **sis-api (:3100)** + sis-db prisma; iam-db / iam-pii-db prisma; the `program-hub` roster scenario (`scripts/scenarios`) |
-| **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**) + sessions-api (**:3007**); the `programs` scenario (`scripts/scenarios`) |
+| **soa** | `~/dev/soa` | `main` | mesh infra (`infra/` + `projects/saga-mesh/seed`) for pg/redis/rabbitmq; shared `@saga-ed/soa-*` packages (registry mode — `soa:link:off`). Override the path with `SOA=...` |
+| **rostering** | `~/dev/rostering` | `main` | iam-api (**:3010**); **sis-api (:3100)** + sis-db prisma; iam-db / iam-pii-db prisma; the `program-hub` roster scenario (`scripts/scenarios`). Override the path with `ROSTERING=...` |
+| **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**) + sessions-api (**:3007**); the `programs` scenario (`scripts/scenarios`). Override the path with `PROGRAM_HUB=...` |
 | **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. OPT-IN (`--with-playback`): the sds_93 playback APIs — insights-api (**:6301**), transcripts-api (**:6302**), chat-api (**:6303**) + their `*-db` prisma. Override the path with `SDS=...` |
-| **saga-dash** | `~/dev/saga-dash` | `main` | dash web UI (**:8900**) |
+| **saga-dash** | `~/dev/saga-dash` | `main` | dash web UI (**:8900**). Override the path with `SAGA_DASH=...` |
 | **qboard** | `~/dev/qboard` | `main` | connect-api (**:6106**) + connect-web (**:6210**); livekit/coturn compose (AV). Override the path with `QBOARD=...` |
 | **rtsm** | `~/dev/rtsm` | `main` | rtsm-api (**:6110**) — Connect's CRDT/socket service, single-node here. Override the path with `RTSM=...` |
 

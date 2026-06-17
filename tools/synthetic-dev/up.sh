@@ -146,10 +146,15 @@
 set -euo pipefail
 
 DEV=${DEV:-$HOME/dev}
-SOA=$DEV/soa
-ROSTERING=$DEV/rostering
-PROGRAM_HUB=$DEV/program-hub
-SAGA_DASH=$DEV/saga-dash
+# Each sibling repo path is overridable so you can point a service at an
+# alternate checkout — most usefully a `git worktree` of clean `main` when
+# your primary checkout is dirty or on a feature branch (refresh-suite skips
+# dirty repos, so a clean worktree is how you keep your in-flight work
+# untouched while the stack runs on main). Defaults to $DEV/<repo>.
+SOA=${SOA:-$DEV/soa}                         # mesh infra + shared @saga-ed/soa-* packages
+ROSTERING=${ROSTERING:-$DEV/rostering}       # iam-api + sis-api + iam/sis prisma
+PROGRAM_HUB=${PROGRAM_HUB:-$DEV/program-hub} # programs/scheduling/sessions/content-api
+SAGA_DASH=${SAGA_DASH:-$DEV/saga-dash}       # dash web UI
 SDS=${SDS:-$DEV/student-data-system}         # ads-adm from the canonical checkout (sds_92 merged to main; worktree retired)
 QBOARD=${QBOARD:-$DEV/qboard}                # Connect app (connect-api + connect-web)
 RTSM=${RTSM:-$DEV/rtsm}                      # RTSM CRDT/socket service (single-node local)

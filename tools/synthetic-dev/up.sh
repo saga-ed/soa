@@ -1044,21 +1044,21 @@ services_up(){
        POSTGRES_USERNAME=insights_app POSTGRES_PASSWORD=insights_app_local_pw \
        POSTGRES_INSTANCENAME=InsightsDB \
        EXPRESS_SERVER_PORT=6301 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false $(tunnel_env insights-api)
+       AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env insights-api)
     launch_if transcripts-api 6302 "$SDS/apps/node/transcripts-api" \
        NODE_ENV=development \
        POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=transcripts_local \
        POSTGRES_USERNAME=transcripts_app POSTGRES_PASSWORD=transcripts_app_local_pw \
        POSTGRES_INSTANCENAME=TranscriptsDB \
        EXPRESS_SERVER_PORT=6302 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false $(tunnel_env transcripts-api)
+       AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env transcripts-api)
     launch_if chat-api 6303 "$SDS/apps/node/chat-api" \
        NODE_ENV=development \
        POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=chat_local \
        POSTGRES_USERNAME=chat_app POSTGRES_PASSWORD=chat_app_local_pw \
        POSTGRES_INSTANCENAME=ChatDB \
        EXPRESS_SERVER_PORT=6303 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false $(tunnel_env chat-api)
+       AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env chat-api)
   fi
   launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" $(tunnel_env saga-dash)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client

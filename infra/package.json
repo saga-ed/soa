@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/infra-compose",
-    "version": "1.3.2",
+    "version": "1.4.0",
     "description": "Composable Docker service templates for Saga platform local development",
     "bin": {
         "infra-compose": "bin/infra-compose"
@@ -30,6 +30,7 @@
         ".env.defaults"
     ],
     "dependencies": {
+        "bson": "^6.10.4",
         "express": "^4.22.1",
         "mongodb": "^6.0.0",
         "mysql2": "^3.0.0"

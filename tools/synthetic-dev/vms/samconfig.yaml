@@ -1,0 +1,23 @@
+version: 0.1
+# Manual-only stack (no CI lane) — deploy from a dev laptop:
+#   cd tools/synthetic-dev/vms && sam deploy --config-env vms --profile SagaDevelopmentProfile
+# The profile below is a local convenience; pass --profile to override.
+vms:
+  deploy:
+    parameters:
+      stack_name: synthetic-dev-vms
+      template_file: template.yaml
+      capabilities: CAPABILITY_NAMED_IAM
+      region: us-west-2
+      confirm_changeset: true
+      resolve_s3: true
+      profile: SagaDevelopmentProfile
+      parameter_overrides:
+      - DomainName=vms.wootdev.com
+      - HostedZoneId=Z06686211OOAM6WWKX6KW
+      - InstanceType=t4g.small
+      - FrpVersion=0.61.1
+      - FrpTokenParameterName=/vms/frp-token
+      - MonikersParameterName=/vms/monikers
+      - AcmeEmail=jward@saga.org
+      tags: Project=synthetic-dev Environment=dev ManagedBy=SAM Service=vms

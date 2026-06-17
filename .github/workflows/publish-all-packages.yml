@@ -23,7 +23,10 @@ on:
   pull_request:
     paths:
       - "packages/**"
-      - ".github/**"
+      - "build-tools/**"
+      - "turbo.json"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/publish-all-packages.yml"
   release:
     types: [published]
   workflow_dispatch:
@@ -42,6 +45,14 @@ on:
         required: false
         default: false
         type: boolean
+
+# Rapid PR pushes were stacking full ~6-min pipeline runs. Cancel superseded
+# runs on PRs; real publishes (push/release/dispatch) are never cancelled
+# mid-flight — they share one serial group so they queue instead of racing
+# on version commits.
+concurrency:
+  group: publish-all-packages-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'publish-serial' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   NODE_VERSION: "22"

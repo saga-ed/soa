@@ -1,29 +1,40 @@
 # Local synthetic-dev stack (sds_92)
 
-A dockerized local stack (postgres + redis + rabbitmq + the six APIs)
-for developing **synthetic** iam rosters / programs / schedules — no
-VPN, no prod-mirror fixture. Built 2026-05-26 in response to
+A dockerized local stack (postgres + redis + rabbitmq + mongo + the ten
+services) for developing **synthetic** iam rosters / programs / schedules —
+no VPN, no prod-mirror fixture. Built 2026-05-26 in response to
 `sources/prompt-3.md`.
 
 The sixth API is **sis-api** (rostering, on main as of 2026-06 — Adam's
 SIS reconciliation / CSV-roster service), added so it can be
 cross-developed against saga-dash on this stack. See
-`../decisions/d1.7`.
+`../decisions/d1.7`. The seventh is **sessions-api** (program-hub #148
+harvest; soa#146). Eight + nine are the **Connect app** (qboard:
+connect-api :6106 + connect-web :6210) — see getting-started.md's
+Connect section for what's different (mesh-managed mongo :27037, no
+fixtures, no proxy, recording deferred). Ten is **rtsm-api** (rtsm,
+:6110) — Connect's CRDT/socket service as a local single-instance node
+(stateless, no DB, auth off).
 
 > **New here?** Read **`getting-started.md`** — onboarding + the
-> one-command path (`./bootstrap.sh`) that lands you in the team's exact
-> state (pinned in-flight PRs via `refresh-suite.sh`, then up + seed +
-> `verify.sh`). This README is the deeper drift log + service map.
+> one-command path (`./bootstrap.sh`) that stands the stack up **on `main`**
+> (the default; up + seed + `verify.sh`). To overlay your own in-flight PRs,
+> `refresh-suite.sh` reads a personal, gitignored `integration-suite.local.tsv`
+> (or `--prs` ad-hoc) — see getting-started's "Overlaying your own in-flight
+> PRs". This README is the deeper drift log + service map.
 
 ## TL;DR
 
 ```bash
-./up.sh           # mesh + 6 services, EMPTY
+./up.sh           # mesh + 10 services, EMPTY
 ./up.sh --reset --seed roster   # from-scratch: empty baseline, then synthetic IAM roster only (programs empty)
 ./up.sh --reset --seed full     # roster + programs/periods/enrollment
 ./up.sh --seed [roster|full]    # seed without resetting (roster = default; iam groups don't dedup — prefer --reset)
 ./up.sh --status  # health + row counts
 ./up.sh --down    # stop services (mesh stays up)
+./up.sh --reset --tunnel --seed roster --login   # ALSO expose the browser plane at
+                  # https://<svc>.<moniker>.vms.wootdev.com for other users
+                  # (multi-user Connect) — see getting-started.md "tunnel mode"
 ```
 
 Branch posture (decision `../decisions/d1.1`): everything on **main**.
@@ -42,9 +53,11 @@ won't stop the run.
 |---|---|---|---|
 | **soa** | `~/dev/soa` | `main` | mesh infra (`infra/` + `projects/saga-mesh/seed`) for pg/redis/rabbitmq; shared `@saga-ed/soa-*` packages (registry mode — `soa:link:off`) |
 | **rostering** | `~/dev/rostering` | `main` | iam-api (**:3010**); **sis-api (:3100)** + sis-db prisma; iam-db / iam-pii-db prisma; the `program-hub` roster scenario (`scripts/scenarios`) |
-| **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**); the `programs` scenario (`scripts/scenarios`) |
-| **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. Override the path with `SDS=...` |
+| **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**) + sessions-api (**:3007**); the `programs` scenario (`scripts/scenarios`) |
+| **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. OPT-IN (`--with-playback`): the sds_93 playback APIs — insights-api (**:6301**), transcripts-api (**:6302**), chat-api (**:6303**) + their `*-db` prisma. Override the path with `SDS=...` |
 | **saga-dash** | `~/dev/saga-dash` | `main` | dash web UI (**:8900**) |
+| **qboard** | `~/dev/qboard` | `main` | connect-api (**:6106**) + connect-web (**:6210**); livekit/coturn compose (AV). Override the path with `QBOARD=...` |
+| **rtsm** | `~/dev/rtsm` | `main` | rtsm-api (**:6110**) — Connect's CRDT/socket service, single-node here. Override the path with `RTSM=...` |
 
 Mesh containers (`soa-postgres-1` / `soa-redis-1` / `soa-rabbitmq-1`) are
 brought up from `soa` by `up.sh` itself — no separate clone.
@@ -63,14 +76,24 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | sis-api | 3100 | rostering main — SIS reconciliation / CSV-roster (d1.7); calls iam-api `service.*` (S2S, dev-bypass locally) |
 | programs-api | 3006 | program-hub main |
 | scheduling-api | 3008 | program-hub main |
+| sessions-api | 3007 | program-hub main — sessions read/lifecycle (harvested from programs-api in program-hub #148); event-built projections (pre-existing data needs the one-time manual replay — see getting-started.md) |
 | ads-adm-api | 5005 | student-data-system **main** (canonical checkout) |
 | saga-dash | 8900 | saga-dash main |
+| connect-api | 6106 | qboard main — Connect session API (Express + mongo; health at `/connectv3/v1/health`) |
+| connect-web | 6210 | qboard main — Connect web app (vite); reaches local rtsm via `VITE_RTSM_BOOTSTRAP_URL` |
+| rtsm-api | 6110 | rtsm main — ONE-NODE FLEET (`rtsm-fleet-local.json` via `FLEET_CONFIG_PATH`; rtsm-client requires `/fleet/discover`, which only fleet mode serves); stateless, no DB, `SOCKET_AUTHMODE=none` |
 | postgres / redis / rabbitmq | 5432 / 6379 / 5672 (mgmt 15672) | soa-mesh (`soa-postgres-1` etc.) |
+| mongo (connect) | 27037 | `soa-connect-mongo-1` — mesh-managed (infra-compose `services/connect-mongo`; standalone mongo:8, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's :27017) |
+| livekit / coturn | 7880 / — | qboard docker-compose (AV; best-effort — Connect runs CRDT-only without them) |
+| recorder / recordings-api / minio / egress | 7890 (webhook 7889) / 8444 / 9000 / — | OPT-IN (`./up.sh --record [crdt|av]`) — fleek compose + local overlay from `~/dev/fleek`; recordings in `~/.fleek-local/recordings` |
+| insights-api / transcripts-api / chat-api | 6301 / 6302 / 6303 | OPT-IN (`./up.sh --with-playback`) — sds_93 playback APIs (student-data-system **main**). Own DBs `{insights,transcripts,chat}_local` + least-privilege roles on the mesh (each `*-db/seed/local-bootstrap.sql`); fixture-seeded on `--seed full` (slsid `fixture-playback-001`). RabbitMQ via the mesh broker (relay log-and-continues if down). |
 
 Mesh rabbitmq creds: **`rabbitmq_admin:password123`** (not `saga_user`).
-Seven empty DBs: `iam_local`, `iam_pii_local`, `programs`, `scheduling`,
-`ads_adm_local`, `ledger_local`, `sis_db` (all created by the canonical
-mesh seed — `sis_db` added in soa#112; d1.7).
+Eight empty DBs: `iam_local`, `iam_pii_local`, `programs`, `scheduling`,
+`sessions`, `ads_adm_local`, `ledger_local`, `sis_db` (all created by the
+canonical mesh seed — `sis_db` added in soa#112, d1.7; `sessions` in soa#146.
+The seed only runs on first postgres init, so `up.sh` prep also ensures
+`sessions` exists on meshes initialized before it was added).
 
 ## Status as of 2026-05-26 (after rostering + program-hub pulled to latest origin/main)
 

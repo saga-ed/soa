@@ -22,8 +22,9 @@ cd ~/dev/soa/tools/synthetic-dev
 ```
 
 `bootstrap.sh` does the whole onboarding path:
-1. `refresh-suite.sh` — sets each repo to `main` + the **pinned** in-flight PRs
-   (`integration-suite.tsv`), so you land in *exactly* the team's state.
+1. `refresh-suite.sh` — applies your **personal, gitignored** overlay
+   (`integration-suite.local.tsv`) if you have one; otherwise a clean no-op and
+   **every repo stays on `main`** (the default).
 2. `up.sh up --reset --seed roster` — mesh + 6 services + a fresh synthetic roster.
 3. `verify.sh` — asserts everything (see "What success looks like").
 
@@ -37,7 +38,7 @@ Then drop into the authenticated dashboard:
 
 - [ ] **Docker** daemon running.
 - [ ] **Node 22+** and **pnpm**.
-- [ ] **`gh` authenticated** — `gh auth status` (refresh-suite + verify resolve pinned PRs via `gh`).
+- [ ] **`gh` authenticated** — `gh auth status` (refresh-suite + verify resolve overlay PRs via `gh`; only needed if you overlay PRs).
 - [ ] **CodeArtifact token** — run `pnpm co:login` in each repo (expires ~12h; a 401 on `pnpm install` means re-run it).
 - [ ] **Five sibling repos cloned under `~/dev/`**: `soa`, `rostering`, `program-hub`, `saga-dash`, `student-data-system`. One successful `pnpm install` in each.
 
@@ -48,17 +49,22 @@ only if **all green** — currently **15 checks**:
 
 - `── service health ──` — iam(:3010) · sis(:3100) · programs(:3006) · scheduling(:3008) · ads-adm(:5005) · saga-dash(:8900), all → 200
 - `── data ──` — iam roster seeded (`users=197`) · `sis_db` migrated
-- `── source posture ──` — repos on the right branches **and** the pinned PRs actually merged in
+- `── source posture ──` — repos on the right branches (all `main` by default, or `local/integration` for any you've overlaid) **and** every overlaid PR actually merged in
 
-If you see `✓ all 15 checks passed — stack is ready`, you're in the team's state.
+If you see `✓ all 15 checks passed — stack is ready`, you're running clean main (plus any overlay you set).
 
-## Current state snapshot (2026-06-02)
+## State model (updated 2026-06-10)
 
-- **Pinned suite** (`./refresh-suite.sh --list`): **program-hub #126**, **saga-dash #136**. Everything else has landed on `main`.
-- **Branch posture** `bootstrap`/`refresh-suite` will set:
-  - `local/integration`: **program-hub**, **saga-dash** (carry the pins)
-  - `main`: **rostering**, **soa**, **student-data-system**
-  - This is correct — `up.sh`/`verify.sh` are manifest-aware and stay quiet about it. A `⚠` or posture failure means *real* drift (usually "re-run `./refresh-suite.sh`").
+- **Default = `main` everywhere.** No overlay file ⇒ `refresh-suite.sh` is a
+  no-op and every repo runs on `origin/main`. `./refresh-suite.sh --list` shows
+  your overlay (empty by default).
+- **Overlay (optional, per-dev):** copy `integration-suite.example.tsv` →
+  `integration-suite.local.tsv` (gitignored) and list your in-flight PRs, or use
+  `./refresh-suite.sh --prs <#s> <repo>` ad-hoc. Only the repos you overlay move
+  to `local/integration`; the rest stay on `main`.
+  - `up.sh`/`verify.sh` are overlay-aware and stay quiet about the correct
+    posture. A `⚠` or posture failure means *real* drift (usually "re-run
+    `./refresh-suite.sh`").
 - **sis-api** is the sixth service (rostering `main`), on **:3100** against `sis_db`. It calls iam-api's `service.*` over S2S and works locally with no credentials (iam dev-bypass). See `decisions/d1.7`.
 - **Heads-up:** Sean's stack may already be running on this machine. `bootstrap.sh` does a clean `--reset` restart, so it's safe to just run it — it'll give you a fresh roster (re-login after any `--reset`).
 
@@ -67,7 +73,7 @@ If you see `✓ all 15 checks passed — stack is ready`, you're in the team's s
 - `verify.sh` names the failing check. For a service, tail its log: `tail -f /tmp/sds-synthetic/<service>.log`.
 - iam red → usually the `AUTH_*` secrets in `~/dev/rostering/.env.local`; `up.sh apply_fixes` writes a working template if absent.
 - `pnpm install` 401 → `pnpm co:login` in that repo.
-- Posture red (a pinned PR "NOT in checkout") → `./refresh-suite.sh`.
+- Posture red (an overlaid PR "NOT in checkout") → `./refresh-suite.sh`.
 - Anything not covered → the **Drift log** at the bottom of `README.md`.
 
 ## Steady-state loop (after the first run)
@@ -76,7 +82,7 @@ If you see `✓ all 15 checks passed — stack is ready`, you're in the team's s
 ./up.sh --status              # quick health peek
 ./verify.sh                   # hard check (services + data + source posture)
 ./up.sh --reset --seed roster # fresh data, services stay up (re-login after)
-./refresh-suite.sh            # re-pull pinned PRs after main moves / a pin updates
+./refresh-suite.sh            # re-apply your overlay after main moves (no-op if you have none)
 ./up.sh --down                # stop services (mesh stays up)
 ```
 
@@ -85,6 +91,6 @@ If you see `✓ all 15 checks passed — stack is ready`, you're in the team's s
 If you're driving this with Claude, point it at:
 - **`getting-started.md`** — full onboarding + every verb.
 - **`README.md`** — service map + the drift log (what `up.sh` patches around and why).
-- **`decisions/d1.7`** (sis-api integration) and **`decisions/d1.8`** (pinned integration suite + the source-posture assertion).
+- **`decisions/d1.7`** (sis-api integration) and **`decisions/d1.8`** (pinned integration suite + the source-posture assertion — the shared-manifest half is now superseded by the per-dev local overlay + main-default; see `getting-started.md`).
 
 — handoff from Sean's session, 2026-06-02

@@ -5,12 +5,13 @@
 # Unlike `up.sh --status` (which just prints), this EXITS NON-ZERO on any red,
 # so it's a one-shot "is my setup correct?" gate for a new engineer (or CI).
 # Checks:
-#   • all six service health endpoints return 200,
+#   • all ten service health endpoints return 200,
 #   • the mesh Postgres is reachable + the iam roster is seeded (users > 0),
-#   • SOURCE POSTURE (manifest-aware): each sibling repo is on the branch the
-#     integration suite expects, and every pinned PR is actually merged into
-#     its local/integration. This is what makes "same state as the team" an
-#     assertion, not a hope — health alone passes even on stale/wrong code.
+#   • SOURCE POSTURE (overlay-aware): each sibling repo is on the branch your
+#     personal overlay expects (main by default, or local/integration for repos
+#     you've overlaid), and every overlaid PR is actually merged into its
+#     local/integration. This makes "the code I think I'm running" an assertion,
+#     not a hope — health alone passes even on stale/wrong code.
 #     (Caveat: it verifies the CHECKOUT; a running service built before a
 #     refresh can still lag — restart/HMR closes that. See getting-started.md.)
 #
@@ -20,17 +21,22 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MANIFEST="$SCRIPT_DIR/integration-suite.tsv"
+MANIFEST="$SCRIPT_DIR/integration-suite.local.tsv"
 DEV=${DEV:-$HOME/dev}
 # Repos refresh-suite manages / up.sh builds from sibling branches. A managed
-# repo with manifest pins is expected on local/integration (with those PRs
-# merged); without pins, on main. soa + student-data-system are always on main.
-MANAGED_REPOS="rostering program-hub saga-dash"
+# repo listed in your local overlay is expected on local/integration (with those
+# PRs merged); without an overlay entry, on main. soa + student-data-system are
+# always on main — except a soa overlay-manifest row, which pins soa itself
+# (testing a synthetic-dev/infra tooling PR end-to-end; see the posture loop).
+MANAGED_REPOS="rostering program-hub saga-dash qboard rtsm"
 ALWAYS_MAIN_REPOS="soa student-data-system"
 
-pass=0; fail=0
+pass=0; fail=0; warn=0
 okline()  { printf "  \033[32m✓\033[0m %s\n" "$*"; pass=$((pass+1)); }
 badline() { printf "  \033[31m✗\033[0m %s\n" "$*"; fail=$((fail+1)); }
+# Warn = real drift worth surfacing but not a failure (e.g. a legitimate ad-hoc
+# overlay). Does NOT touch pass/fail, so it never flips the exit code.
+warnline(){ printf "  \033[33m⚠\033[0m %s\n" "$*"; warn=$((warn+1)); }
 
 probe(){ # name port path
   local name=$1 port=$2 path=$3 code
@@ -47,8 +53,30 @@ probe iam-api        3010 /health
 probe sis-api        3100 /health
 probe programs-api   3006 /health
 probe scheduling-api 3008 /health
+probe sessions-api   3007 /health
 probe ads-adm-api    5005 /health
 probe saga-dash      8900 /
+probe rtsm-api       6110 /health
+probe connect-api    6106 /connectv3/v1/health
+probe connect-web    6210 /
+# Recording stack is OPT-IN (./up.sh --record) — assert it only when its
+# containers are actually up; otherwise note it without failing.
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx fleek-recorder; then
+  probe recorder       7890 /v1/health
+  probe recordings-api 8444 /healthz
+else
+  printf "  \033[2m· recording stack off (opt-in: ./up.sh --record [crdt|av])\033[0m\n"
+fi
+# Playback APIs are OPT-IN (./up.sh --with-playback) — assert only when launched
+# (pid file present), so a default verify run stays green without them.
+PB_STATE=${STATE:-/tmp/sds-synthetic}
+if [[ -f "$PB_STATE/transcripts-api.pid" || -f "$PB_STATE/insights-api.pid" || -f "$PB_STATE/chat-api.pid" ]]; then
+  probe insights-api    6301 /health
+  probe transcripts-api 6302 /health
+  probe chat-api        6303 /health
+else
+  printf "  \033[2m· playback APIs off (opt-in: ./up.sh --with-playback)\033[0m\n"
+fi
 
 printf "\033[1m── data ──\033[0m\n"
 users=$(docker exec soa-postgres-1 psql -U iam -d iam_local -tAc "SELECT count(*) FROM users" 2>/dev/null || echo "")
@@ -56,6 +84,22 @@ if [[ -z "$users" ]]; then
   badline "iam_local unreachable (is the mesh up?)"
 elif [[ "$users" -gt 0 ]]; then
   okline "iam roster seeded — users=$users"
+  # Determinism (db:seed model, synthetic-dev-align d2.1): the canonical seed is
+  # 205 (190 roster + 6 personas + dev + 8 Connect Demo). A non-205 count isn't a
+  # hard fail (partial/journey seeds vary) but is worth flagging.
+  [[ "$users" == 205 ]] || printf "    \033[33m·\033[0m note: users=%s — canonical db:seed is 205 (190 roster+6 personas+dev+8 demo)\n" "$users"
+  # Deterministic dev id = userId('dev') from @saga-ed/iam-seed-ids. Present ⇒
+  # seeded via db:seed; ABSENT ⇒ the old scenario (random UUIDs) seeded it.
+  if docker exec soa-postgres-1 psql -U iam -d iam_local -tAc \
+       "SELECT 1 FROM users WHERE id='1e2ca0d8-8f6a-5a97-a141-b38d472a1186'" 2>/dev/null | grep -q 1; then
+    okline "deterministic ids present (dev = userId('dev'))"
+  else
+    badline "deterministic dev id absent — not seeded via db:seed (scenario uses random ids)"
+  fi
+  # Per-district admin personas (#397): seed + Lincoln + riverside/metro/oakdale/frontier = 6.
+  ap=$(docker exec soa-postgres-1 psql -U iam -d iam_local -tAc "SELECT count(*) FROM personas WHERE name='admin'" 2>/dev/null || echo 0)
+  if [[ "${ap:-0}" -ge 6 ]]; then okline "admin personas present ($ap — incl 4 per-district, #397)"
+  else badline "admin personas=$ap (<6) — per-district admins missing (#397 not seeded)"; fi
 else
   badline "iam roster EMPTY (users=0) — run: ./up.sh --reset --seed roster"
 fi
@@ -68,10 +112,20 @@ else
   badline "sis_db not migrated (run ./up.sh up — prep deploys the schema)"
 fi
 
-# ── source posture (manifest-aware) ──────────────────────────────────
-# Read the pinned suite, then assert each repo's checkout matches it. A repo
-# on the wrong branch — or on local/integration but missing a pinned PR (stale,
-# forgot to re-run refresh-suite) — fails here even though health is green.
+# Connect's mongo (mesh-managed: infra-compose services/connect-mongo, :27037).
+# No schema/seed to assert — collections auto-create — so reachability IS the
+# data check.
+if docker exec soa-connect-mongo-1 mongosh --quiet --eval 'db.runCommand({ping:1}).ok' 2>/dev/null | grep -q 1; then
+  okline "connect-mongo reachable (:27037)"
+else
+  badline "connect-mongo unreachable (run ./up.sh up — mesh_up starts it)"
+fi
+
+# ── source posture (overlay-aware) ───────────────────────────────────
+# Read your local overlay, then assert each repo's checkout matches it. A repo
+# on the wrong branch — or on local/integration but missing an overlaid PR
+# (stale, forgot to re-run refresh-suite) — fails here even though health is
+# green. No overlay is the DEFAULT: every managed repo is asserted on main below.
 printf "\033[1m── source posture ──\033[0m\n"
 declare -A PINS=()
 if [[ -f "$MANIFEST" ]]; then
@@ -80,12 +134,14 @@ if [[ -f "$MANIFEST" ]]; then
     PINS["$repo"]="${prs//[[:space:]]/}"
   done < <(grep -vE '^\s*(#|$)' "$MANIFEST")
 else
-  badline "manifest not found: $MANIFEST"
+  printf "  \033[2m· no local overlay — asserting every repo on origin/main\033[0m\n"
 fi
 
-# Flag any manifest repo we don't know how to posture-check (avoid silent skips).
+# Flag any overlay repo we don't know how to posture-check (avoid silent skips).
+# soa is accepted here even though it isn't "managed": a soa manifest row is
+# how a synthetic-dev/infra tooling PR gets tested end-to-end (see below).
 for repo in "${!PINS[@]}"; do
-  case " $MANAGED_REPOS " in *" $repo "*) ;; *) badline "manifest pins '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it"; esac
+  case " $MANAGED_REPOS soa " in *" $repo "*) ;; *) badline "overlay lists '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it"; esac
 done
 
 on_branch(){ git -C "$DEV/$1" branch --show-current 2>/dev/null; }
@@ -96,6 +152,25 @@ check_posture(){ # repo expected_branch
   have=$(on_branch "$repo")
   if [[ "$have" == "$want" ]]; then okline "$(printf '%-20s on %s' "$repo" "$want")"
   else badline "$(printf '%-20s on '\''%s'\'' (expected '\''%s'\'')' "$repo" "$have" "$want")"; fi
+}
+
+# Un-overlaid managed repo: expected on main. But refresh-suite can leave the
+# repo on local/integration even with no overlay — and an empty local/integration
+# is identical to main (refresh-suite builds it as origin/main + PRs; with
+# zero PRs that's just origin/main). Accept that as equivalent instead of crying
+# wolf; only fail if the tree actually differs from main — a stray overlaid PR not
+# in your overlay, or a stale/behind branch — both real drift worth flagging.
+check_posture_main(){ # repo
+  local repo=$1 dir="$DEV/$repo" have
+  [[ -d "$dir/.git" ]] || { badline "$repo: not a git repo at $dir"; return; }
+  have=$(on_branch "$repo")
+  if [[ "$have" == main ]]; then
+    okline "$(printf '%-20s on main' "$repo")"
+  elif [[ "$have" == local/integration ]] && git -C "$dir" diff --quiet origin/main HEAD 2>/dev/null; then
+    okline "$(printf '%-20s on local/integration ≡ main (no overlay)' "$repo")"
+  else
+    badline "$(printf '%-20s on '\''%s'\'' (expected '\''main'\'')' "$repo" "$have")"
+  fi
 }
 
 # pinned PR actually merged into the current checkout? (resolve #→head SHA via gh)
@@ -110,6 +185,43 @@ check_pin_merged(){ # repo pr#
   fi
 }
 
+# What's ACTUALLY overlaid vs what your overlay lists. The overlay checks above
+# only ask "is every listed PR present?" — they're blind to branches merged in by
+# an ad-hoc `refresh-suite --prs` that AREN'T listed. Those are legitimate
+# (warn, not fail) but invisible and silently dropped by the next refresh-suite,
+# so surface them. Overlay set = PR-branch merges in origin/main..HEAD (commits
+# local/integration carries but main hasn't landed — landed PRs are ancestors of
+# main and fall out of the range automatically). Subtract the pinned branches;
+# whatever's left is an unpinned overlay.
+check_unpinned_overlays(){ # repo  pinned_csv
+  local repo=$1 pins=$2 dir="$DEV/$repo" b n num
+  [[ "$(on_branch "$repo")" == local/integration ]] || return   # only meaningful on integration
+  local merged
+  merged=$( cd "$dir" && git log --merges --pretty=%s origin/main..HEAD 2>/dev/null \
+            | sed -nE "s/.*Merge remote-tracking branch 'origin\/([^']+)'.*/\1/p" \
+            | grep -vxE 'main|master' | sort -u )
+  [[ -z "$merged" ]] && return
+  # pinned branches: resolve each pinned # → headRefName (the branch that gets merged)
+  declare -A PINNED_BRANCH=()
+  IFS=',' read -ra nums <<<"$pins"
+  for n in "${nums[@]}"; do
+    [[ -z "$n" ]] && continue
+    b=$( cd "$dir" && gh pr view "$n" --json headRefName --jq '.headRefName' 2>/dev/null || true )
+    [[ -n "$b" ]] && PINNED_BRANCH["$b"]=$n
+  done
+  local extras=()
+  while IFS= read -r b; do
+    [[ -z "$b" ]] && continue
+    [[ -n "${PINNED_BRANCH[$b]:-}" ]] && continue            # pinned — already reported as ✓
+    num=$( cd "$dir" && gh pr list --head "$b" --state all --json number --jq '.[0].number' 2>/dev/null || true )
+    extras+=( "${num:+#$num }$b" )
+  done <<<"$merged"
+  if [[ ${#extras[@]} -gt 0 ]]; then
+    warnline "$(printf '%-20s +%d unpinned overlay(s): %s' "$repo" "${#extras[@]}" "${extras[*]}")"
+    warnline "$(printf '%-20s   ad-hoc (refresh-suite --prs) — not in your overlay; dropped on next refresh-suite' '')"
+  fi
+}
+
 for repo in $MANAGED_REPOS; do
   prs="${PINS[$repo]:-}"
   if [[ -n "$prs" ]]; then
@@ -117,16 +229,56 @@ for repo in $MANAGED_REPOS; do
     if [[ "$(on_branch "$repo")" == "local/integration" ]]; then   # only meaningful if branch is right
       IFS=',' read -ra nums <<<"$prs"
       for n in "${nums[@]}"; do [[ -n "$n" ]] && check_pin_merged "$repo" "$n"; done
+      check_unpinned_overlays "$repo" "$prs"   # surface ad-hoc overlays not in your overlay file
+    fi
+  else
+    check_posture_main "$repo"   # main, or an empty local/integration that ≡ main
+  fi
+done
+# soa + student-data-system must be literally main (never integration-parked) —
+# EXCEPT a soa row in the overlay manifest, which pins soa itself: that's the
+# only way to verify a synthetic-dev/infra tooling PR end-to-end (the e2e lane
+# gates on this script, and an unconditional red here blocked exactly that).
+# Pinned soa gets the same treatment as a managed repo; sds stays always-main.
+for repo in $ALWAYS_MAIN_REPOS; do
+  if [[ "$repo" == soa && -n "${PINS[soa]:-}" ]]; then
+    check_posture soa "local/integration"
+    if [[ "$(on_branch soa)" == "local/integration" ]]; then
+      IFS=',' read -ra nums <<<"${PINS[soa]}"
+      for n in "${nums[@]}"; do [[ -n "$n" ]] && check_pin_merged soa "$n"; done
+      check_unpinned_overlays soa "${PINS[soa]}"
     fi
   else
     check_posture "$repo" "main"
   fi
 done
-for repo in $ALWAYS_MAIN_REPOS; do check_posture "$repo" "main"; done
+
+# ── freshness (behind origin) ─────────────────────────────────────────
+# A repo can be on the right branch yet stale — origin moved under it. The posture
+# checks above compare against a possibly-stale local origin ref, so they miss it
+# (how program-hub sat hundreds of commits behind and 404'd new endpoints). Fetch,
+# then flag any repo behind origin/main. WARN (main moves constantly) — fix with
+# ./up.sh up --pull. Feature-branch repos are skipped (posture already flagged them).
+printf "\033[1m── freshness (behind origin) ──\033[0m\n"
+for repo in $MANAGED_REPOS $ALWAYS_MAIN_REPOS; do
+  dir="$DEV/$repo"
+  [[ -d "$dir/.git" ]] || continue
+  case "$(on_branch "$repo")" in main|local/integration) ;; *) continue ;; esac
+  git -C "$dir" fetch -q origin 2>/dev/null || { warnline "$(printf '%-20s fetch failed — freshness unknown' "$repo")"; continue; }
+  behind=$(git -C "$dir" rev-list --count "HEAD..origin/main" 2>/dev/null || echo "?")
+  if   [[ "$behind" == 0 ]];   then okline   "$(printf '%-20s current with origin/main' "$repo")"
+  elif [[ "$behind" == "?" ]]; then warnline "$(printf '%-20s could not compare to origin/main' "$repo")"
+  else                              warnline "$(printf '%-20s %s behind origin/main — run ./up.sh up --pull' "$repo" "$behind")"; fi
+done
 
 printf "\n"
 if [[ $fail -eq 0 ]]; then
-  printf "\033[32m✓ all %d checks passed — stack is ready\033[0m\n" "$pass"; exit 0
+  if [[ $warn -gt 0 ]]; then
+    printf "\033[32m✓ all %d checks passed\033[0m \033[33m(%d warning(s) — see ⚠ above)\033[0m — stack is ready\n" "$pass" "$warn"
+  else
+    printf "\033[32m✓ all %d checks passed — stack is ready\033[0m\n" "$pass"
+  fi
+  exit 0
 else
   printf "\033[31m✗ %d/%d checks failed\033[0m — tail /tmp/sds-synthetic/<service>.log for reds\n" "$fail" "$((pass+fail))"; exit 1
 fi

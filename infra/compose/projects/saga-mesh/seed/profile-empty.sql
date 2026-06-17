@@ -1,6 +1,6 @@
 -- saga-mesh / profile=empty
 --
--- Creates the seven per-app databases and owners for the SDS fixture mesh.
+-- Creates the eight per-app databases and owners for the SDS fixture mesh.
 -- No application data is seeded here — each app runs its own prisma
 -- migrations into its database after this file executes.
 --
@@ -24,6 +24,8 @@ CREATE DATABASE iam_local       OWNER iam;
 CREATE DATABASE iam_pii_local   OWNER iam_pii;
 CREATE DATABASE programs        OWNER saga_user;
 CREATE DATABASE scheduling      OWNER saga_user;
+CREATE DATABASE sessions        OWNER saga_user;
+CREATE DATABASE content         OWNER saga_user;
 CREATE DATABASE ads_adm_local   OWNER ads_adm;
 CREATE DATABASE ledger_local    OWNER ledger;
 CREATE DATABASE sis_db          OWNER sis;
@@ -33,6 +35,8 @@ GRANT ALL PRIVILEGES ON DATABASE iam_local     TO iam;
 GRANT ALL PRIVILEGES ON DATABASE iam_pii_local TO iam_pii;
 GRANT ALL PRIVILEGES ON DATABASE programs      TO saga_user;
 GRANT ALL PRIVILEGES ON DATABASE scheduling    TO saga_user;
+GRANT ALL PRIVILEGES ON DATABASE sessions      TO saga_user;
+GRANT ALL PRIVILEGES ON DATABASE content       TO saga_user;
 GRANT ALL PRIVILEGES ON DATABASE ads_adm_local TO ads_adm;
 GRANT ALL PRIVILEGES ON DATABASE ledger_local  TO ledger;
 GRANT ALL PRIVILEGES ON DATABASE sis_db        TO sis;

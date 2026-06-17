@@ -25,6 +25,8 @@ describe('PostgresProviderSchema', () => {
       connectionTimeoutMs: 10_000,
       statementTimeoutMs: 0,
       lockTimeoutMs: 0,
+      // Safety guard (gh-186) defaults ON, unlike the opt-in perf timeouts.
+      idleInTransactionSessionTimeoutMs: 30_000,
     });
   });
 

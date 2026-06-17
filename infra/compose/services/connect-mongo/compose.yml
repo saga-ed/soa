@@ -1,0 +1,41 @@
+## connect-mongo — Connect's dedicated MongoDB (standalone, modern).
+##
+## Deliberately a SEPARATE service from ../mongo (the legacy saga-api/wootmath
+## fixture mongo: mongo:6, --replSet wootmath, seed sidecar, profile-switched
+## volumes — new services must not couple to it). Connect needs none of that:
+##
+## Posture: standalone (no replica set — connect-api uses no transactions or
+## change streams), NO auth (local-dev convention), bound to loopback on a
+## NON-DEFAULT host port (default 27037) so it never contends with a
+## default-port mongo (qboard-mongo, another stack, a system mongod).
+##
+## No seed, no profile switching (model: ../redis): collections are created on
+## first write — connect-api connects via mongodb://localhost:27037/connectv3
+## (the db name comes from connect-api's MONGO_DB_NAME default `connectv3`,
+## not the URI path — keep them matching).
+##
+## Composed into the synthetic-dev mesh by projects/saga-mesh.yml; container
+## gets the compose default name `soa-connect-mongo-1` (local `services:`
+## overrides on top of `include:` are rejected — see saga-mesh.yml header).
+##
+##   docker volume rm connect-mongo-data    # full reset (after make down)
+
+services:
+
+  connect-mongo:
+    image: mongo:8
+    ports:
+      # Loopback only — no remote access to the dev machine.
+      - "127.0.0.1:${CONNECT_MONGO_PORT:-27037}:27017"
+    volumes:
+      - connect-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping: 1}).ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  connect-mongo-data:
+    name: connect-mongo-data

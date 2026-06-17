@@ -55,6 +55,28 @@ EXAMPLE="$SCRIPT_DIR/integration-suite.example.tsv"
 DEV=${DEV:-$HOME/dev}
 BASE=${BASE:-main}
 INT=local/integration
+
+# Resolve a sibling repo's checkout path, honoring up.sh's per-repo override
+# env vars. Defaults to $DEV/<name>. Explicit name→var map (SDS is irregular).
+repo_path(){ # name
+  case "$1" in
+    soa)                 echo "${SOA:-$DEV/soa}" ;;
+    rostering)           echo "${ROSTERING:-$DEV/rostering}" ;;
+    program-hub)         echo "${PROGRAM_HUB:-$DEV/program-hub}" ;;
+    saga-dash)           echo "${SAGA_DASH:-$DEV/saga-dash}" ;;
+    student-data-system) echo "${SDS:-$DEV/student-data-system}" ;;
+    qboard)              echo "${QBOARD:-$DEV/qboard}" ;;
+    rtsm)                echo "${RTSM:-$DEV/rtsm}" ;;
+    fleek)               echo "${FLEEK:-$DEV/fleek}" ;;
+    *)                   echo "$DEV/$1" ;;
+  esac
+}
+# True when a repo is pointed at a non-default checkout. An overridden repo is
+# LEFT AS-IS by the overlay engine: the override is meant for a clean `main`
+# worktree (detached HEAD), and `checkout -B local/integration` there would
+# either collide with the primary checkout's branch or mutate the worktree off
+# the clean main it was created on. So we skip it loudly rather than touch it.
+repo_overridden(){ [[ "$(repo_path "$1")" != "$DEV/$1" ]]; }
 # Repos this stack overlays (the ones up.sh/verify.sh posture-check); soa +
 # student-data-system are always on main and never overlaid — with ONE
 # exception: to test a synthetic-dev/infra tooling PR end-to-end, overlay soa
@@ -102,10 +124,14 @@ usage(){ sed -n '23,35p' "$0" | sed 's/^# \{0,1\}//'; }
 # PR#s/branches. Echoes progress; returns non-zero if anything didn't apply.
 refresh_repo(){ # name  prs_csv
   local name=$1 prs=$2
-  local repo="$DEV/$name"
+  local repo; repo="$(repo_path "$name")"
   printf "\n\033[1m=== %s ===\033[0m\n" "$name"
 
-  if [[ ! -d "$repo/.git" ]]; then
+  if repo_overridden "$name"; then
+    ok "$name — overridden to $repo, left as-is (overlay skipped)"; return 0
+  fi
+
+  if [[ ! -e "$repo/.git" ]]; then   # -e: a worktree's .git is a file, not a dir
     err "$repo is not a git repo — skipping"; return 1
   fi
   cd "$repo"
@@ -352,8 +378,11 @@ if [[ $RESET -eq 1 ]]; then
   [[ ${#targets[@]} -eq 0 ]] && read -ra targets <<<"$MANAGED_REPOS"
   failed=0
   for name in "${targets[@]}"; do
-    dir="$DEV/$name"
-    [[ -d "$dir/.git" ]] || { warn "$name — not a git repo at $dir; skipping"; continue; }
+    if repo_overridden "$name"; then
+      ok "$name — overridden to $(repo_path "$name"), never overlaid; nothing to reset"; continue
+    fi
+    dir="$(repo_path "$name")"
+    [[ -e "$dir/.git" ]] || { warn "$name — not a git repo at $dir; skipping"; continue; }  # -e: worktree .git is a file
     cur=$(git -C "$dir" branch --show-current 2>/dev/null)
     if [[ "$cur" != "$INT" ]]; then
       ok "$name already on '${cur:-?}' (not overlaid)"

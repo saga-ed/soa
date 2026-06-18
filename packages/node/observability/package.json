@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-observability",
-    "version": "0.1.0-dev.2",
+    "version": "0.1.0-dev.3",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -24,7 +24,9 @@
         "@saga-ed/soa-event-outbox": "workspace:*",
         "@saga-ed/soa-logger": "workspace:*",
         "@opentelemetry/api": "^1.9.0",
+        "@opentelemetry/auto-instrumentations-node": "^0.55.0",
         "@opentelemetry/exporter-trace-otlp-http": "^0.55.0",
+        "@opentelemetry/instrumentation-runtime-node": "^0.10.0",
         "@opentelemetry/resources": "^1.28.0",
         "@opentelemetry/sdk-node": "^0.55.0",
         "@opentelemetry/semantic-conventions": "^1.28.0",

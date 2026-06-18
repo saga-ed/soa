@@ -3,6 +3,8 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { RuntimeNodeInstrumentation } from '@opentelemetry/instrumentation-runtime-node';
 import type { ILogger } from '@saga-ed/soa-logger';
 
 /**
@@ -40,10 +42,32 @@ export function initTracing(
     }
 
     const sdk = new NodeSDK({
+        // NOTE: no containerDetector on purpose. On ECS bridge networking the
+        // app container shares its cgroup with the pause container, so
+        // /proc/self/cgroup resolves to the pause container's ID. The Datadog
+        // Agent then enriches OTLP spans with the pause container's
+        // image_tag / ecs_container_name, shadowing our service.name +
+        // deployment.* resource attrs. Letting the DD Agent identify the source
+        // container via its own host-IP-based logic keeps the right task/service
+        // tags. (Resource attrs from OTEL_RESOURCE_ATTRIBUTES still merge in.)
         resource: new Resource({
             [ATTR_SERVICE_NAME]: serviceName,
         }),
         traceExporter: new OTLPTraceExporter({ url: resolveOtlpTracesUrl() }),
+        // Auto-instrumentations register HTTP / Express / pg / amqplib / dns /
+        // net span emitters at SDK start, so each inbound request gets a real
+        // server-entry span + downstream waterfall WITHOUT per-call manual
+        // instrumentation. The HTTP server-entry span is also what carries the
+        // incoming W3C traceparent from the browser (RUM), so RUM sessions link
+        // to the backend trace. fs is excluded — noisy and rarely actionable.
+        // RuntimeNodeInstrumentation feeds DD APM's Runtime Metrics panel
+        // (heap, event-loop lag, GC).
+        instrumentations: [
+            getNodeAutoInstrumentations({
+                '@opentelemetry/instrumentation-fs': { enabled: false },
+            }),
+            new RuntimeNodeInstrumentation(),
+        ],
     });
 
     if (process.env.OTEL_TRACES_DISABLED !== 'true') {

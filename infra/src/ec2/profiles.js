@@ -89,8 +89,14 @@ export function snapshot_db({ name, profile, engine, port: _port, db_name, db_us
 
     const ext = eng.seed_ext;
     const tmp_file = `/tmp/profile-${profile}.${ext}`;
-    const s3_path = `s3://${bucket}/${name}/profile-${profile}.${ext}`;
     const effective_db_name = db_name || name;
+
+    // soa#168: assign the next immutable version number. The dump is written to
+    // `profile-<p>-v<N>.<ext>` (never overwritten) and then copied to the mutable
+    // `profile-<p>.<ext>` latest-pointer (what restore reads by default).
+    const version = next_profile_version({ name, profile, engine, bucket });
+    const versioned_s3 = `s3://${bucket}/${name}/profile-${profile}-v${version}.${ext}`;
+    const pointer_s3 = `s3://${bucket}/${name}/profile-${profile}.${ext}`;
 
     const container = get_container_name(name, projects_dir);
 
@@ -104,26 +110,31 @@ export function snapshot_db({ name, profile, engine, port: _port, db_name, db_us
         console.log(`Dumped ${engine} (${container}) to ${tmp_file} (${output.length} bytes)`);
     }
 
-    // Upload the dump FIRST so a sidecar never points at a missing/stale artifact.
-    run('aws', ['s3', 'cp', tmp_file, s3_path]);
-    console.log(`Uploaded snapshot to ${s3_path}`);
+    // Upload the IMMUTABLE versioned dump FIRST so a sidecar/pointer never points
+    // at a missing artifact.
+    run('aws', ['s3', 'cp', tmp_file, versioned_s3]);
+    console.log(`Uploaded snapshot v${version} to ${versioned_s3}`);
     const dump_bytes = readFileSync(tmp_file).length;
 
     // Schema sidecar is postgres/Prisma-only. Writing it for mongo/mysql would be
     // useless (no Prisma rev) AND harmful for mongo: its seed_ext is `json`, so the
     // sidecar `profile-<p>.meta.json` collides with list_s3_profiles' `profile-(.+)
     // \.json$` pattern and surfaces a phantom `<p>.meta` profile. So gate strictly:
-    // non-postgres snapshots stay byte-for-byte unchanged.
+    // non-postgres snapshots write only the versioned dump + pointer (no sidecar).
     if (engine !== 'postgres') {
-        return { s3Path: s3_path, metaPath: null, schemaRev: null, sidecarOk: false, size: dump_bytes };
+        // Advance the latest-pointer to this version (server-side copy, no re-dump).
+        run('aws', ['s3', 'cp', versioned_s3, pointer_s3]);
+        return { s3Path: pointer_s3, versionedS3Path: versioned_s3, version, metaPath: null, schemaRev: null, sidecarOk: false, size: dump_bytes };
     }
 
-    // Write the authoritative schema sidecar SECOND, next to the dump. The two
-    // uploads are not atomic: if this one fails the dump exists with no sidecar,
+    // Write the authoritative schema sidecar SECOND, next to the versioned dump.
+    // The uploads are not atomic: if this fails the dump exists with no sidecar,
     // which downstream reads as `unknown` (safe-degrade) — report partial success.
     const schema_rev = extract_prisma_rev({ container, db_name: effective_db_name, db_user });
     const meta = {
         sidecarVersion: 1,
+        version,
+        supersedes: version > 1 ? version - 1 : null,
         schemaRev: schema_rev,
         engine,
         takenAt: new Date().toISOString(),
@@ -134,21 +145,37 @@ export function snapshot_db({ name, profile, engine, port: _port, db_name, db_us
         dumpBytes: dump_bytes,
     };
     const meta_tmp = `/tmp/profile-${profile}.meta.json`;
-    const meta_s3 = `s3://${bucket}/${name}/profile-${profile}.meta.json`;
+    const versioned_meta_s3 = `s3://${bucket}/${name}/profile-${profile}-v${version}.meta.json`;
+    const pointer_meta_s3 = `s3://${bucket}/${name}/profile-${profile}.meta.json`;
     let sidecar_ok = true;
     try {
         writeFileSync(meta_tmp, JSON.stringify(meta, null, 2));
-        run('aws', ['s3', 'cp', meta_tmp, meta_s3]);
-        console.log(`Uploaded schema sidecar to ${meta_s3} (schemaRev=${schema_rev})`);
+        run('aws', ['s3', 'cp', meta_tmp, versioned_meta_s3]);
+        console.log(`Uploaded schema sidecar v${version} to ${versioned_meta_s3} (schemaRev=${schema_rev})`);
     } catch (err) {
-        // Dump already uploaded; degrade to a sidecar-less snapshot rather than fail.
+        // Versioned dump already uploaded; degrade to a sidecar-less snapshot.
         sidecar_ok = false;
-        console.log(`WARNING: sidecar upload failed for ${meta_s3}: ${err.message}`);
+        console.log(`WARNING: sidecar upload failed for ${versioned_meta_s3}: ${err.message}`);
+    }
+
+    // Advance the latest-pointer LAST (after the versioned dump + sidecar exist),
+    // via server-side copy — so `profile-<p>.<ext>` and its sidecar always resolve
+    // to a complete version. Copy the sidecar pointer only if the sidecar uploaded.
+    run('aws', ['s3', 'cp', versioned_s3, pointer_s3]);
+    if (sidecar_ok) {
+        try {
+            run('aws', ['s3', 'cp', versioned_meta_s3, pointer_meta_s3]);
+        } catch (err) {
+            console.log(`WARNING: pointer sidecar copy failed for ${pointer_meta_s3}: ${err.message}`);
+        }
     }
 
     return {
-        s3Path: s3_path,
-        metaPath: sidecar_ok ? meta_s3 : null,
+        s3Path: pointer_s3,
+        versionedS3Path: versioned_s3,
+        version,
+        metaPath: sidecar_ok ? pointer_meta_s3 : null,
+        versionedMetaPath: sidecar_ok ? versioned_meta_s3 : null,
         schemaRev: schema_rev,
         sidecarOk: sidecar_ok,
         size: dump_bytes,
@@ -197,6 +224,11 @@ export function seed_after_start({ container, engine, seeds_dir, profile, db_use
     const eng = engines[engine];
     if (!eng) throw new Error(`Unknown engine: ${engine}`);
 
+    // Normalize a `<p>@v<N>` version pin to its base profile — the local seed
+    // files (written by download_profile_seed) are keyed by base profile, and
+    // the SQL entrypoint (`01-seed.sql`) is profile-independent. (soa#168)
+    const base_profile = profile.replace(/@v\d+$/, '');
+
     // Wait for container to be healthy (up to 60s)
     for (let i = 0; i < 30; i++) {
         const health = spawnSync('docker', ['inspect', '--format', '{{.State.Health.Status}}', container], {
@@ -208,11 +240,11 @@ export function seed_after_start({ container, engine, seeds_dir, profile, db_use
 
     if (engine === 'mongo') {
         const loader = resolve(seeds_dir, '01-seed.js');
-        const seed_json = resolve(seeds_dir, `profile-${profile}.json`);
+        const seed_json = resolve(seeds_dir, `profile-${base_profile}.json`);
         if (!existsSync(loader) || !existsSync(seed_json)) return;
 
         // Copy files into container and execute
-        run('docker', ['cp', seed_json, `${container}:/tmp/profile-${profile}.json`]);
+        run('docker', ['cp', seed_json, `${container}:/tmp/profile-${base_profile}.json`]);
         run('docker', ['cp', loader, `${container}:/tmp/01-seed.js`]);
 
         const args = ['exec', container, 'mongosh', '--quiet'];
@@ -258,7 +290,13 @@ export function download_profile_seed({ name, profile, engine, bucket, seeds_bas
     // template name (e.g. programs-api-canonical). Used by both branches below.
     const src = source_name || name;
     const seeds_dir = resolve(seeds_base, name);
-    const s3_path = `s3://${bucket}/${src}/profile-${profile}.${ext}`;
+    // soa#168: optional version pin `profile=<p>@v<N>` resolves the IMMUTABLE
+    // `profile-<p>-v<N>.<ext>` (the rollback path). Bare `<p>` resolves the
+    // mutable `profile-<p>.<ext>` latest-pointer (default — backward compatible).
+    const at = profile.match(/^(.+)@v(\d+)$/);
+    const base_profile = at ? at[1] : profile;
+    const object_stem = at ? `profile-${base_profile}-v${at[2]}` : `profile-${base_profile}`;
+    const s3_path = `s3://${bucket}/${src}/${object_stem}.${ext}`;
 
     // Clear seeds dir
     if (existsSync(seeds_dir)) {
@@ -269,13 +307,14 @@ export function download_profile_seed({ name, profile, engine, bucket, seeds_bas
     mkdirSync(seeds_dir, { recursive: true });
 
     if (engine === 'mongo') {
-        // Download JSON seed file
-        const seed_json = resolve(seeds_dir, `profile-${profile}.json`);
+        // Download JSON seed file. Local filename uses base_profile (no `@vN`) so
+        // the loader path is stable regardless of whether a version was pinned.
+        const seed_json = resolve(seeds_dir, `profile-${base_profile}.json`);
         run('aws', ['s3', 'cp', s3_path, seed_json]);
 
         // Write a mongosh loader script (executed via docker exec, reads from /tmp)
-        const loader = `// Auto-generated loader for profile: ${profile}
-const raw = fs.readFileSync('/tmp/profile-${profile}.json', 'utf8');
+        const loader = `// Auto-generated loader for profile: ${base_profile}
+const raw = fs.readFileSync('/tmp/profile-${base_profile}.json', 'utf8');
 const spec = EJSON.parse(raw);
 for (const [dbName, collections] of Object.entries(spec)) {
     if (dbName === '_meta') continue;
@@ -286,7 +325,7 @@ for (const [dbName, collections] of Object.entries(spec)) {
         print('  ' + dbName + '.' + collName + ': ' + docs.length + ' docs');
     }
 }
-print('Seed complete: profile ${profile}');
+print('Seed complete: profile ${base_profile}');
 `;
         writeFileSync(resolve(seeds_dir, '01-seed.js'), loader);
         console.log(`Prepared mongo seed: ${seeds_dir}`);
@@ -318,13 +357,56 @@ export function list_s3_profiles({ name, engine, bucket }) {
     for (const line of ls.stdout.trim().split('\n')) {
         const match = line.match(pattern);
         if (match) {
+            const profileName = match[2];
+            // Numbered immutable versions (`profile-<p>-v<N>.<ext>`) are VERSIONS of
+            // a profile, not profiles in their own right — exclude them so the
+            // listing stays keyed by logical profile (the `profile-<p>.<ext>`
+            // latest-pointer). See list_profile_versions / next_profile_version.
+            if (/-v\d+$/.test(profileName)) continue;
             profiles.push({
-                name: match[2],
+                name: profileName,
                 size: Number(match[1]),
-                file: `profile-${match[2]}.${ext}`,
+                file: `profile-${profileName}.${ext}`,
             });
         }
     }
 
     return profiles;
+}
+
+// --- Numbered immutable snapshot versions (soa#168) ---
+//
+// Each snapshot writes an IMMUTABLE `profile-<p>-v<N>.<ext>` (+ `.meta.json`)
+// alongside the mutable `profile-<p>.<ext>` "latest pointer". A re-cut only ever
+// ADDS the next number; prior versions are retained, so an overwrite is never
+// destructive and a known-good version can be restored via `profile=<p>@v<N>`.
+// `N` is derived from S3 (max existing + 1) — no global counter / DynamoDB.
+
+const VERSION_RE = /^profile-(.+)-v(\d+)\.[^.]+$/;
+
+/** List the numbered versions of a profile in S3, ascending by version. */
+export function list_profile_versions({ name, profile, engine, bucket }) {
+    const eng = engines[engine];
+    if (!eng) return [];
+    const ext = eng.seed_ext;
+    const ls = spawnSync('aws', ['s3', 'ls', `s3://${bucket}/${name}/`], { encoding: 'utf8', stdio: 'pipe' });
+    if (ls.status !== 0 || !ls.stdout.trim()) return [];
+
+    const versions = [];
+    for (const line of ls.stdout.trim().split('\n')) {
+        const file = line.trim().split(/\s+/).pop() || '';
+        const m = file.match(VERSION_RE);
+        // Match this profile's versioned dumps only (exclude `.meta.json` sidecars,
+        // whose ext is `json` and would otherwise collide for mongo profiles).
+        if (m && m[1] === profile && file.endsWith(`.${ext}`)) {
+            versions.push(Number(m[2]));
+        }
+    }
+    return versions.sort((a, b) => a - b);
+}
+
+/** Next version number for a profile (max existing + 1; 1 if none). */
+export function next_profile_version({ name, profile, engine, bucket }) {
+    const versions = list_profile_versions({ name, profile, engine, bucket });
+    return versions.length ? versions[versions.length - 1] + 1 : 1;
 }

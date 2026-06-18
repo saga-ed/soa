@@ -70,4 +70,35 @@ describe('download_profile_seed — seedFrom source-override', () => {
         // …but the local seed destination stays keyed by the TARGET db name.
         expect(args[3]).toContain('/tmp/seeds/programs-api-sbx/');
     });
+
+    // soa#168 — `<profile>@v<N>` version pin (the rollback path).
+    it('resolves the IMMUTABLE versioned object when profile carries an @vN pin', () => {
+        download_profile_seed({
+            name: 'programs-api-sbx',
+            profile: 'canonical@v1',
+            engine: 'postgres',
+            bucket: 'seeds-bkt',
+            seeds_base: '/tmp/seeds',
+        });
+        const args = awsCpArgs();
+        expect(args).not.toBeNull();
+        // reads profile-canonical-v1.sql (immutable), NOT the bare pointer
+        expect(args[2]).toBe('s3://seeds-bkt/programs-api-sbx/profile-canonical-v1.sql');
+    });
+
+    it('combines @vN pin with seedFrom (rollback a sandbox to a prior canonical version)', () => {
+        download_profile_seed({
+            name: 'programs-api-sbx',
+            profile: 'canonical@v2',
+            engine: 'postgres',
+            bucket: 'seeds-bkt',
+            seeds_base: '/tmp/seeds',
+            source_name: 'programs-api-canonical',
+        });
+        const args = awsCpArgs();
+        expect(args).not.toBeNull();
+        expect(args[2]).toBe('s3://seeds-bkt/programs-api-canonical/profile-canonical-v2.sql');
+        // local destination still keyed by the target db name
+        expect(args[3]).toContain('/tmp/seeds/programs-api-sbx/');
+    });
 });

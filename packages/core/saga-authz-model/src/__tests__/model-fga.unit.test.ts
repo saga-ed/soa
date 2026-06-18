@@ -57,3 +57,49 @@ describe('model.fga is a valid OpenFGA model', () => {
         expect(json.schema_version).toBe('1.1');
     });
 });
+
+/**
+ * SEC-CRIT-2: the staff control-plane is a DISTINCT namespace. `staff_org`
+ * must NOT reuse the `admin` relation (that would overwrite tenant.admin and
+ * feed the `admin from parent` cascades), and must NOT inherit admin from a
+ * resource parent. These assertions fail CI if a future edit collapses the
+ * staff namespace back into the resource tree.
+ */
+describe('staff control-plane namespace (SEC-CRIT-2)', () => {
+    const json = transformer.transformDSLToJSONObject(modelText);
+    const byType = Object.fromEntries(
+        json.type_definitions.map((t) => [t.type, t]),
+    );
+
+    it('declares the staff types', () => {
+        expect(byType.saga_platform).toBeDefined();
+        expect(byType.staff_org).toBeDefined();
+    });
+
+    it('saga_platform exposes the computed capabilities', () => {
+        const rels = Object.keys(byType.saga_platform.relations ?? {});
+        expect(rels).toEqual(
+            expect.arrayContaining([
+                'can_impersonate',
+                'can_create_org',
+                'can_admin_personas',
+                'can_manage_staff',
+            ]),
+        );
+    });
+
+    it('staff_org uses staff_admin and NEVER admin (SEC-CRIT-2)', () => {
+        const rels = Object.keys(byType.staff_org.relations ?? {});
+        expect(rels).toContain('staff_admin');
+        expect(rels).not.toContain('admin');
+    });
+
+    it('staff_org has no `from parent` cascade into the resource tree', () => {
+        // No relation on staff_org may resolve through a `parent` edge —
+        // the only computed-userset source allowed is `platform`.
+        const relations = byType.staff_org.relations ?? {};
+        const serialized = JSON.stringify(relations);
+        expect(serialized).not.toMatch(/"relation"\s*:\s*"parent"/);
+        expect(byType.staff_org.relations).not.toHaveProperty('parent');
+    });
+});

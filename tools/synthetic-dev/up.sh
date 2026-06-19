@@ -116,11 +116,12 @@
 #   ./up.sh --workspace <file.json>
 #                                the GENERAL case of the above: a switchboard-
 #                                exported manifest that picks PER SERVICE how it
-#                                runs — local-source (pnpm dev) / local-image
-#                                (prebuilt ECR image via docker) / sandbox (cloud)
-#                                — plus a DB seed profile for the local ones.
-#                                --only/--sandbox are degenerate slices of it.
-#                                Export it from switchboard's presets drawer.
+#                                runs — local-source (pnpm dev) or sandbox (cloud).
+#                                (local-image, the prebuilt-ECR-image mode, is a
+#                                valid manifest value but not yet runnable — Phase
+#                                2 — and is rejected.) --only/--sandbox are
+#                                degenerate slices of it. Export it from
+#                                switchboard's presets drawer.
 #
 # Flags compose, applied in order up → reset → seed → login. Reproducible
 # recipes (no post-deletes — selectivity is in what you seed):
@@ -251,10 +252,9 @@ SANDBOX_BASE="${SANDBOX_BASE:-wootdev.com}"                # dev fleet base doma
 # same three seams (want_service / sandbox_env / launch), so the bespoke
 # per-service launch env in services_up() is untouched. Empty = classic flags.
 WORKSPACE_FILE=""
-declare -A SVC_MODE=()       # svc → local-source|local-image|sandbox
+declare -A SVC_MODE=()       # svc → local-source|sandbox (local-image is Phase 2)
 declare -A SVC_SANDBOX=()    # svc → sandbox name (the dep lives in this cloud sandbox)
-declare -A SVC_IMAGE=()      # svc → image ref (imageDigest|artifactRef) for local-image
-declare -a WS_RUN_SET=()     # services to launch locally (local-source + local-image)
+declare -a WS_RUN_SET=()     # services to launch locally (local-source)
 # ── tunnel mode (--tunnel): expose the browser-facing services to OTHER users
 # via the vms rendezvous box — https://<svc>.<moniker>.$VMS_BASE → this laptop
 # (tunnel.sh + vms/; built for multi-user Connect sessions). The moniker comes
@@ -862,9 +862,9 @@ launch_if(){ # svc port dir extra_env...
 IAM_SANDBOX=""
 # parse_workspace: read a switchboard-exported workspace.json into the SVC_* maps
 # + WS_RUN_SET. Requires jq (already a refresh-suite dep). Each service entry is
-# keyed by name with a `mode`; local-image carries an image ref, sandbox carries
-# the sandbox name. One jq pass emits a TSV row per service, read in a single
-# loop. Validates mode + image presence.
+# keyed by name with a `mode` (local-source / sandbox; local-image is Phase 2 and
+# rejected); a sandbox entry carries the sandbox name. One jq pass emits a row per
+# service, read in a single loop. Validates mode + sandboxName presence.
 parse_workspace(){ # file
   local f=$1
   command -v jq >/dev/null 2>&1 || { err "--workspace needs jq (brew/apt install jq)"; exit 1; }
@@ -872,36 +872,45 @@ parse_workspace(){ # file
   local ver; ver=$(jq -r '.version // empty' "$f" 2>/dev/null) \
     || { err "--workspace: '$f' is not valid JSON"; exit 1; }
   [[ "$ver" == "1" ]] || warn "--workspace: version '$ver' (expected 1) — proceeding"
-  # One row per service: svc, mode, image(digest|artifact), sandboxName, joined
+  # One row per service: svc, mode, sandboxName, joined
   # by the ASCII unit separator (). NOT tab: `read` treats tab as IFS
   # whitespace and COLLAPSES consecutive tabs, so an empty middle field (e.g. no
-  # image on a sandbox row) would shift later fields left.  is non-whitespace,
+  # sandboxName on a local-source row) would shift later fields left.  is non-whitespace,
   # so empties are preserved; it also can't appear in any of these values.
   local US=$'\x1f' rows
   rows=$(jq -re '.services | to_entries[] | [
            .key, (.value.mode // ""),
-           (.value.imageDigest // .value.artifactRef // ""),
            (.value.sandboxName // "")] | join("")' "$f" 2>/dev/null) \
-    || { err "--workspace: '$f' has no .services or is malformed"; exit 1; }
-  local svc mode img sbx
-  while IFS="$US" read -r svc mode img sbx; do
+    || { err "--workspace: '$f' has no/empty .services or is malformed"; exit 1; }
+  local svc mode sbx
+  while IFS="$US" read -r svc mode sbx; do
     [[ -z "$svc" ]] && continue
     case "$mode" in
-      local-source|local-image|sandbox) ;;
+      local-source|sandbox) ;;
+      # local-image is a valid manifest mode (forward-compatible contract) but the
+      # local docker-run launcher is Phase 2 (image teardown, host-network/macOS
+      # reachability, and per-service port-bind contract are unsolved). Reject it
+      # loudly rather than half-run it.
+      local-image) err "--workspace: service '$svc' is local-image — not supported yet (Phase 2). Use local-source or sandbox."; exit 1 ;;
       *) err "--workspace: service '$svc' has invalid mode '$mode'"; exit 1 ;;
     esac
     SVC_MODE["$svc"]=$mode
-    if [[ "$mode" == "local-image" ]]; then
-      [[ -z "$img" ]] && { err "--workspace: service '$svc' is local-image but carries no imageDigest/artifactRef"; exit 1; }
-      SVC_IMAGE["$svc"]=$img
-      WS_RUN_SET+=("$svc")
-    elif [[ "$mode" == "local-source" ]]; then
+    if [[ "$mode" == "local-source" ]]; then
       WS_RUN_SET+=("$svc")
     else # sandbox
+      [[ -z "$sbx" ]] && { err "--workspace: service '$svc' is sandbox but carries no sandboxName"; exit 1; }
       SVC_SANDBOX["$svc"]=$sbx
-      [[ "$svc" == "iam-api" ]] && IAM_SANDBOX=$sbx
+      if [[ "$svc" == "iam-api" ]]; then
+        IAM_SANDBOX=$sbx
+      else
+        # Only iam-api's dep URL is repointed today (sandbox_env). A non-iam
+        # sandbox is recorded but a LOCAL service depending on it still hits its
+        # default — warn so it isn't a silent wrong-target. (Phase 3: mesh deps.)
+        warn "--workspace: '$svc' sandbox is recorded but dep-repoint is iam-only today; local services depending on it keep their default. (Phase 3.)"
+      fi
     fi
   done <<< "$rows"
+  [[ ${#WS_RUN_SET[@]} -eq 0 ]] && warn "--workspace: no local services to run (all sandbox-hosted) — nothing will launch locally."
   # Pull in the playback stack if any playback API is in the run-set.
   local s; for s in "${WS_RUN_SET[@]}"; do
     case "$s" in insights-api|transcripts-api|chat-api) DO_PLAYBACK=1 ;; esac
@@ -1067,31 +1076,8 @@ port_is_up(){ # port probe
 wait_healthy(){ # port probe  → 0 once a 200 appears, 1 after ~40s
   local _; for _ in $(seq 1 40); do port_is_up "$1" "$2" && return 0; sleep 1; done; return 1
 }
-# launch the prebuilt ECR image for a service instead of `pnpm dev`. Same probe/
-# wait contract as launch(); the difference is the process — a container on the
-# host network (so localhost:<dep-port> deps + the static port scheme just work)
-# fed the SAME KEY=VAL env (mapped to `docker run -e`). Used for local-image mode.
-launch_image(){ # name port image extra_env...
-  local name=$1 port=$2 image=$3 probe; shift 3
-  probe=$(probe_path "$name")
-  port_is_up "$port" "$probe" && { ok "$name already up :$port"; return; }
-  local cname="sds-$name"
-  docker rm -f "$cname" >/dev/null 2>&1 || true
-  local env_args=(); local kv; for kv in "$@"; do env_args+=(-e "$kv"); done
-  say "starting $name (image) on :$port…"
-  if ! docker run -d --name "$cname" --network host "${env_args[@]}" "$image" >"$STATE/$name.cid" 2>"$STATE/$name.log"; then
-    printf "\033[31m✗\033[0m %s: docker run failed — tail %s\n" "$name" "$STATE/$name.log"; return 1
-  fi
-  wait_healthy "$port" "$probe" && { ok "$name up :$port (image)"; return; }
-  printf "\033[31m✗\033[0m %s (image) failed on :%s — docker logs %s\n" "$name" "$port" "$cname"; return 1
-}
 launch(){ # name port dir extra_env...
   local name=$1 port=$2 dir=$3 probe; shift 3
-  # Workspace local-image mode: run the prebuilt container instead of pnpm dev.
-  # The image's env is the SAME extra_env the source path would get.
-  if [[ -n "$WORKSPACE_FILE" && "${SVC_MODE[$name]:-}" == "local-image" ]]; then
-    launch_image "$name" "$port" "${SVC_IMAGE[$name]}" "$@"; return
-  fi
   probe=$(probe_path "$name")
   port_is_up "$port" "$probe" && { ok "$name already up :$port"; return; }
   say "starting $name on :$port…"

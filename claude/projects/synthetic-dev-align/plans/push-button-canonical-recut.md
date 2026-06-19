@@ -1,6 +1,39 @@
 # Plan — push-button canonical snapshot re-cut (`/cut-canonical <service>`)
 
-**Status:** DRAFT 2026-06-19 (design for review; not yet built)
+**Status:** DRAFT 2026-06-19 — design + **chain PROVEN end-to-end by hand** (programs-api → test prefix);
+workflow YAML not yet authored.
+
+> ## ✅ Prove-run (2026-06-19) — the chain works; corrections to the design below
+> Manually executed the full throwaway chain once for programs-api to a `program-hub-programs-canonical-test`
+> prefix, then verified + tore down. Result: every step works. Key CORRECTIONS the design couldn't know:
+> - **`cut-canonical` must run the seed ITSELF** — it cannot rely on `sandbox-deploy` to seed. The
+>   `sandbox-deploy`/`_deploy-ecs-api.yml` **Seed job gates on `inputs.is-preview == true`** (and
+>   `seed-profile == ''`); a sandbox dispatch has is-preview=false, so Seed is SKIPPED (DB comes up
+>   migrated-but-empty: 26 tables, Program=0). So: deploy the identifier (sandbox-deploy with empty
+>   seed-profile gives task-def + provisioned + migrated DB), THEN run `db:seed:run` explicitly via
+>   `run-migrate-task.sh`.
+> - **`run-migrate-task.sh` needs explicit SSM overrides for dev** (its defaults point at non-existent
+>   `/program-hub/infra/dev/*` paths). Use what the real migrate job uses:
+>   `CLUSTER_SSM_PATH=/dev/shared-arm/ecs-cluster-arn`,
+>   `SG_SSM_PATH=/program-hub/<api>/infra/dev/sg-id`,
+>   `CAPACITY_PROVIDER=dev-shared-ec2-cluster-arm-capacity-provider`. (`SUBNETS_SSM_PATH` default
+>   `/shared/infra/dev/private-subnet-ids` is correct.) Tier: `saga-infra-dev` (ecs:RunTask + PassRole).
+> - **The two "blockers" collapsed:** `canonseed` is just a normal preview identifier (the parameterized
+>   SAM deploy creates the task-def); and the `PROGRAM_HUB_DEPLOY_ROLE_ARN` the previews assume already
+>   writes `/preview/*` secrets (previews do it every run). No IAM PR needed if cut-canonical mirrors
+>   that auth.
+> - **The s3-cp-versioning glue WORKS** (the one net-new piece): list dest `profile-canonical-v{N}.sql`,
+>   N+1, `s3 cp` dump → `-v{N}.sql`, write fresh sidecar (schemaRev from the snapshot, `takenFromDb`=the
+>   real canonical name, `version`/`supersedes`, and **`seedIdsVersion` finally populated** from the
+>   package version), then `s3 cp` → the `profile-canonical.sql` + `.meta.json` pointer LAST.
+> - **Verified consumable:** the test canonical restored into a fresh pg18 container clean — Program=11,
+>   `_prisma_migrations` head `20260605120000_add_pod_group`. The cloud-side seed wrote migration history
+>   natively (the P3005 recurrence guard holds by construction).
+> - Provisioned DB came up **pg15** because the default-bump PRs (program-hub #236 / rostering #590 /
+>   soa #173) aren't merged yet; once merged, canonseed DBs provision pg18 (and pg16→pg18 restore is
+>   already proven, so no transition gap).
+
+**Status (original):** DRAFT 2026-06-19 (design for review; not yet built)
 **Goal:** turn the (currently manual, ~15-step) canonical re-cut into a **single rote action** a
 developer runs after extending a service's `@saga-ed/*-seed-ids` catalog, so the refreshed seed data
 is reusable by every future sandbox.

@@ -113,6 +113,14 @@
 #                                NOTE: the cloud iam-api runs auth ON, so a real
 #                                S2S token is required (no local dev-bypass) — see
 #                                the design doc (INTEGRATION.md, alongside this script).
+#   ./up.sh --workspace <file.json>
+#                                the GENERAL case of the above: a switchboard-
+#                                exported manifest that picks PER SERVICE how it
+#                                runs — local-source (pnpm dev) / local-image
+#                                (prebuilt ECR image via docker) / sandbox (cloud)
+#                                — plus a DB seed profile for the local ones.
+#                                --only/--sandbox are degenerate slices of it.
+#                                Export it from switchboard's presets drawer.
 #
 # Flags compose, applied in order up → reset → seed → login. Reproducible
 # recipes (no post-deletes — selectivity is in what you seed):
@@ -235,6 +243,19 @@ DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-d
 ONLY_SERVICE=""                                             # --only <svc>: launch just this one
 SANDBOX_NAME=""                                             # --sandbox <name>: compose name the deps live under
 SANDBOX_BASE="${SANDBOX_BASE:-wootdev.com}"                # dev fleet base domain (preview-header routed)
+# ── workspace mode (--workspace <file.json>): a switchboard-exported manifest
+# that picks, PER SERVICE, how it runs — local-source / local-image / sandbox —
+# plus a DB seed profile for the local ones. It is the general case that --only
+# and --sandbox are degenerate slices of: --only X is a run-set of {X};
+# --sandbox N is a single-entry SVC_SANDBOX map. The flags below all feed the
+# same three seams (want_service / sandbox_env / launch), so the bespoke
+# per-service launch env in services_up() is untouched. Empty = classic flags.
+WORKSPACE_FILE=""
+declare -A SVC_MODE=()       # svc → local-source|local-image|sandbox
+declare -A SVC_SANDBOX=()    # svc → sandbox name (the dep lives in this cloud sandbox)
+declare -A SVC_IMAGE=()      # svc → image ref (imageDigest|artifactRef) for local-image
+declare -A SVC_DBPROFILE=()  # svc → DB seed profile for a local service ('' = no restore)
+declare -a WS_RUN_SET=()     # services to launch locally (local-source + local-image)
 # ── tunnel mode (--tunnel): expose the browser-facing services to OTHER users
 # via the vms rendezvous box — https://<svc>.<moniker>.$VMS_BASE → this laptop
 # (tunnel.sh + vms/; built for multi-user Connect sessions). The moniker comes
@@ -796,6 +817,13 @@ probe_path(){ # name
 # want_service: under --only, launch ONLY the named service; otherwise launch
 # all (the normal full-local stack).
 want_service(){ # svc
+  # Workspace mode: launch only services in the run-set (local-source/-image);
+  # sandbox-mode services are NOT launched (they live in the cloud).
+  if [[ -n "$WORKSPACE_FILE" ]]; then
+    local s; for s in "${WS_RUN_SET[@]}"; do [[ "$s" == "$1" ]] && return 0; done
+    return 1
+  fi
+  # Classic --only is the degenerate single-service run-set.
   [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "$1" ]]
 }
 # launch_if: gate launch by want_service and RECORD any real failure. A service
@@ -827,9 +855,69 @@ launch_if(){ # svc port dir extra_env...
 # launch, and the design doc (INTEGRATION.md, alongside this script).
 # Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
 # sessions deps are additive once the multi-service mesh compose is unblocked.
+# is iam-api a cloud-sandbox dependency for this run? In classic --sandbox mode
+# that's true whenever SANDBOX_NAME is set (iam is the single wired dep). In
+# workspace mode it's true iff iam-api itself is a sandbox-mode service. Echoes
+# the sandbox name if so, else nothing.
+iam_sandbox_name(){
+  if [[ -n "$WORKSPACE_FILE" ]]; then
+    [[ "${SVC_MODE[iam-api]:-}" == "sandbox" ]] && printf '%s' "${SVC_SANDBOX[iam-api]:-}"
+  else
+    printf '%s' "$SANDBOX_NAME"
+  fi
+}
+# parse_workspace: read a switchboard-exported workspace.json into the SVC_* maps
+# + WS_RUN_SET. Requires jq (already a refresh-suite dep). Each entry is keyed by
+# service name with a `mode`; local-* carry an optional dbProfile (+ image for
+# local-image); sandbox carries the sandbox name + previewHeaderValue (the slug,
+# informational here — the routing header still has to be ORIGINATED at the
+# request boundary; see sandbox_env's note). Validates mode + image presence.
+parse_workspace(){ # file
+  local f=$1
+  command -v jq >/dev/null 2>&1 || { err "--workspace needs jq (brew/apt install jq)"; exit 1; }
+  [[ -r "$f" ]] || { err "--workspace: cannot read '$f'"; exit 1; }
+  jq -e . "$f" >/dev/null 2>&1 || { err "--workspace: '$f' is not valid JSON"; exit 1; }
+  local ver; ver=$(jq -r '.version // empty' "$f")
+  [[ "$ver" == "1" ]] || warn "--workspace: version '$ver' (expected 1) — proceeding"
+  local svcs; svcs=$(jq -r '.services | keys[]' "$f" 2>/dev/null)
+  [[ -z "$svcs" ]] && { err "--workspace: no .services in '$f'"; exit 1; }
+  local svc mode
+  while IFS= read -r svc; do
+    [[ -z "$svc" ]] && continue
+    mode=$(jq -r --arg s "$svc" '.services[$s].mode // empty' "$f")
+    case "$mode" in
+      local-source|local-image|sandbox) ;;
+      *) err "--workspace: service '$svc' has invalid mode '$mode'"; exit 1 ;;
+    esac
+    SVC_MODE["$svc"]=$mode
+    SVC_DBPROFILE["$svc"]=$(jq -r --arg s "$svc" '.services[$s].dbProfile // ""' "$f")
+    if [[ "$mode" == "local-image" ]]; then
+      local img; img=$(jq -r --arg s "$svc" '.services[$s].imageDigest // .services[$s].artifactRef // empty' "$f")
+      [[ -z "$img" ]] && { err "--workspace: service '$svc' is local-image but carries no imageDigest/artifactRef"; exit 1; }
+      SVC_IMAGE["$svc"]=$img
+      WS_RUN_SET+=("$svc")
+    elif [[ "$mode" == "local-source" ]]; then
+      WS_RUN_SET+=("$svc")
+    else # sandbox
+      SVC_SANDBOX["$svc"]=$(jq -r --arg s "$svc" '.services[$s].sandboxName // empty' "$f")
+    fi
+  done <<< "$svcs"
+  # Pull in the playback stack if any playback API is in the run-set.
+  local s; for s in "${WS_RUN_SET[@]}"; do
+    case "$s" in insights-api|transcripts-api|chat-api) DO_PLAYBACK=1 ;; esac
+  done
+  say "workspace: ${#WS_RUN_SET[@]} local service(s) [${WS_RUN_SET[*]}]; $(( ${#SVC_MODE[@]} - ${#WS_RUN_SET[@]} )) sandbox-hosted"
+}
 sandbox_env(){ # svc
-  [[ -z "$SANDBOX_NAME" ]] && return 0
-  local svc=$1 iam_host="https://iam.$SANDBOX_BASE"
+  # Repoint a locally-run service's iam-api dependency URL at the cloud when
+  # iam-api is sandbox-hosted this run. Only iam-api is wired today (the proven
+  # single-dep shape); programs/scheduling/sessions deps are additive once the
+  # multi-service mesh compose + the preview-header originate-map land (Phase 3).
+  # NOTE: this flips the URL only — it does NOT originate the routing header
+  # (see the comment above; the header must enter at the request boundary).
+  local svc=$1 sb; sb=$(iam_sandbox_name)
+  [[ -z "$sb" ]] && return 0
+  local iam_host="https://iam.$SANDBOX_BASE"
   case "$svc" in
     sis-api)
       printf '%s\n' "IAM_BASEURL=$iam_host/trpc" "IAM_TOKENURL=$iam_host/v1/oauth/token" ;;
@@ -972,8 +1060,34 @@ sync_dash_local_defaults(){
   fi
 }
 
+# launch the prebuilt ECR image for a service instead of `pnpm dev`. Same probe/
+# wait contract as launch(); the difference is the process — a container on the
+# host network (so localhost:<dep-port> deps + the static port scheme just work)
+# fed the SAME KEY=VAL env (mapped to `docker run -e`). Used for local-image mode.
+launch_image(){ # name port image extra_env...
+  local name=$1 port=$2 image=$3 probe; shift 3
+  probe=$(probe_path "$name")
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
+  local cname="sds-$name"
+  docker rm -f "$cname" >/dev/null 2>&1 || true
+  local env_args=(); local kv; for kv in "$@"; do env_args+=(-e "$kv"); done
+  say "starting $name (image) on :$port…"
+  if ! docker run -d --name "$cname" --network host "${env_args[@]}" "$image" >"$STATE/$name.cid" 2>"$STATE/$name.log"; then
+    printf "\033[31m✗\033[0m %s: docker run failed — tail %s\n" "$name" "$STATE/$name.log"; return 1
+  fi
+  for _ in $(seq 1 40); do
+    [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name up :$port (image)"; return; }
+    sleep 1
+  done
+  printf "\033[31m✗\033[0m %s (image) failed on :%s — docker logs %s\n" "$name" "$port" "$cname"; return 1
+}
 launch(){ # name port dir extra_env...
   local name=$1 port=$2 dir=$3 probe; shift 3
+  # Workspace local-image mode: run the prebuilt container instead of pnpm dev.
+  # The image's env is the SAME extra_env the source path would get.
+  if [[ -n "$WORKSPACE_FILE" && "${SVC_MODE[$name]:-}" == "local-image" ]]; then
+    launch_image "$name" "$port" "${SVC_IMAGE[$name]}" "$@"; return
+  fi
   probe=$(probe_path "$name")
   [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
   say "starting $name on :$port…"
@@ -1441,7 +1555,7 @@ case "${1:-up}" in
   # Self-maintaining: print the header's "Usage:" block through its closing
   # ruler, instead of a hardcoded line range that drifts as the header grows.
   -h|--help)                     sed -n '/^# Usage:/,/^# ─────/p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--tunnel|--with-playback) ;; # flag-only invocation; skip up
+  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--workspace|--tunnel|--with-playback) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
@@ -1463,6 +1577,11 @@ while [[ $# -gt 0 ]]; do
     # header to the dev fleet (see sandbox_env). Either implies the hybrid path.
     --only)    ONLY_SERVICE="${2:-}"; [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == -* ]] && { echo "--only needs a service name"; exit 1; }; shift 2 ;;
     --sandbox) SANDBOX_NAME="${2:-}"; [[ -z "$SANDBOX_NAME" || "$SANDBOX_NAME" == -* ]] && { echo "--sandbox needs a name"; exit 1; }; shift 2 ;;
+    # --workspace <file.json>: a switchboard-exported manifest selecting per-service
+    # run mode (local-source/local-image/sandbox) + DB profile. Parsed into the
+    # SVC_* maps that want_service/sandbox_env/launch read. The general case of
+    # --only/--sandbox; mutually exclusive with them.
+    --workspace) WORKSPACE_FILE="${2:-}"; [[ -z "$WORKSPACE_FILE" || "$WORKSPACE_FILE" == -* ]] && { echo "--workspace needs a file path"; exit 1; }; shift 2 ;;
     # --tunnel: NO argument — the moniker comes from .vms-moniker (tunnel.sh
     # bootstraps it interactively on first use), keeping monikers out of shared
     # command lines (no placeholders, no cross-contamination).
@@ -1485,6 +1604,15 @@ if [[ -n "$ONLY_SERVICE" ]]; then
 fi
 if [[ -n "$SANDBOX_NAME" && -z "$ONLY_SERVICE" ]]; then
   echo "--sandbox <name> requires --only <svc> (point ONE local service at the sandbox; the rest are the sandbox)"; exit 1
+fi
+# --workspace is the general case of --only/--sandbox; refuse to mix them.
+if [[ -n "$WORKSPACE_FILE" && ( -n "$ONLY_SERVICE" || -n "$SANDBOX_NAME" ) ]]; then
+  echo "--workspace cannot be combined with --only/--sandbox (it is the general case of both)"; exit 1
+fi
+if [[ -n "$WORKSPACE_FILE" ]]; then
+  parse_workspace "$WORKSPACE_FILE"
+  # A workspace is a launch directive: imply up unless a reset/restart was asked.
+  [[ $DO_RESET == 1 || $DO_RESTART == 1 ]] || DO_UP=1
 fi
 # --with-playback is a launch directive: a bare `./up.sh --with-playback` (no
 # verb) should bring the stack up WITH the playback APIs. Imply DO_UP unless a

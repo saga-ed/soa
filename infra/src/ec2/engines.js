@@ -6,7 +6,11 @@
 export const engines = {
     postgres: {
         image_template: 'postgres:{version}',
-        default_version: '16',
+        // 18 (was 16): align the fallback with the pg18.3 RDS mainline and the
+        // preview/sandbox provision defaults (program-hub/rostering now request
+        // 18 explicitly). Only fires when a caller omits engine-version (e.g. a
+        // local synthetic-dev `up` or a bare `saga-orch provision`).
+        default_version: '18',
         container_data_path: '/var/lib/postgresql/data',
         port_range: [5432, 5499],
         default_port: 5432,

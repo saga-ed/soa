@@ -254,7 +254,6 @@ WORKSPACE_FILE=""
 declare -A SVC_MODE=()       # svc → local-source|local-image|sandbox
 declare -A SVC_SANDBOX=()    # svc → sandbox name (the dep lives in this cloud sandbox)
 declare -A SVC_IMAGE=()      # svc → image ref (imageDigest|artifactRef) for local-image
-declare -A SVC_DBPROFILE=()  # svc → DB seed profile for a local service ('' = no restore)
 declare -a WS_RUN_SET=()     # services to launch locally (local-source + local-image)
 # ── tunnel mode (--tunnel): expose the browser-facing services to OTHER users
 # via the vms rendezvous box — https://<svc>.<moniker>.$VMS_BASE → this laptop
@@ -855,53 +854,54 @@ launch_if(){ # svc port dir extra_env...
 # launch, and the design doc (INTEGRATION.md, alongside this script).
 # Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
 # sessions deps are additive once the multi-service mesh compose is unblocked.
-# is iam-api a cloud-sandbox dependency for this run? In classic --sandbox mode
-# that's true whenever SANDBOX_NAME is set (iam is the single wired dep). In
-# workspace mode it's true iff iam-api itself is a sandbox-mode service. Echoes
-# the sandbox name if so, else nothing.
-iam_sandbox_name(){
-  if [[ -n "$WORKSPACE_FILE" ]]; then
-    [[ "${SVC_MODE[iam-api]:-}" == "sandbox" ]] && printf '%s' "${SVC_SANDBOX[iam-api]:-}"
-  else
-    printf '%s' "$SANDBOX_NAME"
-  fi
-}
+# IAM_SANDBOX: the sandbox name iam-api lives in for this run, or "" if iam is
+# local. Set once at arg/parse time (--sandbox sets SANDBOX_NAME directly;
+# parse_workspace sets it from the manifest), so sandbox_env reads a plain scalar
+# instead of recomputing per call. --workspace and --sandbox are mutually
+# exclusive, so only one writer ever fires.
+IAM_SANDBOX=""
 # parse_workspace: read a switchboard-exported workspace.json into the SVC_* maps
-# + WS_RUN_SET. Requires jq (already a refresh-suite dep). Each entry is keyed by
-# service name with a `mode`; local-* carry an optional dbProfile (+ image for
-# local-image); sandbox carries the sandbox name + previewHeaderValue (the slug,
-# informational here — the routing header still has to be ORIGINATED at the
-# request boundary; see sandbox_env's note). Validates mode + image presence.
+# + WS_RUN_SET. Requires jq (already a refresh-suite dep). Each service entry is
+# keyed by name with a `mode`; local-image carries an image ref, sandbox carries
+# the sandbox name. One jq pass emits a TSV row per service, read in a single
+# loop. Validates mode + image presence.
 parse_workspace(){ # file
   local f=$1
   command -v jq >/dev/null 2>&1 || { err "--workspace needs jq (brew/apt install jq)"; exit 1; }
   [[ -r "$f" ]] || { err "--workspace: cannot read '$f'"; exit 1; }
-  jq -e . "$f" >/dev/null 2>&1 || { err "--workspace: '$f' is not valid JSON"; exit 1; }
-  local ver; ver=$(jq -r '.version // empty' "$f")
+  local ver; ver=$(jq -r '.version // empty' "$f" 2>/dev/null) \
+    || { err "--workspace: '$f' is not valid JSON"; exit 1; }
   [[ "$ver" == "1" ]] || warn "--workspace: version '$ver' (expected 1) — proceeding"
-  local svcs; svcs=$(jq -r '.services | keys[]' "$f" 2>/dev/null)
-  [[ -z "$svcs" ]] && { err "--workspace: no .services in '$f'"; exit 1; }
-  local svc mode
-  while IFS= read -r svc; do
+  # One row per service: svc, mode, image(digest|artifact), sandboxName, joined
+  # by the ASCII unit separator (). NOT tab: `read` treats tab as IFS
+  # whitespace and COLLAPSES consecutive tabs, so an empty middle field (e.g. no
+  # image on a sandbox row) would shift later fields left.  is non-whitespace,
+  # so empties are preserved; it also can't appear in any of these values.
+  local US=$'\x1f' rows
+  rows=$(jq -re '.services | to_entries[] | [
+           .key, (.value.mode // ""),
+           (.value.imageDigest // .value.artifactRef // ""),
+           (.value.sandboxName // "")] | join("")' "$f" 2>/dev/null) \
+    || { err "--workspace: '$f' has no .services or is malformed"; exit 1; }
+  local svc mode img sbx
+  while IFS="$US" read -r svc mode img sbx; do
     [[ -z "$svc" ]] && continue
-    mode=$(jq -r --arg s "$svc" '.services[$s].mode // empty' "$f")
     case "$mode" in
       local-source|local-image|sandbox) ;;
       *) err "--workspace: service '$svc' has invalid mode '$mode'"; exit 1 ;;
     esac
     SVC_MODE["$svc"]=$mode
-    SVC_DBPROFILE["$svc"]=$(jq -r --arg s "$svc" '.services[$s].dbProfile // ""' "$f")
     if [[ "$mode" == "local-image" ]]; then
-      local img; img=$(jq -r --arg s "$svc" '.services[$s].imageDigest // .services[$s].artifactRef // empty' "$f")
       [[ -z "$img" ]] && { err "--workspace: service '$svc' is local-image but carries no imageDigest/artifactRef"; exit 1; }
       SVC_IMAGE["$svc"]=$img
       WS_RUN_SET+=("$svc")
     elif [[ "$mode" == "local-source" ]]; then
       WS_RUN_SET+=("$svc")
     else # sandbox
-      SVC_SANDBOX["$svc"]=$(jq -r --arg s "$svc" '.services[$s].sandboxName // empty' "$f")
+      SVC_SANDBOX["$svc"]=$sbx
+      [[ "$svc" == "iam-api" ]] && IAM_SANDBOX=$sbx
     fi
-  done <<< "$svcs"
+  done <<< "$rows"
   # Pull in the playback stack if any playback API is in the run-set.
   local s; for s in "${WS_RUN_SET[@]}"; do
     case "$s" in insights-api|transcripts-api|chat-api) DO_PLAYBACK=1 ;; esac
@@ -915,9 +915,8 @@ sandbox_env(){ # svc
   # multi-service mesh compose + the preview-header originate-map land (Phase 3).
   # NOTE: this flips the URL only — it does NOT originate the routing header
   # (see the comment above; the header must enter at the request boundary).
-  local svc=$1 sb; sb=$(iam_sandbox_name)
-  [[ -z "$sb" ]] && return 0
-  local iam_host="https://iam.$SANDBOX_BASE"
+  [[ -z "$IAM_SANDBOX" ]] && return 0
+  local svc=$1 iam_host="https://iam.$SANDBOX_BASE"
   case "$svc" in
     sis-api)
       printf '%s\n' "IAM_BASEURL=$iam_host/trpc" "IAM_TOKENURL=$iam_host/v1/oauth/token" ;;
@@ -1060,6 +1059,14 @@ sync_dash_local_defaults(){
   fi
 }
 
+# Shared health probe used by launch / launch_image (one definition of the
+# curl-200 check + the 40× poll, so the timeout/retry tuning lives in one place).
+port_is_up(){ # port probe
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://localhost:$1$2" 2>/dev/null)" == 200 ]]
+}
+wait_healthy(){ # port probe  → 0 once a 200 appears, 1 after ~40s
+  local _; for _ in $(seq 1 40); do port_is_up "$1" "$2" && return 0; sleep 1; done; return 1
+}
 # launch the prebuilt ECR image for a service instead of `pnpm dev`. Same probe/
 # wait contract as launch(); the difference is the process — a container on the
 # host network (so localhost:<dep-port> deps + the static port scheme just work)
@@ -1067,7 +1074,7 @@ sync_dash_local_defaults(){
 launch_image(){ # name port image extra_env...
   local name=$1 port=$2 image=$3 probe; shift 3
   probe=$(probe_path "$name")
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
+  port_is_up "$port" "$probe" && { ok "$name already up :$port"; return; }
   local cname="sds-$name"
   docker rm -f "$cname" >/dev/null 2>&1 || true
   local env_args=(); local kv; for kv in "$@"; do env_args+=(-e "$kv"); done
@@ -1075,10 +1082,7 @@ launch_image(){ # name port image extra_env...
   if ! docker run -d --name "$cname" --network host "${env_args[@]}" "$image" >"$STATE/$name.cid" 2>"$STATE/$name.log"; then
     printf "\033[31m✗\033[0m %s: docker run failed — tail %s\n" "$name" "$STATE/$name.log"; return 1
   fi
-  for _ in $(seq 1 40); do
-    [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name up :$port (image)"; return; }
-    sleep 1
-  done
+  wait_healthy "$port" "$probe" && { ok "$name up :$port (image)"; return; }
   printf "\033[31m✗\033[0m %s (image) failed on :%s — docker logs %s\n" "$name" "$port" "$cname"; return 1
 }
 launch(){ # name port dir extra_env...
@@ -1089,13 +1093,10 @@ launch(){ # name port dir extra_env...
     launch_image "$name" "$port" "${SVC_IMAGE[$name]}" "$@"; return
   fi
   probe=$(probe_path "$name")
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
+  port_is_up "$port" "$probe" && { ok "$name already up :$port"; return; }
   say "starting $name on :$port…"
   ( cd "$dir"; env "$@" nohup pnpm dev >"$STATE/$name.log" 2>&1 & echo $! >"$STATE/$name.pid" )
-  for _ in $(seq 1 40); do
-    [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name up :$port"; return; }
-    sleep 1
-  done
+  wait_healthy "$port" "$probe" && { ok "$name up :$port"; return; }
   printf "\033[31m✗\033[0m %s failed on :%s — tail %s\n" "$name" "$port" "$STATE/$name.log"; return 1
 }
 
@@ -1625,6 +1626,9 @@ fi
 if [[ -n "$SANDBOX_NAME" && ! "$SANDBOX_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]]; then
   echo "--sandbox: '$SANDBOX_NAME' must match [a-zA-Z0-9][a-zA-Z0-9-]{0,39}"; exit 1
 fi
+# Classic --sandbox: iam-api is the single wired sandbox dep, so seed the scalar
+# sandbox_env reads. (--workspace sets IAM_SANDBOX in parse_workspace instead.)
+[[ -n "$SANDBOX_NAME" ]] && IAM_SANDBOX="$SANDBOX_NAME"
 # Tunnel-mode resolution. The moniker prompt (first run) talks on stderr, so
 # the $() capture stays clean. tunnel_env() needs TUNNEL_DOMAIN before any
 # launch line runs; LOGIN_*_URLs flip the login flow to the public hosts (the

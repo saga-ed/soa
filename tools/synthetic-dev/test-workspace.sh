@@ -28,11 +28,10 @@ JSON
 # Minimal env + stubs so the extracted functions run standalone.
 SANDBOX_BASE="wootdev.com"
 err(){ echo "ERR: $*" >&2; }; warn(){ :; }; say(){ :; }; ok(){ :; }
-ONLY_SERVICE=""; SANDBOX_NAME=""; WORKSPACE_FILE=""; DO_PLAYBACK=0
-declare -A SVC_MODE=() SVC_SANDBOX=() SVC_IMAGE=() SVC_DBPROFILE=()
+ONLY_SERVICE=""; SANDBOX_NAME=""; WORKSPACE_FILE=""; DO_PLAYBACK=0; IAM_SANDBOX=""
+declare -A SVC_MODE=() SVC_SANDBOX=() SVC_IMAGE=()
 declare -a WS_RUN_SET=()
 eval "$(sed -n '/^want_service(){/,/^}/p' "$UP")"
-eval "$(sed -n '/^iam_sandbox_name(){/,/^}/p' "$UP")"
 eval "$(sed -n '/^parse_workspace(){/,/^}/p' "$UP")"
 eval "$(sed -n '/^sandbox_env(){/,/^}/p' "$UP")"
 
@@ -45,13 +44,13 @@ ONLY_SERVICE="programs-api"; WORKSPACE_FILE=""
 assert "only: target wanted"      "$(yn want_service programs-api)" yes
 assert "only: non-target skipped" "$(yn want_service iam-api)"      no
 
-# 2. classic --sandbox regression
-ONLY_SERVICE="programs-api"; SANDBOX_NAME="dev"; WORKSPACE_FILE=""
+# 2. classic --sandbox regression (arg-parse seeds IAM_SANDBOX from SANDBOX_NAME)
+ONLY_SERVICE="programs-api"; SANDBOX_NAME="dev"; IAM_SANDBOX="dev"; WORKSPACE_FILE=""
 assert "sandbox(classic): programs IAM_API_URL" "$(sandbox_env programs-api)" "IAM_API_URL=https://iam.wootdev.com"
 assert "sandbox(classic): iam-api no repoint"   "$(sandbox_env iam-api)"      ""
 
-# 3. workspace mode
-ONLY_SERVICE=""; SANDBOX_NAME=""; WORKSPACE_FILE="$WS"
+# 3. workspace mode (parse_workspace seeds IAM_SANDBOX from the manifest)
+ONLY_SERVICE=""; SANDBOX_NAME=""; IAM_SANDBOX=""; WORKSPACE_FILE="$WS"
 parse_workspace "$WS"
 assert "ws: programs-api local-source"  "${SVC_MODE[programs-api]}" local-source
 assert "ws: sis-api local-image"        "${SVC_MODE[sis-api]}"      local-image

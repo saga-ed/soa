@@ -209,7 +209,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     - id: provision
-      uses: ./.github/actions/orchestrator-call
+      uses: saga-ed/soa/.github/actions/orchestrator-call@feat/shared-deploy-workflow
       with:
         function-name: ${{ inputs.orchestrator-function }}
         payload: ${{ steps.payload.outputs.payload }}
@@ -246,7 +246,7 @@ runs:
 
     - id: describe
       if: steps.triage.outputs.reuse == 'true'
-      uses: ./.github/actions/orchestrator-call
+      uses: saga-ed/soa/.github/actions/orchestrator-call@feat/shared-deploy-workflow
       with:
         function-name: ${{ inputs.orchestrator-function }}
         payload: ${{ steps.triage.outputs.describe-payload }}
@@ -282,7 +282,7 @@ runs:
 
     - id: restore
       if: steps.restore-payload.outputs.payload != ''
-      uses: ./.github/actions/orchestrator-call
+      uses: saga-ed/soa/.github/actions/orchestrator-call@feat/shared-deploy-workflow
       with:
         function-name: ${{ inputs.orchestrator-function }}
         payload: ${{ steps.restore-payload.outputs.payload }}

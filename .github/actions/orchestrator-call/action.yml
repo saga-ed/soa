@@ -45,7 +45,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: ./.github/actions/setup-saga-orch
+    - uses: saga-ed/soa/.github/actions/setup-saga-orch@feat/shared-deploy-workflow
       with:
         saga-platform-version: ${{ inputs.saga-platform-version }}
     - id: call

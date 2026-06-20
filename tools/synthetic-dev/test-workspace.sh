@@ -61,6 +61,11 @@ assert "only: non-target skipped" "$(yn want_service iam-api)"      no
 ONLY_SERVICE="programs-api"; SANDBOX_NAME="dev"; IAM_SANDBOX="dev"; WORKSPACE_FILE=""
 assert "sandbox(classic): programs IAM_API_URL" "$(sandbox_env programs-api)" "IAM_API_URL=https://iam.wootdev.com"
 assert "sandbox(classic): iam-api no repoint"   "$(sandbox_env iam-api)"      ""
+# sis-api originates the preview header (Phase 3) — slug form sandbox-<name>.
+assert "sandbox(classic): sis originate-map"    "$(sandbox_env sis-api)" \
+  $'IAM_BASEURL=https://iam.wootdev.com/trpc\nIAM_TOKENURL=https://iam.wootdev.com/v1/oauth/token\nPREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=sandbox-dev'
+# programs/scheduling/sessions don't parse the originate-map yet → URL flip only.
+assert "sandbox(classic): programs no originate" "$(sandbox_env programs-api)" "IAM_API_URL=https://iam.wootdev.com"
 
 # 3. workspace mode (parse_workspace seeds IAM_SANDBOX from the manifest)
 ONLY_SERVICE=""; SANDBOX_NAME=""; IAM_SANDBOX=""; WORKSPACE_FILE="$WS"
@@ -74,8 +79,8 @@ assert "ws: programs-api in run-set"    "$(yn want_service programs-api)" yes
 assert "ws: sis-api in run-set"         "$(yn want_service sis-api)"      yes
 assert "ws: iam-api NOT in run-set"     "$(yn want_service iam-api)"      no
 assert "ws: programs IAM_API_URL flips" "$(sandbox_env programs-api)" "IAM_API_URL=https://iam.wootdev.com"
-assert "ws: sis IAM_BASEURL flips"      "$(sandbox_env sis-api)" \
-  $'IAM_BASEURL=https://iam.wootdev.com/trpc\nIAM_TOKENURL=https://iam.wootdev.com/v1/oauth/token'
+assert "ws: sis IAM_BASEURL flips + originates" "$(sandbox_env sis-api)" \
+  $'IAM_BASEURL=https://iam.wootdev.com/trpc\nIAM_TOKENURL=https://iam.wootdev.com/v1/oauth/token\nPREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=sandbox-dev'
 
 # 3b. dbProfile parsing (programs-api carries one; sis-api does not)
 assert "ws: programs-api dbProfile"     "${SVC_DBPROFILE[programs-api]:-}" canonical

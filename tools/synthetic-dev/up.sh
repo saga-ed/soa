@@ -1022,17 +1022,18 @@ launch_if(){ # svc port dir extra_env...
 # local mesh. Prints nothing when SANDBOX_NAME is unset (pure-local mode), so
 # it's a no-op safe to splat into every launch line: `launch x ... $(sandbox_env x)`.
 #
-# This ONLY flips the dependency URL (localhost → https://<dep-host>.$SANDBOX_BASE).
-# It deliberately does NOT try to set the preview-routing header via env: the
-# services read it from getPreviewHeaders() (AsyncLocalStorage populated per
-# INBOUND request) — there is no env var that makes a service ORIGINATE
-# `x-saga-preview-<dep>: sandbox-<name>` for its own outbound calls. The header
-# must enter at the request boundary (the dash, or your curl/test harness) and
-# forward-propagate. A backend hit WITHOUT that header silently routes its iam
-# calls to MAIN (empty variant), not the sandbox — see the warning printed at
-# launch, and the design doc (INTEGRATION.md, alongside this script).
-# Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
-# sessions deps are additive once the multi-service mesh compose is unblocked.
+# It flips the dependency URL (localhost → https://<dep-host>.$SANDBOX_BASE) AND,
+# for services that parse it, originates the preview-routing header via
+# PREVIEW_ORIGINATE_MAP (Phase 3 — see sandbox_env's body). Historically there
+# was no env path to ORIGINATE `x-saga-preview-<dep>: sandbox-<name>` — the
+# services only read it off the INBOUND request (AsyncLocalStorage), so a
+# headlessly-driven backend routed its iam calls to MAIN. The originate-map now
+# closes that for sis-api: its getPreviewHeaders() merges PREVIEW_ORIGINATE_MAP
+# under any inbound header (inbound wins per-key, browser flow intact). A real
+# request boundary (dash, curl harness) still forward-propagates as before.
+# Only iam-api is wired as a dep today (the proven single-dep shape), and only
+# sis-api parses the originate-map; programs/scheduling/sessions deps + their
+# own originate-map are additive once the multi-service mesh compose is unblocked.
 # IAM_SANDBOX: the sandbox name iam-api lives in for this run, or "" if iam is
 # local. Set once at arg/parse time (--sandbox sets SANDBOX_NAME directly;
 # parse_workspace sets it from the manifest), so sandbox_env reads a plain scalar
@@ -1100,20 +1101,49 @@ parse_workspace(){ # file
     case "$s" in insights-api|transcripts-api|chat-api) DO_PLAYBACK=1 ;; esac
   done
   say "workspace: ${#WS_RUN_SET[@]} local service(s) [${WS_RUN_SET[*]}]; $(( ${#SVC_MODE[@]} - ${#WS_RUN_SET[@]} )) sandbox-hosted"
+  # Routing signal when iam-api is sandbox-hosted: sis-api self-originates the
+  # preview header (sandbox_env → PREVIEW_ORIGINATE_MAP), but programs/scheduling/
+  # sessions don't parse it yet, so their iam calls silently route to MAIN (which
+  # rejects unauthenticated S2S). Name them rather than let it fail quietly.
+  if [[ -n "$IAM_SANDBOX" ]]; then
+    local need=() x
+    for x in "${WS_RUN_SET[@]}"; do
+      case "$x" in programs-api|scheduling-api|sessions-api) need+=("$x") ;; esac
+    done
+    [[ ${#need[@]} -gt 0 ]] && warn "--workspace: ${need[*]} depend on iam-api but don't originate the preview header yet (only sis-api does) — their iam calls hit MAIN, not sandbox '$IAM_SANDBOX'. (Phase 3 follow-up.)"
+  fi
 }
 sandbox_env(){ # svc
   # Repoint a locally-run service's iam-api dependency URL at the cloud when
-  # iam-api is sandbox-hosted this run. Only iam-api is wired today (the proven
-  # single-dep shape); programs/scheduling/sessions deps are additive once the
-  # multi-service mesh compose + the preview-header originate-map land (Phase 3).
-  # NOTE: this flips the URL only — it does NOT originate the routing header
-  # (see the comment above; the header must enter at the request boundary).
+  # iam-api is sandbox-hosted this run, AND originate the preview-routing header
+  # so the call lands on the sandbox variant rather than main.
+  #
+  # Two halves, both needed for a headlessly-driven local→sandbox hop:
+  #  1. URL flip: localhost → https://iam.$SANDBOX_BASE (the dep's cloud host).
+  #  2. Header origination (Phase 3): PREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=
+  #     sandbox-<name>. The services read getPreviewHeaders() off the INBOUND
+  #     request (AsyncLocalStorage); with no browser/dash entrypoint that store is
+  #     empty and the call would route to main. The originate-map seeds the same
+  #     getPreviewHeaders() from this env var (sis-api preview-headers.ts), so a
+  #     directly-driven backend originates the slug `sandbox-<name>` the ALB
+  #     registered. A real inbound header still wins per-key (browser flow intact).
+  #     Slug form `sandbox-<name>` matches rostering sandbox-deploy.yml's
+  #     IDENTIFIER (verified). Only sis-api parses PREVIEW_ORIGINATE_MAP today;
+  #     it's harmless on services that ignore it.
+  #
+  # Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
+  # sessions deps are additive once the multi-service mesh compose is unblocked.
   [[ -z "$IAM_SANDBOX" ]] && return 0
   local svc=$1 iam_host="https://iam.$SANDBOX_BASE"
+  local iam_originate="PREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=sandbox-$IAM_SANDBOX"
   case "$svc" in
     sis-api)
-      printf '%s\n' "IAM_BASEURL=$iam_host/trpc" "IAM_TOKENURL=$iam_host/v1/oauth/token" ;;
+      printf '%s\n' "IAM_BASEURL=$iam_host/trpc" "IAM_TOKENURL=$iam_host/v1/oauth/token" \
+        "$iam_originate" ;;
     programs-api|scheduling-api|sessions-api)
+      # URL flip only: these services don't parse PREVIEW_ORIGINATE_MAP yet, so
+      # originating the header here would be dead env. Add their entry when their
+      # preview-headers.ts gains the same originate-map (Phase 3 follow-up).
       printf '%s\n' "IAM_API_URL=$iam_host" ;;
     *) ;; # iam-api itself / saga-dash / ads-adm / rtsm / connect: no repoint wired (yet)
   esac
@@ -1881,11 +1911,20 @@ fi
 
 if [[ -n "$SANDBOX_NAME" ]]; then
   say "hybrid: $ONLY_SERVICE local → iam dep at https://iam.$SANDBOX_BASE (sandbox '$SANDBOX_NAME')"
-  warn "ROUTING IS NOT AUTOMATIC: $ONLY_SERVICE only reaches sandbox iam if its INBOUND"
-  warn "request carries  x-saga-preview-iam-api: sandbox-$SANDBOX_NAME  (it forward-propagates"
-  warn "from there). Drive via the dash (which originates it) or set that header on each"
-  warn "curl/test request. WITHOUT it, iam calls hit MAIN — and main has SVCCRED auth ON, so"
-  warn "an unauthenticated S2S call is rejected. See the design doc (INTEGRATION.md)."
+  if [[ "$ONLY_SERVICE" == "sis-api" ]]; then
+    # sis-api self-originates via PREVIEW_ORIGINATE_MAP (sandbox_env), so even a
+    # headless backend hit routes to the sandbox iam. A real inbound header still
+    # wins per-key, so the dash flow is unchanged.
+    ok "routing: sis-api originates  x-saga-preview-iam-api: sandbox-$SANDBOX_NAME  itself"
+    ok "(PREVIEW_ORIGINATE_MAP) — direct backend hits reach sandbox iam with no header needed."
+  else
+    warn "ROUTING IS NOT AUTOMATIC: $ONLY_SERVICE only reaches sandbox iam if its INBOUND"
+    warn "request carries  x-saga-preview-iam-api: sandbox-$SANDBOX_NAME  (it forward-propagates"
+    warn "from there). Drive via the dash (which originates it) or set that header on each"
+    warn "curl/test request. WITHOUT it, iam calls hit MAIN — and main has SVCCRED auth ON, so"
+    warn "an unauthenticated S2S call is rejected. ($ONLY_SERVICE doesn't parse the originate-map"
+    warn "yet — Phase 3 follow-up.) See the design doc (INTEGRATION.md)."
+  fi
 fi
 
 # `up` does first-run prep (branch posture, fixups, mesh, schema). A bare

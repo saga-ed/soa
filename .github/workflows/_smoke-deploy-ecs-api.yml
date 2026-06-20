@@ -1,0 +1,67 @@
+# Smoke caller for the reusable deploy-ecs-api.yml — VALIDATES THE ENVELOPE, NOT A DEPLOY.
+#
+# Purpose: give the reusable workflow a caller so GitHub statically validates the
+# workflow_call interface + this caller's `with:` mapping (catches input-contract
+# drift, dangling `uses:`, and `${{ }}` expression errors that yaml parsing can't).
+# It is workflow_dispatch-only so it never auto-runs a real `sam deploy`; the
+# expensive jobs are also skipped via inputs (has-migrations:false, empty
+# provision/prisma JSON) so a manual run exercises the input contract + composite
+# resolution + early jobs without provisioning a DB or deploying a service.
+#
+# What this does NOT prove: the actual deploy/teardown logic. That is validated by
+# the P1 CANARY (rostering's real iam-api preview on dev) — iam-api is the 1-or-2-DB
+# case the ephemeral-teardown provision-targets-json loop exists for, so the canary
+# is the substantive smoke. This caller is the cheap envelope check that gates @v1.
+#
+# Placeholder values below are intentionally non-functional (a real run would no-op
+# at build-and-deploy on the dummy service); they exist only to satisfy the required
+# inputs so GitHub validates the mapping.
+name: "[smoke] deploy-ecs-api envelope check"
+
+on:
+  workflow_dispatch:
+    inputs:
+      run-mode:
+        description: 'envelope = validate inputs/composites only (default). Do NOT use for a real deploy.'
+        type: choice
+        options: [envelope]
+        default: envelope
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  smoke:
+    name: validate reusable deploy-ecs-api envelope
+    uses: ./.github/workflows/deploy-ecs-api.yml
+    secrets: inherit
+    with:
+      # --- service identity (placeholders; dummy service) ---
+      service-name: smoke-svc
+      project-name: soa-smoke
+      pnpm-filter: "@saga-ed/__smoke__..."
+      ssm-prefix: smoke-svc
+      # --- routing / health (placeholders) ---
+      host-headers: smoke.invalid
+      health-url: https://smoke.invalid/health
+      preview-url: https://smoke.invalid
+      preview-header-name: x-saga-preview-smoke-svc
+      # --- build/deploy paths (placeholders; never reached on a real run because
+      #     the dummy service/ECR don't exist — envelope validation only) ---
+      dockerfile-path: .github/smoke/Dockerfile.placeholder
+      samconfig-path: .github/smoke/samconfig.placeholder.yaml
+      routing-template-path: .github/smoke/routing-template.placeholder.yaml
+      ecr-ssm-name: /soa-smoke/smoke-svc/dev/ecr-uri
+      # --- identity for the run ---
+      identifier: smoke
+      deploy-tier: pr-preview
+      environment: dev
+      # --- skip the expensive jobs (this is an envelope check) ---
+      has-migrations: false
+      provision-preview-db-config-json: "[]"
+      prisma-packages-json: "[]"
+      # --- ARM defaults are inherited from the reusable workflow; left unset ---
+      # --- roles: a soa-side smoke role; real consumers pass their own ---
+      ci-role-arn: ${{ vars.SOA_SMOKE_CI_ROLE_ARN }}
+      deploy-role-arn: ${{ vars.SOA_SMOKE_DEPLOY_ROLE_ARN }}

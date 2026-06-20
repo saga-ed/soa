@@ -1,0 +1,376 @@
+name: 'Provision Preview DB Container + Write Secret'
+description: |
+  End-to-end provisioning of a per-PR Postgres CONTAINER on db-host-v2 and
+  writing its real connection URL into a per-PR Secrets Manager entry that
+  downstream ECS deploys consume.
+
+  Container-per-PR (NOT schema-per-PR): every preview identifier gets its OWN
+  physical Postgres container (own port + EBS volume) on db-host-v2 via the
+  orchestrator Lambda, so a destructive seed (full `db:seed`, which truncates
+  every table) can only ever touch that PR's isolated database — it can never
+  reach the shared mainline DB. This is the precondition that makes the
+  canonical-roster snapshot safe to capture per preview.
+
+  Service-generic: called ONCE PER DATABASE. `api-name` selects the secret path
+  /preview/<api-name>/<id>/<secret-suffix>, `db-role` names the container
+  (rostering-<db-role>-postgres-<id>), and `secret-suffix` is the per-DB `kind`.
+  iam-api has TWO databases (@saga-ed/iam-db + @saga-ed/iam-pii-db) so it calls
+  this twice; sis-api has ONE so it calls it once. Examples:
+    - iam-api / iam      -> rostering-iam-postgres-<id>,
+                            /preview/iam-api/<id>/database-url      (DATABASE_URL)
+    - iam-api / iam-pii  -> rostering-iam-pii-postgres-<id>,
+                            /preview/iam-api/<id>/pii-database-url  (PII_DATABASE_URL)
+    - sis-api / sis      -> rostering-sis-postgres-<id>,
+                            /preview/sis-api/<id>/sis-database-url  (SIS_DATABASE_URL)
+
+  Profile-snapshot seed (optional): when called with both `seed-profile` and
+  `seed-from`, the provision payload carries `seedProfile`+`seedFrom` and the
+  orchestrator restores this container from the named canonical source DB's S3
+  snapshot prefix at provision time (iam <- rostering-iam-canonical, iam-pii <-
+  rostering-iam-pii-canonical). The caller owns the per-DB seed-from mapping;
+  when either input is empty the payload is unchanged (no restore).
+
+  Ported from program-hub's .github/actions/provision-preview-db-secret
+  (origin/unified/programs-canonical-mesh). Replaces rostering's previous
+  schema-per-PR provisioner (read shared URL -> append ?schema=pr_<N>).
+
+inputs:
+  identifier:
+    description: 'Preview identifier, e.g. pr-95 / sandbox-foo'
+    required: true
+  db-role:
+    description: |
+      Lowercase [a-z0-9-] slug naming the per-DB container (one per database):
+      `iam` / `iam-pii` for iam-api's two DBs, `sis` for sis-api's single DB.
+      Drives the orchestrator/CloudMap serviceName rostering-<db-role>-postgres-<id>.
+    required: true
+  api-name:
+    description: |
+      Service name (e.g. iam-api, sis-api). Drives the per-PR secret path
+      /preview/<api-name>/<id>/<secret-suffix> and the secret tags. Defaults to
+      iam-api so existing iam-api callers are unaffected.
+    required: false
+    default: iam-api
+  secret-suffix:
+    description: |
+      Secret-name suffix = the caller's per-DB `kind` (e.g. database-url,
+      pii-database-url, sis-database-url). When empty, falls back to the legacy
+      iam derivation (iam -> database-url, else pii-database-url).
+    required: false
+    default: ''
+  pr-number:
+    description: 'GitHub PR number, used for secret tagging'
+    required: false
+    default: ''
+  mode:
+    description: 'ephemeral | keep-alive; tagged onto the secret'
+    required: true
+  orchestrator-function:
+    description: 'Orchestrator Lambda function name'
+    required: false
+    default: 'dev-db-host-orchestrator'
+  db-engine:
+    required: false
+    default: 'postgres'
+  db-engine-version:
+    required: false
+    # 18 (was 15): align preview/sandbox Postgres with the pg18.3 RDS mainline.
+    # Existing containers are immutable; new provisions get pg18. pg16 canonical
+    # dumps restore cleanly into pg18 (verified), so the transition is safe.
+    default: '18'
+  seed-profile:
+    description: |
+      Seed profile name (e.g. `canonical`). When set TOGETHER WITH `seed-from`,
+      the orchestrator `provision` payload carries `seedProfile`+`seedFrom` and
+      the orchestrator does a post-provision restore of this container from the
+      `seed-from` source DB's S3 snapshot prefix. Empty (default) = no restore.
+
+      On a RE-deploy of an existing identifier (sandbox update) the container
+      already exists, so provision reuses it; a non-empty profile then
+      triggers an explicit orchestrator `restore` into the reused container so
+      "redeploy with canonical" actually resets the data. The reserved value
+      'keep' suppresses both paths: no restore at provision, no restore on
+      reuse — the existing data survives (the caller still runs migrations).
+    required: false
+    default: ''
+  seed-from:
+    description: |
+      Canonical SOURCE DB name this container restores from (e.g.
+      `rostering-iam-canonical` for the iam DB, `rostering-iam-pii-canonical`
+      for the iam-pii DB). The caller (the reusable deploy workflow) owns this
+      per-DB mapping; this action just threads it into the provision payload.
+      Only honored when `seed-profile` is also non-empty.
+    required: false
+    default: ''
+  saga-platform-version:
+    description: |
+      saga-platform CLI version, forwarded to every orchestrator-call so the
+      single version source (workflow-level vars.SAGA_PLATFORM_VERSION) reaches
+      the install. Empty → orchestrator-call/setup-saga-orch defaults.
+    required: false
+    default: ''
+
+outputs:
+  secret-arn:
+    description: 'ARN of the per-PR /preview/iam-api/<id>/<database-url|pii-database-url> secret'
+    value: ${{ steps.write-secret.outputs.secret-arn }}
+  service-name:
+    description: 'serviceName passed to orchestrator (matches CloudMap key) — used for teardown'
+    value: ${{ steps.names.outputs.service-name }}
+  db-name:
+    description: 'Postgres database name (underscored)'
+    value: ${{ steps.names.outputs.db-name }}
+  host:
+    description: 'Resolved DB host (CloudMap or private-IP fallback)'
+    value: ${{ steps.derive.outputs.host }}
+  port:
+    description: 'DB port returned by orchestrator'
+    value: ${{ steps.derive.outputs.port }}
+  response:
+    description: 'Raw orchestrator provision response'
+    value: ${{ steps.provision.outputs.response }}
+
+runs:
+  using: composite
+  steps:
+    - id: names
+      shell: bash
+      env:
+        IDENTIFIER: ${{ inputs.identifier }}
+        DB_ROLE: ${{ inputs.db-role }}
+        API_NAME: ${{ inputs.api-name }}
+        SECRET_SUFFIX_IN: ${{ inputs.secret-suffix }}
+      run: |
+        set -euo pipefail
+        # serviceName = orchestrator/CloudMap key; must match `[a-z0-9-]+`. The
+        # db-role slug names the container (one per database): iam / iam-pii for
+        # iam-api's two DBs, sis for sis-api's single DB.
+        if ! printf '%s' "$DB_ROLE" | grep -qE '^[a-z][a-z0-9-]*$'; then
+          echo "::error::invalid db-role '$DB_ROLE' (must be a lowercase [a-z0-9-] slug)"; exit 1
+        fi
+        SERVICE_NAME="rostering-${DB_ROLE}-postgres-${IDENTIFIER}"
+        # dbName goes to Prisma's CREATE DATABASE; underscores only — derive it
+        # straight from the (already identifier-embedded) serviceName.
+        DB_NAME="${SERVICE_NAME//-/_}"
+        # secret suffix: caller-supplied per-DB `kind`; legacy fallback derives
+        # it from the iam db-role so callers that omit secret-suffix still work.
+        if [ -n "$SECRET_SUFFIX_IN" ]; then
+          SECRET_SUFFIX="$SECRET_SUFFIX_IN"
+        elif [ "$DB_ROLE" = "iam" ]; then
+          SECRET_SUFFIX="database-url"
+        else
+          SECRET_SUFFIX="pii-database-url"
+        fi
+        echo "service-name=$SERVICE_NAME" >> "$GITHUB_OUTPUT"
+        echo "db-name=$DB_NAME" >> "$GITHUB_OUTPUT"
+        echo "secret-suffix=$SECRET_SUFFIX" >> "$GITHUB_OUTPUT"
+        echo "serviceName=$SERVICE_NAME dbName=$DB_NAME secret=/preview/${API_NAME}/${IDENTIFIER}/${SECRET_SUFFIX}"
+
+    - id: payload
+      shell: bash
+      env:
+        SERVICE_NAME: ${{ steps.names.outputs.service-name }}
+        DB_NAME: ${{ steps.names.outputs.db-name }}
+        ENGINE: ${{ inputs.db-engine }}
+        VERSION: ${{ inputs.db-engine-version }}
+        SEED_PROFILE: ${{ inputs.seed-profile }}
+        SEED_FROM: ${{ inputs.seed-from }}
+      run: |
+        set -euo pipefail
+        # Build with jq --arg rather than YAML string interpolation so any
+        # special characters in the inputs can't corrupt the JSON.
+        #
+        # Profile-snapshot seed: ONLY when BOTH seed-profile and seed-from are
+        # non-empty do we attach seedProfile+seedFrom to the provision payload.
+        # The orchestrator then does a post-provision restore of THIS container
+        # from the seed-from source DB's S3 snapshot prefix (live + verified).
+        # When either is empty we emit the plain provision body unchanged, so
+        # mainline/non-seeded previews keep their existing behavior.
+        # 'keep' is the sandbox-update "preserve data" token, never a real
+        # profile name — it must not reach the orchestrator as a seedProfile.
+        if [ "$SEED_PROFILE" = "keep" ]; then
+          SEED_PROFILE=""
+        fi
+        PAYLOAD=$(jq -nc \
+          --arg n "$SERVICE_NAME" \
+          --arg d "$DB_NAME" \
+          --arg e "$ENGINE" \
+          --arg v "$VERSION" \
+          --arg sp "$SEED_PROFILE" \
+          --arg sf "$SEED_FROM" \
+          '{action:"provision",serviceName:$n,engine:$e,version:$v,dbName:$d}
+           + (if ($sp != "" and $sf != "")
+              then {seedProfile:$sp, seedFrom:$sf}
+              else {} end)')
+        {
+          echo "payload<<__EOF__"
+          echo "$PAYLOAD"
+          echo "__EOF__"
+        } >> "$GITHUB_OUTPUT"
+
+    - id: provision
+      uses: ./.github/actions/orchestrator-call
+      with:
+        function-name: ${{ inputs.orchestrator-function }}
+        payload: ${{ steps.payload.outputs.payload }}
+        saga-platform-version: ${{ inputs.saga-platform-version }}
+        # Don't hard-fail here. A re-run for an identifier whose DB was
+        # already provisioned by an earlier run returns ok:false with
+        # "already exists"; the `triage` step below turns that into a reuse
+        # rather than failing the whole preview deploy.
+        fail-on-error: false
+
+    - id: triage
+      shell: bash
+      env:
+        OK: ${{ steps.provision.outputs.ok }}
+        ERR: ${{ steps.provision.outputs.error }}
+        SERVICE_NAME: ${{ steps.names.outputs.service-name }}
+      run: |
+        set -euo pipefail
+        if [ "$OK" = "true" ]; then
+          echo "reuse=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # Idempotent re-run: the container for this identifier already exists
+        # from a prior run. Reuse it (describe -> host/port) instead of failing.
+        if printf '%s' "$ERR" | grep -qi "already exists"; then
+          echo "::notice::DB container '${SERVICE_NAME}' already provisioned for this identifier — reusing existing instance"
+          echo "reuse=true" >> "$GITHUB_OUTPUT"
+          DESC=$(jq -nc --arg n "$SERVICE_NAME" '{action:"describe",serviceName:$n}')
+          echo "describe-payload=$DESC" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "::error::provision failed: $ERR"
+        exit 1
+
+    - id: describe
+      if: steps.triage.outputs.reuse == 'true'
+      uses: ./.github/actions/orchestrator-call
+      with:
+        function-name: ${{ inputs.orchestrator-function }}
+        payload: ${{ steps.triage.outputs.describe-payload }}
+        saga-platform-version: ${{ inputs.saga-platform-version }}
+
+    # Sandbox-update data reset: provision is create-once, so a re-deploy of
+    # an existing identifier reuses its container with whatever data it holds.
+    # When the caller asked for a profile (and not 'keep'), restore it into
+    # the reused container explicitly — the orchestrator `restore` (switch)
+    # stops the container, wipes the data dir, and reloads the profile from
+    # the seed-from S3 prefix. Hard-fails: a requested reset that didn't
+    # happen would silently hand back stale data.
+    - id: restore-payload
+      if: >-
+        steps.triage.outputs.reuse == 'true' &&
+        inputs.seed-profile != '' &&
+        inputs.seed-profile != 'keep' &&
+        inputs.seed-from != ''
+      shell: bash
+      env:
+        SERVICE_NAME: ${{ steps.names.outputs.service-name }}
+        SEED_PROFILE: ${{ inputs.seed-profile }}
+        SEED_FROM: ${{ inputs.seed-from }}
+      run: |
+        set -euo pipefail
+        PAYLOAD=$(jq -nc \
+          --arg n "$SERVICE_NAME" \
+          --arg sp "$SEED_PROFILE" \
+          --arg sf "$SEED_FROM" \
+          '{action:"restore",serviceName:$n,profile:$sp,seedFrom:$sf}')
+        echo "payload=$PAYLOAD" >> "$GITHUB_OUTPUT"
+        echo "::notice::reused container '${SERVICE_NAME}' — restoring profile '$SEED_PROFILE' from '$SEED_FROM'"
+
+    - id: restore
+      if: steps.restore-payload.outputs.payload != ''
+      uses: ./.github/actions/orchestrator-call
+      with:
+        function-name: ${{ inputs.orchestrator-function }}
+        payload: ${{ steps.restore-payload.outputs.payload }}
+        saga-platform-version: ${{ inputs.saga-platform-version }}
+
+    - id: derive
+      shell: bash
+      env:
+        REUSE: ${{ steps.triage.outputs.reuse }}
+        PROVISION_BODY: ${{ steps.provision.outputs.response }}
+        DESCRIBE_BODY: ${{ steps.describe.outputs.response }}
+      run: |
+        set -euo pipefail
+        # Body comes from `provision` on a fresh create, or from `describe`
+        # when `triage` reused an already-existing container. Shapes differ:
+        #   provision: { ok, db: { host, port, ... }, instanceId }  (instanceId top-level)
+        #   describe:  { ok, db: { host, port, instanceId, hostPort, ... } }  (nested)
+        if [ "$REUSE" = "true" ]; then
+          BODY="$DESCRIBE_BODY"
+        else
+          BODY="$PROVISION_BODY"
+        fi
+        # HOST selection: PREFER the instance's PRIVATE IP over the CloudMap
+        # PrivateDnsNamespace name (db.host, <name>.dbs-v2.local). The CloudMap
+        # name is only intermittently resolvable from one-off migrate/seed ECS
+        # tasks — they fail with Prisma P1001 ("Can't reach database server")
+        # while the long-running service (which resolved it once and holds its
+        # pool) keeps working. The private IP is deterministic; the container is
+        # pinned to its instance via its EBS volume, and ephemeral previews
+        # re-provision, so the IP-changes-on-instance-replacement tradeoff is
+        # acceptable. Falls back to the CloudMap name only if the IP is
+        # unresolvable (e.g. orchestrator response missing instanceId).
+        CLOUDMAP_HOST=$(printf '%s' "$BODY" | jq -r '.db.host // ""')
+        PORT=$(printf '%s' "$BODY" | jq -r '.db.port // .db.hostPort // empty')
+        INSTANCE_ID=$(printf '%s' "$BODY" | jq -r '.instanceId // .db.instanceId // empty')
+        if [ -z "$PORT" ]; then
+          echo "::error::orchestrator response missing db.port"
+          echo "$BODY" | jq .
+          exit 1
+        fi
+        HOST=""
+        if [ -n "$INSTANCE_ID" ]; then
+          HOST=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].PrivateIpAddress' --output text 2>/dev/null || true)
+          [ "$HOST" = "None" ] && HOST=""
+        fi
+        if [ -z "$HOST" ]; then
+          if [ -z "$CLOUDMAP_HOST" ]; then
+            echo "::error::could not resolve a private IP (instanceId='${INSTANCE_ID:-}') and db.host is empty"
+            echo "$BODY" | jq .
+            exit 1
+          fi
+          echo "::warning::private IP unresolvable for instance '${INSTANCE_ID:-<none>}' — using CloudMap host $CLOUDMAP_HOST (may be unresolvable from one-off migrate/seed tasks → P1001)"
+          HOST="$CLOUDMAP_HOST"
+        fi
+        echo "host=$HOST" >> "$GITHUB_OUTPUT"
+        echo "port=$PORT" >> "$GITHUB_OUTPUT"
+
+    - id: write-secret
+      shell: bash
+      env:
+        IDENTIFIER: ${{ inputs.identifier }}
+        DB_ROLE: ${{ inputs.db-role }}
+        API_NAME: ${{ inputs.api-name }}
+        DB_NAME: ${{ steps.names.outputs.db-name }}
+        SECRET_SUFFIX: ${{ steps.names.outputs.secret-suffix }}
+        HOST: ${{ steps.derive.outputs.host }}
+        PORT: ${{ steps.derive.outputs.port }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        MODE: ${{ inputs.mode }}
+      run: |
+        set -euo pipefail
+        # Real container connection URL — NO ?schema param (container-per-PR
+        # isolation is physical, not schema-scoped). postgres:password123
+        # engine defaults are baked in by infra-compose on db-host-v2.
+        PER_PR_URL="postgresql://postgres_admin:password123@${HOST}:${PORT}/${DB_NAME}?schema=public"
+        echo "::add-mask::$PER_PR_URL"
+        NAME="/preview/${API_NAME}/${IDENTIFIER}/${SECRET_SUFFIX}"
+        if aws secretsmanager describe-secret --secret-id "$NAME" >/dev/null 2>&1; then
+          ARN=$(aws secretsmanager put-secret-value --secret-id "$NAME" --secret-string "$PER_PR_URL" --query ARN --output text)
+          echo "Updated existing secret: $NAME"
+        else
+          ARN=$(aws secretsmanager create-secret \
+            --name "$NAME" \
+            --secret-string "$PER_PR_URL" \
+            --description "Per-PR ${DB_ROLE} connection URL for ${API_NAME} ${IDENTIFIER} (container-per-PR via db-host-v2; mode=${MODE})" \
+            --tags "Key=pr-number,Value=${PR_NUMBER}" "Key=service,Value=${API_NAME}" "Key=db-role,Value=${DB_ROLE}" "Key=managed-by,Value=pr-preview-workflow" "Key=preview-mode,Value=${MODE}" \
+            --query ARN --output text)
+          echo "Created new secret: $NAME"
+        fi
+        echo "secret-arn=$ARN" >> "$GITHUB_OUTPUT"

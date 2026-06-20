@@ -1,0 +1,78 @@
+name: 'Orchestrator Call'
+description: |
+  Invoke the db-host-v2 orchestrator Lambda directly and surface the JSON
+  response. Branches on body.ok (not Lambda StatusCode) per orchestrator API.md.
+
+  Thin wrapper around `saga-orch raw` (saga-platform CLI) — the CLI owns the
+  aws lambda invoke + FunctionError-envelope-wrap recipe (no-retry, 910s
+  read timeout; see saga-ed/program-hub#176) so it can be reused
+  from shell loops in wake-preview.yml, db-commands.yml, and
+  sleep-idle-keep-alive-previews.yml. This composite adds the
+  step-output / log-group / fail-on-error behaviour that step-style callers
+  expect.
+
+inputs:
+  function-name:
+    description: 'Orchestrator Lambda function name. Defaults to dev.'
+    required: false
+    default: 'dev-db-host-orchestrator'
+  payload:
+    description: 'JSON request body. Must include `action`.'
+    required: true
+  fail-on-error:
+    description: 'If "true" (default), fail the step when body.ok=false.'
+    required: false
+    default: 'true'
+  saga-platform-version:
+    description: |
+      saga-platform CLI version, forwarded to setup-saga-orch so the single
+      version source (the workflow-level vars.SAGA_PLATFORM_VERSION) reaches
+      the install. Empty → setup-saga-orch's own default.
+    required: false
+    default: ''
+
+outputs:
+  response:
+    description: 'Raw JSON response body'
+    value: ${{ steps.call.outputs.response }}
+  ok:
+    description: 'true / false from body.ok'
+    value: ${{ steps.call.outputs.ok }}
+  error:
+    description: 'body.error when ok=false, empty otherwise'
+    value: ${{ steps.call.outputs.error }}
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/setup-saga-orch
+      with:
+        saga-platform-version: ${{ inputs.saga-platform-version }}
+    - id: call
+      shell: bash
+      env:
+        ORCH_FN: ${{ inputs.function-name }}
+        PAYLOAD: ${{ inputs.payload }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: |
+        set -euo pipefail
+        ACTION=$(printf '%s' "$PAYLOAD" | jq -r '.action // "unknown"')
+        echo "::group::orchestrator $ACTION"
+        echo "invoke $ORCH_FN  body=$PAYLOAD"
+        BODY_COMPACT=$(saga-orch raw --payload "$PAYLOAD")
+        OK=$(printf '%s' "$BODY_COMPACT" | jq -r '.ok // false')
+        ERR=$(printf '%s' "$BODY_COMPACT" | jq -r '.error // ""')
+        echo "ok=$OK  error=$ERR"
+        echo "$BODY_COMPACT" | jq .
+        echo "response=$BODY_COMPACT" >> "$GITHUB_OUTPUT"
+        echo "ok=$OK" >> "$GITHUB_OUTPUT"
+        {
+          echo "error<<__EOF__"
+          echo "$ERR"
+          echo "__EOF__"
+        } >> "$GITHUB_OUTPUT"
+        echo "::endgroup::"
+        if [ "$OK" != "true" ] && [ "$FAIL_ON_ERROR" = "true" ]; then
+          echo "::error::orchestrator $ACTION failed: $ERR"
+          exit 1
+        fi

@@ -1,0 +1,1601 @@
+name: Deploy ECS API
+
+# Reusable pipeline that decomposes a preview/main/stable deploy of an
+# ECS-on-shared-cluster API into discrete named jobs. Service-agnostic —
+# callers pass `service-name`, `pnpm-filter`, routing details, and the CFN
+# parameter-overrides JSON for the service stack. Callers: pr-preview-*.yml,
+# deploy-*.yml, stable-sync-*.yml. See .claude/ for design context.
+#
+# CENTRALIZED at saga-ed/soa/.github/workflows/deploy-ecs-api.yml — the single
+# shared deploy workflow for the saga-ed fleet (rostering ⊕ program-hub
+# superset). Consumers call it as
+#   uses: saga-ed/soa/.github/workflows/deploy-ecs-api.yml@v1
+# Two structural deltas vs rostering's _deploy-ecs-api.yml base:
+#   1. ephemeral-teardown job grafted from program-hub (tears a failed/closed
+#      ephemeral preview's DB container(s) + per-PR secret(s) down). Handles
+#      1-OR-2 DBs per service (iam-api has iam + iam-pii) — see that job.
+#   2. ARM is a property of the pipeline: cluster-arn-ssm / capacity-provider /
+#      cpu-architecture (+ migrate variants) are inputs with arm defaults, wired
+#      into the deploy + migrate + wait-stable steps. prod/x86 callers override.
+# Role ARNs and saga-platform version are parameterized so the workflow is
+# repo-agnostic: callers pass ci-role-arn / deploy-role-arn; the saga-platform
+# pin reads the org var SAGA_PLATFORM_VERSION (single source).
+#
+# Job graph:
+#   detect-changes -> ci -> build-and-deploy -> [migrate?] -> wait-stable
+#                                                                │
+#                                                                ▼
+#                                                          health-check
+#                                                                │
+#                                                                ▼
+#                                                        [metadata?]
+#                                                    (canary tier only —
+#                                                    tags, gathers, cuts
+#                                                    GitHub Release)
+#                                                                │
+#                                                                ▼
+#                                                     register-switchboard
+#                                                                │
+#                                                                ▼
+#                                                        [slack-report?]
+#                                                    (canary tier, opt-in
+#                                                    via repo secret)
+#                                                                │
+#                                                                ▼
+#                                              deploy-results + pr-comment
+#
+# migrate is skipped unless has-migrations is true.
+# metadata + slack-report run only when deploy-tier == 'canary'.
+
+on:
+  workflow_call:
+    inputs:
+      # ---- Service identity (every service-aware step reads these) ----
+      service-name:
+        type: string
+        required: true
+        description: 'Service name (e.g. iam-api, sis-api). Drives stack names, switchboard registration, PR comment, image cache scope.'
+      project-name:
+        type: string
+        required: false
+        default: 'rostering'
+        description: 'Project prefix for stack names + SSM paths'
+      pnpm-filter:
+        type: string
+        required: true
+        description: 'pnpm/turbo filter selector for ci-step builds (e.g. "@saga-ed/iam-api...")'
+      ssm-prefix:
+        type: string
+        required: true
+        description: 'SSM/Secrets-Manager path segment for per-PR resources. E.g. "iam-api" -> /preview/iam-api/<id>/...'
+
+      # ---- Routing (workflow uses these + passes through to composite) ----
+      host-headers:
+        type: string
+        required: true
+        description: 'Comma-separated list of host headers for the ALB routing rule passed to deploy-ecs-api. E.g. "iam.wootdev.com,rostering-api.wootdev.com"'
+      health-url:
+        type: string
+        required: true
+        description: 'Full health URL used by the health-check job. E.g. https://rostering-api.wootdev.com/health/ready'
+      preview-url:
+        type: string
+        required: true
+        description: 'Public base URL surfaced in the PR comment / switchboard. E.g. https://rostering-api.wootdev.com'
+      preview-header-name:
+        type: string
+        required: true
+        description: 'HTTP header name used for preview routing. E.g. x-saga-preview-iam-api'
+
+      # ---- Composite-action inputs (forwarded to deploy-ecs-api) ----
+      dockerfile-path:
+        type: string
+        required: true
+        description: 'Path to the service Dockerfile (build context = repo root)'
+      samconfig-path:
+        type: string
+        required: true
+        description: 'Path to the SAM config file'
+      routing-template-path:
+        type: string
+        required: true
+        description: 'Path to the routing-template.yaml (used by the "skip if unchanged" diff check)'
+      ecr-ssm-name:
+        type: string
+        required: true
+        description: 'SSM parameter name for the ECR repo URI'
+      service-parameter-overrides-json:
+        type: string
+        required: false
+        default: '{}'
+        description: 'JSON map of CFN parameter overrides for the service stack. Caller assembles from its repo vars/secrets. Per-PR DB secret ARNs are merged in by build-and-deploy.'
+      extra-ssm-lookups:
+        type: string
+        required: false
+        default: '{}'
+        description: 'JSON map of {CfnParamName: ssmPath} for opt-in SSM lookups. Empty values tolerated.'
+      tg-ssm-scope:
+        type: string
+        required: false
+        default: ''
+        description: >
+          Service-scope segment inserted into the target-group SSM path the
+          service stack reads. Empty (the default) → iam-api's unscoped
+          /{project}/infra/{env}/{identifier}/target-group-arn. Service-scoped
+          services (e.g. sis-api) pass "sis-api/" so the service stack reads
+          /{project}/infra/{env}/sis-api/{identifier}/target-group-arn — the
+          same scoped path their routing stack writes. Mirrors
+          migrate-sg-ssm-path; without it a 2nd service in the project reads
+          iam-api's TG and registers into the wrong target group.
+
+      # ---- CI configuration ----
+      ci-extra-env-json:
+        type: string
+        required: false
+        default: '{}'
+        description: 'JSON map of extra env vars set on the CI job (e.g. dummy DB URLs that prisma.config.ts reads at parse time)'
+      prisma-packages-json:
+        type: string
+        required: false
+        default: '[]'
+        description: 'JSON array of pnpm packages to drift-check with `prisma migrate diff`. E.g. ["@saga-ed/iam-db","@saga-ed/iam-pii-db"]. Empty array skips the check.'
+
+      # ---- Per-PR DB provisioning ----
+      provision-preview-db-config-json:
+        type: string
+        required: false
+        default: '[]'
+        description: 'JSON array of {sourceArn, kind} entries (e.g. [{"sourceArn":"arn:...","kind":"DATABASE_URL"}]). Each entry produces a per-PR secret derived from the source by appending ?schema=<id>. Empty array skips provisioning (canary/main/stable always skip regardless).'
+
+      # ---- Migrate command (only consulted when has-migrations is true) ----
+      migrate-command-json:
+        type: string
+        required: false
+        default: '[]'
+        description: 'JSON array form of the ECS task command for the migrate job (e.g. ["sh","-c","pnpm --filter @saga-ed/iam-db db:deploy"]). Required when has-migrations is true.'
+      migrate-sg-ssm-path:
+        type: string
+        required: false
+        default: ''
+        description: >
+          SSM path for the security group the one-off migrate ECS task should
+          launch with. Empty (the default) → run-migrate-task.sh falls back
+          to /{project}/infra/{env}/sg-id (iam-api's existing unscoped path).
+          Service-scoped services (e.g. sis-api at
+          /{project}/infra/{env}/sis-api/sg-id) pass the explicit path here.
+      migrate-cluster-ssm-path:
+        type: string
+        required: false
+        # ARM DEFAULT (was ''). The shared workflow makes arm a pipeline
+        # property: the one-off migrate task lands on the Graviton dev-shared
+        # cluster by default, matching the arm service deploy + wait-stable.
+        # An ARM64 migrate task can't be placed on the x86 cluster (ECS never
+        # places it → the job hangs to timeout), so the migrate cluster MUST
+        # track cpu-architecture. Passing '' restores run-migrate-task.sh's x86
+        # fallback (/{project}/infra/{env}/ecs-cluster-arn); prod callers
+        # override with their prod cluster path.
+        default: '/dev/shared-arm/ecs-cluster-arn'
+        description: >
+          SSM path for the cluster ARN the one-off migrate ECS task launches
+          into. ARM default → the Graviton dev-shared cluster (matches the arm
+          service deploy). Pass '' for the x86 fallback
+          (/{project}/infra/{env}/ecs-cluster-arn); prod callers override with
+          their prod cluster path. Also read by wait-stable to poll the right
+          cluster.
+      migrate-capacity-provider:
+        type: string
+        required: false
+        # ARM DEFAULT (was ''). Must be associated with the cluster named by
+        # migrate-cluster-ssm-path; the arm capacity provider pairs with the
+        # arm cluster default above. '' restores the x86 fallback.
+        default: 'dev-shared-ec2-cluster-arm-capacity-provider'
+        description: >
+          Capacity provider for the one-off migrate ECS task. ARM default;
+          must be associated with migrate-cluster-ssm-path's cluster. Pass ''
+          for run-migrate-task.sh's x86 fallback
+          ({env}-shared-ec2-cluster-capacity-provider).
+
+      # ---- Pipeline-control inputs (unchanged behavior; iam-api callers pass these today) ----
+      identifier:
+        type: string
+        required: true
+        description: 'Deployment identifier — pr-<N>, main, or stable'
+      environment:
+        type: string
+        required: false
+        default: dev
+        description: 'Target environment — dev or prod'
+      api-domain:
+        type: string
+        required: false
+        default: wootdev.com
+      listener-rule-priority:
+        type: string
+        required: false
+        default: '299'
+        description: 'ALB listener rule priority (main=299, pr-*=100-298). Ignored when use-saga-deploy-routing is true (the CLI claims a free priority).'
+      use-saga-deploy-routing:
+        type: boolean
+        required: false
+        default: false
+        description: >
+          Opt in to open-priority routing via the saga-platform
+          `saga-deploy-routing` CLI (forwarded to deploy-ecs-api). When true the
+          CLI scans the shared ALB and claims a free listener-rule priority,
+          superseding listener-rule-priority. iam-api and sis-api preview/sandbox
+          set this true; main deploys keep the default false (fixed band priority,
+          iam-api=299 / sis-api=399). The CLI always injects the claimed slot as
+          ListenerRulePriorityBase, so each service's routing-template must accept
+          that param (sis-api's template is bilingual: Base wins when set, else
+          the legacy ListenerRulePriority for the non-CLI main path).
+      preview-header:
+        type: string
+        required: false
+        default: ''
+        description: 'Value for the preview-routing header (empty for main)'
+      has-migrations:
+        type: boolean
+        required: false
+        default: false
+        description: 'Run the migrate job after deploy-service'
+      deploy-tier:
+        type: string
+        required: true
+        description: 'Switchboard tier — pr-preview / canary / production / dev-deploy'
+      ttl-hours:
+        type: string
+        required: false
+        default: ''
+        description: 'Switchboard TTL (empty = no TTL)'
+      cleanup-url:
+        type: string
+        required: false
+        default: ''
+        description: 'URL shown in switchboard for manual cleanup (empty for main/stable)'
+      base-sha:
+        type: string
+        required: false
+        default: ''
+        description: 'Base commit SHA for detect-changes diff (empty = run everything)'
+      prebuilt-image-uri:
+        type: string
+        required: false
+        default: ''
+        description: |
+          Deploy this existing ECR image instead of building from source.
+          sandbox-deploy.yml forwards the switchboard variant's artifactRef
+          here so composing a sandbox redeploys the EXACT artifact the
+          variant points at (no rebuild, no CI — the image already passed
+          both when it was originally built). The deploy composite validates
+          the image still exists in ECR before deploying. Empty (default)
+          preserves the build-from-source path.
+      seed-profile:
+        type: string
+        required: false
+        default: ''
+        description: |
+          Profile-snapshot seed (e.g. `canonical`). When non-empty the
+          preview DB containers are restored from per-DB canonical S3
+          snapshots at provision time (orchestrator post-provision restore),
+          and the live destructive db:seed in the migrate job is skipped —
+          the snapshots already carry the canonical roster + PII. Callers
+          send only the profile NAME; this workflow OWNS the per-DB seed-from
+          mapping (iam -> rostering-iam-canonical, iam-pii ->
+          rostering-iam-pii-canonical). Empty (default) preserves the normal
+          full db:seed; main/stable/canary seed behavior is unaffected.
+          On a re-deploy of an existing identifier (sandbox update) a
+          non-empty profile is restored into the REUSED containers (data
+          reset); the reserved value 'keep' preserves the existing data
+          instead — no restore, no db:seed; migrations still run.
+
+      # ---- Caller IAM roles (repo-specific — parameterized for fleet reuse) ----
+      # A reusable workflow hosted in soa resolves `vars.X` against the CALLER's
+      # repo, so the rostering-named vars (ROSTERING_CI_ROLE_ARN /
+      # ROSTERING_DEPLOY_ROLE_ARN) would not exist for other consumers. Each
+      # caller passes its own repo's OIDC role ARNs instead — mirrors how the
+      # composites already take `aws-role-arn` as an input.
+      ci-role-arn:
+        type: string
+        required: true
+        description: 'OIDC IAM role ARN the CI job assumes (CodeArtifact read + workspace). Caller-repo-specific; was vars.ROSTERING_CI_ROLE_ARN.'
+      deploy-role-arn:
+        type: string
+        required: true
+        description: 'OIDC IAM role ARN the deploy/provision/migrate/wait/register/teardown jobs assume. Caller-repo-specific; was vars.ROSTERING_DEPLOY_ROLE_ARN.'
+
+      # ---- Preview lifecycle ----
+      preview-mode:
+        type: string
+        required: false
+        default: ''
+        description: >
+          Explicit preview lifecycle override forwarded to resolve-preview-mode:
+          '' (default) → derive from PR labels (preview:keep-alive opts out of
+          ephemeral teardown); 'ephemeral' / 'keep-alive' force the mode. Default
+          mode is ephemeral, so a closed/failed preview is torn down by the
+          ephemeral-teardown job.
+
+      # ---- ARM cluster/capacity/arch (ARM DEFAULTS — arm is a workflow property) ----
+      # These flow to the SERVICE deploy via deploy-ecs-api (ClusterArnSSMParameter
+      # / CapacityProviderName / CpuArchitecture). Onboarding a service gets arm for
+      # free; prod/x86 holdouts override. NB the cluster/capacity defaults are
+      # DEV-scoped — prod callers MUST override both.
+      cluster-arn-ssm:
+        type: string
+        required: false
+        default: '/dev/shared-arm/ecs-cluster-arn'
+        description: 'SSM param the SERVICE stack reads for its ECS cluster ARN. ARM default → the Graviton dev-shared cluster.'
+      capacity-provider:
+        type: string
+        required: false
+        default: 'dev-shared-ec2-cluster-arm-capacity-provider'
+        description: 'ECS capacity provider for the SERVICE stack. ARM default; must be associated with cluster-arn-ssm''s cluster.'
+      cpu-architecture:
+        type: string
+        required: false
+        default: 'ARM64'
+        description: 'Task CPU architecture for the SERVICE stack. ARM default; must match the capacity-provider cluster''s instance arch.'
+
+    outputs:
+      deploy-result:
+        description: 'Overall deploy result — success/failure/skipped'
+        value: ${{ jobs.deploy-results.outputs.deploy-result }}
+      image-uri:
+        description: 'Docker image URI pushed to ECR (for downstream stable-sync etc.)'
+        value: ${{ jobs.build-and-deploy.outputs.image-uri }}
+      api-url:
+        description: 'Deployed API URL'
+        value: ${{ jobs.build-and-deploy.outputs.api-url }}
+      job-results:
+        description: 'JSON map of individual job results for reporting'
+        value: ${{ jobs.deploy-results.outputs.job-results }}
+
+env:
+  AWS_REGION: us-west-2
+  SWITCHBOARD_WEB_URL: https://switchboard.wootdev.com
+  # Single source of truth for the saga-platform CLI pin. Read at the WORKFLOW
+  # level (vars resolve in workflow-level `env`/expressions, but are NOT
+  # reliably resolvable inside composite actions — so composites take it as an
+  # input and the workflow threads this value down). Fallback keeps the install
+  # working when a caller has not set the org var. Replaced three hardcoded
+  # `saga-platform==0.9.0` pins (setup-saga-orch, deploy-ecs-api routing,
+  # register-switchboard).
+  SAGA_PLATFORM_VERSION: ${{ vars.SAGA_PLATFORM_VERSION || '0.11.0' }}
+
+jobs:
+  # ── Detect changes ──────────────────────────────────────────────
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      has-code: ${{ steps.check.outputs.has-code }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Check for code changes
+        id: check
+        env:
+          BASE_SHA: ${{ inputs.base-sha }}
+          SERVICE_NAME: ${{ inputs.service-name }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_NUMBER" ]; then
+            # PR events: ask the API for the PR's changed files — the same
+            # three-dot diff as the Files tab. A git diff against
+            # event.pull_request.base.sha is WRONG here: that sha is pinned
+            # at PR creation while the checkout is the merge ref (head +
+            # CURRENT base), so once the base branch advances the diff
+            # sweeps in every unrelated base commit and has-code goes true
+            # for all services (observed live in program-hub: a base push
+            # between two PR pushes re-ran CI for every unchanged service).
+            if ! CHANGED=$(gh api --paginate \
+                  "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+                  --jq '.[].filename' 2>&1); then
+              echo "::warning::PR files API failed ($CHANGED) — assuming code changed"
+              echo "has-code=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            if [ -z "$BASE_SHA" ]; then
+              echo "No base-sha provided — running full pipeline"
+              echo "has-code=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            # push events: `github.event.before` misses ranges whose queued run
+            # GitHub superseded (only one run may wait per concurrency group), so
+            # a superseded push's diff would never be examined and its deploy
+            # silently dropped. Diff against the head of the calling workflow's
+            # last SUCCESSFUL run on this branch instead — the last commit this
+            # pipeline actually evaluated. Needs `actions: read` on the caller;
+            # any failure falls back to the event.before base-sha.
+            if [ "$EVENT_NAME" = "push" ]; then
+              WF_FILE="${WORKFLOW_REF%%@*}"; WF_FILE="${WF_FILE##*/}"
+              LAST_OK=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${WF_FILE}/runs?branch=${GITHUB_REF_NAME}&status=success&per_page=1" \
+                          --jq '.workflow_runs[0].head_sha // empty' 2>/dev/null || true)
+              if [ -n "$LAST_OK" ]; then
+                BASE_SHA="$LAST_OK"
+              fi
+            fi
+
+            # Shallow checkout above doesn't include base-sha; fetch it lazily.
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+
+            # Two-dot `A..HEAD` to avoid computing a merge base — `A...HEAD`
+            # needs history back to the common ancestor, which shallow fetch
+            # usually doesn't have. Any diff failure treated as "run everything"
+            # so we never silently skip a build because of a local-ref issue.
+            # quotePath off so non-ASCII filenames arrive raw — octal-escaped,
+            # quoted paths would dodge the prefix matching in the script.
+            if ! CHANGED=$(git -c core.quotePath=false diff --name-only "$BASE_SHA" HEAD 2>&1); then
+              echo "::warning::git diff failed ($CHANGED) — assuming code changed"
+              echo "has-code=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # Service-scoped detection: only changes inside this service's
+          # workspace dependency closure (computed live from package.json
+          # files — never drifts from reality), its infra dir, .github/, or
+          # the root workspace manifests count as "code changed". Doc-only
+          # filtering (claude/, docs/, *.md) lives in the script. It appends
+          # has-code=true|false to $GITHUB_OUTPUT itself; any failure falls
+          # open to has-code=true so we never silently skip a build.
+          if ! printf '%s\n' "$CHANGED" | \
+               node .github/scripts/detect-api-changes.mjs "$SERVICE_NAME" \
+                 --extra "infra/${SERVICE_NAME}/"; then
+            echo "::warning::detect-api-changes.mjs failed — assuming code changed"
+            echo "has-code=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── CI (typecheck, lint, test) — gates build/deploy ─────────────
+  ci:
+    name: CI
+    needs: detect-changes
+    # Skipped on the prebuilt-image path: the artifact already passed CI when
+    # it was originally built and pushed; re-running typecheck/lint/test
+    # against the current ref would test code the image doesn't contain.
+    if: needs.detect-changes.outputs.has-code == 'true' && inputs.prebuilt-image-uri == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      typecheck-result: ${{ steps.out.outputs.typecheck }}
+      lint-result: ${{ steps.out.outputs.lint }}
+      test-result: ${{ steps.out.outputs.test }}
+    env:
+      # Shadow DB for the schema/migration drift check — `prisma migrate diff
+      # --from-migrations` requires somewhere to apply the migrations and read
+      # back the resulting schema. Points at the postgres service container
+      # declared below. Caller's `ci-extra-env-json` typically also supplies
+      # dummy DB URLs for prisma.config.ts (`env(...)` is eager).
+      SHADOW_DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/shadow'
+      # GitHub-hosted runners don't have Docker available; integration tests
+      # that spin up a broker (outbox-roundtrip etc.) gate on this and skip.
+      SKIP_INT: '1'
+    services:
+      # Shadow DB for the drift check step. Postgres 18 to match the runtime
+      # DB; alpine for the small image.
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shadow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          aws-role-arn: ${{ inputs.ci-role-arn }}
+          cache-mode: save
+
+      # Per-caller extra env (typically dummy DB URLs the service's
+      # prisma.config.ts reads eagerly). Exported once for all subsequent
+      # steps in this job — turbo run-graph propagates them transitively.
+      - name: Export caller-provided CI env
+        env:
+          EXTRA_ENV_JSON: ${{ inputs.ci-extra-env-json }}
+        run: |
+          if [ -n "$EXTRA_ENV_JSON" ] && [ "$EXTRA_ENV_JSON" != "{}" ]; then
+            while IFS=$'\t' read -r KEY VAL; do
+              [ -z "$KEY" ] && continue
+              echo "${KEY}=${VAL}" >> "$GITHUB_ENV"
+            done < <(echo "$EXTRA_ENV_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value)"')
+          fi
+
+      # Catches the 2026-05-20 drift class at PR time instead of at deploy
+      # time. `prisma migrate diff --exit-code` returns 2 if schema.prisma
+      # contains anything not represented in migrations/. Needs a real
+      # postgres for the shadow DB (Prisma 7 applies the migrations there
+      # to compute the diff target). See claude/iam_migration_gaps.md for
+      # the recovery episode this prevents.
+      - name: Schema/migration drift check
+        id: drift
+        env:
+          PRISMA_PACKAGES: ${{ inputs.prisma-packages-json }}
+        run: |
+          set +e
+          PACKAGES=$(echo "$PRISMA_PACKAGES" | jq -r '.[]')
+          if [ -z "$PACKAGES" ]; then
+            echo "No prisma-packages configured for drift check — skipping"
+            exit 0
+          fi
+          check() {
+            local pkg="$1"
+            echo "::group::${pkg}: prisma migrate diff"
+            # Shadow DB URL is sourced from each package's prisma.config.ts
+            # (`datasource.shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL`)
+            # — Prisma 7 dropped `--shadow-database-url` from the CLI for
+            # `migrate diff`, even though the error message it emits when
+            # no shadow DB is configured still suggests the flag.
+            pnpm --filter "$pkg" exec prisma migrate diff \
+              --from-migrations ./src/prisma/migrations \
+              --to-schema ./src/prisma/schema.prisma \
+              --exit-code
+            local rc=$?
+            echo "::endgroup::"
+            if [[ $rc -eq 2 ]]; then
+              echo "::error::${pkg}: schema.prisma has changes not captured in src/prisma/migrations/."
+              echo "::error::Resolution: run \`pnpm --filter ${pkg} db:migrate\` locally to generate the migration, then commit it."
+              return 1
+            elif [[ $rc -ne 0 ]]; then
+              echo "::error::${pkg}: prisma migrate diff failed unexpectedly (exit ${rc})"
+              return 1
+            fi
+            echo "${pkg}: schema and migrations are in sync"
+          }
+          fail=0
+          while IFS= read -r pkg; do
+            [ -z "$pkg" ] && continue
+            check "$pkg" || fail=1
+          done <<< "$PACKAGES"
+          exit $fail
+
+      - name: Type check
+        id: typecheck
+        env:
+          FILTER: ${{ inputs.pnpm-filter }}
+        run: pnpm turbo run check-types --filter="$FILTER"
+
+      - name: Lint
+        id: lint
+        env:
+          FILTER: ${{ inputs.pnpm-filter }}
+        run: pnpm turbo run lint --filter="$FILTER"
+
+      - name: Test
+        id: test
+        env:
+          FILTER: ${{ inputs.pnpm-filter }}
+        run: pnpm turbo run test --filter="$FILTER"
+
+      - name: Export outcomes
+        id: out
+        if: always()
+        run: |
+          echo "typecheck=${{ steps.typecheck.outcome }}" >> "$GITHUB_OUTPUT"
+          echo "lint=${{ steps.lint.outcome }}" >> "$GITHUB_OUTPUT"
+          echo "test=${{ steps.test.outcome }}" >> "$GITHUB_OUTPUT"
+
+  # ── Provision per-PR DB containers + write secrets (preview only) ──
+  # CONTAINER-per-PR (ported from program-hub; replaces the previous
+  # schema-per-PR approach). Every preview identifier gets its OWN physical
+  # Postgres containers (own port + EBS volume) on db-host-v2 via the
+  # orchestrator Lambda, so a destructive seed (full `db:seed`, which
+  # truncates every table) can only ever touch that PR's isolated database —
+  # it can never reach the shared mainline DB. This is the precondition that
+  # makes the full canonical-roster snapshot safe to capture per preview.
+  #
+  # This job stays service-agnostic on the OUTSIDE: it iterates the caller's
+  # `provision-preview-db-config-json` (one entry per database, each carrying a
+  # `db-role` + `cfnParamName`) and emits the same `derived-overrides-json`
+  # contract main already merges into `service-parameter-overrides-json` via
+  # build-and-deploy. Only the inner provisioning changed — from "read shared
+  # URL + append ?schema=pr_<N>" to "provision a real container + write its
+  # connection URL" — so the downstream merge/deploy path is untouched.
+  #
+  # iam-api has TWO databases (@saga-ed/iam-db + @saga-ed/iam-pii-db), so we
+  # provision TWO containers per identifier and write BOTH per-PR secrets to
+  # their REAL connection URLs (no ?schema):
+  #   iam     -> rostering-iam-postgres-<id>     -> /preview/iam-api/<id>/database-url
+  #   iam-pii -> rostering-iam-pii-postgres-<id> -> /preview/iam-api/<id>/pii-database-url
+  # The per-PR ARNs are passed to build-and-deploy in place of the shared
+  # canonical ARNs and wired into the task-def, so the migrate/seed task (which
+  # overrides only the command, not the env) runs against the isolated containers.
+  #
+  # Orchestrator contract:
+  # cloudformation_templates/dbs/db_host_v2/orchestrator/API.md
+  #
+  # Mode (ephemeral vs keep-alive) is computed up-front and tags each per-PR
+  # secret + container so the cleanup-preview-iam-api workflow can snapshot-gate
+  # teardown on PR close. Default = ephemeral; opt-in via `preview:keep-alive`
+  # label. Canonical identifiers (main/stable/canary) skip provisioning and use
+  # the shared DATABASE_URL secrets.
+  provision-preview-db:
+    name: Provision Preview DBs
+    # Gated on `ci` deliberately (re-gated after program-hub#169 was closed
+    # post the #176 device-letter exhaustion): an early provision claims a real
+    # EBS volume and one of the fleet's ~105 device letters even for PRs that
+    # never go green, and skipping the CI stagger lands every service's
+    # provision on the db-host at the same instant (the pre-create-volume
+    # contention measured in hipponot/iac#410).
+    needs: [detect-changes, ci]
+    # Run for any non-canonical identifier so manual workflow_dispatch deploys
+    # also get per-deploy container isolation. Canonical identifiers (main/
+    # stable/canary/sandbox) keep using the shared production-shaped DATABASE_URL
+    # secrets — sandbox shares the dev DB (kept in sync with the IsPreviewDeploy
+    # exclusion in service-template.yaml).
+    #
+    # `always()` + the explicit ci-result clause mirror build-and-deploy's gate:
+    # on the prebuilt-image path (sandbox compose) `ci` is deliberately skipped,
+    # and without this guard the implicit success() gate on `needs: [ci]` skips
+    # this job too — leaving DatabaseUrlSecretArn/PiiDatabaseUrlSecretArn unset so
+    # the deploy changeset is rejected. The ci-result clause tolerates ci=skipped
+    # only when an image is prebuilt; a genuine ci=failure still skips provisioning
+    # (ci.result is neither 'success' nor 'skipped'). `always()` does run on
+    # cancellation, matching build-and-deploy — downstream jobs gate on this job's
+    # result, so a cancelled run is short-circuited there, not here.
+    if: |
+      always() &&
+      (needs.detect-changes.outputs.has-code == 'true' || inputs.prebuilt-image-uri != '') &&
+      (needs.ci.result == 'success' ||
+       (inputs.prebuilt-image-uri != '' && needs.ci.result == 'skipped')) &&
+      !contains(fromJSON('["main","stable","canary","sandbox"]'), inputs.identifier) &&
+      inputs.provision-preview-db-config-json != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    outputs:
+      # Generic contract (unchanged): a JSON map of {CfnParamName: secretArn}
+      # that build-and-deploy merges into service-parameter-overrides-json.
+      # Container-per-PR fills these with the per-PR CONTAINER secret ARNs
+      # instead of schema-suffixed ones — the consumer side is identical.
+      derived-overrides-json: ${{ steps.assemble.outputs.derived-overrides-json }}
+      # Preview lifecycle mode (ephemeral | keep-alive), resolved once up-front
+      # and reused by both provision-composite calls below. The ephemeral-teardown
+      # job gates on this; the cleanup-preview workflow re-resolves mode
+      # independently.
+      mode: ${{ steps.mode.outputs.mode }}
+      # Teardown targets — a JSON ARRAY of {service-name, secret-name}, ONE PER
+      # provisioned DB container. This is the merge delta vs program-hub: rostering
+      # provisions 1-OR-2 containers per service (iam-api = iam + iam-pii), each
+      # with a DISTINCT orchestrator serviceName (rostering-<db-role>-postgres-<id>)
+      # and a DISTINCT per-PR secret (/preview/<api>/<id>/<suffix>). program-hub's
+      # teardown assumed ONE; porting it verbatim would silently LEAK the 2nd
+      # container + 2nd secret on every ephemeral iam-api teardown. The teardown
+      # job loops over this array instead. Empty '[]' when no DB was provisioned.
+      provision-targets-json: ${{ steps.targets.outputs.provision-targets-json }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ inputs.deploy-role-arn }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve preview mode
+        id: mode
+        uses: ./.github/actions/resolve-preview-mode
+        with:
+          labels-json: ${{ toJSON(github.event.pull_request.labels) }}
+          # Explicit override forwarded from the new workflow input (rostering's
+          # base call omitted this; the merged superset supports it for sandbox/
+          # compositor callers that force a mode regardless of PR labels).
+          mode-input: ${{ inputs.preview-mode }}
+
+      # Parse the caller's provision-preview-db-config-json (1 or 2 entries, one
+      # per database). Each entry: {sourceArn, kind, cfnParamName, dbRole}.
+      # iam-api passes two (iam + iam-pii); sis-api passes one (sis). The entries
+      # drive the per-DB container provisioning + derived CFN overrides below, so
+      # this job is service-generic — no hardcoded db-role / CFN param names.
+      - name: Parse provision config
+        id: cfg
+        env:
+          CONFIG: ${{ inputs.provision-preview-db-config-json }}
+        run: |
+          set -euo pipefail
+          n=$(printf '%s' "$CONFIG" | jq 'length')
+          if [ "$n" -lt 1 ] || [ "$n" -gt 2 ]; then
+            echo "::error::provision-preview-db-config-json must have 1 or 2 entries (got $n)"; exit 1
+          fi
+          {
+            echo "role0=$(printf '%s' "$CONFIG" | jq -r '.[0].dbRole')"
+            echo "suffix0=$(printf '%s' "$CONFIG" | jq -r '.[0].kind')"
+            echo "cfn0=$(printf '%s' "$CONFIG" | jq -r '.[0].cfnParamName')"
+            echo "has1=$([ "$n" = "2" ] && echo true || echo false)"
+            echo "role1=$(printf '%s' "$CONFIG" | jq -r '.[1].dbRole // ""')"
+            echo "suffix1=$(printf '%s' "$CONFIG" | jq -r '.[1].kind // ""')"
+            echo "cfn1=$(printf '%s' "$CONFIG" | jq -r '.[1].cfnParamName // ""')"
+          } >> "$GITHUB_OUTPUT"
+
+      # Profile-snapshot seed mapping — REPO-OWNED. The composer only names a
+      # profile (inputs.seed-profile, e.g. `canonical`); rostering owns which
+      # canonical source DB each db-role restores from. Roles without a canonical
+      # snapshot (e.g. sis) resolve empty -> no restore, and the caller's live
+      # db:seed runs instead. Only populated when a real seed-profile is
+      # requested — the reserved 'keep' token (sandbox update preserving
+      # data) resolves nothing, so no restore fires anywhere.
+      - name: Resolve per-DB seed-from
+        id: seed
+        if: inputs.seed-profile != '' && inputs.seed-profile != 'keep'
+        env:
+          SEED_PROFILE: ${{ inputs.seed-profile }}
+          ROLE0: ${{ steps.cfg.outputs.role0 }}
+          ROLE1: ${{ steps.cfg.outputs.role1 }}
+        run: |
+          set -euo pipefail
+          # db-role -> canonical snapshot SOURCE DB name (captured in S3); the
+          # orchestrator restores each container's volume from the matching
+          # prefix during provision (live + verified).
+          canon() {
+            case "$1" in
+              iam)     echo "rostering-iam-canonical" ;;
+              iam-pii) echo "rostering-iam-pii-canonical" ;;
+              *)       echo "" ;;
+            esac
+          }
+          {
+            echo "from0=$(canon "$ROLE0")"
+            echo "from1=$(canon "$ROLE1")"
+          } >> "$GITHUB_OUTPUT"
+          echo "profile '$SEED_PROFILE': ${ROLE0}<-$(canon "$ROLE0") ${ROLE1:-(none)}<-$(canon "$ROLE1")"
+
+      # Provision one real Postgres container per database on db-host-v2 (one
+      # call per config entry). Each writes its connection URL (no ?schema —
+      # isolation is physical) to /preview/<service-name>/<id>/<kind>. When a
+      # seed-profile + per-DB seed-from were resolved, the orchestrator restores
+      # that container from the canonical S3 snapshot at provision time. The two
+      # ARNs are assembled into the generic `derived-overrides-json` map that
+      # build-and-deploy already consumes — downstream deploy path unchanged.
+      - name: Provision DB container 0 + write secret
+        id: provision-0
+        uses: ./.github/actions/provision-preview-db-secret
+        with:
+          api-name: ${{ inputs.service-name }}
+          identifier: ${{ inputs.identifier }}
+          db-role: ${{ steps.cfg.outputs.role0 }}
+          secret-suffix: ${{ steps.cfg.outputs.suffix0 }}
+          pr-number: ${{ github.event.pull_request.number }}
+          mode: ${{ steps.mode.outputs.mode }}
+          seed-profile: ${{ inputs.seed-profile }}
+          seed-from: ${{ steps.seed.outputs.from0 }}
+          saga-platform-version: ${{ env.SAGA_PLATFORM_VERSION }}
+
+      # Second database (e.g. iam-pii); skipped for single-DB services (sis-api).
+      - name: Provision DB container 1 + write secret
+        id: provision-1
+        if: steps.cfg.outputs.has1 == 'true'
+        uses: ./.github/actions/provision-preview-db-secret
+        with:
+          api-name: ${{ inputs.service-name }}
+          identifier: ${{ inputs.identifier }}
+          db-role: ${{ steps.cfg.outputs.role1 }}
+          secret-suffix: ${{ steps.cfg.outputs.suffix1 }}
+          pr-number: ${{ github.event.pull_request.number }}
+          mode: ${{ steps.mode.outputs.mode }}
+          seed-profile: ${{ inputs.seed-profile }}
+          seed-from: ${{ steps.seed.outputs.from1 }}
+          saga-platform-version: ${{ env.SAGA_PLATFORM_VERSION }}
+
+      # Map each per-PR container secret ARN onto the CFN param name the service
+      # stack expects (entry.cfnParamName), producing the generic
+      # `derived-overrides-json` map build-and-deploy merges into
+      # service-parameter-overrides-json.
+      - name: Assemble derived CFN parameter overrides
+        id: assemble
+        env:
+          CFN0: ${{ steps.cfg.outputs.cfn0 }}
+          ARN0: ${{ steps.provision-0.outputs.secret-arn }}
+          HAS1: ${{ steps.cfg.outputs.has1 }}
+          CFN1: ${{ steps.cfg.outputs.cfn1 }}
+          ARN1: ${{ steps.provision-1.outputs.secret-arn }}
+        run: |
+          set -euo pipefail
+          OVERRIDES=$(jq -nc --arg k0 "$CFN0" --arg a0 "$ARN0" '{($k0): $a0}')
+          if [ "$HAS1" = "true" ]; then
+            OVERRIDES=$(printf '%s' "$OVERRIDES" | jq -c --arg k1 "$CFN1" --arg a1 "$ARN1" '. + {($k1): $a1}')
+          fi
+          echo "derived-overrides-json=$OVERRIDES" >> "$GITHUB_OUTPUT"
+
+      # Assemble the teardown-targets array (one entry per provisioned container).
+      # Each entry pairs the orchestrator serviceName the provision step actually
+      # used (provision-N.outputs.service-name = rostering-<db-role>-postgres-<id>)
+      # with the deterministic per-PR secret name (/preview/<api>/<id>/<suffix>,
+      # the exact path provision-preview-db-secret writes). The ephemeral-teardown
+      # job loops over this so BOTH iam + iam-pii (and their secrets) are torn
+      # down — the multi-DB correctness fix vs program-hub's single-DB teardown.
+      - name: Assemble teardown targets
+        id: targets
+        env:
+          API: ${{ inputs.service-name }}
+          IDENTIFIER: ${{ inputs.identifier }}
+          SVC0: ${{ steps.provision-0.outputs.service-name }}
+          SUFFIX0: ${{ steps.cfg.outputs.suffix0 }}
+          HAS1: ${{ steps.cfg.outputs.has1 }}
+          SVC1: ${{ steps.provision-1.outputs.service-name }}
+          SUFFIX1: ${{ steps.cfg.outputs.suffix1 }}
+        run: |
+          set -euo pipefail
+          TARGETS=$(jq -nc \
+            --arg s0 "$SVC0" \
+            --arg n0 "/preview/${API}/${IDENTIFIER}/${SUFFIX0}" \
+            '[{"service-name":$s0,"secret-name":$n0}]')
+          if [ "$HAS1" = "true" ]; then
+            TARGETS=$(printf '%s' "$TARGETS" | jq -c \
+              --arg s1 "$SVC1" \
+              --arg n1 "/preview/${API}/${IDENTIFIER}/${SUFFIX1}" \
+              '. + [{"service-name":$s1,"secret-name":$n1}]')
+          fi
+          echo "provision-targets-json=$TARGETS" >> "$GITHUB_OUTPUT"
+
+  # ── Build image + deploy CF stacks ──────────────────────────────
+  build-and-deploy:
+    name: Build & Deploy
+    needs: [detect-changes, ci, provision-preview-db]
+    if: |
+      always() &&
+      (needs.detect-changes.outputs.has-code == 'true' || inputs.prebuilt-image-uri != '') &&
+      (needs.ci.result == 'success' ||
+       (inputs.prebuilt-image-uri != '' && needs.ci.result == 'skipped')) &&
+      (needs.provision-preview-db.result == 'success' || needs.provision-preview-db.result == 'skipped')
+    runs-on: ubuntu-latest
+    # 35 not 20: a PROD build is linux/arm64 on an amd64 ubuntu runner → QEMU
+    # emulation (~16 min cold). Prod also exports no registry cache (immutable
+    # ECR tags — see deploy-ecs-api/action.yml cache-to comment), so it always
+    # cold-builds, then runs sam deploy + ECS stabilization on top. The old
+    # 20-min cap killed the job mid-stabilization after the cold build (run
+    # 27582955909), so Migrate never ran. timeout-minutes is a ceiling, not a
+    # duration — warm dev/preview builds finish in minutes and are unaffected.
+    timeout-minutes: 35
+    environment: ${{ inputs.environment }}
+    outputs:
+      image-uri: ${{ steps.deploy.outputs.image-uri }}
+      api-url: ${{ steps.deploy.outputs.api-url }}
+    steps:
+      # fetch-depth: 2 so the routing-stack diff in deploy-ecs-api can compare
+      # HEAD against HEAD^ when no explicit base-sha is passed (main deploys).
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Setup
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          aws-role-arn: ${{ inputs.deploy-role-arn }}
+          skip-install: 'true'
+
+      # Merge the caller's `service-parameter-overrides-json` with the per-PR
+      # secret ARNs produced by provision-preview-db (when the latter ran).
+      # Per-PR overrides win on key conflict, so the same JSON key wins per
+      # input even if the caller passes a non-empty value.
+      - name: Merge parameter overrides
+        id: merge
+        env:
+          CALLER_JSON: ${{ inputs.service-parameter-overrides-json }}
+          DERIVED_JSON: ${{ needs.provision-preview-db.outputs.derived-overrides-json || '{}' }}
+        run: |
+          MERGED=$(jq -nc \
+            --argjson a "$CALLER_JSON" \
+            --argjson b "$DERIVED_JSON" \
+            '$a + $b')
+          echo "merged-json=$MERGED" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy
+        id: deploy
+        uses: ./.github/actions/deploy-ecs-api
+        with:
+          service-name: ${{ inputs.service-name }}
+          project-name: ${{ inputs.project-name }}
+          identifier: ${{ inputs.identifier }}
+          environment: ${{ inputs.environment }}
+          api-domain: ${{ inputs.api-domain }}
+          host-headers: ${{ inputs.host-headers }}
+          listener-rule-priority: ${{ inputs.listener-rule-priority }}
+          preview-header: ${{ inputs.preview-header }}
+          base-sha: ${{ inputs.base-sha }}
+          dockerfile-path: ${{ inputs.dockerfile-path }}
+          samconfig-path: ${{ inputs.samconfig-path }}
+          routing-template-path: ${{ inputs.routing-template-path }}
+          ecr-ssm-name: ${{ inputs.ecr-ssm-name }}
+          service-parameter-overrides-json: ${{ steps.merge.outputs.merged-json }}
+          extra-ssm-lookups: ${{ inputs.extra-ssm-lookups }}
+          tg-ssm-scope: ${{ inputs.tg-ssm-scope }}
+          use-saga-deploy-routing: ${{ inputs.use-saga-deploy-routing }}
+          prebuilt-image-uri: ${{ inputs.prebuilt-image-uri }}
+          # ARM cluster/capacity/arch (arm defaults). The composite injects these
+          # as ClusterArnSSMParameter / CapacityProviderName / CpuArchitecture
+          # into the service sam-deploy. CONTRACT (see the composite's Deploy
+          # service stack step): these DEFAULTS SUPERSEDE samconfig; a caller
+          # that supplies any of the three keys in service-parameter-overrides-json
+          # wins (the composite skips its arm default for a caller-supplied key —
+          # deterministic, no SAM dup-key reliance); the consumer template must
+          # declare all three params.
+          cluster-arn-ssm: ${{ inputs.cluster-arn-ssm }}
+          capacity-provider: ${{ inputs.capacity-provider }}
+          cpu-architecture: ${{ inputs.cpu-architecture }}
+          # Single-source saga-platform pin for the saga-deploy-routing install.
+          saga-platform-version: ${{ env.SAGA_PLATFORM_VERSION }}
+
+  # ── Migrations (optional) ───────────────────────────────────────
+  migrate:
+    name: Migrate
+    needs: build-and-deploy
+    # Boolean reusable-workflow inputs are received as strings on the
+    # main-deploy caller path, so `inputs.has-migrations == true` (boolean
+    # equality) evaluated FALSE and silently skipped Migrate on every main
+    # deploy (verified: 5/5 recent main iam-api deploys skipped, e.g. the
+    # #386 sessions-authz permission migration never applied). Use a truthy
+    # check (a non-empty 'true' string is truthy) plus always() so the gate
+    # no longer depends on the input's runtime type — matching program-hub's
+    # proven-working _deploy-ecs-api.yml condition.
+    if: always() && needs.build-and-deploy.result == 'success' && inputs.has-migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ inputs.deploy-role-arn }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run migration task
+        env:
+          IDENTIFIER: ${{ inputs.identifier }}
+          ENV: ${{ inputs.environment }}
+          PROJECT: ${{ inputs.project-name }}
+          SERVICE: ${{ inputs.service-name }}
+          CONTAINER: ${{ inputs.service-name }}
+          # COMMAND is the caller-owned migrate/seed chain (migrate-command-json),
+          # EXCEPT on the profile-snapshot path: when a seed-profile is
+          # requested the provision-preview-db job already had the orchestrator
+          # restore each container from its canonical S3 snapshot at provision
+          # time (iam <- rostering-iam-canonical, iam-pii <-
+          # rostering-iam-pii-canonical), so the canonical roster + PII are
+          # ALREADY present. Running the caller's live destructive db:seed would
+          # only repeat work the snapshot already carries (and could clobber the
+          # restored canonical data), so the seed step is gated off here and we
+          # run migrations only. migrate deploy still runs: the snapshot may
+          # pre-date later migrations, and migrate deploy is a no-op when the
+          # container is already at head.
+          #
+          # This override is the ONLY place _deploy-ecs-api.yml strays from the
+          # caller's COMMAND, and it's gated on seed-profile != '' — which only
+          # the sandbox/composer path ever sets, and only for iam-api (the
+          # canonical snapshots are iam DBs). All other callers (sis-api,
+          # deploy-iam-api main/stable/canary) leave seed-profile empty and get
+          # their migrate-command-json verbatim — unchanged from main.
+          # CAUTION: this branch substitutes a RAW `pnpm db:deploy` chain that does
+          # NOT route through prod-migrate.js. It's safe today because seed-profile
+          # is only ever set on the dev sandbox/composer path (static-password
+          # DATABASE_URL). If a PROD dispatch ever sets seed-profile, this raw chain
+          # would hit the no-DATABASE_URL wall — wrap it in prod-migrate.js first.
+          COMMAND: >-
+            ${{ inputs.seed-profile != ''
+                && '["sh","-c","pnpm --filter @saga-ed/iam-db db:deploy && pnpm --filter @saga-ed/iam-pii-db db:deploy"]'
+                || inputs.migrate-command-json }}
+          # Caller-provided override for the SG SSM path. Empty → script
+          # default (/{project}/infra/{env}/sg-id, iam-api's unscoped slot).
+          # Set only when the service publishes its SG under a different path.
+          SG_SSM_PATH: ${{ inputs.migrate-sg-ssm-path }}
+          # Caller-provided override for the cluster + capacity the one-off
+          # migrate task launches into. Empty → script defaults (x86 dev-shared).
+          # arm-migrated services set these to the dev-shared-arm cluster so the
+          # ARM64 migrate task is placeable (an ARM64 task can't run on the x86
+          # cluster → ECS never places it → the migrate job hangs to timeout).
+          CLUSTER_SSM_PATH: ${{ inputs.migrate-cluster-ssm-path }}
+          CAPACITY_PROVIDER: ${{ inputs.migrate-capacity-provider }}
+          # PROD only: point the migrate one-shot at the dedicated owner-connect
+          # task role (published by the bootstrap stack) so it can do DDL while
+          # the always-on service role stays DML-only (postgres-role-isolation.md
+          # guarantee #2). Empty on dev/preview → the task inherits the service
+          # role, which carries the static-password DATABASE_URL secret.
+          MIGRATE_TASK_ROLE_SSM_PATH: ${{ inputs.environment == 'prod' && format('/{0}/infra/prod/migrate-task-role-arn', inputs.project-name) || '' }}
+        run: ./.github/scripts/run-migrate-task.sh
+
+  # ── Wait for service stability ──────────────────────────────────
+  wait-stable:
+    name: Wait Stable
+    needs: [build-and-deploy, migrate]
+    if: |
+      always() && needs.build-and-deploy.result == 'success' &&
+      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ inputs.deploy-role-arn }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Wait for ECS service stability
+        env:
+          IDENTIFIER: ${{ inputs.identifier }}
+          ENV: ${{ inputs.environment }}
+          PROJECT: ${{ inputs.project-name }}
+          SERVICE: ${{ inputs.service-name }}
+          # Resolve the cluster the SERVICE was actually deployed to. For
+          # arm-migrated services the caller passes migrate-cluster-ssm-path
+          # (= /dev/shared-arm/ecs-cluster-arn); the per-project
+          # /{project}/infra/{env}/ecs-cluster-arn indirection key still points
+          # at the x86 cluster, so without this wait-stable would poll the x86
+          # cluster, find the service MISSING (it's on arm), and fail the deploy
+          # AFTER a healthy service + a successful migrate. Empty → x86 default.
+          CLUSTER_SSM_PATH: ${{ inputs.migrate-cluster-ssm-path }}
+        run: |
+          CLUSTER_SSM_PATH="${CLUSTER_SSM_PATH:-/${PROJECT}/infra/${ENV}/ecs-cluster-arn}"
+          CLUSTER_ARN=$(aws ssm get-parameter \
+            --name "$CLUSTER_SSM_PATH" \
+            --query Parameter.Value --output text)
+          ECS_SERVICE="${PROJECT}-${SERVICE}-${IDENTIFIER}"
+          echo "Waiting for $ECS_SERVICE on $CLUSTER_ARN..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER_ARN" \
+            --services "$ECS_SERVICE" \
+            --cli-read-timeout 300
+
+  # ── Health check ────────────────────────────────────────────────
+  # NB: explicit `needs.wait-stable.result == 'success'` instead of `success()` —
+  # `wait-stable` uses `always()` to tolerate a skipped `migrate`, which causes
+  # downstream `if: success()` to evaluate the transitive graph and skip.
+  health-check:
+    name: Health Check
+    needs: wait-stable
+    if: always() && needs.wait-stable.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe health endpoint
+        env:
+          IDENTIFIER: ${{ inputs.identifier }}
+          HEALTH_URL: ${{ inputs.health-url }}
+          PREVIEW_HEADER_NAME: ${{ inputs.preview-header-name }}
+        run: |
+          HEADER_ARG=()
+          if [ "$IDENTIFIER" != "main" ]; then
+            HEADER_ARG=(-H "${PREVIEW_HEADER_NAME}: ${IDENTIFIER}")
+          fi
+          echo "Checking ${HEALTH_URL}${IDENTIFIER:+ (header: ${IDENTIFIER})}"
+          # wait-stable already confirmed the service passed ALB health checks,
+          # so health here should respond almost immediately. 12 × 3s = 36s is
+          # plenty; bump back if we see false fails.
+          for i in $(seq 1 12); do
+            if curl -sf "${HEADER_ARG[@]}" "$HEALTH_URL"; then
+              echo ""
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Attempt $i/12 failed, retrying in 3s..."
+            sleep 3
+          done
+          echo "::error::Health check failed after 12 attempts"
+          exit 1
+
+  # ── Ephemeral teardown (preview only) ───────────────────────────
+  # Grafted from program-hub's _deploy-ecs-api.yml ephemeral-teardown job.
+  # Tears a freshly-deployed EPHEMERAL preview's DB container(s) + per-PR
+  # secret(s) down after the pipeline runs. `always()` so a RED health-check
+  # still tears down (no lingering artifact on a failed preview).
+  #
+  # MERGE DELTA vs program-hub (the artifact's flagged silent-risk): program-hub
+  # assumed ONE DB — a single provision-preview-db.outputs.service-name and a
+  # single /preview/<api>/<id>/database-url secret. rostering's provision job
+  # runs 1-OR-2 containers (iam-api = iam + iam-pii), each with a DISTINCT
+  # serviceName + secret. Porting the single-DB teardown verbatim would silently
+  # LEAK the 2nd container + 2nd secret on every ephemeral iam-api teardown.
+  # This job therefore loops over provision-preview-db.outputs.provision-targets-json
+  # (a JSON array of {service-name, secret-name}) so every container + secret is
+  # torn down.
+  #
+  # Auto-skip for main/stable/canary/sandbox: those identifiers skip provision
+  # (rostering's provision `if` excludes them), so provision.result is 'skipped'
+  # → the `provision.result == 'success'` gate short-circuits this job.
+  ephemeral-teardown:
+    name: Ephemeral Teardown
+    needs: [detect-changes, ci, provision-preview-db, build-and-deploy, health-check]
+    if: |
+      always() &&
+      needs.provision-preview-db.result == 'success' &&
+      needs.provision-preview-db.outputs.mode == 'ephemeral'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ inputs.deploy-role-arn }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Best-effort teardown of the just-deployed preview's service + routing
+      # stacks. continue-on-error stays (program-hub's gate): this is the
+      # ephemeral hot path and a stuck delete must not block the run; the
+      # dedicated cleanup-preview workflow surfaces such failures loudly on PR
+      # close. (NB program-hub's source comment calls this a "pre-deploy"
+      # cleanup, but the job runs AFTER health-check — porting the gate +
+      # behavior faithfully; comment wording corrected here.)
+      - name: Cleanup ECS / ALB stack (best-effort)
+        continue-on-error: true
+        uses: ./.github/actions/cleanup-ecs-api
+        with:
+          service-name: ${{ inputs.service-name }}
+          project-name: ${{ inputs.project-name }}
+          identifier: ${{ inputs.identifier }}
+          environment: ${{ inputs.environment }}
+
+      # Orchestrator teardown — once per provisioned container. program-hub
+      # teardown is a single orchestrator-call with skipSnapshotCheck:true;
+      # rostering provisions 1-or-2 containers, so we iterate the targets array
+      # and tear each one down. saga-orch (saga-platform CLI) is installed once
+      # by setup-saga-orch and reused across the loop iterations.
+      - name: Setup saga-orch
+        uses: ./.github/actions/setup-saga-orch
+        with:
+          saga-platform-version: ${{ env.SAGA_PLATFORM_VERSION }}
+
+      - name: Orchestrator teardown (per container)
+        env:
+          TARGETS_JSON: ${{ needs.provision-preview-db.outputs.provision-targets-json }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TARGETS_JSON:-}" ] || [ "$TARGETS_JSON" = "[]" ]; then
+            echo "No provisioned containers recorded — nothing to tear down"
+            exit 0
+          fi
+          # One teardown per {service-name}. skipSnapshotCheck:true matches
+          # program-hub (ephemeral mode never needs a pre-teardown snapshot —
+          # resolve-preview-mode already gated keep-alive out via the `mode`
+          # check on this job).
+          #
+          # `saga-orch raw` exits 0 even on a LOGICAL failure (the body carries
+          # {ok:false,error:...}); the orchestrator-call composite tests body.ok
+          # for exactly this reason. We can't `uses:` a composite inside a loop,
+          # so replicate its ok-check here: a failed teardown must RED the job
+          # (else a leaked container reports green — defeating the job's purpose).
+          # Collect failures and exit non-zero at the end so every container is
+          # attempted even if an earlier one fails.
+          FAILED=0
+          while IFS= read -r SVC; do
+            [ -z "$SVC" ] && continue
+            echo "::group::teardown $SVC"
+            PAYLOAD=$(jq -nc --arg n "$SVC" \
+              '{action:"teardown",serviceName:$n,skipSnapshotCheck:true}')
+            BODY=$(saga-orch raw --payload "$PAYLOAD")
+            echo "$BODY" | jq .
+            OK=$(printf '%s' "$BODY" | jq -r '.ok // false')
+            if [ "$OK" != "true" ]; then
+              ERR=$(printf '%s' "$BODY" | jq -r '.error // "unknown"')
+              echo "::error::orchestrator teardown failed for $SVC: $ERR"
+              FAILED=1
+            fi
+            echo "::endgroup::"
+          done < <(echo "$TARGETS_JSON" | jq -r '.[]."service-name"')
+          exit $FAILED
+
+      # Delete each per-PR secret. continue-on-error (program-hub's gate): a
+      # missing/already-deleted secret must not red the run. Secret names come
+      # from the targets array (the exact paths provision-preview-db-secret
+      # wrote: /preview/<api>/<id>/<suffix>).
+      - name: Delete per-PR DB secret(s)
+        continue-on-error: true
+        env:
+          TARGETS_JSON: ${{ needs.provision-preview-db.outputs.provision-targets-json }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TARGETS_JSON:-}" ] || [ "$TARGETS_JSON" = "[]" ]; then
+            echo "No provisioned secrets recorded — nothing to delete"
+            exit 0
+          fi
+          echo "$TARGETS_JSON" | jq -r '.[]."secret-name"' | while IFS= read -r NAME; do
+            [ -z "$NAME" ] && continue
+            if aws secretsmanager describe-secret --secret-id "$NAME" >/dev/null 2>&1; then
+              aws secretsmanager delete-secret --secret-id "$NAME" --force-delete-without-recovery
+              echo "Deleted secret: $NAME"
+            else
+              echo "Secret not present (already gone): $NAME"
+            fi
+          done
+
+  # ── Metadata — tag + gather + cut GitHub Release (canary only) ──
+  # Runs only on main-merge (canary). Creates the canary tag and a
+  # --prerelease GitHub Release whose body is the generated changelog.
+  # Outputs flow into register-switchboard so the switchboard row gets
+  # DeployStats + deployTag + releaseUrl + canaryNumber.
+  metadata:
+    name: Metadata
+    needs: health-check
+    if: always() && needs.health-check.result == 'success' && inputs.deploy-tier == 'canary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    outputs:
+      deploy-tag:        ${{ steps.tag.outputs.tag }}
+      canary-number:     ${{ steps.tag.outputs.canary-number }}
+      release-url:       ${{ steps.release.outputs.url }}
+      deploy-stats-json: ${{ steps.extract.outputs.stats-json }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Gather deploy info
+        id: gather
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVICE_NAME: ${{ inputs.service-name }}
+        run: |
+          chmod +x .github/scripts/deploy-reporting/gather-deploy-info.sh
+          .github/scripts/deploy-reporting/gather-deploy-info.sh \
+            --tier canary \
+            --service "$SERVICE_NAME" \
+            --commit "${{ github.sha }}" \
+            --repo "${{ github.repository }}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --run-id "${{ github.run_id }}" \
+            --actor "${{ github.actor }}" \
+            --config .github/deploy-reporting.config.json \
+            > /tmp/deploy-info.json
+
+      - name: Extract stats + canary number
+        id: extract
+        run: |
+          ANCESTORS=$(jq -r '.canary_ancestors // 0' /tmp/deploy-info.json)
+          CANARY_NUMBER=$((ANCESTORS + 1))
+          # The switchboard variant card shows a single stats triple; send
+          # the "since last production" cut — it answers "what would we
+          # ship if we promoted now?" for canary, and "what shipped in
+          # this release" for production. The "since last canary" cut is
+          # still emitted in the Release body for nuance.
+          STATS_JSON=$(jq -c '.stats_since_prod' /tmp/deploy-info.json)
+          echo "canary-number=$CANARY_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "stats-json=$STATS_JSON" >> "$GITHUB_OUTPUT"
+          echo "Canary #$CANARY_NUMBER, stats (since last prod): $STATS_JSON"
+
+      - name: Build release notes
+        run: |
+          chmod +x .github/scripts/deploy-reporting/build-release-notes.sh
+          .github/scripts/deploy-reporting/build-release-notes.sh \
+            --input /tmp/deploy-info.json \
+            --config .github/deploy-reporting.config.json \
+            > /tmp/release-notes.md
+
+      - name: Create tag + prerelease
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANARY_NUMBER: ${{ steps.extract.outputs.canary-number }}
+          SERVICE_NAME: ${{ inputs.service-name }}
+        run: |
+          TAG="deploy/canary/${SERVICE_NAME}/$(date -u +%Y%m%d-%H%M)"
+          TITLE="Canary #${CANARY_NUMBER} — ${SERVICE_NAME} — $(date -u +%Y-%m-%d\ %H:%M) UTC"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "canary-number=$CANARY_NUMBER" >> "$GITHUB_OUTPUT"
+          gh release create "$TAG" \
+            --target "${{ github.sha }}" \
+            --title "$TITLE" \
+            --notes-file /tmp/release-notes.md \
+            --prerelease
+
+      - name: Capture release URL
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          URL=$(gh release view "$TAG" --json url --jq .url)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Upload deploy-info artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-info-${{ github.run_id }}
+          path: /tmp/deploy-info.json
+          retention-days: 30
+
+  # ── Register with switchboard (best-effort) ─────────────────────
+  register-switchboard:
+    name: Register Switchboard
+    needs: [build-and-deploy, health-check, metadata]
+    if: always() && needs.build-and-deploy.result == 'success' && needs.health-check.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ inputs.deploy-role-arn }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Install the shared saga-switchboard CLI from CodeArtifact (replaces the
+      # per-repo switchboard-register.sh bash script). saga_py proxies PyPI so
+      # transitive deps resolve through the one index.
+      - name: Install saga-switchboard CLI
+        env:
+          # Single-source pin (env.SAGA_PLATFORM_VERSION = vars.SAGA_PLATFORM_VERSION
+          # || '0.11.0'). This is a workflow-level run step, where workflow `env`
+          # resolves — unlike inside composites, hence the input-threading there.
+          SAGA_PLATFORM_VERSION: ${{ env.SAGA_PLATFORM_VERSION }}
+        run: |
+          TOKEN=$(aws codeartifact get-authorization-token \
+            --domain saga --domain-owner 531314149529 \
+            --query authorizationToken --output text)
+          PIP_INDEX_URL="https://aws:${TOKEN}@saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/pypi/saga_py/simple/" \
+            pip install -q "saga-platform==${SAGA_PLATFORM_VERSION}"
+
+      - name: Fetch switchboard CI key
+        id: key
+        continue-on-error: true
+        run: |
+          key=$(aws secretsmanager get-secret-value \
+            --secret-id switchboard/ci-api-key \
+            --query SecretString --output text 2>/dev/null) || key=""
+          echo "::add-mask::$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Register
+        continue-on-error: true
+        env:
+          SERVICE_NAME: ${{ inputs.service-name }}
+          HEALTH_CHECK_URL: ${{ inputs.health-url }}
+          PUBLIC_URL: ${{ inputs.preview-url }}
+          VARIANT_ID: ${{ inputs.identifier }}
+          ARTIFACT_REF: ${{ needs.build-and-deploy.outputs.image-uri }}
+          GIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DEPLOY_TIER: ${{ inputs.deploy-tier }}
+          DEPLOY_ACTOR: ${{ github.event.pull_request.user.login || github.actor }}
+          WORKFLOW_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          TTL_HOURS: ${{ inputs.ttl-hours }}
+          CLEANUP_URL: ${{ inputs.cleanup-url }}
+          DEPLOY_STATS_JSON: ${{ needs.metadata.outputs.deploy-stats-json }}
+          DEPLOY_TAG: ${{ needs.metadata.outputs.deploy-tag }}
+          RELEASE_URL: ${{ needs.metadata.outputs.release-url }}
+          CANARY_NUMBER: ${{ needs.metadata.outputs.canary-number }}
+          SWITCHBOARD_API_KEY: ${{ steps.key.outputs.key }}
+          # Phase 4 — declare sandboxSupport so sandbox-api can compose
+          # sandboxes on this variant. Both workflow refs must be set or
+          # the field is omitted entirely (server-side SandboxSupport
+          # requires both). The ref is pinned to the branch that
+          # registered the variant — main pushes register with ref=main,
+          # PR-preview deploys register with ref=<PR branch> — so
+          # composing a sandbox against a PR-preview variant dispatches
+          # that PR's version of the sandbox-deploy workflow. Lets
+          # workflow-file changes be validated end-to-end before merge.
+          # owner/repo are derived from the CALLER repo at runtime (was hardcoded
+          # saga-ed/rostering) — the sandbox-deploy.yml / sandbox-teardown.yml
+          # workflow files live in the calling repo, so a centralized workflow must
+          # point sandboxSupport at whoever called it, not at rostering.
+          SANDBOX_CREATE_WORKFLOW: '{"owner":"${{ github.repository_owner }}","repo":"${{ github.event.repository.name }}","workflowFile":"sandbox-deploy.yml","ref":"${{ github.event.pull_request.head.ref || github.ref_name }}"}'
+          SANDBOX_TEARDOWN_WORKFLOW: '{"owner":"${{ github.repository_owner }}","repo":"${{ github.event.repository.name }}","workflowFile":"sandbox-teardown.yml","ref":"${{ github.event.pull_request.head.ref || github.ref_name }}"}'
+        run: saga-switchboard-register
+
+  # ── Slack report (canary only; no-ops without webhook secret) ───
+  # Depends on deploy-results for the consolidated deploy-result +
+  # job-results (metadata's artifact was captured BEFORE the final
+  # aggregate finished, so those fields there are empty — we patch
+  # them in from the aggregator before feeding build-slack).
+  slack-report:
+    name: Slack Report
+    needs: [metadata, register-switchboard, deploy-results]
+    if: always() && inputs.deploy-tier == 'canary' && needs.metadata.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download deploy-info artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-info-${{ github.run_id }}
+          path: /tmp
+
+      - name: Patch deploy-info with final results
+        env:
+          DEPLOY_RESULT: ${{ needs.deploy-results.outputs.deploy-result }}
+          JOB_RESULTS: ${{ needs.deploy-results.outputs.job-results }}
+        run: |
+          jq --arg result "$DEPLOY_RESULT" \
+             --argjson jr "$JOB_RESULTS" \
+             '.deploy.result = $result | .job_results = $jr' \
+             /tmp/deploy-info.json > /tmp/deploy-info.patched.json
+          mv /tmp/deploy-info.patched.json /tmp/deploy-info.json
+
+      - name: Build Slack message
+        run: |
+          chmod +x .github/scripts/deploy-reporting/build-slack-message.sh
+          .github/scripts/deploy-reporting/build-slack-message.sh \
+            --input /tmp/deploy-info.json \
+            --config .github/deploy-reporting.config.json \
+            > /tmp/slack-message.json
+
+      - name: Send Slack message
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+        run: |
+          chmod +x .github/scripts/deploy-reporting/send-slack-message.sh
+          .github/scripts/deploy-reporting/send-slack-message.sh \
+            --file /tmp/slack-message.json
+
+  # ── Aggregate results for caller + comment ──────────────────────
+  deploy-results:
+    name: Deploy Results
+    needs: [detect-changes, ci, provision-preview-db, build-and-deploy, migrate, wait-stable, health-check, ephemeral-teardown, metadata, register-switchboard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      deploy-result: ${{ steps.out.outputs.deploy-result }}
+      job-results: ${{ steps.out.outputs.job-results }}
+    steps:
+      - name: Consolidate
+        id: out
+        run: |
+          if [[ "${{ needs.detect-changes.outputs.has-code }}" == "false" ]]; then
+            echo "deploy-result=skipped" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ needs.build-and-deploy.result }}" == "success" && \
+                   "${{ needs.health-check.result }}" == "success" ]]; then
+            echo "deploy-result=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy-result=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+          JOB_RESULTS=$(jq -nc \
+            --arg ci "${{ needs.ci.result }}" \
+            --arg typecheck "${{ needs.ci.outputs.typecheck-result }}" \
+            --arg lint "${{ needs.ci.outputs.lint-result }}" \
+            --arg test "${{ needs.ci.outputs.test-result }}" \
+            --arg build "${{ needs.build-and-deploy.result }}" \
+            --arg migrate "${{ needs.migrate.result }}" \
+            --arg waitstable "${{ needs.wait-stable.result }}" \
+            --arg health "${{ needs.health-check.result }}" \
+            --arg teardown "${{ needs.ephemeral-teardown.result }}" \
+            --arg metadata "${{ needs.metadata.result }}" \
+            --arg register "${{ needs.register-switchboard.result }}" \
+            '{ci:$ci,typecheck:$typecheck,lint:$lint,test:$test,"build-and-deploy":$build,migrate:$migrate,"wait-stable":$waitstable,"health-check":$health,"ephemeral-teardown":$teardown,metadata:$metadata,"register-switchboard":$register}')
+          echo "job-results=$JOB_RESULTS" >> "$GITHUB_OUTPUT"
+
+  # ── PR comment (phase 1: immediately after deploy) ──────────────
+  create-pr-comment:
+    name: PR Comment
+    needs: [build-and-deploy, ci, detect-changes]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      comment-id: ${{ steps.c.outputs.comment-id }}
+    permissions:
+      pull-requests: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github
+
+      - name: Create initial comment
+        id: c
+        uses: actions/github-script@v8
+        env:
+          IDENTIFIER: ${{ inputs.identifier }}
+          PREVIEW_URL: ${{ inputs.preview-url }}
+          IMAGE_URI: ${{ needs.build-and-deploy.outputs.image-uri }}
+          HAS_CODE: ${{ needs.detect-changes.outputs.has-code }}
+          BUILD_RESULT: ${{ needs.build-and-deploy.result }}
+          CI_RESULT: ${{ needs.ci.result }}
+          TYPECHECK: ${{ needs.ci.outputs.typecheck-result }}
+          LINT: ${{ needs.ci.outputs.lint-result }}
+          TEST: ${{ needs.ci.outputs.test-result }}
+          RUN_ID: ${{ github.run_id }}
+          SERVICE_NAME: ${{ inputs.service-name }}
+          HAS_MIGRATIONS: ${{ inputs.has-migrations }}
+          SWITCHBOARD_WEB_URL: ${{ env.SWITCHBOARD_WEB_URL }}
+        with:
+          script: |
+            const { buildCommentBody } = require('./.github/scripts/build-pr-comment.cjs');
+            const body = await buildCommentBody({ github, context, phase: 1, env: process.env });
+            const { data: comment } = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+            core.setOutput('comment-id', comment.id);
+
+  # ── PR comment (phase 2: after all jobs complete) ───────────────
+  update-pr-comment:
+    name: PR Comment Update
+    needs: [create-pr-comment, ci, build-and-deploy, migrate, wait-stable, health-check, metadata, register-switchboard, detect-changes]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      pull-requests: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: .github
+
+      - name: Update comment with final results
+        uses: actions/github-script@v8
+        env:
+          COMMENT_ID: ${{ needs.create-pr-comment.outputs.comment-id }}
+          IDENTIFIER: ${{ inputs.identifier }}
+          PREVIEW_URL: ${{ inputs.preview-url }}
+          IMAGE_URI: ${{ needs.build-and-deploy.outputs.image-uri }}
+          HAS_CODE: ${{ needs.detect-changes.outputs.has-code }}
+          BUILD_RESULT: ${{ needs.build-and-deploy.result }}
+          CI_RESULT: ${{ needs.ci.result }}
+          TYPECHECK: ${{ needs.ci.outputs.typecheck-result }}
+          LINT: ${{ needs.ci.outputs.lint-result }}
+          TEST: ${{ needs.ci.outputs.test-result }}
+          MIGRATE_RESULT: ${{ needs.migrate.result }}
+          WAIT_STABLE_RESULT: ${{ needs.wait-stable.result }}
+          HEALTH_RESULT: ${{ needs.health-check.result }}
+          REGISTER_RESULT: ${{ needs.register-switchboard.result }}
+          RUN_ID: ${{ github.run_id }}
+          SERVICE_NAME: ${{ inputs.service-name }}
+          HAS_MIGRATIONS: ${{ inputs.has-migrations }}
+          SWITCHBOARD_WEB_URL: ${{ env.SWITCHBOARD_WEB_URL }}
+          TTL_HOURS: ${{ inputs.ttl-hours }}
+        with:
+          script: |
+            const { buildCommentBody, minimizeOldComments } = require('./.github/scripts/build-pr-comment.cjs');
+            const body = await buildCommentBody({ github, context, phase: 2, env: process.env });
+
+            const commentId = process.env.COMMENT_ID;
+            const currentId = (commentId && commentId !== 'undefined' && commentId !== '')
+              ? parseInt(commentId) : null;
+
+            await minimizeOldComments({ github, context, currentId });
+
+            if (currentId) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: currentId,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

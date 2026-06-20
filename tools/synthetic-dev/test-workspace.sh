@@ -59,13 +59,16 @@ assert "only: non-target skipped" "$(yn want_service iam-api)"      no
 
 # 2. classic --sandbox regression (arg-parse seeds IAM_SANDBOX from SANDBOX_NAME)
 ONLY_SERVICE="programs-api"; SANDBOX_NAME="dev"; IAM_SANDBOX="dev"; WORKSPACE_FILE=""
-assert "sandbox(classic): programs IAM_API_URL" "$(sandbox_env programs-api)" "IAM_API_URL=https://iam.wootdev.com"
 assert "sandbox(classic): iam-api no repoint"   "$(sandbox_env iam-api)"      ""
-# sis-api originates the preview header (Phase 3) — slug form sandbox-<name>.
+# sis-api and programs-api both originate the iam preview header (Phase 3) — slug
+# form sandbox-<name>. sis flips IAM_BASEURL/IAM_TOKENURL; programs flips IAM_API_URL.
 assert "sandbox(classic): sis originate-map"    "$(sandbox_env sis-api)" \
   $'IAM_BASEURL=https://iam.wootdev.com/trpc\nIAM_TOKENURL=https://iam.wootdev.com/v1/oauth/token\nPREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=sandbox-dev'
-# programs/scheduling/sessions don't parse the originate-map yet → URL flip only.
-assert "sandbox(classic): programs no originate" "$(sandbox_env programs-api)" "IAM_API_URL=https://iam.wootdev.com"
+assert "sandbox(classic): programs originate-map" "$(sandbox_env programs-api)" \
+  $'IAM_API_URL=https://iam.wootdev.com\nPREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=sandbox-dev'
+# scheduling/sessions don't originate (no S2S iam dep / dep has no flip yet) → URL flip only.
+assert "sandbox(classic): scheduling no originate" "$(sandbox_env scheduling-api)" "IAM_API_URL=https://iam.wootdev.com"
+assert "sandbox(classic): sessions no originate"   "$(sandbox_env sessions-api)"   "IAM_API_URL=https://iam.wootdev.com"
 
 # 3. workspace mode (parse_workspace seeds IAM_SANDBOX from the manifest)
 ONLY_SERVICE=""; SANDBOX_NAME=""; IAM_SANDBOX=""; WORKSPACE_FILE="$WS"
@@ -78,7 +81,8 @@ assert "ws: IAM_SANDBOX scalar set"     "$IAM_SANDBOX"              dev
 assert "ws: programs-api in run-set"    "$(yn want_service programs-api)" yes
 assert "ws: sis-api in run-set"         "$(yn want_service sis-api)"      yes
 assert "ws: iam-api NOT in run-set"     "$(yn want_service iam-api)"      no
-assert "ws: programs IAM_API_URL flips" "$(sandbox_env programs-api)" "IAM_API_URL=https://iam.wootdev.com"
+assert "ws: programs IAM_API_URL flips + originates" "$(sandbox_env programs-api)" \
+  $'IAM_API_URL=https://iam.wootdev.com\nPREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=sandbox-dev'
 assert "ws: sis IAM_BASEURL flips + originates" "$(sandbox_env sis-api)" \
   $'IAM_BASEURL=https://iam.wootdev.com/trpc\nIAM_TOKENURL=https://iam.wootdev.com/v1/oauth/token\nPREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=sandbox-dev'
 

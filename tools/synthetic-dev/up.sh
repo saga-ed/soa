@@ -1101,16 +1101,15 @@ parse_workspace(){ # file
     case "$s" in insights-api|transcripts-api|chat-api) DO_PLAYBACK=1 ;; esac
   done
   say "workspace: ${#WS_RUN_SET[@]} local service(s) [${WS_RUN_SET[*]}]; $(( ${#SVC_MODE[@]} - ${#WS_RUN_SET[@]} )) sandbox-hosted"
-  # Routing signal when iam-api is sandbox-hosted: sis-api self-originates the
-  # preview header (sandbox_env → PREVIEW_ORIGINATE_MAP), but programs/scheduling/
-  # sessions don't parse it yet, so their iam calls silently route to MAIN (which
-  # rejects unauthenticated S2S). Name them rather than let it fail quietly.
-  if [[ -n "$IAM_SANDBOX" ]]; then
-    local need=() x
-    for x in "${WS_RUN_SET[@]}"; do
-      case "$x" in programs-api|scheduling-api|sessions-api) need+=("$x") ;; esac
-    done
-    [[ ${#need[@]} -gt 0 ]] && warn "--workspace: ${need[*]} depend on iam-api but don't originate the preview header yet (only sis-api does) — their iam calls hit MAIN, not sandbox '$IAM_SANDBOX'. (Phase 3 follow-up.)"
+  # Routing signal when iam-api is sandbox-hosted. sis-api and programs-api both
+  # self-originate the preview header for their iam dep (sandbox_env →
+  # PREVIEW_ORIGINATE_MAP), so their iam calls reach the sandbox. sessions-api's
+  # only sandbox-able dep is scheduling-api (NOT iam), and that path has no URL
+  # flip + no originate wired yet — flag it so a sessions+scheduling sandbox mix
+  # isn't a silent route-to-localhost. scheduling-api has no outbound S2S dep.
+  if [[ -n "$IAM_SANDBOX" && -n "${SVC_MODE[sessions-api]:-}" ]]; then
+    [[ "${SVC_MODE[sessions-api]}" == "local-source" ]] \
+      && warn "--workspace: sessions-api→scheduling-api preview routing isn't wired yet (no URL flip / originate) — if scheduling-api is sandbox-hosted, sessions-api still calls it at localhost. (Phase 3 follow-up.)"
   fi
 }
 sandbox_env(){ # svc
@@ -1128,11 +1127,16 @@ sandbox_env(){ # svc
   #     directly-driven backend originates the slug `sandbox-<name>` the ALB
   #     registered. A real inbound header still wins per-key (browser flow intact).
   #     Slug form `sandbox-<name>` matches rostering sandbox-deploy.yml's
-  #     IDENTIFIER (verified). Only sis-api parses PREVIEW_ORIGINATE_MAP today;
-  #     it's harmless on services that ignore it.
+  #     IDENTIFIER (verified). sis-api (own copy) AND programs-api (via the shared
+  #     @saga-ed/program-hub rostering-client) parse PREVIEW_ORIGINATE_MAP; it's
+  #     harmless on services that ignore it.
   #
-  # Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
-  # sessions deps are additive once the multi-service mesh compose is unblocked.
+  # Only the iam-api DEP is wired today (the proven single-dep shape — sis-api and
+  # programs-api both call iam over S2S). scheduling-api has no outbound S2S client
+  # (nothing to originate); sessions-api's only sandbox-able dep is scheduling-api,
+  # which has no URL flip here yet — originating that header alone would silently
+  # route to localhost, so it waits until both halves (scheduling URL flip + header)
+  # land together with proven multi-service compose.
   [[ -z "$IAM_SANDBOX" ]] && return 0
   local svc=$1 iam_host="https://iam.$SANDBOX_BASE"
   local iam_originate="PREVIEW_ORIGINATE_MAP=x-saga-preview-iam-api=sandbox-$IAM_SANDBOX"
@@ -1140,10 +1144,16 @@ sandbox_env(){ # svc
     sis-api)
       printf '%s\n' "IAM_BASEURL=$iam_host/trpc" "IAM_TOKENURL=$iam_host/v1/oauth/token" \
         "$iam_originate" ;;
-    programs-api|scheduling-api|sessions-api)
-      # URL flip only: these services don't parse PREVIEW_ORIGINATE_MAP yet, so
-      # originating the header here would be dead env. Add their entry when their
-      # preview-headers.ts gains the same originate-map (Phase 3 follow-up).
+    programs-api)
+      # URL flip + originate: programs-api calls iam over S2S (TrpcRosteringClient)
+      # and its rostering-client parses PREVIEW_ORIGINATE_MAP, so a headless hit
+      # (incl. its iam-projection consumer) routes to the sandbox iam, not main.
+      printf '%s\n' "IAM_API_URL=$iam_host" "$iam_originate" ;;
+    scheduling-api|sessions-api)
+      # URL flip only. scheduling-api has no outbound S2S client to originate for;
+      # sessions-api's sandbox-able dep is scheduling-api (not iam), whose URL flip
+      # isn't wired here yet — see the header-vs-flip note above. Add their originate
+      # entry when their flip + a proven multi-service compose land (Phase 3).
       printf '%s\n' "IAM_API_URL=$iam_host" ;;
     *) ;; # iam-api itself / saga-dash / ads-adm / rtsm / connect: no repoint wired (yet)
   esac

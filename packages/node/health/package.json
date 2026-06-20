@@ -1,6 +1,6 @@
 {
-    "name": "@saga-ed/soa-event-consumer",
-    "version": "0.1.0-dev.5",
+    "name": "@saga-ed/soa-health",
+    "version": "0.1.0-dev.1",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -19,20 +19,9 @@
         "lint": "eslint src/",
         "clean": "rm -rf dist"
     },
-    "dependencies": {
-        "@saga-ed/soa-event-envelope": "workspace:*",
-        "@saga-ed/soa-logger": "workspace:*",
-        "@saga-ed/soa-rabbitmq": "workspace:*",
-        "@opentelemetry/api": "^1.9.0",
-        "amqplib": "^0.10.4",
-        "pg": "^8.13.0",
-        "zod": "3.25.67"
-    },
     "devDependencies": {
         "@saga-ed/soa-typescript-config": "workspace:*",
-        "@types/amqplib": "^0.10.4",
         "@types/node": "^24.0.3",
-        "@types/pg": "^8.11.10",
         "tsup": "^8.5.0",
         "typescript": "5.8.2",
         "vitest": "^1.6.1"
@@ -44,6 +33,6 @@
     "repository": {
         "type": "git",
         "url": "https://github.com/saga-ed/soa.git",
-        "directory": "packages/node/event-consumer"
+        "directory": "packages/node/health"
     }
 }

@@ -72,4 +72,25 @@ describe('mountHealthRoutes', () => {
     expect(body.dependencies.postgres.status).toBe('unhealthy');
     expect(body.dependencies.postgres.latencyMs).toBeUndefined();
   });
+
+  // dev.1 -> dev.2 superset guard: adding mountReadinessRoutes must NOT alter
+  // the existing two-arg mountHealthRoutes contract. program-hub is exact-pinned
+  // to dev.1 and must see byte-identical /health + /health/details output, so a
+  // future repin to dev.2 is a no-op. (timestamp is the only non-deterministic
+  // field; asserted by shape, the rest by exact value.)
+  it('dev.1 superset: the two-arg mountHealthRoutes output is unchanged', async () => {
+    const { app, call, paths } = fakeApp();
+    mountHealthRoutes(app, { serviceName: 'Programs API', pingDb: async () => undefined });
+    expect(paths().sort()).toEqual(['/health', '/health/details']);
+
+    expect(await call('/health')).toEqual({ status: 'ok', service: 'Programs API' });
+
+    const details = (await call('/health/details')) as Record<string, unknown>;
+    expect(details.status).toBe('healthy');
+    expect(details.service).toBe('Programs API');
+    expect(typeof details.timestamp).toBe('string');
+    expect((details.dependencies as { postgres: { status: string } }).postgres.status).toBe('healthy');
+    // exact key set — no new top-level fields leaked into the dev.1 body
+    expect(Object.keys(details).sort()).toEqual(['dependencies', 'service', 'status', 'timestamp']);
+  });
 });

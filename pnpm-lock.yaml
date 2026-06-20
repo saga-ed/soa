@@ -1422,6 +1422,24 @@ importers:
         specifier: ^1.5.0
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
 
+  packages/node/preview-headers:
+    devDependencies:
+      '@saga-ed/soa-typescript-config':
+        specifier: workspace:*
+        version: link:../../core/typescript-config
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.0.12
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(@swc/core@1.15.7(@swc/helpers@0.5.17))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.8.2)(yaml@2.8.2)
+      typescript:
+        specifier: 5.8.2
+        version: 5.8.2
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
+
   packages/node/pubsub-client:
     dependencies:
       '@saga-ed/soa-logger':

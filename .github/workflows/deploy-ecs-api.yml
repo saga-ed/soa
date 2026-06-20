@@ -21,22 +21,26 @@ name: Deploy ECS API
 # repo-agnostic: callers pass ci-role-arn / deploy-role-arn; the saga-platform
 # pin reads the org var SAGA_PLATFORM_VERSION (single source).
 #
-# ⚠️ COMPOSITE REFS ARE FULL-PATH, NOT `./` — a reusable workflow's
-# `uses: ./.github/actions/X` resolves `./` against the CONSUMER's checked-out
-# workspace ($GITHUB_WORKSPACE = the caller repo, e.g. rostering), NOT against
-# soa. The caller's repo carries the OLD composites (no arm inputs), so a `./`
-# ref silently runs the wrong action and drops the cpu-architecture/cluster/
-# capacity inputs → the service task def defaults to X86_64 → the migrate task
-# can't place on the arm cluster (TaskFailedToStart: ATTRIBUTE). Every SHARED
-# composite is therefore referenced as
-#   uses: saga-ed/soa/.github/actions/X@<ref>
-# so the action DEFINITION comes from soa while still operating on the caller's
-# files. `run: ./.github/scripts/...` are LEFT as `./` on purpose — those run in
-# the caller's checkout by design (per-consumer migrate/comment scripts).
-# `uses:` refs cannot use ${{ }}, so they are pinned literally to this branch;
-# AT @v1 PROMOTION, retarget all `@feat/shared-deploy-workflow` → `@v1` in this
-# file AND in every composite under .github/actions/ (orchestrator-call,
-# provision-preview-db-secret). Workflow @v1 and composites @v1 move in lockstep.
+# ⚠️ COMPOSITE ACTIONS LIVE IN saga-ed/ci-actions (a dedicated PRIVATE repo),
+# NOT in soa, and are referenced full-path: `uses: saga-ed/ci-actions/X@v1`.
+# Two hard lessons forced this (both proven on the rostering canary, PR #597):
+#   1. `uses: ./.github/actions/X` in a reusable workflow resolves `./` against
+#      the CONSUMER's checked-out workspace ($GITHUB_WORKSPACE = the caller repo,
+#      e.g. rostering), NOT against soa. The caller carries its OWN/older
+#      composites, so a `./` ref ran the wrong action and dropped the
+#      cpu-architecture/cluster/capacity inputs → X86_64 task def → migrate task
+#      unplaceable on the arm cluster (TaskFailedToStart: ATTRIBUTE).
+#   2. Full-path'ing to `saga-ed/soa/.github/actions/X` then failed at action
+#      DOWNLOAD: `uses: org/repo/path@ref` pulls the WHOLE repo tarball, and
+#      soa's dangling bin/* convenience symlinks fail extraction
+#      (`Could not find file .../bin/zod2ts`).
+# Hosting the composites in a clean dedicated repo fixes both: clean tarball +
+# full-path sibling refs (no nested-`./`). ci-actions is private; its Actions
+# access policy is set to `organization`, so any saga-ed repo's default
+# GITHUB_TOKEN resolves these actions with no PAT.
+# `run: ./.github/scripts/...` are LEFT as `./` on purpose — those run in the
+# caller's checkout by design (per-consumer migrate/comment scripts).
+# ci-actions sibling refs use @v1; release by re-tagging v1 in that repo.
 #
 # Job graph:
 #   detect-changes -> ci -> build-and-deploy -> [migrate?] -> wait-stable
@@ -514,7 +518,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: saga-ed/soa/.github/actions/setup-node-pnpm@feat/shared-deploy-workflow
+      - uses: saga-ed/ci-actions/setup-node-pnpm@v1
         with:
           aws-role-arn: ${{ inputs.ci-role-arn }}
           cache-mode: save
@@ -707,7 +711,7 @@ jobs:
 
       - name: Resolve preview mode
         id: mode
-        uses: saga-ed/soa/.github/actions/resolve-preview-mode@feat/shared-deploy-workflow
+        uses: saga-ed/ci-actions/resolve-preview-mode@v1
         with:
           labels-json: ${{ toJSON(github.event.pull_request.labels) }}
           # Explicit override forwarded from the new workflow input (rostering's
@@ -781,7 +785,7 @@ jobs:
       # build-and-deploy already consumes — downstream deploy path unchanged.
       - name: Provision DB container 0 + write secret
         id: provision-0
-        uses: saga-ed/soa/.github/actions/provision-preview-db-secret@feat/shared-deploy-workflow
+        uses: saga-ed/ci-actions/provision-preview-db-secret@v1
         with:
           api-name: ${{ inputs.service-name }}
           identifier: ${{ inputs.identifier }}
@@ -797,7 +801,7 @@ jobs:
       - name: Provision DB container 1 + write secret
         id: provision-1
         if: steps.cfg.outputs.has1 == 'true'
-        uses: saga-ed/soa/.github/actions/provision-preview-db-secret@feat/shared-deploy-workflow
+        uses: saga-ed/ci-actions/provision-preview-db-secret@v1
         with:
           api-name: ${{ inputs.service-name }}
           identifier: ${{ inputs.identifier }}
@@ -891,7 +895,7 @@ jobs:
           fetch-depth: 2
 
       - name: Setup
-        uses: saga-ed/soa/.github/actions/setup-node-pnpm@feat/shared-deploy-workflow
+        uses: saga-ed/ci-actions/setup-node-pnpm@v1
         with:
           aws-role-arn: ${{ inputs.deploy-role-arn }}
           skip-install: 'true'
@@ -914,7 +918,7 @@ jobs:
 
       - name: Deploy
         id: deploy
-        uses: saga-ed/soa/.github/actions/deploy-ecs-api@feat/shared-deploy-workflow
+        uses: saga-ed/ci-actions/deploy-ecs-api@v1
         with:
           service-name: ${{ inputs.service-name }}
           project-name: ${{ inputs.project-name }}
@@ -1159,7 +1163,7 @@ jobs:
       # behavior faithfully; comment wording corrected here.)
       - name: Cleanup ECS / ALB stack (best-effort)
         continue-on-error: true
-        uses: saga-ed/soa/.github/actions/cleanup-ecs-api@feat/shared-deploy-workflow
+        uses: saga-ed/ci-actions/cleanup-ecs-api@v1
         with:
           service-name: ${{ inputs.service-name }}
           project-name: ${{ inputs.project-name }}
@@ -1172,7 +1176,7 @@ jobs:
       # and tear each one down. saga-orch (saga-platform CLI) is installed once
       # by setup-saga-orch and reused across the loop iterations.
       - name: Setup saga-orch
-        uses: saga-ed/soa/.github/actions/setup-saga-orch@feat/shared-deploy-workflow
+        uses: saga-ed/ci-actions/setup-saga-orch@v1
         with:
           saga-platform-version: ${{ env.SAGA_PLATFORM_VERSION }}
 

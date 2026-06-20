@@ -945,7 +945,11 @@ jobs:
     # proven-working _deploy-ecs-api.yml condition.
     if: always() && needs.build-and-deploy.result == 'success' && inputs.has-migrations
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20 (rostering's original was 15; the P0 port had dropped it to 10). The
+    # one-shot migrate ECS task runs the full canonical db:seed (168 students +
+    # tutors + PII for every user), which on its own took ~10min on dev-shared-arm
+    # and blew a 10-min wall → the job was cancelled mid-poll. 20 gives headroom.
+    timeout-minutes: 20
     environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v6

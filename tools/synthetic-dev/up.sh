@@ -113,6 +113,15 @@
 #                                NOTE: the cloud iam-api runs auth ON, so a real
 #                                S2S token is required (no local dev-bypass) — see
 #                                the design doc (INTEGRATION.md, alongside this script).
+#   ./up.sh --workspace <file.json>
+#                                the GENERAL case of the above: a switchboard-
+#                                exported manifest that picks PER SERVICE how it
+#                                runs — local-source (pnpm dev) or sandbox (cloud).
+#                                (local-image, the prebuilt-ECR-image mode, is a
+#                                valid manifest value but not yet runnable — Phase
+#                                2 — and is rejected.) --only/--sandbox are
+#                                degenerate slices of it. Export it from
+#                                switchboard's presets drawer.
 #
 # Flags compose, applied in order up → reset → seed → login. Reproducible
 # recipes (no post-deletes — selectivity is in what you seed):
@@ -235,6 +244,29 @@ DEV_USER_UUID="f0000004-0000-4000-8000-00000000beef"        # from iam-db seed-d
 ONLY_SERVICE=""                                             # --only <svc>: launch just this one
 SANDBOX_NAME=""                                             # --sandbox <name>: compose name the deps live under
 SANDBOX_BASE="${SANDBOX_BASE:-wootdev.com}"                # dev fleet base domain (preview-header routed)
+# ── workspace mode (--workspace <file.json>): a switchboard-exported manifest
+# that picks, PER SERVICE, how it runs — local-source / local-image / sandbox —
+# plus a DB seed profile for the local ones. It is the general case that --only
+# and --sandbox are degenerate slices of: --only X is a run-set of {X};
+# --sandbox N is a single-entry SVC_SANDBOX map. The flags below all feed the
+# same three seams (want_service / sandbox_env / launch), so the bespoke
+# per-service launch env in services_up() is untouched. Empty = classic flags.
+WORKSPACE_FILE=""
+declare -A SVC_MODE=()       # svc → local-source|sandbox (local-image is Phase 2)
+declare -A SVC_SANDBOX=()    # svc → sandbox name (the dep lives in this cloud sandbox)
+declare -A SVC_DBPROFILE=()  # svc → DB seed profile (local-source only; restore an S3 snapshot)
+declare -A RESTORED_OK=()    # mesh-db → 1 once it actually holds snapshot data (restore_one_db)
+declare -a WS_RUN_SET=()     # services to launch locally (local-source)
+# ── S3 DB-snapshot restore (workspace `dbProfile`): instead of seeding a
+# local-source service's DB from scratch (`pnpm db:seed`), restore the SAME
+# synthetic snapshot a cloud sandbox uses, stored as a plain pg_dump in
+# s3://saga-db-seeds-dev/<source>/profile-<profile>.sql (+ .meta.json sidecar
+# carrying schemaRev). The bucket is readable ONLY at the AppRuntime tier
+# (Observer is explicitly denied), so the restore shells out to `aws s3 cp`
+# under SEED_S3_PROFILE — overridable, but defaulting to the one tier that can
+# read it. See restore_stack().
+SEED_S3_BUCKET="${SEED_S3_BUCKET:-saga-db-seeds-dev}"
+SEED_S3_PROFILE="${SEED_S3_PROFILE:-saga-runtime-dev}"   # AppRuntime — only tier with s3:GetObject on the bucket
 # ── tunnel mode (--tunnel): expose the browser-facing services to OTHER users
 # via the vms rendezvous box — https://<svc>.<moniker>.$VMS_BASE → this laptop
 # (tunnel.sh + vms/; built for multi-user Connect sessions). The moniker comes
@@ -655,6 +687,173 @@ migrate_db(){ # dir db_name [database_url — override to point prisma at the me
   fi
 }
 
+# ── S3 DB-snapshot restore (workspace `dbProfile`) ───────────────────────────
+# Restore a local-source service's mesh DB from the SAME synthetic snapshot a
+# cloud sandbox seeds from, instead of `pnpm db:seed`-ing from scratch. The
+# snapshot is a plain pg_dump (schema + data + _prisma_migrations rows) at
+# s3://$SEED_S3_BUCKET/<source>/profile-<profile>.sql, with a .meta.json sidecar
+# carrying `schemaRev` (the snapshot's migration watermark).
+#
+# Placement (load-bearing): runs BETWEEN mesh_up and prep. profile-empty.sql
+# leaves every app DB table-EMPTY, so the dump's CREATE TABLEs don't collide, and
+# its _prisma_migrations rows make prep's later migrate_db land in branch 1
+# (`db:deploy` = non-destructive apply-pending) — a proven restore-then-migrate.
+#
+# Three invariants, each empirically gated:
+#  1. RESTORE INTO EMPTY ONLY. The docker volume persists across runs and prep
+#     runs every up, so we restore a DB only when it has ZERO public tables (same
+#     predicate migrate_db uses). This makes restore "populate-once-per-volume":
+#     run 2+ skips (the data is already there) — no CREATE-exists / dup-key
+#     collisions. Re-pulling a fresh snapshot is an explicit --reset concern.
+#  2. RESTORE AS THE DB OWNER. The dump is owner-neutral, but migrate deploy
+#     (prep) touches _prisma_migrations as the app role; if the tables are owned
+#     by someone else it dies "permission denied for table _prisma_migrations".
+#     So we psql as each DB's owning app role (iam/iam_pii/saga_user/sis).
+#  3. SNAPSHOT MUST NOT BE AHEAD OF LOCAL. migrate deploy errors if the snapshot's
+#     _prisma_migrations records a migration the local checkout lacks. We compare
+#     the sidecar schemaRev against the repo's migrations dir and REFUSE (suggest
+#     --pull) rather than let prep emit that cryptic error later.
+#
+# Reads only at the AppRuntime tier: SEED_S3_PROFILE (default saga-runtime-dev) —
+# the one tier with s3:GetObject on the bucket (Observer is explicitly denied).
+#
+# mesh-DB → "s3-source|owner-role|owner-pw|migrations-dir-or-'' (schemaRev check)"
+# Only the six services with a canonical snapshot source are restorable; sis_db
+# has no canonical source (it db:seed-s from scratch as usual). iam-api maps to
+# BOTH iam_local and iam_pii_local. iam_pii uses `db push` (no migration history),
+# so its schemaRev check is skipped (no migrations dir).
+restore_source_for(){ # mesh-db  → echoes "source|role|pw|migdir"  (empty = no source)
+  case "$1" in
+    iam_local)      echo "rostering-iam-canonical|iam|iam|$ROSTERING/packages/node/iam-db/src/prisma/migrations" ;;
+    iam_pii_local)  echo "rostering-iam-pii-canonical|iam_pii|iam_pii|" ;;  # db push — no migration-set check
+    programs)       echo "program-hub-programs-canonical|saga_user|password123|$PROGRAM_HUB/apps/node/programs-api/src/prisma/migrations" ;;
+    scheduling)     echo "program-hub-scheduling-canonical|saga_user|password123|$PROGRAM_HUB/apps/node/scheduling-api/src/prisma/migrations" ;;
+    sessions)       echo "program-hub-sessions-canonical|saga_user|password123|$PROGRAM_HUB/apps/node/sessions-api/src/prisma/migrations" ;;
+    content)        echo "content-api-postgres|saga_user|password123|$PROGRAM_HUB/apps/node/content-api/src/prisma/migrations" ;;
+    *)              echo "" ;;
+  esac
+}
+
+# Which mesh DB(s) a local-source service's dbProfile restores. Most are 1:1;
+# iam-api owns two (the iam roster DB + the PII sidecar DB).
+restore_dbs_for_service(){ # svc → echoes mesh-db names (space-separated)
+  case "$1" in
+    iam-api)        echo "iam_local iam_pii_local" ;;
+    programs-api)   echo "programs" ;;
+    scheduling-api) echo "scheduling" ;;
+    sessions-api)   echo "sessions" ;;
+    content-api)    echo "content" ;;
+    *)              echo "" ;;   # sis-api + everything else: no canonical source
+  esac
+}
+
+# Restore one mesh DB from its S3 snapshot. Idempotent: no-op if the DB already
+# has tables. Returns non-zero (and leaves the DB empty for prep to provision) on
+# any failure, so a missing snapshot / expired creds degrades to normal db:seed
+# rather than wedging the whole bring-up.
+restore_one_db(){ # mesh-db profile
+  local db=$1 profile=$2 spec source role pw migdir
+  spec=$(restore_source_for "$db")
+  [[ -z "$spec" ]] && { warn "restore: no snapshot source for DB '$db' — skipping (it will db:seed normally)"; return 1; }
+  IFS='|' read -r source role pw migdir <<< "$spec"
+
+  # (1) create-if-missing as owner (stale mesh volumes predate some DBs), then the
+  # table-empty gate — restore only into a genuinely empty DB.
+  if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='$db'" 2>/dev/null)" != 1 ]]; then
+    docker exec soa-postgres-1 psql -U postgres_admin -c "CREATE DATABASE \"$db\" OWNER \"$role\"" >/dev/null 2>&1 \
+      || { err "restore: could not create DB '$db'"; return 1; }
+  fi
+  local ntables; ntables=$(docker exec soa-postgres-1 psql -U postgres_admin -d "$db" -tAc \
+      "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>/dev/null || echo "?")
+  if [[ "$ntables" != 0 ]]; then
+    say "restore: $db already has data ($ntables tables) — skipping (restore is populate-once per volume; wipe the mesh volume to re-pull a fresh snapshot)"
+    RESTORED_OK["$db"]=1   # already holds data → its service must skip scratch db:seed
+    return 0
+  fi
+
+  # (2-4) fetch + guard + restore in a tmp dir we clean up on EVERY exit. Done via
+  # an inner body whose rc we capture, rather than a `trap ... RETURN` (which, with
+  # neither functrace nor `declare -ft`, can fire on a sibling function's return).
+  local tmp; tmp=$(mktemp -d)
+  _restore_into "$db" "$source" "$role" "$pw" "$migdir" "$source/profile-$profile" "$tmp"
+  local rc=$?
+  rm -rf "$tmp"
+  [[ $rc -eq 0 ]] && RESTORED_OK["$db"]=1   # holds snapshot data → service skips scratch db:seed
+  return $rc
+}
+
+# Inner body of restore_one_db: fetch dump+sidecar, run the snapshot-ahead guard,
+# restore as the owner. No cleanup here — the caller owns $tmp's lifetime.
+_restore_into(){ # db source role pw migdir keybase tmp
+  local db=$1 source=$2 role=$3 pw=$4 migdir=$5 key=$6 tmp=$7
+  say "restore: $db ← s3://$SEED_S3_BUCKET/$key.sql (profile $SEED_S3_PROFILE)…"
+  if ! aws s3 cp "s3://$SEED_S3_BUCKET/$key.sql" "$tmp/dump.sql" \
+        --profile "$SEED_S3_PROFILE" >"$STATE/restore-$db.log" 2>&1; then
+    err "restore: s3 cp failed for $db — see $STATE/restore-$db.log"
+    grep -qiE 'AccessDenied|ExpiredToken|sso' "$STATE/restore-$db.log" \
+      && err "  → '$SEED_S3_PROFILE' may need: aws sso login --profile $SEED_S3_PROFILE  (the bucket is AppRuntime-only)"
+    return 1
+  fi
+  # Sidecar is best-effort — only used for the schemaRev guard.
+  aws s3 cp "s3://$SEED_S3_BUCKET/$key.meta.json" "$tmp/meta.json" \
+      --profile "$SEED_S3_PROFILE" >/dev/null 2>&1 || true
+
+  # snapshot-ahead guard: if the sidecar's schemaRev isn't a migration the local
+  # checkout has, prep's migrate deploy would later error "recorded in DB but not
+  # found locally" — refuse now with an actionable message. Skipped for db-push
+  # DBs (no migdir) and when the sidecar/schemaRev is absent.
+  if [[ -n "$migdir" ]]; then
+    if [[ -f "$tmp/meta.json" ]]; then
+      local rev; rev=$(jq -r '.schemaRev // empty' "$tmp/meta.json" 2>/dev/null)
+      if [[ -n "$rev" && -d "$migdir" && ! -d "$migdir/$rev" ]]; then
+        err "restore: $db snapshot is AHEAD of your local checkout — schemaRev '$rev'"
+        err "  is not in $migdir. prep's migrate deploy would fail."
+        err "  → run './up.sh up --pull' (or git pull that repo) to catch up, then retry."
+        return 1
+      fi
+    else
+      # No sidecar → can't run the snapshot-ahead check. All six sources ship one
+      # today, so this is a soft edge: warn that an ahead snapshot would surface
+      # later as prep's cryptic migrate-deploy error instead of here.
+      warn "restore: $db has no .meta.json sidecar — skipping the snapshot-ahead check (an ahead snapshot would fail in prep)."
+    fi
+  fi
+
+  # restore AS THE OWNER so prep's migrate deploy can touch _prisma_migrations.
+  if docker exec -i -e PGPASSWORD="$pw" soa-postgres-1 \
+        psql -U "$role" -h localhost -d "$db" -v ON_ERROR_STOP=1 < "$tmp/dump.sql" \
+        >>"$STATE/restore-$db.log" 2>&1; then
+    local rows; rows=$(docker exec soa-postgres-1 psql -U postgres_admin -d "$db" -tAc \
+        "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>/dev/null)
+    ok "restore: $db restored from $key ($rows tables)"
+    return 0
+  fi
+  err "restore: psql restore failed for $db — see $STATE/restore-$db.log"
+  return 1
+}
+
+# Restore every local-source service that carries a dbProfile, BEFORE prep (which
+# migrates the restored schema forward). A per-DB failure is non-fatal: it warns
+# and leaves the DB empty, so prep provisions it and the normal db:seed lane fills
+# it — the stack still comes up, just without that snapshot's data.
+restore_stack(){
+  [[ ${#SVC_DBPROFILE[@]} -eq 0 ]] && return 0
+  say "restoring DB snapshots for ${#SVC_DBPROFILE[@]} service(s) [${!SVC_DBPROFILE[*]}] (workspace dbProfile)…"
+  local svc profile dbs db
+  for svc in "${!SVC_DBPROFILE[@]}"; do
+    profile=${SVC_DBPROFILE[$svc]}
+    dbs=$(restore_dbs_for_service "$svc")
+    if [[ -z "$dbs" ]]; then
+      warn "restore: '$svc' has dbProfile '$profile' but no canonical snapshot source — it will db:seed normally."
+      continue
+    fi
+    for db in $dbs; do
+      restore_one_db "$db" "$profile" || true   # non-fatal: degrade to db:seed
+    done
+  done
+}
+
 # Provision the sds_93 playback DBs (transcripts/insights/chat) on the mesh
 # Postgres. Each *-db package's seed/local-bootstrap.sql creates the DB +
 # least-privilege app role + grants — hardcoded for the docker-compose Postgres
@@ -796,6 +995,13 @@ probe_path(){ # name
 # want_service: under --only, launch ONLY the named service; otherwise launch
 # all (the normal full-local stack).
 want_service(){ # svc
+  # Workspace mode: launch only services in the run-set (local-source/-image);
+  # sandbox-mode services are NOT launched (they live in the cloud).
+  if [[ -n "$WORKSPACE_FILE" ]]; then
+    local s; for s in "${WS_RUN_SET[@]}"; do [[ "$s" == "$1" ]] && return 0; done
+    return 1
+  fi
+  # Classic --only is the degenerate single-service run-set.
   [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == "$1" ]]
 }
 # launch_if: gate launch by want_service and RECORD any real failure. A service
@@ -827,8 +1033,82 @@ launch_if(){ # svc port dir extra_env...
 # launch, and the design doc (INTEGRATION.md, alongside this script).
 # Only iam-api is wired today (the proven single-dep shape); programs/scheduling/
 # sessions deps are additive once the multi-service mesh compose is unblocked.
+# IAM_SANDBOX: the sandbox name iam-api lives in for this run, or "" if iam is
+# local. Set once at arg/parse time (--sandbox sets SANDBOX_NAME directly;
+# parse_workspace sets it from the manifest), so sandbox_env reads a plain scalar
+# instead of recomputing per call. --workspace and --sandbox are mutually
+# exclusive, so only one writer ever fires.
+IAM_SANDBOX=""
+# parse_workspace: read a switchboard-exported workspace.json into the SVC_* maps
+# + WS_RUN_SET. Requires jq (already a refresh-suite dep). Each service entry is
+# keyed by name with a `mode` (local-source / sandbox; local-image is Phase 2 and
+# rejected); a sandbox entry carries the sandbox name. One jq pass emits a row per
+# service, read in a single loop. Validates mode + sandboxName presence.
+parse_workspace(){ # file
+  local f=$1
+  command -v jq >/dev/null 2>&1 || { err "--workspace needs jq (brew/apt install jq)"; exit 1; }
+  [[ -r "$f" ]] || { err "--workspace: cannot read '$f'"; exit 1; }
+  local ver; ver=$(jq -r '.version // empty' "$f" 2>/dev/null) \
+    || { err "--workspace: '$f' is not valid JSON"; exit 1; }
+  [[ "$ver" == "1" ]] || warn "--workspace: version '$ver' (expected 1) — proceeding"
+  # One row per service: svc, mode, sandboxName, dbProfile, joined
+  # by the ASCII unit separator (). NOT tab: `read` treats tab as IFS
+  # whitespace and COLLAPSES consecutive tabs, so an empty middle field (e.g. no
+  # sandboxName on a local-source row) would shift later fields left.  is non-whitespace,
+  # so empties are preserved; it also can't appear in any of these values.
+  local US=$'\x1f' rows
+  rows=$(jq -re '.services | to_entries[] | [
+           .key, (.value.mode // ""),
+           (.value.sandboxName // ""),
+           (.value.dbProfile // "")] | join("")' "$f" 2>/dev/null) \
+    || { err "--workspace: '$f' has no/empty .services or is malformed"; exit 1; }
+  local svc mode sbx dbp
+  while IFS="$US" read -r svc mode sbx dbp; do
+    [[ -z "$svc" ]] && continue
+    case "$mode" in
+      local-source|sandbox) ;;
+      # local-image is a valid manifest mode (forward-compatible contract) but the
+      # local docker-run launcher is Phase 2 (image teardown, host-network/macOS
+      # reachability, and per-service port-bind contract are unsolved). Reject it
+      # loudly rather than half-run it.
+      local-image) err "--workspace: service '$svc' is local-image — not supported yet (Phase 2). Use local-source or sandbox."; exit 1 ;;
+      *) err "--workspace: service '$svc' has invalid mode '$mode'"; exit 1 ;;
+    esac
+    SVC_MODE["$svc"]=$mode
+    if [[ "$mode" == "local-source" ]]; then
+      WS_RUN_SET+=("$svc")
+      # A dbProfile means "restore this service's DB from the matching S3 snapshot
+      # instead of seeding from scratch" (restore_stack). Only honored for the six
+      # services with a canonical snapshot source; recorded here, validated there.
+      [[ -n "$dbp" ]] && SVC_DBPROFILE["$svc"]=$dbp
+    else # sandbox
+      [[ -z "$sbx" ]] && { err "--workspace: service '$svc' is sandbox but carries no sandboxName"; exit 1; }
+      SVC_SANDBOX["$svc"]=$sbx
+      if [[ "$svc" == "iam-api" ]]; then
+        IAM_SANDBOX=$sbx
+      else
+        # Only iam-api's dep URL is repointed today (sandbox_env). A non-iam
+        # sandbox is recorded but a LOCAL service depending on it still hits its
+        # default — warn so it isn't a silent wrong-target. (Phase 3: mesh deps.)
+        warn "--workspace: '$svc' sandbox is recorded but dep-repoint is iam-only today; local services depending on it keep their default. (Phase 3.)"
+      fi
+    fi
+  done <<< "$rows"
+  [[ ${#WS_RUN_SET[@]} -eq 0 ]] && warn "--workspace: no local services to run (all sandbox-hosted) — nothing will launch locally."
+  # Pull in the playback stack if any playback API is in the run-set.
+  local s; for s in "${WS_RUN_SET[@]}"; do
+    case "$s" in insights-api|transcripts-api|chat-api) DO_PLAYBACK=1 ;; esac
+  done
+  say "workspace: ${#WS_RUN_SET[@]} local service(s) [${WS_RUN_SET[*]}]; $(( ${#SVC_MODE[@]} - ${#WS_RUN_SET[@]} )) sandbox-hosted"
+}
 sandbox_env(){ # svc
-  [[ -z "$SANDBOX_NAME" ]] && return 0
+  # Repoint a locally-run service's iam-api dependency URL at the cloud when
+  # iam-api is sandbox-hosted this run. Only iam-api is wired today (the proven
+  # single-dep shape); programs/scheduling/sessions deps are additive once the
+  # multi-service mesh compose + the preview-header originate-map land (Phase 3).
+  # NOTE: this flips the URL only — it does NOT originate the routing header
+  # (see the comment above; the header must enter at the request boundary).
+  [[ -z "$IAM_SANDBOX" ]] && return 0
   local svc=$1 iam_host="https://iam.$SANDBOX_BASE"
   case "$svc" in
     sis-api)
@@ -972,16 +1252,21 @@ sync_dash_local_defaults(){
   fi
 }
 
+# Shared health probe used by launch / launch_image (one definition of the
+# curl-200 check + the 40× poll, so the timeout/retry tuning lives in one place).
+port_is_up(){ # port probe
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://localhost:$1$2" 2>/dev/null)" == 200 ]]
+}
+wait_healthy(){ # port probe  → 0 once a 200 appears, 1 after ~40s
+  local _; for _ in $(seq 1 40); do port_is_up "$1" "$2" && return 0; sleep 1; done; return 1
+}
 launch(){ # name port dir extra_env...
   local name=$1 port=$2 dir=$3 probe; shift 3
   probe=$(probe_path "$name")
-  [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name already up :$port"; return; }
+  port_is_up "$port" "$probe" && { ok "$name already up :$port"; return; }
   say "starting $name on :$port…"
   ( cd "$dir"; env "$@" nohup pnpm dev >"$STATE/$name.log" 2>&1 & echo $! >"$STATE/$name.pid" )
-  for _ in $(seq 1 40); do
-    [[ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$port$probe 2>/dev/null)" == 200 ]] && { ok "$name up :$port"; return; }
-    sleep 1
-  done
+  wait_healthy "$port" "$probe" && { ok "$name up :$port"; return; }
   printf "\033[31m✗\033[0m %s failed on :%s — tail %s\n" "$name" "$port" "$STATE/$name.log"; return 1
 }
 
@@ -1283,17 +1568,32 @@ seed_playback(){
   ok "playback seeded (transcripts/insights/chat)"
 }
 
+# A service whose DB was RESTORED from an S3 snapshot (workspace dbProfile) must
+# NOT be scratch-seeded on top — the snapshot IS the canonical data, and db:seed
+# would double-populate / clash ids. Keyed on ACTUAL restore success
+# (RESTORED_OK, set by restore_one_db), NOT on the dbProfile request: a restore
+# that failed (snapshot-ahead refusal, s3/SSO error, psql error) leaves the DB
+# empty and the service MUST fall through to db:seed. Requires ALL of the
+# service's DBs to be restored (iam-api owns two: iam_local + iam_pii_local) —
+# a partial restore still needs the scratch seed for the un-restored half.
+restored_db(){ # svc
+  local dbs; dbs=$(restore_dbs_for_service "$1")
+  [[ -z "$dbs" ]] && return 1
+  local db; for db in $dbs; do [[ -n "${RESTORED_OK[$db]:-}" ]] || return 1; done
+  return 0
+}
+
 # roster = iam + sessions demo (programs empty); full = + programs + content
 # (+ playback fixtures when --with-playback). Playback rides `full` so
 # `--seed roster` stays minimal; it only runs when the playback APIs were
-# actually provisioned.
+# actually provisioned. Services restored from a snapshot skip their scratch seed.
 seed_stack(){
   local mode=${1:-roster}
-  seed_iam
-  seed_sessions
+  if restored_db iam-api; then say "seed: iam-api DB restored from snapshot — skipping db:seed"; else seed_iam; fi
+  if restored_db sessions-api; then say "seed: sessions-api DB restored from snapshot — skipping db:seed"; else seed_sessions; fi
   if [[ "$mode" == full ]]; then
-    seed_programs
-    seed_content
+    if restored_db programs-api; then say "seed: programs-api DB restored from snapshot — skipping db:seed"; else seed_programs; fi
+    if restored_db content-api; then say "seed: content-api DB restored from snapshot — skipping db:seed"; else seed_content; fi
     [[ $DO_PLAYBACK == 1 ]] && seed_playback
   fi
   return 0
@@ -1441,7 +1741,7 @@ case "${1:-up}" in
   # Self-maintaining: print the header's "Usage:" block through its closing
   # ruler, instead of a hardcoded line range that drifts as the header grows.
   -h|--help)                     sed -n '/^# Usage:/,/^# ─────/p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--tunnel|--with-playback) ;; # flag-only invocation; skip up
+  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--workspace|--tunnel|--with-playback) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
@@ -1463,6 +1763,11 @@ while [[ $# -gt 0 ]]; do
     # header to the dev fleet (see sandbox_env). Either implies the hybrid path.
     --only)    ONLY_SERVICE="${2:-}"; [[ -z "$ONLY_SERVICE" || "$ONLY_SERVICE" == -* ]] && { echo "--only needs a service name"; exit 1; }; shift 2 ;;
     --sandbox) SANDBOX_NAME="${2:-}"; [[ -z "$SANDBOX_NAME" || "$SANDBOX_NAME" == -* ]] && { echo "--sandbox needs a name"; exit 1; }; shift 2 ;;
+    # --workspace <file.json>: a switchboard-exported manifest selecting per-service
+    # run mode (local-source/local-image/sandbox) + DB profile. Parsed into the
+    # SVC_* maps that want_service/sandbox_env/launch read. The general case of
+    # --only/--sandbox; mutually exclusive with them.
+    --workspace) WORKSPACE_FILE="${2:-}"; [[ -z "$WORKSPACE_FILE" || "$WORKSPACE_FILE" == -* ]] && { echo "--workspace needs a file path"; exit 1; }; shift 2 ;;
     # --tunnel: NO argument — the moniker comes from .vms-moniker (tunnel.sh
     # bootstraps it interactively on first use), keeping monikers out of shared
     # command lines (no placeholders, no cross-contamination).
@@ -1486,6 +1791,15 @@ fi
 if [[ -n "$SANDBOX_NAME" && -z "$ONLY_SERVICE" ]]; then
   echo "--sandbox <name> requires --only <svc> (point ONE local service at the sandbox; the rest are the sandbox)"; exit 1
 fi
+# --workspace is the general case of --only/--sandbox; refuse to mix them.
+if [[ -n "$WORKSPACE_FILE" && ( -n "$ONLY_SERVICE" || -n "$SANDBOX_NAME" ) ]]; then
+  echo "--workspace cannot be combined with --only/--sandbox (it is the general case of both)"; exit 1
+fi
+if [[ -n "$WORKSPACE_FILE" ]]; then
+  parse_workspace "$WORKSPACE_FILE"
+  # A workspace is a launch directive: imply up unless a reset/restart was asked.
+  [[ $DO_RESET == 1 || $DO_RESTART == 1 ]] || DO_UP=1
+fi
 # --with-playback is a launch directive: a bare `./up.sh --with-playback` (no
 # verb) should bring the stack up WITH the playback APIs. Imply DO_UP unless a
 # reset/restart was asked (those run prep + services_up themselves).
@@ -1497,6 +1811,9 @@ fi
 if [[ -n "$SANDBOX_NAME" && ! "$SANDBOX_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]]; then
   echo "--sandbox: '$SANDBOX_NAME' must match [a-zA-Z0-9][a-zA-Z0-9-]{0,39}"; exit 1
 fi
+# Classic --sandbox: iam-api is the single wired sandbox dep, so seed the scalar
+# sandbox_env reads. (--workspace sets IAM_SANDBOX in parse_workspace instead.)
+[[ -n "$SANDBOX_NAME" ]] && IAM_SANDBOX="$SANDBOX_NAME"
 # Tunnel-mode resolution. The moniker prompt (first run) talks on stderr, so
 # the $() capture stays clean. tunnel_env() needs TUNNEL_DOMAIN before any
 # launch line runs; LOGIN_*_URLs flip the login flow to the public hosts (the
@@ -1579,11 +1896,23 @@ fi
 # previously launched ten services against an unprepped tree / missing mongo).
 # SKIP_PREP=1 skips the install+build pass for tight iteration loops.
 [[ $DO_PULL == 1 ]] && pull_repos        # ff-only sync siblings BEFORE we build/migrate
+# restore_stack runs AFTER mesh_up (DBs exist, empty) and BEFORE prep (which
+# migrates the restored schema forward via migrate_db's non-destructive branch).
+# A no-op unless a --workspace carried `dbProfile` entries. Idempotent: it
+# restores only DBs that are still table-empty, so re-runs skip.
+#
+# ONLY on the `up` path — NOT --reset/restart. --reset's reset_data truncates
+# every app DB to empty AFTER prep, which would silently undo (or, on a fresh
+# volume, waste) a restore. So restore is an `up`-only op; a --reset is the
+# truncate-to-empty it always was. (Making --reset re-pull a fresh snapshot —
+# drop the restore-eligible DBs, then restore after reset_data — is a deliberate
+# future feature, not smuggled in here.)
 if [[ $DO_UP == 1 ]]; then
-  check_branches; check_layout; apply_fixes; mesh_up; connect_av_up; prep
+  check_branches; check_layout; apply_fixes; mesh_up; connect_av_up; restore_stack; prep
 elif [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
   check_layout; mesh_up; connect_av_up
   if [[ "${SKIP_PREP:-0}" == "1" ]]; then say "SKIP_PREP=1 — skipping install+build prep"; else prep; fi
+  [[ ${#SVC_DBPROFILE[@]} -gt 0 ]] && warn "--workspace dbProfile is ignored on --reset/restart (reset truncates DBs); use a plain './up.sh --workspace ...' to restore snapshots."
 fi
 
 # A --reset ALWAYS means a CLEAN restart on current code — independent of the

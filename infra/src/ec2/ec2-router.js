@@ -798,6 +798,7 @@ export function create_ec2_router(config = {}) {
                 profile,
                 db_user: config.user,
                 db_password: config.password,
+                db_name,
             });
 
             // Update profile registry

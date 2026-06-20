@@ -220,7 +220,7 @@ function snapshot_mongo({ container, tmp_file, user, password }) {
 
 // --- Seed a running DB directly via docker exec ---
 
-export function seed_after_start({ container, engine, seeds_dir, profile, db_user, db_password }) {
+export function seed_after_start({ container, engine, seeds_dir, profile, db_user, db_password, db_name }) {
     const eng = engines[engine];
     if (!eng) throw new Error(`Unknown engine: ${engine}`);
 
@@ -259,9 +259,15 @@ export function seed_after_start({ container, engine, seeds_dir, profile, db_use
         const seed_file = resolve(seeds_dir, '01-seed.sql');
         if (!existsSync(seed_file)) return;
         run('docker', ['cp', seed_file, `${container}:/tmp/01-seed.sql`]);
-        const result = spawnSync('docker', [
-            'exec', container, 'psql', '-U', db_user || 'postgres', '-f', '/tmp/01-seed.sql',
-        ], { encoding: 'utf8', stdio: 'pipe' });
+        // MUST target the configured DB with `-d`: a single-DB pg_dump carries no
+        // CREATE DATABASE/\connect, so a bare `psql -f` loads into the role's
+        // default DB (or fails) and the configured DB ends up empty — the restore
+        // then reports success while loading 0 tables (soa#177). ON_ERROR_STOP
+        // surfaces a genuine load failure instead of swallowing it.
+        const psql_args = ['exec', container, 'psql', '-U', db_user || 'postgres'];
+        if (db_name) psql_args.push('-d', db_name);
+        psql_args.push('-v', 'ON_ERROR_STOP=1', '-f', '/tmp/01-seed.sql');
+        const result = spawnSync('docker', psql_args, { encoding: 'utf8', stdio: 'pipe' });
         console.log(`Postgres seed output: ${(result.stdout || '').slice(0, 500)}`);
         if (result.status !== 0) console.log(`Postgres seed error: ${result.stderr}`);
     } else if (engine === 'mysql') {

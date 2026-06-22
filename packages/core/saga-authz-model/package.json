@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/saga-authz-model",
-    "version": "0.1.0-dev.2",
+    "version": "0.1.0-dev.3",
     "private": false,
     "type": "module",
     "description": "Saga's OpenFGA authorization model (.fga DSL) and tuple-key helpers. Source of truth for ReBAC types and relations.",

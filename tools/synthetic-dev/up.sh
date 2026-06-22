@@ -371,6 +371,17 @@ check_layout(){
 }
 
 # ── idempotent fixes (all the main-vs-tooling drifts) ────────────────
+# Set KEY=VALUE in an env file: rewrite in place if the key is present (even with
+# a different value), else append. Used to RECONCILE connection URLs to the mesh —
+# a pre-existing .env.local from a standalone rostering stack may point DB/redis/
+# broker at other ports (postgres :5434, broker :5673…), which silently breaks
+# prep's prisma migrate + iam-api. The heredoc below only writes a FRESH file, so
+# without this a stale standalone .env.local is never corrected. (Random secrets
+# like AUTH_* stay append-if-absent so we don't churn them every run.)
+ensure_kv(){ # file key value
+  local f=$1 k=$2 v=$3
+  if grep -q "^$k=" "$f"; then sed -i "s|^$k=.*|$k=$v|" "$f"; else printf '%s=%s\n' "$k" "$v" >>"$f"; fi
+}
 apply_fixes(){
   # 1. rostering root .env.local — main iam-api needs NODE_ENV + AUTH secrets + broker
   local L="$ROSTERING/.env.local"
@@ -385,14 +396,20 @@ PII_CRYPTO_PIIHMACKEYHEX=fedcba9876543210fedcba9876543210fedcba9876543210fedcba9
 PII_CRYPTO_PIIDEKVERSION=1
 REDIS_URL=redis://localhost:6379
 EOF
-  grep -q '^NODE_ENV='                     "$L" || echo "NODE_ENV=development" >>"$L"
-  grep -q '^AUTH_EMAIL_LOOKUP_SECRET='     "$L" || echo "AUTH_EMAIL_LOOKUP_SECRET=$(openssl rand -hex 32)" >>"$L"
+  # Generated/random values: append only if absent (don't churn them every run).
+  grep -q '^NODE_ENV='                       "$L" || echo "NODE_ENV=development" >>"$L"
+  grep -q '^AUTH_EMAIL_LOOKUP_SECRET='       "$L" || echo "AUTH_EMAIL_LOOKUP_SECRET=$(openssl rand -hex 32)" >>"$L"
   grep -q '^AUTH_EMAIL_VERIFICATION_SECRET=' "$L" || echo "AUTH_EMAIL_VERIFICATION_SECRET=$(openssl rand -hex 32)" >>"$L"
-  grep -q '^RABBITMQ_URL='                 "$L" || echo "RABBITMQ_URL=$MESH_MQ" >>"$L"
-  # sis-api / sis-db read SIS_DATABASE_URL directly (sis-db/prisma.config.ts
-  # loads this repo-root .env.local), so it must live here for `migrate deploy`
-  # AND the running service to see the same DB. See d1.7.
-  grep -q '^SIS_DATABASE_URL='             "$L" || echo "SIS_DATABASE_URL=$SIS_DB_URL" >>"$L"
+  # Connection URLs: RECONCILE to the mesh (rewrite if present-but-wrong) — a
+  # standalone-stack .env.local pointing these elsewhere silently breaks prep's
+  # prisma migrate + iam-api. sis-api / sis-db read SIS_DATABASE_URL directly
+  # (sis-db/prisma.config.ts loads this repo-root .env.local), so it must be
+  # correct here for `migrate deploy` AND the running service. See d1.7.
+  ensure_kv "$L" DATABASE_URL     "postgresql://iam:iam@localhost:5432/iam_local"
+  ensure_kv "$L" PII_DATABASE_URL "postgresql://iam_pii:iam_pii@localhost:5432/iam_pii_local"
+  ensure_kv "$L" REDIS_URL        "redis://localhost:6379"
+  ensure_kv "$L" RABBITMQ_URL     "$MESH_MQ"
+  ensure_kv "$L" SIS_DATABASE_URL "$SIS_DB_URL"
 
   # 2. iam-api/.env — dev user must be a UUID (audit_log.actor is uuid); raise rate limit for bulk seed
   local IE="$ROSTERING/apps/node/iam-api/.env"
@@ -517,9 +534,23 @@ mesh_up(){
     exit 1
   fi
   for _ in $(seq 1 20); do docker exec soa-postgres-1 pg_isready -U postgres_admin >/dev/null 2>&1 && break; sleep 1; done
+  for _ in $(seq 1 20); do docker exec soa-redis-1 redis-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; done
+  # rabbitmq cold-boots slowest (and crash-loops on a stale .erlang.cookie), so
+  # give it the longest runway before we assert below.
+  for _ in $(seq 1 45); do docker exec soa-rabbitmq-1 rabbitmq-diagnostics -q ping >/dev/null 2>&1 && break; sleep 1; done
   for _ in $(seq 1 20); do
     docker exec soa-connect-mongo-1 mongosh --quiet --eval 'db.runCommand({ping:1}).ok' >/dev/null 2>&1 && break; sleep 1
   done
+  # Verify redis + rabbitmq actually ANSWER, not just that their containers run:
+  # a port clash can leave redis bound-but-dead and a stale .erlang.cookie leaves
+  # rabbitmq crash-looping. Catch it loudly here instead of letting programs/
+  # scheduling-api circuit-break on the missing broker downstream.
+  if ! docker exec soa-redis-1 redis-cli ping 2>/dev/null | grep -q PONG; then
+    printf "\033[31m✗\033[0m redis container is up but not answering PING — tail %s\n" "$STATE/mesh.log"; exit 1
+  fi
+  if ! docker exec soa-rabbitmq-1 rabbitmq-diagnostics -q ping >/dev/null 2>&1; then
+    printf "\033[31m✗\033[0m rabbitmq container is up but not answering (stale .erlang.cookie?) — tail %s\n" "$STATE/mesh.log"; exit 1
+  fi
   ok "mesh up — pg :5432  redis :6379  rabbitmq :5672  connect-mongo :$CONNECT_MONGO_PORT"
 }
 

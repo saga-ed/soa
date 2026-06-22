@@ -88,6 +88,11 @@
 #                                  (slsid fixture-playback-001). Composes:
 #                                  `--with-playback --seed full`. Lets colleagues query
 #                                  non-empty transcripts/insights/chat without a real CU run.
+#   ./up.sh --with-qtf-demo      opt-in: seed a sample QTF evaluation + observation
+#                                  notes (glow/grow/bookmark) onto an Ended demo
+#                                  session, so the Session Viewer's QTF/Notes panels
+#                                  show populated content. Authored as dev@saga.org;
+#                                  idempotent. Composes with --seed (roster or full).
 #   ./up.sh --tunnel             ALSO expose the browser-facing services to other
 #                                  users at https://<svc>.<moniker>.vms.wootdev.com
 #                                  (multi-user Connect). Moniker comes from
@@ -187,6 +192,7 @@ TRANSCRIPTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/trans
 INSIGHTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/insights_local"
 CHAT_DB_URL="postgresql://postgres_admin:password123@localhost:5432/chat_local"
 DO_PLAYBACK=0                                               # --with-playback: add the 3 playback APIs
+DO_QTF_DEMO=0                                               # --with-qtf-demo: seed a sample QTF eval + notes
 # Connect (qboard). Ports are the apps' own defaults (vite.config.ts / config.ts).
 # Its mongo is the mesh's soa-connect-mongo-1 (infra-compose services/connect-mongo),
 # host :27037 (non-default on purpose: no contention with qboard-mongo/:27017),
@@ -1255,6 +1261,23 @@ seed_playback(){
   ok "playback seeded (transcripts/insights/chat)"
 }
 
+# sessions-api: a sample QTF evaluation + observation notes on an Ended demo
+# session, so the Session Viewer's QTF / Notes panels show populated content.
+# Direct sessions-DB write (the qtf/observations API is Janus-gated, no seed auth)
+# via the same docker-exec psql path provision_playback_dbs uses; idempotent.
+# Surfaces the /session-viewer/<id> link. Gated by --with-qtf-demo.
+seed_qtf_demo(){
+  say "seeding QTF + observation notes demo (sessions db)…"
+  local tgt
+  tgt=$(docker exec -i soa-postgres-1 psql -U postgres_admin -d sessions -tAq -v ON_ERROR_STOP=1 \
+          < "$SCRIPT_DIR/seed-demo-qtf.sql" 2>/dev/null | grep -m1 '^v1\.')
+  if [[ -n "$tgt" ]]; then
+    ok "QTF + notes demo seeded → /session-viewer/$tgt"
+  else
+    warn "QTF/notes demo seed skipped (no Ended demo session yet?)"
+  fi
+}
+
 # roster = iam + sessions demo (programs empty); full = + programs + content
 # (+ playback fixtures when --with-playback). Playback rides `full` so
 # `--seed roster` stays minimal; it only runs when the playback APIs were
@@ -1263,6 +1286,7 @@ seed_stack(){
   local mode=${1:-roster}
   seed_iam
   seed_sessions
+  [[ $DO_QTF_DEMO == 1 ]] && seed_qtf_demo
   if [[ "$mode" == full ]]; then
     seed_programs
     seed_content
@@ -1413,7 +1437,7 @@ case "${1:-up}" in
   # Self-maintaining: print the header's "Usage:" block through its closing
   # ruler, instead of a hardcoded line range that drifts as the header grows.
   -h|--help)                     sed -n '/^# Usage:/,/^# ─────/p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--tunnel|--with-playback) ;; # flag-only invocation; skip up
+  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--tunnel|--with-playback|--with-qtf-demo) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
@@ -1429,6 +1453,9 @@ while [[ $# -gt 0 ]]; do
     # --with-playback: also provision + launch + (on --seed full) seed the sds_93
     # playback APIs (transcripts/insights/chat). Composes with up/reset/seed.
     --with-playback) DO_PLAYBACK=1; shift ;;
+    # --with-qtf-demo: also seed a sample QTF eval + observation notes onto an
+    # Ended demo session (Session Viewer demo). Runs in seed_stack after sessions.
+    --with-qtf-demo) DO_QTF_DEMO=1; shift ;;
     # --only <svc>: launch just one service (the one you're editing); the rest
     # are expected to live in a cloud sandbox. --sandbox <name>: the compose name
     # those deps live under — flips the launched service's dep URLs + preview

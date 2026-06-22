@@ -1652,14 +1652,18 @@ seed_playback(){
 # Surfaces the /session-viewer/<id> link. Gated by --with-qtf-demo.
 seed_qtf_demo(){
   say "seeding QTF + observation notes demo (sessions db)…"
-  local tgt
-  tgt=$(docker exec -i soa-postgres-1 psql -U postgres_admin -d sessions -tAq -v ON_ERROR_STOP=1 \
-          < "$SCRIPT_DIR/seed-demo-qtf.sql" 2>/dev/null | grep -m1 '^v1\.')
+  local tgt out
+  out=$(mktemp)
+  docker exec -i soa-postgres-1 psql -U postgres_admin -d sessions -tAq -v ON_ERROR_STOP=1 \
+    < "$SCRIPT_DIR/seed-demo-qtf.sql" >"$out" 2>&1 || true
+  tgt=$(grep -m1 '^v1\.' "$out" || true)
   if [[ -n "$tgt" ]]; then
     ok "QTF + notes demo seeded → /session-viewer/$tgt"
   else
     warn "QTF/notes demo seed skipped (no Ended demo session yet?)"
+    warn "psql output:"; sed 's/^/    /' "$out" | tail -5
   fi
+  rm -f "$out"
 }
 
 # A service whose DB was RESTORED from an S3 snapshot (workspace dbProfile) must
@@ -1904,6 +1908,9 @@ fi
 if [[ $DO_PLAYBACK == 1 ]]; then
   [[ $DO_RESET == 1 || $DO_RESTART == 1 ]] || DO_UP=1
 fi
+# --with-qtf-demo only runs inside seed_stack (gated by DO_SEED); warn if the
+# user passed it without --seed so the flag doesn't silently do nothing.
+[[ ${DO_QTF_DEMO:-0} == 1 && ${DO_SEED:-0} != 1 ]] && warn "--with-qtf-demo has no effect without --seed"
 # Validate the sandbox name — it flows into the host URL and the preview header,
 # so constrain it to the same shape the composition API enforces.
 if [[ -n "$SANDBOX_NAME" && ! "$SANDBOX_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]]; then

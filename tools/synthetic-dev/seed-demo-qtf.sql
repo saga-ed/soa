@@ -68,13 +68,14 @@ BEGIN
 
   -- ── Authz shim: grant the coach QTF perms + assign the dev user the observer
   --    persona on the session's group, so qtf/observations authz passes (else 404).
-  UPDATE authz_persona_definition
-  SET permissions = (
-        SELECT array_agg(DISTINCT p)
-        FROM unnest(permissions || ARRAY['coach:access_qtf','coach:use_shared_qtf']) AS p
-      ),
-      updated_at = now()
-  WHERE persona_id = obs_persona;
+  INSERT INTO authz_persona_definition (persona_id, permissions, updated_at)
+  VALUES (obs_persona, ARRAY['coach:access_qtf','coach:use_shared_qtf'], now())
+  ON CONFLICT (persona_id) DO UPDATE
+    SET permissions = (
+          SELECT array_agg(DISTINCT p)
+          FROM unnest(authz_persona_definition.permissions || ARRAY['coach:access_qtf','coach:use_shared_qtf']) AS p
+        ),
+        updated_at = now();
 
   IF grp IS NOT NULL THEN
     DELETE FROM authz_persona_assignment WHERE user_id = dev AND persona_id = obs_persona AND group_id = grp;

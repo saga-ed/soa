@@ -72,7 +72,7 @@ describe('generate_compose resource limits', () => {
     it('still produces a valid-looking compose YAML structure', () => {
         const out = generate_compose({ ...base, engine: 'postgres' });
         expect(out).toMatch(/^services:/m);
-        expect(out).toMatch(/image: postgres:16/);
+        expect(out).toMatch(/image: postgres:18/);
         expect(out).toMatch(/container_name: pr-42/);
         expect(out).toMatch(/"5433:5432"/);
     });

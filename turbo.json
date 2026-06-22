@@ -2,7 +2,8 @@
   "$schema": "https://turborepo.com/schema.json",
   "ui": "tui",
   "globalEnv": [
-    "EVENT_PREVIEW_TAG"
+    "EVENT_PREVIEW_TAG",
+    "PREVIEW_ORIGINATE_MAP"
   ],
   "tasks": {
     "build": {

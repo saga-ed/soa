@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-event-outbox",
-  "version": "0.1.0-dev.6",
+  "version": "0.1.0-dev.7",
   "private": false,
   "type": "module",
   "main": "dist/index.js",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./pg": {
+      "types": "./dist/pg.d.ts",
+      "default": "./dist/pg.js"
     }
   },
   "files": [

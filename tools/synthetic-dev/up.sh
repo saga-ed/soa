@@ -1458,7 +1458,10 @@ services_up(){
        EXPRESS_SERVER_PORT=6303 RABBITMQ_URL="$MESH_MQ" \
        AUTH_AUTHENABLED=false $(tunnel_env chat-api)
   fi
-  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" $(tunnel_env saga-dash)
+  # VITE_ADS_ADM_REAL=true: serve the ADS/ADM page (/adm) against the real
+  # ads-adm-api (:5005) instead of the mock generators — the default for this
+  # integration stack (see saga-dash docs/dev-toggle-ads-adm.md).
+  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" VITE_ADS_ADM_REAL=true $(tunnel_env saga-dash)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
   # always discovers via GET /fleet/discover (404 without fleet mode → the
   # browser's "Fleet discovery failed … Fleet mode may not be active"), so the

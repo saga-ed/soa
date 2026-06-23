@@ -1656,21 +1656,22 @@ seed_playback(){
 
 # sessions-api: a sample QTF evaluation + observation notes on an Ended demo
 # session, so the Session Viewer's QTF / Notes panels show populated content.
-# Direct sessions-DB write (the qtf/observations API is Janus-gated, no seed auth)
-# via the same docker-exec psql path provision_playback_dbs uses; idempotent.
-# Surfaces the /session-viewer/<id> link. Gated by --with-qtf-demo.
+# Runs the sessions-api `db:seed:qtf-demo` Prisma seed on the host (mirrors
+# seed_sessions) — writes the rows directly (the qtf/observations API is
+# Janus-gated, no seed auth); idempotent. Surfaces the /session-viewer/<id>
+# link. Gated by --with-qtf-demo.
 seed_qtf_demo(){
-  say "seeding QTF + observation notes demo (sessions db)…"
+  say "seeding QTF + observation notes demo (sessions db, db:seed:qtf-demo)…"
   local tgt out
   out=$(mktemp)
-  docker exec -i soa-postgres-1 psql -U postgres_admin -d sessions -tAq -v ON_ERROR_STOP=1 \
-    < "$SCRIPT_DIR/seed-demo-qtf.sql" >"$out" 2>&1 || true
-  tgt=$(grep -m1 '^v1\.' "$out" || true)
+  ( cd "$PROGRAM_HUB/apps/node/sessions-api" \
+      && env DATABASE_URL="$SESSIONS_DB_URL" pnpm db:seed:qtf-demo ) >"$out" 2>&1 || true
+  tgt=$(grep -m1 'QTF_DEMO_SESSION_ID=' "$out" | sed 's/.*QTF_DEMO_SESSION_ID=//' || true)
   if [[ -n "$tgt" ]]; then
     ok "QTF + notes demo seeded → /session-viewer/$tgt"
   else
     warn "QTF/notes demo seed skipped (no Ended demo session yet?)"
-    warn "psql output:"; sed 's/^/    /' "$out" | tail -5
+    warn "seed output:"; sed 's/^/    /' "$out" | tail -8
   fi
   rm -f "$out"
 }

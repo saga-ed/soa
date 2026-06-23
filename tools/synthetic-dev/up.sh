@@ -281,7 +281,7 @@ SEED_S3_PROFILE="${SEED_S3_PROFILE:-saga-runtime-dev}"   # AppRuntime — only t
 # domain, connect CORS/VITE_* URLs); service-to-service URLs stay localhost.
 TUNNEL=0
 TUNNEL_DOMAIN=""                                            # <moniker>.$VMS_BASE once resolved
-TUNNEL_LK_KEY=""; TUNNEL_LK_SECRET=""; TUNNEL_FLEEK_TOPOLOGY=""  # AV-via-fleek (set in the tunnel block)
+TUNNEL_LK_KEY=""; TUNNEL_LK_SECRET=""; TUNNEL_FLEEK_TOPOLOGY=""; TUNNEL_FLEEK_DEFAULT_URL=""  # AV-via-fleek (set in the tunnel block)
 VMS_BASE="${VMS_BASE:-vms.wootdev.com}"                     # rendezvous domain (vms/template.yaml)
 LOGIN_IAM_URL=""                                            # tunnel mode: login flows use the PUBLIC iam…
 LOGIN_DASH_URL=""                                           # …and dash URLs (domain cookie can't be set via localhost)
@@ -1263,13 +1263,22 @@ tunnel_env(){ # svc
       printf '%s\n' "ALLOWED_ORIGINS=$CONNECT_WEB_URL,https://connect.$TUNNEL_DOMAIN" \
                     "PUBLIC_API_URL=https://connect-api.$TUNNEL_DOMAIN" \
                     "JANUS_LOGIN_HOST=iam.$TUNNEL_DOMAIN/demo"
-      # AV → fleek dev cluster when the creds fetch succeeded (tunnel block).
-      # Splatted after the launch line's local FLEEK_TOPOLOGY_JSON/LIVEKIT_*,
-      # so these win (env last-wins). Values are space-free by construction
-      # (compact JSON) — safe through the $() splat.
+      # AV → the fleek dev cluster, ALWAYS in tunnel mode. Local LiveKit is UDP
+      # and can't ride the HTTP tunnels, so a guest's browser must be pointed at
+      # the PUBLIC cluster regardless of whether we could fetch its creds — the
+      # whole point of tunnel mode. The topology decides the URL the browser
+      # connects to (via /livekit/token), so it AND the now-cosmetic LIVEKIT_URL
+      # fallback both flip unconditionally: the connect-api env must never
+      # advertise localhost:7880 in tunnel mode. The real cluster key/secret
+      # overlay ONLY when the Secrets Manager fetch succeeded (best-effort — the
+      # tunnel block warns loudly when it didn't, and token mints then fail
+      # against the cluster rather than silently routing AV to an unreachable
+      # localhost). Splatted after the launch line's local values, so these win
+      # (env last-wins); compact JSON is space-free → safe through the $() splat.
+      printf '%s\n' "FLEEK_TOPOLOGY_JSON=$TUNNEL_FLEEK_TOPOLOGY" \
+                    "LIVEKIT_URL=$TUNNEL_FLEEK_DEFAULT_URL"
       if [[ -n "$TUNNEL_LK_KEY" && -n "$TUNNEL_LK_SECRET" ]]; then
-        printf '%s\n' "FLEEK_TOPOLOGY_JSON=$TUNNEL_FLEEK_TOPOLOGY" \
-                      "LIVEKIT_API_KEY=$TUNNEL_LK_KEY" \
+        printf '%s\n' "LIVEKIT_API_KEY=$TUNNEL_LK_KEY" \
                       "LIVEKIT_API_SECRET=$TUNNEL_LK_SECRET"
       fi ;;
     connect-web)
@@ -1948,14 +1957,19 @@ if [[ $TUNNEL == 1 ]]; then
     fs.writeFileSync(dst, JSON.stringify(c, null, 4) + "\n");
   ' "$SCRIPT_DIR/rtsm-fleet-local.json" "$STATE/rtsm-fleet-tunnel.json" "rtsm.$TUNNEL_DOMAIN" \
     || { err "could not render $STATE/rtsm-fleet-tunnel.json"; exit 1; }
-  # AV via the REAL fleek dev cluster. Local LiveKit (ws://localhost:7880) is
-  # unreachable from a guest's browser (WebRTC media is UDP — it can't ride
-  # the HTTP tunnels), so tunnel mode points connect-api at the fleek dev
-  # nodes instead: the deployed topology (qboard infra/connectv3-api/
-  # samconfig.yaml — keep in sync) + the cluster's real LiveKit creds from
-  # Secrets Manager (same JSON secret the ECS task injects). Best-effort: no
-  # creds → warn and stay on local AV (guests get CRDT-only, same as before).
+  # AV via the REAL fleek dev cluster — ALWAYS in tunnel mode. Local LiveKit
+  # (ws://localhost:7880) is unreachable from a guest's browser (WebRTC media is
+  # UDP — it can't ride the HTTP tunnels), and a public cluster is the whole
+  # point of tunnel mode, so connect-api is pointed at the fleek dev nodes
+  # unconditionally: the deployed topology (qboard infra/connectv3-api/
+  # samconfig.yaml — keep in sync), with TUNNEL_FLEEK_DEFAULT_URL mirroring its
+  # _default for the cosmetic LIVEKIT_URL knob. The cluster's real LiveKit creds
+  # (same JSON secret the ECS task injects) are best-effort: no creds → warn
+  # LOUD and leave connect-api signing with the dev key (the cluster rejects
+  # those tokens, so AV fails — but we never silently fall back to an
+  # unreachable localhost).
   TUNNEL_LK_KEY=""; TUNNEL_LK_SECRET=""
+  TUNNEL_FLEEK_DEFAULT_URL="wss://chi-1.fleek.wootdev.com"   # MUST match TUNNEL_FLEEK_TOPOLOGY's _default
   TUNNEL_FLEEK_TOPOLOGY='{"domain":"fleek.wootdev.com","cityMap":{"phx":"wss://phx-1.fleek.wootdev.com","chi":"wss://chi-1.fleek.wootdev.com","nyc":"wss://nyc-1.fleek.wootdev.com","_default":"wss://chi-1.fleek.wootdev.com"}}'
   TUNNEL_AWS_PROFILE="$("$SCRIPT_DIR/tunnel.sh" aws-profile 2>/dev/null)" || TUNNEL_AWS_PROFILE=""
   _lk_json=$(aws secretsmanager get-secret-value --secret-id qboard/fleek/livekit-creds \
@@ -1971,7 +1985,7 @@ if [[ $TUNNEL == 1 ]]; then
     [[ $DO_RECORD == 1 && "$RECORD_MODE" == av ]] \
       && warn "--record av + --tunnel: AV rides the fleek CLUSTER, so the LOCAL egress can't capture media; CRDT recording still works."
   else
-    warn "could not fetch qboard/fleek/livekit-creds — AV stays LOCAL (guests get CRDT-only; aws sso login and re-run for cluster AV)"
+    warn "could not fetch qboard/fleek/livekit-creds — connect-api still points at the fleek cluster (wss://*.fleek.wootdev.com) but signs tokens with the dev key, so the cluster rejects them and AV fails; aws sso login and re-run for working cluster AV."
   fi
   say "tunnel mode: browser plane at https://<svc>.$TUNNEL_DOMAIN (Connect: https://connect.$TUNNEL_DOMAIN)"
   warn "remote users: Connect + dash are wired (dash needs PR #194 pinned — see"

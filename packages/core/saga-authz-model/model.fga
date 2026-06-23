@@ -113,3 +113,48 @@ type whiteboard
     define parent: [session]
     define editor: [user, group#member] or host from parent or participant from parent
     define viewer: editor or observer from parent
+
+# ---------------------------------------------------------------------------
+# Staff control-plane (namespace: staff)
+# ---------------------------------------------------------------------------
+#
+# Saga INTERNAL staff (employees), distinct from platform users. Staff roles
+# are driven by JumpCloud group membership (the sync worker writes the role
+# tuples from the SSM group->role mapping). App code checks the `can_*`
+# computed relations, never the raw role nouns.
+#
+# SECURITY (SEC-CRIT-2): `staff_org` is a DISTINCT type — NOT a reuse of
+# `tenant` — and its admin relation is `staff_admin`, NEVER `admin`. Reusing
+# `tenant` + an `admin` relation would (a) overwrite `tenant.admin` above and
+# (b) feed the `admin from parent` cascades on group/school/cohort/program,
+# silently making a staff persona-admin an admin of the ENTIRE district
+# resource tree. `staff_org` has NO `admin from parent` edge into the resource
+# types above; the cascade is impossible by construction.
+
+# The singleton staff control-plane root (object id: saga_platform:root).
+# Staff roles attach here; capabilities are computed from the roles.
+type saga_platform
+  relations
+    # Direct role grants — written by the authz-sync worker from JumpCloud
+    # group membership via the SSM group->role mapping.
+    define super_admin: [user, group#member]
+    define support: [user, group#member] or super_admin
+    define org_admin: [user, group#member] or super_admin
+
+    # Computed capabilities — app code (fgaCheck) evaluates these, never the
+    # role nouns above.
+    define can_impersonate: support
+    define can_create_org: org_admin
+    define can_admin_personas: org_admin
+    define can_manage_staff: super_admin
+
+# An organization staff create/administer. Maps 1:1 to an iam-api group
+# (kind=district): object id is the rostering group id. DISTINCT from the
+# resource `tenant`; the admin relation is `staff_admin`, never `admin`.
+type staff_org
+  relations
+    define platform: [saga_platform]
+    define staff_admin: [user, group#member] or can_admin_personas from platform
+    define can_view: staff_admin
+    define can_edit: staff_admin
+    define can_delete: staff_admin

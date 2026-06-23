@@ -18,6 +18,10 @@ export const FGA_TYPES = [
     'session',
     'room',
     'whiteboard',
+    // Staff control-plane (namespace: staff) — distinct from the resource
+    // tree; see model.fga's SEC-CRIT-2 note (staff_org is NOT tenant).
+    'saga_platform',
+    'staff_org',
 ] as const;
 export type FgaType = (typeof FGA_TYPES)[number];
 
@@ -43,6 +47,24 @@ export interface FgaRelationsByType {
         | 'can_join';
     room: 'parent' | 'session' | 'member' | 'moderator' | 'can_join';
     whiteboard: 'parent' | 'editor' | 'viewer';
+    // Staff control-plane. `saga_platform` carries the role grants
+    // (super_admin/support/org_admin) and the computed `can_*` capabilities
+    // app code checks. `staff_org` is the per-org control object; its admin
+    // relation is `staff_admin` (NEVER `admin` — SEC-CRIT-2).
+    saga_platform:
+        | 'super_admin'
+        | 'support'
+        | 'org_admin'
+        | 'can_impersonate'
+        | 'can_create_org'
+        | 'can_admin_personas'
+        | 'can_manage_staff';
+    staff_org:
+        | 'platform'
+        | 'staff_admin'
+        | 'can_view'
+        | 'can_edit'
+        | 'can_delete';
 }
 
 export type FgaRelation<T extends FgaType> = FgaRelationsByType[T];

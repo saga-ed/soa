@@ -1408,8 +1408,19 @@ services_up(){
   # store. The dash picker reads it from the browser (CORS → dash origin) and
   # connect-api resolves contentRef→body from it S2S. RABBITMQ for its outbox events.
   launch_if content-api "$CONTENT_PORT" "$PROGRAM_HUB/apps/node/content-api"     NODE_ENV=development PORT="$CONTENT_PORT" DATABASE_URL="$CONTENT_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(tunnel_env content-api)
+  # ADS/ADM session integration (ads-adm/session-integration branches): ADM now
+  # reads "who is expected, when" on demand from sessions-api (:3007) via its
+  # program-hub schedule provider (decisions D1/D2), instead of the retired
+  # saga_api mock. It presents the x-service-token credential (dev: raw slug;
+  # sessions-api dev-bypass trusts it — decisions D-AUTH). Policy stays default-off
+  # (ADS_ADM_POLICY_PROVIDER unset → Mock) so non-session orgs don't hit the absent
+  # saga_api. SESSIONS_API_CLIENT_BASEURL + SERVICE_TOKEN_SERVICESLUG default to
+  # :3007 / ads-adm-api, but are set explicitly here for clarity. Set
+  # ADS_ADM_SCHEDULE_PROVIDER=mock to fall back to the legacy fixture path.
   launch_if ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
-     ADS_ADM_SCHEDULE_PROVIDER=mock \
+     ADS_ADM_SCHEDULE_PROVIDER=program-hub \
+     SESSIONS_API_CLIENT_BASEURL=http://localhost:3007 \
+     SERVICE_TOKEN_SERVICESLUG=ads-adm-api \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)

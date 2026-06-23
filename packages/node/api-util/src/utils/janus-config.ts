@@ -25,11 +25,28 @@ import { z } from 'zod';
 export const JanusConfigSchema = z.object({
   configType: z.literal('JANUS').default('JANUS'),
   required: z.boolean().default(true),
-  jwksUrl: z.url().default('https://gate.wootdev.com/.well-known/jwks.json'),
+  // z.string().url() (NOT z.url()): the latter is a zod-4-only top-level API.
+  // This package serves zod-3 consumers (program-hub, rostering, qboard), and
+  // tsup bundles no zod (skipNodeModulesBundle) — so the consumer's zod runs at
+  // runtime. z.string().url() is portable across zod 3 and 4; z.url() would
+  // throw at module-eval under a zod-3 consumer.
+  jwksUrl: z.string().url().default('https://gate.wootdev.com/.well-known/jwks.json'),
   /** Host used in emitted SagaAuth `login=` URLs (e.g. login.saga.org in prod). */
   loginHost: z.string().optional(),
 });
-export type JanusConfig = z.infer<typeof JanusConfigSchema>;
+
+// Plain interface, NOT `z.infer<typeof JanusConfigSchema>`. An inferred type
+// leaks zod-internal types (z.core.$strip) into the published .d.ts, which a
+// zod-3 consumer can't resolve — the type then collapses to `unknown` at the
+// call site. A hand-written interface keeps the public type surface
+// zod-agnostic. `loadJanusConfig`'s `return JanusConfigSchema.parse(...)` below
+// is the compile-time guard that this interface stays in sync with the schema.
+export interface JanusConfig {
+  configType: 'JANUS';
+  required: boolean;
+  jwksUrl: string;
+  loginHost?: string;
+}
 
 /**
  * Build a {@link JanusConfig} from environment variables.

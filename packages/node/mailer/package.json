@@ -1,0 +1,44 @@
+{
+  "name": "@saga-ed/soa-mailer",
+  "version": "1.0.0",
+  "private": false,
+  "scripts": {
+    "dev": "tsup --watch",
+    "build": "tsup",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./mocks": {
+      "types": "./dist/mocks/mock-mail-adapter.d.ts",
+      "default": "./dist/mocks/mock-mail-adapter.js"
+    }
+  },
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.968.0",
+    "@aws-sdk/client-sts": "^3.968.0",
+    "zod": "3.25.67"
+  },
+  "devDependencies": {
+    "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/node": "latest",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "publishConfig": {
+    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saga-ed/soa.git",
+    "directory": "packages/node/mailer"
+  }
+}

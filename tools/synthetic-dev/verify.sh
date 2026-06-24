@@ -121,6 +121,20 @@ else
   badline "connect-mongo unreachable (run ./up.sh up — mesh_up starts it)"
 fi
 
+# Health-only mode (VERIFY_HEALTH_ONLY=1): a fast gate for callers (e.g.
+# run-stack-e2e.sh's pre-INSPECT re-check) that care ONLY about whether the
+# services + data are live. Runs the ✗-hard-failing health/data checks above,
+# then exits — skipping the source-posture/freshness sections below, which do a
+# git fetch and only ever ⚠ warn. Exit code reflects API/data health alone.
+if [[ "${VERIFY_HEALTH_ONLY:-0}" == "1" ]]; then
+  if [[ $fail -eq 0 ]]; then
+    printf "\033[32m✓ health: %d/%d checks passed — stack is healthy\033[0m\n" "$pass" "$pass"
+    exit 0
+  fi
+  printf "\033[31m✗ health: %d/%d checks failed\033[0m — tail /tmp/sds-synthetic/<service>.log for reds\n" "$fail" "$((pass+fail))"
+  exit 1
+fi
+
 # ── source posture (overlay-aware) ───────────────────────────────────
 # Read your local overlay, then assert each repo's checkout matches it. A repo
 # on the wrong branch — or on local/integration but missing an overlaid PR

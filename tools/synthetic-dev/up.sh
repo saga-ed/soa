@@ -1536,7 +1536,7 @@ services_up(){
 # Preserves _prisma_migrations so no re-migrate. Uses the mesh superuser
 # (postgres_admin) so it can truncate tables owned by iam / saga_user / etc.
 reset_data(){
-  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis, connect)…"
+  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis, ads-adm, connect)…"
   local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
   # `sessions` truncation also clears its consumed-event cursors, so its
   # event-built projections re-converge from the producers' outbox replay.
@@ -1544,7 +1544,12 @@ reset_data(){
   # leaves seeded fixtures intact. NOTE: `--reset --with-playback` truncates them
   # but re-seed runs only on --seed full — so follow such a reset with `--seed
   # full` (or `--with-playback --seed full`) to repopulate, else they stay empty.
-  local dbs=(iam_local iam_pii_local programs scheduling sessions content sis_db)
+  # ads_adm_local (ads-adm-api's Prisma DB): without this, lazily-created
+  # adm_attendance rows accumulate across journey runs — old program generations
+  # leave rows whose occurrences no longer resolve, which then 500 on save
+  # ("schedule has shifted out from under this record"). Generic truncate keeps
+  # _prisma_migrations, so the schema survives.
+  local dbs=(iam_local iam_pii_local programs scheduling sessions content sis_db ads_adm_local)
   [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local)
   for db in "${dbs[@]}"; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then

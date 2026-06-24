@@ -121,11 +121,27 @@ else
   badline "connect-mongo unreachable (run ./up.sh up — mesh_up starts it)"
 fi
 
+# Health-only mode (VERIFY_HEALTH_ONLY=1): a fast gate for callers (e.g.
+# run-stack-e2e.sh's pre-INSPECT re-check) that care ONLY about whether the
+# services + data are live. Runs the ✗-hard-failing health/data checks above,
+# then exits — skipping the source-posture/freshness sections below, which do a
+# git fetch and only ever ⚠ warn. Exit code reflects API/data health alone.
+if [[ "${VERIFY_HEALTH_ONLY:-0}" == "1" ]]; then
+  if [[ $fail -eq 0 ]]; then
+    printf "\033[32m✓ health: %d/%d checks passed — stack is healthy\033[0m\n" "$pass" "$pass"
+    exit 0
+  fi
+  printf "\033[31m✗ health: %d/%d checks failed\033[0m — tail /tmp/sds-synthetic/<service>.log for reds\n" "$fail" "$((pass+fail))"
+  exit 1
+fi
+
 # ── source posture (overlay-aware) ───────────────────────────────────
 # Read your local overlay, then assert each repo's checkout matches it. A repo
 # on the wrong branch — or on local/integration but missing an overlaid PR
-# (stale, forgot to re-run refresh-suite) — fails here even though health is
-# green. No overlay is the DEFAULT: every managed repo is asserted on main below.
+# (stale, forgot to re-run refresh-suite) — is a WARNING here (⚠), not a failure:
+# we work across repos on feature branches frequently, so posture drift must not
+# gate the stack (health checks above still hard-fail). No overlay is the DEFAULT:
+# every managed repo is checked against main below.
 printf "\033[1m── source posture ──\033[0m\n"
 declare -A PINS=()
 if [[ -f "$MANIFEST" ]]; then
@@ -141,7 +157,7 @@ fi
 # soa is accepted here even though it isn't "managed": a soa manifest row is
 # how a synthetic-dev/infra tooling PR gets tested end-to-end (see below).
 for repo in "${!PINS[@]}"; do
-  case " $MANAGED_REPOS soa " in *" $repo "*) ;; *) badline "overlay lists '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it"; esac
+  case " $MANAGED_REPOS soa " in *" $repo "*) ;; *) warnline "overlay lists '$repo' but it's not in MANAGED_REPOS — verify can't posture-check it (warn)"; esac
 done
 
 on_branch(){ git -C "$DEV/$1" branch --show-current 2>/dev/null; }
@@ -151,7 +167,7 @@ check_posture(){ # repo expected_branch
   [[ -d "$dir/.git" ]] || { badline "$repo: not a git repo at $dir"; return; }
   have=$(on_branch "$repo")
   if [[ "$have" == "$want" ]]; then okline "$(printf '%-20s on %s' "$repo" "$want")"
-  else badline "$(printf '%-20s on '\''%s'\'' (expected '\''%s'\'')' "$repo" "$have" "$want")"; fi
+  else warnline "$(printf '%-20s on '\''%s'\'' (expected '\''%s'\'') — posture drift (warn)' "$repo" "$have" "$want")"; fi
 }
 
 # Un-overlaid managed repo: expected on main. But refresh-suite can leave the
@@ -169,7 +185,7 @@ check_posture_main(){ # repo
   elif [[ "$have" == local/integration ]] && git -C "$dir" diff --quiet origin/main HEAD 2>/dev/null; then
     okline "$(printf '%-20s on local/integration ≡ main (no overlay)' "$repo")"
   else
-    badline "$(printf '%-20s on '\''%s'\'' (expected '\''main'\'')' "$repo" "$have")"
+    warnline "$(printf '%-20s on '\''%s'\'' (expected '\''main'\'') — posture drift (warn)' "$repo" "$have")"
   fi
 }
 
@@ -177,11 +193,11 @@ check_posture_main(){ # repo
 check_pin_merged(){ # repo pr#
   local repo=$1 n=$2 dir="$DEV/$repo" oid
   oid=$( cd "$dir" && gh pr view "$n" --json headRefOid --jq '.headRefOid' 2>/dev/null || true )
-  if [[ -z "$oid" ]]; then badline "$repo #$n: couldn't resolve head via gh (auth? PR exists?)"; return; fi
+  if [[ -z "$oid" ]]; then warnline "$repo #$n: couldn't resolve head via gh (auth? PR exists?) (warn)"; return; fi
   if git -C "$dir" merge-base --is-ancestor "$oid" HEAD 2>/dev/null; then
     okline "$(printf '%-20s #%s merged in' "$repo" "$n")"
   else
-    badline "$(printf '%-20s #%s NOT in checkout — run ./refresh-suite.sh' "$repo" "$n")"
+    warnline "$(printf '%-20s #%s NOT in checkout — run ./refresh-suite.sh (warn)' "$repo" "$n")"
   fi
 }
 

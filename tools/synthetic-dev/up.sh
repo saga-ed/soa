@@ -1414,8 +1414,20 @@ services_up(){
   # store. The dash picker reads it from the browser (CORS → dash origin) and
   # connect-api resolves contentRef→body from it S2S. RABBITMQ for its outbox events.
   launch_if content-api "$CONTENT_PORT" "$PROGRAM_HUB/apps/node/content-api"     NODE_ENV=development PORT="$CONTENT_PORT" DATABASE_URL="$CONTENT_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(tunnel_env content-api)
+  # ADS/ADM session integration (ads-adm/session-integration branches): ADM now
+  # reads "who is expected, when" on demand from sessions-api (:3007) via its
+  # program-hub schedule provider (decisions D1/D2), instead of the retired
+  # saga_api mock. It presents the x-service-token credential (dev: raw slug;
+  # sessions-api dev-bypass trusts it — decisions D-AUTH). Policy stays default-off
+  # (ADS_ADM_POLICY_PROVIDER unset → Mock) so non-session orgs don't hit the absent
+  # saga_api. SESSIONS_API_CLIENT_BASEURL + SERVICE_TOKEN_SERVICESLUG default to
+  # :3007 / ads-adm-api, but are set explicitly here for clarity. Set
+  # ADS_ADM_SCHEDULE_PROVIDER=mock to fall back to the legacy fixture path.
   launch_if ads-adm-api 5005 "$SDS/apps/node/ads-adm-api" \
-     ADS_ADM_SCHEDULE_PROVIDER=mock \
+     ADS_ADM_SCHEDULE_PROVIDER=program-hub \
+     SESSIONS_API_CLIENT_BASEURL=http://localhost:3007 \
+     IAM_API_CLIENT_BASEURL=http://localhost:3010/trpc \
+     SERVICE_TOKEN_SERVICESLUG=ads-adm-api \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)
@@ -1452,7 +1464,10 @@ services_up(){
        EXPRESS_SERVER_PORT=6303 RABBITMQ_URL="$MESH_MQ" \
        AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env chat-api)
   fi
-  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" $(tunnel_env saga-dash)
+  # VITE_ADS_ADM_REAL=true: serve the ADS/ADM page (/adm) against the real
+  # ads-adm-api (:5005) instead of the mock generators — the default for this
+  # integration stack (see saga-dash docs/dev-toggle-ads-adm.md).
+  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" VITE_ADS_ADM_REAL=true $(tunnel_env saga-dash)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
   # always discovers via GET /fleet/discover (404 without fleet mode → the
   # browser's "Fleet discovery failed … Fleet mode may not be active"), so the
@@ -1527,7 +1542,7 @@ services_up(){
 # Preserves _prisma_migrations so no re-migrate. Uses the mesh superuser
 # (postgres_admin) so it can truncate tables owned by iam / saga_user / etc.
 reset_data(){
-  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis, connect)…"
+  say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis, ads-adm, connect)…"
   local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
   # `sessions` truncation also clears its consumed-event cursors, so its
   # event-built projections re-converge from the producers' outbox replay.
@@ -1535,7 +1550,12 @@ reset_data(){
   # leaves seeded fixtures intact. NOTE: `--reset --with-playback` truncates them
   # but re-seed runs only on --seed full — so follow such a reset with `--seed
   # full` (or `--with-playback --seed full`) to repopulate, else they stay empty.
-  local dbs=(iam_local iam_pii_local programs scheduling sessions content sis_db)
+  # ads_adm_local (ads-adm-api's Prisma DB): without this, lazily-created
+  # adm_attendance rows accumulate across journey runs — old program generations
+  # leave rows whose occurrences no longer resolve, which then 500 on save
+  # ("schedule has shifted out from under this record"). Generic truncate keeps
+  # _prisma_migrations, so the schema survives.
+  local dbs=(iam_local iam_pii_local programs scheduling sessions content sis_db ads_adm_local)
   [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local)
   for db in "${dbs[@]}"; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then

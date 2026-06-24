@@ -88,6 +88,11 @@
 #                                  (slsid fixture-playback-001). Composes:
 #                                  `--with-playback --seed full`. Lets colleagues query
 #                                  non-empty transcripts/insights/chat without a real CU run.
+#   ./up.sh --with-qtf-demo      opt-in: seed a sample QTF evaluation + observation
+#                                  notes (glow/grow/bookmark) onto an Ended demo
+#                                  session, so the Session Viewer's QTF/Notes panels
+#                                  show populated content. Authored as dev@saga.org;
+#                                  idempotent. Composes with --seed (roster or full).
 #   ./up.sh --tunnel             ALSO expose the browser-facing services to other
 #                                  users at https://<svc>.<moniker>.vms.wootdev.com
 #                                  (multi-user Connect). Moniker comes from
@@ -201,6 +206,7 @@ TRANSCRIPTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/trans
 INSIGHTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/insights_local"
 CHAT_DB_URL="postgresql://postgres_admin:password123@localhost:5432/chat_local"
 DO_PLAYBACK=0                                               # --with-playback: add the 3 playback APIs
+DO_QTF_DEMO=0                                               # --with-qtf-demo: seed a sample QTF eval + notes
 # Connect (qboard). Ports are the apps' own defaults (vite.config.ts / config.ts).
 # Its mongo is the mesh's soa-connect-mongo-1 (infra-compose services/connect-mongo),
 # host :27037 (non-default on purpose: no contention with qboard-mongo/:27017),
@@ -1442,21 +1448,21 @@ services_up(){
        POSTGRES_USERNAME=insights_app POSTGRES_PASSWORD=insights_app_local_pw \
        POSTGRES_INSTANCENAME=InsightsDB \
        EXPRESS_SERVER_PORT=6301 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false $(tunnel_env insights-api)
+       AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env insights-api)
     launch_if transcripts-api 6302 "$SDS/apps/node/transcripts-api" \
        NODE_ENV=development \
        POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=transcripts_local \
        POSTGRES_USERNAME=transcripts_app POSTGRES_PASSWORD=transcripts_app_local_pw \
        POSTGRES_INSTANCENAME=TranscriptsDB \
        EXPRESS_SERVER_PORT=6302 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false $(tunnel_env transcripts-api)
+       AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env transcripts-api)
     launch_if chat-api 6303 "$SDS/apps/node/chat-api" \
        NODE_ENV=development \
        POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=chat_local \
        POSTGRES_USERNAME=chat_app POSTGRES_PASSWORD=chat_app_local_pw \
        POSTGRES_INSTANCENAME=ChatDB \
        EXPRESS_SERVER_PORT=6303 RABBITMQ_URL="$MESH_MQ" \
-       AUTH_AUTHENABLED=false $(tunnel_env chat-api)
+       AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env chat-api)
   fi
   # VITE_ADS_ADM_REAL=true: serve the ADS/ADM page (/adm) against the real
   # ads-adm-api (:5005) instead of the mock generators — the default for this
@@ -1668,6 +1674,28 @@ seed_playback(){
   ok "playback seeded (transcripts/insights/chat)"
 }
 
+# sessions-api: a sample QTF evaluation + observation notes on an Ended demo
+# session, so the Session Viewer's QTF / Notes panels show populated content.
+# Runs the sessions-api `db:seed:qtf-demo` Prisma seed on the host (mirrors
+# seed_sessions) — writes the rows directly (the qtf/observations API is
+# Janus-gated, no seed auth); idempotent. Surfaces the /session-viewer/<id>
+# link. Gated by --with-qtf-demo.
+seed_qtf_demo(){
+  say "seeding QTF + observation notes demo (sessions db, db:seed:qtf-demo)…"
+  local tgt out
+  out=$(mktemp)
+  ( cd "$PROGRAM_HUB/apps/node/sessions-api" \
+      && env DATABASE_URL="$SESSIONS_DB_URL" pnpm db:seed:qtf-demo ) >"$out" 2>&1 || true
+  tgt=$(grep -m1 'QTF_DEMO_SESSION_ID=' "$out" | sed 's/.*QTF_DEMO_SESSION_ID=//' || true)
+  if [[ -n "$tgt" ]]; then
+    ok "QTF + notes demo seeded → /session-viewer/$tgt"
+  else
+    warn "QTF/notes demo seed skipped (no Ended demo session yet?)"
+    warn "seed output:"; sed 's/^/    /' "$out" | tail -8
+  fi
+  rm -f "$out"
+}
+
 # A service whose DB was RESTORED from an S3 snapshot (workspace dbProfile) must
 # NOT be scratch-seeded on top — the snapshot IS the canonical data, and db:seed
 # would double-populate / clash ids. Keyed on ACTUAL restore success
@@ -1691,6 +1719,7 @@ seed_stack(){
   local mode=${1:-roster}
   if restored_db iam-api; then say "seed: iam-api DB restored from snapshot — skipping db:seed"; else seed_iam; fi
   if restored_db sessions-api; then say "seed: sessions-api DB restored from snapshot — skipping db:seed"; else seed_sessions; fi
+  [[ $DO_QTF_DEMO == 1 ]] && seed_qtf_demo
   if [[ "$mode" == full ]]; then
     if restored_db programs-api; then say "seed: programs-api DB restored from snapshot — skipping db:seed"; else seed_programs; fi
     if restored_db content-api; then say "seed: content-api DB restored from snapshot — skipping db:seed"; else seed_content; fi
@@ -1841,7 +1870,7 @@ case "${1:-up}" in
   # Self-maintaining: print the header's "Usage:" block through its closing
   # ruler, instead of a hardcoded line range that drifts as the header grows.
   -h|--help)                     sed -n '/^# Usage:/,/^# ─────/p' "$0"; exit 0 ;;
-  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--workspace|--tunnel|--with-playback) ;; # flag-only invocation; skip up
+  --reset|--seed|--login|--user|--pull|--record|--only|--sandbox|--workspace|--tunnel|--with-playback|--with-qtf-demo) ;; # flag-only invocation; skip up
   *) echo "unknown: $1 (use --help)"; exit 1 ;;
 esac
 while [[ $# -gt 0 ]]; do
@@ -1857,6 +1886,9 @@ while [[ $# -gt 0 ]]; do
     # --with-playback: also provision + launch + (on --seed full) seed the sds_93
     # playback APIs (transcripts/insights/chat). Composes with up/reset/seed.
     --with-playback) DO_PLAYBACK=1; shift ;;
+    # --with-qtf-demo: also seed a sample QTF eval + observation notes onto an
+    # Ended demo session (Session Viewer demo). Runs in seed_stack after sessions.
+    --with-qtf-demo) DO_QTF_DEMO=1; shift ;;
     # --only <svc>: launch just one service (the one you're editing); the rest
     # are expected to live in a cloud sandbox. --sandbox <name>: the compose name
     # those deps live under — flips the launched service's dep URLs + preview
@@ -1906,6 +1938,9 @@ fi
 if [[ $DO_PLAYBACK == 1 ]]; then
   [[ $DO_RESET == 1 || $DO_RESTART == 1 ]] || DO_UP=1
 fi
+# --with-qtf-demo only runs inside seed_stack (gated by DO_SEED); warn if the
+# user passed it without --seed so the flag doesn't silently do nothing.
+[[ ${DO_QTF_DEMO:-0} == 1 && ${DO_SEED:-0} != 1 ]] && warn "--with-qtf-demo has no effect without --seed"
 # Validate the sandbox name — it flows into the host URL and the preview header,
 # so constrain it to the same shape the composition API enforces.
 if [[ -n "$SANDBOX_NAME" && ! "$SANDBOX_NAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]]; then

@@ -1474,6 +1474,7 @@ services_up(){
   # other services. SAGA_API_TARGET is legacy poll content (unauthenticated
   # endpoint — see header). LiveKit creds match qboard's local container.
   launch_if connect-api "$CONNECT_API_PORT" "$QBOARD/apps/node/connectv3-api" \
+     NODE_ENV=development \
      PORT="$CONNECT_API_PORT" \
      MONGO_URI="$CONNECT_MONGO_URI" \
      AUTH_ENABLED=true JANUS_REQUIRED=false \

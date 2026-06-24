@@ -1909,6 +1909,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Make a SKIPPED seed loud: with `set -e`, any failure after this point but
+# before the seed dispatch below (commonly a service that doesn't come up —
+# services_up returns non-zero) exits the script BEFORE seed_stack, silently
+# leaving the roster unseeded; the only symptom is then cryptic verify reds
+# ("deterministic dev id absent…"). Trap the early exit and say so.
+SEED_DONE=0
+_warn_unseeded_on_exit() {
+  local rc=$?
+  if (( rc != 0 )) && [[ "${DO_SEED:-0}" == 1 && "${SEED_DONE:-0}" == 0 ]]; then
+    printf '\033[31m\n✗ up.sh exited (code %s) BEFORE seeding — the roster was NOT seeded.\033[0m\n' "$rc" >&2
+    printf '\033[33m  A step above failed (usually a service that did not come up). Fix it, then seed:\n      %s --seed %s\033[0m\n' "$0" "${SEED_MODE:-roster}" >&2
+  fi
+}
+trap _warn_unseeded_on_exit EXIT
+
 # Hybrid-mode sanity: --only takes a real service; --sandbox is only meaningful
 # with --only (running the full local stack against a cloud iam is not the point).
 if [[ -n "$ONLY_SERVICE" ]]; then
@@ -2093,6 +2108,6 @@ if [[ $TUNNEL == 1 ]]; then
   "$SCRIPT_DIR/tunnel.sh" up
 fi
 [[ $DO_RECORD == 1 ]] && record_up "$RECORD_MODE"
-[[ $DO_SEED == 1 ]]  && seed_stack "$SEED_MODE"
+[[ $DO_SEED == 1 ]]  && { seed_stack "$SEED_MODE"; SEED_DONE=1; }
 [[ $DO_LOGIN == 1 ]] && login_user "$LOGIN_USER"
 exit 0

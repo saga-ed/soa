@@ -1491,6 +1491,7 @@ services_up(){
   launch_if connect-api "$CONNECT_API_PORT" "$QBOARD/apps/node/connectv3-api" \
      PORT="$CONNECT_API_PORT" \
      MONGO_URI="$CONNECT_MONGO_URI" \
+     NODE_ENV=development \
      AUTH_ENABLED=true JANUS_REQUIRED=false \
      IAM_API_URL="$IAM_URL" JWT_ISSUER="https://iam.saga.org" \
      ALLOWED_ORIGINS="$CONNECT_WEB_URL" \

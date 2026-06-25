@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-mailer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": false,
   "scripts": {
     "dev": "tsup --watch",
@@ -21,7 +21,7 @@
   "dependencies": {
     "@aws-sdk/client-ses": "^3.968.0",
     "@aws-sdk/client-sts": "^3.968.0",
-    "zod": "3.25.67"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",

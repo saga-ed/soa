@@ -88,17 +88,25 @@ export function initTracing(
  *
  * `service.name` is always set from the (hardcoded) name the service passes.
  * `service.version` is set from a release identifier when one is plumbed into
- * the container — DD_VERSION (Datadog's convention) or OTEL_SERVICE_VERSION.
- * This is what powers Datadog APM Deployment Tracking ("which release
- * introduced this regression?"). It is OPTIONAL and degrade-safe: with nothing
- * wired the version attr is simply omitted (today's behavior), and the
- * service's CI is expected to pass the build's git SHA as DD_VERSION.
+ * the container — DD_VERSION (Datadog's convention) or OTEL_SERVICE_VERSION (a
+ * local convenience fallback, NOT an OTel-standard variable — the spec route
+ * is OTEL_RESOURCE_ATTRIBUTES=service.version=...). This powers Datadog APM
+ * Deployment Tracking ("which release introduced this regression?"). It is
+ * OPTIONAL and degrade-safe: with nothing wired the version attr is simply
+ * omitted (today's behavior), and the service's CI is expected to pass the
+ * build's git SHA as DD_VERSION.
  *
  * Anything in OTEL_RESOURCE_ATTRIBUTES (e.g. deployment.environment.name set by
- * docker-entrypoint.sh) still merges in via the SDK's env detector on top of
- * this base — we only seed name + version here.
+ * docker-entrypoint.sh) is merged on top of this base by the SDK's env
+ * detector. NOTE: on a key collision the env-detected value WINS over the
+ * values seeded here — so an operator-set service.name/service.version in
+ * OTEL_RESOURCE_ATTRIBUTES would override these defaults (harmless today, since
+ * nothing sets those keys via env; worth knowing before one does).
+ *
+ * Exported for unit testing (initTracing boots the real SDK, so this pure
+ * helper is the clean seam to assert the DD_VERSION precedence + omit-on-unset).
  */
-function resolveResourceAttributes(
+export function resolveResourceAttributes(
     serviceName: string,
 ): Record<string, string> {
     const attrs: Record<string, string> = {

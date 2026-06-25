@@ -1,3 +1,4 @@
+import { diag, type Attributes } from '@opentelemetry/api';
 import type { SpanExporter, ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import type { ExportResult } from '@opentelemetry/core';
 
@@ -20,9 +21,12 @@ import type { ExportResult } from '@opentelemetry/core';
  * in OTel JS (sdk-trace-base 1.x) a `ReadableSpan` handed to
  * `SpanProcessor.onEnd` is treated as read-only; mutating `span.attributes`
  * there is unsupported and silently ineffective. The exporter receives the
- * same `ReadableSpan[]`, but here we own the boundary to the wire: we rewrite
- * the `attributes` map (it is a plain object on the SDK's span impl) and then
- * delegate to the real OTLP exporter. This is the robust, version-stable seam.
+ * same `ReadableSpan[]`, but here we own the boundary to the wire: although
+ * `attributes` is declared `readonly`, the concrete SDK span impl backs it
+ * with a mutable plain object, so we rewrite it in place and then delegate to
+ * the real OTLP exporter. This is the robust, version-stable seam. (If a
+ * future impl makes `attributes` truly read-only, the rewrite throws and is
+ * caught per the degrade-safe contract below, with a throttled diag warning.)
  *
  * DEGRADE-SAFE CONTRACT (fleet blast radius): sanitization must NEVER throw and
  * NEVER drop a span. Any error while rewriting one span is swallowed and that
@@ -32,14 +36,12 @@ import type { ExportResult } from '@opentelemetry/core';
  * down tracing for the whole service.
  */
 
-/** URL-ish attribute keys whose values get path/query sanitization. */
-const URL_ATTR_KEYS = [
-    'http.url',
-    'http.target',
-    'url.full',
-    'url.path',
-    'url.query',
-] as const;
+// URL-ish attribute keys whose string values get path-segment sanitization.
+// `url.query` is NOT here — a raw query string has no safe shape, so it is
+// dropped outright (DROP_ATTR_KEYS) rather than rewritten. The two lists are
+// disjoint by construction so the rewrite/drop split is structural, not a
+// runtime special-case.
+const URL_ATTR_KEYS = ['http.url', 'http.target', 'url.full', 'url.path'] as const;
 
 /** Attribute keys removed outright (raw query string, never a safe shape). */
 const DROP_ATTR_KEYS = ['url.query'] as const;
@@ -50,7 +52,10 @@ const NUMERIC_SEGMENT = /^\d+$/;
 const UUID_SEGMENT =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LONG_TOKEN_SEGMENT = /^[A-Za-z0-9_-]{20,}$/; // hex/base64-ish opaque ids
-const EMAIL_SEGMENT = /@/;
+// Email-shaped segment: a literal `@` OR its percent-encoded form `%40`.
+// Auto-instrumented `http.target`/`url.path` values are frequently
+// percent-encoded, so matching only the literal `@` would leak encoded emails.
+const EMAIL_SEGMENT = /@|%40/i;
 
 function looksLikeIdentifier(segment: string): boolean {
     return (
@@ -92,18 +97,26 @@ export function sanitizeUrl(value: string): string {
     return prefix + sanitizedPath;
 }
 
-function sanitizeAttributes(attributes: Record<string, unknown>): void {
+function sanitizeAttributes(attributes: Attributes): void {
     for (const key of DROP_ATTR_KEYS) {
         if (key in attributes) delete attributes[key];
     }
     for (const key of URL_ATTR_KEYS) {
-        if (key === 'url.query') continue; // already dropped above
         const val = attributes[key];
+        // Only string-valued URL attrs are rewritten; numeric/boolean/array
+        // attribute values (e.g. http.status_code) are left untouched.
         if (typeof val === 'string') {
             attributes[key] = sanitizeUrl(val);
         }
     }
 }
+
+// `export()` is a hot path, so a persistent sanitize failure (e.g. a future
+// SDK making `span.attributes` read-only → every assignment throws) must not
+// flood the diag stream. Warn at most once per this many swallowed errors so a
+// regression is DETECTABLE without becoming a log storm.
+const SANITIZE_WARN_EVERY = 1000;
+let sanitizeFailureCount = 0;
 
 /**
  * Wraps a SpanExporter, sanitizing PII out of span attributes before delegating
@@ -118,13 +131,23 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
     ): void {
         for (const span of spans) {
             try {
-                // The SDK's span impl exposes `attributes` as a mutable plain
-                // object; rewrite in place. Guard in case a future impl makes
-                // it read-only (the assignment would throw → caught below).
-                sanitizeAttributes(span.attributes as Record<string, unknown>);
-            } catch {
+                // `span.attributes` is declared `readonly` on ReadableSpan, but
+                // the concrete SDK span impl backs it with a mutable plain
+                // object, so in-place rewrite works. If a future impl makes it
+                // truly read-only the assignment throws → caught below.
+                sanitizeAttributes(span.attributes);
+            } catch (err) {
                 // Fail OPEN: leave this span untouched rather than dropping it
-                // or aborting the whole batch. Never rethrow.
+                // or aborting the whole batch. Never rethrow. But surface a
+                // persistent failure (throttled) — a silent swallow would let a
+                // read-only-attributes regression disable PII sanitization
+                // fleet-wide with no signal.
+                if (sanitizeFailureCount++ % SANITIZE_WARN_EVERY === 0) {
+                    diag.warn(
+                        '[pii-sanitizer] span sanitization failed; shipping span unmodified',
+                        err,
+                    );
+                }
             }
         }
         this.inner.export(spans, resultCallback);

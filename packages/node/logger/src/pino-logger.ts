@@ -17,21 +17,24 @@ import type { PinoLoggerConfig } from './pino-logger-schema.js';
 //     isn't known at logging time.
 //
 //   Wholesale paths (high-risk, low-debug-value):
-//     `req.body` and `*.body`  — POST bodies commonly contain passwords,
+//     `body`, `req.body`, `*.body`  — POST bodies commonly contain passwords,
 //       PII forms, or tokens; the raw body is almost never needed in logs.
+//       Covered at top level, under `req`, and one level nested.
 //     `req.headers.authorization` / `headers.authorization` — Bearer tokens.
 //
-// Wildcard syntax:
+// Wildcard syntax & DEPTH LIMIT:
 //   fast-redact supports `a.b`, `*.b`, and optionally `a[*].b`.
 //   We deliberately avoid `*.*.email` (double-star nesting) because its
 //   validity in fast-redact's compiled mode is not confirmed and a bad
 //   path throws at Pino construction — crashing EVERY service at startup.
-//   Prefer the documented conservative forms.
+//   Prefer the documented conservative forms. CONSEQUENCE: redaction reaches
+//   ONE level of nesting (`a.email`), NOT two (`a.b.email`). Log flat or
+//   one-level-nested data objects; deeper PII is the caller's responsibility.
 //
 // Censor value:
-//   Pino's default "[Redacted]" — we keep the key present so it is obvious
-//   in logs that a value was intentionally censored (more debuggable than
-//   `remove: true` which would silently drop the key).
+//   Pino's default censor "[Redacted]" — we keep the key present so it is
+//   obvious in logs that a value was intentionally censored (more debuggable
+//   than `remove: true` which would silently drop the key).
 // ---------------------------------------------------------------------------
 export const REDACT_PATHS: string[] = [
   // --- Email ---
@@ -57,7 +60,9 @@ export const REDACT_PATHS: string[] = [
   'secret',
   '*.secret',
   // Wholesale: POST bodies almost always contain credentials or PII forms;
-  // raw bodies are rarely useful in structured logs.
+  // raw bodies are rarely useful in structured logs. Cover top-level too
+  // (`logger.info({ body })`) for symmetry with the other PII fields.
+  'body',
   'req.body',
   '*.body',
 

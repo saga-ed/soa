@@ -3,6 +3,65 @@ import pino, { Logger, TransportTargetOptions } from 'pino';
 import { ILogger } from './i-logger.js';
 import type { PinoLoggerConfig } from './pino-logger-schema.js';
 
+/**
+ * Fleet-wide PII redaction for structured log fields. Defense-in-depth so a
+ * caller that logs `{ email }`, a name, a token, or a whole request `input`/
+ * `body`/`payload` doesn't leak it into CloudWatch/Datadog.
+ *
+ * Limits worth knowing (pino's `redact` is not a catch-all):
+ *  - Keys ONLY. It masks structured object fields, never interpolated message
+ *    strings — `logger.info(`user ${email}`)` is NOT redacted. Keep PII out of
+ *    the message text at the call site.
+ *  - Shallow wildcards. `*.email` matches one level; pino has no recursive
+ *    `**`, so we enumerate the shapes PII actually arrives in: top-level, one
+ *    level deep (`*.`), and under the `err` wrapper that `error()` adds.
+ *  - No ancestor/descendant overlap. pino's fast-redact THROWS at construction
+ *    on a path that is both covered by a wildcard parent and listed as a child
+ *    (e.g. `input` + `input.email`) — and that throw would crash this shared
+ *    logger fleet-wide. So request objects are redacted WHOLESALE (`input`,
+ *    `payload`, `body`) with no child paths under them — blunt but safe for
+ *    unbounded user content.
+ *  - `code` is deliberately NOT redacted (tRPC error codes, HTTP status, and
+ *    district codes all use it); one-time/auth codes use specific keys
+ *    (`otp`, `authCode`).
+ */
+const REDACT_PATHS = [
+  // Email
+  'email',
+  '*.email',
+  'err.email',
+  // Names (raw + the normalized variants the student search uses)
+  'name',
+  '*.name',
+  'firstName',
+  'lastName',
+  'firstNameNorm',
+  'lastNameNorm',
+  '*.firstNameNorm',
+  '*.lastNameNorm',
+  // Date of birth (FERPA)
+  'dob',
+  '*.dob',
+  // Secrets / tokens / one-time codes
+  'password',
+  '*.password',
+  'token',
+  '*.token',
+  'accessToken',
+  'refreshToken',
+  'clientSecret',
+  'otp',
+  'authCode',
+  // Unbounded user-content objects — redacted WHOLESALE (no child paths under
+  // these, see the overlap note above)
+  'input',
+  'payload',
+  'body',
+] as const;
+
+/** Shared so both pino construction paths (prod stdout + transport) redact identically. */
+export const redact = { paths: [...REDACT_PATHS], censor: '[REDACTED]' };
+
 @injectable()
 export class PinoLogger implements ILogger {
   private readonly logger: Logger;
@@ -27,7 +86,7 @@ export class PinoLogger implements ILogger {
     // driver → CloudWatch.
     if (env === 'production' && isExpressContext) {
       const dest = pinoFn.destination({ dest: logFile ?? 1, sync: false });
-      this.logger = pinoFn({ level: config.level }, dest);
+      this.logger = pinoFn({ level: config.level, redact }, dest);
       this.logger.info(`Logger initialized with level ${config.level}`);
       return;
     }
@@ -95,6 +154,7 @@ export class PinoLogger implements ILogger {
 
     this.logger = pinoFn({
       level: config.level,
+      redact,
       transport: {
         targets,
       },

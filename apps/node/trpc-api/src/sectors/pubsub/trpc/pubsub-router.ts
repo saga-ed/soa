@@ -44,7 +44,9 @@ export const pubsubRouter = router({
                     pubsubResult: result
                 };
             } catch (error) {
-                ctx.logger.error('Failed to send ping event', error instanceof Error ? error : new Error('Unknown error'), { input });
+                // Log a bounded event identifier, not the whole input — pubsub
+                // payloads are user content (unbounded) and must not land in logs.
+                ctx.logger.error('Failed to send ping event', error instanceof Error ? error : new Error('Unknown error'), { eventName: 'ping:message' });
                 throw new Error(`Failed to send ping: ${error instanceof Error ? error.message : 'Unknown error'}`);
             }
         }),
@@ -96,8 +98,10 @@ export const pubsubRouter = router({
                     message: `Event "${eventName}" sent successfully`
                 };
             } catch (error) {
+                // Log the event name only — never `input`, whose `payload` is
+                // `z.any()` (unbounded user content that could carry PII).
                 ctx.logger.error('Failed to send custom event', error instanceof Error ? error : undefined, {
-                    input
+                    eventName: input.name
                 });
                 throw new Error(`Failed to send event: ${error instanceof Error ? error.message : 'Unknown error'}`);
             }
@@ -160,7 +164,8 @@ export const pubsubRouter = router({
                 };
             } catch (error) {
                 ctx.logger.error('Failed to create subscription', error instanceof Error ? error : undefined, {
-                    input
+                    channel: input.channel,
+                    eventTypes: input.eventTypes
                 });
                 throw new Error(`Failed to subscribe: ${error instanceof Error ? error.message : 'Unknown error'}`);
             }
@@ -185,7 +190,7 @@ export const pubsubRouter = router({
                 };
             } catch (error) {
                 ctx.logger.error('Failed to unsubscribe', error instanceof Error ? error : undefined, {
-                    input
+                    subscriptionId: input.subscriptionId
                 });
                 throw new Error(`Failed to unsubscribe: ${error instanceof Error ? error.message : 'Unknown error'}`);
             }

@@ -9,9 +9,7 @@ SOA example client app for testing and interacting with all API examples.
 - Interactive endpoint testing with tRPC client integration
 - Demonstrates @saga-ed/soa-ui component library usage
 
-## Parent Context
-
-See [/apps/web/CLAUDE.md](../CLAUDE.md) for web app patterns.
+**Parent Context:** Part of [apps/web](../CLAUDE.md), the frontend applications tier.
 
 ## Tech Stack
 

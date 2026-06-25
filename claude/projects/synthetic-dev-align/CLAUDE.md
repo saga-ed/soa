@@ -13,6 +13,8 @@ onboarding, local mesh runbook & synthetic-dev convergence", author
 seed-ids packages, (2) give a manual local-mesh runbook, and (3) propose
 the synthetic-dev convergence as a **draft for discussion**.
 
+**Parent Context:** Part of [soa](../../../CLAUDE.md), the shared-infrastructure monorepo — this is a project-scoped working doc under `claude/projects/`.
+
 ## What this initiative is
 
 A **research / synthesis** track, not (yet) an implementation track. The

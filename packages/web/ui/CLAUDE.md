@@ -10,9 +10,7 @@ React component library for SOA frontend applications.
 - Component showcasing in docs app
 - Internal package (not published externally)
 
-## Parent Context
-
-See [/packages/web/CLAUDE.md](../CLAUDE.md) for web package patterns.
+**Parent Context:** Part of [packages/web](../CLAUDE.md), the browser shared-packages tier.
 
 ## Tech Stack
 

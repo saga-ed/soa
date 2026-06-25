@@ -11,9 +11,7 @@ Shared API server utilities for building Node.js backend services.
 - Server configuration schemas (Zod-validated)
 - Sector pattern support (automatic route/resolver discovery)
 
-## Parent Context
-
-See [/packages/node/CLAUDE.md](../CLAUDE.md) for Node.js package patterns.
+**Parent Context:** Part of [packages/node](../CLAUDE.md), the Node.js shared-packages tier.
 
 ## Tech Stack
 

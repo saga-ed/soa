@@ -70,8 +70,8 @@ pnpm typecheck      # Type check
 
 ## Documentation Directive
 
-**Documentation Directive:** Documentation system is provided via the `documentation-system@saga-tools` plugin. Use `/documentation-system` for maintenance instructions.
+**Documentation Directive:** Keep every CLAUDE.md < 200 lines; route each instruction to the right surface — repo/area-wide facts here or in nested CLAUDE.md (load on demand), genuinely path-scoped conventions into `.claude/rules/*.md` (none today, by design), how-to detail into `docs/`, and multi-step procedures into skills. Documentation system is provided via the `documentation-system@saga-tools` plugin; use `/documentation-system` for maintenance instructions.
 
 ---
 
-*Last updated: 2026-02*
+*Last updated: 2026-06*

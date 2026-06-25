@@ -2,6 +2,8 @@
 
 Shared Python development standards and conventions for all @saga-ed/soa projects.
 
+**Parent Context:** Part of [soa](../CLAUDE.md), the shared-infrastructure monorepo for Saga platform applications.
+
 ## Package Management
 
 **CRITICAL**: All Python projects MUST use `uv` for package management.

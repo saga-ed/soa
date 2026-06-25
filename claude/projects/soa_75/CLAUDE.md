@@ -10,6 +10,8 @@ ads-adm-api read fan-out) and stand it up end-to-end to expose
 the real costs and design questions before any broader
 commitment.
 
+**Parent Context:** Part of [soa](../../../CLAUDE.md), the shared-infrastructure monorepo — this is a project-scoped working doc under `claude/projects/`.
+
 ## Scope
 
 Spans 4 repos, all on `soa_75` branch (the soa branch base is

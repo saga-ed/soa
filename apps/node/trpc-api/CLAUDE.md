@@ -9,9 +9,7 @@ tRPC API example with end-to-end type-safe RPC using Zod schemas.
 - Sector-based architecture with static router composition
 - Project, Run, and PubSub domain management
 
-## Parent Context
-
-See [/apps/node/CLAUDE.md](../CLAUDE.md) for Node.js app patterns.
+**Parent Context:** Part of [apps/node](../CLAUDE.md), the Node.js backend applications tier.
 
 ## Tech Stack
 

@@ -9,9 +9,7 @@ GraphQL API example using Apollo Server with SDL-first schema.
 - Sector-based architecture with resolver auto-loading
 - User and session management via GraphQL queries/mutations
 
-## Parent Context
-
-See [/apps/node/CLAUDE.md](../CLAUDE.md) for Node.js app patterns.
+**Parent Context:** Part of [apps/node](../CLAUDE.md), the Node.js backend applications tier.
 
 ## Tech Stack
 

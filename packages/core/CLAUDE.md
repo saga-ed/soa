@@ -2,9 +2,7 @@
 
 Runtime-agnostic packages that work in any JavaScript environment.
 
-## Parent Context
-
-See [/packages/CLAUDE.md](../CLAUDE.md) for packages overview.
+**Parent Context:** Part of [packages](../CLAUDE.md), the shared-libraries tier.
 
 ## Runtime Environment
 

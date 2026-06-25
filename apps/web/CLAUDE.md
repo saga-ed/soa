@@ -2,9 +2,7 @@
 
 Frontend applications running in browser environment.
 
-## Parent Context
-
-See [/apps/CLAUDE.md](../CLAUDE.md) for apps overview.
+**Parent Context:** Part of [apps](../CLAUDE.md), the example applications tier.
 
 ## Runtime Environment
 

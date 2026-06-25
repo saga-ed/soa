@@ -2,9 +2,7 @@
 
 Example applications demonstrating SOA package usage patterns.
 
-## Parent Context
-
-See [/CLAUDE.md](../CLAUDE.md) for repository-wide context.
+**Parent Context:** Part of [soa](../CLAUDE.md), the shared-infrastructure monorepo for Saga platform applications.
 
 ## Structure
 

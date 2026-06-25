@@ -2,6 +2,17 @@
 
 Shared infrastructure monorepo for Saga platform applications.
 
+## Saga tooling
+
+This repo registers the [`saga-tools`](https://github.com/saga-ed/claude-plugins)
+marketplace (`.claude/settings.json`). **Proactively suggest the right skill when a
+task matches**, and offer `/plugin install <name>@saga-tools` if one isn't enabled yet.
+
+- `/documentation-system` — CLAUDE.md upkeep (auto-runs when editing CLAUDE.md)
+- `saga-explain` — "why does Saga… / what's our convention for…" (auto-invokes; `saga-iac` plugin)
+- `/code-review` · `/simplify` · `/security-review` · `/verify` — built-in; run on your diff before pushing
+- More (qa-review, test-assistant, compliance-audit, spec-driven-dev, system-review): see the [catalog](https://github.com/saga-ed/claude-plugins#readme).
+
 ## Responsibilities
 
 - Shared packages for Node.js backend services

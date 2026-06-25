@@ -44,5 +44,17 @@
         ]
       }
     ]
+  },
+  "extraKnownMarketplaces": {
+    "saga-tools": {
+      "source": {
+        "source": "github",
+        "repo": "saga-ed/claude-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "documentation-system@saga-tools": true,
+    "saga-iac@saga-tools": true
   }
 }

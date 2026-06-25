@@ -9,9 +9,7 @@ SOA documentation site built with Next.js 15.
 - Developer onboarding and API reference
 - Living examples of shared UI components
 
-## Parent Context
-
-See [/apps/web/CLAUDE.md](../CLAUDE.md) for web app patterns.
+**Parent Context:** Part of [apps/web](../CLAUDE.md), the frontend applications tier.
 
 ## Tech Stack
 

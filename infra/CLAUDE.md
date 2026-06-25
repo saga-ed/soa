@@ -11,9 +11,7 @@ Docker Compose template package with instant profile switching. Published as `@s
 - CLI (`infra-compose`) + programmatic JS API + Express HTTP router
 - EC2 db-host server subsystem for remote fixture-serving VMs
 
-## Parent Context
-
-See [/CLAUDE.md](../CLAUDE.md) for repository-wide context. `infra-compose` is a sibling of `packages/` — not inside it, because it ships as a standalone npm package with its own `package.json`, its own test runner config, and its own CI.
+**Parent Context:** Part of [soa](../CLAUDE.md), the shared-infrastructure monorepo for Saga platform applications. `infra-compose` is a sibling of `packages/` — not inside it, because it ships as a standalone npm package with its own `package.json`, its own test runner config, and its own CI.
 
 ## Tech Stack
 

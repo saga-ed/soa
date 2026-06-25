@@ -2,9 +2,7 @@
 
 Server-side packages for Node.js applications.
 
-## Parent Context
-
-See [/packages/CLAUDE.md](../CLAUDE.md) for packages overview.
+**Parent Context:** Part of [packages](../CLAUDE.md), the shared-libraries tier.
 
 ## Runtime Environment
 

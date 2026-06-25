@@ -10,9 +10,7 @@ TypeGraphQL API example using Apollo Server with code-first schema.
 - Schema generation and emission via TypeGraphQL
 - User and session management via GraphQL queries/mutations
 
-## Parent Context
-
-See [/apps/node/CLAUDE.md](../CLAUDE.md) for Node.js app patterns.
+**Parent Context:** Part of [apps/node](../CLAUDE.md), the Node.js backend applications tier.
 
 ## Tech Stack
 

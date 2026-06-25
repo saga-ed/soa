@@ -11,9 +11,7 @@ Ready-to-run Express server for managing test fixtures across database environme
 - infra-compose integration (mounts `/infra` router with lifecycle hooks)
 - Systemd service restart helper + fixture-admin self-registration
 
-## Parent Context
-
-See [/packages/node/CLAUDE.md](../CLAUDE.md) for Node.js package patterns.
+**Parent Context:** Part of [packages/node](../CLAUDE.md), the Node.js shared-packages tier.
 
 ## Tech Stack
 

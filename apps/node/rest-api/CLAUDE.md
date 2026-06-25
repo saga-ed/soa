@@ -9,9 +9,7 @@ REST API example using Express with routing-controllers.
 - Sector-based architecture with controller auto-loading
 - Express middleware and request/response handling
 
-## Parent Context
-
-See [/apps/node/CLAUDE.md](../CLAUDE.md) for Node.js app patterns.
+**Parent Context:** Part of [apps/node](../CLAUDE.md), the Node.js backend applications tier.
 
 ## Tech Stack
 

@@ -1,6 +1,7 @@
 export {
     initTracing,
     shutdownTracing,
+    resolveResourceAttributes,
     type InitTracingOpts,
     type TracingHandle,
 } from './tracing.js';
@@ -12,3 +13,9 @@ export {
     type OutboxMetrics,
 } from './metrics.js';
 export { structuredErrorMiddleware } from './error-middleware.js';
+export {
+    PiiSanitizingSpanExporter,
+    sanitizeUrl,
+    setSanitizerWarnSink,
+    resetSanitizerWarnSink,
+} from './span-sanitizer.js';

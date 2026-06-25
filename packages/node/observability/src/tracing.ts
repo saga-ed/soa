@@ -5,7 +5,9 @@ import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { RuntimeNodeInstrumentation } from '@opentelemetry/instrumentation-runtime-node';
+import { ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import type { ILogger } from '@saga-ed/soa-logger';
+import { PiiSanitizingSpanExporter } from './span-sanitizer.js';
 
 /**
  * Opaque handle to an initialized OTel SDK. Services don't need to import
@@ -50,10 +52,14 @@ export function initTracing(
         // deployment.* resource attrs. Letting the DD Agent identify the source
         // container via its own host-IP-based logic keeps the right task/service
         // tags. (Resource attrs from OTEL_RESOURCE_ATTRIBUTES still merge in.)
-        resource: new Resource({
-            [ATTR_SERVICE_NAME]: serviceName,
-        }),
-        traceExporter: new OTLPTraceExporter({ url: resolveOtlpTracesUrl() }),
+        resource: new Resource(resolveResourceAttributes(serviceName)),
+        // Wrap the OTLP exporter so PII (ids/emails in URL paths + query
+        // strings) is stripped from span attributes before they hit the wire.
+        // See span-sanitizer.ts for why this is an exporter wrapper (not a
+        // SpanProcessor) and the degrade-safe contract.
+        traceExporter: new PiiSanitizingSpanExporter(
+            new OTLPTraceExporter({ url: resolveOtlpTracesUrl() }),
+        ),
         // Auto-instrumentations register HTTP / Express / pg / amqplib / dns /
         // net span emitters at SDK start, so each inbound request gets a real
         // server-entry span + downstream waterfall WITHOUT per-call manual
@@ -75,6 +81,42 @@ export function initTracing(
     }
 
     return sdk;
+}
+
+/**
+ * Build the OTel resource attributes for a service.
+ *
+ * `service.name` is always set from the (hardcoded) name the service passes.
+ * `service.version` is set from a release identifier when one is plumbed into
+ * the container — DD_VERSION (Datadog's convention) or OTEL_SERVICE_VERSION (a
+ * local convenience fallback, NOT an OTel-standard variable — the spec route
+ * is OTEL_RESOURCE_ATTRIBUTES=service.version=...). This powers Datadog APM
+ * Deployment Tracking ("which release introduced this regression?"). It is
+ * OPTIONAL and degrade-safe: with nothing wired the version attr is simply
+ * omitted (today's behavior), and the service's CI is expected to pass the
+ * build's git SHA as DD_VERSION.
+ *
+ * Anything in OTEL_RESOURCE_ATTRIBUTES (e.g. deployment.environment.name set by
+ * docker-entrypoint.sh) is merged on top of this base by the SDK's env
+ * detector. NOTE: on a key collision the env-detected value WINS over the
+ * values seeded here — so an operator-set service.name/service.version in
+ * OTEL_RESOURCE_ATTRIBUTES would override these defaults (harmless today, since
+ * nothing sets those keys via env; worth knowing before one does).
+ *
+ * Exported for unit testing (initTracing boots the real SDK, so this pure
+ * helper is the clean seam to assert the DD_VERSION precedence + omit-on-unset).
+ */
+export function resolveResourceAttributes(
+    serviceName: string,
+): Record<string, string> {
+    const attrs: Record<string, string> = {
+        [ATTR_SERVICE_NAME]: serviceName,
+    };
+    const version = process.env.DD_VERSION || process.env.OTEL_SERVICE_VERSION;
+    if (version) {
+        attrs[ATTR_SERVICE_VERSION] = version;
+    }
+    return attrs;
 }
 
 /**

@@ -1391,7 +1391,16 @@ services_up(){
   # MAIL_FRONTEND_BASE_URL: the iam-realm SagaAuth login= base on 401s — the
   # local iam demo (devLogin), so a lapsed session re-logs-in here, not at prod
   # login.wootdev.com. tunnel_env overrides it with the tunnelled iam.
-  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL" MAIL_FRONTEND_BASE_URL="http://localhost:$IAM_PORT/demo" $(tunnel_env iam-api)
+  # JANUS_REQUIRED=false on the LAUNCH ENV (not iam-api/.env): the apply_fixes
+  # sed at :419-421 patches iam-api/.env, which doesn't exist on a fresh clone
+  # (dotenv-flow logs "no .env* files"), so JANUS_REQUIRED stays unset and
+  # fail-safes to required (config schema) — iam then 401s every local S2S call
+  # with {"realms":["janus"]} (sis-api surfaces it as "Unable to transform
+  # response from server") and devLogin 401s too. Passing it here is the same
+  # literal-false bypass programs-api/scheduling-api already use on their launch
+  # env, and is .env-independent. authEnabled defaults false; this is the
+  # perimeter lever that actually gates the dev-bypass S2S actor.
+  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL" MAIL_FRONTEND_BASE_URL="http://localhost:$IAM_PORT/demo" $(tunnel_env iam-api)
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7. Under --sandbox

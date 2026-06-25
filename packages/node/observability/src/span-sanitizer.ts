@@ -111,10 +111,44 @@ function sanitizeAttributes(attributes: Attributes): void {
     }
 }
 
+// Detectability of a persistent sanitize failure must NOT depend on whether a
+// service wired an OTel diag logger. The global `diag` defaults to a no-op with
+// NO console fallback (verified against @opentelemetry/api), so a bare
+// `diag.warn` here is silent on any service that didn't pass `initTracing` a
+// logger or set OTEL_LOG_LEVEL — which would re-open the exact silent-swallow
+// this warning exists to close. So we ALSO emit through `diag` (when a logger
+// IS configured the warning lands in the service log stream) AND through a
+// self-contained sink that always reaches somewhere. The sink is injectable so
+// it can be spied/silenced in tests.
+type WarnSink = (message: string, err: unknown) => void;
+
+const defaultWarnSink: WarnSink = (message, err) => {
+    // diag.warn is a no-op when no diag logger is registered, so it can't be
+    // the sole channel; console.warn is the unconditional floor.
+    diag.warn(message, err);
+    // eslint-disable-next-line no-console
+    console.warn(message, err);
+};
+
+let warnSink: WarnSink = defaultWarnSink;
+
+/** Override the failure-warning sink (test seam). */
+export function setSanitizerWarnSink(sink: WarnSink): void {
+    warnSink = sink;
+}
+
+/** Restore the default failure-warning sink + reset the throttle (test seam). */
+export function resetSanitizerWarnSink(): void {
+    warnSink = defaultWarnSink;
+    sanitizeFailureCount = 0;
+}
+
 // `export()` is a hot path, so a persistent sanitize failure (e.g. a future
 // SDK making `span.attributes` read-only → every assignment throws) must not
-// flood the diag stream. Warn at most once per this many swallowed errors so a
-// regression is DETECTABLE without becoming a log storm.
+// flood the log stream. Warn on the FIRST failure (count 0) then at most once
+// per this many swallowed errors, so a regression is DETECTABLE immediately
+// without becoming a log storm. NOTE: count-based, so cadence scales with span
+// volume — acceptable here because the first occurrence always fires.
 const SANITIZE_WARN_EVERY = 1000;
 let sanitizeFailureCount = 0;
 
@@ -143,7 +177,7 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
                 // read-only-attributes regression disable PII sanitization
                 // fleet-wide with no signal.
                 if (sanitizeFailureCount++ % SANITIZE_WARN_EVERY === 0) {
-                    diag.warn(
+                    warnSink(
                         '[pii-sanitizer] span sanitization failed; shipping span unmodified',
                         err,
                     );

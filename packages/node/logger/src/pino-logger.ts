@@ -23,13 +23,16 @@ import type { PinoLoggerConfig } from './pino-logger-schema.js';
 //     `req.headers.authorization` / `headers.authorization` — Bearer tokens.
 //
 // Wildcard syntax & DEPTH LIMIT:
-//   fast-redact supports `a.b`, `*.b`, and optionally `a[*].b`.
-//   We deliberately avoid `*.*.email` (double-star nesting) because its
-//   validity in fast-redact's compiled mode is not confirmed and a bad
-//   path throws at Pino construction — crashing EVERY service at startup.
-//   Prefer the documented conservative forms. CONSEQUENCE: redaction reaches
-//   ONE level of nesting (`a.email`), NOT two (`a.b.email`). Log flat or
-//   one-level-nested data objects; deeper PII is the caller's responsibility.
+//   fast-redact supports `a.b`, `*.b`, and `a[*].b`. We deliberately avoid
+//   `*.*.email` (double-star nesting): fast-redact accepts it without throwing
+//   but its matching semantics are not the "any-depth" they look like, so it
+//   gives a false sense of coverage. (Separately, genuinely MALFORMED paths —
+//   e.g. `a..b`, `.email` — DO throw at Pino construction, which would crash
+//   EVERY service at startup; that is the loud, deploy-time failure we accept
+//   over a silent mis-redaction, and the construction test guards it.)
+//   CONSEQUENCE of using only `a.b`/`*.b` forms: redaction reaches ONE level
+//   of nesting (`a.email`), NOT two (`a.b.email`). Log flat or one-level-nested
+//   data objects; deeper PII is the caller's responsibility.
 //
 // Censor value:
 //   Pino's default censor "[Redacted]" — we keep the key present so it is

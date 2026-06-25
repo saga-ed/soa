@@ -1,5 +1,10 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { sanitizeUrl, PiiSanitizingSpanExporter } from './span-sanitizer.js';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import {
+    sanitizeUrl,
+    PiiSanitizingSpanExporter,
+    setSanitizerWarnSink,
+    resetSanitizerWarnSink,
+} from './span-sanitizer.js';
 import { resolveResourceAttributes } from './tracing.js';
 
 describe('sanitizeUrl', () => {
@@ -111,10 +116,18 @@ describe('PiiSanitizingSpanExporter', () => {
         expect(a['url.path']).toBe('/students/:id/grades');
     });
 
-    it('fails OPEN: never throws / drops spans, ships PII unmodified on error', () => {
+    // Inject a spy sink + reset the throttle after each test so the
+    // module-level failure counter never leaks between cases.
+    afterEach(() => resetSanitizerWarnSink());
+
+    it('fails OPEN: never throws / drops spans, ships PII unmodified, and WARNS', () => {
         // Frozen attributes object → assignment throws → must be swallowed,
         // span still passed through to inner WITH its (unsanitized) PII intact
-        // (the documented fail-open consequence: degrade, never drop).
+        // (the documented fail-open consequence: degrade, never drop) AND a
+        // warning must fire (detectability — not a silent swallow).
+        const warn = vi.fn();
+        setSanitizerWarnSink(warn);
+
         const frozen = Object.freeze({
             'http.url': 'http://x/students/42?q=1',
         });
@@ -133,6 +146,12 @@ describe('PiiSanitizingSpanExporter', () => {
         expect(seen).toHaveLength(1); // span not dropped
         // Unsanitized value shipped (fail open) — documents the contract.
         expect(seen[0]!.attributes['http.url']).toBe('http://x/students/42?q=1');
+        // The failure is surfaced on the FIRST occurrence (count 0).
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('span sanitization failed'),
+            expect.anything(),
+        );
     });
 });
 

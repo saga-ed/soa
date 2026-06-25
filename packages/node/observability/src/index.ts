@@ -16,4 +16,6 @@ export { structuredErrorMiddleware } from './error-middleware.js';
 export {
     PiiSanitizingSpanExporter,
     sanitizeUrl,
+    setSanitizerWarnSink,
+    resetSanitizerWarnSink,
 } from './span-sanitizer.js';

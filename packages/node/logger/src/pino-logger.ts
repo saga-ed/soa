@@ -3,6 +3,85 @@ import pino, { Logger, TransportTargetOptions } from 'pino';
 import { ILogger } from './i-logger.js';
 import type { PinoLoggerConfig } from './pino-logger-schema.js';
 
+// ---------------------------------------------------------------------------
+// PII Redaction paths
+// ---------------------------------------------------------------------------
+// Pino uses fast-redact to censor these field paths before serialisation.
+// Design rationale:
+//
+//   Field-level paths (preferred):
+//     We list specific leaf keys rather than nuking whole parent objects like
+//     `user` or `student`.  Redacting the whole object would hide useful
+//     non-PII fields (e.g. user.id, user.role) that matter for debugging.
+//     One-level wildcard (`*.email`) covers nested PII when the parent key
+//     isn't known at logging time.
+//
+//   Wholesale paths (high-risk, low-debug-value):
+//     `req.body` and `*.body`  — POST bodies commonly contain passwords,
+//       PII forms, or tokens; the raw body is almost never needed in logs.
+//     `req.headers.authorization` / `headers.authorization` — Bearer tokens.
+//
+// Wildcard syntax:
+//   fast-redact supports `a.b`, `*.b`, and optionally `a[*].b`.
+//   We deliberately avoid `*.*.email` (double-star nesting) because its
+//   validity in fast-redact's compiled mode is not confirmed and a bad
+//   path throws at Pino construction — crashing EVERY service at startup.
+//   Prefer the documented conservative forms.
+//
+// Censor value:
+//   Pino's default "[Redacted]" — we keep the key present so it is obvious
+//   in logs that a value was intentionally censored (more debuggable than
+//   `remove: true` which would silently drop the key).
+// ---------------------------------------------------------------------------
+export const REDACT_PATHS: string[] = [
+  // --- Email ---
+  'email',
+  '*.email',
+  'user.email',
+  'req.body.email',
+
+  // --- Auth / secrets (wholesale body + auth header) ---
+  'password',
+  '*.password',
+  'token',
+  '*.token',
+  'accessToken',
+  '*.accessToken',
+  'refreshToken',
+  '*.refreshToken',
+  '*.authorization',
+  'req.headers.authorization',
+  'headers.authorization',
+  'apiKey',
+  '*.apiKey',
+  'secret',
+  '*.secret',
+  // Wholesale: POST bodies almost always contain credentials or PII forms;
+  // raw bodies are rarely useful in structured logs.
+  'req.body',
+  '*.body',
+
+  // --- Identity PII (student / staff space) ---
+  // Top-level forms: catch bare `logger.info({ ssn, phone, ... })` calls.
+  // Wildcard forms: catch the common nested shape `{ user: { ssn }, student: { phone } }`.
+  'firstName',
+  'lastName',
+  '*.firstName',
+  '*.lastName',
+  'dob',
+  '*.dob',
+  'dateOfBirth',
+  '*.dateOfBirth',
+  'ssn',
+  '*.ssn',
+  'phone',
+  '*.phone',
+  'phoneNumber',
+  '*.phoneNumber',
+  'address',
+  '*.address',
+];
+
 @injectable()
 export class PinoLogger implements ILogger {
   private readonly logger: Logger;
@@ -17,6 +96,19 @@ export class PinoLogger implements ILogger {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pinoFn: any = (pino as any).default ?? pino;
 
+    // Shared base options applied to BOTH instantiation sites below.
+    // Both the production/Express direct-destination path and the transport
+    // path (local/dev) must carry identical redact config — a redact that
+    // only exists on one path silently leaves the other unprotected.
+    //
+    // TODO(E4): trace-context mixin slots in here — add a `mixin` key to
+    //   baseOptions that injects dd.trace_id / dd.span_id from the active
+    //   Datadog APM context.  Do NOT implement here; this is the hook point.
+    const baseOptions = {
+      level: config.level,
+      redact: { paths: REDACT_PATHS },
+    };
+
     // Production Express context (e.g. ECS/Fargate): write structured JSON
     // straight to a file descriptor via a direct pino.destination stream
     // (default fd 1 = stdout; an explicit logFile overrides). pino's
@@ -27,7 +119,7 @@ export class PinoLogger implements ILogger {
     // driver → CloudWatch.
     if (env === 'production' && isExpressContext) {
       const dest = pinoFn.destination({ dest: logFile ?? 1, sync: false });
-      this.logger = pinoFn({ level: config.level }, dest);
+      this.logger = pinoFn(baseOptions, dest);
       this.logger.info(`Logger initialized with level ${config.level}`);
       return;
     }
@@ -94,7 +186,7 @@ export class PinoLogger implements ILogger {
     }
 
     this.logger = pinoFn({
-      level: config.level,
+      ...baseOptions,
       transport: {
         targets,
       },

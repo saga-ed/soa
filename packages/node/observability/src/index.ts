@@ -12,3 +12,7 @@ export {
     type OutboxMetrics,
 } from './metrics.js';
 export { structuredErrorMiddleware } from './error-middleware.js';
+export {
+    PiiSanitizingSpanExporter,
+    sanitizeUrl,
+} from './span-sanitizer.js';

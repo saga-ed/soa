@@ -6,7 +6,7 @@ export const CreateRunSchema = z.object({
   name: z.string().min(1, 'Run name is required'),
   description: z.string().optional(),
   status: z.enum(['pending', 'running', 'completed', 'failed']).default('pending'),
-  config: z.record(z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const UpdateRunSchema = z.object({
@@ -14,7 +14,7 @@ export const UpdateRunSchema = z.object({
   name: z.string().min(1, 'Run name is required').optional(),
   description: z.string().optional(),
   status: z.enum(['pending', 'running', 'completed', 'failed']).optional(),
-  config: z.record(z.unknown()).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const GetRunSchema = z.object({

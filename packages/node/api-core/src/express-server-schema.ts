@@ -30,4 +30,9 @@ export const ExpressServerSchema = z.object({
     .optional(),
 });
 
-export type ExpressServerConfig = z.infer<typeof ExpressServerSchema>;
+// Use the INPUT type, not `z.infer` (the output): this config is bound directly
+// to DI and never `.parse()`d, so the `basePath` transform never runs. Under zod
+// 4, `.optional().transform()` infers the *output* key as required-but-undefined
+// (`basePath: string | undefined`); the input type keeps it genuinely optional
+// (`basePath?:`), matching how every consumer hand-builds the literal.
+export type ExpressServerConfig = z.input<typeof ExpressServerSchema>;

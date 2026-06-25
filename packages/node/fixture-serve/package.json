@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/fixture-serve",
-  "version": "0.2.7",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
   "description": "Reusable fixture server infrastructure — Express server, async job queue, provision workflow, and credential export for service-specific fixture CLIs",
@@ -38,7 +38,7 @@
     "mongodb": "^6.0.0",
     "reflect-metadata": "^0.2.2",
     "routing-controllers": "^0.11.2",
-    "zod": "3.25.67"
+    "zod": "^4.4.3"
   },
   "peerDependencies": {
     "@saga-ed/infra-compose": ">=0.10.0",

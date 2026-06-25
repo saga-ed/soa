@@ -45,6 +45,7 @@ describe('renderSnapshot', () => {
     "eventType": "test.thing.created",
     "eventVersion": 1,
     "payload": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
         "type": "object",
         "properties": {
             "id": {
@@ -57,9 +58,7 @@ describe('renderSnapshot', () => {
         "required": [
             "id",
             "count"
-        ],
-        "additionalProperties": false,
-        "$schema": "http://json-schema.org/draft-07/schema#"
+        ]
     }
 }
 `,
@@ -103,10 +102,10 @@ describe('renderSnapshot', () => {
         expect(out).toContain('"$id": "https://saga-ed.example.local/events/foo.bar-v1.json"');
     });
 
-    it('preserves $refStrategy=none — no inline $refs in the rendered payload', () => {
-        // Two structurally identical sub-objects. With $refStrategy other than
-        // 'none', zod-to-json-schema would dedupe one to a $ref pointing at
-        // the other, producing different bytes depending on encounter order.
+    it('inlines structurally identical sub-objects — no $refs in the rendered payload', () => {
+        // Two structurally identical sub-objects. zod 4's native toJSONSchema
+        // inlines by default (it only emits $ref for genuine cycles), so the
+        // bytes stay stable regardless of encounter order.
         const inner = z.object({ id: z.string() });
         const out = renderSnapshot('foo.bar.v1', {
             eventType: 'foo.bar',

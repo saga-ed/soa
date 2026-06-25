@@ -13,18 +13,18 @@
   },
   "dependencies": {
     "@saga-ed/soa-ui": "workspace:*",
-    "@trpc/client": "^11.0.0",
+    "@trpc/client": "^11.18.0",
     "next": "^15.3.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "@saga-ed/soa-trpc-types": "workspace:*"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.1",
+    "@eslint/eslintrc": "^3.3.5",
     "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "^22.15.3",
-    "@types/react": "19.1.0",
-    "@types/react-dom": "19.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
     "eslint": "^8.57.0",
     "eslint-config-next": "^15.4.0",
     "typescript": "5.8.2"

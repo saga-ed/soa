@@ -15,16 +15,16 @@
   "devDependencies": {
     "@saga-ed/soa-eslint-config": "workspace:*",
     "@saga-ed/soa-typescript-config": "workspace:*",
-    "@turbo/gen": "^2.5.0",
+    "@turbo/gen": "^2.10.0",
     "@types/node": "^22.15.3",
-    "@types/react": "19.1.0",
-    "@types/react-dom": "19.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
     "eslint": "^9.28.0",
     "typescript": "5.8.2"
   },
   "dependencies": {
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "prop-types": "^15.8.1"
   },
   "publishConfig": {

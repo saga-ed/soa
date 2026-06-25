@@ -42,7 +42,7 @@
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/node": "24.0.12",
-    "tsup": "^8.5.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3",
     "vitest": "^1.6.1"
   }

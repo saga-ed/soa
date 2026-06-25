@@ -26,7 +26,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@trpc/server": "^11.0.0",
+    "@trpc/server": "^11.18.0",
     "inversify": "^6.2.2",
     "reflect-metadata": "^0.2.2",
     "zod": "3.25.67",
@@ -37,8 +37,8 @@
   },
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
-    "@types/node": "latest",
-    "tsup": "^8.5.0",
+    "@types/node": "26.0.1",
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3",
     "vitest": "^1.5.0"
   },

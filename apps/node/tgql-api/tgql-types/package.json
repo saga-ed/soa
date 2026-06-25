@@ -30,14 +30,14 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "type-graphql": "^2.0.0-rc.2",
+    "type-graphql": "^2.0.0-rc.3",
     "graphql": "^16.8.1",
     "@saga-ed/soa-api-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.12",
     "@vitest/coverage-v8": "^1.5.0",
-    "tsup": "^8.5.0",
+    "tsup": "^8.5.1",
     "typescript": "5.8.2",
     "vitest": "^1.5.0",
     "@saga-ed/soa-tgql-codegen": "workspace:*"

@@ -20,13 +20,13 @@
         "clean": "rm -rf dist"
     },
     "dependencies": {
-        "@opentelemetry/api": "^1.9.0",
+        "@opentelemetry/api": "^1.9.1",
         "zod": "3.25.67"
     },
     "devDependencies": {
         "@saga-ed/soa-typescript-config": "workspace:*",
         "@types/node": "^24.0.3",
-        "tsup": "^8.5.0",
+        "tsup": "^8.5.1",
         "typescript": "5.8.2",
         "vitest": "^1.6.1"
     },

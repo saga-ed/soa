@@ -17,13 +17,13 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "zod": "^4.2.1"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@saga-ed/soa-logger": "workspace:*",
     "@saga-ed/soa-typescript-config": "workspace:*",
-    "@types/node": "latest",
-    "tsup": "^8.5.0",
+    "@types/node": "26.0.1",
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3"
   },
   "publishConfig": {

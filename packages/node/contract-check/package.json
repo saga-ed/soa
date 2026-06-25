@@ -26,7 +26,7 @@
         "@saga-ed/soa-event-envelope": "workspace:*",
         "fast-glob": "^3.3.3",
         "js-yaml": "^4.1.0",
-        "zod-to-json-schema": "^3.23.5"
+        "zod-to-json-schema": "^3.25.2"
     },
     "peerDependencies": {
         "zod": "^3.23.0"
@@ -35,7 +35,7 @@
         "@saga-ed/soa-typescript-config": "workspace:*",
         "@types/js-yaml": "^4.0.9",
         "@types/node": "^24.0.3",
-        "tsup": "^8.5.0",
+        "tsup": "^8.5.1",
         "typescript": "5.8.2",
         "vitest": "^1.6.1",
         "zod": "3.25.67"

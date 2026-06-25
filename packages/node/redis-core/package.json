@@ -18,8 +18,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@aws-sdk/client-secrets-manager": "^3.968.0",
-    "@aws-sdk/client-ssm": "^3.968.0",
+    "@aws-sdk/client-secrets-manager": "^3.1075.0",
+    "@aws-sdk/client-ssm": "^3.1075.0",
     "@saga-ed/soa-api-util": "workspace:*",
     "@saga-ed/soa-logger": "workspace:*",
     "inversify": "^6.2.2",

@@ -33,11 +33,11 @@
         "bson": "^6.10.4",
         "express": "^4.22.1",
         "mongodb": "^6.0.0",
-        "mysql2": "^3.0.0"
+        "mysql2": "^3.22.5"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "eslint": "^10.1.0",
+        "eslint": "^10.5.0",
         "typescript": "^5.9.3",
         "vitest": "^1.6.1"
     },

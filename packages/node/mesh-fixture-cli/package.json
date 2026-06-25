@@ -53,16 +53,16 @@
     "mesh-fixture": "node bin/run.js"
   },
   "dependencies": {
-    "@oclif/core": "^4.0.0",
-    "@oclif/plugin-help": "^6.0.0",
+    "@oclif/core": "^4.11.11",
+    "@oclif/plugin-help": "^6.2.52",
     "uuid": "^11.0.0",
     "zod": "3.25.67"
   },
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
-    "@types/node": "latest",
+    "@types/node": "26.0.1",
     "@types/uuid": "^10.0.0",
-    "oclif": "^4.22.93",
+    "oclif": "^4.23.21",
     "typescript": "^5.8.3"
   },
   "publishConfig": {

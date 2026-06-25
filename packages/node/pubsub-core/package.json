@@ -32,7 +32,7 @@
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
     "@types/uuid": "^10.0.0",
-    "tsup": "^8.5.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3",
     "vitest": "^1.5.0"
   },

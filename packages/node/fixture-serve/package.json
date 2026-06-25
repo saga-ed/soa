@@ -37,7 +37,7 @@
     "inversify": "^6.2.2",
     "mongodb": "^6.0.0",
     "reflect-metadata": "^0.2.2",
-    "routing-controllers": "^0.11.2",
+    "routing-controllers": "^0.11.3",
     "zod": "3.25.67"
   },
   "peerDependencies": {
@@ -52,9 +52,9 @@
     "@saga-ed/soa-db": "workspace:*",
     "@saga-ed/soa-logger": "workspace:*",
     "@saga-ed/soa-typescript-config": "workspace:*",
-    "@types/express": "^5.0.3",
-    "@types/node": "latest",
-    "tsup": "^8.5.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "26.0.1",
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3",
     "vitest": "^1.5.0"
   },

@@ -985,9 +985,6 @@ importers:
       pg:
         specifier: ^8.13.0
         version: 8.20.0
-      zod:
-        specifier: 3.25.67
-        version: 3.25.67
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -1010,15 +1007,15 @@ importers:
       vitest:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
+      zod:
+        specifier: 3.25.67
+        version: 3.25.67
 
   packages/node/event-envelope:
     dependencies:
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.1
-      zod:
-        specifier: 3.25.67
-        version: 3.25.67
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -1035,6 +1032,9 @@ importers:
       vitest:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
+      zod:
+        specifier: 3.25.67
+        version: 3.25.67
 
   packages/node/event-integration-tests:
     dependencies:

@@ -67,7 +67,12 @@
 #
 # Usage:
 #   ./up.sh                      bring up mesh + 10 services (empty)
-#   ./up.sh up --pull            ff-only sync all siblings to origin, then build/migrate
+#   ./up.sh up --pull            ff-only sync ALL siblings to upstream, then build/migrate
+#                                  (every invocation already auto-pulls siblings
+#                                   ON THEIR DEFAULT BRANCH; overlays/feature
+#                                   branches are left as-is. NO_AUTO_PULL=1 opts
+#                                   out. --pull additionally syncs non-default
+#                                   branches to their own upstream.)
 #   ./up.sh --seed [roster|full] seed synthetic data (default: roster)
 #                                  roster = iam roster only (programs empty → from-scratch)
 #                                  full   = iam roster + programs/periods/enrollment
@@ -923,8 +928,13 @@ provision_playback_dbs(){
 # Kills the recurring trap of building/migrating a checkout silently behind origin
 # (e.g. program-hub hundreds of commits stale → 404s on new endpoints).
 pull_repos(){
-  say "pulling siblings to upstream (ff-only)…"
-  local kv dir name dirty br behind
+  # mode=auto (default-branch siblings only — used for the automatic pre-build
+  # sync) or mode=all (every sibling, used by explicit --pull). auto leaves
+  # overlay/feature branches (e.g. local/integration) untouched so WIP is never
+  # moved toward main behind your back.
+  local mode="${1:-all}"
+  say "pulling siblings to upstream (ff-only${mode:+ — $mode})…"
+  local kv dir name dirty br behind def
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
             "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
             "$RTSM:rtsm"; do
@@ -932,9 +942,13 @@ pull_repos(){
     [[ -e "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
     dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -v '^??' || true)
     [[ -z "$dirty" ]] || { printf "\033[33m⚠\033[0m %-20s uncommitted changes — skipping\n" "$name"; continue; }
-    git -C "$dir" fetch -q origin 2>/dev/null || { printf "\033[33m⚠\033[0m %-20s fetch failed — skipping\n" "$name"; continue; }
     br=$(git -C "$dir" branch --show-current 2>/dev/null)
     [[ -n "$br" ]] || { printf "\033[33m⚠\033[0m %-20s detached HEAD — skipping\n" "$name"; continue; }
+    if [[ "$mode" == auto ]]; then
+      def=$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null); def=${def#origin/}; def=${def:-main}
+      [[ "$br" == "$def" ]] || { printf "\033[36m·\033[0m %-20s on %s (not %s) — leaving overlay/feature branch as-is\n" "$name" "$br" "$def"; continue; }
+    fi
+    git -C "$dir" fetch -q origin 2>/dev/null || { printf "\033[33m⚠\033[0m %-20s fetch failed — skipping\n" "$name"; continue; }
     git -C "$dir" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1 || { printf "\033[33m⚠\033[0m %-20s %s has no upstream — skipping\n" "$name" "$br"; continue; }
     behind=$(git -C "$dir" rev-list --count "HEAD..@{u}" 2>/dev/null || echo 0)
     if [[ "$behind" -eq 0 ]]; then ok "$name up to date ($br)"; continue; fi
@@ -2061,7 +2075,17 @@ fi
 # launches services has provisioned them (the e2e runner's `--reset --seed`
 # previously launched ten services against an unprepped tree / missing mongo).
 # SKIP_PREP=1 skips the install+build pass for tight iteration loops.
-[[ $DO_PULL == 1 ]] && pull_repos        # ff-only sync siblings BEFORE we build/migrate
+# Keep passive on-main siblings current by default (ff-only) BEFORE we
+# build/migrate, so the stack never runs a checkout silently behind origin — the
+# trap that 404s/500s on new endpoints (e.g. programs-api roster-allow-post, #278).
+# `auto` mode only touches repos on their default branch; overlays/feature
+# branches and dirty/diverged trees are left untouched. `--pull` forces the full
+# sync of every sibling; NO_AUTO_PULL=1 opts out of the automatic pass.
+if [[ $DO_PULL == 1 ]]; then
+  pull_repos all
+elif [[ "${NO_AUTO_PULL:-0}" != 1 ]]; then
+  pull_repos auto
+fi
 # restore_stack runs AFTER mesh_up (DBs exist, empty) and BEFORE prep (which
 # migrates the restored schema forward via migrate_db's non-destructive branch).
 # A no-op unless a --workspace carried `dbProfile` entries. Idempotent: it

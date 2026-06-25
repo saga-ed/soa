@@ -17,6 +17,10 @@
       "types": "./dist/i-config-manager.d.ts",
       "default": "./dist/i-config-manager.js"
     },
+    "./zod-env": {
+      "types": "./dist/zod-env.d.ts",
+      "default": "./dist/zod-env.js"
+    },
     "./mocks/mock-config-manager": {
       "types": "./dist/mocks/mock-config-manager.d.ts",
       "default": "./dist/mocks/mock-config-manager.js"

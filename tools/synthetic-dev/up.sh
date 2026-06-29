@@ -1441,6 +1441,7 @@ services_up(){
      ADS_ADM_SCHEDULE_PROVIDER=program-hub \
      SESSIONS_API_CLIENT_BASEURL=http://localhost:3007 \
      IAM_API_CLIENT_BASEURL=http://localhost:3010/trpc \
+     IAM_API_URL="$IAM_URL" JWT_ISSUER="https://iam.saga.org" \
      SERVICE_TOKEN_SERVICESLUG=ads-adm-api \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \

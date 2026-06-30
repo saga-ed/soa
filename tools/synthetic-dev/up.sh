@@ -182,6 +182,13 @@ FLEEK=${FLEEK:-$DEV/fleek}                   # fleek recording stack (opt-in: --
 
 IAM_PORT=3010                                               # iam-api port — matches saga-dash main's static/config.json default (post Janus auth rewrite, d1.4)
 IAM_URL="http://localhost:$IAM_PORT"
+# The `iss` claim the LOCAL iam-api stamps on its JWTs — NOT a URL of the running
+# instance, but iam-api's JwtConfigSchema default (rostering config/schemas.ts:
+# "Public-facing iam-api URL"), which the mesh leaves un-overridden. Services that
+# VALIDATE the iss claim (ads-adm-api, coach-api) must be handed this exact value;
+# ads-adm-api/connect-api inline it below as JWT_ISSUER. NOT $IAM_URL (:3010) — a
+# token minted here carries iss=iam.saga.org regardless of the localhost host.
+IAM_ISSUER="https://iam.saga.org"
 SIS_PORT=3100                                               # sis-api port (SisConfigSchema default; rostering apps/node/sis-api)
 SIS_DB_URL="postgresql://sis:sis@localhost:5432/sis_db"     # sis-api owns a dedicated DB (read direct from SIS_DATABASE_URL; see d1.7)
 # program-hub config defaults to its OWN standalone-dev postgres on :5433; in this
@@ -1469,20 +1476,28 @@ services_up(){
   # coach-api (:6105 — Coach professional-development GraphQL + tRPC). DUAL-STORE:
   # Postgres `coach_api` (progress/instances via coach-db) + Mongo (`content_coach`
   # curriculum at the mesh mongo :27037). Verifies the iam_session JWT against the
-  # local iam-api :3010 (AUTH_AUTHENABLED=true + IAM_API_TARGET/JWKS/ISSUER override
-  # coach's cloud-dev schema defaults), like every other mesh service. Consumes iam
-  # persona events off the mesh broker (RABBITMQ_ENABLED=true — off by default in
-  # coach). CORS uses EXPRESS_SERVER_CORSALLOWEDDOMAINS (the coach-web origin), NOT
+  # local iam-api :3010 (AUTH_AUTHENABLED=true + IAM_API_TARGET/JWKS override coach's
+  # cloud-dev schema defaults), like every other mesh service. AUTH_ISSUER must be
+  # the iss the local iam-api STAMPS ($IAM_ISSUER = iam.saga.org), NOT $IAM_URL —
+  # coach validates the iss claim, and a token minted here carries iss=iam.saga.org
+  # regardless of the :3010 host (verified: AUTH_ISSUER=$IAM_URL → 401 on every
+  # token). CORS uses EXPRESS_SERVER_CORSALLOWEDDOMAINS (the coach-web origin), NOT
   # CORS_ORIGIN. SAGA_API_TARGET is a frontend-only config value (coach-web reads it
   # via GET /coach/v1/config); the backend no longer calls saga_api.
+  # RABBITMQ_ENABLED stays FALSE: turning the iam-event consumer on currently crashes
+  # coach-api at boot — its createIamEventConsumer DI binding is async (toDynamicValue)
+  # and breaks the synchronous construction of CnsDataService, which shares the pg
+  # pool (Inversify: "construct CnsDataService synchronously … has async dependencies").
+  # That's a pre-existing coach step-4a consumer bug, not a mesh issue; flip to true
+  # once it's fixed so coach projects iam persona events.
   # NOTE: the mesh mongo holds no coach curriculum yet, so coach-api boots green but
   # serves empty curriculum until a Mongo content seed lands (see prep()).
   launch_if coach-api "$COACH_API_PORT" "$COACH/apps/node/coach-api" \
      NODE_ENV=development EXPRESS_SERVER_PORT="$COACH_API_PORT" \
      DATABASE_URL="$COACH_DB_URL" \
      MONGO_HOST=localhost MONGO_PORT="$CONNECT_MONGO_PORT" MONGO_DATABASE=saga_local CONTENT_DATABASE=wmlms_local \
-     AUTH_AUTHENABLED=true IAM_API_TARGET="$IAM_URL" AUTH_JWKSURL="$IAM_URL/.well-known/jwks.json" AUTH_ISSUER="$IAM_URL" \
-     RABBITMQ_ENABLED=true RABBITMQ_URL="$MESH_MQ" \
+     AUTH_AUTHENABLED=true IAM_API_TARGET="$IAM_URL" AUTH_JWKSURL="$IAM_URL/.well-known/jwks.json" AUTH_ISSUER="$IAM_ISSUER" \
+     RABBITMQ_ENABLED=false RABBITMQ_URL="$MESH_MQ" \
      EXPRESS_SERVER_CORSALLOWEDDOMAINS="$COACH_WEB_URL" \
      SAGA_API_TARGET="$SAGA_API_TARGET_COACH" \
      $(sandbox_env coach-api) $(tunnel_env coach-api)

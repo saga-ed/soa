@@ -25,14 +25,22 @@
 import { Command } from '@oclif/core';
 import { baseFlags } from './shared-flags.js';
 import type { ScriptPlan } from './core/flag-map.js';
+import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
 import {
   buildRepoEnv,
+  makeRealProber,
   makeRealRunner,
   resolveScript,
   scriptCwd,
   REPO_ENV_VAR,
 } from './runtime/index.js';
-import type { RepoKey, RepoOverrides, Runner, ScriptContext } from './runtime/index.js';
+import type {
+  HealthProber,
+  RepoKey,
+  RepoOverrides,
+  Runner,
+  ScriptContext,
+} from './runtime/index.js';
 
 /**
  * The subset of the parsed global flags `runScript` reads to locate the script
@@ -56,11 +64,25 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * The injectable HTTP health-probe seam (M2). Production returns a real
+   * short-timeout `fetch` prober (the only place a real network request is
+   * made); the native `stack status` / `stack verify` tests spy this on the
+   * prototype to return canned `ProbeResult`s without hitting the network or a
+   * running stack — mirroring how `getRunner` is mocked for the process seam.
+   * Provided here as a SEAM; the M2 build phase wires it into status/verify.
+   */
+  protected getProber(): HealthProber {
+    return makeRealProber();
+  }
+
+  /**
    * Resolve a pure `ScriptPlan` to a real script invocation and run it through
    * the injectable Runner.
    *
    * - Locates the absolute script path + cwd from the workspace flags
-   *   (`--soa`/`--dev`) via `runtime/scripts`.
+   *   (`--dev` + the per-repo `--<repo>` pins) via `runtime/scripts`. The script
+   *   lives in the repo named by `plan.script.repo` (SOA, SAGA_DASH, …), so the
+   *   cwd is that script's own directory — not a hardcoded synthetic-dev dir.
    * - Layers the per-repo path overrides (`--<repo>`/`--dev`) UNDER the plan's
    *   own env (NO_AUTO_PULL / SKIP_PREP / VERIFY_HEALTH_ONLY) — they never
    *   collide, but the subcommand env wins by construction.
@@ -76,15 +98,22 @@ export abstract class BaseCommand extends Command {
     flags: WorkspaceFlags,
     opts: { propagateExit?: boolean } = {},
   ): Promise<number> {
-    const ctx: ScriptContext = { soa: flags.soa, dev: flags.dev };
-    const command = resolveScript(plan.script, ctx);
-    const cwd = scriptCwd(ctx);
-
+    // Build BOTH the per-repo override env (for the child process) and the
+    // per-repo path-pin map (for locating the script), keyed by the manifest
+    // env-var name. `--soa` lands in both because `REPO_ENV_VAR.soa === 'SOA'`.
     const overrides: RepoOverrides = { dev: flags.dev };
+    const repoRoots: Partial<Record<ManifestRepoKey, string>> = {};
     for (const repo of Object.keys(REPO_ENV_VAR) as RepoKey[]) {
       const value = flags[repo];
-      if (value) overrides[repo] = value;
+      if (value) {
+        overrides[repo] = value;
+        repoRoots[REPO_ENV_VAR[repo] as ManifestRepoKey] = value;
+      }
     }
+
+    const ctx: ScriptContext = { dev: flags.dev, repoRoots };
+    const command = resolveScript(plan.script, ctx);
+    const cwd = scriptCwd(plan.script, ctx);
 
     const env = { ...buildRepoEnv(overrides), ...plan.env };
 

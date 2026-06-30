@@ -1,5 +1,525 @@
 {
   "commands": {
+    "e2e:connect": {
+      "aliases": [],
+      "args": {},
+      "description": "Open a live interactive Connect session: 1 tutor + 2 students (wraps connect-session.sh; foreground).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --reuse -- --debug"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "reuse": {
+          "description": "skip the rebuild; run the live session against the current stack state",
+          "name": "reuse",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "e2e:connect",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": false,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "e2e",
+        "connect.js"
+      ]
+    },
+    "e2e:list": {
+      "aliases": [],
+      "args": {},
+      "description": "List the saga-dash journey phases (wraps check-e2e.sh --help).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "e2e:list",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "e2e",
+        "list.js"
+      ]
+    },
+    "e2e:run": {
+      "aliases": [],
+      "args": {},
+      "description": "Run the saga-dash journey e2e pipeline through a phase (wraps check-e2e.sh; foreground by default).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> --phase 2 --headless",
+        "<%= config.bin %> <%= command.id %> --skip-reset -- --debug"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "phase": {
+          "description": "run the journey THROUGH this phase (name or number; earlier phases run first)",
+          "name": "phase",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "through": {
+          "description": "alias of --phase (run the journey through this phase)",
+          "name": "through",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "headless": {
+          "description": "CI-style run: no browser windows (default is headed/foreground)",
+          "name": "headless",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "skip-reset": {
+          "description": "reuse the current stack state; skip the up.sh reset+seed (env SKIP_RESET=1)",
+          "name": "skip-reset",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "inspect": {
+          "description": "after the suite, open a logged-in browser on the built state (env INSPECT=1)",
+          "name": "inspect",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "no-inspect": {
+          "description": "stay headed but skip the post-suite inspect browser (env INSPECT=0)",
+          "name": "no-inspect",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "pause-at-end": {
+          "description": "pause inside each test at its final state (Playwright Inspector; env PAUSE_AT_END=1)",
+          "name": "pause-at-end",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "inspect-user": {
+          "description": "persona for the inspect browser (env INSPECT_USER; default empty@saga.org)",
+          "name": "inspect-user",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "e2e:run",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": false,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "e2e",
+        "run.js"
+      ]
+    },
+    "stack:bootstrap": {
+      "aliases": [],
+      "args": {},
+      "description": "Stand up the synthetic-dev stack on main: ensure repos → overlay → up → verify (wraps bootstrap.sh).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --no-refresh --seed full"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "no-refresh": {
+          "description": "skip the refresh-suite overlay step (bootstrap.sh --no-refresh)",
+          "name": "no-refresh",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "seed": {
+          "description": "seed profile for the up step (bootstrap.sh --seed <roster|full>)",
+          "name": "seed",
+          "default": "roster",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "options": [
+            "roster",
+            "full"
+          ],
+          "type": "option"
+        },
+        "yes": {
+          "description": "non-interactive auto-confirm (NEW — not yet supported: bootstrap.sh has no non-interactive antecedent)",
+          "name": "yes",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:bootstrap",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "bootstrap.js"
+      ]
+    },
     "stack:down": {
       "aliases": [],
       "args": {},
@@ -223,6 +743,165 @@
         "commands",
         "stack",
         "login.js"
+      ]
+    },
+    "stack:overlay": {
+      "aliases": [],
+      "args": {
+        "verb": {
+          "default": "apply",
+          "description": "overlay action",
+          "name": "verb",
+          "options": [
+            "apply",
+            "list",
+            "reset",
+            "compose-rest"
+          ]
+        }
+      },
+      "description": "Overlay your in-flight PRs onto a main-based synthetic-dev (wraps refresh-suite.sh).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> list",
+        "<%= config.bin %> <%= command.id %> apply --prs 165 saga-dash",
+        "<%= config.bin %> <%= command.id %> reset rostering",
+        "<%= config.bin %> <%= command.id %> compose-rest dev --ttl-hours 6"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "prs": {
+          "description": "apply: ad-hoc PR/branch set to overlay (refresh-suite.sh --prs <#s|branch>); requires one or more trailing repo names",
+          "name": "prs",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "base": {
+          "description": "base ref the overlay rebuilds on (refresh-suite.sh env BASE; default main)",
+          "name": "base",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "ttl-hours": {
+          "description": "compose-rest: sandbox TTL in hours (refresh-suite.sh env SANDBOX_TTL_HOURS)",
+          "name": "ttl-hours",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "seed-profile": {
+          "description": "compose-rest: sandbox seed profile (refresh-suite.sh env SANDBOX_SEED_PROFILE)",
+          "name": "seed-profile",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "bypass-header": {
+          "description": "compose-rest: ALB-perimeter bypass header 'Name: value' (refresh-suite.sh env SANDBOX_BYPASS_HEADER). Omit to print the spec only (exit 2, composes nothing).",
+          "name": "bypass-header",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:overlay",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": false,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "overlay.js"
       ]
     },
     "stack:reset": {
@@ -585,9 +1264,11 @@
     "stack:status": {
       "aliases": [],
       "args": {},
-      "description": "Show stack health and DB row counts (wraps up.sh --status; read-only).",
+      "description": "Show per-service health, probing manifest-derived endpoints (native; read-only).",
       "examples": [
-        "<%= config.bin %> <%= command.id %>"
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --only connect-web",
+        "<%= config.bin %> <%= command.id %> --output-json"
       ],
       "flags": {
         "porcelain": {
@@ -673,6 +1354,19 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "only": {
+          "description": "scope the health report to the dependency closure of these services (comma-list)",
+          "name": "only",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "with-playback": {
+          "description": "also probe the optional playback services (transcripts, insights, chat)",
+          "name": "with-playback",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -689,6 +1383,138 @@
         "commands",
         "stack",
         "status.js"
+      ]
+    },
+    "stack:tunnel": {
+      "aliases": [],
+      "args": {
+        "verb": {
+          "default": "up",
+          "description": "tunnel action (moniker is prompted on the TTY, never taken as a flag)",
+          "name": "verb",
+          "options": [
+            "up",
+            "down",
+            "status",
+            "moniker",
+            "urls",
+            "aws-profile"
+          ]
+        }
+      },
+      "description": "Expose the local synthetic-dev stack via the vms rendezvous box (wraps tunnel.sh).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> up",
+        "<%= config.bin %> <%= command.id %> status",
+        "<%= config.bin %> <%= command.id %> moniker"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "vms-base": {
+          "description": "rendezvous domain (tunnel.sh env VMS_BASE; default vms.wootdev.com)",
+          "name": "vms-base",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:tunnel",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "tunnel.js"
       ]
     },
     "stack:up": {
@@ -902,10 +1728,11 @@
     "stack:verify": {
       "aliases": [],
       "args": {},
-      "description": "Run the verification suite (wraps verify.sh).",
+      "description": "Verify the stack: native manifest-derived health gate (--full delegates the deep checks to verify.sh).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --health-only"
+        "<%= config.bin %> <%= command.id %> --tolerate saga-dash",
+        "<%= config.bin %> <%= command.id %> --full"
       ],
       "flags": {
         "porcelain": {
@@ -993,17 +1820,23 @@
           "type": "option"
         },
         "health-only": {
-          "description": "fast health gate only (verify.sh env VERIFY_HEALTH_ONLY=1)",
+          "description": "native health gate only (the default). On --full, narrows the delegated verify.sh to its health gate (VERIFY_HEALTH_ONLY=1).",
           "name": "health-only",
           "allowNo": false,
           "type": "boolean"
         },
         "tolerate": {
-          "description": "tolerate the named non-fatal failures (M2 — not yet supported)",
+          "description": "tolerate these services being down without failing the gate (comma-list; matches a service id or its repo name, e.g. saga-dash)",
           "name": "tolerate",
           "hasDynamicHelp": false,
           "multiple": true,
           "type": "option"
+        },
+        "full": {
+          "description": "run the CANONICAL complete check: delegate the deep data + git-posture checks to verify.sh (the native gate only covers health today).",
+          "name": "full",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,

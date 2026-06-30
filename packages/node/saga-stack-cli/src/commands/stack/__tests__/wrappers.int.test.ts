@@ -26,15 +26,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import type { RunResult, ScriptInvocation } from '../../../runtime/index.js';
 import StackUp from '../up.js';
-import StackVerify from '../verify.js';
-import StackStatus from '../status.js';
+import StackOverlay from '../overlay.js';
+import StackTunnel from '../tunnel.js';
+import StackBootstrap from '../bootstrap.js';
 
 // Package root = vitest cwd; soa root is three dirs up (packages/node/<pkg>).
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
 const SYNTH_DIR = resolve(SOA_ROOT, 'tools', 'synthetic-dev');
 const UP_SH = resolve(SYNTH_DIR, 'up.sh');
-const VERIFY_SH = resolve(SYNTH_DIR, 'verify.sh');
+const REFRESH_SH = resolve(SYNTH_DIR, 'refresh-suite.sh');
+const TUNNEL_SH = resolve(SYNTH_DIR, 'tunnel.sh');
+const BOOTSTRAP_SH = resolve(SYNTH_DIR, 'bootstrap.sh');
 const DEV_ROOT = '/fixed/dev';
 
 let config: Config;
@@ -135,52 +138,125 @@ describe('stack up — real path (no --dry-run) wraps up.sh', () => {
   });
 });
 
-describe('stack verify — wraps verify.sh', () => {
-  it('default → verify.sh with no argv and no extra env beyond repo paths', async () => {
-    await StackVerify.run([...WS], config);
+// NOTE: `stack status` and `stack verify` are NO LONGER shell-out wrappers — M2
+// re-implemented them natively (manifest-derived health probes via the injectable
+// HealthProber). Their tests moved to `status-verify.int.test.ts`, which mocks
+// `getProber` instead of `getRunner`. (verify --full still delegates to verify.sh
+// and is covered there.)
 
+describe('stack overlay — wraps refresh-suite.sh', () => {
+  it('apply (bare) → refresh-suite.sh with no argv (file-driven)', async () => {
+    await StackOverlay.run(['apply', ...WS], config);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       cwd: SYNTH_DIR,
-      command: VERIFY_SH,
+      command: REFRESH_SH,
       args: [],
       env: { DEV: DEV_ROOT, SOA: SOA_ROOT },
       stdio: 'inherit',
     });
   });
 
-  it('--health-only adds VERIFY_HEALTH_ONLY=1 to the env (still no argv)', async () => {
-    await StackVerify.run(['--health-only', ...WS], config);
-
+  it('apply --prs <set> <repo…> → ad-hoc overlay argv (repos read off positionals)', async () => {
+    await StackOverlay.run(['apply', '--prs', '165', 'saga-dash', ...WS], config);
     expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe(VERIFY_SH);
-    expect(calls[0].args).toEqual([]);
+    expect(calls[0].command).toBe(REFRESH_SH);
+    expect(calls[0].args).toEqual(['--prs', '165', 'saga-dash']);
+  });
+
+  it('rejects apply with positional repos but no --prs (would silently drop them)', async () => {
+    await expect(
+      StackOverlay.run(['apply', 'saga-dash', ...WS], config),
+    ).rejects.toMatchObject({ message: expect.stringContaining('ignores positional repos unless --prs') });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('list → --list', async () => {
+    await StackOverlay.run(['list', ...WS], config);
+    expect(calls[0].args).toEqual(['--list']);
+  });
+
+  it('reset <repo…> → --reset <repo…>', async () => {
+    await StackOverlay.run(['reset', 'rostering', ...WS], config);
+    expect(calls[0].args).toEqual(['--reset', 'rostering']);
+  });
+
+  it('compose-rest <name> → --compose-rest <name>; knobs become env', async () => {
+    await StackOverlay.run(
+      ['compose-rest', 'dev', '--ttl-hours', '6', '--seed-profile', 'canonical', ...WS],
+      config,
+    );
+    expect(calls[0].args).toEqual(['--compose-rest', 'dev']);
     expect(calls[0].env).toEqual({
       DEV: DEV_ROOT,
       SOA: SOA_ROOT,
-      VERIFY_HEALTH_ONLY: '1',
+      SANDBOX_TTL_HOURS: '6',
+      SANDBOX_SEED_PROFILE: 'canonical',
     });
+  });
+
+  it('preserves compose-rest exit 2 ("spec printed, composed nothing") via exit-code propagation', async () => {
+    installFakeRunner(2);
+    await expect(StackOverlay.run(['compose-rest', 'dev', ...WS], config)).rejects.toMatchObject({
+      oclif: { exit: 2 },
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('rejects compose-rest with no sandbox name (before spawning)', async () => {
+    await expect(StackOverlay.run(['compose-rest', ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('exactly one sandbox name'),
+    });
+    expect(calls).toHaveLength(0);
   });
 });
 
-describe('stack status — wraps up.sh --status, read-only', () => {
-  it('hands the Runner up.sh --status', async () => {
-    await StackStatus.run([...WS], config);
-
+describe('stack tunnel — wraps tunnel.sh', () => {
+  it('up → tunnel.sh up', async () => {
+    await StackTunnel.run(['up', ...WS], config);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       cwd: SYNTH_DIR,
-      command: UP_SH,
-      args: ['--status'],
+      command: TUNNEL_SH,
+      args: ['up'],
       env: { DEV: DEV_ROOT, SOA: SOA_ROOT },
       stdio: 'inherit',
     });
   });
 
-  it('does NOT propagate a non-zero exit (status is read-only; never fails on its own)', async () => {
-    installFakeRunner(1);
-    // No throw: propagateExit:false means a degraded stack is reported, not an error.
-    await expect(StackStatus.run([...WS], config)).resolves.toBeUndefined();
+  it('moniker is the dispatch VERB (never a flag value); --vms-base → env VMS_BASE', async () => {
+    await StackTunnel.run(['moniker', '--vms-base', 'vms.example.com', ...WS], config);
+    expect(calls[0].args).toEqual(['moniker']);
+    expect(calls[0].env).toEqual({
+      DEV: DEV_ROOT,
+      SOA: SOA_ROOT,
+      VMS_BASE: 'vms.example.com',
+    });
+  });
+});
+
+describe('stack bootstrap — wraps bootstrap.sh', () => {
+  it('default → bootstrap.sh --seed roster (the flag default)', async () => {
+    await StackBootstrap.run([...WS], config);
     expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      cwd: SYNTH_DIR,
+      command: BOOTSTRAP_SH,
+      args: ['--seed', 'roster'],
+      env: { DEV: DEV_ROOT, SOA: SOA_ROOT },
+      stdio: 'inherit',
+    });
+  });
+
+  it('--no-refresh --seed full → bootstrap.sh --no-refresh --seed full', async () => {
+    await StackBootstrap.run(['--no-refresh', '--seed', 'full', ...WS], config);
+    expect(calls[0].args).toEqual(['--no-refresh', '--seed', 'full']);
+  });
+
+  it('--yes is rejected with a clear message and never spawns', async () => {
+    await expect(StackBootstrap.run(['--yes', ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('bootstrap --yes is not available'),
+    });
+    expect(calls).toHaveLength(0);
   });
 });

@@ -1,6 +1,8 @@
 import { Writable } from 'node:stream';
 import pino from 'pino';
-import { PinoLogger, redact } from '../pino-logger.js';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
+import { BasicTracerProvider } from '@opentelemetry/sdk-trace-base';
+import { PinoLogger, redact, traceCorrelationMixin } from '../pino-logger.js';
 import { PinoLoggerConfig } from '../pino-logger-schema.js';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 
@@ -176,6 +178,56 @@ describe('PinoLogger', () => {
       const s = sink();
       pino({ redact }, s.stream).info('looked up alice@example.org');
       expect(s.text).toContain('alice@example.org');
+    });
+  });
+
+  describe('trace/log correlation (`mixin` config)', () => {
+    // `trace.getActiveSpan()` reads from the GLOBAL context manager, not
+    // from the provider/tracer directly — `startActiveSpan` is a no-op for
+    // propagation unless both the provider AND a context manager are
+    // registered globally (sdk-trace-base ships neither by default; real
+    // services get this via `NodeSDK.start()` in soa-observability).
+    const provider = new BasicTracerProvider();
+    provider.register({ contextManager: new AsyncLocalStorageContextManager() });
+    const tracer = provider.getTracer('pino-logger.unit.test');
+
+    it('adds no trace_id/span_id when there is no active span', () => {
+      const s = sink();
+      pino({ mixin: traceCorrelationMixin }, s.stream).info('startup');
+      const line = JSON.parse(s.text);
+      expect(line.trace_id).toBeUndefined();
+      expect(line.span_id).toBeUndefined();
+    });
+
+    it("adds trace_id/span_id matching the active span, in Datadog's expected hex format", () => {
+      const s = sink();
+      const logger = pino({ mixin: traceCorrelationMixin }, s.stream);
+
+      tracer.startActiveSpan('test-span', span => {
+        const spanContext = span.spanContext();
+        logger.info('handled request');
+
+        const line = JSON.parse(s.text);
+        expect(line.trace_id).toBe(spanContext.traceId);
+        expect(line.span_id).toBe(spanContext.spanId);
+        expect(line.trace_id).toMatch(/^[0-9a-f]{32}$/);
+        expect(line.span_id).toMatch(/^[0-9a-f]{16}$/);
+
+        span.end();
+      });
+    });
+
+    it('does not collide with PII redaction when both are configured together', () => {
+      const s = sink();
+      const logger = pino({ redact, mixin: traceCorrelationMixin }, s.stream);
+
+      tracer.startActiveSpan('test-span-2', span => {
+        logger.info({ email: 'alice@example.org' }, 'lookup');
+        const line = JSON.parse(s.text);
+        expect(line.email).toBe('[REDACTED]');
+        expect(line.trace_id).toBe(span.spanContext().traceId);
+        span.end();
+      });
     });
   });
 });

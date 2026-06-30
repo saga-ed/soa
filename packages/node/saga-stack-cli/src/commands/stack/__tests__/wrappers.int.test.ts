@@ -117,17 +117,22 @@ describe('stack up — real path (no --dry-run) wraps up.sh', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('rejects a comma-list --only on the real path (closure is --dry-run/M4 only)', async () => {
+  // M4: a comma-list --only boots the closure NATIVELY (covered in
+  // up-native.int.test.ts). Combined with a flag the native path can't honour
+  // (here --tunnel) there is no single-service up.sh fallback, so it's rejected.
+  it('rejects a comma-list --only + native-unsupported flag (--tunnel)', async () => {
     await expect(
-      StackUp.run(['--only', 'scheduling-api,sessions-api', ...WS], config),
-    ).rejects.toMatchObject({ message: expect.stringContaining('comma-separated --only') });
+      StackUp.run(['--only', 'scheduling-api,sessions-api', '--tunnel', ...WS], config),
+    ).rejects.toMatchObject({ message: expect.stringContaining('boots the closure NATIVELY') });
     expect(calls).toHaveLength(0);
   });
 
-  it('passes a SINGLE-service --only through to up.sh on the real path', async () => {
-    await StackUp.run(['--only', 'scheduling-api', ...WS], config);
+  // A SINGLE-service --only with a native-unsupported flag (--sandbox) still
+  // falls back to the up.sh wrapper (preserves the M1 --sandbox behaviour).
+  it('single-service --only + --sandbox falls back to the up.sh wrapper', async () => {
+    await StackUp.run(['--only', 'scheduling-api', '--sandbox', 'demo', ...WS], config);
     expect(calls).toHaveLength(1);
-    expect(calls[0].args).toEqual(['up', '--only', 'scheduling-api']);
+    expect(calls[0].args).toEqual(['up', '--only', 'scheduling-api', '--sandbox', 'demo']);
   });
 
   it('propagates a non-zero up.sh exit code via this.exit()', async () => {

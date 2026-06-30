@@ -1520,10 +1520,10 @@
     "stack:up": {
       "aliases": [],
       "args": {},
-      "description": "Bring the synthetic dev stack up. Real run wraps up.sh; --dry-run prints the closure planner only.",
+      "description": "Bring the synthetic dev stack up. --only boots the dependency closure NATIVELY; full-stack wraps up.sh; --dry-run prints the planner.",
       "examples": [
         "<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api --dry-run",
-        "<%= config.bin %> <%= command.id %> --dry-run --with-playback",
+        "<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api",
         "<%= config.bin %> <%= command.id %> --seed roster --login"
       ],
       "flags": {
@@ -1612,7 +1612,7 @@
           "type": "option"
         },
         "only": {
-          "description": "services to bring up. With --dry-run, a comma-list whose dependency closure is printed. On a real run (M1) only a SINGLE service is accepted (passed through to up.sh); native comma-list + closure bring-up lands at M4.",
+          "description": "services to bring up. With --dry-run, a comma-list whose dependency closure is printed. On a real run (M4) a comma-list boots the closure NATIVELY (not via up.sh); combine with a flag the native path cannot honour yet (sandbox/tunnel/workspace/record/pull/prep) and a SINGLE service still falls back to up.sh.",
           "name": "only",
           "hasDynamicHelp": false,
           "multiple": false,
@@ -1625,7 +1625,7 @@
           "type": "boolean"
         },
         "dry-run": {
-          "description": "plan only: print the resolved closure and exit without touching docker/pnpm",
+          "description": "plan only: print the resolved closure (+ launch/seed plan for --only) and exit without touching docker/pnpm",
           "name": "dry-run",
           "allowNo": false,
           "type": "boolean"

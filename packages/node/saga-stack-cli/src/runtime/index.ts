@@ -14,3 +14,7 @@ export * from './scripts.js';
 export * from './repos.js';
 export * from './snapshot.js';
 export * from './snapshot-store.js';
+export * from './launcher.js';
+export * from './mesh.js';
+export * from './preflight.js';
+export * from './dash-defaults.js';

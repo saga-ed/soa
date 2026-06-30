@@ -11,9 +11,14 @@
  *  - redis is left OFF per service in mesh[] for v1 (decision 3, 2026-06-29).
  *  - saga-dash carries prelaunchHook: 'sync-dash-local-defaults'.
  *
- * launch.env values are templated-string stubs (e.g. `${IAM_URL}`) resolved at
- * launch by lane()/sandbox_env()/tunnel_env(); M0 does not execute them. Keys are
- * faithful to the up.sh launch lines.
+ * launch.env values are FAITHFUL, COMPLETE templates (M4): each service's env
+ * map reproduces EVERY var its up.sh `services_up` launch_if line sets (and only
+ * those — no invented vars), with `${TOKEN}` placeholders (e.g. `${IAM_URL}`,
+ * `${MESH_MQ}`, `${PROGRAMS_DB_URL}`) for the up.sh scalar variables. The pure
+ * `resolveLaunchEnv()` in `core/launch-plan.ts` expands those tokens against a
+ * `LaunchContext` the runtime supplies; the resolved strings are what the native
+ * partial-stack launcher hands each child. Audit target: diff each resolved env
+ * against the matching up.sh launch_if line.
  */
 
 import type { LaneTemplates, ServiceDef, ServiceId } from './types.js';
@@ -299,7 +304,6 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         JWT_ISSUER: 'https://iam.saga.org',
         ALLOWED_ORIGINS: '${CONNECT_WEB_URL}',
         SESSIONS_API_BASE_URL: 'http://localhost:3007',
-        RABBITMQ_URL: '${MESH_MQ}',
         SAGA_API_TARGET: '${SAGA_API_TARGET}',
         CONTENT_API_URL: '${CONTENT_API_URL}',
         PUBLIC_API_URL: '${CONNECT_API_URL}',

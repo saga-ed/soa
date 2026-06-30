@@ -28,6 +28,10 @@ import type { ScriptPlan } from './core/flag-map.js';
 import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
 import {
   buildRepoEnv,
+  makeRealDashFs,
+  makeRealLauncher,
+  makeRealMeshExec,
+  makeRealPortProbe,
   makeRealProber,
   makeRealRunner,
   makeRealSnapshotIO,
@@ -36,11 +40,15 @@ import {
   REPO_ENV_VAR,
 } from './runtime/index.js';
 import type {
+  DashFs,
   HealthProber,
+  MeshExec,
+  PortProbe,
   RepoKey,
   RepoOverrides,
   Runner,
   ScriptContext,
+  ServiceLauncher,
   SnapshotIO,
 } from './runtime/index.js';
 
@@ -88,6 +96,52 @@ export abstract class BaseCommand extends Command {
    */
   protected getSnapshotIO(): SnapshotIO {
     return makeRealSnapshotIO();
+  }
+
+  /**
+   * The injectable native-launch seam (M4 — native partial-stack). Production
+   * returns `makeRealLauncher()` — the ONLY place a real `pnpm dev` child is
+   * spawned for the native `stack up --only` path (pid file written under
+   * `stateDir`, health-polled). The native partial-stack TESTS spy this on the
+   * prototype to return a fake `ServiceLauncher` that records each `LaunchSpec`
+   * and yields a canned result, so the topo-wave launch order + per-service env +
+   * health gating are asserted WITHOUT spawning a process — mirroring how
+   * `getRunner`/`getProber`/`getSnapshotIO` are mocked. `stateDir` comes from the
+   * `--state-dir` flag so pid/log files land where the rest of the stack expects.
+   */
+  protected getLauncher(stateDir?: string): ServiceLauncher {
+    return makeRealLauncher({ stateDir });
+  }
+
+  /**
+   * The injectable mesh-readiness seam (M4). Production returns
+   * `makeRealMeshExec()` — the only place `docker exec <container> …` runs for
+   * mesh readiness gating (pg_isready / redis-cli ping / rabbitmq-diagnostics /
+   * mongosh). Tests substitute a fake so the native `meshUp` readiness poll is
+   * asserted WITHOUT a real container.
+   */
+  protected getMeshExec(): MeshExec {
+    return makeRealMeshExec();
+  }
+
+  /**
+   * The injectable host-port-probe seam (M4). Production returns
+   * `makeRealPortProbe()` — the only place `docker ps` / `ss` / `lsof` run for the
+   * mesh `check_ports` preflight. Tests substitute a fake so the conflict logic is
+   * asserted WITHOUT touching docker or the host socket table.
+   */
+  protected getPortProbe(): PortProbe {
+    return makeRealPortProbe();
+  }
+
+  /**
+   * The injectable dash-config fs seam (M4 — the `sync-dash-local-defaults`
+   * prelaunch hook). Production returns `makeRealDashFs()` (the only place the
+   * dash `config.local.json` is written/removed for the hook); tests substitute a
+   * fake so the hook's mode-for-mode behaviour is asserted WITHOUT real fs IO.
+   */
+  protected getDashFs(): DashFs {
+    return makeRealDashFs();
   }
 
   /**

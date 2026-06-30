@@ -1,0 +1,352 @@
+/**
+ * StackApi facade unit tests (plan §6.3).
+ *
+ * Drive `makeStackApi(manifest, runtime)` with FAKE seams (launcher / meshExec /
+ * portProbe / dashFs / prober / runner / delegate) — NO real process, docker,
+ * fetch, or fs. Assert the facade's sequencing:
+ *   up()    — meshUp (preflight → make up → readiness) → dash hook (only when
+ *             saga-dash is in the closure) → topo-WAVE service launch, deps first.
+ *   seed()  — offline then online steps via the Runner; fatal aborts, warn continues.
+ *   verify()— probe each URL; tolerate by id or repo.
+ *   down()  — stopServices in reverse launch order.
+ *   reset()/login() — delegated to up.sh via the `delegate` seam (M4).
+ */
+
+import { describe, expect, it } from 'vitest';
+import { computeClosure } from '../core/closure.js';
+import { defaultLaunchContext } from '../core/launch-plan.js';
+import type { LaunchContext } from '../core/launch-plan.js';
+import { manifest } from '../core/manifest/index.js';
+import type { RepoKey, ServiceId } from '../core/manifest/index.js';
+import { healthProbes } from '../core/probe-plan.js';
+import { composeSeedPlan } from '../core/seed/compose-seed-plan.js';
+import { makeStackApi } from '../stack-api.js';
+import type { Runtime } from '../stack-api.js';
+import type {
+  DashFs,
+  HealthProber,
+  LaunchResult,
+  LaunchSpec,
+  MeshExec,
+  PortProbe,
+  RunResult,
+  Runner,
+  ScriptInvocation,
+  ServiceLauncher,
+  StopResult,
+} from '../runtime/index.js';
+
+// ── fakes ──────────────────────────────────────────────────────────────────
+
+const REPO_ROOTS = {
+  SOA: '/dev/soa',
+  ROSTERING: '/dev/rostering',
+  PROGRAM_HUB: '/dev/program-hub',
+  SAGA_DASH: '/dev/saga-dash',
+  SDS: '/dev/student-data-system',
+  QBOARD: '/dev/qboard',
+  RTSM: '/dev/rtsm',
+  FLEEK: '/dev/fleek',
+} as Record<RepoKey, string>;
+
+function ctx(): LaunchContext {
+  return defaultLaunchContext({ repoRoots: REPO_ROOTS, syntheticDevDir: '/dev/soa/tools/synthetic-dev' });
+}
+
+interface Fakes {
+  launches: LaunchSpec[];
+  stopped: string[];
+  runs: ScriptInvocation[];
+  meshExecs: { container: string; cmd: string }[];
+  dashCalls: string[];
+  delegated: ScriptInvocation[];
+}
+
+function makeRuntime(overrides: Partial<Runtime> = {}): { runtime: Runtime; fakes: Fakes } {
+  const fakes: Fakes = { launches: [], stopped: [], runs: [], meshExecs: [], dashCalls: [], delegated: [] };
+
+  const launcher: ServiceLauncher = {
+    async launch(spec: LaunchSpec): Promise<LaunchResult> {
+      fakes.launches.push(spec);
+      return { id: spec.id, ok: true, pid: 1000 + fakes.launches.length };
+    },
+    async stopServices(ids: string[]): Promise<StopResult[]> {
+      fakes.stopped.push(...ids);
+      return ids.map((id) => ({ id, stopped: true, pid: 1 }));
+    },
+  };
+  const meshExec: MeshExec = {
+    async ready(container: string, readinessCmd: string): Promise<boolean> {
+      fakes.meshExecs.push({ container, cmd: readinessCmd });
+      return true;
+    },
+  };
+  const portProbe: PortProbe = {
+    async dockerHolder(): Promise<string | null> {
+      return null;
+    },
+    async listening(): Promise<boolean> {
+      return false;
+    },
+  };
+  const dashFs: DashFs = {
+    existsDir: (p: string) => {
+      fakes.dashCalls.push(`existsDir:${p}`);
+      return true;
+    },
+    existsFile: () => false,
+    remove: (p: string) => fakes.dashCalls.push(`remove:${p}`),
+    write: (p: string) => fakes.dashCalls.push(`write:${p}`),
+  };
+  const prober: HealthProber = {
+    async probe(url: string) {
+      // content-api runs on :3009 — mark it down so the verify/tolerate test bites.
+      return url.includes(':3009') ? { ok: false } : { ok: true, status: 200 };
+    },
+  };
+  const runner: Runner = {
+    async run(spec: ScriptInvocation): Promise<RunResult> {
+      fakes.runs.push(spec);
+      return { code: 0 };
+    },
+  };
+
+  const runtime: Runtime = {
+    lane: 'stack',
+    launchContext: ctx(),
+    soaRoot: REPO_ROOTS.SOA,
+    sagaDashRoot: REPO_ROOTS.SAGA_DASH,
+    launcher,
+    meshExec,
+    portProbe,
+    dashFs,
+    prober,
+    runner,
+    delegate: async (plan) => {
+      fakes.delegated.push({ cwd: '', command: 'up.sh', args: plan.args, env: plan.env });
+      return 0;
+    },
+    ...overrides,
+  };
+  return { runtime, fakes };
+}
+
+// ── up() ─────────────────────────────────────────────────────────────────────
+
+describe('StackApi.up — native partial-stack bring-up', () => {
+  it('mesh + topo-wave launch: deps before dependents, no dash hook when saga-dash absent', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['scheduling-api', 'sessions-api'] as ServiceId[]);
+
+    const res = await api.up(closure.services);
+
+    expect(res.ok).toBe(true);
+    // launch order is the topo flatten: iam-api → programs-api → scheduling-api → sessions-api.
+    expect(fakes.launches.map((s) => s.id)).toEqual([
+      'iam-api',
+      'programs-api',
+      'scheduling-api',
+      'sessions-api',
+    ]);
+    // command split from `pnpm dev`.
+    expect(fakes.launches[0].command).toBe('pnpm');
+    expect(fakes.launches[0].args).toEqual(['dev']);
+    // saga-dash not in the closure ⇒ the dash prelaunch hook never touched the fs.
+    expect(fakes.dashCalls).toEqual([]);
+    // mesh: only the closure's units (postgres + rabbitmq) were readiness-gated.
+    expect(res.mesh.units.map((u) => u.id)).toEqual(['postgres', 'rabbitmq']);
+    // `make up` ran in <soa>/infra.
+    const makeUp = fakes.runs.find((r) => r.command === 'make');
+    expect(makeUp?.cwd).toBe('/dev/soa/infra');
+  });
+
+  it('launch env is FAITHFUL + fully resolved (no dangling tokens)', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
+    await api.up(closure.services);
+
+    const sched = fakes.launches.find((s) => s.id === 'scheduling-api');
+    expect(sched).toBeDefined();
+    // tokens resolved: DATABASE_URL ← SCHEDULING_DB_URL, RABBITMQ_URL ← MESH_MQ, CORS_ORIGIN ← DASH_URL.
+    expect(sched?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:5432/scheduling');
+    expect(sched?.env.RABBITMQ_URL).toBe('amqp://rabbitmq_admin:password123@localhost:5672');
+    expect(sched?.env.CORS_ORIGIN).toBe('http://localhost:8900');
+    // No env value still carries a ${TOKEN}.
+    for (const spec of fakes.launches) {
+      for (const v of Object.values(spec.env)) expect(v).not.toMatch(/\$\{/);
+    }
+    // health URL built from the resolved stack-lane port.
+    expect(sched?.healthUrl).toBe('http://localhost:3008/health');
+  });
+
+  it('runs the dash prelaunch hook when saga-dash is in the closure', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['saga-dash'] as ServiceId[]);
+    const res = await api.up(closure.services);
+
+    expect(res.dash?.action).toBe('noop-absent'); // existsFile:false, non-tunnel ⇒ nothing to remove
+    expect(fakes.dashCalls.some((c) => c.startsWith('existsDir:'))).toBe(true);
+    expect(fakes.launches.some((s) => s.id === 'saga-dash')).toBe(true);
+  });
+
+  it('aborts (ok:false) and stops launching when a wave service never goes healthy', async () => {
+    const { runtime, fakes } = makeRuntime({
+      launcher: {
+        async launch(spec: LaunchSpec): Promise<LaunchResult> {
+          fakes.launches.push(spec);
+          return { id: spec.id, ok: spec.id !== 'iam-api' }; // iam-api fails health
+        },
+        async stopServices(): Promise<StopResult[]> {
+          return [];
+        },
+      },
+    });
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
+    const res = await api.up(closure.services);
+
+    expect(res.ok).toBe(false);
+    expect(res.failedAt).toBe('iam-api');
+    // iam-api is wave 1; dependents are never launched after the wave fails.
+    expect(fakes.launches.map((s) => s.id)).toEqual(['iam-api']);
+  });
+
+  it('aborts before launch when the mesh preflight finds a port conflict', async () => {
+    const { runtime, fakes } = makeRuntime({
+      portProbe: {
+        async dockerHolder(port: number): Promise<string | null> {
+          return port === 5432 ? 'rogue-postgres' : null;
+        },
+        async listening(): Promise<boolean> {
+          return false;
+        },
+      },
+    });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services);
+
+    expect(res.ok).toBe(false);
+    expect(res.mesh.conflicts.map((c) => c.port)).toContain(5432);
+    expect(fakes.launches).toEqual([]); // never reached the launch stage
+    expect(fakes.runs.some((r) => r.command === 'make')).toBe(false); // never ran make up
+  });
+});
+
+// ── seed() ─────────────────────────────────────────────────────────────────
+
+describe('StackApi.seed — offline then online via the Runner', () => {
+  it('runs the roster offline steps in order, none online, resolved cwds', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const plan = composeSeedPlan(
+      { profile: 'roster' },
+      new Set<ServiceId>(['iam-api', 'programs-api', 'scheduling-api', 'sessions-api']),
+      new Set<ServiceId>(),
+    );
+    const res = await api.seed(plan);
+
+    expect(res.ok).toBe(true);
+    expect(res.ran.offline).toEqual(['iam-dev-user', 'iam', 'sessions']);
+    expect(res.ran.online).toEqual([]);
+    // iam steps run under the iam-db package in PROGRAM_HUB? No — iam-api repo. Assert cwd is resolved (absolute).
+    const iamRun = fakes.runs.find((r) => r.args.includes('db:seed') && r.cwd.includes('iam-db'));
+    expect(iamRun?.cwd.startsWith('/dev/')).toBe(true);
+  });
+
+  it('a FATAL non-zero step aborts the run; a WARN step continues', async () => {
+    // Runner fails the `iam` db:seed (fatal) ⇒ run aborts at it.
+    const { runtime } = makeRuntime({
+      runner: {
+        async run(spec: ScriptInvocation): Promise<RunResult> {
+          const isIamSeed = spec.cwd.includes('iam-db') && spec.args.includes('db:seed');
+          return { code: isIamSeed ? 1 : 0 };
+        },
+      },
+    });
+    const api = makeStackApi(manifest, runtime);
+    const plan = composeSeedPlan(
+      { profile: 'roster' },
+      new Set<ServiceId>(['iam-api', 'sessions-api']),
+      new Set<ServiceId>(),
+    );
+    const res = await api.seed(plan);
+
+    expect(res.ok).toBe(false);
+    expect(res.failed).toBe('iam');
+    expect(res.ran.offline).toEqual(['iam-dev-user']); // ran before the fatal step
+  });
+
+  it('online content step + its warn-mode optional tail (token-expanded env) run after services up', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const plan = composeSeedPlan(
+      { profile: 'full' },
+      new Set<ServiceId>(['iam-api', 'programs-api', 'scheduling-api', 'sessions-api', 'content-api']),
+      new Set<ServiceId>(),
+    );
+    const res = await api.seed(plan);
+
+    expect(res.ok).toBe(true);
+    expect(res.ran.online).toContain('content');
+    // the demo-polls optional step resolves CONTENT_API from the launch tokens.
+    const demoPolls = fakes.runs.find((r) => r.args.includes('seed-demo-polls.mjs'));
+    expect(demoPolls?.env.CONTENT_API).toBe('http://localhost:3009');
+    // and runs from the synthetic-dev tool dir under SOA (the $SCRIPT_DIR shim).
+    expect(demoPolls?.cwd).toBe('/dev/soa/tools/synthetic-dev');
+  });
+});
+
+// ── verify() / down() / reset() / login() ───────────────────────────────────
+
+describe('StackApi.verify — manifest probes + tolerate', () => {
+  it('fails on a down required service unless tolerated by id or repo', async () => {
+    const { runtime } = makeRuntime(); // prober answers content down
+    const api = makeStackApi(manifest, runtime);
+    const probes = healthProbes(manifest, ['iam-api', 'content-api'] as ServiceId[]);
+
+    const strict = await api.verify(probes);
+    expect(strict.passed).toBe(false);
+    expect(strict.rows.find((r) => r.id === 'content-api')?.ok).toBe(false);
+
+    const tolerated = await api.verify(probes, { tolerate: ['content-api'] });
+    expect(tolerated.passed).toBe(true);
+    expect(tolerated.rows.find((r) => r.id === 'content-api')?.tolerated).toBe(true);
+  });
+});
+
+describe('StackApi.down — stop in reverse launch order', () => {
+  it('stops dependents before dependencies', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
+    await api.down(closure.services);
+    // closure(scheduling-api) = {iam-api, scheduling-api}; stop is the reverse.
+    expect(fakes.stopped).toEqual(['scheduling-api', 'iam-api']);
+  });
+});
+
+describe('StackApi.reset / login — delegated to up.sh (M4)', () => {
+  it('reset delegates `up.sh --reset`', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.reset(['iam-api'] as ServiceId[]);
+    expect(res).toEqual({ delegated: true, code: 0 });
+    expect(fakes.delegated[0].args).toEqual(['--reset']);
+  });
+
+  it('login delegates `up.sh --login [email]`', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    await api.login('teacher@saga.org');
+    expect(fakes.delegated[0].args).toEqual(['--login', 'teacher@saga.org']);
+  });
+
+  it('reset throws without a delegate (native partial reset is M6)', async () => {
+    const { runtime } = makeRuntime({ delegate: undefined });
+    const api = makeStackApi(manifest, runtime);
+    await expect(api.reset(['iam-api'] as ServiceId[])).rejects.toThrow(/M6/);
+  });
+});

@@ -14,6 +14,7 @@
 export * from './manifest/index.js';
 export * from './closure.js';
 export * from './launch-order.js';
+export * from './launch-plan.js';
 export * from './want-service.js';
 export * from './flag-map.js';
 export * from './e2e-map.js';

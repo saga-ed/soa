@@ -1482,7 +1482,11 @@ services_up(){
   # VITE_ADS_ADM_REAL=true: serve the ADS/ADM page (/adm) against the real
   # ads-adm-api (:5005) instead of the mock generators — the default for this
   # integration stack (see saga-dash docs/dev-toggle-ads-adm.md).
-  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" VITE_ADS_ADM_REAL=true $(tunnel_env saga-dash)
+  # VITE_SESSION_MEASURED=true: enable the #280 SESSION measured-time overlay
+  # (SessionAttendanceFeed) so the live telemetry dosage path is exercised. The
+  # collator already populates timeInTutorialMs/segments on the payload, so the
+  # number renders either way; the flag activates the dash-side feed module.
+  launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" VITE_ADS_ADM_REAL=true VITE_SESSION_MEASURED=true $(tunnel_env saga-dash)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
   # always discovers via GET /fleet/discover (404 without fleet mode → the
   # browser's "Fleet discovery failed … Fleet mode may not be active"), so the
@@ -1512,6 +1516,7 @@ services_up(){
      IAM_API_URL="$IAM_URL" JWT_ISSUER="https://iam.saga.org" \
      ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
      SESSIONS_API_BASE_URL="http://localhost:3007" \
+     RABBITMQ_URL="$MESH_MQ" \
      SAGA_API_TARGET="$SAGA_API_TARGET" \
      CONTENT_API_URL="$CONTENT_API_URL" \
      PUBLIC_API_URL="$CONNECT_API_URL" \

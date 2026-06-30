@@ -208,6 +208,12 @@ COACH_API_PORT=6105
 COACH_WEB_PORT=8800
 COACH_API_URL="http://localhost:$COACH_API_PORT"
 COACH_WEB_URL="http://localhost:$COACH_WEB_PORT"
+# Bare hostname for coach-api's CORS allow-list. SOA api-core's CORS matches the
+# request Origin's *hostname* (new URL(origin).hostname) against this list — so it
+# wants a domain ("localhost"), NOT a full URL. Passing $COACH_WEB_URL here makes
+# "localhost" !== "http://localhost:8800" → origin rejected → no ACAO header →
+# browser blocks GET /coach/v1/config (coach-web hangs on its loading screen).
+COACH_WEB_HOST="localhost"
 # coach's upstream-saga config surface (frontend-only; coach-web reads it via
 # GET /coach/v1/config — the backend no longer calls saga_api). Stays remote.
 SAGA_API_TARGET_COACH="${SAGA_API_TARGET_COACH:-https://staging.wootmath.com}"
@@ -1481,8 +1487,9 @@ services_up(){
   # the iss the local iam-api STAMPS ($IAM_ISSUER = iam.saga.org), NOT $IAM_URL —
   # coach validates the iss claim, and a token minted here carries iss=iam.saga.org
   # regardless of the :3010 host (verified: AUTH_ISSUER=$IAM_URL → 401 on every
-  # token). CORS uses EXPRESS_SERVER_CORSALLOWEDDOMAINS (the coach-web origin), NOT
-  # CORS_ORIGIN. SAGA_API_TARGET is a frontend-only config value (coach-web reads it
+  # token). CORS uses EXPRESS_SERVER_CORSALLOWEDDOMAINS (a hostname allow-list —
+  # $COACH_WEB_HOST, NOT a URL; api-core matches origin.hostname), NOT CORS_ORIGIN.
+  # SAGA_API_TARGET is a frontend-only config value (coach-web reads it
   # via GET /coach/v1/config); the backend no longer calls saga_api.
   # RABBITMQ_ENABLED stays FALSE: turning the iam-event consumer on currently crashes
   # coach-api at boot — its createIamEventConsumer DI binding is async (toDynamicValue)
@@ -1498,7 +1505,7 @@ services_up(){
      MONGO_HOST=localhost MONGO_PORT="$CONNECT_MONGO_PORT" MONGO_DATABASE=saga_local CONTENT_DATABASE=wmlms_local \
      AUTH_AUTHENABLED=true IAM_API_TARGET="$IAM_URL" AUTH_JWKSURL="$IAM_URL/.well-known/jwks.json" AUTH_ISSUER="$IAM_ISSUER" \
      RABBITMQ_ENABLED=false RABBITMQ_URL="$MESH_MQ" \
-     EXPRESS_SERVER_CORSALLOWEDDOMAINS="$COACH_WEB_URL" \
+     EXPRESS_SERVER_CORSALLOWEDDOMAINS="$COACH_WEB_HOST" \
      SAGA_API_TARGET="$SAGA_API_TARGET_COACH" \
      $(sandbox_env coach-api) $(tunnel_env coach-api)
   # content-api (:3009 — default :3010 collides with iam): the MODERN poll/content

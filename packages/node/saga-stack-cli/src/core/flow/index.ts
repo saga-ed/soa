@@ -1,16 +1,16 @@
 /**
- * `core/flow` barrel + the `resolveFlow` stub (plan §5, saga-ed/soa#214).
+ * `core/flow` barrel (plan §5, saga-ed/soa#214).
  *
- * The full resolver (closure union, prerequisite recursion, env clamp) lands in
- * M5 (§5.4). M0 ships the schema + inferred types + a type-correct stub so the
- * command layer and `core/index.ts` can compile against the final signature.
+ * Re-exports the `flows.json` schema + inferred types (M0), the real PURE
+ * `resolveFlow` + `ResolvedFlow` shape (M5, `./resolve.js`), the built-in SPA
+ * registry (`./spa-registry.js`), the PURE flow-discovery path resolution
+ * (`./discover.js`), and the centralized date env / e2e date-kit (`./env.js`,
+ * `./e2e-kit.js`). The fs lookup that reads + zod-parses a discovered
+ * `flows.json` is a thin runtime helper (`runtime/flows.ts`), keeping this whole
+ * sub-tree IO-free.
  *
- * PURE: types + zod schema re-exports + a pure (throwing) stub.
+ * PURE: types + zod schema re-exports + pure functions only.
  */
-
-import type { ServiceId } from '../manifest/index.js';
-import type { SeedSelection } from '../seed/index.js';
-import type { FlowDef, FlowManifest, SpaDescriptor, StageDef } from './types.js';
 
 export {
   flowDefSchema,
@@ -30,43 +30,30 @@ export type {
   StageDef,
 } from './types.js';
 
-/** Options narrowing which stages of a flow to resolve (progressive `--through`). */
-export interface ResolveFlowOptions {
-  /** Resolve up to and including this stage id (progressive flows). */
-  throughStage?: string;
-  /** Run only the terminal stage, stripping Playwright deps (`--stage-only`). */
-  stageOnly?: boolean;
-}
+// M5 centralized date env (the Monday-flake fix) + the stable e2e date-kit
+// surface (plan §5.5). `computeEnv` is the CLI-authoritative injector; `e2e-kit`
+// re-exports the pure helpers for env-first SPA specs / the future package.
+export { computeEnv } from './env.js';
+export {
+  ENV_OCCURRENCE_DATE,
+  ENV_TERM_START,
+  ENV_TERM_END,
+  fmtLocal,
+  mondayOfWeekOf,
+  occurrenceDate,
+  todayOrNextWeekday,
+} from './e2e-kit.js';
 
-/**
- * A flow resolved into the inputs the runner needs: the owning SPA, the flow,
- * the selected stages, the union of `requiredSystems` (∪ `spa.system`, fed to
- * `computeClosure`), and the effective seed selection. Surfaced by `--dry-run`.
- */
-export interface ResolvedFlow {
-  spa: SpaDescriptor;
-  flow: FlowDef;
-  /** Stages selected for this run (after `throughStage`/`stageOnly`). */
-  stages: StageDef[];
-  /** Union of selected stages' `requiredSystems` ∪ `{ spa.system, iam-api }`. */
-  requiredSystems: ServiceId[];
-  /** Effective seed selection (flow-level, possibly overridden per stage). */
-  seed?: SeedSelection;
-}
+export { resolveFlow } from './resolve.js';
+export type { ResolvedFlow, ResolvedPlaywright, ResolveFlowOptions } from './resolve.js';
 
-/**
- * Resolve a named flow from a loaded `FlowManifest` into a `ResolvedFlow`.
- *
- * TODO(M5, plan §5.4): implement — (1) look up `flowName` (throw on miss);
- * (2) recurse `prerequisite` (mark SKIP_RESET, force headless); (3) select
- * stages up to `throughStage`; (4) union `requiredSystems` ∪ `{spa.system,
- * iam-api}`; (5) merge per-stage seed over the flow seed. M0 is a type-correct
- * placeholder so downstream signatures compile.
- */
-export function resolveFlow(
-  _manifest: FlowManifest,
-  _flowName: string,
-  _opts: ResolveFlowOptions = {},
-): ResolvedFlow {
-  throw new Error('resolveFlow is implemented in M5 (flow runner) — see plan §5.4');
-}
+export { knownSpaIds, lookupSpa, SPA_REGISTRY } from './spa-registry.js';
+
+export {
+  flowsCandidatePaths,
+  flowsJsonPath,
+  parseFlowRef,
+  resolveRepoRoot,
+  splitSpaPaths,
+} from './discover.js';
+export type { DiscoverInput, EnvLookup, FlowRef } from './discover.js';

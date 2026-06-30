@@ -58,6 +58,11 @@ export const seedSelectionSchema = z.object({
   profile: seedProfileSchema,
   reset: z.boolean().optional(),
   addOns: z.array(seedAddOnSchema).optional(),
+  // Per-system profile overrides (plan §5): the "which systems seed at which
+  // profile" knob, authored inline in a flow/stage `seed` block. An ARRAY (not
+  // an enum-keyed record) so the zod-inferred type is structurally IDENTICAL to
+  // the canonical `SystemSeedOverride[]` — the compile guard below asserts it.
+  perSystem: z.array(z.object({ system: serviceIdSchema, profile: seedProfileSchema })).optional(),
   only: z.array(serviceIdSchema).optional(),
   exclude: z.array(z.string()).optional(),
 });

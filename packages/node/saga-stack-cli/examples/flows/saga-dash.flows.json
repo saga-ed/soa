@@ -1,0 +1,99 @@
+{
+  "$comment": "EXAMPLE / AUTHORING TEMPLATE bundled with @saga-ed/saga-stack-cli (plan §5.2). This mirrors saga-dash/apps/web/dash/e2e/flows.json (authored in the saga-dash repo as a FOLLOW-UP PR). Validated by core/flow `flowManifestSchema` (zod). Used by the CLI's flow-resolver tests and as the copy-paste template for onboarding a new SPA.",
+  "schemaVersion": 1,
+  "spa": {
+    "id": "saga-dash",
+    "system": "saga-dash",
+    "repoEnvVar": "SAGA_DASH",
+    "defaultRepoSubpath": "saga-dash",
+    "appDir": "apps/web/dash",
+    "e2eDir": "apps/web/dash/e2e",
+    "playwrightConfig": "playwright.stack.config.ts"
+  },
+  "flows": [
+    {
+      "name": "journey",
+      "description": "Progressive admin journey: build a tutoring program end-to-end (roster → program → enrollment → pods → schedule → sessions → attendance).",
+      "lanes": ["stack", "sandbox"],
+      "progressive": true,
+      "foreground": true,
+      "seed": { "reset": true, "profile": "roster" },
+      "stages": [
+        {
+          "id": "roster",
+          "phase": 1,
+          "project": "stage-1-roster",
+          "spec": "roster/csv-upload-view.e2e.test.ts",
+          "requiredSystems": ["sis-api", "programs-api"]
+        },
+        {
+          "id": "program",
+          "phase": 2,
+          "project": "stage-2-program-creation",
+          "spec": "journey/program-creation.e2e.test.ts",
+          "requiredSystems": ["programs-api"]
+        },
+        {
+          "id": "enrollment",
+          "phase": 3,
+          "project": "stage-3-enrollment-periods",
+          "spec": "journey/enrollment-periods.e2e.test.ts",
+          "requiredSystems": ["programs-api"]
+        },
+        {
+          "id": "pods",
+          "phase": 4,
+          "project": "stage-4-pods",
+          "spec": "journey/pods.e2e.test.ts",
+          "requiredSystems": ["programs-api"]
+        },
+        {
+          "id": "schedule",
+          "phase": 5,
+          "project": "stage-5-schedule",
+          "spec": "journey/schedule.e2e.test.ts",
+          "requiredSystems": ["scheduling-api", "programs-api"]
+        },
+        {
+          "id": "sessions",
+          "phase": 6,
+          "project": "stage-6-sessions",
+          "spec": "journey/sessions.e2e.test.ts",
+          "requiredSystems": ["sessions-api"]
+        },
+        {
+          "id": "attendance",
+          "phase": 7,
+          "project": "stage-7-attendance",
+          "spec": "journey/attendance.e2e.test.ts",
+          "requiredSystems": ["ads-adm-api", "sessions-api", "iam-api"]
+        },
+        {
+          "id": "attendance-personas",
+          "phase": 8,
+          "project": "stage-8-attendance-personas",
+          "spec": "journey/attendance-personas.e2e.test.ts",
+          "requiredSystems": ["ads-adm-api", "sessions-api", "iam-api"]
+        }
+      ]
+    },
+    {
+      "name": "connect-session",
+      "description": "Live interactive Connect tutoring session (1 tutor + 2 students). Builds the journey end-state through 'schedule' first, then drives a real Connect room.",
+      "lanes": ["stack"],
+      "progressive": false,
+      "foreground": true,
+      "av": true,
+      "prerequisite": { "flow": "journey", "throughStage": "schedule" },
+      "stages": [
+        {
+          "id": "interactive-connect",
+          "project": "interactive-connect",
+          "spec": "interactive/connect-session.e2e.test.ts",
+          "requiredSystems": ["connect-web", "connect-api", "rtsm-api", "sessions-api"],
+          "tags": ["@interactive"]
+        }
+      ]
+    }
+  ]
+}

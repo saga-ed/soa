@@ -1,92 +1,205 @@
 /**
- * `saga-stack e2e run` — run the saga-dash journey e2e pipeline (M2 thin wrapper
- * over check-e2e.sh).
+ * `saga-stack e2e run [<spa>/]<flow>` — run an e2e flow IN-PROCESS (M5).
  *
- * Maps flags → `e2eMap.e2eRun()` → check-e2e.sh, which runs the journey THROUGH
- * a phase (Playwright projects chained via `dependencies`, so phase N runs 1..N
- * against a freshly reset stack) and delegates to run-stack-e2e.sh. FOREGROUND BY
- * DEFAULT: the test browser is headed and an inspect browser opens afterwards;
- * stdio is inherited so those holds own the user's TTY.
+ * This is the M5 native orchestrator that REPLACES the M2 thin shell over
+ * check-e2e.sh. It discovers the SPA's `flows.json` (registry repo path, or the
+ * package's BUNDLED example for the built-in `saga-dash` id when the repo hasn't
+ * authored one yet — and it SAYS SO), resolves the named flow to a `ResolvedFlow`
+ * (dependency closure + stages + seed + prerequisite), and drives the SAME
+ * six-method `StackApi` + a single Playwright spawn the bash pipeline did — but
+ * via the in-process M4 facade, no up.sh, no second oclif invocation:
  *
- * `--phase`/`--through` pick the terminal phase; the lifecycle knobs (`--skip-
- * reset`, `--inspect`/`--no-inspect`, `--pause-at-end`, `--inspect-user`) become
- * the env check-e2e.sh forwards to run-stack-e2e.sh. Anything after `--` passes
- * straight through to Playwright.
+ *   resolve flow → recurse prerequisite (headless, skip-reset) → StackApi.up(closure)
+ *   → reset+seed (unless --skip-reset) → verify({tolerate:[spa.system]})
+ *   → computeEnv(flow, now)  [now = new Date() AT THE COMMAND LAYER → the PURE clamp]
+ *   → spawn `pnpm exec playwright test --config … --project <terminal stage>
+ *      [--grep-invert @interactive] [--headed]` in the SPA's appDir via the Runner.
  *
- * M2 SCOPE: this is the STACK-lane journey. The deployed sandbox lane and the
- * native flow/phase registry land at M5 (plan §3.2 / §7.2).
+ * `--dry-run` is the safe, testable smoke: it prints the resolved flow + closure
+ * + seed plan + the Playwright argv + the injected PLAYWRIGHT_OCCURRENCE_DATE and
+ * exits WITHOUT touching docker / pnpm / a single seam.
  *
- *   node bin/dev.js e2e run --phase 2 --headless
- *   node bin/dev.js e2e run --skip-reset -- --debug
+ *   node bin/dev.js e2e run journey --through pods --dry-run
+ *   node bin/dev.js e2e run saga-dash/journey --through 2 --headless
+ *   node bin/dev.js e2e run journey --skip-reset -- --debug
  */
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import * as e2eMap from '../../core/e2e-map.js';
+import type { WorkspaceFlags } from '../../base-command.js';
+import { parseFlowRef, resolveFlow } from '../../core/flow/index.js';
+import { manifest as serviceManifest } from '../../core/manifest/index.js';
+import type { Lane } from '../../core/manifest/index.js';
+import type { ScriptPlan } from '../../core/flag-map.js';
+import { makeStackApi } from '../../stack-api.js';
+import {
+  buildStackContext,
+  describeResolved,
+  discoverFlowManifest,
+  executeResolvedFlow,
+  FlowExecError,
+  resolveAppCwd,
+} from '../../e2e-orchestrate.js';
+
+/** The default SPA when the flow ref has no `<spa>/` prefix. */
+const DEFAULT_SPA = 'saga-dash';
 
 export default class E2eRun extends BaseCommand {
   static description =
-    'Run the saga-dash journey e2e pipeline through a phase (wraps check-e2e.sh; foreground by default).';
+    'Run an e2e flow in-process: discover flows.json -> closure -> StackApi up/reset/seed/verify -> Playwright. --dry-run prints the plan.';
 
   static examples = [
-    '<%= config.bin %> <%= command.id %> --phase 2 --headless',
-    '<%= config.bin %> <%= command.id %> --skip-reset -- --debug',
+    '<%= config.bin %> <%= command.id %> journey --through pods --dry-run',
+    '<%= config.bin %> <%= command.id %> saga-dash/journey --through 2 --headless',
+    '<%= config.bin %> <%= command.id %> journey --skip-reset -- --debug',
   ];
 
-  // Allow trailing playwright passthrough args (after `--`).
+  // One required positional ([<spa>/]<flow>) + trailing playwright passthrough (after `--`).
   static strict = false;
+
+  static args = {};
 
   static flags = {
     ...BaseCommand.baseFlags,
-    phase: Flags.string({
-      description: 'run the journey THROUGH this phase (name or number; earlier phases run first)',
-    }),
     through: Flags.string({
-      description: 'alias of --phase (run the journey through this phase)',
+      description: 'run THROUGH this phase/stage (name, number, or project); progressive flows run 1..N',
+    }),
+    phase: Flags.string({
+      description: 'alias of --through',
+    }),
+    lane: Flags.string({
+      description: 'URL lane to target',
+      options: ['stack', 'sandbox'],
+      default: 'stack',
+    }),
+    headed: Flags.boolean({
+      description: 'force a headed (windowed) run (foreground flows are headed by default)',
+      default: false,
     }),
     headless: Flags.boolean({
-      description: 'CI-style run: no browser windows (default is headed/foreground)',
+      description: 'force a headless (CI-style) run; flips a foreground flow off headed',
       default: false,
     }),
     'skip-reset': Flags.boolean({
-      description: 'reuse the current stack state; skip the up.sh reset+seed (env SKIP_RESET=1)',
+      description: 'reuse the current stack state; skip the reset+seed before Playwright',
       default: false,
     }),
-    inspect: Flags.boolean({
-      description: 'after the suite, open a logged-in browser on the built state (env INSPECT=1)',
-      default: false,
+    'spa-path': Flags.string({
+      description: 'explicit path to a flows.json (file or dir) — highest-priority discovery override',
     }),
-    'no-inspect': Flags.boolean({
-      description: 'stay headed but skip the post-suite inspect browser (env INSPECT=0)',
+    'dry-run': Flags.boolean({
+      description: 'plan only: print the resolved flow + closure + seed plan + playwright argv + occurrence date; touch nothing',
       default: false,
-    }),
-    'pause-at-end': Flags.boolean({
-      description: 'pause inside each test at its final state (Playwright Inspector; env PAUSE_AT_END=1)',
-      default: false,
-    }),
-    'inspect-user': Flags.string({
-      description: 'persona for the inspect browser (env INSPECT_USER; default empty@saga.org)',
     }),
   };
 
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(E2eRun);
 
-    if (flags.inspect && flags['no-inspect']) {
-      this.error('--inspect and --no-inspect are mutually exclusive.');
+    if (flags.headed && flags.headless) {
+      this.error('--headed and --headless are mutually exclusive.');
     }
 
-    const plan = e2eMap.e2eRun({
-      phase: flags.phase ?? flags.through,
-      headless: flags.headless,
-      skipReset: flags['skip-reset'],
-      inspect: flags.inspect,
-      noInspect: flags['no-inspect'],
-      pauseAtEnd: flags['pause-at-end'],
-      inspectUser: flags['inspect-user'],
-      passthrough: argv as string[],
+    // The first non-flag token is the flow ref; the rest (after `--`) are passthrough.
+    const positionals = (argv as string[]).filter((a) => !a.startsWith('-'));
+    const ref = positionals[0];
+    if (!ref) {
+      this.error('missing flow argument. Usage: e2e run [<spa>/]<flow> [--through <phase>]');
+    }
+    const passthrough = (argv as string[]).filter((a) => a !== ref);
+
+    const { spaId, flowName } = parseRef(ref);
+    const lane = flags.lane as Lane;
+
+    // Discover + load the flows.json (bundled-example fallback for built-in saga-dash).
+    const disco = discoverFlowManifest(spaId, flags, process.env);
+    if (disco.usedBundledExample) {
+      this.warn(
+        `no flows.json found for '${spaId}' in the repo; using the BUNDLED EXAMPLE shipped with @saga-ed/saga-stack-cli (${disco.sourcePath}). Author ${spaId}'s own e2e/flows.json to override.`,
+      );
+    }
+
+    const headed = flags.headless ? false : flags.headed ? true : undefined;
+    const resolved = resolveFlow(disco.manifest, flowName, {
+      throughPhase: flags.through ?? flags.phase,
+      lane,
+      headed,
     });
 
-    await this.runScript(plan, flags);
+    const appCwd = resolveAppCwd(resolved.spa, flags, process.env);
+    const now = new Date(); // the ONLY wall-clock read — fed into the pure clamp.
+
+    // ── --dry-run: pure projection, no IO, no seam. ──
+    if (flags['dry-run']) {
+      const desc = describeResolved(resolved, {
+        now,
+        lane,
+        appCwd,
+        passthrough,
+        skipReset: flags['skip-reset'],
+      });
+      this.emit(flags, { dryRun: true, ...desc } as unknown as Record<string, unknown>, dryRunLines(desc));
+      return;
+    }
+
+    // ── real run: build the in-process StackApi from the BaseCommand seams. ──
+    const seams = {
+      launcher: this.getLauncher(flags['state-dir']),
+      meshExec: this.getMeshExec(),
+      portProbe: this.getPortProbe(),
+      dashFs: this.getDashFs(),
+      prober: this.getProber(),
+      runner: this.getRunner(),
+    };
+    const delegate = (plan: ScriptPlan): Promise<number> =>
+      this.runScript(plan, flags as WorkspaceFlags, { propagateExit: false });
+    const { runtime } = buildStackContext(flags, seams, delegate);
+    const api = makeStackApi(serviceManifest, runtime);
+
+    try {
+      const code = await executeResolvedFlow(
+        resolved,
+        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l) },
+        { lane, skipReset: flags['skip-reset'], passthrough },
+      );
+      if (code !== 0) this.exit(code);
+    } catch (err) {
+      if (err instanceof FlowExecError) this.error(err.message);
+      throw err;
+    }
   }
+}
+
+/** Parse `[<spa>/]<flow>` applying the default SPA. */
+function parseRef(ref: string): { spaId: string; flowName: string } {
+  const parsed = parseFlowRef(ref);
+  return { spaId: parsed.spaId ?? DEFAULT_SPA, flowName: parsed.flowName };
+}
+
+/** Human-readable dry-run lines (the JSON shape is emitted separately for --output-json). */
+function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
+  const lines: string[] = [
+    `dry-run: ${d.spa}/${d.flow} (lane ${d.lane}${d.headed ? ', headed' : ', headless'})`,
+    `stages: ${d.stages.join(' -> ')}`,
+    `closure (${d.closure.services.length}): ${d.closure.services.join(', ')}`,
+    `databases: ${d.closure.databases.join(', ') || '(none)'}`,
+    `mesh: ${d.closure.mesh.join(', ') || '(none)'}`,
+    `reset+seed: ${d.reset ? 'yes' : 'no (reuse state)'}`,
+  ];
+  if (d.seed) {
+    lines.push(
+      `  seed offline: ${d.seed.offline.join(', ') || '(none)'}`,
+      `  seed online:  ${d.seed.online.join(', ') || '(none)'}`,
+      `  seed skipped: ${d.seed.skipped.map((s) => `${s.id} (${s.reason})`).join(', ') || '(none)'}`,
+    );
+  }
+  if (d.prerequisite) {
+    lines.push(`prerequisite: ${d.prerequisite.spa}/${d.prerequisite.flow} (through ${d.prerequisite.stages.at(-1)}, headless)`);
+  }
+  lines.push(
+    `PLAYWRIGHT_OCCURRENCE_DATE: ${d.occurrenceDate}`,
+    `playwright cwd: ${d.playwright.cwd}`,
+    `playwright: pnpm ${d.playwright.argv.join(' ')}`,
+  );
+  return lines;
 }

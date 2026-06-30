@@ -28,10 +28,18 @@ export function composeSeedPlan(
   active: Set<ServiceId>,
   restored: Set<ServiceId>,
 ): SeedPlan {
-  // Resolve the selected step-id set: profile ∪ add-ons.
+  // Resolve the selected step-id set: base profile ∪ add-ons ∪ per-system
+  // profile overrides. The per-system override unions in only the steps that
+  // belong to the named system at its (possibly heavier) profile, so a flow can
+  // seed e.g. programs-api at `full` while the base stays `roster` (plan §5).
   const selected = new Set<SeedStepId>(PROFILE_STEPS[sel.profile]);
   for (const addOn of sel.addOns ?? []) {
     for (const id of ADDON_STEPS[addOn]) selected.add(id);
+  }
+  for (const { system, profile } of sel.perSystem ?? []) {
+    for (const id of PROFILE_STEPS[profile]) {
+      if (SEED_STEPS[id].service === system) selected.add(id);
+    }
   }
 
   const onlyServices = sel.only ? new Set<ServiceId>(sel.only) : undefined;

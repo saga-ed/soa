@@ -3,7 +3,7 @@
     "e2e:connect": {
       "aliases": [],
       "args": {},
-      "description": "Open a live interactive Connect session: 1 tutor + 2 students (wraps connect-session.sh; foreground).",
+      "description": "Open a live interactive Connect session: 1 tutor + 2 students (in-process; builds the journey prerequisite, then a headed Connect room).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> --reuse -- --debug"
@@ -94,10 +94,17 @@
           "type": "option"
         },
         "reuse": {
-          "description": "skip the rebuild; run the live session against the current stack state",
+          "description": "skip the journey-prerequisite rebuild + reset; run the live session against the current stack state",
           "name": "reuse",
           "allowNo": false,
           "type": "boolean"
+        },
+        "spa-path": {
+          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
+          "name": "spa-path",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -119,9 +126,10 @@
     "e2e:list": {
       "aliases": [],
       "args": {},
-      "description": "List the saga-dash journey phases (wraps check-e2e.sh --help).",
+      "description": "List discoverable SPAs, their e2e flows, and phases (reads flows.json / the bundled example).",
       "examples": [
-        "<%= config.bin %> <%= command.id %>"
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --output-json"
       ],
       "flags": {
         "porcelain": {
@@ -204,6 +212,13 @@
         "fleek": {
           "description": "override path to the fleek repo checkout",
           "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "spa-path": {
+          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
+          "name": "spa-path",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -228,10 +243,11 @@
     "e2e:run": {
       "aliases": [],
       "args": {},
-      "description": "Run the saga-dash journey e2e pipeline through a phase (wraps check-e2e.sh; foreground by default).",
+      "description": "Run an e2e flow in-process: discover flows.json -> closure -> StackApi up/reset/seed/verify -> Playwright. --dry-run prints the plan.",
       "examples": [
-        "<%= config.bin %> <%= command.id %> --phase 2 --headless",
-        "<%= config.bin %> <%= command.id %> --skip-reset -- --debug"
+        "<%= config.bin %> <%= command.id %> journey --through pods --dry-run",
+        "<%= config.bin %> <%= command.id %> saga-dash/journey --through 2 --headless",
+        "<%= config.bin %> <%= command.id %> journey --skip-reset -- --debug"
       ],
       "flags": {
         "porcelain": {
@@ -318,56 +334,62 @@
           "multiple": false,
           "type": "option"
         },
-        "phase": {
-          "description": "run the journey THROUGH this phase (name or number; earlier phases run first)",
-          "name": "phase",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
         "through": {
-          "description": "alias of --phase (run the journey through this phase)",
+          "description": "run THROUGH this phase/stage (name, number, or project); progressive flows run 1..N",
           "name": "through",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
+        "phase": {
+          "description": "alias of --through",
+          "name": "phase",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "lane": {
+          "description": "URL lane to target",
+          "name": "lane",
+          "default": "stack",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "options": [
+            "stack",
+            "sandbox"
+          ],
+          "type": "option"
+        },
+        "headed": {
+          "description": "force a headed (windowed) run (foreground flows are headed by default)",
+          "name": "headed",
+          "allowNo": false,
+          "type": "boolean"
+        },
         "headless": {
-          "description": "CI-style run: no browser windows (default is headed/foreground)",
+          "description": "force a headless (CI-style) run; flips a foreground flow off headed",
           "name": "headless",
           "allowNo": false,
           "type": "boolean"
         },
         "skip-reset": {
-          "description": "reuse the current stack state; skip the up.sh reset+seed (env SKIP_RESET=1)",
+          "description": "reuse the current stack state; skip the reset+seed before Playwright",
           "name": "skip-reset",
           "allowNo": false,
           "type": "boolean"
         },
-        "inspect": {
-          "description": "after the suite, open a logged-in browser on the built state (env INSPECT=1)",
-          "name": "inspect",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "no-inspect": {
-          "description": "stay headed but skip the post-suite inspect browser (env INSPECT=0)",
-          "name": "no-inspect",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "pause-at-end": {
-          "description": "pause inside each test at its final state (Playwright Inspector; env PAUSE_AT_END=1)",
-          "name": "pause-at-end",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "inspect-user": {
-          "description": "persona for the inspect browser (env INSPECT_USER; default empty@saga.org)",
-          "name": "inspect-user",
+        "spa-path": {
+          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
+          "name": "spa-path",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "dry-run": {
+          "description": "plan only: print the resolved flow + closure + seed plan + playwright argv + occurrence date; touch nothing",
+          "name": "dry-run",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,

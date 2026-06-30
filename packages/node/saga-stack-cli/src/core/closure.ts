@@ -39,6 +39,19 @@ export interface Closure {
 export interface ClosureOpts {
   /** Keep `optional:true` playback services (transcripts/insights/chat). */
   withPlayback?: boolean;
+  /**
+   * Whether to traverse `depKind: 'browser'` edges (default `true`).
+   *
+   * A `browser` edge means a frontend MAY call that backend from SOME page — so
+   * for interactive `stack up --only saga-dash` we follow them and bring the
+   * whole stack up. But an e2e FLOW only exercises specific stages, which list
+   * the backends they actually touch in `requiredSystems`; for those, following
+   * saga-dash's browser edges would drag in every backend and defeat the N-of-M
+   * payoff (plan §5.2 — "content-api is in no journey stage → never launched").
+   * Flow resolution therefore passes `false`: the flow's explicit requiredSystems
+   * drive the launch set, expanding only their hard (url/s2s/event) deps.
+   */
+  followBrowserEdges?: boolean;
 }
 
 /**
@@ -51,6 +64,7 @@ export function computeClosure(
   opts: ClosureOpts = {},
 ): Closure {
   const withPlayback = opts.withPlayback ?? false;
+  const followBrowserEdges = opts.followBrowserEdges ?? true;
 
   const inClosure = new Set<ServiceId>();
   const reasons = new Map<ServiceId, string[]>();
@@ -92,6 +106,8 @@ export function computeClosure(
       if (!depDef) throw new Error(`unknown service id: ${dep}`);
       if (depDef.optional && !withPlayback) continue;
       const kind = def.depKinds[dep] ?? 'url';
+      // Skip browser edges when narrowing a flow closure (see followBrowserEdges).
+      if (kind === 'browser' && !followBrowserEdges) continue;
       addReason(dep, `required by ${id} (${kind})`);
       enqueue(dep);
     }

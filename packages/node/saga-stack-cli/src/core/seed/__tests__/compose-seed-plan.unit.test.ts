@@ -108,3 +108,33 @@ describe('composeSeedPlan — selection refinements', () => {
     expect(plan.skipped).toEqual([]); // excluded ≠ skipped (never requested)
   });
 });
+
+describe('composeSeedPlan — per-system profile overrides (M5)', () => {
+  it('unions ONLY the named system’s steps at the heavier profile onto a roster base', () => {
+    // base roster = {iam-dev-user, iam, sessions}; override seeds programs-api at
+    // full (adds `programs`) WITHOUT pulling content-api in (the rest stay roster).
+    const sel: SeedSelection = { profile: 'roster', perSystem: [{ system: 'programs-api', profile: 'full' }] };
+    const active = set('iam-api', 'sessions-api', 'programs-api', 'content-api');
+    const plan = composeSeedPlan(sel, active, set());
+    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions', 'programs']);
+    // content (the other full-only step) is NOT seeded — heterogeneous profiles.
+    expect(ids(plan.offline)).not.toContain('content');
+  });
+
+  it('is a no-op when the override profile adds nothing new for that system', () => {
+    // iam-api already contributes iam-dev-user + iam at roster; overriding it to
+    // full adds no iam-api steps (full’s extra steps belong to other services).
+    const sel: SeedSelection = { profile: 'roster', perSystem: [{ system: 'iam-api', profile: 'full' }] };
+    const plan = composeSeedPlan(sel, set('iam-api', 'sessions-api'), set());
+    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions']);
+  });
+
+  it('absent perSystem ⇒ identical to the M4 single-profile shape', () => {
+    const base: SeedSelection = { profile: 'full' };
+    const active = set('iam-api', 'sessions-api', 'programs-api', 'content-api');
+    const a = composeSeedPlan(base, active, set());
+    const b = composeSeedPlan({ ...base, perSystem: [] }, active, set());
+    expect(ids(a.offline)).toEqual(ids(b.offline));
+    expect(ids(a.online)).toEqual(ids(b.online));
+  });
+});

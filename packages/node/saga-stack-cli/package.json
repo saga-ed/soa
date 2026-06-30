@@ -42,6 +42,7 @@
   "files": [
     "dist",
     "bin",
+    "examples",
     "oclif.manifest.json",
     "README.md"
   ],

@@ -13,6 +13,18 @@
 
 import type { DbId, ServiceId } from '../manifest/index.js';
 
+/**
+ * Per-system seed override (plan §4.1 / §5, M5). Seeds ONE system's steps at a
+ * (possibly heavier) profile, unioned on top of the base `profile`. Lets a
+ * single flow seed e.g. `sessions-api` + `programs-api` at `full` while the rest
+ * stay at `roster`, without dragging the whole stack to `full`. Additive only —
+ * use `only`/`exclude` to NARROW which systems/steps run.
+ */
+export interface SystemSeedOverride {
+  system: ServiceId;
+  profile: SeedProfile;
+}
+
 /** Base seed profiles (plan §4.1). `roster` is minimal; `full` adds programs+content. */
 export type SeedProfile = 'roster' | 'full';
 
@@ -91,12 +103,20 @@ export interface SeedPlan {
  * `seedSelectionSchema` in `core/flow/types.ts`).
  */
 export interface SeedSelection {
-  /** Base profile. */
+  /** Base profile applied to EVERY active system unless overridden per-system. */
   profile: SeedProfile;
   /** Whether the runner should `reset` before seeding (runner concern; carried for the flow contract). */
   reset?: boolean;
   /** Orthogonal add-ons (`--add playback,qtf`). */
   addOns?: SeedAddOn[];
+  /**
+   * Per-system profile overrides (plan §4.1 / §5, M5): seed THESE systems at a
+   * heavier profile, unioned on top of the base `profile`. Absent ⇒ the single
+   * global `profile` governs every system (the M4 shape — unchanged for M4
+   * callers). This is the "which systems seed at which profile" knob a flow's
+   * `seed` block authors; `only`/`exclude` still narrow the result.
+   */
+  perSystem?: SystemSeedOverride[];
   /** Restrict to steps whose service is in this set (`stack seed --only <svc,…>`). */
   only?: ServiceId[];
   /** Drop these step ids (`stack seed --exclude <id,…>`). */

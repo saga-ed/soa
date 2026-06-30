@@ -32,21 +32,26 @@ export const SPA_REGISTRY: Readonly<Record<string, SpaDescriptor>> = Object.free
     playwrightConfig: 'playwright.stack.config.ts',
   },
 
-  // ── FUTURE (M6) — connectv3 ────────────────────────────────────────────────
-  // The "other SPA" proof: this row + an authored `flows.json` + specs in qboard
-  // are all that onboarding connectv3 takes. UNVERIFIED placeholders — the appDir/
-  // e2eDir/playwrightConfig must be confirmed against the connectv3 repo before it
-  // ships (the `flows.json`'s own `spa` block is authoritative once authored).
-  // `system` is `connect-web` (connectv3's frontend service in the manifest); there
-  // is no standalone `connectv3` ServiceId.
+  // ── connectv3 (M6 — the SECOND-SPA externalization proof) ──────────────────
+  // The "other SPA" proof (plan §5.3): this row + a `flows.json` are ALL that
+  // onboarding connectv3 takes — zero new resolver/command/core logic. Discovery
+  // falls back to the package's bundled `examples/flows/connectv3.flows.json`
+  // (wired in `e2e-orchestrate.ts`'s BUNDLED_EXAMPLE, exactly like saga-dash) until
+  // the REAL `flows.json` is authored in the qboard repo (a follow-up).
+  //
+  // Paths confirmed against `core/manifest/services.ts` `connect-web` (QBOARD ·
+  // `apps/web/connectv3`); `system` is `connect-web` (connectv3's frontend service
+  // — there is no standalone `connectv3` ServiceId). The authored `flows.json`'s
+  // own `spa` block remains authoritative once it exists; this row only locates it.
   connectv3: {
     id: 'connectv3',
     system: 'connect-web',
     repoEnvVar: 'QBOARD',
     defaultRepoSubpath: 'qboard',
-    appDir: 'apps/web/connect', // TODO(M6): confirm
-    e2eDir: 'apps/web/connect/e2e', // TODO(M6): confirm
-    playwrightConfig: 'playwright.stack.config.ts', // TODO(M6): confirm
+    appDir: 'apps/web/connectv3',
+    e2eDir: 'apps/web/connectv3/e2e',
+    // repo-relative to `appDir` (Playwright runs in `appDir`).
+    playwrightConfig: 'playwright.config.ts',
   },
 });
 

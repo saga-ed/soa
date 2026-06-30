@@ -75,6 +75,10 @@ const BUNDLED_EXAMPLE: Readonly<Record<string, string>> = Object.freeze({
   // `dist` (published): `<pkg>/examples/flows/saga-dash.flows.json`. The file is
   // shipped via package.json `files: ["examples"]`.
   'saga-dash': fileURLToPath(new URL('../examples/flows/saga-dash.flows.json', import.meta.url)),
+  // connectv3 (M6): the second-SPA proof. A DATA row only — the fallback logic is
+  // generic over this map, so onboarding connectv3 added a registry row + this
+  // bundled example + the json, with ZERO new resolver/command/core logic.
+  connectv3: fileURLToPath(new URL('../examples/flows/connectv3.flows.json', import.meta.url)),
 });
 
 /** A `process.env`-shaped bag the command passes in (keeps env reads at the edge). */

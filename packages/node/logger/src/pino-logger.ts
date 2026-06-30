@@ -1,5 +1,6 @@
 import { injectable, inject } from 'inversify';
 import pino, { Logger, TransportTargetOptions } from 'pino';
+import { trace } from '@opentelemetry/api';
 import { ILogger } from './i-logger.js';
 import type { PinoLoggerConfig } from './pino-logger-schema.js';
 
@@ -62,6 +63,25 @@ const REDACT_PATHS = [
 /** Shared so both pino construction paths (prod stdout + transport) redact identically. */
 export const redact = { paths: [...REDACT_PATHS], censor: '[REDACTED]' };
 
+/**
+ * Merges the active OTel span's trace/span IDs into every log line so
+ * Datadog can link a log to its trace. pino calls this on each log call
+ * (cheaper than wrapping every public method) and merges the result under
+ * the log object. `trace.getActiveSpan()` returns undefined outside a
+ * traced context (e.g. startup messages), so those logs are unaffected.
+ *
+ * OTel's SpanContext.traceId/spanId are already lowercase hex strings
+ * (32/16 chars) per the W3C Trace Context spec — the exact format Datadog
+ * expects for its `trace_id`/`span_id` log fields, no conversion needed.
+ */
+export function traceCorrelationMixin(): Record<string, string> {
+  const spanContext = trace.getActiveSpan()?.spanContext();
+  if (!spanContext) {
+    return {};
+  }
+  return { trace_id: spanContext.traceId, span_id: spanContext.spanId };
+}
+
 @injectable()
 export class PinoLogger implements ILogger {
   private readonly logger: Logger;
@@ -86,7 +106,7 @@ export class PinoLogger implements ILogger {
     // driver → CloudWatch.
     if (env === 'production' && isExpressContext) {
       const dest = pinoFn.destination({ dest: logFile ?? 1, sync: false });
-      this.logger = pinoFn({ level: config.level, redact }, dest);
+      this.logger = pinoFn({ level: config.level, redact, mixin: traceCorrelationMixin }, dest);
       this.logger.info(`Logger initialized with level ${config.level}`);
       return;
     }
@@ -155,6 +175,7 @@ export class PinoLogger implements ILogger {
     this.logger = pinoFn({
       level: config.level,
       redact,
+      mixin: traceCorrelationMixin,
       transport: {
         targets,
       },

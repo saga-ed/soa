@@ -30,6 +30,7 @@ import {
   buildRepoEnv,
   makeRealProber,
   makeRealRunner,
+  makeRealSnapshotIO,
   resolveScript,
   scriptCwd,
   REPO_ENV_VAR,
@@ -40,6 +41,7 @@ import type {
   RepoOverrides,
   Runner,
   ScriptContext,
+  SnapshotIO,
 } from './runtime/index.js';
 
 /**
@@ -73,6 +75,19 @@ export abstract class BaseCommand extends Command {
    */
   protected getProber(): HealthProber {
     return makeRealProber();
+  }
+
+  /**
+   * The injectable snapshot-IO seam (M3). Production returns
+   * `makeRealSnapshotIO()` — the only place `docker exec
+   * pg_dump/pg_restore/mongodump/mongorestore/psql/redis-cli` is launched; the
+   * `stack snapshot store|restore|list|validate` TESTS spy this on the prototype
+   * to return a fake that records the calls and yields canned bytes, so the
+   * snapshot logic is asserted WITHOUT a real container, DB, or dump file —
+   * mirroring how `getRunner`/`getProber` are mocked for the process/HTTP seams.
+   */
+  protected getSnapshotIO(): SnapshotIO {
+    return makeRealSnapshotIO();
   }
 
   /**

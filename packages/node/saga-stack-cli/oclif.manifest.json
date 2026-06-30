@@ -1854,6 +1854,640 @@
         "stack",
         "verify.js"
       ]
+    },
+    "stack:snapshot:delete": {
+      "aliases": [],
+      "args": {
+        "fixture-id": {
+          "description": "fixture identifier to delete",
+          "name": "fixture-id",
+          "required": true
+        }
+      },
+      "description": "Delete a snapshot directory by fixture id.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> demo-small"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:snapshot:delete",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "snapshot",
+        "delete.js"
+      ]
+    },
+    "stack:snapshot:list": {
+      "aliases": [],
+      "args": {},
+      "description": "List the snapshots on disk under $SAGA_MESH_SNAPSHOTS_DIR (read-only).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --output-json"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:snapshot:list",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "snapshot",
+        "list.js"
+      ]
+    },
+    "stack:snapshot:restore": {
+      "aliases": [],
+      "args": {
+        "fixture-id": {
+          "description": "fixture identifier to restore",
+          "name": "fixture-id",
+          "required": true
+        }
+      },
+      "description": "Restore a named snapshot over the running stack (pg_restore + mongorestore, AS owner), then flush redis.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> demo-small",
+        "<%= config.bin %> <%= command.id %> demo-small --only iam-api",
+        "<%= config.bin %> <%= command.id %> demo-small --force"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "only": {
+          "description": "restore only the DBs in the dependency closure of these services (comma-list)",
+          "name": "only",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "force": {
+          "description": "bypass the profile-mismatch guard (does NOT bypass the snapshot-ahead guard)",
+          "name": "force",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "flush-redis": {
+          "description": "flush redis after restore (rostering cache invalidation)",
+          "name": "flush-redis",
+          "allowNo": true,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:snapshot:restore",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "snapshot",
+        "restore.js"
+      ]
+    },
+    "stack:snapshot:store": {
+      "aliases": [],
+      "args": {},
+      "description": "Dump all stack databases (9 pg app DBs + connectv3 mongo) into a named snapshot.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> --fixture-id demo-small",
+        "<%= config.bin %> <%= command.id %> --fixture-id full --profile full --with-playback",
+        "<%= config.bin %> <%= command.id %> --fixture-id iam --only iam-api"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fixture-id": {
+          "description": "fixture identifier (= snapshot directory name)",
+          "name": "fixture-id",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "profile": {
+          "description": "SEED_PROFILE stamped into the manifest (drives the restore profile guard)",
+          "name": "profile",
+          "default": "roster",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "only": {
+          "description": "scope the dump to the dependency closure of these services (comma-list); overrides --with-playback",
+          "name": "only",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "with-playback": {
+          "description": "also dump the optional playback DBs (transcripts, insights, chat)",
+          "name": "with-playback",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "force": {
+          "description": "overwrite an existing snapshot with the same fixture id",
+          "name": "force",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:snapshot:store",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "snapshot",
+        "store.js"
+      ]
+    },
+    "stack:snapshot:validate": {
+      "aliases": [],
+      "args": {
+        "fixture-id": {
+          "description": "fixture identifier to validate",
+          "name": "fixture-id",
+          "required": true
+        }
+      },
+      "description": "Structurally validate a snapshot (dump files present + non-empty; --deep parses each pg archive). Exits 1 on failure.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> demo-small",
+        "<%= config.bin %> <%= command.id %> demo-small --deep"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "deep": {
+          "description": "also run `pg_restore --list` on each postgres dump (needs the pg container up)",
+          "name": "deep",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:snapshot:validate",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "snapshot",
+        "validate.js"
+      ]
     }
   },
   "version": "0.0.1"

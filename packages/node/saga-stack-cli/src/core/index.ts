@@ -22,3 +22,6 @@ export * from './probe-plan.js';
 // Owned by the seed/flow vertical — planned core sub-barrels (plan §2.1, §4, §5).
 export * from './seed/index.js';
 export * from './flow/index.js';
+
+// Native snapshot fast-path — per-snapshot manifest + pure planners (plan §4.3, M3).
+export * from './snapshot/index.js';

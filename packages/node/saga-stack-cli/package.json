@@ -27,6 +27,9 @@
       "stack": {
         "description": "Bring the synthetic dev stack up/down, seed, reset, verify, and log in."
       },
+      "stack:snapshot": {
+        "description": "Store, restore, list, validate, and delete native DB snapshots (all pg app DBs + connectv3 mongo)."
+      },
       "e2e": {
         "description": "Run end-to-end flows in-process against a running stack."
       }

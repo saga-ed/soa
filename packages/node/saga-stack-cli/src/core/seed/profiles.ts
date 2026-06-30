@@ -1,0 +1,234 @@
+/**
+ * Seed profiles + the canonical SeedStep registry (plan §4.1, saga-ed/soa#214).
+ *
+ * Sourced from up.sh's `seed_*` family (`~1610-1714`):
+ *   seed_iam / seed_sessions / seed_programs / seed_content / seed_playback /
+ *   seed_qtf_demo, plus the dev-user re-seed (`node dist/seed-dev-user.js`).
+ *
+ * Connection data (DATABASE_URL, the POSTGRES_* set) is DERIVED from the
+ * manifest's `DatabaseDef` (owner role/pw + db name) — NOT hardcoded — per the
+ * review minor that collapsed the triplicated `MESH_DATABASES`. This module is
+ * PURE (types + frozen data + a registry builder; zero IO).
+ */
+
+import { getDb, getService, manifest } from '../manifest/index.js';
+import type { DatabaseDef, DbId, Manifest, ServiceId } from '../manifest/index.js';
+import type { SeedAddOn, SeedEnv, SeedProfile, SeedStep } from './types.js';
+
+/** The 9 canonical seed-step ids (mirrors `SeedStepRef` in the manifest). */
+export type SeedStepId =
+  | 'iam-dev-user'
+  | 'iam'
+  | 'sessions'
+  | 'qtf-demo'
+  | 'programs'
+  | 'content'
+  | 'transcripts'
+  | 'insights'
+  | 'chat';
+
+/** Profile → the seed-step ids it contributes (plan §4.1). */
+export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>> = {
+  roster: ['iam-dev-user', 'iam', 'sessions'],
+  full: ['iam-dev-user', 'iam', 'sessions', 'programs', 'content'],
+};
+
+/** Add-on → the seed-step ids it contributes (plan §4.1). */
+export const ADDON_STEPS: Readonly<Record<SeedAddOn, readonly SeedStepId[]>> = {
+  playback: ['transcripts', 'insights', 'chat'],
+  qtf: ['qtf-demo'],
+};
+
+/**
+ * Canonical seed run order (plan §4.1):
+ *   iam-dev-user → iam → sessions → qtf → programs → content → playback.
+ * `composeSeedPlan` walks this order so the emitted plan is deterministic.
+ */
+export const SEED_RUN_ORDER: readonly SeedStepId[] = [
+  'iam-dev-user',
+  'iam',
+  'sessions',
+  'qtf-demo',
+  'programs',
+  'content',
+  'transcripts',
+  'insights',
+  'chat',
+];
+
+// ── connection derivation (from the manifest's DatabaseDef) ──────────────────
+
+/** The mesh postgres address (single shared instance — up.sh PROGRAMS_DB_URL et al.). */
+const MESH_PG_HOST = 'localhost';
+const MESH_PG_PORT = 5432;
+
+/** `postgresql://<owner>:<pw>@localhost:5432/<dbname>` — derived from DatabaseDef. */
+function pgUrl(db: DatabaseDef): string {
+  return `postgresql://${db.ownerRole}:${db.ownerPw}@${MESH_PG_HOST}:${MESH_PG_PORT}/${db.name}`;
+}
+
+/** Single inline `DATABASE_URL` override (programs/sessions/content/qtf). */
+function inlineDatabaseUrl(db: DatabaseDef): SeedEnv {
+  return { kind: 'inline', vars: { DATABASE_URL: pgUrl(db) } };
+}
+
+/** The multi-var `POSTGRES_*` set the playback apps read (host/port/db/user/pw/instance). */
+function postgresVarSet(db: DatabaseDef, instanceName: string): SeedEnv {
+  return {
+    kind: 'inline-multi',
+    vars: {
+      POSTGRES_HOST: MESH_PG_HOST,
+      POSTGRES_PORT: String(MESH_PG_PORT),
+      POSTGRES_DATABASE: db.name,
+      POSTGRES_USERNAME: db.ownerRole,
+      POSTGRES_PASSWORD: db.ownerPw,
+      POSTGRES_INSTANCENAME: instanceName,
+    },
+  };
+}
+
+/** A playback seed step (transcripts/insights/chat) — all share the same shape. */
+function playbackStep(m: Manifest, id: SeedStepId, service: ServiceId, dbId: DbId): SeedStep {
+  const db = getDb(dbId, m);
+  // POSTGRES_INSTANCENAME is service config, not connection data — read it off the
+  // service's launch env (TranscriptsDB / InsightsDB / ChatDB) rather than hardcode.
+  const instanceName = getService(service, m).launch.env.POSTGRES_INSTANCENAME ?? '';
+  return {
+    id,
+    service,
+    databases: [dbId],
+    cwd: getService(service, m).subpath,
+    command: ['pnpm', 'seed'],
+    env: postgresVarSet(db, instanceName),
+    requiresServiceUp: [], // pure db fixtures (db:seed-equivalent) — offline
+    failureMode: 'fatal',
+  };
+}
+
+/**
+ * Build the canonical SeedStep registry, deriving all connection data from the
+ * given manifest. Exported (vs. a frozen const) so tests can feed a hand-built
+ * `Manifest` fixture; `SEED_STEPS` below is the default built from the real one.
+ */
+export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, SeedStep> {
+  return {
+    // dev-user bootstrap (auth user dev@example.org / DEV_USER_UUID f0000004-…beef).
+    // Runs `node dist/seed-dev-user.js` from the iam-db package with the repo dotenv
+    // loaded (PII keys), matching up.sh's reset re-seed + prep bootstrap.
+    'iam-dev-user': {
+      id: 'iam-dev-user',
+      service: 'iam-api',
+      databases: ['iam_local', 'iam_pii_local'],
+      cwd: 'packages/node/iam-db',
+      command: ['node', 'dist/seed-dev-user.js'],
+      env: { kind: 'dotenv', dotenvPath: '.env.local' },
+      requiresServiceUp: [],
+      // Foundational (login + verify depend on it). up.sh's RESET re-seed tolerates
+      // failure (`|| true`); the canonical bootstrap step is fatal.
+      failureMode: 'fatal',
+    },
+    // iam roster — db:seed deterministic ids, direct DB. Needs the repo dotenv for
+    // DATABASE_URL/PII_DATABASE_URL + PII_DEK/HMAC (else names write blank).
+    iam: {
+      id: 'iam',
+      service: 'iam-api',
+      databases: ['iam_local', 'iam_pii_local'],
+      cwd: 'packages/node/iam-db',
+      command: ['pnpm', 'db:seed'],
+      env: { kind: 'dotenv', dotenvPath: '.env.local' },
+      requiresServiceUp: [],
+      failureMode: 'fatal',
+    },
+    // sessions-api Connect-demo direct-projection seed (+ projection_readiness row).
+    sessions: {
+      id: 'sessions',
+      service: 'sessions-api',
+      databases: ['sessions'],
+      cwd: getService('sessions-api', m).subpath,
+      command: ['pnpm', 'db:seed'],
+      env: inlineDatabaseUrl(getDb('sessions', m)),
+      requiresServiceUp: [],
+      failureMode: 'fatal',
+    },
+    // QTF + observation-notes demo on an Ended session. Add-on, online: only
+    // meaningful once the stack has produced an Ended demo session (plan §4.1).
+    'qtf-demo': {
+      id: 'qtf-demo',
+      service: 'sessions-api',
+      databases: ['sessions'],
+      cwd: getService('sessions-api', m).subpath,
+      command: ['pnpm', 'db:seed:qtf-demo'],
+      env: inlineDatabaseUrl(getDb('sessions', m)),
+      requiresServiceUp: ['sessions-api'],
+      // up.sh runs this best-effort (`|| true`, warns when no Ended session yet).
+      failureMode: 'warn',
+    },
+    // programs/periods/enrollment — db:seed deterministic offline derived ids.
+    // DATABASE_URL forced to mesh :5432 (program-hub apps default :5433).
+    programs: {
+      id: 'programs',
+      service: 'programs-api',
+      databases: ['programs'],
+      cwd: getService('programs-api', m).subpath,
+      command: ['pnpm', 'db:seed'],
+      env: inlineDatabaseUrl(getDb('programs', m)),
+      requiresServiceUp: [],
+      failureMode: 'fatal',
+    },
+    // content catalog (db:seed) + self-guarding HTTP tail (demo-polls / legacy-poll).
+    // The HTTP tail needs content-api up ⇒ the whole step is online; the catalog
+    // db:seed is itself best-effort in up.sh (warns on failure).
+    content: {
+      id: 'content',
+      service: 'content-api',
+      databases: ['content'],
+      cwd: getService('content-api', m).subpath,
+      command: ['pnpm', 'db:seed'],
+      env: inlineDatabaseUrl(getDb('content', m)),
+      requiresServiceUp: ['content-api'],
+      failureMode: 'warn',
+      optionalSteps: [
+        {
+          // seed-demo-polls.mjs (HTTP authoring against content-api :3009).
+          // TODO(M3/M4): cwd here is the synthetic-dev tool dir ($SCRIPT_DIR), not a
+          // repo subpath — the runtime adapter resolves the shipped script location.
+          id: 'demo-polls',
+          service: 'content-api',
+          databases: ['content'],
+          cwd: 'tools/synthetic-dev',
+          command: ['node', 'seed-demo-polls.mjs'],
+          env: { kind: 'inline', vars: { CONTENT_API: '${CONTENT_API_URL}' } },
+          requiresServiceUp: ['content-api'],
+          failureMode: 'warn',
+        },
+        {
+          // legacy→content migration — only present on an unmerged program-hub branch.
+          id: 'legacy-poll',
+          service: 'content-api',
+          databases: ['content'],
+          cwd: getService('content-api', m).subpath,
+          command: [
+            'pnpm',
+            'exec',
+            'tsx',
+            'tools/legacy-poll-migrate/migrate.ts',
+            '--fixture',
+            'bwo8my5mgprq9ran',
+            '--target',
+            '${CONTENT_API_URL}',
+          ],
+          env: inlineDatabaseUrl(getDb('content', m)),
+          requiresServiceUp: ['content-api'],
+          failureMode: 'warn',
+        },
+      ],
+    },
+    // playback fixtures (sds_93) — each app's `pnpm seed`, app-role POSTGRES_* inline.
+    transcripts: playbackStep(m, 'transcripts', 'transcripts-api', 'transcripts_local'),
+    insights: playbackStep(m, 'insights', 'insights-api', 'insights_local'),
+    chat: playbackStep(m, 'chat', 'chat-api', 'chat_local'),
+  };
+}
+
+/** The default registry, built from the real frozen manifest. */
+export const SEED_STEPS: Readonly<Record<SeedStepId, SeedStep>> = buildSeedRegistry();

@@ -1362,6 +1362,21 @@ tunnel_env(){ # svc
       printf '%s\n' "FLEET_CONFIG_PATH=$STATE/rtsm-fleet-tunnel.json" ;;
     saga-dash)
       printf '%s\n' "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=dash.$TUNNEL_DOMAIN" ;;
+    coach-api)
+      # EXPRESS_SERVER_CORSALLOWEDDOMAINS is coach's hostname allow-list (comma-
+      # split; api-core matches origin.hostname === d || endsWith(".d")), so the
+      # bare tunnel domain admits coach.$TUNNEL_DOMAIN — and any other tunnel
+      # label — without enumerating them. Keep $COACH_WEB_HOST (localhost) so a
+      # local browser still works alongside remote ones. Splats after the launch
+      # line's CORS value, so this wins (env last-wins).
+      printf '%s\n' "EXPRESS_SERVER_CORSALLOWEDDOMAINS=$COACH_WEB_HOST,$TUNNEL_DOMAIN" ;;
+    coach-web)
+      # PUBLIC_COACH_API_URL is BROWSER-side (SvelteKit PUBLIC_ var read at
+      # vite-dev time): a remote coworker's browser must reach coach-api via its
+      # public tunnel name, not localhost:6105. iam stays behind coach-api (the
+      # cookie composition lives server-side, coach#94), so nothing else flips.
+      printf '%s\n' "PUBLIC_COACH_API_URL=https://coach-api.$TUNNEL_DOMAIN" \
+                    "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=coach.$TUNNEL_DOMAIN" ;;
     *) ;; # everything else: dev CORS wildcard already admits *.wootdev.com
   esac
 }

@@ -545,9 +545,10 @@
     "stack:down": {
       "aliases": [],
       "args": {},
-      "description": "Stop the running stack (wraps up.sh --down; leaves the mesh up).",
+      "description": "Stop the running stack (wraps up.sh --down; leaves the mesh up unless --mesh).",
       "examples": [
-        "<%= config.bin %> <%= command.id %>"
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --mesh"
       ],
       "flags": {
         "porcelain": {
@@ -633,6 +634,12 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "mesh": {
+          "description": "Also tear the mesh (postgres/rabbitmq/redis/connect-mongo) down (make down PROJECT=saga-mesh in $SOA/infra); default leaves the mesh up.",
+          "name": "mesh",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,

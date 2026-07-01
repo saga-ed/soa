@@ -222,7 +222,11 @@ export function listDbMigrations(db: DbId, m: Manifest, ctx: ScriptContext = {})
   if (!def?.migrate || def.engine !== 'postgres') return [];
   const repo = ownerRepoOf(db, m);
   if (!repo) return [];
-  const migDir = join(resolveRepoRoot(repo, ctx), def.migrate.dir, 'prisma', 'migrations');
+  // Prisma migrations live under the package's `src/prisma/migrations` (each
+  // package's prisma.config.ts sets `migrations.path: './src/prisma/migrations'`),
+  // which is exactly the dir up.sh's restore_source_for reads. Without the `src`
+  // segment this returned [] for every DB → false "snapshot ahead" on restore.
+  const migDir = join(resolveRepoRoot(repo, ctx), def.migrate.dir, 'src', 'prisma', 'migrations');
   if (!existsSync(migDir)) return [];
   try {
     return readdirSync(migDir, { withFileTypes: true })

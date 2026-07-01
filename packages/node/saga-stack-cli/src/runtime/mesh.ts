@@ -122,6 +122,49 @@ export function meshMakeArgs(m: Manifest = defaultManifest): string[] {
   ];
 }
 
+/** Inputs to a native mesh teardown. */
+export interface MeshDownContext {
+  /** Absolute path to the soa repo checkout (the `make down` runs in `<soaRoot>/infra`). */
+  soaRoot: string;
+  /** The Runner the `make down` invocation goes through (shared M1 process seam). */
+  runner: Runner;
+}
+
+/** The outcome of `meshDown`. */
+export interface MeshDownResult {
+  ok: boolean;
+  /** The `make down` exit code (0 ⇒ mesh stopped). */
+  code: number;
+}
+
+/**
+ * The `make` argv that tears the mesh down — the faithful inverse of
+ * `meshMakeArgs`. up.sh brings the mesh up with `make up PROJECT=saga-mesh …`
+ * (mesh_up), so teardown is `make down PROJECT=saga-mesh`. `down` needs neither
+ * the PORT vars nor PROFILE (infra's `down:` target is just `docker compose down`,
+ * keyed only by PROJECT), so we pass only PROJECT.
+ */
+export function meshDownArgs(): string[] {
+  return ['down', 'PROJECT=saga-mesh'];
+}
+
+/**
+ * Tear the mesh down: `make down PROJECT=saga-mesh` in `<soaRoot>/infra`, through
+ * the shared Runner. Stops the mesh containers but PRESERVES their volumes (infra
+ * `down` = `docker compose down`, no `-v`). Returns the make exit code; never runs
+ * docker directly, so a test asserts the argv with no real make/docker.
+ */
+export async function meshDown(ctx: MeshDownContext): Promise<MeshDownResult> {
+  const { code } = await ctx.runner.run({
+    cwd: join(ctx.soaRoot, 'infra'),
+    command: 'make',
+    args: meshDownArgs(),
+    env: {},
+    stdio: 'inherit',
+  });
+  return { ok: code === 0, code };
+}
+
 /**
  * Bring the mesh up natively: preflight → `make up` → per-unit readiness poll.
  * Returns a structured result; never throws on a normal failure (conflicts, a

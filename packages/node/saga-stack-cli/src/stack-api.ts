@@ -247,14 +247,19 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
   }
 
   /**
-   * Resolve a seed step's extra env. `dotenv` ⇒ {} (the seed command loads its
-   * own repo `.env.local` from the cwd — see TODO); `inline`/`inline-multi` ⇒ the
-   * var bag with `${TOKEN}`s expanded against the launch-context tokens (only the
-   * content optional steps carry tokens; the core steps are literal connection
-   * strings).
+   * Resolve a seed step's extra env. `inline`/`inline-multi` ⇒ the var bag with
+   * `${TOKEN}`s expanded against the launch-context tokens (the core steps are
+   * literal connection strings; only the content optional steps carry tokens).
+   *
+   * `dotenv` is NOT supported — it silently returned `{}`, which spawned the iam
+   * seeds with no `DATABASE_URL` (the soak's `iam-dev-user` failure). No step
+   * constructs it anymore (the iam steps derive their env via `iamSeedEnv`); throw
+   * so a future `dotenv` step can't reintroduce that no-op env.
    */
   function seedEnv(step: SeedStep): Record<string, string> {
-    if (step.env.kind === 'dotenv') return {};
+    if (step.env.kind === 'dotenv') {
+      throw new Error(`seed step '${step.id}': dotenv env kind is unimplemented — use inline/inline-multi`);
+    }
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(step.env.vars)) {
       out[k] = expandTokens(v, tokens, `seed.${step.id}.env.${k}`);

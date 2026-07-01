@@ -87,6 +87,39 @@ function postgresVarSet(db: DatabaseDef, instanceName: string): SeedEnv {
   };
 }
 
+/**
+ * The FIXED synthetic-dev PII crypto keys up.sh writes into `$ROSTERING/.env.local`
+ * (apply_fixes template, up.sh ~L405-406). The iam seeds REQUIRE these: both
+ * `seed-dev-user.js` and iam's `db:seed` read `PII_CRYPTO_PIIDEKHEX` /
+ * `PII_CRYPTO_PIIHMACKEYHEX` off `process.env` and THROW when absent. Deterministic
+ * dev fixtures, NOT real secrets — safe as frozen core data (keeps this pure, no
+ * dotenv IO). (`PII_CRYPTO_PIIDEKVERSION` is injected for completeness but is not
+ * read by the seeds.)
+ */
+const IAM_PII_CRYPTO: Readonly<Record<string, string>> = {
+  PII_CRYPTO_PIIDEKHEX: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  PII_CRYPTO_PIIHMACKEYHEX: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+  PII_CRYPTO_PIIDEKVERSION: '1',
+};
+
+/**
+ * Env for the iam seeds (dev-user bootstrap + roster db:seed). Mirrors the vars
+ * up.sh sources from `.env.local` for `cd iam-db && env $(...) node
+ * dist/seed-dev-user.js` / `pnpm db:seed`: DATABASE_URL + PII_DATABASE_URL derived
+ * from the manifest iam DBs, plus the fixed PII crypto keys. `inline-multi` ⇒ the
+ * runtime spawns the child with exactly these layered over process.env — no dotenv.
+ */
+function iamSeedEnv(m: Manifest): SeedEnv {
+  return {
+    kind: 'inline-multi',
+    vars: {
+      DATABASE_URL: pgUrl(getDb('iam_local', m)),
+      PII_DATABASE_URL: pgUrl(getDb('iam_pii_local', m)),
+      ...IAM_PII_CRYPTO,
+    },
+  };
+}
+
 /** A playback seed step (transcripts/insights/chat) — all share the same shape. */
 function playbackStep(m: Manifest, id: SeedStepId, service: ServiceId, dbId: DbId): SeedStep {
   const db = getDb(dbId, m);
@@ -121,11 +154,16 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       databases: ['iam_local', 'iam_pii_local'],
       cwd: 'packages/node/iam-db',
       command: ['node', 'dist/seed-dev-user.js'],
-      env: { kind: 'dotenv', dotenvPath: '.env.local' },
+      env: iamSeedEnv(m),
       requiresServiceUp: [],
-      // Foundational (login + verify depend on it). up.sh's RESET re-seed tolerates
-      // failure (`|| true`); the canonical bootstrap step is fatal.
-      failureMode: 'fatal',
+      // Best-effort, matching up.sh: BOTH invocations tolerate failure — prep
+      // bootstrap (up.sh:1030) and reset re-seed (up.sh:1596) run it as
+      // `… node dist/seed-dev-user.js … || true`. It refuses to run until the iam
+      // registry is seeded (needs `seed:registry` — which up.sh never runs), and
+      // the canonical `dev@saga.org` user comes from `db:seed` (the `iam` step)
+      // anyway. So a failure here must NOT abort the bring-up (the soak's
+      // "registry is missing required session permissions" abort).
+      failureMode: 'warn',
     },
     // iam roster — db:seed deterministic ids, direct DB. Needs the repo dotenv for
     // DATABASE_URL/PII_DATABASE_URL + PII_DEK/HMAC (else names write blank).
@@ -135,7 +173,7 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       databases: ['iam_local', 'iam_pii_local'],
       cwd: 'packages/node/iam-db',
       command: ['pnpm', 'db:seed'],
-      env: { kind: 'dotenv', dotenvPath: '.env.local' },
+      env: iamSeedEnv(m),
       requiresServiceUp: [],
       failureMode: 'fatal',
     },

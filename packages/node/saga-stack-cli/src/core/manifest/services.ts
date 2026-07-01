@@ -271,6 +271,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         VITE_ADS_ADM_REAL: 'true',
+        // #280 SESSION measured-time overlay (SessionAttendanceFeed): landed on
+        // main's up.sh (services_up:1577); the journey stage-8 spec asserts the
+        // session-student-row / session-attendance-summary UI it gates. (Removed
+        // in M4 as a presumed rogue edit before #280 merged — re-added once the
+        // baseline confirmed main requires it.)
+        VITE_SESSION_MEASURED: 'true',
       },
     },
     seed: [],

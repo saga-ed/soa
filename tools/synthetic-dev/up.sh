@@ -1609,7 +1609,7 @@ services_up(){
      NODE_ENV=development \
      AUTH_ENABLED=true JANUS_REQUIRED=false \
      IAM_API_URL="$IAM_URL" JWT_ISSUER="https://iam.saga.org" \
-     ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
+     ALLOWED_ORIGINS="$CONNECT_WEB_URL,$DASH_URL" \
      SESSIONS_API_BASE_URL="http://localhost:3007" \
      RABBITMQ_URL="$MESH_MQ" \
      SAGA_API_TARGET="$SAGA_API_TARGET" \

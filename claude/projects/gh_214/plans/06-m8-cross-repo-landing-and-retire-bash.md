@@ -1,0 +1,101 @@
+# M8 — cross-repo landing + retire bash (capstone) (#214)
+
+> The decommission milestone: make saga-stack-cli the sole entrypoint, land the
+> pieces that live in OTHER repos, flip the wrappers from shell-out to native, and
+> remove the bash + mesh-fixture-cli. Ships as part of this effort, **after the
+> soak** (`03-soak-plan.md`). Promotes the `02-handoff-and-status.md` remainder into
+> a formal, phased, testable plan.
+
+## Preconditions (hard gates)
+
+1. **Soak passed** — `03-soak-plan.md` Phases 3–5 green **repeatedly in daily use**
+   (native `stack up --only`, snapshot round-trip, `e2e run`). M8 flips defaults to
+   native; do not start until the native paths are trusted.
+2. **Infra volume fix landed** (from M7 §"shared infra fix"): `Makefile
+   COMPOSE_PROJECT_NAME ?=` + project-keyed volumes. (Shared with M7; land once.)
+3. M4/M5/M6 code merged on `gh_214`; M7 may land before or in parallel (independent).
+
+## Scope — five workstreams
+
+### A. Author the real per-SPA `flows.json` (cross-repo)
+Promote the bundled examples into the SPA repos so discovery finds them.
+- **saga-dash PR** (`apps/web/dash/e2e/flows.json`): the `journey` (8 stages) +
+  `connect-session` flows, from `examples/flows/saga-dash.flows.json`. Verify the
+  `stage-N-*` projects/specs match the real `playwright.stack.config.ts`.
+- **qboard PR** (`apps/web/connectv3/e2e/flows.json`): the connectv3 `connect-smoke`
+  flow from `examples/flows/connectv3.flows.json` (once a real connectv3 e2e spec exists).
+- Update `spa-registry` to prefer the repo file over the bundled fallback (the
+  fallback stays as the authoring template + test fixture).
+- **DoD:** `e2e run saga-dash/journey` and `connectv3/connect-smoke` resolve from the
+  repo files, not the bundled examples.
+
+### B. Monday-flake fix end-to-end (cross-repo)
+The CLI already injects a clamped `PLAYWRIGHT_OCCURRENCE_DATE` (M5) but the specs
+ignore it. Make it effective.
+- **Extract `@saga-ed/saga-stack-e2e-kit`** — a new `soa/packages/node/*` package
+  exporting the clamp helpers (`todayOrNextWeekday`/`mondayOfWeekOf`/`occurrenceDate`/
+  `fmtLocal`) that `core/flow/env.ts` already contains (move/re-export; keep the CLI
+  using the same source).
+- **saga-dash PR** — migrate `journey/{schedule,sessions,attendance}.e2e.test.ts` to
+  env-first: `process.env.PLAYWRIGHT_OCCURRENCE_DATE ?? occurrenceDate(new Date())`,
+  importing the kit; delete the per-spec unclamped `mondayOfCurrentWeek` copies.
+- **DoD:** a Sat/Sun `e2e run` no longer flakes (occurrence date = next Monday); the
+  flake cannot regress per-spec (env is authoritative, helper is shared).
+
+### C. Port remaining up.sh internals → flip wrappers native (per-command, post-soak)
+Each wrapper (M1/M2) flips shell-out → native ONLY after its own soak; bash stays
+callable as the fallback until C is complete.
+- `mesh_up` → finish the data-driven readiness port (M4 has a minimal version).
+- `prep`/migrate → native migrate runner over the closure's DBs (incl. iam-pii-db
+  `db push` step order; program-hub `db:deploy` url-override).
+- `reset_data` → native truncate + the `ledger_local` `migrate-reset` (decision
+  2026-06-30) + mongo drop.
+- seed-family → native SeedStep runner executing composed `SeedPlan`s (M5 composes;
+  runner executes offline-then-online).
+- `overlay`/`tunnel`/`bootstrap` → native ports (git overlay, frp/moniker, provision).
+- **Method (per command):** build native → run dual (native + bash) and diff outputs
+  → flip the default to native → keep a `--legacy`/bash escape for one release → remove.
+- **DoD:** full-stack `stack up`, `reset`, `seed`, `verify`, `overlay`, `tunnel`,
+  `bootstrap` all run native by default; bash no longer invoked on the happy path.
+
+### D. Retire mesh-fixture-cli
+- Deprecate: README notice + a runtime warning pointing at `stack snapshot`/`stack
+  seed`; stop referencing it.
+- Delete the package once `stack snapshot` has soaked (Phase 4) and no consumer remains.
+- **DoD:** `packages/node/mesh-fixture-cli` removed; snapshot/seed fully on saga-stack-cli.
+
+### E. Retire the `.sh` scripts (LAST, destructive)
+- Convert `up.sh`/`verify.sh`/`refresh-suite.sh`/`tunnel.sh`/`bootstrap.sh`/the
+  saga-dash e2e `.sh` into thin **deprecation shims** that exec the CLI (one release),
+  then delete them. Never rewrite git history — deletion is a normal commit.
+- Update `synthetic-dev/README.md` (the drift log/service map) to point at the CLI.
+- **DoD:** no `.sh` on the happy path; the CLI is the sole documented entrypoint.
+
+## Phasing (each independently shippable, low→high risk)
+
+1. **M8.0** — infra volume fix (if not already via M7) + `spa-registry` repo-file preference.
+2. **M8.A** — saga-dash `flows.json` PR (safe; CLI already resolves it).
+3. **M8.B** — e2e-kit extraction + saga-dash spec migration (fixes the flake for real).
+4. **M8.C** — native internals + wrapper flips, ONE command at a time, each post-soak,
+   bash fallback retained.
+5. **M8.D** — retire mesh-fixture-cli.
+6. **M8.E** — retire the `.sh` scripts (only after C fully native + soaked). Capstone.
+
+## Risks
+- **Double-maintenance window (C):** up.sh + native co-exist while porting — pin
+  behavior with the M1 golden parity tests + per-command dual-run diffs; land each
+  flip fast; freeze bash feature work.
+- **Cross-repo coordination (A/B):** saga-dash + qboard PRs on their own branches/reviews.
+- **Destructive (D/E):** gated behind soak + a one-release deprecation shim; deletions
+  are normal commits (recoverable from history).
+- **Premature flip:** never flip a wrapper's default to native before its soak — the
+  whole M8 gate.
+
+## Definition of done (M8 / the effort)
+CLI is the sole entrypoint; `.sh` + mesh-fixture-cli removed; saga-dash + connectv3
+have real `flows.json`; the Monday clamp is effective; multi-instance (M7) available;
+`up.sh`/`verify.sh` retired. Issue #214 closable.
+
+## Cross-references
+`01` plan of record · `02` handoff (this promotes its remainder) · `03` soak (the
+gate) · `04` M7 (shares the infra fix) · `05` M5 follow-up (AV/guard).

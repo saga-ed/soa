@@ -8,9 +8,10 @@
 ## Conventions
 
 ```bash
-cd ~/dev/soa
-alias ss='node packages/node/saga-stack-cli/bin/dev.js'   # dev runner (tsx, no build)
-# (or after `pnpm --filter @saga-ed/saga-stack-cli build`: alias ss='node packages/node/saga-stack-cli/bin/run.js')
+# Install the CLI on PATH once — `ss` (and `saga-stack`) then run from ANY dir:
+cd ~/dev/soa/packages/node/saga-stack-cli && pnpm build && pnpm link --global
+# (re-run `pnpm build` after CLI code changes; the global `ss` runs the built dist)
+# No-build alternative (runs straight from src via tsx): node <abs>/bin/dev.js …
 ```
 
 - State/logs for BOTH up.sh and the native path: `/tmp/sds-synthetic/` (`*.log`, `*.pid`).
@@ -89,8 +90,7 @@ no exported PINO_*) to prove the CLI supplies them.
 
 ```bash
 ss stack down --mesh                     # full clean slate (stop services + mesh)
-# fresh terminal:
-cd ~/dev/soa && alias ss='node packages/node/saga-stack-cli/bin/dev.js'
+# fresh terminal (clean shell, no exported PINO_*; `ss` is on PATH via the global link):
 ss stack up --only scheduling-api,sessions-api
 ```
 PASS criteria:

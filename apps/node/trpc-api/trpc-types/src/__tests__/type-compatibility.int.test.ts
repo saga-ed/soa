@@ -176,8 +176,6 @@ describe('Type Compatibility', () => {
 
     describe('Type Inference Consistency', () => {
         it('should have consistent type inference between Zod and TypeScript', () => {
-            type ZodCreateProject = typeof CreateProjectSchema._type;
-
             const testData = {
                 name: 'Test Project',
                 description: 'Test Description',
@@ -224,7 +222,7 @@ describe('Type Compatibility', () => {
             if (!zodResult.success) {
                 expect(zodResult.error.issues).toHaveLength(2);
                 expect(zodResult.error.issues.some(issue => issue.message === 'Project name is required')).toBe(true);
-                expect(zodResult.error.issues.some(issue => issue.code === 'invalid_enum_value')).toBe(true);
+                expect(zodResult.error.issues.some(issue => issue.code === 'invalid_value')).toBe(true);
             }
         });
 

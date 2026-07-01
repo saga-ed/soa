@@ -33,6 +33,7 @@ import * as flagMap from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
+import { resolveServiceSet } from './status.js';
 
 export default class StackVerify extends BaseCommand {
   static description =
@@ -40,12 +41,21 @@ export default class StackVerify extends BaseCommand {
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
+    '<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api',
     '<%= config.bin %> <%= command.id %> --tolerate saga-dash',
     '<%= config.bin %> <%= command.id %> --full',
   ];
 
   static flags = {
     ...BaseCommand.baseFlags,
+    only: Flags.string({
+      description:
+        'scope the NATIVE health gate to the dependency closure of these services (comma-list) — so a partial `stack up --only …` verifies just what it launched, instead of failing on the services it never started. Ignored with --full (verify.sh checks the whole stack).',
+    }),
+    'with-playback': Flags.boolean({
+      description: 'also gate on the optional playback services (transcripts, insights, chat)',
+      default: false,
+    }),
     'health-only': Flags.boolean({
       description:
         'native health gate only (the default). On --full, narrows the delegated verify.sh to its health gate (VERIFY_HEALTH_ONLY=1).',
@@ -68,14 +78,18 @@ export default class StackVerify extends BaseCommand {
 
     // ── --full: delegate the deep checks to the still-canonical verify.sh. ──
     if (flags.full) {
+      if (flags.only) {
+        this.warn('--only is ignored with --full (verify.sh checks the whole stack).');
+      }
       const plan = flagMap.verify({ healthOnly: flags['health-only'] });
       await this.runScript(plan, flags); // propagates verify.sh's exit code verbatim
       return;
     }
 
-    // ── Native health gate. ──
+    // ── Native health gate (scoped to the --only closure, else all required). ──
     const tolerate = parseTolerate(flags.tolerate);
-    const probes = healthProbes(manifest); // every required (non-optional) service
+    const ids = resolveServiceSet(flags.only, flags['with-playback'], (m) => this.error(m));
+    const probes = healthProbes(manifest, ids);
 
     const prober = this.getProber();
     const rows = await Promise.all(

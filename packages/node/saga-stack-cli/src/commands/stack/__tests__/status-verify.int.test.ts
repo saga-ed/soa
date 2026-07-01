@@ -154,6 +154,23 @@ describe('stack verify — native health gate', () => {
       StackVerify.run(['--tolerate', 'content-api', ...WS], config),
     ).rejects.toMatchObject({ oclif: { exit: 1 } });
   });
+
+  it('--only scopes the gate to the closure (so a partial stack does not fail on unstarted services)', async () => {
+    await StackVerify.run(['--only', 'scheduling-api,sessions-api', ...WS], config);
+    const expected = computeClosure(manifest, ['scheduling-api', 'sessions-api']).services.map(
+      (id) => `${manifest.services[id].lane.stack}${manifest.services[id].healthPath}`,
+    );
+    expect(new Set(probed)).toEqual(new Set(expected));
+    expect(probed).not.toContain(DASH_URL); // saga-dash not in the closure → not probed
+    expect(probed).not.toContain(CONTENT_URL); // content-api not in the closure → not probed
+  });
+
+  it('--only: a service OUTSIDE the closure being down does NOT fail the gate', async () => {
+    installProber([DASH_URL, CONTENT_URL]); // both outside the scheduling/sessions closure
+    await expect(
+      StackVerify.run(['--only', 'scheduling-api,sessions-api', ...WS], config),
+    ).resolves.toBeUndefined();
+  });
 });
 
 describe('stack verify --full — delegates the deep checks to verify.sh', () => {

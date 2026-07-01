@@ -1760,6 +1760,7 @@
       "description": "Verify the stack: native manifest-derived health gate (--full delegates the deep checks to verify.sh).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api",
         "<%= config.bin %> <%= command.id %> --tolerate saga-dash",
         "<%= config.bin %> <%= command.id %> --full"
       ],
@@ -1847,6 +1848,19 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "only": {
+          "description": "scope the NATIVE health gate to the dependency closure of these services (comma-list) — so a partial `stack up --only …` verifies just what it launched, instead of failing on the services it never started. Ignored with --full (verify.sh checks the whole stack).",
+          "name": "only",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "with-playback": {
+          "description": "also gate on the optional playback services (transcripts, insights, chat)",
+          "name": "with-playback",
+          "allowNo": false,
+          "type": "boolean"
         },
         "health-only": {
           "description": "native health gate only (the default). On --full, narrows the delegated verify.sh to its health gate (VERIFY_HEALTH_ONLY=1).",

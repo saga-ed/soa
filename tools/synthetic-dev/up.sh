@@ -1730,6 +1730,22 @@ seed_programs(){
   ok "programs seeded (db:seed)"
 }
 
+# scheduling-api db:seed — the DEMO schedules + slot rules, deterministic
+# @saga-ed/demo-seed-ids ids (the SAME ids sessions-api's direct-projection seed
+# uses), so scheduling OWNS the demo slots. Direct rows, no events (safe in the
+# mesh). Two payoffs: the program-config *Schedule* step (reads scheduling-api)
+# now renders the demo schedules, AND editing a schedule via schedules.upsert
+# cascades cleanly — the upsert DEACTIVATES the owned slot instead of minting a
+# rival random slot that duplicates every session. This is what the standalone
+# seed-demo-schedules.sh workaround used to force by hand (delete + re-source);
+# with the reconciled seed (program-hub saga-dash#226) it's just another db:seed.
+seed_scheduling(){
+  say "seeding scheduling (db:seed — deterministic demo schedules/slots, direct)…"
+  ( cd "$PROGRAM_HUB/apps/node/scheduling-api" \
+      && env DATABASE_URL="$SCHEDULING_DB_URL" pnpm db:seed )
+  ok "scheduling seeded (db:seed) — demo owns its slots (Schedule step + edits coherent)"
+}
+
 # sessions-api db:seed — the Connect-demo DIRECT-PROJECTION seed. Writes
 # sessions-api's local projection tables (demo programs/periods/pods/slots,
 # deterministic @saga-ed/demo-seed-ids — pairs with the 8 Connect Demo users
@@ -1884,7 +1900,7 @@ restored_db(){ # svc
   return 0
 }
 
-# roster = iam + sessions demo (programs empty); full = + programs + content
+# roster = iam + sessions demo (programs empty); full = + programs + scheduling + content
 # (+ playback fixtures when --with-playback). Playback rides `full` so
 # `--seed roster` stays minimal; it only runs when the playback APIs were
 # actually provisioned. Services restored from a snapshot skip their scratch seed.
@@ -1895,6 +1911,7 @@ seed_stack(){
   [[ $DO_QTF_DEMO == 1 ]] && seed_qtf_demo
   if [[ "$mode" == full ]]; then
     if restored_db programs-api; then say "seed: programs-api DB restored from snapshot — skipping db:seed"; else seed_programs; fi
+    if restored_db scheduling-api; then say "seed: scheduling-api DB restored from snapshot — skipping db:seed"; else seed_scheduling; fi
     if restored_db content-api; then say "seed: content-api DB restored from snapshot — skipping db:seed"; else seed_content; fi
     # coach: mongo curriculum always seeds (fixtures, not snapshot-covered); the
     # PG db:seed skips when the coach_api DB was restored from an S3 snapshot.

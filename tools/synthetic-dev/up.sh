@@ -1740,23 +1740,61 @@ seed_sessions(){
   ok "sessions projections seeded (demo programs render + authorize)"
 }
 
-# coach: progress store (Postgres) seed. BLOCKED on coach#155 — the coach-db
-# `db:seed` script + src/seed/local-snapshot.ts live on the unmerged branch
-# `worktree-coach-pg-seeds`; coach `main` has NO db:seed yet, so calling it would
-# abort the whole `--seed` lane. Uncomment seed_coach() + its seed_stack call
-# once #155 merges. NOTE two further gaps before the Coach dashboard renders
-# content (see prep()): (a) the Postgres snapshot identity is the rostering tutor
-# 5a9a…0101, but the mesh dev actor is $DEV_USER_UUID (f0000004…beef) — reconcile
-# before content shows; (b) coach's PRIMARY curriculum read path is MONGO
-# (content_coach), and the mesh mongo holds no coach collections, so a separate
-# Mongo content seed (mongoimport of coach-api/scripts/data/*.json into
-# soa-connect-mongo-1) is still needed — no existing harness idiom covers it.
-# seed_coach(){
-#   say "seeding coach progress store (db:seed — coach#155 local-snapshot)…"
-#   ( cd "$COACH/packages/node/coach-db" \
-#       && env DATABASE_URL="$COACH_DB_URL" pnpm db:seed )
-#   ok "coach progress store seeded (db:seed)"
-# }
+# coach seeds TWO stores — Coach is the mesh's first Mongo-dependent service:
+#   1. Mongo curriculum (the PRIMARY read path): the single `content_coach`
+#      doc `curriculum-coach` + the 27 `content` docs, mongoimport'd from coach's
+#      committed fixtures (coach-api/scripts/data/*.json) into the mesh mongo
+#      (soa-connect-mongo-1: saga_local.content_coach + wmlms_local.content, the
+#      dbs coach-api's launch_if points at). subjectData 500s ("Curriculum data
+#      not found") until this lands. Curriculum is static + identity-independent,
+#      so committed fixtures are the source of truth (no snapshot needed).
+#   2. Postgres progress store (coach_api): the coach-db `db:seed` (coach#155
+#      local-snapshot) — one content_instance + persona projections, keyed to the
+#      mesh devLogin tutor alex (f0000004-…-003). Skipped when the DB was restored
+#      from an S3 snapshot (restored_db gate in seed_stack).
+# Together: `devLogin` as alex@example.org → the Coach dashboard renders 27
+# assigned modules. Each step self-guards so a partial mesh only warns.
+# Mongo curriculum only. Split out because it ALWAYS runs (curriculum is static
+# fixtures, not covered by the Postgres S3 snapshot) — even when coach_api's PG
+# was restored from a snapshot.
+seed_coach_mongo_only(){
+  say "seeding coach curriculum (mongoimport → mesh mongo :$CONNECT_MONGO_PORT)…"
+  local data="$COACH/apps/node/coach-api/scripts/data"
+  if [[ ! -f "$data/content_coach.json" || ! -f "$data/content.json" ]]; then
+    warn "coach curriculum fixtures not found at $data — skipping mongo seed"; return 0
+  fi
+  # content_coach.json is a single JSON object (not an array); content.json is an
+  # array. mongoimport reads from stdin so no docker cp into the container. Upsert
+  # so re-seeds converge (idempotent, like the PG db:seed).
+  if docker exec -i soa-connect-mongo-1 mongoimport --quiet --port 27017 \
+        -d saga_local -c content_coach --mode upsert --upsertFields name \
+        < "$data/content_coach.json" >>"$STATE/seed-coach.log" 2>&1 \
+     && docker exec -i soa-connect-mongo-1 mongoimport --quiet --port 27017 \
+        -d wmlms_local -c content --jsonArray --mode upsert --upsertFields id \
+        < "$data/content.json" >>"$STATE/seed-coach.log" 2>&1; then
+    ok "coach curriculum seeded (content_coach + 27 content docs)"
+  else
+    warn "coach curriculum mongoimport failed — see $STATE/seed-coach.log"
+  fi
+}
+
+# coach seeds TWO stores (Coach is the mesh's first Mongo-dependent service): the
+# Mongo curriculum (always — see seed_coach_mongo_only) + the Postgres progress
+# store (coach-db db:seed, coach#155 local-snapshot: one content_instance +
+# persona projections keyed to the mesh devLogin tutor alex, f0000004-…-003).
+# Together: `devLogin` as alex@example.org → the Coach dashboard renders 27
+# assigned modules. seed_stack skips the PG half when coach_api was restored from
+# a snapshot; the mongo half still runs. Each step self-guards.
+seed_coach(){
+  seed_coach_mongo_only
+  say "seeding coach progress store (db:seed — coach#155 local-snapshot)…"
+  if ( cd "$COACH/packages/node/coach-db" \
+         && env DATABASE_URL="$COACH_DB_URL" pnpm db:seed >>"$STATE/seed-coach.log" 2>&1 ); then
+    ok "coach progress store seeded (1 content_instance + persona projections, tutor alex)"
+  else
+    warn "coach db:seed failed (coach#155 landed on this checkout?) — see $STATE/seed-coach.log"
+  fi
+}
 
 # content-api: catalog (db:seed, direct DB) + obvious demo polls (HTTP authoring),
 # plus an optional REAL decoded legacy poll IF the (unmerged) migration tool is
@@ -1854,7 +1892,9 @@ seed_stack(){
   if [[ "$mode" == full ]]; then
     if restored_db programs-api; then say "seed: programs-api DB restored from snapshot — skipping db:seed"; else seed_programs; fi
     if restored_db content-api; then say "seed: content-api DB restored from snapshot — skipping db:seed"; else seed_content; fi
-    # if restored_db coach-api; then say "seed: coach-api DB restored from snapshot — skipping db:seed"; else seed_coach; fi  # blocked on coach#155
+    # coach: mongo curriculum always seeds (fixtures, not snapshot-covered); the
+    # PG db:seed skips when the coach_api DB was restored from an S3 snapshot.
+    if restored_db coach-api; then say "seed: coach-api PG restored from snapshot — running mongo curriculum only"; seed_coach_mongo_only; else seed_coach; fi
     [[ $DO_PLAYBACK == 1 ]] && seed_playback
   fi
   return 0

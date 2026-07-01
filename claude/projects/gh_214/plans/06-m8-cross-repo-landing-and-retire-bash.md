@@ -58,18 +58,27 @@ callable as the fallback until C is complete.
 - **DoD:** full-stack `stack up`, `reset`, `seed`, `verify`, `overlay`, `tunnel`,
   `bootstrap` all run native by default; bash no longer invoked on the happy path.
 
-### D. Retire mesh-fixture-cli
-- Deprecate: README notice + a runtime warning pointing at `stack snapshot`/`stack
-  seed`; stop referencing it.
-- Delete the package once `stack snapshot` has soaked (Phase 4) and no consumer remains.
-- **DoD:** `packages/node/mesh-fixture-cli` removed; snapshot/seed fully on saga-stack-cli.
+### D. Deprecate mesh-fixture-cli (coexist — do NOT delete out from under anyone)
+- Deprecate: README notice + a runtime hint pointing at `stack snapshot`/`stack seed`;
+  stop referencing it in our tooling.
+- **LEAVE the package in place** so any existing user/script keeps working. Remove it
+  only later, if/when provably unused AND the owner signs off — never as a forced step.
+- **DoD:** snapshot/seed fully available on saga-stack-cli; mesh-fixture-cli marked
+  deprecated but still functional.
 
-### E. Retire the `.sh` scripts (LAST, destructive)
-- Convert `up.sh`/`verify.sh`/`refresh-suite.sh`/`tunnel.sh`/`bootstrap.sh`/the
-  saga-dash e2e `.sh` into thin **deprecation shims** that exec the CLI (one release),
-  then delete them. Never rewrite git history — deletion is a normal commit.
-- Update `synthetic-dev/README.md` (the drift log/service map) to point at the CLI.
-- **DoD:** no `.sh` on the happy path; the CLI is the sole documented entrypoint.
+### E. Coexist with the `.sh` scripts (NON-DESTRUCTIVE — do NOT retire/delete)
+> **Directive (skelly, 2026-07-01):** the CLI lands purely ADDITIVE. The bash scripts
+> stay in place and working; developers are NOT forced to transition — they move on
+> their own. See memory `saga-stack-cli-non-destructive-landing`.
+- **Do NOT** convert the `.sh` scripts to shims or delete them. `up.sh`/`verify.sh`/
+  `refresh-suite.sh`/`tunnel.sh`/`bootstrap.sh` + the saga-dash e2e `.sh` remain the
+  supported bash path indefinitely.
+- The CLI flips its OWN defaults to native (§C) after soak, but keeps a bash escape and
+  never touches the scripts themselves.
+- Update `synthetic-dev/README.md` to document BOTH entrypoints (bash + `ss`), noting the
+  CLI as the recommended-but-optional path.
+- **DoD:** the CLI is a fully-functional alternative entrypoint; the `.sh` scripts are
+  untouched and still work; **no developer is forced to switch.**
 
 ## Phasing (each independently shippable, low→high risk)
 
@@ -78,21 +87,20 @@ callable as the fallback until C is complete.
 3. **M8.B** — e2e-kit extraction + saga-dash spec migration (fixes the flake for real).
 4. **M8.C** — native internals + wrapper flips, ONE command at a time, each post-soak,
    bash fallback retained.
-5. **M8.D** — retire mesh-fixture-cli.
-6. **M8.E** — retire the `.sh` scripts (only after C fully native + soaked). Capstone.
+5. **M8.D** — deprecate mesh-fixture-cli (leave it in place; don't delete).
+6. **M8.E** — coexist: CLI defaults flip native (post-soak) but the `.sh` scripts stay in place and working (NON-DESTRUCTIVE, skelly's directive). Capstone.
 
 ## Risks
 - **Double-maintenance window (C):** up.sh + native co-exist while porting — pin
   behavior with the M1 golden parity tests + per-command dual-run diffs; land each
   flip fast; freeze bash feature work.
 - **Cross-repo coordination (A/B):** saga-dash + qboard PRs on their own branches/reviews.
-- **Destructive (D/E):** gated behind soak + a one-release deprecation shim; deletions
-  are normal commits (recoverable from history).
+- **Non-destructive landing (D/E):** the `.sh` scripts are NOT deleted or shimmed — the CLI coexists as an additive entrypoint (skelly's directive), so there's no forced transition and nothing to break for existing bash users.
 - **Premature flip:** never flip a wrapper's default to native before its soak — the
   whole M8 gate.
 
 ## Definition of done (M8 / the effort)
-CLI is the sole entrypoint; `.sh` + mesh-fixture-cli removed; saga-dash + connectv3
+CLI is a fully-functional additive entrypoint; `.sh` scripts LEFT IN PLACE (non-destructive) + mesh-fixture-cli deprecated-not-deleted; saga-dash + connectv3
 have real `flows.json`; the Monday clamp is effective; multi-instance (M7) available;
 `up.sh`/`verify.sh` retired. Issue #214 closable.
 

@@ -1,8 +1,9 @@
-# M8 — cross-repo landing + retire bash (capstone) (#214)
+# M8 — cross-repo landing + native-by-default (NON-DESTRUCTIVE) (capstone) (#214)
 
-> The decommission milestone: make saga-stack-cli the sole entrypoint, land the
-> pieces that live in OTHER repos, flip the wrappers from shell-out to native, and
-> remove the bash + mesh-fixture-cli. Ships as part of this effort, **after the
+> The landing milestone: make saga-stack-cli a fully-functional ADDITIVE entrypoint —
+> land the pieces that live in OTHER repos, and flip the CLI's OWN wrappers from
+> shell-out to native. The bash scripts + mesh-fixture-cli are LEFT IN PLACE
+> (non-destructive — skelly's directive); no forced developer transition. Ships as part of this effort, **after the
 > soak** (`03-soak-plan.md`). Promotes the `02-handoff-and-status.md` remainder into
 > a formal, phased, testable plan.
 
@@ -101,8 +102,7 @@ callable as the fallback until C is complete.
 
 ## Definition of done (M8 / the effort)
 CLI is a fully-functional additive entrypoint; `.sh` scripts LEFT IN PLACE (non-destructive) + mesh-fixture-cli deprecated-not-deleted; saga-dash + connectv3
-have real `flows.json`; the Monday clamp is effective; multi-instance (M7) available;
-`up.sh`/`verify.sh` retired. Issue #214 closable.
+have real `flows.json`; the Monday clamp is effective; multi-instance (M7) available; the bash scripts + mesh-fixture-cli LEFT IN PLACE and working (non-destructive). Issue #214 closable.
 
 ## Cross-references
 `01` plan of record · `02` handoff (this promotes its remainder) · `03` soak (the

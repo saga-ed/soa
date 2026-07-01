@@ -174,6 +174,7 @@ SOA=${SOA:-$DEV/soa}                         # mesh infra + shared @saga-ed/soa-
 ROSTERING=${ROSTERING:-$DEV/rostering}       # iam-api + sis-api + iam/sis prisma
 PROGRAM_HUB=${PROGRAM_HUB:-$DEV/program-hub} # programs/scheduling/sessions/content-api
 SAGA_DASH=${SAGA_DASH:-$DEV/saga-dash}       # dash web UI
+COACH=${COACH:-$DEV/coach}                    # coach-api (:6105) + coach-web (:8800) + coach-db prisma
 SDS=${SDS:-$DEV/student-data-system}         # ads-adm from the canonical checkout (sds_92 merged to main; worktree retired)
 QBOARD=${QBOARD:-$DEV/qboard}                # Connect app (connect-api + connect-web)
 RTSM=${RTSM:-$DEV/rtsm}                      # RTSM CRDT/socket service (single-node local)
@@ -181,6 +182,13 @@ FLEEK=${FLEEK:-$DEV/fleek}                   # fleek recording stack (opt-in: --
 
 IAM_PORT=3010                                               # iam-api port — matches saga-dash main's static/config.json default (post Janus auth rewrite, d1.4)
 IAM_URL="http://localhost:$IAM_PORT"
+# The `iss` claim the LOCAL iam-api stamps on its JWTs — NOT a URL of the running
+# instance, but iam-api's JwtConfigSchema default (rostering config/schemas.ts:
+# "Public-facing iam-api URL"), which the mesh leaves un-overridden. Services that
+# VALIDATE the iss claim (ads-adm-api, coach-api) must be handed this exact value;
+# ads-adm-api/connect-api inline it below as JWT_ISSUER. NOT $IAM_URL (:3010) — a
+# token minted here carries iss=iam.saga.org regardless of the localhost host.
+IAM_ISSUER="https://iam.saga.org"
 SIS_PORT=3100                                               # sis-api port (SisConfigSchema default; rostering apps/node/sis-api)
 SIS_DB_URL="postgresql://sis:sis@localhost:5432/sis_db"     # sis-api owns a dedicated DB (read direct from SIS_DATABASE_URL; see d1.7)
 # program-hub config defaults to its OWN standalone-dev postgres on :5433; in this
@@ -192,6 +200,23 @@ SCHEDULING_DB_URL="postgresql://saga_user:password123@localhost:5432/scheduling"
 SESSIONS_DB_URL="postgresql://saga_user:password123@localhost:5432/sessions"
 CONTENT_DB_URL="postgresql://saga_user:password123@localhost:5432/content"      # content-api owns the `content` mesh DB
 MESH_MQ="amqp://rabbitmq_admin:password123@localhost:5672"  # mesh broker creds (NOT saga_user)
+# coach-api owns the `coach_api` mesh DB via the `coach_api_app` app role (coach-db's
+# own default is the same role/db on :5433; the mesh runs it on :5432). coach-web is a
+# vite SPA that reaches iam server-side THROUGH coach-api (only needs the coach-api URL).
+COACH_DB_URL="postgresql://coach_api_app:dev-password-coach-api-app@localhost:5432/coach_api"
+COACH_API_PORT=6105
+COACH_WEB_PORT=8800
+COACH_API_URL="http://localhost:$COACH_API_PORT"
+COACH_WEB_URL="http://localhost:$COACH_WEB_PORT"
+# Bare hostname for coach-api's CORS allow-list. SOA api-core's CORS matches the
+# request Origin's *hostname* (new URL(origin).hostname) against this list — so it
+# wants a domain ("localhost"), NOT a full URL. Passing $COACH_WEB_URL here makes
+# "localhost" !== "http://localhost:8800" → origin rejected → no ACAO header →
+# browser blocks GET /coach/v1/config (coach-web hangs on its loading screen).
+COACH_WEB_HOST="localhost"
+# coach's upstream-saga config surface (frontend-only; coach-web reads it via
+# GET /coach/v1/config — the backend no longer calls saga_api). Stays remote.
+SAGA_API_TARGET_COACH="${SAGA_API_TARGET_COACH:-https://staging.wootmath.com}"
 # ── sds_93 playback stack (opt-in: --with-playback) ──────────────────────────
 # insights/transcripts/chat APIs (student-data-system). Each *-db package owns
 # its DB + a least-privilege app role via seed/local-bootstrap.sql (written for
@@ -319,8 +344,8 @@ check_branches(){
   # co:login + install) is bootstrap.sh's "ensure repos" step.
   local _miss=()
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
-            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
-            "$RTSM:rtsm"; do
+            "$SAGA_DASH:saga-dash" "$COACH:coach" "$SDS:student-data-system" \
+            "$QBOARD:qboard" "$RTSM:rtsm"; do
     [[ -e "${kv%:*}/.git" ]] || _miss+=("$kv")   # -e, not -d: a git WORKTREE's .git is a file
   done
   if [[ ${#_miss[@]} -gt 0 ]]; then
@@ -339,7 +364,7 @@ check_branches(){
       PINS["$repo"]="${_prs//[[:space:]]/}"
     done < <(grep -vE '^\s*(#|$)' "$MANIFEST")
   fi
-  for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash" "$QBOARD:qboard" "$RTSM:rtsm"; do
+  for kv in "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" "$SAGA_DASH:saga-dash" "$COACH:coach" "$QBOARD:qboard" "$RTSM:rtsm"; do
     r=${kv%:*}; repo=${kv#*:}
     have=$(git -C "$r" branch --show-current)
     if [[ -n "${PINS[$repo]:-}" ]]; then
@@ -760,10 +785,12 @@ migrate_db(){ # dir db_name [database_url — override to point prisma at the me
 # the one tier with s3:GetObject on the bucket (Observer is explicitly denied).
 #
 # mesh-DB → "s3-source|owner-role|owner-pw|migrations-dir-or-'' (schemaRev check)"
-# Only the six services with a canonical snapshot source are restorable; sis_db
-# has no canonical source (it db:seed-s from scratch as usual). iam-api maps to
-# BOTH iam_local and iam_pii_local. iam_pii uses `db push` (no migration history),
-# so its schemaRev check is skipped (no migrations dir).
+# The seven services with a canonical snapshot source are restorable; sis_db has
+# no canonical source (it db:seed-s from scratch as usual). iam-api maps to BOTH
+# iam_local and iam_pii_local. iam_pii uses `db push` (no migration history), so
+# its schemaRev check is skipped (no migrations dir). coach_api's snapshot covers
+# only the Postgres progress store — coach's Mongo curriculum is seeded separately
+# (seed_coach_mongo_only), since Mongo is not part of the pg_dump S3 snapshot.
 restore_source_for(){ # mesh-db  → echoes "source|role|pw|migdir"  (empty = no source)
   case "$1" in
     iam_local)      echo "rostering-iam-canonical|iam|iam|$ROSTERING/packages/node/iam-db/src/prisma/migrations" ;;
@@ -772,6 +799,7 @@ restore_source_for(){ # mesh-db  → echoes "source|role|pw|migdir"  (empty = no
     scheduling)     echo "program-hub-scheduling-canonical|saga_user|password123|$PROGRAM_HUB/apps/node/scheduling-api/src/prisma/migrations" ;;
     sessions)       echo "program-hub-sessions-canonical|saga_user|password123|$PROGRAM_HUB/apps/node/sessions-api/src/prisma/migrations" ;;
     content)        echo "content-api-postgres|saga_user|password123|$PROGRAM_HUB/apps/node/content-api/src/prisma/migrations" ;;
+    coach_api)      echo "coach-api-postgres|coach_api_app|dev-password-coach-api-app|$COACH/packages/node/coach-db/src/prisma/migrations" ;;
     *)              echo "" ;;
   esac
 }
@@ -785,6 +813,7 @@ restore_dbs_for_service(){ # svc → echoes mesh-db names (space-separated)
     scheduling-api) echo "scheduling" ;;
     sessions-api)   echo "sessions" ;;
     content-api)    echo "content" ;;
+    coach-api)      echo "coach_api" ;;
     *)              echo "" ;;   # sis-api + everything else: no canonical source
   esac
 }
@@ -936,8 +965,8 @@ pull_repos(){
   say "pulling siblings to upstream (ff-only${mode:+ — $mode})…"
   local kv dir name dirty br behind def
   for kv in "$SOA:soa" "$ROSTERING:rostering" "$PROGRAM_HUB:program-hub" \
-            "$SAGA_DASH:saga-dash" "$SDS:student-data-system" "$QBOARD:qboard" \
-            "$RTSM:rtsm"; do
+            "$SAGA_DASH:saga-dash" "$COACH:coach" "$SDS:student-data-system" \
+            "$QBOARD:qboard" "$RTSM:rtsm"; do
     dir=${kv%:*}; name=${kv#*:}
     [[ -e "$dir/.git" ]] || { printf "\033[33m⚠\033[0m %-20s not cloned — skipping\n" "$name"; continue; }
     dirty=$(git -C "$dir" status --porcelain 2>/dev/null | grep -v '^??' || true)
@@ -1000,6 +1029,14 @@ prep(){
   say "reconciling rtsm deps + workspace build (rtsm-api)…"
   pnpm_install "$RTSM"
   build_step rtsm "$RTSM" 1
+  # coach: coach-api imports @saga-ed/coach-db from dist/, so the workspace must
+  # be built (fatal=1 — a missing dist crashes coach-api at import). coach-db (tsup)
+  # needs a generated Prisma client first; turbo's build graph doesn't run
+  # db:generate (same caveat as the *-db packages above).
+  say "reconciling coach deps + workspace build (coach-db dist for coach-api)…"
+  pnpm_install "$COACH"
+  ( cd "$COACH/packages/node/coach-db" && pnpm db:generate >/dev/null 2>&1 ) || true
+  build_step coach "$COACH" 1
   say "applying prisma schemas (migrate deploy — canonical, see d1.5)…"
   db_step "iam-db migrate deploy"     "$ROSTERING/packages/node/iam-db"     pnpm prisma migrate deploy
   db_step "iam-pii-db db push"        "$ROSTERING/packages/node/iam-pii-db" pnpm prisma db push
@@ -1021,6 +1058,17 @@ prep(){
       psql -U postgres_admin -c "CREATE DATABASE content OWNER saga_user"
   fi
   migrate_db "$PROGRAM_HUB/apps/node/content-api"    content    "$CONTENT_DB_URL"
+  # coach-api owns a `coach_api` DB via the `coach_api_app` app role. Same
+  # first-postgres-init caveat as sessions/content — but coach's role is NEW
+  # (not the pre-existing saga_user), so create the role too on existing volumes.
+  if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='coach_api'" 2>/dev/null)" != 1 ]]; then
+    db_step "coach_api role+db create" "$SOA" docker exec soa-postgres-1 \
+      psql -U postgres_admin -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coach_api_app') THEN CREATE ROLE coach_api_app LOGIN PASSWORD 'dev-password-coach-api-app'; END IF; END \$\$; CREATE DATABASE coach_api OWNER coach_api_app"
+  fi
+  # coach's prisma schema lives in the coach-db PACKAGE (not the app); it has
+  # committed migrations, so migrate deploy lands cleanly.
+  migrate_db "$COACH/packages/node/coach-db"         coach_api  "$COACH_DB_URL"
   migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7); uses sis-db's own config
   db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
   # sds_93 playback DBs (transcripts/insights/chat) — opt-in, own their DB+role
@@ -1031,12 +1079,14 @@ prep(){
   ok "schemas + dev user ready"
 }
 
-# Health-probe path per service. APIs expose /health; the two vite apps
-# (saga-dash, connect-web) answer on /; connect-api mounts its router under
-# /connectv3/v1 (qboard apps/node/connectv3-api/src/app.ts).
+# Health-probe path per service. APIs expose /health; the vite apps
+# (saga-dash, connect-web, coach-web) answer on /; connect-api mounts its router
+# under /connectv3/v1 (qboard apps/node/connectv3-api/src/app.ts). coach-api
+# mounts /health at the app ROOT (not under its /coach/v1 basepath), so it falls
+# through to the default /health arm.
 probe_path(){ # name
   case "$1" in
-    saga-dash|connect-web) echo / ;;
+    saga-dash|connect-web|coach-web) echo / ;;
     connect-api)           echo /connectv3/v1/health ;;
     *)                     echo /health ;;
   esac
@@ -1433,6 +1483,35 @@ services_up(){
   # port) and it doesn't read JANUS_REQUIRED, so neither is set. Pre-existing
   # program data needs a one-time manual replay (see header note).
   launch_if sessions-api 3007 "$PROGRAM_HUB/apps/node/sessions-api"     NODE_ENV=development DATABASE_URL="$SESSIONS_DB_URL"   IAM_API_URL="$IAM_URL" RABBITMQ_URL="$MESH_MQ" CORS_ORIGIN="$DASH_URL" $(sandbox_env sessions-api) $(tunnel_env sessions-api)
+  # coach-api (:6105 — Coach professional-development GraphQL + tRPC). DUAL-STORE:
+  # Postgres `coach_api` (progress/instances via coach-db) + Mongo (`content_coach`
+  # curriculum at the mesh mongo :27037). Verifies the iam_session JWT against the
+  # local iam-api :3010 (AUTH_AUTHENABLED=true + IAM_API_TARGET/JWKS override coach's
+  # cloud-dev schema defaults), like every other mesh service. AUTH_ISSUER must be
+  # the iss the local iam-api STAMPS ($IAM_ISSUER = iam.saga.org), NOT $IAM_URL —
+  # coach validates the iss claim, and a token minted here carries iss=iam.saga.org
+  # regardless of the :3010 host (verified: AUTH_ISSUER=$IAM_URL → 401 on every
+  # token). CORS uses EXPRESS_SERVER_CORSALLOWEDDOMAINS (a hostname allow-list —
+  # $COACH_WEB_HOST, NOT a URL; api-core matches origin.hostname), NOT CORS_ORIGIN.
+  # SAGA_API_TARGET is a frontend-only config value (coach-web reads it
+  # via GET /coach/v1/config); the backend no longer calls saga_api.
+  # RABBITMQ_ENABLED stays FALSE: turning the iam-event consumer on currently crashes
+  # coach-api at boot — its createIamEventConsumer DI binding is async (toDynamicValue)
+  # and breaks the synchronous construction of CnsDataService, which shares the pg
+  # pool (Inversify: "construct CnsDataService synchronously … has async dependencies").
+  # That's a pre-existing coach step-4a consumer bug, not a mesh issue; flip to true
+  # once it's fixed so coach projects iam persona events.
+  # NOTE: the mesh mongo holds no coach curriculum yet, so coach-api boots green but
+  # serves empty curriculum until a Mongo content seed lands (see prep()).
+  launch_if coach-api "$COACH_API_PORT" "$COACH/apps/node/coach-api" \
+     NODE_ENV=development EXPRESS_SERVER_PORT="$COACH_API_PORT" \
+     DATABASE_URL="$COACH_DB_URL" \
+     MONGO_HOST=localhost MONGO_PORT="$CONNECT_MONGO_PORT" MONGO_DATABASE=saga_local CONTENT_DATABASE=wmlms_local \
+     AUTH_AUTHENABLED=true IAM_API_TARGET="$IAM_URL" AUTH_JWKSURL="$IAM_URL/.well-known/jwks.json" AUTH_ISSUER="$IAM_ISSUER" \
+     RABBITMQ_ENABLED=false RABBITMQ_URL="$MESH_MQ" \
+     EXPRESS_SERVER_CORSALLOWEDDOMAINS="$COACH_WEB_HOST" \
+     SAGA_API_TARGET="$SAGA_API_TARGET_COACH" \
+     $(sandbox_env coach-api) $(tunnel_env coach-api)
   # content-api (:3009 — default :3010 collides with iam): the MODERN poll/content
   # store. The dash picker reads it from the browser (CORS → dash origin) and
   # connect-api resolves contentRef→body from it S2S. RABBITMQ for its outbox events.
@@ -1496,6 +1575,13 @@ services_up(){
   # collator already populates timeInTutorialMs/segments on the payload, so the
   # number renders either way; the flag activates the dash-side feed module.
   launch_if saga-dash 8900 "$SAGA_DASH/apps/web/dash" VITE_ADS_ADM_REAL=true VITE_SESSION_MEASURED=true $(tunnel_env saga-dash)
+  # coach-web (:8800 — SvelteKit/vite SPA). Reaches iam server-side THROUGH
+  # coach-api (the iam_session cookie composition lives in coach-api per coach#94),
+  # so it only needs the coach-api URL — no direct iam origin/JWKS. PUBLIC_-prefixed
+  # vars are read by SvelteKit at vite-dev time.
+  launch_if coach-web "$COACH_WEB_PORT" "$COACH/apps/web/coach-web" \
+     PUBLIC_COACH_API_URL="$COACH_API_URL" \
+     $(tunnel_env coach-web)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
   # always discovers via GET /fleet/discover (404 without fleet mode → the
   # browser's "Fleet discovery failed … Fleet mode may not be active"), so the
@@ -1586,7 +1672,7 @@ reset_data(){
   # leave rows whose occurrences no longer resolve, which then 500 on save
   # ("schedule has shifted out from under this record"). Generic truncate keeps
   # _prisma_migrations, so the schema survives.
-  local dbs=(iam_local iam_pii_local programs scheduling sessions content sis_db ads_adm_local)
+  local dbs=(iam_local iam_pii_local programs scheduling sessions content coach_api sis_db ads_adm_local)
   [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local)
   for db in "${dbs[@]}"; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then
@@ -1656,6 +1742,62 @@ seed_sessions(){
   ( cd "$PROGRAM_HUB/apps/node/sessions-api" \
       && env DATABASE_URL="$SESSIONS_DB_URL" pnpm db:seed )
   ok "sessions projections seeded (demo programs render + authorize)"
+}
+
+# coach seeds TWO stores — Coach is the mesh's first Mongo-dependent service:
+#   1. Mongo curriculum (the PRIMARY read path): the single `content_coach`
+#      doc `curriculum-coach` + the 27 `content` docs, mongoimport'd from coach's
+#      committed fixtures (coach-api/scripts/data/*.json) into the mesh mongo
+#      (soa-connect-mongo-1: saga_local.content_coach + wmlms_local.content, the
+#      dbs coach-api's launch_if points at). subjectData 500s ("Curriculum data
+#      not found") until this lands. Curriculum is static + identity-independent,
+#      so committed fixtures are the source of truth (no snapshot needed).
+#   2. Postgres progress store (coach_api): the coach-db `db:seed` (coach#155
+#      local-snapshot) — one content_instance + persona projections, keyed to the
+#      mesh devLogin tutor alex (f0000004-…-003). Skipped when the DB was restored
+#      from an S3 snapshot (restored_db gate in seed_stack).
+# Together: `devLogin` as alex@example.org → the Coach dashboard renders 27
+# assigned modules. Each step self-guards so a partial mesh only warns.
+# Mongo curriculum only. Split out because it ALWAYS runs (curriculum is static
+# fixtures, not covered by the Postgres S3 snapshot) — even when coach_api's PG
+# was restored from a snapshot.
+seed_coach_mongo_only(){
+  say "seeding coach curriculum (mongoimport → mesh mongo :$CONNECT_MONGO_PORT)…"
+  local data="$COACH/apps/node/coach-api/scripts/data"
+  if [[ ! -f "$data/content_coach.json" || ! -f "$data/content.json" ]]; then
+    warn "coach curriculum fixtures not found at $data — skipping mongo seed"; return 0
+  fi
+  # content_coach.json is a single JSON object (not an array); content.json is an
+  # array. mongoimport reads from stdin so no docker cp into the container. Upsert
+  # so re-seeds converge (idempotent, like the PG db:seed).
+  if docker exec -i soa-connect-mongo-1 mongoimport --quiet --port 27017 \
+        -d saga_local -c content_coach --mode upsert --upsertFields name \
+        < "$data/content_coach.json" >>"$STATE/seed-coach.log" 2>&1 \
+     && docker exec -i soa-connect-mongo-1 mongoimport --quiet --port 27017 \
+        -d wmlms_local -c content --jsonArray --mode upsert --upsertFields id \
+        < "$data/content.json" >>"$STATE/seed-coach.log" 2>&1; then
+    ok "coach curriculum seeded (content_coach + 27 content docs)"
+  else
+    warn "coach curriculum mongoimport failed — see $STATE/seed-coach.log"
+  fi
+}
+
+# coach seeds TWO stores (Coach is the mesh's first Mongo-dependent service): the
+# Mongo curriculum (always — see seed_coach_mongo_only) + the Postgres progress
+# store (coach-db db:seed, coach#155 local-snapshot: one content_instance +
+# persona projections keyed to the mesh devLogin tutor alex, f0000004-…-003).
+# Together: `devLogin` as alex@example.org → the Coach dashboard renders 27
+# assigned modules. seed_stack skips the PG half when coach_api was restored from
+# a snapshot; the mongo half still runs. Each step self-guards.
+seed_coach(){
+  seed_coach_mongo_only
+  say "seeding coach progress store (db:seed — coach#155 local-snapshot)…"
+  if ( cd "$COACH/packages/node/coach-db" \
+         && env DATABASE_URL="$COACH_DB_URL" pnpm db:seed >>"$STATE/seed-coach.log" 2>&1 ); then
+    ok "coach progress store seeded (1 content_instance + persona projections, tutor alex)"
+  else
+    warn "coach db:seed failed (coach#155 landed on this checkout?) — see $STATE/seed-coach.log"
+  fi
 }
 
 # content-api: catalog (db:seed, direct DB) + obvious demo polls (HTTP authoring),
@@ -1754,6 +1896,9 @@ seed_stack(){
   if [[ "$mode" == full ]]; then
     if restored_db programs-api; then say "seed: programs-api DB restored from snapshot — skipping db:seed"; else seed_programs; fi
     if restored_db content-api; then say "seed: content-api DB restored from snapshot — skipping db:seed"; else seed_content; fi
+    # coach: mongo curriculum always seeds (fixtures, not snapshot-covered); the
+    # PG db:seed skips when the coach_api DB was restored from an S3 snapshot.
+    if restored_db coach-api; then say "seed: coach-api PG restored from snapshot — running mongo curriculum only"; seed_coach_mongo_only; else seed_coach; fi
     [[ $DO_PLAYBACK == 1 ]] && seed_playback
   fi
   return 0
@@ -1828,7 +1973,7 @@ open_login_browser(){
   printf "\033[33m⚠\033[0m Chromium still starting — watch %s\n" "$STATE/browser-login.log"
 }
 
-services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api content-api ads-adm-api insights-api transcripts-api chat-api saga-dash rtsm-api connect-api connect-web; do
+services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api content-api coach-api ads-adm-api insights-api transcripts-api chat-api saga-dash coach-web rtsm-api connect-api connect-web; do
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
@@ -1839,7 +1984,7 @@ done
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
-for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 "$CONTENT_PORT" 3008 5005 6301 6302 6303 8900 "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
+for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 "$CONTENT_PORT" 3008 5005 6301 6302 6303 "$COACH_API_PORT" 8900 "$COACH_WEB_PORT" "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
 ok "services down (mesh incl. connect-mongo + AV containers left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
@@ -1857,7 +2002,7 @@ nuke_vite(){
 }
 
 status(){
-  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 content-api:$CONTENT_PORT ads-adm-api:5005 saga-dash:8900 rtsm-api:$RTSM_PORT connect-api:$CONNECT_API_PORT connect-web:$CONNECT_WEB_PORT; do
+  for kv in iam-api:$IAM_PORT sis-api:$SIS_PORT programs-api:3006 scheduling-api:3008 sessions-api:3007 content-api:$CONTENT_PORT coach-api:$COACH_API_PORT ads-adm-api:5005 saga-dash:8900 coach-web:$COACH_WEB_PORT rtsm-api:$RTSM_PORT connect-api:$CONNECT_API_PORT connect-web:$CONNECT_WEB_PORT; do
     n=${kv%:*}; p=${kv#*:}; probe=$(probe_path "$n")
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done
@@ -1958,8 +2103,8 @@ trap _warn_unseeded_on_exit EXIT
 # with --only (running the full local stack against a cloud iam is not the point).
 if [[ -n "$ONLY_SERVICE" ]]; then
   case "$ONLY_SERVICE" in
-    iam-api|sis-api|programs-api|scheduling-api|sessions-api|content-api|ads-adm-api|saga-dash|rtsm-api|connect-api|connect-web) ;;
-    *) echo "--only: unknown service '$ONLY_SERVICE' (iam-api|sis-api|programs-api|scheduling-api|sessions-api|content-api|ads-adm-api|saga-dash|rtsm-api|connect-api|connect-web)"; exit 1 ;;
+    iam-api|sis-api|programs-api|scheduling-api|sessions-api|content-api|coach-api|ads-adm-api|saga-dash|coach-web|rtsm-api|connect-api|connect-web) ;;
+    *) echo "--only: unknown service '$ONLY_SERVICE' (iam-api|sis-api|programs-api|scheduling-api|sessions-api|content-api|coach-api|ads-adm-api|saga-dash|coach-web|rtsm-api|connect-api|connect-web)"; exit 1 ;;
   esac
   # --only is a launch directive: a bare `./up.sh --only <svc>` (no `up` verb)
   # should still bring that one service up, so imply DO_UP unless the user

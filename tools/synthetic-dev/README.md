@@ -74,6 +74,7 @@ path (a worktree's `.git` is a file, not a dir — handled).
 | **program-hub** | `~/dev/program-hub` | `main`¹ | programs-api (**:3006**) + scheduling-api (**:3008**) + sessions-api (**:3007**); the `programs` scenario (`scripts/scenarios`). Override the path with `PROGRAM_HUB=...` |
 | **student-data-system** | `~/dev/student-data-system` | `main` | ads-adm-api (**:5005**); ads-adm-db prisma. OPT-IN (`--with-playback`): the sds_93 playback APIs — insights-api (**:6301**), transcripts-api (**:6302**), chat-api (**:6303**) + their `*-db` prisma. Override the path with `SDS=...` |
 | **saga-dash** | `~/dev/saga-dash` | `main` | dash web UI (**:8900**). Override the path with `SAGA_DASH=...` |
+| **coach** | `~/dev/coach` | `main` | coach-api (**:6105**) + coach-web (**:8800**); coach-db prisma (`coach_api` DB). Override the path with `COACH=...` |
 | **qboard** | `~/dev/qboard` | `main` | connect-api (**:6106**) + connect-web (**:6210**); livekit/coturn compose (AV). Override the path with `QBOARD=...` |
 | **rtsm** | `~/dev/rtsm` | `main` | rtsm-api (**:6110**) — Connect's CRDT/socket service, single-node here. Override the path with `RTSM=...` |
 
@@ -96,7 +97,9 @@ same fix idempotently. You'll just see a `⚠ … (expected 'main')` line.
 | scheduling-api | 3008 | program-hub main |
 | sessions-api | 3007 | program-hub main — sessions read/lifecycle (harvested from programs-api in program-hub #148); event-built projections (pre-existing data needs the one-time manual replay — see getting-started.md) |
 | ads-adm-api | 5005 | student-data-system **main** (canonical checkout) |
+| coach-api | 6105 | coach main — Coach PD GraphQL + tRPC. Dual-store: Postgres `coach_api` (progress, via coach-db) + Mongo (`content_coach` curriculum on the mesh mongo :27037); verifies the iam_session JWT vs iam-api :3010 JWKS; consumes iam persona events off the mesh broker (`RABBITMQ_ENABLED=true`). NOTE: boots green but serves empty curriculum until a Mongo content seed lands, and the Postgres `db:seed` is blocked on coach#155 |
 | saga-dash | 8900 | saga-dash main |
+| coach-web | 8800 | coach main — Coach SvelteKit/vite SPA; reaches coach-api via `PUBLIC_COACH_API_URL` (iam composed server-side in coach-api) |
 | connect-api | 6106 | qboard main — Connect session API (Express + mongo; health at `/connectv3/v1/health`) |
 | connect-web | 6210 | qboard main — Connect web app (vite); reaches local rtsm via `VITE_RTSM_BOOTSTRAP_URL` |
 | rtsm-api | 6110 | rtsm main — ONE-NODE FLEET (`rtsm-fleet-local.json` via `FLEET_CONFIG_PATH`; rtsm-client requires `/fleet/discover`, which only fleet mode serves); stateless, no DB, `SOCKET_AUTHMODE=none` |

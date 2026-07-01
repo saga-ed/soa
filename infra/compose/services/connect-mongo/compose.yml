@@ -38,4 +38,4 @@ services:
 
 volumes:
   connect-mongo-data:
-    name: connect-mongo-data
+    # no explicit name → <project>_connect-mongo-data (per-slot isolation, M7)

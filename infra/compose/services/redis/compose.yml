@@ -20,4 +20,4 @@ services:
 
 volumes:
   redis-data:
-    name: redis-data
+    # no explicit name → <project>_redis-data (per-slot isolation, M7)

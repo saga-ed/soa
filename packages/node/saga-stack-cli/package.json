@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Unified CLI for bringing up, seeding, verifying, and e2e-testing the synthetic saga dev stack across all repos. Supersedes mesh-fixture-cli. saga-ed/soa#214.",
   "bin": {
-    "saga-stack": "./bin/run.js"
+    "saga-stack": "./bin/run.js",
+    "ss": "./bin/run.js"
   },
   "exports": {
     "./core": {

@@ -34,9 +34,14 @@ ESLint `no-restricted-imports` rule (see `eslint.config.js`).
 
 ## Invocation modes
 
-- **built + global-link:** `pnpm build` then `saga-stack …`
-- **dev, no build:** `./bin/dev.js …` (tsx loader runs straight from `src/`)
+- **run from anywhere (recommended):** `pnpm build && pnpm link --global` once — then
+  `saga-stack …` or the short alias `ss …` work from **any** directory (both are put on
+  PATH; the bins resolve the package via `import.meta.url`, so cwd doesn't matter).
+  Re-run `pnpm build` after code changes. Undo with `pnpm uninstall --global @saga-ed/saga-stack-cli`.
+- **dev, no build:** `./bin/dev.js …` (tsx loader runs straight from `src/`; absolute path works from any cwd)
 - **monorepo filter:** `pnpm --filter @saga-ed/saga-stack-cli saga-stack -- …`
+
+`saga-stack -h` / `ss -h` and `--help` both print help at every level.
 
 ## Plan
 

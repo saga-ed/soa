@@ -13,6 +13,9 @@ if (process.argv.includes('--output-json') && !process.env.LOG_LEVEL) {
   process.env.LOG_LEVEL = 'error';
 }
 
+// Root-level `-h` → `--help` (oclif parses a bare `-h` as a command). See run.js.
+if (process.argv[2] === '-h') process.argv[2] = '--help';
+
 import { execute } from '@oclif/core';
 
 await execute({ development: true, dir: import.meta.url });

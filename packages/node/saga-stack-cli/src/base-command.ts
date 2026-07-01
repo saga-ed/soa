@@ -24,7 +24,8 @@
 
 import { existsSync } from 'node:fs';
 import { Command } from '@oclif/core';
-import { baseFlags } from './shared-flags.js';
+import type { Interfaces } from '@oclif/core';
+import { SLOT_PHASE2_MESSAGE, baseFlags } from './shared-flags.js';
 import type { ScriptPlan } from './core/flag-map.js';
 import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
 import {
@@ -65,6 +66,37 @@ export type WorkspaceFlags = {
 
 export abstract class BaseCommand extends Command {
   static baseFlags = baseFlags;
+
+  /**
+   * Parse + a CENTRAL slot guard. `--slot` lives on `baseFlags`, so every command
+   * accepts it — but M7 Phase 1 only wires slot 0 (the injection site is
+   * `stack up`'s `buildRuntime`, a no-op at offset 0). A `--slot > 0` on ANY
+   * command must fail fast here rather than half-run at the base ports and clobber
+   * a live default stack; the mesh-project/container/down threading that makes
+   * slot > 0 real is Phase 2. Slot 0 (the default) is completely unaffected.
+   *
+   * The structural generic bounds mirror oclif's own `Command.parse` signature
+   * (`FlagOutput`/`ArgOutput` are `{ [k: string]: any }`) so this is a faithful
+   * override, not a widening.
+   */
+  protected async parse<
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    F extends { [flag: string]: any },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    B extends { [flag: string]: any },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    A extends { [arg: string]: any },
+  >(
+    options?: Interfaces.Input<F, B, A>,
+    argv?: string[],
+  ): Promise<Interfaces.ParserOutput<F, B, A>> {
+    const result = await super.parse<F, B, A>(options, argv);
+    const slot = (result.flags as { slot?: unknown }).slot;
+    if (typeof slot === 'number' && slot > 0) {
+      this.error(SLOT_PHASE2_MESSAGE);
+    }
+    return result;
+  }
 
   /**
    * The injectable process seam. Production launches real children; tests spy

@@ -15,6 +15,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -145,6 +153,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -269,6 +285,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -444,6 +468,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -585,6 +617,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -713,6 +753,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -844,6 +892,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -997,6 +1053,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -1127,6 +1191,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -1253,6 +1325,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -1385,6 +1465,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -1539,6 +1627,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -1663,6 +1759,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -1882,6 +1986,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -2024,124 +2136,6 @@
         "verify.js"
       ]
     },
-    "stack:bundle:list": {
-      "aliases": [],
-      "args": {},
-      "description": "List the --with convenience bundles (name, services, seed add-on, description). Read-only.",
-      "examples": [
-        "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --output-json"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "default": "/home/skelly/dev",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state",
-          "name": "state-dir",
-          "default": "/tmp/sds-synthetic",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "stack:bundle:list",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "stack",
-        "bundle",
-        "list.js"
-      ]
-    },
     "stack:snapshot:delete": {
       "aliases": [],
       "args": {
@@ -2161,6 +2155,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -2280,6 +2282,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -2412,6 +2422,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -2550,6 +2568,14 @@
           "name": "porcelain",
           "allowNo": false,
           "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -2718,6 +2744,14 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "output-json": {
           "description": "emit structured JSON on stdout instead of human-readable text",
           "name": "output-json",
@@ -2825,6 +2859,132 @@
         "stack",
         "snapshot",
         "validate.js"
+      ]
+    },
+    "stack:bundle:list": {
+      "aliases": [],
+      "args": {},
+      "description": "List the --with convenience bundles (name, services, seed add-on, description). Read-only.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --output-json"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state",
+          "name": "state-dir",
+          "default": "/tmp/sds-synthetic",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:bundle:list",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "bundle",
+        "list.js"
       ]
     }
   },

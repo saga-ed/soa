@@ -71,10 +71,26 @@ export const repoFlags = {
   }),
 };
 
+/**
+ * The error surfaced when `--slot > 0` is passed on any command. Multi-slot
+ * bring-up (the mesh-project / container / down threading) lands in M7 Phase 2;
+ * until then a slot > 0 must FAIL FAST rather than half-run at the base slot 0
+ * ports and silently clobber a live default stack. Enforced centrally in
+ * `BaseCommand.parse`, so every command that spreads `baseFlags` is guarded.
+ */
+export const SLOT_PHASE2_MESSAGE =
+  'multi-slot (--slot > 0) is not enabled yet — Phase 2. Only --slot 0 (the default) is supported for now.';
+
 export const baseFlags = {
   porcelain: Flags.boolean({
     description: 'machine-readable output; no color, minimal noise',
     default: false,
+  }),
+  slot: Flags.integer({
+    default: 0,
+    min: 0,
+    description:
+      'stack instance slot (0 = default; N>0 offsets ports by N*1000 into an isolated soa-s<N> stack). Multi-slot bring-up lands in a later phase.',
   }),
   'output-json': Flags.boolean({
     description: 'emit structured JSON on stdout instead of human-readable text',

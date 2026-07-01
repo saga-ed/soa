@@ -34,6 +34,7 @@ import {
   seedAddOnsFor,
 } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
+import { deriveInstance } from '../../core/derive-instance.js';
 import * as flagMap from '../../core/flag-map.js';
 import type { RecordMode } from '../../core/flag-map.js';
 import { defaultLaunchContext } from '../../core/launch-plan.js';
@@ -384,11 +385,22 @@ export default class StackUp extends BaseCommand {
     }
 
     const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
+
+    // M7: the ONE slot-injection site. `deriveInstance` maps the numeric slot to
+    // its port offset / project / state+snapshot dirs / container env. At slot 0
+    // (offset 0) `portOverrides` is the base-port map and `meshOffset` is 0, so the
+    // launch context is byte-identical to the pre-M7 no-offset build — the
+    // regression guard. Slot > 0 is rejected up front in `BaseCommand.parse`
+    // (Phase 2), so only slot 0 is exercised here for now.
+    const profile = deriveInstance({ slot: flags.slot });
+
     // Mirror up.sh's `${PINO_LOGGER_LEVEL:-info}` / `${…ISEXPRESSCONTEXT:-true}`:
     // honour an ambient override, else the planner's defaults.
     const launchContext = defaultLaunchContext({
       repoRoots,
       syntheticDevDir,
+      portOverrides: profile.portOverrides,
+      meshOffset: profile.meshOffset,
       pinoLevel: process.env.PINO_LOGGER_LEVEL,
       pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
     });
@@ -398,7 +410,9 @@ export default class StackUp extends BaseCommand {
       launchContext,
       soaRoot: repoRoots.SOA,
       sagaDashRoot: repoRoots.SAGA_DASH,
-      launcher: this.getLauncher(flags['state-dir']),
+      // Default the launcher state-dir from the slot when `--state-dir` isn't
+      // given. At slot 0 both are `/tmp/sds-synthetic`, so this is a no-op today.
+      launcher: this.getLauncher(flags['state-dir'] ?? profile.stateDir),
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
@@ -444,6 +458,7 @@ type DryRunFlags = WorkspaceFlags & {
 };
 type NativeFlags = DryRunFlags & {
   'state-dir': string;
+  slot: number;
   reset: boolean;
   login: boolean;
 };

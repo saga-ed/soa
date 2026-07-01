@@ -27,6 +27,12 @@
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import type { WorkspaceFlags } from '../../base-command.js';
+import {
+  BUNDLE_NAMES,
+  combineRequested,
+  effectiveWithPlayback,
+  seedAddOnsFor,
+} from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import * as flagMap from '../../core/flag-map.js';
 import type { RecordMode } from '../../core/flag-map.js';
@@ -61,9 +67,11 @@ export default class StackUp extends BaseCommand {
       description:
         'services to bring up. With --dry-run, a comma-list whose dependency closure is printed. On a real run (M4) a comma-list boots the closure NATIVELY (not via up.sh); combine with a flag the native path cannot honour yet (sandbox/tunnel/workspace/record/pull/prep) and a SINGLE service still falls back to up.sh.',
     }),
-    'with-playback': Flags.boolean({
-      description: 'include the optional playback services (transcripts, insights, chat)',
-      default: false,
+    with: Flags.string({
+      multiple: true,
+      options: [...BUNDLE_NAMES],
+      description:
+        "convenience bundle(s) to include — sugar over --only (unions the bundle's services into the closure). Repeatable/composable: --with dash --with coach. `--with playback` includes the optional playback services (transcripts, insights, chat). Bundles: dash, connect, coach, playback.",
     }),
     'dry-run': Flags.boolean({
       description: 'plan only: print the resolved closure (+ launch/seed plan for --only) and exit without touching docker/pnpm',
@@ -96,10 +104,6 @@ export default class StackUp extends BaseCommand {
         'record session traffic (up.sh --record <mode>). A value is required in the wrapper; up.sh\'s bare `--record` default is `crdt`, so pass `--record crdt` for that behavior.',
       options: ['crdt', 'av'],
     }),
-    'with-qtf-demo': Flags.boolean({
-      description: 'include the QTF demo seed/services (up.sh --with-qtf-demo)',
-      default: false,
-    }),
     tunnel: Flags.boolean({
       description: 'open the public tunnel for the stack (up.sh --tunnel)',
       default: false,
@@ -120,12 +124,15 @@ export default class StackUp extends BaseCommand {
   async run(): Promise<void> {
     const { flags } = await this.parse(StackUp);
 
-    const requested: ServiceId[] = parseOnly(flags.only);
+    // requested = --only ids ∪ --with bundle ids (sugar over --only); `--with`
+    // participates in the same closure resolution the native/dry-run paths use.
+    const requested: ServiceId[] = combineRequested(flags.only, flags.with, (m) => this.error(m));
     const isOnly = requested.length > 0;
+    const withPlayback = effectiveWithPlayback(flags.with);
 
     // ── --dry-run (M0/M4): planner only. ──
     if (flags['dry-run']) {
-      this.runDryRun(flags, requested, isOnly);
+      this.runDryRun(flags, requested, isOnly, withPlayback);
       return;
     }
 
@@ -144,13 +151,13 @@ export default class StackUp extends BaseCommand {
         flags['skip-prep'];
 
       if (!needsUpSh) {
-        await this.runNative(flags, requested);
+        await this.runNative(flags, requested, withPlayback);
         return;
       }
 
-      if (flags.only?.includes(',')) {
+      if (requested.length > 1) {
         this.error(
-          'comma-separated --only boots the closure NATIVELY, but that path does not yet support --sandbox/--tunnel/--workspace/--record/--pull/--no-auto-pull/--skip-prep. Drop the unsupported flag (native), pass a single service (up.sh fallback), or use --dry-run to preview.',
+          'a multi-service --only/--with set boots the closure NATIVELY, but that path does not yet support --sandbox/--tunnel/--workspace/--record/--pull/--no-auto-pull/--skip-prep. Drop the unsupported flag (native), pass a single service (up.sh fallback), or use --dry-run to preview.',
         );
       }
       // Single service + an unsupported-native flag ⇒ fall through to the up.sh
@@ -158,15 +165,20 @@ export default class StackUp extends BaseCommand {
     }
 
     // ── WRAPPED full-stack (M1): thin wrapper over up.sh. UNCHANGED. ──
-    await this.runWrapped(flags);
+    await this.runWrapped(flags, requested);
   }
 
-  /** M0/M4 dry-run: print the closure (+ native launch/seed plan when --only). */
-  private runDryRun(flags: DryRunFlags, requested: ServiceId[], isOnly: boolean): void {
+  /** M0/M4 dry-run: print the closure (+ native launch/seed plan when --only/--with). */
+  private runDryRun(
+    flags: DryRunFlags,
+    requested: ServiceId[],
+    isOnly: boolean,
+    withPlayback: boolean,
+  ): void {
     const resolvedRequest: ServiceId[] = isOnly
       ? requested
       : Object.values(manifest.services)
-          .filter((s) => flags['with-playback'] || !s.optional)
+          .filter((s) => !s.optional)
           .map((s) => s.id);
 
     const known = new Set(Object.keys(manifest.services));
@@ -175,7 +187,7 @@ export default class StackUp extends BaseCommand {
       this.error(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
     }
 
-    const closure = computeClosure(manifest, resolvedRequest, { withPlayback: flags['with-playback'] });
+    const closure = computeClosure(manifest, resolvedRequest, { withPlayback });
 
     const reasonsObj: Record<string, string[]> = {};
     for (const svc of closure.services) reasonsObj[svc] = closure.reasons.get(svc) ?? [];
@@ -226,14 +238,18 @@ export default class StackUp extends BaseCommand {
   }
 
   /** M4 native partial-stack: StackApi.up(closure) → composeSeedPlan → StackApi.seed(plan). */
-  private async runNative(flags: NativeFlags, requested: ServiceId[]): Promise<void> {
+  private async runNative(
+    flags: NativeFlags,
+    requested: ServiceId[],
+    withPlayback: boolean,
+  ): Promise<void> {
     const known = new Set(Object.keys(manifest.services));
     const unknown = requested.filter((s) => !known.has(s));
     if (unknown.length > 0) {
       this.error(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
     }
 
-    const closure = computeClosure(manifest, requested, { withPlayback: flags['with-playback'] });
+    const closure = computeClosure(manifest, requested, { withPlayback });
     const api = makeStackApi(manifest, this.buildRuntime(flags));
 
     // 1. native bring-up (mesh + topo-wave service launch).
@@ -310,8 +326,12 @@ export default class StackUp extends BaseCommand {
     if (!seeded.ok) this.exit(1);
   }
 
-  /** M1 wrapped path: map flags → up.sh argv/env and shell out. UNCHANGED. */
-  private async runWrapped(flags: WrappedFlags): Promise<void> {
+  /**
+   * M1 wrapped path: map flags → up.sh argv/env and shell out. `--with` bundles
+   * resolve to up.sh's `--only` (the combined `requested` set — a single service
+   * on the wrapped fallback, or empty for the full stack) and drive `withPlayback`.
+   */
+  private async runWrapped(flags: WrappedFlags, requested: ServiceId[]): Promise<void> {
     const plan = flagMap.up({
       reset: flags.reset,
       seed: flags.seed as SeedProfile | undefined,
@@ -319,22 +339,24 @@ export default class StackUp extends BaseCommand {
       noAutoPull: flags['no-auto-pull'],
       skipPrep: flags['skip-prep'],
       record: flags.record as RecordMode | undefined,
-      withPlayback: flags['with-playback'],
-      withQtfDemo: flags['with-qtf-demo'],
+      withPlayback: effectiveWithPlayback(flags.with),
+      withQtfDemo: (flags.with ?? []).includes('qtf'),
       tunnel: flags.tunnel,
       login: flags.login,
-      only: flags.only,
+      only: requested.length > 0 ? requested.join(',') : flags.only,
       sandbox: flags.sandbox,
       workspace: flags.workspace,
     });
     await this.runScript(plan, flags);
   }
 
-  /** Build the seed selection from the up flags (profile + playback/qtf add-ons). */
-  private seedSelection(flags: { seed?: string; 'with-playback': boolean; 'with-qtf-demo': boolean }): SeedSelection {
-    const addOns: SeedAddOn[] = [];
-    if (flags['with-playback']) addOns.push('playback');
-    if (flags['with-qtf-demo']) addOns.push('qtf');
+  /**
+   * Build the seed selection from the up flags: the profile plus the seed add-ons
+   * the `--with` features contribute (`--with playback` ⇒ playback, `--with qtf`
+   * ⇒ qtf) — derived from the bundle registry so it cannot drift from `--with`.
+   */
+  private seedSelection(flags: { seed?: string; with?: string[] }): SeedSelection {
+    const addOns: SeedAddOn[] = seedAddOnsFor(flags.with);
     // up.sh's bare `--seed` defaults to `roster`; an absent --seed on a native
     // bring-up still seeds the roster baseline (matching the daily-driver default).
     return { profile: (flags.seed as SeedProfile | undefined) ?? 'roster', addOns };
@@ -417,9 +439,8 @@ export default class StackUp extends BaseCommand {
 type DryRunFlags = WorkspaceFlags & {
   porcelain: boolean;
   'output-json': boolean;
-  'with-playback': boolean;
+  with?: string[];
   seed?: string;
-  'with-qtf-demo': boolean;
 };
 type NativeFlags = DryRunFlags & {
   'state-dir': string;
@@ -433,20 +454,10 @@ type WrappedFlags = WorkspaceFlags & {
   'no-auto-pull': boolean;
   'skip-prep': boolean;
   record?: string;
-  'with-playback': boolean;
-  'with-qtf-demo': boolean;
+  with?: string[];
   tunnel: boolean;
   login: boolean;
   only?: string;
   sandbox?: string;
   workspace?: string;
 };
-
-/** Split a `--only` comma list into trimmed, non-empty service ids. */
-function parseOnly(only: string | undefined): ServiceId[] {
-  if (!only) return [];
-  return only
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0) as ServiceId[];
-}

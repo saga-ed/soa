@@ -29,6 +29,7 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
+import { BUNDLE_NAMES } from '../../core/bundles.js';
 import * as flagMap from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { manifest } from '../../core/manifest/index.js';
@@ -52,9 +53,11 @@ export default class StackVerify extends BaseCommand {
       description:
         'scope the NATIVE health gate to the dependency closure of these services (comma-list) — so a partial `stack up --only …` verifies just what it launched, instead of failing on the services it never started. Ignored with --full (verify.sh checks the whole stack).',
     }),
-    'with-playback': Flags.boolean({
-      description: 'also gate on the optional playback services (transcripts, insights, chat)',
-      default: false,
+    with: Flags.string({
+      multiple: true,
+      options: [...BUNDLE_NAMES],
+      description:
+        "convenience bundle(s) to include — sugar over --only (unions the bundle's services into the closure). Repeatable/composable: --with dash --with coach. Bundles: dash, connect, coach, playback.",
     }),
     'health-only': Flags.boolean({
       description:
@@ -88,7 +91,7 @@ export default class StackVerify extends BaseCommand {
 
     // ── Native health gate (scoped to the --only closure, else all required). ──
     const tolerate = parseTolerate(flags.tolerate);
-    const ids = resolveServiceSet(flags.only, flags['with-playback'], (m) => this.error(m));
+    const ids = resolveServiceSet(flags.only, flags.with, (m) => this.error(m));
 
     // A service whose sibling repo isn't cloned is reported not-cloned (NOT a
     // failure) — a missing coach checkout must not fail the gate, matching `stack

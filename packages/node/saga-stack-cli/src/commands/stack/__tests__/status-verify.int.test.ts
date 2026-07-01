@@ -114,6 +114,30 @@ describe('stack status — native, manifest-derived, read-only', () => {
     expect(probed).toContain(CONTENT_URL); // pulled in via connect-api
   });
 
+  it('--with coach scopes the probes to the coach bundle closure (sugar over --only)', async () => {
+    await StackStatus.run(['--with', 'coach', ...WS], config);
+    const expected = computeClosure(manifest, ['coach-api', 'coach-web']).services.map(
+      (id) => `${manifest.services[id].lane.stack}${manifest.services[id].healthPath}`,
+    );
+    expect(new Set(probed)).toEqual(new Set(expected));
+    expect(probed).toContain('http://localhost:6105/health'); // coach-api
+    expect(probed).not.toContain(DASH_URL); // saga-dash outside the coach closure
+  });
+
+  it('--with playback scopes to the 3 playback services (not the whole stack)', async () => {
+    await StackStatus.run(['--with', 'playback', ...WS], config);
+    const expected = computeClosure(manifest, ['transcripts-api', 'insights-api', 'chat-api'], {
+      withPlayback: true,
+    }).services.map((id) => `${manifest.services[id].lane.stack}${manifest.services[id].healthPath}`);
+    expect(new Set(probed)).toEqual(new Set(expected));
+    expect(probed).not.toContain(CONTENT_URL); // narrowed, not full-stack
+  });
+
+  it('--with qtf is seed-only ⇒ no service scope ⇒ probes the full non-optional stack', async () => {
+    await StackStatus.run(['--with', 'qtf', ...WS], config);
+    expect(probed).toHaveLength(13);
+  });
+
   it('NEVER exits non-zero even when services are down (read-only)', async () => {
     installProber([CONTENT_URL, DASH_URL]);
     await expect(StackStatus.run([...WS, '--output-json'], config)).resolves.toBeUndefined();
@@ -177,6 +201,20 @@ describe('stack verify — native health gate', () => {
     await expect(
       StackVerify.run(['--only', 'scheduling-api,sessions-api', ...WS], config),
     ).resolves.toBeUndefined();
+  });
+
+  it('--with coach scopes the gate to the coach bundle closure (sugar over --only)', async () => {
+    await StackVerify.run(['--with', 'coach', ...WS], config);
+    const expected = computeClosure(manifest, ['coach-api', 'coach-web']).services.map(
+      (id) => `${manifest.services[id].lane.stack}${manifest.services[id].healthPath}`,
+    );
+    expect(new Set(probed)).toEqual(new Set(expected));
+    expect(probed).not.toContain(DASH_URL); // saga-dash outside the coach closure → not gated
+  });
+
+  it('--with coach: a service outside the bundle closure being down does NOT fail', async () => {
+    installProber([DASH_URL, CONTENT_URL]); // both outside the coach closure
+    await expect(StackVerify.run(['--with', 'coach', ...WS], config)).resolves.toBeUndefined();
   });
 });
 

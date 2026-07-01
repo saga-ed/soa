@@ -22,9 +22,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { combineRequested, effectiveWithPlayback } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { ServiceId } from '../../../core/manifest/index.js';
+
+const fail = (msg: string): never => {
+  throw new Error(msg);
+};
 
 describe('stack up --dry-run — closure planning path', () => {
   it('plans the {scheduling-api, sessions-api} partial stack the command emits', () => {
@@ -59,6 +64,26 @@ describe('stack up --dry-run — closure planning path', () => {
     expect(closure.services).toHaveLength(13);
     expect(closure.services).not.toContain('transcripts-api');
     expect(closure.mesh).toContain('connect-mongo'); // connect-api in the full set
+  });
+
+  it('--with coach (dry-run) plans the {iam-api, coach-api, coach-web} closure', () => {
+    // Mirrors StackUp.run: requested = combineRequested(only, with) → computeClosure.
+    const requested = combineRequested(undefined, ['coach'], fail);
+    const closure = computeClosure(manifest, requested, {
+      withPlayback: effectiveWithPlayback(['coach']),
+    });
+    expect(new Set(closure.services)).toEqual(new Set(['iam-api', 'coach-api', 'coach-web']));
+  });
+
+  it('--with playback (dry-run) plans the playback closure, not the full stack', () => {
+    const requested = combineRequested(undefined, ['playback'], fail);
+    const closure = computeClosure(manifest, requested, {
+      withPlayback: effectiveWithPlayback(['playback']),
+    });
+    expect(new Set(closure.services)).toEqual(
+      new Set(['transcripts-api', 'insights-api', 'chat-api']),
+    );
+    expect(closure.services).not.toContain('saga-dash');
   });
 
   it.todo('oclif harness: emit() stdout shape (--output-json / --porcelain / text)');

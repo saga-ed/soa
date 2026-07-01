@@ -11,8 +11,10 @@
  * the manifest.
  *
  * SCOPE: `--only <svc,…>` scopes the report to a dependency closure (so you can
- * status just the subset you brought up); `--with-playback` adds the optional
- * playback services. With neither, status probes every NON-optional service.
+ * status just the subset you brought up); `--with <bundle>` is sugar over
+ * `--only` that unions a named bundle's services into that closure (`--with
+ * playback` scopes to the optional playback services). With neither, status
+ * probes every NON-optional service.
  *
  * READ-ONLY: status never exits non-zero on its own — a down service is REPORTED
  * (and reflected in the JSON `healthy` field / exit-free text), not raised as an
@@ -25,6 +27,11 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
+import {
+  BUNDLE_NAMES,
+  combineRequested,
+  effectiveWithPlayback,
+} from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { manifest } from '../../core/manifest/index.js';
@@ -48,16 +55,18 @@ export default class StackStatus extends BaseCommand {
       description:
         'scope the health report to the dependency closure of these services (comma-list)',
     }),
-    'with-playback': Flags.boolean({
-      description: 'also probe the optional playback services (transcripts, insights, chat)',
-      default: false,
+    with: Flags.string({
+      multiple: true,
+      options: [...BUNDLE_NAMES],
+      description:
+        "convenience bundle(s) to include — sugar over --only (unions the bundle's services into the closure). Repeatable/composable: --with dash --with coach. Bundles: dash, connect, coach, playback.",
     }),
   };
 
   async run(): Promise<void> {
     const { flags } = await this.parse(StackStatus);
 
-    const ids = resolveServiceSet(flags.only, flags['with-playback'], (msg) => this.error(msg));
+    const ids = resolveServiceSet(flags.only, flags.with, (msg) => this.error(msg));
 
     // A service whose sibling repo isn't cloned is reported not-cloned, not probed
     // (and excluded from the healthy verdict) — consistent with `stack up`'s skip.
@@ -132,21 +141,25 @@ function formatRow(r: StatusRow): string {
 }
 
 /**
- * Turn the `--only`/`--with-playback` flags into the ordered service-id list to
- * probe. `--only` ⇒ the dependency closure of the requested set (launch order);
- * otherwise every non-optional service (+ optional playback on `--with-playback`).
- * `fail` renders a friendly oclif error and does not return.
+ * Turn the `--only`/`--with` flags into the ordered service-id list to probe.
+ * The requested set is `parseOnly(only) ∪ expandBundles(with)`; `--with playback`
+ * (the only bundle of optional services) sets `withPlayback` so those ids survive
+ * the closure's optional filter.
+ *  - EMPTY requested (no `--only`, no `--with`) ⇒ every NON-optional service.
+ *  - else ⇒ the dependency closure of the requested set (launch order).
+ * `fail` renders a friendly oclif error and does not return. Shared by
+ * `stack status` and `stack verify` (and mirrors `stack up`'s resolution).
  */
 export function resolveServiceSet(
   only: string | undefined,
-  withPlayback: boolean,
+  withBundles: string[] | undefined,
   fail: (msg: string) => never,
 ): ServiceId[] {
-  const requested = parseOnly(only);
+  const requested = combineRequested(only, withBundles, fail);
 
   if (requested.length === 0) {
     return (Object.keys(manifest.services) as ServiceId[]).filter(
-      (id) => withPlayback || !manifest.services[id].optional,
+      (id) => !manifest.services[id].optional,
     );
   }
 
@@ -156,16 +169,9 @@ export function resolveServiceSet(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  return computeClosure(manifest, requested, { withPlayback }).services;
-}
-
-/** Split a `--only` comma list into trimmed, non-empty service ids. */
-function parseOnly(only: string | undefined): ServiceId[] {
-  if (!only) return [];
-  return only
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0) as ServiceId[];
+  return computeClosure(manifest, requested, {
+    withPlayback: effectiveWithPlayback(withBundles),
+  }).services;
 }
 
 /** A service excluded from the health pass because its sibling repo isn't cloned. */

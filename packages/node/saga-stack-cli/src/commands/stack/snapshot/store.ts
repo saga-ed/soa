@@ -14,7 +14,7 @@
  * calls with no real container, DB, or dump file.
  *
  *   node bin/dev.js stack snapshot store --fixture-id demo-small
- *   node bin/dev.js stack snapshot store --fixture-id full --profile full --with-playback
+ *   node bin/dev.js stack snapshot store --fixture-id full --profile full --with playback
  *   node bin/dev.js stack snapshot store --fixture-id iam --only iam-api
  */
 
@@ -22,6 +22,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
+import { BUNDLE_NAMES, combineRequested, effectiveWithPlayback } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { DbId, ServiceId } from '../../../core/manifest/index.js';
@@ -43,7 +44,7 @@ export default class SnapshotStore extends BaseCommand {
 
   static examples = [
     '<%= config.bin %> <%= command.id %> --fixture-id demo-small',
-    '<%= config.bin %> <%= command.id %> --fixture-id full --profile full --with-playback',
+    '<%= config.bin %> <%= command.id %> --fixture-id full --profile full --with playback',
     '<%= config.bin %> <%= command.id %> --fixture-id iam --only iam-api',
   ];
 
@@ -59,11 +60,13 @@ export default class SnapshotStore extends BaseCommand {
     }),
     only: Flags.string({
       description:
-        'scope the dump to the dependency closure of these services (comma-list); overrides --with-playback',
+        'scope the dump to the dependency closure of these services (comma-list). `--with` bundle services union into this closure.',
     }),
-    'with-playback': Flags.boolean({
-      description: 'also dump the optional playback DBs (transcripts, insights, chat)',
-      default: false,
+    with: Flags.string({
+      multiple: true,
+      options: [...BUNDLE_NAMES],
+      description:
+        "convenience bundle(s) whose DBs join the dump — sugar shared with `stack up`. Repeatable: --with coach --with playback. `--with playback` also dumps the optional playback DBs (transcripts, insights, chat = the old --with-playback). With `--only`, a bundle's services union into the scoped closure (e.g. `--only iam-api --with coach` adds coach_api); without `--only`, non-playback bundles are no-ops (their DBs are already in the default full dump).",
     }),
     force: Flags.boolean({
       description: 'overwrite an existing snapshot with the same fixture id',
@@ -75,15 +78,24 @@ export default class SnapshotStore extends BaseCommand {
     const { flags } = await this.parse(SnapshotStore);
     const fixtureId = flags['fixture-id'];
 
+    // `--with playback` admits the optional playback DBs (== the old
+    // --with-playback). With `--only`, the `--with` bundle services union into
+    // the scoped closure; without it, the default full-dump path is used and
+    // withPlayback layers the playback trio on top.
+    const withPlayback = effectiveWithPlayback(flags.with);
     const only = flags.only
-      ? closureDatabases(flags.only, flags['with-playback'], (m) => this.error(m))
+      ? closureDatabases(
+          combineRequested(flags.only, flags.with, (m) => this.error(m)),
+          withPlayback,
+          (m) => this.error(m),
+        )
       : undefined;
 
     const plan = storePlan(manifest, {
       fixtureId,
       profile: flags.profile,
       only,
-      withPlayback: flags['with-playback'],
+      withPlayback,
     });
 
     const io = this.getSnapshotIO();
@@ -156,19 +168,16 @@ export default class SnapshotStore extends BaseCommand {
 }
 
 /**
- * Resolve a `--only <svc,…>` list to its closure's DB set (`DbId[]`). Mirrors
- * `status`'s `resolveServiceSet`: unknown ids fail with a friendly oclif error.
+ * Resolve a requested service set (`--only <svc,…>` ∪ `--with <bundle>` services,
+ * already combined by `combineRequested`) to its closure's DB set (`DbId[]`).
+ * Mirrors `status`'s `resolveServiceSet`: unknown ids fail with a friendly oclif
+ * error. `withPlayback` keeps any optional (playback) services in the closure.
  */
 export function closureDatabases(
-  only: string,
+  requested: ServiceId[],
   withPlayback: boolean,
   fail: (msg: string) => never,
 ): DbId[] {
-  const requested = only
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0) as ServiceId[];
-
   const known = new Set(Object.keys(manifest.services));
   const unknown = requested.filter((s) => !known.has(s));
   if (unknown.length > 0) {

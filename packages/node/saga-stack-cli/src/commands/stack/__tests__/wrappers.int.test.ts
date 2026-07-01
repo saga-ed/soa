@@ -26,6 +26,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import type { RunResult, ScriptInvocation } from '../../../runtime/index.js';
 import StackUp from '../up.js';
+import StackSeed from '../seed.js';
+import StackReset from '../reset.js';
 import StackOverlay from '../overlay.js';
 import StackTunnel from '../tunnel.js';
 import StackBootstrap from '../bootstrap.js';
@@ -140,6 +142,54 @@ describe('stack up — real path (no --dry-run) wraps up.sh', () => {
     // oclif's this.exit(code) throws an ExitError carrying `oclif.exit === code`.
     await expect(StackUp.run([...WS], config)).rejects.toMatchObject({ oclif: { exit: 3 } });
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('stack seed — --with bundles map to up.sh seed add-ons', () => {
+  it('bare → up.sh --seed roster (no add-ons)', async () => {
+    await StackSeed.run([...WS], config);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe(UP_SH);
+    expect(calls[0].args).toEqual(['--seed', 'roster']);
+  });
+
+  it('full --with playback → --seed full --with-playback (== the old --with-playback)', async () => {
+    await StackSeed.run(['full', '--with', 'playback', ...WS], config);
+    expect(calls[0].args).toEqual(['--seed', 'full', '--with-playback']);
+  });
+
+  it('--with playback --with qtf → both add-on flags (registry order)', async () => {
+    await StackSeed.run(['--with', 'playback', '--with', 'qtf', ...WS], config);
+    expect(calls[0].args).toEqual(['--seed', 'roster', '--with-playback', '--with-qtf-demo']);
+  });
+
+  it('--with qtf → up.sh --with-qtf-demo (bash flag emitted by the mapper)', async () => {
+    await StackSeed.run(['--with', 'qtf', ...WS], config);
+    expect(calls[0].args).toEqual(['--seed', 'roster', '--with-qtf-demo']);
+  });
+
+  it('a bundle with no seed add-on (--with coach) is a no-op', async () => {
+    await StackSeed.run(['--with', 'coach', ...WS], config);
+    expect(calls[0].args).toEqual(['--seed', 'roster']);
+  });
+});
+
+describe('stack reset — --with playback also truncates the playback DBs', () => {
+  it('bare → up.sh --reset', async () => {
+    await StackReset.run([...WS], config);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe(UP_SH);
+    expect(calls[0].args).toEqual(['--reset']);
+  });
+
+  it('--with playback → --reset --with-playback (== the old --with-playback)', async () => {
+    await StackReset.run(['--with', 'playback', ...WS], config);
+    expect(calls[0].args).toEqual(['--reset', '--with-playback']);
+  });
+
+  it('a bundle already in the default reset set (--with coach) is a no-op', async () => {
+    await StackReset.run(['--with', 'coach', ...WS], config);
+    expect(calls[0].args).toEqual(['--reset']);
   });
 });
 

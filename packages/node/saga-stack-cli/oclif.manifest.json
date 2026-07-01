@@ -988,7 +988,7 @@
       "description": "Truncate and re-seed the data DBs (wraps up.sh --reset).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --with-playback"
+        "<%= config.bin %> <%= command.id %> --with playback"
       ],
       "flags": {
         "porcelain": {
@@ -1082,11 +1082,19 @@
           "multiple": false,
           "type": "option"
         },
-        "with-playback": {
-          "description": "also truncate the opt-in playback DBs (up.sh --reset --with-playback)",
-          "name": "with-playback",
-          "allowNo": false,
-          "type": "boolean"
+        "with": {
+          "description": "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. Only `--with playback` changes the set (it also truncates the opt-in playback DBs — transcripts, insights, chat = the old --with-playback); every other bundle's DBs are already reset by default, so `--with coach`/`connect`/`dash` are no-ops. Repeatable: --with playback.",
+          "name": "with",
+          "hasDynamicHelp": false,
+          "multiple": true,
+          "options": [
+            "dash",
+            "connect",
+            "coach",
+            "playback",
+            "qtf"
+          ],
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -1237,7 +1245,7 @@
       "description": "Seed a running stack (wraps up.sh --seed <profile>).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> full --with-playback"
+        "<%= config.bin %> <%= command.id %> full --with playback"
       ],
       "flags": {
         "porcelain": {
@@ -1331,17 +1339,19 @@
           "multiple": false,
           "type": "option"
         },
-        "with-playback": {
-          "description": "also seed the playback DBs (up.sh --with-playback). NOTE: up.sh treats --with-playback as a launch directive — without --reset/--restart it implies a full stack bring-up (DO_UP), so on a seed-only invocation this brings the whole stack up rather than seeding in place. Prefer `stack up --with-playback --seed <profile>` when you want the bring-up.",
-          "name": "with-playback",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "with-qtf-demo": {
-          "description": "also seed the QTF demo data (up.sh --with-qtf-demo)",
-          "name": "with-qtf-demo",
-          "allowNo": false,
-          "type": "boolean"
+        "with": {
+          "description": "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo. Bundles with no seed add-on (dash/coach/connect) are a no-op here. NOTE: up.sh treats --with-playback as a launch directive — without --reset/--restart it implies a full stack bring-up (DO_UP), so on a seed-only invocation `--with playback` brings the whole stack up rather than seeding in place. Prefer `stack up --with playback --seed <profile>` when you want the bring-up.",
+          "name": "with",
+          "hasDynamicHelp": false,
+          "multiple": true,
+          "options": [
+            "dash",
+            "connect",
+            "coach",
+            "playback",
+            "qtf"
+          ],
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -2531,7 +2541,7 @@
       "description": "Dump all stack databases (9 pg app DBs + connectv3 mongo) into a named snapshot.",
       "examples": [
         "<%= config.bin %> <%= command.id %> --fixture-id demo-small",
-        "<%= config.bin %> <%= command.id %> --fixture-id full --profile full --with-playback",
+        "<%= config.bin %> <%= command.id %> --fixture-id full --profile full --with playback",
         "<%= config.bin %> <%= command.id %> --fixture-id iam --only iam-api"
       ],
       "flags": {
@@ -2643,17 +2653,25 @@
           "type": "option"
         },
         "only": {
-          "description": "scope the dump to the dependency closure of these services (comma-list); overrides --with-playback",
+          "description": "scope the dump to the dependency closure of these services (comma-list). `--with` bundle services union into this closure.",
           "name": "only",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
-        "with-playback": {
-          "description": "also dump the optional playback DBs (transcripts, insights, chat)",
-          "name": "with-playback",
-          "allowNo": false,
-          "type": "boolean"
+        "with": {
+          "description": "convenience bundle(s) whose DBs join the dump — sugar shared with `stack up`. Repeatable: --with coach --with playback. `--with playback` also dumps the optional playback DBs (transcripts, insights, chat = the old --with-playback). With `--only`, a bundle's services union into the scoped closure (e.g. `--only iam-api --with coach` adds coach_api); without `--only`, non-playback bundles are no-ops (their DBs are already in the default full dump).",
+          "name": "with",
+          "hasDynamicHelp": false,
+          "multiple": true,
+          "options": [
+            "dash",
+            "connect",
+            "coach",
+            "playback",
+            "qtf"
+          ],
+          "type": "option"
         },
         "force": {
           "description": "overwrite an existing snapshot with the same fixture id",

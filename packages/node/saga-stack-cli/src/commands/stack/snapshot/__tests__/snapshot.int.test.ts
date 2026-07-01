@@ -157,10 +157,23 @@ describe('stack snapshot store — manifest-driven, all 10 pg + connectv3 mongo'
     expect(dbsCalled('mongoDump')).toEqual([]);
   });
 
-  it('--with-playback adds transcripts/insights/chat', async () => {
-    await SnapshotStore.run(['--fixture-id', 'pb', '--with-playback'], config);
+  it('--with playback adds transcripts/insights/chat', async () => {
+    await SnapshotStore.run(['--fixture-id', 'pb', '--with', 'playback'], config);
     expect(dbsCalled('pgDump')).toContain('transcripts_local');
     expect(dbsCalled('pgDump')).toContain('chat_local');
+  });
+
+  it('--only iam-api --with coach unions coach_api into the scoped closure', async () => {
+    await SnapshotStore.run(
+      ['--fixture-id', 'ic', '--only', 'iam-api', '--with', 'coach'],
+      config,
+    );
+    const pg = new Set(dbsCalled('pgDump'));
+    // iam's own DBs + coach's coach_api, and nothing outside that scope.
+    expect(pg).toContain('iam_local');
+    expect(pg).toContain('coach_api');
+    expect(pg).not.toContain('programs');
+    expect(dbsCalled('mongoDump')).toEqual([]);
   });
 
   it('writes a zod-valid manifest with profile + per-DB sizes', async () => {

@@ -785,10 +785,12 @@ migrate_db(){ # dir db_name [database_url — override to point prisma at the me
 # the one tier with s3:GetObject on the bucket (Observer is explicitly denied).
 #
 # mesh-DB → "s3-source|owner-role|owner-pw|migrations-dir-or-'' (schemaRev check)"
-# Only the six services with a canonical snapshot source are restorable; sis_db
-# has no canonical source (it db:seed-s from scratch as usual). iam-api maps to
-# BOTH iam_local and iam_pii_local. iam_pii uses `db push` (no migration history),
-# so its schemaRev check is skipped (no migrations dir).
+# The seven services with a canonical snapshot source are restorable; sis_db has
+# no canonical source (it db:seed-s from scratch as usual). iam-api maps to BOTH
+# iam_local and iam_pii_local. iam_pii uses `db push` (no migration history), so
+# its schemaRev check is skipped (no migrations dir). coach_api's snapshot covers
+# only the Postgres progress store — coach's Mongo curriculum is seeded separately
+# (seed_coach_mongo_only), since Mongo is not part of the pg_dump S3 snapshot.
 restore_source_for(){ # mesh-db  → echoes "source|role|pw|migdir"  (empty = no source)
   case "$1" in
     iam_local)      echo "rostering-iam-canonical|iam|iam|$ROSTERING/packages/node/iam-db/src/prisma/migrations" ;;
@@ -797,6 +799,7 @@ restore_source_for(){ # mesh-db  → echoes "source|role|pw|migdir"  (empty = no
     scheduling)     echo "program-hub-scheduling-canonical|saga_user|password123|$PROGRAM_HUB/apps/node/scheduling-api/src/prisma/migrations" ;;
     sessions)       echo "program-hub-sessions-canonical|saga_user|password123|$PROGRAM_HUB/apps/node/sessions-api/src/prisma/migrations" ;;
     content)        echo "content-api-postgres|saga_user|password123|$PROGRAM_HUB/apps/node/content-api/src/prisma/migrations" ;;
+    coach_api)      echo "coach-api-postgres|coach_api_app|dev-password-coach-api-app|$COACH/packages/node/coach-db/src/prisma/migrations" ;;
     *)              echo "" ;;
   esac
 }
@@ -810,6 +813,7 @@ restore_dbs_for_service(){ # svc → echoes mesh-db names (space-separated)
     scheduling-api) echo "scheduling" ;;
     sessions-api)   echo "sessions" ;;
     content-api)    echo "content" ;;
+    coach-api)      echo "coach_api" ;;
     *)              echo "" ;;   # sis-api + everything else: no canonical source
   esac
 }

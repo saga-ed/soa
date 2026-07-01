@@ -4,13 +4,15 @@
  * subsumes its `snapshot:show` (use `--output-json` for the full manifest).
  *
  * Scans `$SAGA_MESH_SNAPSHOTS_DIR` (default ~/.saga-mesh/snapshots), newest
- * first, surfacing each snapshot's profile, DB count, and per-DB schemaRevs from
- * the zod-validated manifest.
+ * first. Default view is one compact row per snapshot (id, profile, #DBs, size,
+ * date); `-v/--verbose` lists each DB and its migration head underneath.
  *
  *   node bin/dev.js stack snapshot list
+ *   node bin/dev.js stack snapshot list -v
  *   node bin/dev.js stack snapshot list --output-json
  */
 
+import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
 import { formatBytes, scanSnapshots, snapshotsRoot } from '../../../runtime/index.js';
 
@@ -19,11 +21,17 @@ export default class SnapshotList extends BaseCommand {
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
+    '<%= config.bin %> <%= command.id %> -v',
     '<%= config.bin %> <%= command.id %> --output-json',
   ];
 
   static flags = {
     ...BaseCommand.baseFlags,
+    verbose: Flags.boolean({
+      char: 'v',
+      description: 'list each DB and its migration head under every snapshot',
+      default: false,
+    }),
   };
 
   async run(): Promise<void> {
@@ -64,25 +72,51 @@ export default class SnapshotList extends BaseCommand {
       return;
     }
 
+    // ── Aligned table: widths sized to the data (id capped so a stray long id
+    //    can't blow the layout out). ──
+    const idW = clamp(Math.max(2, ...entries.map((e) => e.fixtureId.length)), 4, 28);
+    const profW = Math.max(7, ...entries.map((e) => (e.manifest?.profile ?? '—').length));
+    const row = (id: string, prof: string, dbs: string, size: string, when: string): string =>
+      `  ${id.padEnd(idW)}  ${prof.padEnd(profW)}  ${dbs.padStart(4)}  ${size.padStart(9)}  ${when}`;
+
     this.log(`Snapshots under ${snapshotsRoot()}:`);
     this.log('');
-    this.log('  ' + 'ID'.padEnd(26) + 'PROFILE'.padEnd(10) + 'DBS'.padEnd(6) + 'SIZE'.padEnd(11) + 'MODIFIED');
-    this.log('  ' + '─'.repeat(78));
+    const header = row('ID', 'PROFILE', 'DBS', 'SIZE', 'MODIFIED');
+    this.log(header);
+    this.log('  ' + '─'.repeat(header.length - 2));
+
     for (const e of entries) {
       const profile = e.manifest?.profile ?? '—';
       const dbs = e.manifest?.databases.length ?? 0;
       this.log(
-        '  ' +
-          e.fixtureId.padEnd(26) +
-          profile.padEnd(10) +
-          String(dbs).padEnd(6) +
-          formatBytes(e.sizeBytes).padEnd(11) +
-          e.mtime.toISOString(),
+        row(e.fixtureId, profile, String(dbs), formatBytes(e.sizeBytes), friendlyDate(e.mtime)),
       );
-      const revs = (e.manifest?.databases ?? [])
-        .filter((d) => d.schemaRev)
-        .map((d) => `${d.db}@${d.schemaRev}`);
-      if (revs.length > 0) this.log('    ' + revs.join('  '));
+      if (flags.verbose) {
+        const dbW = clamp(Math.max(2, ...(e.manifest?.databases ?? []).map((d) => d.db.length)), 4, 22);
+        for (const d of e.manifest?.databases ?? []) {
+          this.log(`        ${d.db.padEnd(dbW)}  ${migrationHead(d)}`);
+        }
+      }
+    }
+
+    if (!flags.verbose && entries.some((e) => (e.manifest?.databases.length ?? 0) > 0)) {
+      this.log('');
+      this.log('  (-v / --verbose lists each DB + its migration head)');
     }
   }
+}
+
+/** `2026-07-01 20:09 UTC` — the ISO timestamp trimmed to minutes. */
+function friendlyDate(d: Date): string {
+  return `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+/** The readable migration head for a DB row: drop the `<timestamp>_` prefix. */
+function migrationHead(d: { schemaRev: string | null; engine: string }): string {
+  if (d.schemaRev) return d.schemaRev.replace(/^\d+_/, '');
+  return d.engine === 'mongo' ? '(mongo — no migrations)' : '(no migration history)';
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
 }

@@ -2020,6 +2020,7 @@
       "description": "List the snapshots on disk under $SAGA_MESH_SNAPSHOTS_DIR (read-only).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> -v",
         "<%= config.bin %> <%= command.id %> --output-json"
       ],
       "flags": {
@@ -2106,6 +2107,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "verbose": {
+          "char": "v",
+          "description": "list each DB and its migration head under every snapshot",
+          "name": "verbose",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,

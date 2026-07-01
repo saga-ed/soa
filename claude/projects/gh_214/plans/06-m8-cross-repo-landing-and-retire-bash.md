@@ -56,8 +56,19 @@ callable as the fallback until C is complete.
 - `overlay`/`tunnel`/`bootstrap` → native ports (git overlay, frp/moniker, provision).
 - **Method (per command):** build native → run dual (native + bash) and diff outputs
   → flip the default to native → keep a `--legacy`/bash escape for one release → remove.
+- **OUT OF SCOPE — gated opt-in non-defaults (skelly, 2026-07-01):** do NOT re-implement
+  up.sh's opt-in gates as bespoke native flags — `--with-playback` (transcripts/insights/
+  chat), `--record` (fleek recording), the connect/AV-behind-a-gate. The **sub-stack
+  closure** (`--only`, N-of-M) already stands up any subset, so the gates are redundant:
+  you just `--only <those services>`. See memory `cli-gated-nondefaults-foreground-constraint`.
+- **The one constraint kept:** never run a service/flow that REQUIRES foreground
+  (interactive / AV / held-open, e.g. connect-session `foreground: true`) in the
+  background/detached — guard `foreground` flows in the `e2e run` model (refuse or force
+  foreground). This is the real invariant the gates were protecting. (Unconditional
+  DEFAULT services like coach-api/coach-web are still modeled for parity — different thing.)
 - **DoD:** full-stack `stack up`, `reset`, `seed`, `verify`, `overlay`, `tunnel`,
-  `bootstrap` all run native by default; bash no longer invoked on the happy path.
+  `bootstrap` all run native by default; bash no longer invoked on the happy path; the
+  foreground-not-in-background guard is enforced; opt-in gates left to `--only`.
 
 ### D. Deprecate mesh-fixture-cli (coexist — do NOT delete out from under anyone)
 - Deprecate: README notice + a runtime hint pointing at `stack snapshot`/`stack seed`;

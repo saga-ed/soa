@@ -8,7 +8,7 @@
  *      (the snapshot layer puts a service there only when ALL its DBs restored;
  *      a partial restore leaves it OUT ⇒ the step is KEPT).
  *   3. offline / online partition by requiresServiceUp.
- * Plus: a service that contributes no seed steps (scheduling-api) ⇒ empty plan.
+ * Plus: a service that contributes no seed steps (sis-api) ⇒ empty plan.
  *
  * PURE: no docker/pnpm/network.
  */
@@ -23,17 +23,17 @@ const ids = (steps: { id: string }[]): string[] => steps.map((s) => s.id);
 
 describe('composeSeedPlan — gate 1: partial-stack drop', () => {
   it('drops steps whose owning service is not in the active closure', () => {
-    const sel: SeedSelection = { profile: 'full' }; // iam-dev-user, iam, sessions, programs, content
+    const sel: SeedSelection = { profile: 'full' }; // iam-dev-user, iam, sessions, programs, scheduling, content
     const plan = composeSeedPlan(sel, set('iam-api'), set());
 
     // Only iam-api's steps survive (and they're offline — no requiresServiceUp).
     expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam']);
     expect(plan.online).toEqual([]);
 
-    // sessions / programs / content dropped as service-inactive.
+    // sessions / programs / scheduling / content dropped as service-inactive.
     const dropped = plan.skipped.filter((s) => s.reason === 'service-inactive');
     expect(dropped.map((s) => s.service).sort()).toEqual(
-      ['content-api', 'programs-api', 'sessions-api'].sort(),
+      ['content-api', 'programs-api', 'scheduling-api', 'sessions-api'].sort(),
     );
   });
 });
@@ -66,20 +66,21 @@ describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () =
 describe('composeSeedPlan — gate 3: offline / online partition', () => {
   it('partitions survivors by requiresServiceUp, in canonical run order', () => {
     const sel: SeedSelection = { profile: 'full', addOns: ['qtf'] };
-    const active = set('iam-api', 'sessions-api', 'programs-api', 'content-api');
+    const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api');
     const plan = composeSeedPlan(sel, active, set());
 
-    // qtf-demo (requires sessions-api) + content (requires content-api) defer online.
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions', 'programs']);
+    // qtf-demo (requires sessions-api) + content (requires content-api) defer online;
+    // scheduling (db:seed, no requiresServiceUp) stays offline between programs and content.
+    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling']);
     expect(ids(plan.online)).toEqual(['qtf-demo', 'content']);
     expect(plan.skipped).toEqual([]);
   });
 });
 
 describe('composeSeedPlan — service with no seed steps', () => {
-  it('scheduling-api alone ⇒ no seed steps (it contributes none)', () => {
-    const sel: SeedSelection = { profile: 'full', only: ['scheduling-api'] };
-    const plan = composeSeedPlan(sel, set('iam-api', 'scheduling-api'), set());
+  it('sis-api alone ⇒ no seed steps (it contributes none)', () => {
+    const sel: SeedSelection = { profile: 'full', only: ['sis-api'] };
+    const plan = composeSeedPlan(sel, set('iam-api', 'sis-api'), set());
     expect(plan.offline).toEqual([]);
     expect(plan.online).toEqual([]);
     expect(plan.skipped).toEqual([]);

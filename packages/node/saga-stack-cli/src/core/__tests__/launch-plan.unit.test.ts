@@ -78,6 +78,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       AUTH_DEVUSERID: 'f0000004-0000-4000-8000-00000000beef',
       CORS_ORIGIN: 'http://localhost:8900,http://localhost:6210',
       MAIL_FRONTEND_BASE_URL: 'http://localhost:3010/demo',
+      JANUS_REQUIRED: 'false', // main up.sh:1467 — without it iam 401s every local S2S/devLogin
     });
   });
 
@@ -156,13 +157,13 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     expect(env('saga-dash')).toEqual({ VITE_ADS_ADM_REAL: 'true', VITE_SESSION_MEASURED: 'true' });
   });
 
-  it('connect-api (NO RABBITMQ_URL — up.sh does not set one)', () => {
+  it('connect-api (incl. RABBITMQ_URL — main up.sh:1614)', () => {
     const resolved = env('connect-api');
-    expect(resolved).not.toHaveProperty('RABBITMQ_URL');
     expect(resolved).toEqual({
       NODE_ENV: 'development',
       PORT: '6106',
       MONGO_URI: 'mongodb://localhost:27037/connectv3',
+      RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       AUTH_ENABLED: 'true',
       JANUS_REQUIRED: 'false',
       IAM_API_URL: 'http://localhost:3010',

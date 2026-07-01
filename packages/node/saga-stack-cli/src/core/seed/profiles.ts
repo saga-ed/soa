@@ -22,6 +22,7 @@ export type SeedStepId =
   | 'sessions'
   | 'qtf-demo'
   | 'programs'
+  | 'scheduling'
   | 'content'
   | 'transcripts'
   | 'insights'
@@ -30,7 +31,7 @@ export type SeedStepId =
 /** Profile → the seed-step ids it contributes (plan §4.1). */
 export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>> = {
   roster: ['iam-dev-user', 'iam', 'sessions'],
-  full: ['iam-dev-user', 'iam', 'sessions', 'programs', 'content'],
+  full: ['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content'],
 };
 
 /** Add-on → the seed-step ids it contributes (plan §4.1). */
@@ -50,6 +51,7 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
   'sessions',
   'qtf-demo',
   'programs',
+  'scheduling',
   'content',
   'transcripts',
   'insights',
@@ -210,6 +212,20 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       cwd: getService('programs-api', m).subpath,
       command: ['pnpm', 'db:seed'],
       env: inlineDatabaseUrl(getDb('programs', m)),
+      requiresServiceUp: [],
+      failureMode: 'fatal',
+    },
+    // scheduling deterministic demo schedules/slots (db:seed, direct). main's
+    // seed_stack full runs seed_scheduling between programs and content (up.sh:1914,
+    // fatal — no `|| true`); added on main after gh_214 branched. Without it a native
+    // `--seed full` leaves scheduling unseeded → the Schedule step renders nothing.
+    scheduling: {
+      id: 'scheduling',
+      service: 'scheduling-api',
+      databases: ['scheduling'],
+      cwd: getService('scheduling-api', m).subpath,
+      command: ['pnpm', 'db:seed'],
+      env: inlineDatabaseUrl(getDb('scheduling', m)),
       requiresServiceUp: [],
       failureMode: 'fatal',
     },

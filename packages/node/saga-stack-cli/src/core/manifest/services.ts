@@ -56,6 +56,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         AUTH_DEVUSERID: '${DEV_USER_UUID}',
         CORS_ORIGIN: '${DASH_URL},${CONNECT_WEB_URL}',
         MAIL_FRONTEND_BASE_URL: 'http://localhost:${IAM_PORT}/demo',
+        // On a fresh clone iam-api/.env doesn't exist, so JANUS_REQUIRED fail-safes
+        // to `required` → iam 401s every local S2S call + devLogin ({"realms":["janus"]}).
+        // main's up.sh sets it (services_up ~1467, added after gh_214 branched); the CLI
+        // must too — same class as the VITE_SESSION_MEASURED miss.
+        JANUS_REQUIRED: 'false',
       },
     },
     seed: ['iam-dev-user', 'iam'],
@@ -297,13 +302,16 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // §2.3 fix: connect-api → content-api (url), so any connect closure pulls content + its DB.
     dependsOn: ['iam-api', 'sessions-api', 'content-api'],
     depKinds: { 'iam-api': 'url', 'sessions-api': 'url', 'content-api': 'url' },
-    mesh: ['connect-mongo'],
+    mesh: ['connect-mongo', 'rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
       env: {
         NODE_ENV: 'development',
         PORT: '${CONNECT_API_PORT}',
         MONGO_URI: '${CONNECT_MONGO_URI}',
+        // main up.sh:1614 added RABBITMQ_URL to connect-api after gh_214 branched;
+        // without it connect-api's publish/consume/outbox get an unset broker URL.
+        RABBITMQ_URL: '${MESH_MQ}',
         AUTH_ENABLED: 'true',
         JANUS_REQUIRED: 'false',
         IAM_API_URL: '${IAM_URL}',

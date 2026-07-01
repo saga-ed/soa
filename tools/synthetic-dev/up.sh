@@ -1064,7 +1064,9 @@ prep(){
   if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -tAc \
         "SELECT 1 FROM pg_database WHERE datname='coach_api'" 2>/dev/null)" != 1 ]]; then
     db_step "coach_api role+db create" "$SOA" docker exec soa-postgres-1 \
-      psql -U postgres_admin -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coach_api_app') THEN CREATE ROLE coach_api_app LOGIN PASSWORD 'dev-password-coach-api-app'; END IF; END \$\$; CREATE DATABASE coach_api OWNER coach_api_app"
+      psql -U postgres_admin \
+      -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coach_api_app') THEN CREATE ROLE coach_api_app LOGIN PASSWORD 'dev-password-coach-api-app'; END IF; END \$\$;" \
+      -c "CREATE DATABASE coach_api OWNER coach_api_app"
   fi
   # coach's prisma schema lives in the coach-db PACKAGE (not the app); it has
   # committed migrations, so migrate deploy lands cleanly.
@@ -1609,7 +1611,7 @@ services_up(){
      NODE_ENV=development \
      AUTH_ENABLED=true JANUS_REQUIRED=false \
      IAM_API_URL="$IAM_URL" JWT_ISSUER="https://iam.saga.org" \
-     ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
+     ALLOWED_ORIGINS="$CONNECT_WEB_URL,$DASH_URL" \
      SESSIONS_API_BASE_URL="http://localhost:3007" \
      RABBITMQ_URL="$MESH_MQ" \
      SAGA_API_TARGET="$SAGA_API_TARGET" \

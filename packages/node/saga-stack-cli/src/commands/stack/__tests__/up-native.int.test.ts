@@ -94,12 +94,17 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     getPortProbe: () => PortProbe;
     getDashFs: () => DashFs;
     getRunner: () => Runner;
+    getRepoDirCheck: () => (dir: string) => boolean;
   };
   vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
   vi.spyOn(proto, 'getMeshExec').mockReturnValue(meshExec);
   vi.spyOn(proto, 'getPortProbe').mockReturnValue(portProbe);
   vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
   vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
+  // The fake workspace paths (--dev /fixed/dev) don't exist on disk; default the
+  // repo-dir check to "present" so services aren't skipped. The skip-when-absent
+  // path is covered explicitly in stack-api.int.test.ts.
+  vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
 }
 
 beforeEach(async () => {
@@ -165,6 +170,35 @@ describe('stack up --only — native partial-stack', () => {
     expect(upSh).toHaveLength(1);
     // flagMap.login() is a flag-only invocation (no leading `up` verb).
     expect(upSh[0].args).toEqual(['--login']);
+  });
+
+  it('coach absent + --seed full: coach-pg is NOT planned and the run does not fail', async () => {
+    // Report the coach checkout as absent; every other repo present.
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue((dir: string) => !dir.endsWith('/coach'));
+
+    // closure(coach-web) = coach-web + coach-api (COACH, absent) + iam-api (present).
+    await expect(
+      StackUp.run(['--only', 'coach-web', '--seed', 'full', ...WS], config),
+    ).resolves.toBeUndefined();
+
+    // only iam-api launched; the coach pair was skipped (repo not cloned).
+    expect(launches.map((s) => s.id)).toEqual(['iam-api']);
+
+    // the seed plan dropped coach-pg — NOTHING ran against the coach-db dir (which
+    // would have spawn-crashed on the missing checkout with a real runner).
+    expect(runs.some((r) => r.cwd.includes('/coach'))).toBe(false);
+    expect(runs.some((r) => r.command === 'pnpm' && r.args.includes('db:seed') && r.cwd.includes('coach-db'))).toBe(
+      false,
+    );
+  });
+
+  it('accepts the --coach repo-override flag (native path, no "Nonexistent flag")', async () => {
+    // The per-repo --coach pin must parse; it just pins the COACH checkout path.
+    await StackUp.run(['--only', 'iam-api', '--coach', '/some/dir', ...WS], config);
+    expect(launches.map((s) => s.id)).toEqual(['iam-api']);
   });
 
   it('--reset delegates `up.sh --reset` after bring-up, then native seed still runs', async () => {

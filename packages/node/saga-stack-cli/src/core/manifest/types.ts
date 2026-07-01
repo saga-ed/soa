@@ -11,7 +11,7 @@
  * unions anywhere else — `core/seed/`, `closure.ts`, etc. import from here.
  */
 
-/** The 10 core services + rtsm + the 3 optional (`--with-playback`) playback APIs. */
+/** The 10 core services + rtsm + the coach pair + the 3 optional (`--with-playback`) playback APIs. */
 export type ServiceId =
   | 'iam-api'
   | 'sis-api'
@@ -24,6 +24,8 @@ export type ServiceId =
   | 'connect-api'
   | 'connect-web'
   | 'rtsm-api'
+  | 'coach-api' //       coach-api (:6105) — Coach professional-development GraphQL/tRPC
+  | 'coach-web' //       coach-web (:8800) — SvelteKit SPA (reaches iam THROUGH coach-api)
   | 'transcripts-api' // optional: true (--with-playback)
   | 'insights-api' //    optional: true (--with-playback)
   | 'chat-api'; //       optional: true (--with-playback)
@@ -31,12 +33,13 @@ export type ServiceId =
 /** Mesh infra units, started as a single `make up PROFILE=empty`. */
 export type MeshId = 'postgres' | 'redis' | 'rabbitmq' | 'connect-mongo';
 
-/** Sibling-repo env-var keys (mirror up.sh:173-180). `repoRoot = $<key> ?? $DEV/<default>`. */
+/** Sibling-repo env-var keys (mirror up.sh:173-181). `repoRoot = $<key> ?? $DEV/<default>`. */
 export type RepoKey =
   | 'SOA'
   | 'ROSTERING'
   | 'PROGRAM_HUB'
   | 'SAGA_DASH'
+  | 'COACH'
   | 'SDS'
   | 'QBOARD'
   | 'RTSM'
@@ -52,7 +55,7 @@ export type DepKind = 'url' | 's2s' | 'event' | 'browser';
 export type Engine = 'postgres' | 'mongo';
 
 /**
- * The 13 databases. The literal equals the real DB `name` (so `DbId` doubles as
+ * The 14 databases. The literal equals the real DB `name` (so `DbId` doubles as
  * the postgres/mongo database name). `connectv3` is mongo; the rest are postgres.
  */
 export type DbId =
@@ -62,6 +65,7 @@ export type DbId =
   | 'scheduling'
   | 'sessions'
   | 'content'
+  | 'coach_api'
   | 'sis_db'
   | 'ads_adm_local'
   | 'ledger_local'

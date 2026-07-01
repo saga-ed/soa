@@ -74,6 +74,13 @@ beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
   installProber();
   installRunner(0);
+  // The fake workspace paths (--dev /fixed/dev) don't exist on disk; default the
+  // repo-dir check to "present" so every service is probed. The not-cloned path is
+  // covered explicitly below.
+  vi.spyOn(
+    BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+    'getRepoDirCheck',
+  ).mockReturnValue(() => true);
   out = [];
   // Capture (and suppress) the commands' emitted lines. oclif's `this.log` does
   // not route through process.stdout.write, so we spy the inherited `log` on the
@@ -94,7 +101,7 @@ describe('stack status — native, manifest-derived, read-only', () => {
   it('probes every non-optional service INCLUDING content-api :3009 (the closed gap)', async () => {
     await StackStatus.run([...WS], config);
     expect(probed).toContain(CONTENT_URL);
-    expect(probed).toHaveLength(11); // 10 core + rtsm-api; no playback
+    expect(probed).toHaveLength(13); // 10 core + rtsm-api + coach-api/coach-web; no playback
   });
 
   it('--only scopes the probes to the dependency closure', async () => {
@@ -112,7 +119,7 @@ describe('stack status — native, manifest-derived, read-only', () => {
     await expect(StackStatus.run([...WS, '--output-json'], config)).resolves.toBeUndefined();
     const json = JSON.parse(out.join(''));
     expect(json.healthy).toBe(false);
-    expect(json.summary).toMatchObject({ total: 11, down: 2 });
+    expect(json.summary).toMatchObject({ total: 13, down: 2 });
   });
 
   it('porcelain emits one key=value per service plus healthy=', async () => {
@@ -170,6 +177,50 @@ describe('stack verify — native health gate', () => {
     await expect(
       StackVerify.run(['--only', 'scheduling-api,sessions-api', ...WS], config),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('status / verify — a service whose repo is not cloned is not-cloned, not down', () => {
+  const COACH_API_URL = 'http://localhost:6105/health';
+  const COACH_WEB_URL = 'http://localhost:8800/';
+
+  /** Report the coach checkout (dir ending in `/coach`) as absent; everything else present. */
+  function markCoachAbsent(): void {
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue((dir: string) => !dir.endsWith('/coach'));
+  }
+
+  it('verify PASSES with coach absent (coach reported not-cloned, not a failure)', async () => {
+    markCoachAbsent();
+    // Every probed service answers up; the ONLY down-ish services would be coach,
+    // which must be excluded from the gate entirely.
+    await expect(StackVerify.run([...WS], config)).resolves.toBeUndefined();
+    // coach-api / coach-web were never probed …
+    expect(probed).not.toContain(COACH_API_URL);
+    expect(probed).not.toContain(COACH_WEB_URL);
+    // … and the other non-optional services still were.
+    expect(probed).toContain(CONTENT_URL);
+  });
+
+  it('verify still PASSES with coach absent even when coach WOULD answer down', async () => {
+    markCoachAbsent();
+    installProber([COACH_API_URL, COACH_WEB_URL]); // moot — coach is never probed
+    await expect(StackVerify.run(['--output-json', ...WS], config)).resolves.toBeUndefined();
+    const json = JSON.parse(out.join(''));
+    expect(json.passed).toBe(true);
+    expect(json.notCloned.map((n: { id: string }) => n.id).sort()).toEqual(['coach-api', 'coach-web']);
+    expect(json.summary.notCloned).toBe(2);
+  });
+
+  it('status reports coach not-cloned (excluded from the healthy verdict)', async () => {
+    markCoachAbsent();
+    await StackStatus.run(['--output-json', ...WS], config);
+    const json = JSON.parse(out.join(''));
+    expect(json.healthy).toBe(true);
+    expect(json.notCloned.map((n: { id: string }) => n.id).sort()).toEqual(['coach-api', 'coach-web']);
+    expect(json.services.some((s: { id: string }) => s.id === 'coach-api')).toBe(false);
   });
 });
 

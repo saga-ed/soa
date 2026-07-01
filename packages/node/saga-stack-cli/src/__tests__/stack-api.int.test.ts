@@ -44,6 +44,7 @@ const REPO_ROOTS = {
   ROSTERING: '/dev/rostering',
   PROGRAM_HUB: '/dev/program-hub',
   SAGA_DASH: '/dev/saga-dash',
+  COACH: '/dev/coach',
   SDS: '/dev/student-data-system',
   QBOARD: '/dev/qboard',
   RTSM: '/dev/rtsm',
@@ -248,6 +249,46 @@ describe('StackApi.up — full native bring-up over a concrete closure', () => {
     expect(res.failedAt).toBe('iam-api');
     // iam-api is wave 1; its dependents are never launched.
     expect(fakes.launches.map((s) => s.id)).toEqual(['iam-api']);
+  });
+});
+
+describe('StackApi.up — skips a service whose sibling repo is not cloned (warn, not fail)', () => {
+  it('launches services whose repo is present and SKIPS the coach pair when COACH is absent', async () => {
+    const { runtime, fakes } = makeRuntime();
+    // COACH checkout absent on disk; every other repo present.
+    runtime.repoDirExists = (dir: string) => dir !== REPO_ROOTS.COACH;
+    const api = makeStackApi(manifest, runtime);
+
+    // closure(coach-web) = coach-web + coach-api (COACH, absent) + iam-api (present).
+    const closure = computeClosure(manifest, ['coach-web'] as ServiceId[]);
+
+    const res = await api.up(closure.services);
+
+    // the run does NOT fail — the missing repo is a warning, not an error.
+    expect(res.ok).toBe(true);
+
+    // only iam-api (a present repo) launched; the coach pair was skipped, not spawned.
+    expect(fakes.launches.map((s) => s.id)).toEqual(['iam-api']);
+
+    // both coach services are reported skipped, with the repo dir + a clear message.
+    expect(res.skipped.map((s) => s.id).sort()).toEqual(['coach-api', 'coach-web']);
+    for (const s of res.skipped) {
+      expect(s.repo).toBe('COACH');
+      expect(s.repoDir).toBe(REPO_ROOTS.COACH);
+      expect(s.message).toMatch(/not present.*COACH repo not cloned/);
+    }
+  });
+
+  it('launches everything (no skips) when repoDirExists reports every repo present', async () => {
+    const { runtime, fakes } = makeRuntime();
+    runtime.repoDirExists = () => true;
+    const api = makeStackApi(manifest, runtime);
+
+    const res = await api.up(['iam-api', 'coach-api'] as ServiceId[]);
+
+    expect(res.ok).toBe(true);
+    expect(res.skipped).toEqual([]);
+    expect(fakes.launches.map((s) => s.id)).toEqual(['iam-api', 'coach-api']);
   });
 });
 

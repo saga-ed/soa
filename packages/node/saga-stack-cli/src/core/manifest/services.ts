@@ -1,6 +1,6 @@
 /**
- * The 14 ServiceDefs — verified against up.sh (ports `182-299`, the `services_up`
- * launch wall `1373-1553`) and verify.sh (health endpoints `52-76`).
+ * The 16 ServiceDefs — verified against up.sh (ports `182-299`, the `services_up`
+ * launch wall `1373-1584`) and verify.sh (health endpoints `52-76`).
  *
  * All review corrections + user decisions applied:
  *  - saga-dash.dependsOn includes sis-api (roster CSV page) AND content-api (picker).
@@ -391,6 +391,71 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     lane: lanes(6110, 'rtsm'),
     tunnelSlug: 'rtsm',
     isFrontend: false,
+    optional: false,
+  },
+  'coach-api': {
+    id: 'coach-api',
+    repo: 'COACH',
+    subpath: 'apps/node/coach-api',
+    port: 6105,
+    portEnvVar: 'EXPRESS_SERVER_PORT',
+    // coach-api mounts /health at the app ROOT (not under its /coach/v1 basepath).
+    healthPath: '/health',
+    databases: ['coach_api'],
+    dependsOn: ['iam-api'],
+    depKinds: { 'iam-api': 'url' },
+    // DUAL-STORE: coach_api pg (via `databases`) + the mesh mongo (curriculum read
+    // path). RABBITMQ_ENABLED=false, so rabbitmq is intentionally NOT gated on.
+    mesh: ['connect-mongo'],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        NODE_ENV: 'development',
+        EXPRESS_SERVER_PORT: '${COACH_API_PORT}',
+        DATABASE_URL: '${COACH_DB_URL}',
+        MONGO_HOST: 'localhost',
+        MONGO_PORT: '${CONNECT_MONGO_PORT}',
+        MONGO_DATABASE: 'saga_local',
+        CONTENT_DATABASE: 'wmlms_local',
+        AUTH_AUTHENABLED: 'true',
+        IAM_API_TARGET: '${IAM_URL}',
+        AUTH_JWKSURL: '${IAM_URL}/.well-known/jwks.json',
+        AUTH_ISSUER: '${IAM_ISSUER}',
+        RABBITMQ_ENABLED: 'false',
+        RABBITMQ_URL: '${MESH_MQ}',
+        EXPRESS_SERVER_CORSALLOWEDDOMAINS: '${COACH_WEB_HOST}',
+        SAGA_API_TARGET: '${SAGA_API_TARGET_COACH}',
+      },
+    },
+    seed: [],
+    lane: lanes(6105, 'coach'),
+    tunnelSlug: 'coach',
+    isFrontend: false,
+    optional: false,
+  },
+  'coach-web': {
+    id: 'coach-web',
+    repo: 'COACH',
+    subpath: 'apps/web/coach-web',
+    port: 8800,
+    portEnvVar: null,
+    // SvelteKit SPA — probed on the root path like saga-dash / connect-web.
+    healthPath: '/',
+    databases: [],
+    // Reaches iam server-side THROUGH coach-api, so it only needs the coach-api URL.
+    dependsOn: ['coach-api'],
+    depKinds: { 'coach-api': 'browser' },
+    mesh: [],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        PUBLIC_COACH_API_URL: '${COACH_API_URL}',
+      },
+    },
+    seed: [],
+    lane: lanes(8800, 'coach-web'),
+    tunnelSlug: 'coach-web',
+    isFrontend: true,
     optional: false,
   },
   'transcripts-api': {

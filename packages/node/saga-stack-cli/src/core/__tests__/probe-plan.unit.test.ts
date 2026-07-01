@@ -39,8 +39,8 @@ describe('healthProbes — manifest-derived probe list', () => {
   it('default set = every NON-optional service, in manifest declaration order', () => {
     const probes = healthProbes(manifest);
     const ids = probes.map((p) => p.id);
-    // 11 non-optional (10 core + rtsm-api); the 3 playback APIs are excluded.
-    expect(ids).toHaveLength(11);
+    // 13 non-optional (10 core + rtsm-api + coach-api/coach-web); the 3 playback APIs are excluded.
+    expect(ids).toHaveLength(13);
     expect(ids).not.toContain('transcripts-api');
     expect(ids).not.toContain('insights-api');
     expect(ids).not.toContain('chat-api');

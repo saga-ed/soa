@@ -55,8 +55,8 @@ describe('stack up --dry-run — closure planning path', () => {
       .filter((s) => !s.optional)
       .map((s) => s.id);
     const closure = computeClosure(manifest, fullRequest);
-    // 11 non-optional services (10 core + rtsm-api); no playback.
-    expect(closure.services).toHaveLength(11);
+    // 13 non-optional services (10 core + rtsm-api + coach-api/coach-web); no playback.
+    expect(closure.services).toHaveLength(13);
     expect(closure.services).not.toContain('transcripts-api');
     expect(closure.mesh).toContain('connect-mongo'); // connect-api in the full set
   });

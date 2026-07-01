@@ -32,6 +32,8 @@ const SERVICE_IDS = [
   'connect-api',
   'connect-web',
   'rtsm-api',
+  'coach-api',
+  'coach-web',
   'transcripts-api',
   'insights-api',
   'chat-api',

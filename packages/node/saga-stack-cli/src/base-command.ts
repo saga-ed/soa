@@ -22,6 +22,7 @@
  * default handler — don't override it.
  */
 
+import { existsSync } from 'node:fs';
 import { Command } from '@oclif/core';
 import { baseFlags } from './shared-flags.js';
 import type { ScriptPlan } from './core/flag-map.js';
@@ -142,6 +143,19 @@ export abstract class BaseCommand extends Command {
    */
   protected getDashFs(): DashFs {
     return makeRealDashFs();
+  }
+
+  /**
+   * The injectable repo-dir existence check (M4 native partial-stack). Production
+   * returns a real `fs.existsSync` predicate — the native `stack up` path calls it
+   * per service to SKIP (warn, not fail) any service whose sibling-repo checkout is
+   * absent (e.g. the coach repo not cloned). Tests spy this on the prototype to
+   * drive the skip logic WITHOUT touching the filesystem — mirroring how
+   * `getLauncher`/`getMeshExec`/… are mocked. Default (real existsSync) would skip
+   * every service under a fake `--dev` path, so seam-mocking tests must stub it.
+   */
+  protected getRepoDirCheck(): (dir: string) => boolean {
+    return (dir: string) => existsSync(dir);
   }
 
   /**

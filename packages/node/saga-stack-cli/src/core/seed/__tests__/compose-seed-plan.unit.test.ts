@@ -23,17 +23,17 @@ const ids = (steps: { id: string }[]): string[] => steps.map((s) => s.id);
 
 describe('composeSeedPlan — gate 1: partial-stack drop', () => {
   it('drops steps whose owning service is not in the active closure', () => {
-    const sel: SeedSelection = { profile: 'full' }; // iam-dev-user, iam, sessions, programs, scheduling, content
+    const sel: SeedSelection = { profile: 'full' }; // iam-dev-user, iam, sessions, programs, scheduling, content, coach-pg
     const plan = composeSeedPlan(sel, set('iam-api'), set());
 
     // Only iam-api's steps survive (and they're offline — no requiresServiceUp).
     expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam']);
     expect(plan.online).toEqual([]);
 
-    // sessions / programs / scheduling / content dropped as service-inactive.
+    // sessions / programs / scheduling / content / coach-pg dropped as service-inactive.
     const dropped = plan.skipped.filter((s) => s.reason === 'service-inactive');
     expect(dropped.map((s) => s.service).sort()).toEqual(
-      ['content-api', 'programs-api', 'scheduling-api', 'sessions-api'].sort(),
+      ['coach-api', 'content-api', 'programs-api', 'scheduling-api', 'sessions-api'].sort(),
     );
   });
 });
@@ -66,12 +66,13 @@ describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () =
 describe('composeSeedPlan — gate 3: offline / online partition', () => {
   it('partitions survivors by requiresServiceUp, in canonical run order', () => {
     const sel: SeedSelection = { profile: 'full', addOns: ['qtf'] };
-    const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api');
+    const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api', 'coach-api');
     const plan = composeSeedPlan(sel, active, set());
 
     // qtf-demo (requires sessions-api) + content (requires content-api) defer online;
-    // scheduling (db:seed, no requiresServiceUp) stays offline between programs and content.
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling']);
+    // scheduling + coach-pg (db:seed, no requiresServiceUp) stay offline. coach-pg
+    // trails content in the canonical run order.
+    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'coach-pg']);
     expect(ids(plan.online)).toEqual(['qtf-demo', 'content']);
     expect(plan.skipped).toEqual([]);
   });

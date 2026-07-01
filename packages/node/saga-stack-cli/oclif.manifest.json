@@ -65,6 +65,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -188,6 +195,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -302,6 +316,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -473,6 +494,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -607,6 +635,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -725,6 +760,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -849,6 +891,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -998,6 +1047,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -1109,6 +1165,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1233,6 +1296,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -1352,6 +1422,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1494,6 +1571,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -1608,6 +1692,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1821,6 +1912,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -1968,6 +2066,13 @@
           "multiple": false,
           "type": "option"
         },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "sds": {
           "description": "override path to the sds (student-data-system) repo checkout",
           "name": "sds",
@@ -2076,6 +2181,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2201,6 +2313,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2332,6 +2451,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2484,6 +2610,13 @@
         "saga-dash": {
           "description": "override path to the saga-dash repo checkout",
           "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"

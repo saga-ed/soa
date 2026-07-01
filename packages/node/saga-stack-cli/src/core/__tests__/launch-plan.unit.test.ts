@@ -23,6 +23,7 @@ const REPO_ROOTS: Record<RepoKey, string> = {
   ROSTERING: '/w/rostering',
   PROGRAM_HUB: '/w/program-hub',
   SAGA_DASH: '/w/saga-dash',
+  COACH: '/w/coach',
   SDS: '/w/student-data-system',
   QBOARD: '/w/qboard',
   RTSM: '/w/rtsm',
@@ -216,6 +217,32 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       AUTH_AUTHENABLED: 'false',
       JANUS_REQUIRED: 'false',
+    });
+  });
+
+  it('coach-api (dual-store: coach_api pg + mesh mongo, iss=iam.saga.org)', () => {
+    expect(env('coach-api')).toEqual({
+      NODE_ENV: 'development',
+      EXPRESS_SERVER_PORT: '6105',
+      DATABASE_URL: 'postgresql://coach_api_app:dev-password-coach-api-app@localhost:5432/coach_api',
+      MONGO_HOST: 'localhost',
+      MONGO_PORT: '27037',
+      MONGO_DATABASE: 'saga_local',
+      CONTENT_DATABASE: 'wmlms_local',
+      AUTH_AUTHENABLED: 'true',
+      IAM_API_TARGET: 'http://localhost:3010',
+      AUTH_JWKSURL: 'http://localhost:3010/.well-known/jwks.json',
+      AUTH_ISSUER: 'https://iam.saga.org',
+      RABBITMQ_ENABLED: 'false',
+      RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
+      EXPRESS_SERVER_CORSALLOWEDDOMAINS: 'localhost',
+      SAGA_API_TARGET: 'https://staging.wootmath.com',
+    });
+  });
+
+  it('coach-web (only needs the coach-api URL)', () => {
+    expect(env('coach-web')).toEqual({
+      PUBLIC_COACH_API_URL: 'http://localhost:6105',
     });
   });
 

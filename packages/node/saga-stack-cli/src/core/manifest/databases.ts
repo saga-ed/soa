@@ -1,15 +1,18 @@
 /**
- * The 13 databases — verified against infra/compose/projects/saga-mesh/seed/
+ * The 14 databases — verified against infra/compose/projects/saga-mesh/seed/
  * profile-empty.sql (owners/roles) and the plan §2.2 "Databases" table.
  *
- * profile-empty.sql provisions 9 app DBs at mesh-up (iam_local, iam_pii_local,
- * programs, scheduling, sessions, content, ads_adm_local, ledger_local, sis_db).
- * The 3 playback DBs are provisioned by `provision_playback_dbs` (not mesh) and
- * connectv3 is a mongo DB that auto-creates.
+ * profile-empty.sql provisions 10 app DBs at mesh-up (iam_local, iam_pii_local,
+ * programs, scheduling, sessions, content, coach_api, ads_adm_local, ledger_local,
+ * sis_db) — it CREATE USER/DATABASE/GRANTs coach_api's role+db too. up.sh's
+ * first-postgres-init role+db_step (up.sh:1061-1067) is only a fallback for
+ * pre-existing volumes; coach_api is a mesh-provisioned pg app DB. The 3 playback
+ * DBs are provisioned by `provision_playback_dbs` (not mesh) and connectv3 is a
+ * mongo DB that auto-creates.
  *
  * Migrate order (plan §2.2 blocker fix):
  *   iam-db → iam-pii-db (db push) → programs → scheduling → sessions → content
- *   → sis-db → ads-adm-db.
+ *   → coach-db → sis-db → ads-adm-db.
  */
 
 import type { DatabaseDef, DbId } from './types.js';
@@ -74,6 +77,20 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     migrate: { dir: 'apps/node/content-api', cmd: 'db:deploy', databaseUrlOverride: true },
     ownerRole: 'saga_user',
     ownerPw: 'password123',
+    resettable: true,
+    resetMode: 'truncate',
+    meshProvisioned: true,
+  },
+  coach_api: {
+    name: 'coach_api',
+    engine: 'postgres',
+    // coach's prisma schema lives in the coach-db PACKAGE (not the app); migrations
+    // under packages/node/coach-db/src/prisma/migrations (up.sh:802). db:deploy with
+    // DATABASE_URL forced to the mesh :5432 (coach-db's own default is :5433 —
+    // up.sh's migrate_db passes $COACH_DB_URL).
+    migrate: { dir: 'packages/node/coach-db', cmd: 'db:deploy', databaseUrlOverride: true },
+    ownerRole: 'coach_api_app',
+    ownerPw: 'dev-password-coach-api-app',
     resettable: true,
     resetMode: 'truncate',
     meshProvisioned: true,

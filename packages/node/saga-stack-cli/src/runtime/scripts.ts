@@ -51,6 +51,7 @@ export const REPO_DEFAULT_DIR: Record<RepoKey, string> = {
   ROSTERING: 'rostering',
   PROGRAM_HUB: 'program-hub',
   SAGA_DASH: 'saga-dash',
+  COACH: 'coach',
   SDS: 'student-data-system',
   QBOARD: 'qboard',
   RTSM: 'rtsm',

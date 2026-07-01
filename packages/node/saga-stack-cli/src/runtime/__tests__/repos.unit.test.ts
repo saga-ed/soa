@@ -16,6 +16,7 @@ describe('REPO_ENV_VAR', () => {
       rostering: 'ROSTERING',
       'program-hub': 'PROGRAM_HUB',
       'saga-dash': 'SAGA_DASH',
+      coach: 'COACH',
       sds: 'SDS',
       qboard: 'QBOARD',
       rtsm: 'RTSM',

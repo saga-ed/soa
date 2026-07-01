@@ -39,7 +39,7 @@ import { launchPlan } from './core/launch-plan.js';
 import type { LaunchContext } from './core/launch-plan.js';
 import { launchOrder } from './core/launch-order.js';
 import { getService, manifest as defaultManifest } from './core/manifest/index.js';
-import type { Lane, Manifest, MeshId, ServiceId } from './core/manifest/index.js';
+import type { Lane, Manifest, MeshId, RepoKey, ServiceId } from './core/manifest/index.js';
 import type { HealthProbe } from './core/probe-plan.js';
 import type { SeedPlan, SeedStep, SkipNote } from './core/seed/types.js';
 import { meshUp, syncDashLocalDefaults } from './runtime/index.js';
@@ -85,6 +85,16 @@ export interface Runtime {
   prober: HealthProber;
   /** Process seam — mesh `make up` + the native seed steps. */
   runner: Runner;
+  /**
+   * Predicate: does a resolved sibling-repo checkout dir exist on disk? Injected
+   * so the facade stays IO-free (the command resolves it to `fs.existsSync`). When
+   * a service's repo dir is ABSENT, `up` SKIPS that service with a warning instead
+   * of erroring — so a missing optional sibling (e.g. the coach repo not cloned)
+   * does not redden the whole stack. Absent ⇒ every repo is assumed present (no
+   * skipping) — the behaviour before this guard, preserved for callers that don't
+   * wire it (e2e / the facade unit tests).
+   */
+  repoDirExists?: (dir: string) => boolean;
   /** True iff running in `--tunnel` mode (drives the dash prelaunch hook). Default false. */
   tunnel?: boolean;
   /** `<moniker>.<VMS_BASE>` — required when `tunnel` is true. */
@@ -102,9 +112,21 @@ export interface Runtime {
 
 // ── results ────────────────────────────────────────────────────────────────
 
+/** A service `up` skipped because its sibling-repo checkout dir is not present. */
+export interface UpSkip {
+  /** The skipped service id. */
+  id: ServiceId;
+  /** Its manifest repo key (e.g. `COACH`). */
+  repo: RepoKey;
+  /** The resolved repo checkout dir that was found to be absent. */
+  repoDir: string;
+  /** Human-readable warning (e.g. `coach-api skipped — repo dir /d/coach not present (COACH repo not cloned)`). */
+  message: string;
+}
+
 /** The outcome of a native `up`. */
 export interface UpResult {
-  /** True iff the mesh came ready, the dash hook ran (if needed), and every wave went healthy. */
+  /** True iff the mesh came ready, the dash hook ran (if needed), and every launched wave went healthy. */
   ok: boolean;
   /** The mesh bring-up result (preflight conflicts / make-up / per-unit readiness). */
   mesh: MeshResult;
@@ -112,6 +134,8 @@ export interface UpResult {
   dash?: DashSyncResult;
   /** Per-service launch results, in the order launched (topo waves flattened). */
   launched: LaunchResult[];
+  /** Services skipped because their repo checkout dir is absent (warn, not fail). */
+  skipped: UpSkip[];
   /** The first service that failed health (set only when `ok` is false at the service stage). */
   failedAt?: ServiceId;
 }
@@ -267,22 +291,38 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
     return out;
   }
 
-  /** Run one seed step (+ its warn-mode optional tail). Returns false only on a FATAL non-zero. */
+  /**
+   * Run one seed step (+ its warn-mode optional tail). Returns false only on a
+   * FATAL failure. A spawn-level throw (ENOENT — e.g. the owning repo isn't
+   * cloned, so its `cwd` doesn't exist) is folded into a non-zero code BEFORE the
+   * `failureMode` check, so a warn-mode step degrades to a warning instead of an
+   * unhandled rejection (defense-in-depth for the repo-absent skip guard).
+   */
   async function runSeedStep(step: SeedStep, phase: 'offline' | 'online', ran: SeedResult['ran']): Promise<boolean> {
     const { command, args } = head(step.command);
-    const { code } = await runner.run({
-      cwd: seedCwd(step),
-      command,
-      args,
-      env: seedEnv(step),
-      stdio: 'inherit',
-    });
+    let code: number;
+    try {
+      ({ code } = await runner.run({
+        cwd: seedCwd(step),
+        command,
+        args,
+        env: seedEnv(step),
+        stdio: 'inherit',
+      }));
+    } catch {
+      code = -1; // spawn failure (ENOENT etc.) — treat as non-zero, honour failureMode
+    }
 
     // Optional tail steps (content demo-polls / legacy-poll) are always warn-mode;
-    // run them best-effort after the main step regardless of the main exit code.
+    // run them best-effort after the main step regardless of the main exit code —
+    // and a spawn throw there is likewise swallowed (they never fail the seed).
     for (const sub of step.optionalSteps ?? []) {
       const sh = head(sub.command);
-      await runner.run({ cwd: seedCwd(sub), command: sh.command, args: sh.args, env: seedEnv(sub), stdio: 'inherit' });
+      try {
+        await runner.run({ cwd: seedCwd(sub), command: sh.command, args: sh.args, env: seedEnv(sub), stdio: 'inherit' });
+      } catch {
+        // best-effort tail; a missing script/dir is a no-op warning, never fatal.
+      }
     }
 
     if (code === 0 || step.failureMode === 'warn') {
@@ -304,24 +344,48 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         units: neededMesh(services, manifest),
         manifest,
       });
-      if (!mesh.ok) return { ok: false, mesh, launched: [] };
+      if (!mesh.ok) return { ok: false, mesh, launched: [], skipped: [] };
 
-      // 3. dash prelaunch hook — ONLY when saga-dash is in the closure (it reads
+      // 3. skip any service whose sibling-repo checkout is absent — a missing repo
+      // (e.g. the coach repo not cloned) is a WARNING, not a failure. Generic across
+      // ALL services: resolve each service's repo dir and, if `repoDirExists` says it
+      // is not on disk, drop it from the launch set. `repoDirExists` absent ⇒ assume
+      // every repo is present (no skipping — the pre-guard behaviour).
+      const repoDirExists = runtime.repoDirExists;
+      const skipped: UpSkip[] = [];
+      const launchable: ServiceId[] = [];
+      for (const id of services) {
+        const repo = getService(id, manifest).repo;
+        const repoDir = launchContext.repoRoots[repo];
+        if (repoDirExists && !repoDirExists(repoDir)) {
+          skipped.push({
+            id,
+            repo,
+            repoDir,
+            message: `${id} skipped — repo dir ${repoDir} not present (${repo} repo not cloned)`,
+          });
+        } else {
+          launchable.push(id);
+        }
+      }
+
+      // 4. dash prelaunch hook — ONLY when saga-dash is actually launchable (it reads
       // static/config.local.json at page load, so the file must match the mode first).
       let dash: DashSyncResult | undefined;
-      if (services.includes('saga-dash')) {
+      if (launchable.includes('saga-dash')) {
         dash = syncDashLocalDefaults(
           { sagaDashRoot: runtime.sagaDashRoot, tunnel: runtime.tunnel, tunnelDomain: runtime.tunnelDomain },
           dashFs,
         );
       }
 
-      // 4. launch the closure in topo WAVES — health-gate each wave before the next.
-      // Reuse the faithful per-service spec builder (launchPlan), then regroup the
-      // flat specs into waves via launchOrder so dependents only start once their
-      // deps are healthy.
-      const byId = new Map(launchPlan(manifest, services, lane, launchContext).map((s) => [s.id, s]));
-      const waves = launchOrder(services, manifest);
+      // 5. launch the launchable set in topo WAVES — health-gate each wave before the
+      // next. Reuse the faithful per-service spec builder (launchPlan), then regroup
+      // the flat specs into waves via launchOrder so dependents only start once their
+      // deps are healthy. Both are computed over `launchable` so a skipped service is
+      // neither planned nor ordered against.
+      const byId = new Map(launchPlan(manifest, launchable, lane, launchContext).map((s) => [s.id, s]));
+      const waves = launchOrder(launchable, manifest);
       const launched: LaunchResult[] = [];
       for (const wave of waves) {
         const results = await Promise.all(
@@ -342,10 +406,10 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         );
         launched.push(...results);
         const failed = results.find((r) => !r.ok);
-        if (failed) return { ok: false, mesh, dash, launched, failedAt: failed.id as ServiceId };
+        if (failed) return { ok: false, mesh, dash, launched, skipped, failedAt: failed.id as ServiceId };
       }
 
-      return { ok: true, mesh, dash, launched };
+      return { ok: true, mesh, dash, launched, skipped };
     },
 
     async down(services: ServiceId[]): Promise<DownResult> {

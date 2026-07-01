@@ -15,7 +15,7 @@ import { getDb, getService, manifest } from '../manifest/index.js';
 import type { DatabaseDef, DbId, Manifest, ServiceId } from '../manifest/index.js';
 import type { SeedAddOn, SeedEnv, SeedProfile, SeedStep } from './types.js';
 
-/** The 9 canonical seed-step ids (mirrors `SeedStepRef` in the manifest). */
+/** The canonical seed-step ids (superset of `SeedStepRef` — incl. `scheduling`/`coach-pg`). */
 export type SeedStepId =
   | 'iam-dev-user'
   | 'iam'
@@ -24,6 +24,7 @@ export type SeedStepId =
   | 'programs'
   | 'scheduling'
   | 'content'
+  | 'coach-pg'
   | 'transcripts'
   | 'insights'
   | 'chat';
@@ -31,7 +32,7 @@ export type SeedStepId =
 /** Profile → the seed-step ids it contributes (plan §4.1). */
 export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>> = {
   roster: ['iam-dev-user', 'iam', 'sessions'],
-  full: ['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content'],
+  full: ['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content', 'coach-pg'],
 };
 
 /** Add-on → the seed-step ids it contributes (plan §4.1). */
@@ -42,7 +43,8 @@ export const ADDON_STEPS: Readonly<Record<SeedAddOn, readonly SeedStepId[]>> = {
 
 /**
  * Canonical seed run order (plan §4.1):
- *   iam-dev-user → iam → sessions → qtf → programs → content → playback.
+ *   iam-dev-user → iam → sessions → qtf → programs → scheduling → content →
+ *   coach-pg → playback.
  * `composeSeedPlan` walks this order so the emitted plan is deterministic.
  */
 export const SEED_RUN_ORDER: readonly SeedStepId[] = [
@@ -53,6 +55,7 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
   'programs',
   'scheduling',
   'content',
+  'coach-pg',
   'transcripts',
   'insights',
   'chat',
@@ -276,6 +279,26 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
           failureMode: 'warn',
         },
       ],
+    },
+    // coach progress store (Postgres) — coach-db `db:seed` (coach#155 local-snapshot),
+    // DATABASE_URL forced to the mesh :5432 coach_api (== $COACH_DB_URL; coach-db's own
+    // default is :5433). main runs it best-effort in seed_stack full after content
+    // (up.sh:1808-1816, `warn` on failure — coach may be absent / coach#155 unmerged).
+    //
+    // TODO(coach-curriculum): main's seed_coach ALSO mongoimports coach's curriculum
+    // fixtures into the mesh mongo (up.sh:1780-1798 seed_coach_mongo_only —
+    // `docker exec -i soa-connect-mongo-1 mongoimport … < content_coach.json`). The
+    // SeedStep model has no stdin-redirect (`< file`) support, so that step is NOT
+    // expressible cleanly and is intentionally OMITTED here rather than hacked in.
+    'coach-pg': {
+      id: 'coach-pg',
+      service: 'coach-api',
+      databases: ['coach_api'],
+      cwd: 'packages/node/coach-db',
+      command: ['pnpm', 'db:seed'],
+      env: inlineDatabaseUrl(getDb('coach_api', m)),
+      requiresServiceUp: [], // direct pg db:seed — offline
+      failureMode: 'warn',
     },
     // playback fixtures (sds_93) — each app's `pnpm seed`, app-role POSTGRES_* inline.
     transcripts: playbackStep(m, 'transcripts', 'transcripts-api', 'transcripts_local'),

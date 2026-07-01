@@ -33,7 +33,7 @@ import * as flagMap from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
-import { resolveServiceSet } from './status.js';
+import { partitionByRepoPresence, repoContextFromFlags, resolveServiceSet } from './status.js';
 
 export default class StackVerify extends BaseCommand {
   static description =
@@ -89,7 +89,13 @@ export default class StackVerify extends BaseCommand {
     // ── Native health gate (scoped to the --only closure, else all required). ──
     const tolerate = parseTolerate(flags.tolerate);
     const ids = resolveServiceSet(flags.only, flags['with-playback'], (m) => this.error(m));
-    const probes = healthProbes(manifest, ids);
+
+    // A service whose sibling repo isn't cloned is reported not-cloned (NOT a
+    // failure) — a missing coach checkout must not fail the gate, matching `stack
+    // up`'s skip guard.
+    const ctx = repoContextFromFlags(flags as unknown as Record<string, unknown>);
+    const { probe, notCloned } = partitionByRepoPresence(ids, ctx, this.getRepoDirCheck());
+    const probes = healthProbes(manifest, probe);
 
     const prober = this.getProber();
     const rows = await Promise.all(
@@ -120,7 +126,8 @@ export default class StackVerify extends BaseCommand {
               status: r.status ?? null,
               tolerated: r.tolerated,
             })),
-            summary: { total: rows.length, up, failed: failures.length },
+            notCloned: notCloned.map((n) => ({ id: n.id, repo: n.repo, repoDir: n.repoDir })),
+            summary: { total: rows.length, up, failed: failures.length, notCloned: notCloned.length },
             passed,
           },
           null,
@@ -131,12 +138,17 @@ export default class StackVerify extends BaseCommand {
       for (const r of rows) {
         this.log(`${r.id}=${r.ok ? 'up' : r.tolerated ? 'down-tolerated' : 'down'}`);
       }
+      for (const n of notCloned) this.log(`${n.id}=not-cloned`);
       this.log(`passed=${passed}`);
     } else {
       for (const r of rows) this.log(formatRow(r));
+      for (const n of notCloned) {
+        this.log(`⚠ ${n.id.padEnd(16)} ${n.repoDir}  (not cloned: ${n.repo} repo not present)`);
+      }
       this.log(
         passed
-          ? `verify: PASS — ${up}/${rows.length} required services up`
+          ? `verify: PASS — ${up}/${rows.length} required services up` +
+              (notCloned.length ? ` (${notCloned.length} not cloned)` : '')
           : `verify: FAIL — ${failures.length} required service(s) down: ${failures.map((f) => f.id).join(', ')}`,
       );
     }

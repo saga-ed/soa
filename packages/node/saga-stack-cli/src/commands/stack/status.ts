@@ -28,7 +28,9 @@ import { BaseCommand } from '../../base-command.js';
 import { computeClosure } from '../../core/closure.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { manifest } from '../../core/manifest/index.js';
-import type { ServiceId } from '../../core/manifest/index.js';
+import type { RepoKey, ServiceId } from '../../core/manifest/index.js';
+import { REPO_ENV_VAR, resolveRepoRoot } from '../../runtime/index.js';
+import type { ScriptContext } from '../../runtime/index.js';
 
 export default class StackStatus extends BaseCommand {
   static description =
@@ -56,7 +58,12 @@ export default class StackStatus extends BaseCommand {
     const { flags } = await this.parse(StackStatus);
 
     const ids = resolveServiceSet(flags.only, flags['with-playback'], (msg) => this.error(msg));
-    const probes = healthProbes(manifest, ids);
+
+    // A service whose sibling repo isn't cloned is reported not-cloned, not probed
+    // (and excluded from the healthy verdict) — consistent with `stack up`'s skip.
+    const ctx = repoContextFromFlags(flags as unknown as Record<string, unknown>);
+    const { probe, notCloned } = partitionByRepoPresence(ids, ctx, this.getRepoDirCheck());
+    const probes = healthProbes(manifest, probe);
 
     const prober = this.getProber();
     const rows = await Promise.all(
@@ -68,7 +75,7 @@ export default class StackStatus extends BaseCommand {
 
     const up = rows.filter((r) => r.ok).length;
     const down = rows.length - up;
-    const healthy = down === 0;
+    const healthy = down === 0; // not-cloned services do NOT count as down
 
     if (flags['output-json']) {
       this.log(
@@ -80,7 +87,8 @@ export default class StackStatus extends BaseCommand {
               ok: r.ok,
               status: r.status ?? null,
             })),
-            summary: { total: rows.length, up, down },
+            notCloned: notCloned.map((n) => ({ id: n.id, repo: n.repo, repoDir: n.repoDir })),
+            summary: { total: rows.length, up, down, notCloned: notCloned.length },
             healthy,
           },
           null,
@@ -92,12 +100,19 @@ export default class StackStatus extends BaseCommand {
 
     if (flags.porcelain) {
       for (const r of rows) this.log(`${r.id}=${r.ok ? 'up' : 'down'}`);
+      for (const n of notCloned) this.log(`${n.id}=not-cloned`);
       this.log(`healthy=${healthy}`);
       return;
     }
 
     for (const r of rows) this.log(formatRow(r));
-    this.log(`${up}/${rows.length} services up${healthy ? '' : ` (${down} down)`}`);
+    for (const n of notCloned) {
+      this.log(`⚠ ${n.id.padEnd(16)} ${n.repoDir}  (not cloned: ${n.repo} repo not present)`);
+    }
+    this.log(
+      `${up}/${rows.length} services up${healthy ? '' : ` (${down} down)`}` +
+        (notCloned.length ? `, ${notCloned.length} not cloned` : ''),
+    );
   }
 }
 
@@ -151,4 +166,49 @@ function parseOnly(only: string | undefined): ServiceId[] {
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0) as ServiceId[];
+}
+
+/** A service excluded from the health pass because its sibling repo isn't cloned. */
+export interface NotClonedService {
+  id: ServiceId;
+  repo: RepoKey;
+  repoDir: string;
+}
+
+/**
+ * Build the `ScriptContext` (dev root + per-repo path pins) from the parsed
+ * workspace flags — the same `--dev` / `--<repo>` precedence `stack up`'s
+ * `buildRuntime` uses, so status/verify resolve each repo dir identically.
+ */
+export function repoContextFromFlags(flags: Record<string, unknown>): ScriptContext {
+  const pinned: Partial<Record<RepoKey, string>> = {};
+  for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
+    const value = flags[kebab];
+    if (typeof value === 'string' && value) pinned[REPO_ENV_VAR[kebab] as RepoKey] = value;
+  }
+  const dev = typeof flags.dev === 'string' ? flags.dev : undefined;
+  return { dev, repoRoots: pinned };
+}
+
+/**
+ * Partition a resolved service set by whether each service's sibling-repo checkout
+ * is present on disk. A service whose repo dir is ABSENT is reported as
+ * not-cloned (and excluded from the health pass/fail) rather than probed-and-down,
+ * so `status`/`verify` stay consistent with `stack up`'s skip guard: a missing
+ * coach checkout does not redden the stack. Shared by both commands.
+ */
+export function partitionByRepoPresence(
+  ids: ServiceId[],
+  ctx: ScriptContext,
+  repoDirExists: (dir: string) => boolean,
+): { probe: ServiceId[]; notCloned: NotClonedService[] } {
+  const probe: ServiceId[] = [];
+  const notCloned: NotClonedService[] = [];
+  for (const id of ids) {
+    const repo = manifest.services[id].repo;
+    const repoDir = resolveRepoRoot(repo, ctx);
+    if (repoDirExists(repoDir)) probe.push(id);
+    else notCloned.push({ id, repo, repoDir });
+  }
+  return { probe, notCloned };
 }

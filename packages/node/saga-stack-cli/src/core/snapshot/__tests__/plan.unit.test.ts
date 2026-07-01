@@ -5,8 +5,8 @@
  * against the REAL frozen service manifest (the data under test). These are the
  * brains of the native fast-path — they decide WHICH DBs to dump/restore and
  * WHICH structural checks to run, all as plain data. The whole point of M3 is
- * the 6→9-pg + mongo extension over mesh-fixture-cli, so the load-bearing
- * assertion is the DEFAULT db set: all 9 pg app DBs (critically incl. `content`
+ * the 6→10-pg + mongo extension over mesh-fixture-cli, so the load-bearing
+ * assertion is the DEFAULT db set: all 10 pg app DBs (critically incl. `content`
  * AND `ledger_local` — the DBs mesh-fixture-cli's stale `SAGA_MESH_DATABASES`
  * missed) + the `connectv3` mongo DB.
  *
@@ -27,7 +27,7 @@ import {
 import type { ObservedFile } from '../plan.js';
 import type { LocalMigrations, SnapshotDbEntry, SnapshotManifest } from '../manifest.js';
 
-/** The 9 postgres app DBs provisioned at mesh-up (profile-empty.sql). */
+/** The 10 postgres app DBs (9 profile-empty.sql + coach_api created in prep). */
 const PG_APP_DBS: DbId[] = [
   'iam_local',
   'iam_pii_local',
@@ -35,6 +35,7 @@ const PG_APP_DBS: DbId[] = [
   'scheduling',
   'sessions',
   'content',
+  'coach_api',
   'sis_db',
   'ads_adm_local',
   'ledger_local',
@@ -79,13 +80,13 @@ function knownMigrations(snap: SnapshotManifest): LocalMigrations {
   return out as LocalMigrations;
 }
 
-describe('storePlan — manifest-driven db set (the 6→9-pg + mongo extension)', () => {
-  it('defaults to all 9 pg app DBs + connectv3 mongo, excluding playback', () => {
+describe('storePlan — manifest-driven db set (the 6→10-pg + mongo extension)', () => {
+  it('defaults to all 10 pg app DBs + connectv3 mongo, excluding playback', () => {
     const plan = storePlan(manifest, { fixtureId: 'x', profile: 'roster' });
     const pg = plan.databases.filter((d) => d.engine === 'postgres').map((d) => d.db);
     const mongo = plan.databases.filter((d) => d.engine === 'mongo').map((d) => d.db);
 
-    expect(pg).toHaveLength(9);
+    expect(pg).toHaveLength(10);
     expect(new Set(pg)).toEqual(new Set(PG_APP_DBS));
     expect(mongo).toEqual(['connectv3']);
     // The DBs mesh-fixture-cli's stale 6-DB list missed:
@@ -119,7 +120,7 @@ describe('storePlan — manifest-driven db set (the 6→9-pg + mongo extension)'
   it('--with-playback adds the transcripts/insights/chat trio', () => {
     const plan = storePlan(manifest, { fixtureId: 'x', profile: 'roster', withPlayback: true });
     const dbs = plan.databases.map((d) => d.db);
-    expect(plan.databases.filter((d) => d.engine === 'postgres')).toHaveLength(12);
+    expect(plan.databases.filter((d) => d.engine === 'postgres')).toHaveLength(13);
     for (const pb of PLAYBACK_DBS) expect(dbs).toContain(pb);
   });
 

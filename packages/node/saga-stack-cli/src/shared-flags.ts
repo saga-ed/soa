@@ -49,6 +49,10 @@ export const repoFlags = {
     description: 'override path to the saga-dash repo checkout',
     default: process.env.SAGA_DASH,
   }),
+  coach: Flags.string({
+    description: 'override path to the coach repo checkout',
+    default: process.env.COACH,
+  }),
   sds: Flags.string({
     description: 'override path to the sds (student-data-system) repo checkout',
     default: process.env.SDS,

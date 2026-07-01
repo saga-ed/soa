@@ -31,6 +31,7 @@ export type RepoKey =
   | 'rostering'
   | 'program-hub'
   | 'saga-dash'
+  | 'coach'
   | 'sds'
   | 'qboard'
   | 'rtsm'
@@ -46,6 +47,7 @@ export const REPO_ENV_VAR: Record<RepoKey, string> = {
   rostering: 'ROSTERING',
   'program-hub': 'PROGRAM_HUB',
   'saga-dash': 'SAGA_DASH',
+  coach: 'COACH',
   sds: 'SDS',
   qboard: 'QBOARD',
   rtsm: 'RTSM',

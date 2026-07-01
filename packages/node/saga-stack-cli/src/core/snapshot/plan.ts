@@ -10,11 +10,11 @@
  * --archive, redis flush) are ported from mesh-fixture-cli but live in
  * `runtime/` (the only place a process is spawned); here we only plan.
  *
- * The 6→9-pg + mongo extension lives ENTIRELY in the manifest-derived db set:
+ * The 6→10-pg + mongo extension lives ENTIRELY in the manifest-derived db set:
  * mesh-fixture-cli hardcoded 6 pg DBs in `SAGA_MESH_DATABASES`; we drive the set
- * off `manifest.databases`, so all 9 pg app DBs (incl. `content` + `ledger_local`)
- * plus the `connectv3` mongo DB are covered, and the optional playback trio is
- * admitted only behind `--with-playback`.
+ * off `manifest.databases`, so all 10 pg app DBs (incl. `content`, `coach_api` +
+ * `ledger_local`) plus the `connectv3` mongo DB are covered, and the optional
+ * playback trio is admitted only behind `--with-playback`.
  *
  * INVARIANT (plan hard constraint): zero IO. `localMigrations` (db → known local
  * migration ids) and observed file stats are INPUTS supplied by the command /
@@ -125,7 +125,7 @@ export interface StorePlan {
  * Decide which databases to dump for a `store`.
  *
  * Default set = ALL manifest DBs except those owned by optional (playback)
- * services — i.e. the 9 pg app DBs + `connectv3` mongo. `--with-playback` adds
+ * services — i.e. the 10 pg app DBs + `connectv3` mongo. `--with-playback` adds
  * the 3 playback DBs. `only` (a resolved closure db set) overrides both and
  * scopes the dump precisely.
  */

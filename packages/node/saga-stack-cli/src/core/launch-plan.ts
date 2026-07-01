@@ -61,6 +61,12 @@ export interface LaunchTokens {
   RECORDER_CONTROL_PORT: string;
   /** fleek-recordings-api port — up.sh `RECORDINGS_API_PORT` (8444; --record playback). */
   RECORDINGS_API_PORT: string;
+  /** coach-api port — up.sh `COACH_API_PORT` (6105). */
+  COACH_API_PORT: string;
+  /** coach-web port — up.sh `COACH_WEB_PORT` (8800). */
+  COACH_WEB_PORT: string;
+  /** connect-mongo mesh port — up.sh `CONNECT_MONGO_PORT` (27037; coach-api's MONGO_PORT). */
+  CONNECT_MONGO_PORT: string;
 
   // ── lane base URLs (local/stack lane: http://localhost:<port>) ──
   /** up.sh `IAM_URL`. */
@@ -77,6 +83,14 @@ export interface LaunchTokens {
   RTSM_URL: string;
   /** up.sh `SAGA_API_TARGET` — legacy poll-content source (env-overridable; default https://wootmath.com). */
   SAGA_API_TARGET: string;
+  /** up.sh `COACH_API_URL` — `http://localhost:$COACH_API_PORT` (coach-web PUBLIC_COACH_API_URL). */
+  COACH_API_URL: string;
+  /** up.sh `COACH_WEB_HOST` — bare hostname for coach-api's CORS allow-list (`localhost`). */
+  COACH_WEB_HOST: string;
+  /** up.sh `SAGA_API_TARGET_COACH` — coach's frontend upstream-saga config (default https://staging.wootmath.com). */
+  SAGA_API_TARGET_COACH: string;
+  /** up.sh `IAM_ISSUER` — the `iss` claim coach-api/ads-adm-api validate (`https://iam.saga.org`). */
+  IAM_ISSUER: string;
 
   // ── mesh broker + DB / mongo connection strings ──
   /** up.sh `MESH_MQ` — `amqp://rabbitmq_admin:password123@localhost:5672`. */
@@ -93,6 +107,8 @@ export interface LaunchTokens {
   SESSIONS_DB_URL: string;
   /** up.sh `CONTENT_DB_URL`. */
   CONTENT_DB_URL: string;
+  /** up.sh `COACH_DB_URL` — `postgresql://coach_api_app:dev-password-coach-api-app@localhost:5432/coach_api`. */
+  COACH_DB_URL: string;
 
   // ── misc scalars ──
   /** up.sh `RECORDING_TOKEN` — shared fleek bearer (`local-dev-token`). */
@@ -350,6 +366,9 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     RTSM_PORT: String(ports['rtsm-api']),
     RECORDER_CONTROL_PORT: String(recorderControlPort),
     RECORDINGS_API_PORT: String(recordingsApiPort),
+    COACH_API_PORT: String(ports['coach-api']),
+    COACH_WEB_PORT: String(ports['coach-web']),
+    CONNECT_MONGO_PORT: String(mongoPort),
 
     // lane base URLs (local/stack lane)
     IAM_URL: `http://localhost:${ports['iam-api']}`,
@@ -359,6 +378,10 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     CONTENT_API_URL: `http://localhost:${ports['content-api']}`,
     RTSM_URL: `http://localhost:${ports['rtsm-api']}`,
     SAGA_API_TARGET: inputs.sagaApiTarget ?? 'https://wootmath.com',
+    COACH_API_URL: `http://localhost:${ports['coach-api']}`,
+    COACH_WEB_HOST: 'localhost',
+    SAGA_API_TARGET_COACH: 'https://staging.wootmath.com',
+    IAM_ISSUER: 'https://iam.saga.org',
 
     // mesh broker + connection strings
     MESH_MQ: `amqp://rabbitmq_admin:password123@localhost:${mqPort}`,
@@ -368,6 +391,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     SCHEDULING_DB_URL: pgUrl('scheduling', pgPort, m),
     SESSIONS_DB_URL: pgUrl('sessions', pgPort, m),
     CONTENT_DB_URL: pgUrl('content', pgPort, m),
+    COACH_DB_URL: pgUrl('coach_api', pgPort, m),
 
     // misc scalars (up.sh hardcodes these verbatim)
     RECORDING_TOKEN: 'local-dev-token',

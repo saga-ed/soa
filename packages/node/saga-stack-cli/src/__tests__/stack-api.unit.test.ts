@@ -279,6 +279,56 @@ describe('StackApi.seed — offline then online via the Runner', () => {
     expect(res.ran.offline).toEqual(['iam-dev-user']); // ran before the fatal step
   });
 
+  it('a WARN step whose runner THROWS (ENOENT) degrades to a warning, not an unhandled rejection', async () => {
+    // The warn-mode dev-user bootstrap spawn-throws (its repo/cwd is missing);
+    // seed must swallow it, record the step, and keep going — never reject.
+    const { runtime } = makeRuntime({
+      runner: {
+        async run(spec: ScriptInvocation): Promise<RunResult> {
+          if (spec.args.includes('seed-dev-user.js')) {
+            throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
+          }
+          return { code: 0 };
+        },
+      },
+    });
+    const api = makeStackApi(manifest, runtime);
+    const plan = composeSeedPlan(
+      { profile: 'roster' },
+      new Set<ServiceId>(['iam-api', 'sessions-api']),
+      new Set<ServiceId>(),
+    );
+
+    const res = await api.seed(plan); // must resolve, not throw
+    expect(res.ok).toBe(true);
+    // the throwing warn step is still recorded, and the run continued past it.
+    expect(res.ran.offline).toEqual(['iam-dev-user', 'iam', 'sessions']);
+  });
+
+  it('a FATAL step whose runner THROWS (ENOENT) aborts the run (ok:false)', async () => {
+    const { runtime } = makeRuntime({
+      runner: {
+        async run(spec: ScriptInvocation): Promise<RunResult> {
+          // `iam` (fatal) db:seed spawn-throws.
+          if (spec.cwd.includes('iam-db') && spec.args.includes('db:seed')) {
+            throw Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
+          }
+          return { code: 0 };
+        },
+      },
+    });
+    const api = makeStackApi(manifest, runtime);
+    const plan = composeSeedPlan(
+      { profile: 'roster' },
+      new Set<ServiceId>(['iam-api', 'sessions-api']),
+      new Set<ServiceId>(),
+    );
+
+    const res = await api.seed(plan); // resolves with ok:false (no unhandled rejection)
+    expect(res.ok).toBe(false);
+    expect(res.failed).toBe('iam');
+  });
+
   it('online content step + its warn-mode optional tail (token-expanded env) run after services up', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);

@@ -238,6 +238,12 @@ export default class StackUp extends BaseCommand {
 
     // 1. native bring-up (mesh + topo-wave service launch).
     const up = await api.up(closure.services);
+
+    // Surface any services skipped because their sibling repo isn't cloned (warn,
+    // not fail) — e.g. a missing coach checkout. Printed before the failure/emit
+    // so the warning is visible even on an unrelated launch failure.
+    for (const s of up.skipped) this.log(`⚠ ${s.message}`);
+
     if (!up.ok) {
       this.logUpFailure(up);
       this.exit(1);
@@ -252,11 +258,17 @@ export default class StackUp extends BaseCommand {
       if (reset.code !== 0) this.exit(reset.code);
     }
 
-    // 3. seed: compose over the ACTIVE closure (restored = empty for M4 — snapshot
-    // integration can pass a fully-restored set later) and run it natively.
+    // 3. seed: compose over the ACTIVE set — the closure MINUS any service skipped
+    // because its repo isn't cloned. Composing over the full closure would still
+    // plan a skipped service's steps (e.g. coach-pg) and then spawn-crash on the
+    // missing coach-db dir, defeating the skip guard; gate-1 drops them here as
+    // service-inactive instead. (restored = empty for M4 — snapshot integration can
+    // pass a fully-restored set later.)
+    const skippedIds = new Set(up.skipped.map((s) => s.id));
+    const active = new Set(closure.services.filter((id) => !skippedIds.has(id)));
     const plan: SeedPlan = composeSeedPlan(
       this.seedSelection(flags),
-      new Set(closure.services),
+      active,
       new Set<ServiceId>(),
     );
     const seeded = await api.seed(plan);
@@ -272,6 +284,7 @@ export default class StackUp extends BaseCommand {
         native: true,
         services: closure.services,
         launched: up.launched.map((r) => ({ id: r.id, ok: r.ok, alreadyUp: r.alreadyUp ?? false, pid: r.pid ?? null })),
+        skipped: up.skipped.map((s) => ({ id: s.id, repo: s.repo, repoDir: s.repoDir })),
         mesh: { ok: up.mesh.ok, units: up.mesh.units.map((u) => ({ id: u.id, ok: u.ok })) },
         dash: up.dash?.action ?? null,
         seed: {
@@ -283,8 +296,9 @@ export default class StackUp extends BaseCommand {
         },
       },
       [
-        `native partial-stack up: ${closure.services.length} service(s) launched`,
+        `native partial-stack up: ${up.launched.length} service(s) launched${up.skipped.length ? `, ${up.skipped.length} skipped` : ''}`,
         `launched: ${launchedIds.join(', ')}`,
+        ...(up.skipped.length ? [`skipped (repo not cloned): ${up.skipped.map((s) => s.id).join(', ')}`] : []),
         `mesh: ${up.mesh.units.map((u) => `${u.id}=${u.ok ? 'ready' : 'DOWN'}`).join(', ') || '(none)'}`,
         ...(up.dash ? [`dash defaults: ${up.dash.action}`] : []),
         `seed offline: ${seeded.ran.offline.join(', ') || '(none)'}`,
@@ -368,6 +382,9 @@ export default class StackUp extends BaseCommand {
       dashFs: this.getDashFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
+      // Skip (warn, not fail) any service whose sibling repo isn't cloned — e.g. a
+      // missing coach checkout no longer reddens the whole stack.
+      repoDirExists: this.getRepoDirCheck(),
       tunnel: false, // native path drives the stack lane; --tunnel forces the up.sh wrapper.
       // reset/login delegate to up.sh through the M1 script path (resolution stays
       // in BaseCommand.runScript); read-only exit handling so a delegate failure is

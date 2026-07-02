@@ -136,6 +136,7 @@ jobs:
           fi
           pnpm turbo run build --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
+            --filter=@saga-ed/soa-mailer \
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-tgql-codegen \
@@ -157,6 +158,7 @@ jobs:
           fi
           pnpm turbo run lint --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
+            --filter=@saga-ed/soa-mailer \
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-tgql-codegen \
@@ -178,6 +180,7 @@ jobs:
           fi
           pnpm turbo run check-types --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
+            --filter=@saga-ed/soa-mailer \
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-tgql-codegen \
@@ -201,6 +204,7 @@ jobs:
           # requires downloading MongoDB and times out in CI
           pnpm turbo run test --filter=@saga-ed/soa-config \
             --filter=@saga-ed/soa-logger \
+            --filter=@saga-ed/soa-mailer \
             --filter=@saga-ed/soa-pubsub-core \
             --filter=@saga-ed/soa-api-util \
             --filter=@saga-ed/soa-tgql-codegen \
@@ -304,6 +308,7 @@ jobs:
           PUBLISHABLE_PACKAGES=(
             "packages/core/config"
             "packages/node/logger"
+            "packages/node/mailer"
             "packages/node/pubsub-core"
             "packages/node/api-util"
             "packages/core/tgql-codegen"
@@ -421,7 +426,7 @@ jobs:
       - name: Publish packages in dependency order
         run: |
           # Layer 0: Base packages (no workspace deps)
-          LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base"
+          LAYER_0="packages/core/config packages/node/logger packages/node/mailer packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base"
 
           # Layer 1: Depends on Layer 0
           LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
@@ -534,7 +539,7 @@ jobs:
 
       - name: Publish packages in dependency order
         run: |
-          LAYER_0="packages/core/config packages/node/logger packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base"
+          LAYER_0="packages/core/config packages/node/logger packages/node/mailer packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base"
           LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
           LAYER_2="packages/node/pubsub-client"
 

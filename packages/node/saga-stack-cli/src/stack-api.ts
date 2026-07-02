@@ -38,11 +38,18 @@ import type { ScriptPlan } from './core/flag-map.js';
 import { launchPlan } from './core/launch-plan.js';
 import type { LaunchContext } from './core/launch-plan.js';
 import { launchOrder } from './core/launch-order.js';
-import { getService, manifest as defaultManifest } from './core/manifest/index.js';
-import type { Lane, Manifest, MeshId, RepoKey, ServiceId } from './core/manifest/index.js';
+import { getMesh, getService, manifest as defaultManifest } from './core/manifest/index.js';
+import type { DbId, Lane, Manifest, MeshId, RepoKey, ServiceId } from './core/manifest/index.js';
 import type { HealthProbe } from './core/probe-plan.js';
 import type { SeedPlan, SeedStep, SkipNote } from './core/seed/types.js';
-import { meshUp, syncDashLocalDefaults } from './runtime/index.js';
+import {
+  meshContainer,
+  meshUp,
+  migrateClosure,
+  prepClosure,
+  provisionDbs,
+  syncDashLocalDefaults,
+} from './runtime/index.js';
 import type {
   DashFs,
   DashSyncResult,
@@ -50,7 +57,11 @@ import type {
   LaunchResult,
   MeshExec,
   MeshResult,
+  MigrateResult,
+  PgProbe,
   PortProbe,
+  PrepResult,
+  ProvisionResult,
   Runner,
   ServiceLauncher,
   StopResult,
@@ -85,6 +96,33 @@ export interface Runtime {
   prober: HealthProber;
   /** Process seam — mesh `make up` + the native seed steps. */
   runner: Runner;
+  /**
+   * Native-prep postgres probe (M8). When PRESENT, `up` runs the native prep pass
+   * between mesh-up and launch — R1 build (`prepClosure`) → R2 provision
+   * (`provisionDbs`) → R3 migrate (`migrateClosure`) — so a fresh checkout/volume
+   * provisions + migrates itself instead of relying on a prior up.sh run. ABSENT ⇒
+   * the pass is skipped entirely (the pre-M8 behaviour), so callers that don't wire
+   * it (the facade unit/int tests) are byte-identical. All three phases are
+   * idempotent, so a re-up on an already-prepped stack is a fast no-op.
+   */
+  pgProbe?: PgProbe;
+  /**
+   * Resolved slot postgres container for the native-prep psql (`soa-postgres-1` at
+   * slot 0, `soa-s<N>-postgres-1` at slot > 0). Defaults to the env-aware
+   * `meshContainer(postgres)` (which reads the slot's `SAGA_MESH_POSTGRES_CONTAINER`).
+   */
+  pgContainer?: string;
+  /** Native `--skip-prep` (up.sh `SKIP_PREP=1`) — skip R1 build only (R2/R3 still run). */
+  skipPrep?: boolean;
+  /** R1 fresh-skip predicate: is a repo root already built (`node_modules` + `dist`)? */
+  prepIsFresh?: (repoRoot: string) => boolean;
+  /**
+   * R1 `db:generate` scan (M8 BLOCKER-B): given a repo root, the repo-relative dirs
+   * of every package declaring a `db:generate` script — generated before the
+   * whole-workspace build so ungenerated sibling `*-db` packages don't fail it.
+   * Absent ⇒ R1 falls back to the closure-derived `*-db` targets.
+   */
+  prepDbGenerateScan?: (repoRoot: string) => string[];
   /**
    * Predicate: does a resolved sibling-repo checkout dir exist on disk? Injected
    * so the facade stays IO-free (the command resolves it to `fs.existsSync`). When
@@ -144,6 +182,12 @@ export interface UpResult {
   ok: boolean;
   /** The mesh bring-up result (preflight conflicts / make-up / per-unit readiness). */
   mesh: MeshResult;
+  /** R1 native build/prep outcome (only when the native-prep pass ran). */
+  prep?: PrepResult;
+  /** R2 DB provisioning outcome (only when the native-prep pass ran). */
+  provision?: ProvisionResult;
+  /** R3 migrate outcome (only when the native-prep pass ran). */
+  migrate?: MigrateResult;
   /** What the dash prelaunch hook did (only when saga-dash was in the closure). */
   dash?: DashSyncResult;
   /** Per-service launch results, in the order launched (topo waves flattened). */
@@ -252,6 +296,18 @@ function neededMesh(services: ServiceId[], m: Manifest): MeshId[] {
   const set = new Set<MeshId>();
   for (const id of services) for (const u of getService(id, m).mesh) set.add(u);
   return (Object.keys(m.mesh) as MeshId[]).filter((u) => set.has(u));
+}
+
+/**
+ * Databases the closure needs — the union of the closure services' `databases`,
+ * in manifest declaration order (the canonical migrate order). Drives the native
+ * prep pass's provision (R2) + migrate (R3) targets, closure-scoped so a partial
+ * stack provisions/migrates only its own DBs.
+ */
+function neededDbs(services: ServiceId[], m: Manifest): DbId[] {
+  const set = new Set<DbId>();
+  for (const id of services) for (const d of getService(id, m).databases) set.add(d);
+  return (Object.keys(m.databases) as DbId[]).filter((d) => set.has(d));
 }
 
 /** Token-aware match: a tolerate token equals a service id or its repo name (kebab or env-var spelling). */
@@ -386,6 +442,53 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         }
       }
 
+      // 3.5. NATIVE PREP PASS (M8) — between mesh-up and the launch waves, in order
+      // R1 build → R2 provision → R3 migrate, so a fresh checkout/volume provisions +
+      // migrates ITSELF instead of relying on a prior up.sh run. Runs ONLY when the
+      // caller wired `pgProbe` (production does; the facade unit/int tests don't, so
+      // they stay byte-identical). Scoped to the LAUNCHABLE set (a repo-absent service
+      // is neither prepped, provisioned, nor migrated — its cwd/DB would fail). All
+      // three phases are IDEMPOTENT (fresh-skip / existence-guarded / apply-pending),
+      // so a re-up on an already-prepped stack is a fast no-op and the soaked --only
+      // path is unbroken. A fatal failure in any phase aborts the bring-up.
+      let prep: PrepResult | undefined;
+      let provision: ProvisionResult | undefined;
+      let migrate: MigrateResult | undefined;
+      if (runtime.pgProbe) {
+        const dbs = neededDbs(launchable, manifest);
+        const repoRoots = launchContext.repoRoots;
+        const pgContainer = runtime.pgContainer ?? meshContainer(getMesh('postgres', manifest));
+
+        // R1 — build/install/db:generate over the closure repos.
+        prep = await prepClosure({
+          services: launchable,
+          dbs,
+          repoRoots,
+          runner,
+          skipPrep: runtime.skipPrep,
+          isFresh: runtime.prepIsFresh,
+          dbGenerateScan: runtime.prepDbGenerateScan,
+          manifest,
+        });
+        if (!prep.ok) return { ok: false, mesh, prep, launched: [], skipped };
+
+        // R2 — idempotent role+DB provisioning fallback (coach_api #221 blocker incl.).
+        provision = await provisionDbs({ dbs, pgContainer, runner, probe: runtime.pgProbe, manifest });
+        if (!provision.ok) return { ok: false, mesh, prep, provision, launched: [], skipped };
+
+        // R3 — migrate every closure DB in canonical order (the three-way branch).
+        migrate = await migrateClosure({
+          dbs,
+          pgContainer,
+          meshOffset: runtime.meshOffset,
+          repoRoots,
+          runner,
+          probe: runtime.pgProbe,
+          manifest,
+        });
+        if (!migrate.ok) return { ok: false, mesh, prep, provision, migrate, launched: [], skipped };
+      }
+
       // 4. dash prelaunch hook — ONLY when saga-dash is actually launchable (it reads
       // static/config.local.json at page load, so the file must match the mode first).
       let dash: DashSyncResult | undefined;
@@ -445,10 +548,12 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         );
         launched.push(...results);
         const failed = results.find((r) => !r.ok);
-        if (failed) return { ok: false, mesh, dash, launched, skipped, failedAt: failed.id as ServiceId };
+        if (failed) {
+          return { ok: false, mesh, prep, provision, migrate, dash, launched, skipped, failedAt: failed.id as ServiceId };
+        }
       }
 
-      return { ok: true, mesh, dash, launched, skipped };
+      return { ok: true, mesh, prep, provision, migrate, dash, launched, skipped };
     },
 
     async down(services: ServiceId[]): Promise<DownResult> {

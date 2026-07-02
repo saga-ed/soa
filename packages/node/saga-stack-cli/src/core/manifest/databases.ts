@@ -21,7 +21,10 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
   iam_local: {
     name: 'iam_local',
     engine: 'postgres',
-    migrate: { dir: 'packages/node/iam-db', cmd: 'prisma migrate deploy' },
+    // BLOCKER-A: iam-db's prisma.config.ts THROWS if DATABASE_URL is unset — on a
+    // fresh checkout with no `$ROSTERING/.env.local`, R3 must inject it (up.sh
+    // supplies it via ensure_kv into .env.local; native injects into the child env).
+    migrate: { dir: 'packages/node/iam-db', cmd: 'prisma migrate deploy', migrateEnvVar: 'DATABASE_URL' },
     ownerRole: 'iam',
     ownerPw: 'iam',
     resettable: true,
@@ -33,7 +36,8 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     engine: 'postgres',
     // Blocker fix: owned by a SEPARATE iam-pii-db package, applied with `prisma db push`
     // (no migration history) as a distinct step in `prep`.
-    migrate: { dir: 'packages/node/iam-pii-db', cmd: 'prisma db push' },
+    // BLOCKER-A: iam-pii-db's prisma.config.ts THROWS if PII_DATABASE_URL is unset.
+    migrate: { dir: 'packages/node/iam-pii-db', cmd: 'prisma db push', migrateEnvVar: 'PII_DATABASE_URL' },
     ownerRole: 'iam_pii',
     ownerPw: 'iam_pii',
     resettable: true,
@@ -98,7 +102,10 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
   sis_db: {
     name: 'sis_db',
     engine: 'postgres',
-    migrate: { dir: 'packages/node/sis-db', cmd: 'db:deploy' },
+    // BLOCKER-A: sis-db's prisma.config.ts loads SIS_DATABASE_URL directly (and
+    // THROWS if unset); up.sh writes it into `$ROSTERING/.env.local` (up.sh:448) and
+    // it equals $SIS_DB_URL = postgresql://sis:sis@localhost:5432/sis_db.
+    migrate: { dir: 'packages/node/sis-db', cmd: 'db:deploy', migrateEnvVar: 'SIS_DATABASE_URL' },
     ownerRole: 'sis',
     ownerPw: 'sis',
     resettable: true,

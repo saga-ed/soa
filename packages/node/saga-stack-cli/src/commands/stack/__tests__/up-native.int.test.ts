@@ -21,6 +21,7 @@ import type {
   LaunchResult,
   LaunchSpec,
   MeshExec,
+  PgProbe,
   PortProbe,
   RunResult,
   Runner,
@@ -87,6 +88,20 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
       return { code: 0 };
     },
   };
+  // M8 native prep pass: a fake pg probe so R2 provision + R3 migrate assert their
+  // PLAN with NO real docker/postgres. Every DB probes ABSENT + table-empty, so
+  // provision CREATEs each and migrate takes the `empty → db:deploy` branch.
+  const pgProbe: PgProbe = {
+    async databaseExists(): Promise<boolean> {
+      return false;
+    },
+    async hasMigrationsTable(): Promise<boolean> {
+      return false;
+    },
+    async publicTableCount(): Promise<number> {
+      return 0;
+    },
+  };
 
   const proto = BaseCommand.prototype as unknown as {
     getLauncher: () => ServiceLauncher;
@@ -94,6 +109,8 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     getPortProbe: () => PortProbe;
     getDashFs: () => DashFs;
     getRunner: () => Runner;
+    getPgProbe: () => PgProbe;
+    getPrepFreshCheck: () => (repoRoot: string) => boolean;
     getRepoDirCheck: () => (dir: string) => boolean;
   };
   vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
@@ -101,6 +118,9 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
   vi.spyOn(proto, 'getPortProbe').mockReturnValue(portProbe);
   vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
   vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
+  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pgProbe);
+  // Never fresh in these tests (fixed /fixed/dev paths don't exist) ⇒ R1 prep runs.
+  vi.spyOn(proto, 'getPrepFreshCheck').mockReturnValue(() => false);
   // The fake workspace paths (--dev /fixed/dev) don't exist on disk; default the
   // repo-dir check to "present" so services aren't skipped. The skip-when-absent
   // path is covered explicitly in stack-api.int.test.ts.

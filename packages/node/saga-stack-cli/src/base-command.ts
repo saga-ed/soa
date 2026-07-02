@@ -22,7 +22,7 @@
  * default handler — don't override it.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { Command } from '@oclif/core';
 import type { Interfaces } from '@oclif/core';
 import { SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
@@ -34,6 +34,7 @@ import {
   makeRealDashFs,
   makeRealLauncher,
   makeRealMeshExec,
+  makeRealPgProbe,
   makeRealPortProbe,
   makeRealProber,
   makeRealRunner,
@@ -47,6 +48,7 @@ import type {
   DashFs,
   HealthProber,
   MeshExec,
+  PgProbe,
   PortProbe,
   RepoKey,
   RepoOverrides,
@@ -216,6 +218,47 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * The injectable native-prep postgres-probe seam (M8 — R2 provision + R3
+   * migrate). Production returns `makeRealPgProbe()` — the only place the read-only
+   * `docker exec … psql -tAc` probes (pg_database existence / `_prisma_migrations`
+   * presence / public-table count) run for the native prep pass. The native `up`
+   * TESTS spy this on the prototype to return a fake that answers from a script, so
+   * the provision/migrate PLAN is asserted WITHOUT a real container or DB —
+   * mirroring how `getRunner`/`getMeshExec`/… are mocked.
+   */
+  protected getPgProbe(): PgProbe {
+    return makeRealPgProbe();
+  }
+
+  /**
+   * The injectable R1 fresh-repo predicate (M8 — native build/prep). A repo is
+   * "fresh" (prep skipped) only when it is BOTH installed AND built — MAJOR-D: a
+   * `node_modules`-only check treated an installed-but-unbuilt (or stale-`dist`-
+   * after-`git pull`) repo as fresh, skipped its build, and launched a service from
+   * a missing/stale `dist/` — the exact crash R1 exists to prevent. So this also
+   * requires built output: at least one `packages/node/*` or `apps/node/*` package
+   * has a `dist/` (a repo with no such node workspaces — e.g. saga-dash, a pure
+   * frontend that is install-only anyway — is fresh on `node_modules` alone).
+   * Injected so tests drive R1's fresh-skip WITHOUT touching the filesystem.
+   */
+  protected getPrepFreshCheck(): (repoRoot: string) => boolean {
+    return (repoRoot: string) => isRepoBuilt(repoRoot);
+  }
+
+  /**
+   * The injectable R1 `db:generate` scan seam (M8 — BLOCKER-B). Given a repo root,
+   * returns the repo-relative dirs of every `packages/node/*` package that DECLARES
+   * a `db:generate` script — a faithful port of up.sh's
+   * `for dbpkg in $SDS/packages/node/*; grep -q '"db:generate"'` loop (up.sh:1010-1013).
+   * R1 generates ALL of these before the whole-workspace `pnpm build`, so an
+   * ungenerated sibling `*-db` package (chat/insights/transcripts/ledger-db) can't
+   * fail the turbo build. Injected so tests drive R1's db:generate plan WITHOUT fs.
+   */
+  protected getDbGenerateScan(): (repoRoot: string) => string[] {
+    return (repoRoot: string) => scanDbGenerateDirs(repoRoot);
+  }
+
+  /**
    * The injectable dash-config fs seam (M4 — the `sync-dash-local-defaults`
    * prelaunch hook). Production returns `makeRealDashFs()` (the only place the
    * dash `config.local.json` is written/removed for the hook); tests substitute a
@@ -316,4 +359,63 @@ export abstract class BaseCommand extends Command {
     const lines = Array.isArray(textLines) ? textLines : [textLines];
     for (const line of lines) this.log(line);
   }
+}
+
+/** The node-workspace roots up.sh builds under (`packages/node/*`, `apps/node/*`). */
+const NODE_WORKSPACE_DIRS = ['packages/node', 'apps/node'] as const;
+
+/**
+ * MAJOR-D: a repo is "built" iff `node_modules` is present AND at least one
+ * `packages/node/*` / `apps/node/*` package has a `dist/`. A repo with NO node
+ * workspaces (a pure frontend like saga-dash, which is install-only and produces no
+ * `dist/`) counts as built once installed. Every `fs` error folds to "not built"
+ * (⇒ prep runs), the safe default.
+ */
+function isRepoBuilt(repoRoot: string): boolean {
+  const root = repoRoot.replace(/\/+$/, '');
+  if (!existsSync(`${root}/node_modules`)) return false;
+  let sawWorkspace = false;
+  for (const ws of NODE_WORKSPACE_DIRS) {
+    const wsRoot = `${root}/${ws}`;
+    let entries: string[];
+    try {
+      entries = readdirSync(wsRoot);
+    } catch {
+      continue; // this workspace dir doesn't exist here
+    }
+    sawWorkspace = true;
+    for (const pkg of entries) {
+      if (existsSync(`${wsRoot}/${pkg}/dist`)) return true; // at least one built package
+    }
+  }
+  // No node workspaces at all ⇒ nothing to build; installed is enough (saga-dash).
+  return !sawWorkspace;
+}
+
+/**
+ * BLOCKER-B: scan a repo's `packages/node/*` for every package DECLARING a
+ * `db:generate` script, returning their repo-relative dirs (up.sh:1010-1013). A
+ * malformed/absent `package.json` is skipped; a missing workspace dir yields `[]`.
+ */
+function scanDbGenerateDirs(repoRoot: string): string[] {
+  const root = repoRoot.replace(/\/+$/, '');
+  const base = `${root}/packages/node`;
+  let entries: string[];
+  try {
+    entries = readdirSync(base);
+  } catch {
+    return [];
+  }
+  const dirs: string[] = [];
+  for (const name of entries) {
+    const pkgJson = `${base}/${name}/package.json`;
+    if (!existsSync(pkgJson)) continue;
+    try {
+      const pkg = JSON.parse(readFileSync(pkgJson, 'utf8')) as { scripts?: Record<string, string> };
+      if (pkg.scripts?.['db:generate']) dirs.push(`packages/node/${name}`);
+    } catch {
+      // malformed package.json — skip (never throw out of the scan).
+    }
+  }
+  return dirs;
 }

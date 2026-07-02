@@ -19,3 +19,7 @@ export * from './mesh.js';
 export * from './preflight.js';
 export * from './dash-defaults.js';
 export * from './flows.js';
+export * from './pg-probe.js';
+export * from './prep.js';
+export * from './provision.js';
+export * from './migrate.js';

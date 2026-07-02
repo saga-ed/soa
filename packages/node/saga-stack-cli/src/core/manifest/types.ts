@@ -93,6 +93,16 @@ export interface MigrateSpec {
   cmd: 'db:deploy' | 'prisma migrate deploy' | 'prisma db push';
   /** Force the mesh :5432 DATABASE_URL (program-hub apps default to their own :5433). */
   databaseUrlOverride?: boolean;
+  /**
+   * BLOCKER-A fix: env var this package's `prisma.config.ts` REQUIRES (and THROWS
+   * when unset) for a migrate — `DATABASE_URL` (iam-db), `PII_DATABASE_URL`
+   * (iam-pii-db), `SIS_DATABASE_URL` (sis-db). up.sh supplies these by writing
+   * `$ROSTERING/.env.local` before prep; the native pass has no `.env.local`
+   * writer, so R3 injects `<migrateEnvVar> = pgUrl(def)` (slot-offset-correct) into
+   * the child env instead of mutating a file. Absent ⇒ the package reads its own
+   * config (e.g. sessions-api via `databaseUrlOverride`) and no var is injected.
+   */
+  migrateEnvVar?: string;
 }
 
 export interface DatabaseDef {

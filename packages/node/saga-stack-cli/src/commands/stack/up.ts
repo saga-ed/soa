@@ -98,7 +98,8 @@ export default class StackUp extends BaseCommand {
       default: false,
     }),
     'skip-prep': Flags.boolean({
-      description: 'skip the install+build prep pass (up.sh env SKIP_PREP=1)',
+      description:
+        'skip the R1 install+build prep pass. NATIVE (--only): skips R1 ONLY — R2 DB provision + R3 migrate still run (both idempotent). WRAPPED (full-stack): up.sh env SKIP_PREP=1 wraps the whole prep.',
       default: false,
     }),
     record: Flags.string({
@@ -163,14 +164,16 @@ export default class StackUp extends BaseCommand {
     // pull/prep/record bash prep) force a fall-back to the up.sh wrapper, which
     // ONLY accepts a single service. A comma-list + such a flag is rejected.
     if (isOnly) {
+      // --skip-prep is now NATIVE (M8): it threads into the native prep pass as
+      // SKIP_PREP (skip R1 build; R2 provision + R3 migrate still run), so it no
+      // longer forces the up.sh fallback.
       const needsUpSh =
         flags.sandbox !== undefined ||
         flags.workspace !== undefined ||
         flags.tunnel ||
         flags.record !== undefined ||
         flags.pull ||
-        flags['no-auto-pull'] ||
-        flags['skip-prep'];
+        flags['no-auto-pull'];
 
       if (!needsUpSh) {
         await this.runNative(flags, requested, withPlayback);
@@ -360,6 +363,12 @@ export default class StackUp extends BaseCommand {
     // 4. (optional) login — DELEGATED to up.sh for M4.
     if (flags.login) await api.login();
 
+    // MAJOR-C: R1 records non-fatal build/db:generate failures as warnings (up.sh
+    // warn+continue) rather than aborting — surface them so they're visible.
+    for (const w of up.prep?.warnings ?? []) {
+      this.log(`⚠ prep: ${w.repo} ${w.kind} failed (non-fatal, continued)`);
+    }
+
     // Report.
     const launchedIds = up.launched.map((r) => `${r.id}${r.alreadyUp ? ' (already up)' : ''}`);
     this.emit(
@@ -500,6 +509,18 @@ export default class StackUp extends BaseCommand {
       dashFs: this.getDashFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
+      // M8 native prep pass: wiring `pgProbe` turns on R1 build → R2 provision → R3
+      // migrate between mesh-up and launch, so a fresh checkout/volume provisions +
+      // migrates itself (no prior up.sh run needed). All idempotent. `pgContainer`
+      // is left to the facade default (`meshContainer(postgres)`, which reads the
+      // slot's SAGA_MESH_POSTGRES_CONTAINER that applyInstanceEnv set above).
+      pgProbe: this.getPgProbe(),
+      // M8 --skip-prep: skips R1 (build/install) ONLY — R2 provision + R3 migrate
+      // still run (unlike up.sh's SKIP_PREP, which wraps the whole prep). Documented
+      // in runtime/prep.ts + the flag help.
+      skipPrep: flags['skip-prep'],
+      prepIsFresh: this.getPrepFreshCheck(),
+      prepDbGenerateScan: this.getDbGenerateScan(),
       // Skip (warn, not fail) any service whose sibling repo isn't cloned — e.g. a
       // missing coach checkout no longer reddens the whole stack.
       repoDirExists: this.getRepoDirCheck(),
@@ -544,6 +565,7 @@ type NativeFlags = DryRunFlags & {
   slot: number;
   reset: boolean;
   login: boolean;
+  'skip-prep': boolean;
 };
 type WrappedFlags = WorkspaceFlags & {
   reset: boolean;

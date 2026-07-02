@@ -271,6 +271,136 @@ describe('StackApi.up — native partial-stack bring-up', () => {
   });
 });
 
+// ── native prep pass wiring (M8 — R1 build → R2 provision → R3 migrate) ──────
+
+import type { PgProbe } from '../runtime/index.js';
+
+/** A pg probe: DBs absent + table-empty by default (fresh volume). */
+function fakePgProbe(
+  opts: { exists?: Record<string, boolean>; branch?: Record<string, 'managed' | 'empty' | 'unmanaged'> } = {},
+): PgProbe {
+  return {
+    async databaseExists(_c, db): Promise<boolean> {
+      return opts.exists?.[db] ?? false;
+    },
+    async hasMigrationsTable(_c, db): Promise<boolean> {
+      return (opts.branch?.[db] ?? 'empty') === 'managed';
+    },
+    async publicTableCount(_c, db): Promise<number> {
+      return (opts.branch?.[db] ?? 'empty') === 'unmanaged' ? 3 : 0;
+    },
+  };
+}
+
+describe('StackApi.up — native prep pass wiring (M8)', () => {
+  it('runs R1 build → R2 provision → R3 migrate between mesh-up and launch, in order', async () => {
+    const { runtime, fakes } = makeRuntime({ pgProbe: fakePgProbe(), prepIsFresh: () => false });
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
+
+    const res = await api.up(closure.services);
+    expect(res.ok).toBe(true);
+
+    // all three phases populated + ok.
+    expect(res.prep?.ok).toBe(true);
+    expect(res.provision?.ok).toBe(true);
+    expect(res.migrate?.ok).toBe(true);
+
+    // R1 prepped the closure repos (rostering + program-hub).
+    expect(new Set(res.prep?.steps.map((s) => s.repo))).toEqual(new Set(['ROSTERING', 'PROGRAM_HUB']));
+    // R2 created the closure DBs (fresh volume: all absent). closure(scheduling-api)
+    // = {iam-api, scheduling-api} ⇒ iam_local, iam_pii_local, scheduling.
+    expect(res.provision?.dbs.filter((d) => d.action === 'created').map((d) => d.db)).toEqual([
+      'iam_local',
+      'iam_pii_local',
+      'scheduling',
+    ]);
+    // R3 migrated in canonical order: iam FIXED steps, then the db:deploy target.
+    expect(res.migrate?.dbs.map((d) => `${d.db}:${d.branch}`)).toEqual([
+      'iam_local:fixed',
+      'iam_pii_local:fixed',
+      'scheduling:empty',
+    ]);
+
+    // ORDER in the runner call log: make up → prep (pnpm install) → provision
+    // (docker exec) → migrate (pnpm db:deploy). Launch is via the launcher seam.
+    const makeIdx = fakes.runs.findIndex((r) => r.command === 'make');
+    const prepIdx = fakes.runs.findIndex((r) => r.command === 'pnpm' && r.args.includes('install'));
+    const provIdx = fakes.runs.findIndex((r) => r.command === 'docker');
+    const migIdx = fakes.runs.findIndex((r) => r.command === 'pnpm' && r.args.includes('db:deploy'));
+    expect(makeIdx).toBeGreaterThanOrEqual(0);
+    expect(makeIdx).toBeLessThan(prepIdx);
+    expect(prepIdx).toBeLessThan(provIdx);
+    expect(provIdx).toBeLessThan(migIdx);
+  });
+
+  it('is SKIPPED entirely when no pgProbe is wired (pre-M8 byte-identical path)', async () => {
+    const { runtime } = makeRuntime(); // no pgProbe
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services);
+    expect(res.prep).toBeUndefined();
+    expect(res.provision).toBeUndefined();
+    expect(res.migrate).toBeUndefined();
+  });
+
+  it('idempotent re-up is a fast no-op: fresh repos skipped, DBs exist, migrate stays non-destructive', async () => {
+    const { runtime, fakes } = makeRuntime({
+      prepIsFresh: () => true, // already built
+      pgProbe: fakePgProbe({
+        exists: { iam_local: true, iam_pii_local: true, programs: true, scheduling: true },
+        branch: { programs: 'managed', scheduling: 'managed' },
+      }),
+    });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(computeClosure(manifest, ['scheduling-api'] as ServiceId[]).services);
+
+    expect(res.ok).toBe(true);
+    // R1: every repo fresh ⇒ no prep steps ran.
+    expect(res.prep?.steps).toEqual([]);
+    // R2: every DB exists ⇒ ZERO docker-exec CREATE statements.
+    expect(fakes.runs.some((r) => r.command === 'docker')).toBe(false);
+    expect(res.provision?.dbs.every((d) => d.action === 'exists' || d.action === 'skipped')).toBe(true);
+    // R3: db:deploy targets are `managed` (apply-pending) — never the destructive reset.
+    expect(fakes.runs.some((r) => r.args.includes('reset'))).toBe(false);
+  });
+
+  it('aborts the bring-up (ok:false) + never launches when R2 provisioning fails', async () => {
+    const { runtime, fakes } = makeRuntime({
+      pgProbe: fakePgProbe(),
+      prepIsFresh: () => true, // skip prep to isolate the provision failure
+      runner: {
+        async run(spec: ScriptInvocation): Promise<RunResult> {
+          fakes.runs.push(spec);
+          return { code: spec.command === 'docker' ? 1 : 0 }; // provision psql fails
+        },
+      },
+    });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services);
+    expect(res.ok).toBe(false);
+    expect(res.provision?.ok).toBe(false);
+    expect(fakes.launches).toEqual([]); // never reached the launch stage
+  });
+
+  it('slot > 0: provision + migrate target the slot pg container and offset DB URL', async () => {
+    const { runtime, fakes } = makeRuntime({
+      pgProbe: fakePgProbe(),
+      prepIsFresh: () => true,
+      pgContainer: 'soa-s1-postgres-1',
+      meshOffset: 1000,
+    });
+    const api = makeStackApi(manifest, runtime);
+    await api.up(computeClosure(manifest, ['programs-api'] as ServiceId[]).services);
+
+    // provision docker-exec hit the slot container.
+    const dockerCall = fakes.runs.find((r) => r.command === 'docker');
+    expect(dockerCall?.args[1]).toBe('soa-s1-postgres-1');
+    // migrate DATABASE_URL points at the slot's offset mesh port.
+    const migCall = fakes.runs.find((r) => r.command === 'pnpm' && r.args.includes('db:deploy'));
+    expect(migCall?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:6432/programs');
+  });
+});
+
 // ── seed() ─────────────────────────────────────────────────────────────────
 
 describe('StackApi.seed — offline then online via the Runner', () => {

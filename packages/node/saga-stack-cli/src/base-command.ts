@@ -24,7 +24,9 @@
 
 import { existsSync } from 'node:fs';
 import { Command } from '@oclif/core';
-import { baseFlags } from './shared-flags.js';
+import type { Interfaces } from '@oclif/core';
+import { SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
+import type { InstanceProfile } from './core/derive-instance.js';
 import type { ScriptPlan } from './core/flag-map.js';
 import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
 import {
@@ -65,6 +67,67 @@ export type WorkspaceFlags = {
 
 export abstract class BaseCommand extends Command {
   static baseFlags = baseFlags;
+
+  /**
+   * Whether THIS command supports `--slot > 0` (M7 Phase 2). Default `false` —
+   * the central guard in `parse` rejects a `--slot > 0` for any command that does
+   * not opt in, so an un-slot-safe command (the wrapper-lifecycle set, login,
+   * tunnel, snapshot, …) fails fast rather than half-running against a peer slot's
+   * data on up.sh's host-global lifecycle. `stack up`/`status`/`verify`/`down`
+   * override this to `true`. Slot 0 (the default) is accepted everywhere.
+   */
+  protected slotAware(): boolean {
+    return false;
+  }
+
+  /**
+   * Parse + a CENTRAL slot guard. `--slot` lives on `baseFlags`, so every command
+   * accepts it — but only the slot-aware commands (`slotAware()` ⇒ true) wire the
+   * mesh-project / container / offset threading that makes `--slot > 0` isolated.
+   * A `--slot > 0` on a NON-slot-aware command must fail fast here rather than
+   * half-run at the base ports / on up.sh's host-global teardown and clobber a live
+   * default stack. Slot 0 (the default) is completely unaffected.
+   *
+   * The structural generic bounds mirror oclif's own `Command.parse` signature
+   * (`FlagOutput`/`ArgOutput` are `{ [k: string]: any }`) so this is a faithful
+   * override, not a widening.
+   */
+  protected async parse<
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    F extends { [flag: string]: any },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    B extends { [flag: string]: any },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    A extends { [arg: string]: any },
+  >(
+    options?: Interfaces.Input<F, B, A>,
+    argv?: string[],
+  ): Promise<Interfaces.ParserOutput<F, B, A>> {
+    const result = await super.parse<F, B, A>(options, argv);
+    const slot = (result.flags as { slot?: unknown }).slot;
+    if (typeof slot === 'number' && slot > 0 && !this.slotAware()) {
+      this.error(SLOT_UNSUPPORTED_COMMAND_MESSAGE);
+    }
+    return result;
+  }
+
+  /**
+   * Apply a slot's `InstanceProfile` to `process.env` (M7 Phase 2 — the "env
+   * seam"). Sets the `SAGA_MESH_*_CONTAINER` overrides so the mesh-readiness
+   * resolver (`mesh.ts` `meshContainer`), the snapshot-store resolvers, and the
+   * preflight owned-container set all target `soa-s<N>-<unit>-1`, and points
+   * `SAGA_MESH_SNAPSHOTS_DIR` at the per-slot snapshot root. At slot 0 the profile
+   * carries an empty container env and an undefined snapshot dir, so this is a
+   * NO-OP and slot 0 stays byte-identical.
+   */
+  protected applyInstanceEnv(profile: InstanceProfile): void {
+    for (const [key, value] of Object.entries(profile.containerEnv)) {
+      process.env[key] = value;
+    }
+    if (profile.snapshotsDir !== undefined) {
+      process.env.SAGA_MESH_SNAPSHOTS_DIR = profile.snapshotsDir;
+    }
+  }
 
   /**
    * The injectable process seam. Production launches real children; tests spy

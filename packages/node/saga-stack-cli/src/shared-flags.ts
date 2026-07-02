@@ -71,10 +71,39 @@ export const repoFlags = {
   }),
 };
 
+/**
+ * The error surfaced when `--slot > 0` is passed on a command that is NOT
+ * slot-aware (M7 Phase 2). Phase 2 makes `stack up`/`status`/`verify`/`down`
+ * bring up / act on an ISOLATED `soa-s<N>` stack; every OTHER command — the
+ * wrapper-lifecycle set (`reset`/`restart`/`overlay`/`bootstrap`/`seed`) plus
+ * `login`/`tunnel`/`snapshot`/… — still delegates to up.sh's HOST-GLOBAL
+ * lifecycle (`pkill -f tsup`, `nuke_vite`, fixed `STATE=/tmp/sds-synthetic`),
+ * which would clobber other slots. Those FAIL FAST here rather than silently
+ * corrupt a peer slot. Enforced in `BaseCommand.parse`, opted out per-command via
+ * `slotAware()`. Slot 0 (the default) is unaffected everywhere.
+ */
+export const SLOT_UNSUPPORTED_COMMAND_MESSAGE =
+  "multi-slot (--slot > 0) is not supported for this command yet — only 'stack up', 'stack status', " +
+  "'stack verify', and 'stack down' are slot-aware. The wrapper-lifecycle commands " +
+  '(reset/restart/overlay/bootstrap/seed) delegate to up.sh host-global teardown ' +
+  '(pkill/nuke_vite), which would clobber other slots; run them against slot 0 only.';
+
 export const baseFlags = {
   porcelain: Flags.boolean({
     description: 'machine-readable output; no color, minimal noise',
     default: false,
+  }),
+  slot: Flags.integer({
+    default: 0,
+    min: 0,
+    // CEILING 9 (M7 MINOR): the mesh's rabbitmq (:5672) and rabbitmq-mgmt (:15672)
+    // differ by 10000 = 10 * the 1000 stride, so slot 10's rabbitmq (:15672) would
+    // collide with slot 0's rabbitmq-mgmt (:15672). Cap at 9 so every slot's full
+    // resolved port band stays disjoint. Slot > 0 is a BACKEND sub-stack (the
+    // literal-port backends + browser frontends are excluded — see derive-instance).
+    max: 9,
+    description:
+      'stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.',
   }),
   'output-json': Flags.boolean({
     description: 'emit structured JSON on stdout instead of human-readable text',
@@ -85,8 +114,13 @@ export const baseFlags = {
     default: defaultDevDir,
   }),
   'state-dir': Flags.string({
-    description: 'scratch dir for pid files, snapshots, and other run state',
-    default: '/tmp/sds-synthetic',
+    description:
+      'scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)',
+    // NO oclif default: an unset `--state-dir` stays `undefined` so a slot-aware
+    // command can fall back to the slot's `InstanceProfile.stateDir` (an explicit
+    // `--state-dir` still wins). The launcher's `DEFAULT_STATE_DIR` (/tmp/sds-
+    // synthetic) is the ultimate fallback for callers that pass it through
+    // unchanged (e2e), so slot 0 stays /tmp/sds-synthetic.
   }),
   ...repoFlags,
 };

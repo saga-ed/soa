@@ -18,6 +18,7 @@ import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import { computeClosure } from '../../../core/closure.js';
+import { deriveInstance } from '../../../core/derive-instance.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { HealthProber, ProbeResult } from '../../../runtime/health.js';
 import type { RunResult, ScriptInvocation } from '../../../runtime/index.js';
@@ -290,5 +291,35 @@ describe('stack verify --full — delegates the deep checks to verify.sh', () =>
     await expect(StackVerify.run(['--full', ...WS], config)).rejects.toMatchObject({
       oclif: { exit: 4 },
     });
+  });
+});
+
+describe('stack verify --slot N — backend-only gate on offset ports (M7 Phase 2)', () => {
+  const EXCLUDED = ['saga-dash', 'connect-api', 'connect-web', 'coach-web', 'ads-adm-api'] as const;
+
+  it('slot > 0 excludes the frontends + literal-port backends and probes offset ports', async () => {
+    await StackVerify.run(['--slot', '1', ...WS], config);
+    const profile = deriveInstance({ slot: 1 });
+
+    // the excluded services (frontends + literal-port backends) are NOT gated — at
+    // slot > 0 they aren't brought up, so gating them would always read down.
+    for (const id of EXCLUDED) {
+      const url = `http://localhost:${profile.portOverrides[id]}${manifest.services[id].healthPath}`;
+      expect(probed).not.toContain(url);
+    }
+
+    // the backend services ARE probed, on the +1000 offset port.
+    const iamUrl = `http://localhost:${profile.portOverrides['iam-api']}${manifest.services['iam-api'].healthPath}`;
+    expect(probed).toContain(iamUrl);
+    expect(iamUrl).toContain(`:${manifest.services['iam-api'].port + 1000}`);
+
+    // exactly the backend sub-stack: 13 non-optional minus the 5 excluded = 8.
+    expect(probed).toHaveLength(8);
+  });
+
+  it('slot 0 verify is byte-identical: probes every non-optional service on base ports', async () => {
+    await StackVerify.run([...WS], config);
+    expect(probed).toContain(DASH_URL); // frontends gated at slot 0
+    expect(probed).toHaveLength(13);
   });
 });

@@ -53,8 +53,17 @@ export interface HealthProbe {
  * The stack-lane URL has no trailing slash (`http://localhost:3010`) and every
  * `healthPath` begins with `/`, so a plain concatenation yields the correct URL
  * for both `/health` services and the `/`-rooted frontends.
+ *
+ * M7: `portOverrides` (a slot's `InstanceProfile.portOverrides`) shifts each URL to
+ * the slot's RESOLVED offset port, so `stack status`/`verify` probe the right
+ * instance instead of base. Absent (slot 0) ⇒ the manifest base port, which equals
+ * `svc.lane.stack`, so slot 0 is byte-identical.
  */
-export function healthProbes(m: Manifest, services?: ServiceId[]): HealthProbe[] {
+export function healthProbes(
+  m: Manifest,
+  services?: ServiceId[],
+  portOverrides?: Partial<Record<ServiceId, number>>,
+): HealthProbe[] {
   const ids =
     services ??
     (Object.keys(m.services) as ServiceId[]).filter((id) => !m.services[id].optional);
@@ -62,9 +71,10 @@ export function healthProbes(m: Manifest, services?: ServiceId[]): HealthProbe[]
   return ids.map((id) => {
     const svc = m.services[id];
     if (!svc) throw new Error(`unknown service id: ${id}`);
+    const port = portOverrides?.[id] ?? svc.port;
     return {
       id,
-      url: `${svc.lane.stack}${svc.healthPath}`,
+      url: `http://localhost:${port}${svc.healthPath}`,
       healthPath: svc.healthPath,
       expectStatus: 200,
     };

@@ -24,4 +24,4 @@ services:
 
 volumes:
   rabbitmq-data:
-    name: rabbitmq-data
+    # no explicit name → <project>_rabbitmq-data (per-slot isolation, M7)

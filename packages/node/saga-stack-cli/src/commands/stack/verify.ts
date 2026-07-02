@@ -30,6 +30,7 @@
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { BUNDLE_NAMES } from '../../core/bundles.js';
+import { deriveInstance } from '../../core/derive-instance.js';
 import * as flagMap from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { manifest } from '../../core/manifest/index.js';
@@ -76,6 +77,11 @@ export default class StackVerify extends BaseCommand {
     }),
   };
 
+  /** M7 Phase 2: the native health gate probes a slot's offset ports at slot > 0. */
+  protected slotAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackVerify);
 
@@ -91,14 +97,23 @@ export default class StackVerify extends BaseCommand {
 
     // ── Native health gate (scoped to the --only closure, else all required). ──
     const tolerate = parseTolerate(flags.tolerate);
-    const ids = resolveServiceSet(flags.only, flags.with, (m) => this.error(m));
+    // M7: the slot profile drives the offset probe ports + the slot>0 exclusion.
+    // At slot 0 it's the byte-identical no-offset default (base ports, no exclusion).
+    const profile = deriveInstance({ slot: flags.slot });
+    let ids = resolveServiceSet(flags.only, flags.with, (m) => this.error(m));
+    // At slot > 0 the literal-port services aren't brought up (see `stack up`), so
+    // don't gate on them here either — they'd always read down.
+    if (profile.slot > 0) {
+      const excluded = new Set(profile.excludedServices);
+      ids = ids.filter((id) => !excluded.has(id));
+    }
 
     // A service whose sibling repo isn't cloned is reported not-cloned (NOT a
     // failure) — a missing coach checkout must not fail the gate, matching `stack
     // up`'s skip guard.
     const ctx = repoContextFromFlags(flags as unknown as Record<string, unknown>);
     const { probe, notCloned } = partitionByRepoPresence(ids, ctx, this.getRepoDirCheck());
-    const probes = healthProbes(manifest, probe);
+    const probes = healthProbes(manifest, probe, profile.portOverrides);
 
     const prober = this.getProber();
     const rows = await Promise.all(

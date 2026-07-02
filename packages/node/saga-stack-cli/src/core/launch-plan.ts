@@ -310,6 +310,13 @@ export interface LaunchContextInputs {
   sagaApiTarget?: string;
   /** Per-service port overrides (e.g. a `check_ports` remap); defaults to the manifest port. */
   portOverrides?: Partial<Record<ServiceId, number>>;
+  /**
+   * Offset added to the mesh ports (postgres/rabbitmq/connect-mongo) so
+   * `MESH_MQ` / `CONNECT_MONGO_URI` / `*_DB_URL` (and `CONNECT_MONGO_PORT`)
+   * point at a slot's offset mesh in lockstep with the mesh's published ports
+   * (M7). Default 0 ⇒ today's base mesh ports (byte-identical to no offset).
+   */
+  meshOffset?: number;
   /** Fleek recorder control port (up.sh `RECORDER_CONTROL_PORT`; default 7890). */
   recorderControlPort?: number;
   /** Fleek recordings-api port (up.sh `RECORDINGS_API_PORT`; default 8444). */
@@ -350,9 +357,12 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
   const ports = {} as Record<ServiceId, number>;
   for (const id of Object.keys(m.services) as ServiceId[]) ports[id] = port(id);
 
-  const pgPort = getMesh('postgres', m).port; // 5432 (mesh shared instance)
-  const mqPort = getMesh('rabbitmq', m).port; // 5672
-  const mongoPort = getMesh('connect-mongo', m).port; // 27037
+  // Mesh ports offset in lockstep with the mesh's published ports (M7 slots).
+  // meshOffset 0 (the default) ⇒ today's base ports, byte-identical to no offset.
+  const meshOffset = inputs.meshOffset ?? 0;
+  const pgPort = getMesh('postgres', m).port + meshOffset; // 5432 (mesh shared instance)
+  const mqPort = getMesh('rabbitmq', m).port + meshOffset; // 5672
+  const mongoPort = getMesh('connect-mongo', m).port + meshOffset; // 27037
 
   const recorderControlPort = inputs.recorderControlPort ?? 7890;
   const recordingsApiPort = inputs.recordingsApiPort ?? 8444;

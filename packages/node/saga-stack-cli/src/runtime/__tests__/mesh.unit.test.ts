@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { manifest } from '../../core/manifest/index.js';
 import type { RunResult, Runner, ScriptInvocation } from '../exec.js';
-import { meshMakeArgs, meshUp } from '../mesh.js';
+import { meshDownArgs, meshMakeArgs, meshUp } from '../mesh.js';
 import type { MeshExec } from '../mesh.js';
 import type { PortProbe } from '../preflight.js';
 
@@ -61,6 +61,47 @@ describe('meshMakeArgs', () => {
       'RABBITMQ_PORT=5672',
       'RABBITMQ_MGMT_PORT=15672',
       'CONNECT_MONGO_PORT=27037',
+    ]);
+  });
+
+  it('M7 slot 0 (no opts / project+offset 0) is byte-identical', () => {
+    expect(meshMakeArgs(manifest, { offset: 0 })).toEqual(meshMakeArgs(manifest));
+  });
+
+  it('M7 slot > 0: prepends COMPOSE_PROJECT_NAME + offsets every mesh port', () => {
+    expect(meshMakeArgs(manifest, { project: 'soa-s1', offset: 1000 })).toEqual([
+      'up',
+      'COMPOSE_PROJECT_NAME=soa-s1',
+      'PROJECT=saga-mesh',
+      'PROFILE=empty',
+      'POSTGRES_PORT=6432',
+      'REDIS_PORT=7379',
+      'RABBITMQ_PORT=6672',
+      'RABBITMQ_MGMT_PORT=16672',
+      'CONNECT_MONGO_PORT=28037',
+    ]);
+  });
+
+  it('two slots (1 vs 2) emit non-colliding mesh port args', () => {
+    const portsOf = (a: string[]): string[] => a.filter((x) => x.endsWith('_PORT') === false && /_PORT=/.test(x));
+    const s1 = portsOf(meshMakeArgs(manifest, { project: 'soa-s1', offset: 1000 }));
+    const s2 = portsOf(meshMakeArgs(manifest, { project: 'soa-s2', offset: 2000 }));
+    const vals1 = s1.map((x) => x.split('=')[1]);
+    const vals2 = s2.map((x) => x.split('=')[1]);
+    expect(vals1.some((v) => vals2.includes(v))).toBe(false);
+  });
+});
+
+describe('meshDownArgs', () => {
+  it('slot 0 (no project) is byte-identical to the pre-M7 form', () => {
+    expect(meshDownArgs()).toEqual(['down', 'PROJECT=saga-mesh']);
+  });
+
+  it('slot > 0: passes the per-slot COMPOSE_PROJECT_NAME (tears down the right project)', () => {
+    expect(meshDownArgs({ project: 'soa-s1' })).toEqual([
+      'down',
+      'COMPOSE_PROJECT_NAME=soa-s1',
+      'PROJECT=saga-mesh',
     ]);
   });
 });
@@ -147,6 +188,53 @@ describe('meshUp', () => {
     });
     expect(res2.ok).toBe(false);
     expect(res2.units[0]).toMatchObject({ id: 'rabbitmq', ok: false });
+  });
+
+  it('M7 slot > 0: passes COMPOSE_PROJECT_NAME (arg + env) + offset ports, gates the slot containers', async () => {
+    const { runner, calls } = fakeRunner(0);
+    const { exec, calls: gated } = fakeExec();
+    // The slot's container-name env (set from InstanceProfile.containerEnv) so the
+    // readiness resolver + owned-container preflight target soa-s1-*.
+    const saved = {
+      pg: process.env.SAGA_MESH_POSTGRES_CONTAINER,
+      rabbit: process.env.SAGA_MESH_RABBITMQ_CONTAINER,
+    };
+    process.env.SAGA_MESH_POSTGRES_CONTAINER = 'soa-s1-postgres-1';
+    process.env.SAGA_MESH_RABBITMQ_CONTAINER = 'soa-s1-rabbitmq-1';
+    try {
+      const res = await meshUp({
+        soaRoot: SOA,
+        runner,
+        exec,
+        portProbe: FREE_PROBE,
+        units: ['postgres', 'rabbitmq'],
+        project: 'soa-s1',
+        meshOffset: 1000,
+      });
+      expect(res.ok).toBe(true);
+      // COMPOSE_PROJECT_NAME both as a make arg and via child env; ports offset.
+      expect(calls[0].args).toContain('COMPOSE_PROJECT_NAME=soa-s1');
+      expect(calls[0].args).toContain('POSTGRES_PORT=6432');
+      expect(calls[0].env).toEqual({
+        EXTRA_POSTGRES_SEED_DIR: '../../projects/saga-mesh/seed',
+        COMPOSE_PROJECT_NAME: 'soa-s1',
+      });
+      // readiness gated the slot's containers, not the base names.
+      expect(gated).toEqual(['soa-s1-postgres-1', 'soa-s1-rabbitmq-1']);
+    } finally {
+      process.env.SAGA_MESH_POSTGRES_CONTAINER = saved.pg;
+      process.env.SAGA_MESH_RABBITMQ_CONTAINER = saved.rabbit;
+      if (saved.pg === undefined) delete process.env.SAGA_MESH_POSTGRES_CONTAINER;
+      if (saved.rabbit === undefined) delete process.env.SAGA_MESH_RABBITMQ_CONTAINER;
+    }
+  });
+
+  it('M7 slot 0: make env stays byte-identical (no COMPOSE_PROJECT_NAME)', async () => {
+    const { runner, calls } = fakeRunner(0);
+    const { exec } = fakeExec();
+    await meshUp({ soaRoot: SOA, runner, exec, portProbe: FREE_PROBE, units: ['postgres'] });
+    expect(calls[0].env).toEqual({ EXTRA_POSTGRES_SEED_DIR: '../../projects/saga-mesh/seed' });
+    expect(calls[0].args).not.toContain('COMPOSE_PROJECT_NAME=soa');
   });
 
   it('honours skipPreflight (caller already ran check_ports)', async () => {

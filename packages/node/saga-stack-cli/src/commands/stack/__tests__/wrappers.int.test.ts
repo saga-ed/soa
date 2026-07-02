@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import type { RunResult, ScriptInvocation } from '../../../runtime/index.js';
 import StackUp from '../up.js';
+import StackDown from '../down.js';
 import StackSeed from '../seed.js';
 import StackReset from '../reset.js';
 import StackOverlay from '../overlay.js';
@@ -142,6 +143,48 @@ describe('stack up — real path (no --dry-run) wraps up.sh', () => {
     // oclif's this.exit(code) throws an ExitError carrying `oclif.exit === code`.
     await expect(StackUp.run([...WS], config)).rejects.toMatchObject({ oclif: { exit: 3 } });
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe('stack down — slot-safe teardown (M7 BLOCKER-2)', () => {
+  const INFRA_DIR = resolve(SOA_ROOT, 'infra');
+
+  it('slot 0 (bare) wraps up.sh --down (unchanged M1 behaviour)', async () => {
+    await StackDown.run([...WS], config);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe(UP_SH);
+    expect(calls[0].args).toEqual(['--down']);
+  });
+
+  it('slot 0 --mesh: up.sh --down THEN make down for the default project', async () => {
+    await StackDown.run(['--mesh', ...WS], config);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].command).toBe(UP_SH);
+    expect(calls[0].args).toEqual(['--down']);
+    // mesh teardown targets the DEFAULT project (no COMPOSE_PROJECT_NAME arg/env).
+    expect(calls[1].command).toBe('make');
+    expect(calls[1].cwd).toBe(INFRA_DIR);
+    expect(calls[1].args).toEqual(['down', 'PROJECT=saga-mesh']);
+    expect(calls[1].env).toEqual({});
+  });
+
+  it('slot > 0 does NOT invoke up.sh --down (no host-global service-stop)', async () => {
+    await StackDown.run(['--slot', '1', ...WS], config);
+    // no up.sh service-stop at all — its pkill/slot-0 STATE would kill slot 0.
+    expect(calls.some((c) => c.command.endsWith('up.sh'))).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('slot > 0 --mesh: ONLY the native mesh teardown for the slot project (no up.sh)', async () => {
+    await StackDown.run(['--slot', '1', '--mesh', ...WS], config);
+    // never the host-global up.sh --down.
+    expect(calls.some((c) => c.command.endsWith('up.sh'))).toBe(false);
+    // exactly one call: make down for THIS slot's project.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe('make');
+    expect(calls[0].cwd).toBe(INFRA_DIR);
+    expect(calls[0].args).toEqual(['down', 'COMPOSE_PROJECT_NAME=soa-s1', 'PROJECT=saga-mesh']);
+    expect(calls[0].env).toEqual({ COMPOSE_PROJECT_NAME: 'soa-s1' });
   });
 });
 

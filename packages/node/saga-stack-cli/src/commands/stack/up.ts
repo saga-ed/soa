@@ -34,6 +34,8 @@ import {
   seedAddOnsFor,
 } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
+import { deriveInstance, slotExcludedServices } from '../../core/derive-instance.js';
+import type { InstanceProfile } from '../../core/derive-instance.js';
 import * as flagMap from '../../core/flag-map.js';
 import type { RecordMode } from '../../core/flag-map.js';
 import { defaultLaunchContext } from '../../core/launch-plan.js';
@@ -121,19 +123,39 @@ export default class StackUp extends BaseCommand {
     }),
   };
 
+  /** M7 Phase 2: `stack up` brings up an isolated `soa-s<N>` stack at slot > 0. */
+  protected slotAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackUp);
 
     // requested = --only ids ∪ --with bundle ids (sugar over --only); `--with`
     // participates in the same closure resolution the native/dry-run paths use.
-    const requested: ServiceId[] = combineRequested(flags.only, flags.with, (m) => this.error(m));
-    const isOnly = requested.length > 0;
+    let requested: ServiceId[] = combineRequested(flags.only, flags.with, (m) => this.error(m));
+    let isOnly = requested.length > 0;
     const withPlayback = effectiveWithPlayback(flags.with);
 
     // ── --dry-run (M0/M4): planner only. ──
     if (flags['dry-run']) {
       this.runDryRun(flags, requested, isOnly, withPlayback);
       return;
+    }
+
+    // ── M7 BLOCKER-1: a BARE full-stack `up` at slot > 0 must NOT reach the up.sh
+    // wrapper. up.sh is hardcoded to slot 0 (project `soa`, base ports, STATE=
+    // /tmp/sds-synthetic) — a bare `--slot N` falling through to `runWrapped` would
+    // CLOBBER the default stack. Expand the bare request to the FULL non-optional
+    // service set and route it through the native (slot-threaded) path below; the
+    // per-slot exclusion filter in `runNative` then drops the literal-port / frontend
+    // services, so slot > 0 comes up as a BACKEND sub-stack (see derive-instance).
+    // Slot 0 (bare) is unchanged — it keeps the up.sh wrap. ──
+    if (flags.slot > 0 && !isOnly) {
+      requested = Object.values(manifest.services)
+        .filter((s) => !s.optional)
+        .map((s) => s.id);
+      isOnly = true;
     }
 
     // ── NATIVE partial-stack (M4): --only with flags the native path can honour. ──
@@ -155,16 +177,31 @@ export default class StackUp extends BaseCommand {
         return;
       }
 
+      // M7 BLOCKER-1: the up.sh fallback below is hardcoded to slot 0 (project `soa`,
+      // base ports, STATE=/tmp/sds-synthetic). At slot > 0 it would clobber slot 0,
+      // so REFUSE rather than corrupt it — never fall through to `runWrapped`. (Native
+      // overlays for --sandbox/--tunnel/… at slot > 0 are a documented fast-follow.)
+      if (flags.slot > 0) {
+        this.error(
+          `slot ${flags.slot}: --sandbox/--tunnel/--workspace/--record/--pull/--no-auto-pull/--skip-prep ` +
+            'route through the up.sh wrapper, which is hardcoded to slot 0 (project soa, base ports, ' +
+            'STATE=/tmp/sds-synthetic) and would clobber it. Drop the flag to bring the slot up natively.',
+        );
+      }
+
       if (requested.length > 1) {
         this.error(
           'a multi-service --only/--with set boots the closure NATIVELY, but that path does not yet support --sandbox/--tunnel/--workspace/--record/--pull/--no-auto-pull/--skip-prep. Drop the unsupported flag (native), pass a single service (up.sh fallback), or use --dry-run to preview.',
         );
       }
       // Single service + an unsupported-native flag ⇒ fall through to the up.sh
-      // wrapper below (preserves the M1 --sandbox/single-service behaviour).
+      // wrapper below (preserves the M1 --sandbox/single-service behaviour). Only
+      // reached at slot 0 (slot > 0 hard-errored just above).
     }
 
-    // ── WRAPPED full-stack (M1): thin wrapper over up.sh. UNCHANGED. ──
+    // ── WRAPPED full-stack (M1): thin wrapper over up.sh. UNCHANGED. Slot 0 only —
+    // slot > 0 can never reach here (bare → native above; --only + unsupported flag
+    // → hard-error above). ──
     await this.runWrapped(flags, requested);
   }
 
@@ -189,6 +226,12 @@ export default class StackUp extends BaseCommand {
 
     const closure = computeClosure(manifest, resolvedRequest, { withPlayback });
 
+    // M7: at slot > 0 the bring-up would EXCLUDE the literal-port services; surface
+    // that in the preview so the dry-run matches what a real `--slot N` up launches.
+    const slotExcluded = slotExcludedServices(flags.slot).filter((id) =>
+      closure.services.includes(id),
+    );
+
     const reasonsObj: Record<string, string[]> = {};
     for (const svc of closure.services) reasonsObj[svc] = closure.reasons.get(svc) ?? [];
 
@@ -205,6 +248,7 @@ export default class StackUp extends BaseCommand {
       databases: closure.databases,
       mesh: closure.mesh,
       reasons: reasonsObj,
+      ...(slotExcluded.length > 0 ? { slot: flags.slot, slotExcluded } : {}),
       ...(seedPlan
         ? {
             native: true,
@@ -224,6 +268,9 @@ export default class StackUp extends BaseCommand {
       `mesh: ${closure.mesh.join(', ') || '(none)'}`,
       'reasons:',
       ...closure.services.map((svc) => `  ${svc}: ${(closure.reasons.get(svc) ?? []).join('; ')}`),
+      ...(slotExcluded.length > 0
+        ? [`slot ${flags.slot}: backend sub-stack — would EXCLUDE (literal-port + frontends, collide with slot 0): ${slotExcluded.join(', ')}`]
+        : []),
     ];
     if (seedPlan) {
       textLines.push(
@@ -249,11 +296,32 @@ export default class StackUp extends BaseCommand {
       this.error(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
     }
 
-    const closure = computeClosure(manifest, requested, { withPlayback });
-    const api = makeStackApi(manifest, this.buildRuntime(flags));
+    // M7: derive the slot profile once, up front — it drives the ports/project/
+    // container-env threading (buildRuntime) AND the literal-port-service exclusion
+    // below. At slot 0 the profile is the byte-identical no-offset default.
+    const profile = deriveInstance({ slot: flags.slot });
+
+    const fullClosure = computeClosure(manifest, requested, { withPlayback });
+
+    // Exclude the literal-port backends (ads-adm-api/connect-api/playback trio) AND
+    // the browser frontends (saga-dash/connect-web/coach-web — no listen-port seam)
+    // from a slot > 0 bring-up: they'd collide with / split-brain onto slot 0 (see
+    // SLOT_EXCLUDED_SERVICES). So slot > 0 is a BACKEND sub-stack. Empty at slot 0,
+    // so slot 0 is unchanged.
+    const excluded = new Set(profile.excludedServices);
+    const services = fullClosure.services.filter((id) => !excluded.has(id));
+    const droppedForSlot = fullClosure.services.filter((id) => excluded.has(id));
+    if (droppedForSlot.length > 0) {
+      this.log(
+        `⚠ slot ${profile.slot}: backend sub-stack — excluding literal-port + frontend ` +
+          `service(s) that would collide with slot 0: ${droppedForSlot.join(', ')}`,
+      );
+    }
+
+    const api = makeStackApi(manifest, this.buildRuntime(flags, profile));
 
     // 1. native bring-up (mesh + topo-wave service launch).
-    const up = await api.up(closure.services);
+    const up = await api.up(services);
 
     // Surface any services skipped because their sibling repo isn't cloned (warn,
     // not fail) — e.g. a missing coach checkout. Printed before the failure/emit
@@ -270,7 +338,7 @@ export default class StackUp extends BaseCommand {
     // up.sh --reset truncates + re-seeds the running partial stack; the native seed
     // below then applies the SELECTED profile/add-ons on top (idempotent upserts).
     if (flags.reset) {
-      const reset = await api.reset(closure.services);
+      const reset = await api.reset(services);
       if (reset.code !== 0) this.exit(reset.code);
     }
 
@@ -281,7 +349,7 @@ export default class StackUp extends BaseCommand {
     // service-inactive instead. (restored = empty for M4 — snapshot integration can
     // pass a fully-restored set later.)
     const skippedIds = new Set(up.skipped.map((s) => s.id));
-    const active = new Set(closure.services.filter((id) => !skippedIds.has(id)));
+    const active = new Set(services.filter((id) => !skippedIds.has(id)));
     const plan: SeedPlan = composeSeedPlan(
       this.seedSelection(flags),
       active,
@@ -298,7 +366,7 @@ export default class StackUp extends BaseCommand {
       flags,
       {
         native: true,
-        services: closure.services,
+        services,
         launched: up.launched.map((r) => ({ id: r.id, ok: r.ok, alreadyUp: r.alreadyUp ?? false, pid: r.pid ?? null })),
         skipped: up.skipped.map((s) => ({ id: s.id, repo: s.repo, repoDir: s.repoDir })),
         mesh: { ok: up.mesh.ok, units: up.mesh.units.map((u) => ({ id: u.id, ok: u.ok })) },
@@ -367,7 +435,7 @@ export default class StackUp extends BaseCommand {
    * workspace. The seams (`getLauncher`/`getMeshExec`/…) are injectable, so a test
    * spies them on the prototype to drive the whole native path with fakes.
    */
-  private buildRuntime(flags: NativeFlags): Runtime {
+  private buildRuntime(flags: NativeFlags, profile: InstanceProfile): Runtime {
     // Pinned repo roots from the per-repo flags (kebab key → manifest env-var key).
     const pinned: Partial<Record<RepoKey, string>> = {};
     for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
@@ -384,11 +452,30 @@ export default class StackUp extends BaseCommand {
     }
 
     const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
+
+    // M7: the ONE slot-injection site. The `deriveInstance` profile (computed by the
+    // caller) maps the numeric slot to its port offset / project / state+snapshot
+    // dirs / container env. At slot 0 (offset 0) `portOverrides` is the base-port
+    // map and `meshOffset` is 0, so the launch context is byte-identical to the
+    // pre-M7 no-offset build — the regression guard.
+    //
+    // Apply the slot's env seam (SAGA_MESH_*_CONTAINER + SAGA_MESH_SNAPSHOTS_DIR) so
+    // the mesh-readiness resolver, the preflight owned-container set, and the
+    // snapshot store all target `soa-s<N>-<unit>-1`. No-op at slot 0.
+    this.applyInstanceEnv(profile);
+
+    // State dir (item 4): an EXPLICIT `--state-dir` wins; otherwise the slot's
+    // `profile.stateDir` (`/tmp/sds-synthetic` at slot 0, `…-s<N>` at slot > 0).
+    // `--state-dir` carries no oclif default, so an unset flag is `undefined` here.
+    const stateDir = flags['state-dir'] ?? profile.stateDir;
+
     // Mirror up.sh's `${PINO_LOGGER_LEVEL:-info}` / `${…ISEXPRESSCONTEXT:-true}`:
     // honour an ambient override, else the planner's defaults.
     const launchContext = defaultLaunchContext({
       repoRoots,
       syntheticDevDir,
+      portOverrides: profile.portOverrides,
+      meshOffset: profile.meshOffset,
       pinoLevel: process.env.PINO_LOGGER_LEVEL,
       pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
     });
@@ -398,7 +485,16 @@ export default class StackUp extends BaseCommand {
       launchContext,
       soaRoot: repoRoots.SOA,
       sagaDashRoot: repoRoots.SAGA_DASH,
-      launcher: this.getLauncher(flags['state-dir']),
+      // M7 slot threading: > 0 namespaces the mesh (soa-s<N>) + offsets its ports +
+      // writes the slot's stack-lane dash config. At slot 0 project is undefined and
+      // offset 0, so `up` is byte-identical to the pre-M7 build.
+      slot: profile.slot,
+      meshProject: profile.slot === 0 ? undefined : profile.project,
+      meshOffset: profile.meshOffset,
+      // Default the launcher state-dir from the slot when `--state-dir` isn't given
+      // (see the explicit-set detection below). At slot 0 both are
+      // `/tmp/sds-synthetic`, so this is a no-op today.
+      launcher: this.getLauncher(stateDir),
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
@@ -439,11 +535,13 @@ export default class StackUp extends BaseCommand {
 type DryRunFlags = WorkspaceFlags & {
   porcelain: boolean;
   'output-json': boolean;
+  slot: number;
   with?: string[];
   seed?: string;
 };
 type NativeFlags = DryRunFlags & {
-  'state-dir': string;
+  'state-dir'?: string;
+  slot: number;
   reset: boolean;
   login: boolean;
 };

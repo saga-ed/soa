@@ -33,6 +33,7 @@ import {
   effectiveWithPlayback,
 } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
+import { deriveInstance } from '../../core/derive-instance.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { RepoKey, ServiceId } from '../../core/manifest/index.js';
@@ -63,16 +64,30 @@ export default class StackStatus extends BaseCommand {
     }),
   };
 
+  /** M7 Phase 2: `stack status` probes a slot's offset ports at slot > 0. */
+  protected slotAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackStatus);
 
-    const ids = resolveServiceSet(flags.only, flags.with, (msg) => this.error(msg));
+    // M7: the slot profile drives the offset probe ports + the slot>0 exclusion.
+    // At slot 0 it's the byte-identical no-offset default (base ports, no exclusion).
+    const profile = deriveInstance({ slot: flags.slot });
+    let ids = resolveServiceSet(flags.only, flags.with, (msg) => this.error(msg));
+    // At slot > 0 the literal-port services aren't brought up (see `stack up`), so
+    // don't report them as down here either.
+    if (profile.slot > 0) {
+      const excluded = new Set(profile.excludedServices);
+      ids = ids.filter((id) => !excluded.has(id));
+    }
 
     // A service whose sibling repo isn't cloned is reported not-cloned, not probed
     // (and excluded from the healthy verdict) — consistent with `stack up`'s skip.
     const ctx = repoContextFromFlags(flags as unknown as Record<string, unknown>);
     const { probe, notCloned } = partitionByRepoPresence(ids, ctx, this.getRepoDirCheck());
-    const probes = healthProbes(manifest, probe);
+    const probes = healthProbes(manifest, probe, profile.portOverrides);
 
     const prober = this.getProber();
     const rows = await Promise.all(

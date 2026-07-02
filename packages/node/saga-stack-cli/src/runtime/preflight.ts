@@ -70,21 +70,35 @@ export interface PortProbe {
  * Derive the mesh host-port list from the manifest: each mesh unit's `port`, plus
  * `mgmtPort` where present (rabbitmq's 15672). Declaration order is preserved, so
  * the output reads postgres, redis, rabbitmq (+ mgmt), connect-mongo.
+ *
+ * M7: `offset` shifts every host port by the slot's `slot * 1000` so the preflight
+ * probes the SLOT's ports, not base. At offset 0 (slot 0) this is byte-identical.
  */
-export function meshPortSpecs(m: Manifest = defaultManifest): MeshPortSpec[] {
+export function meshPortSpecs(m: Manifest = defaultManifest, offset = 0): MeshPortSpec[] {
   const specs: MeshPortSpec[] = [];
   for (const unit of allMesh(m)) {
-    specs.push({ port: unit.port, name: unit.id });
+    specs.push({ port: unit.port + offset, name: unit.id });
     if (unit.mgmtPort !== undefined) {
-      specs.push({ port: unit.mgmtPort, name: `${unit.id}-mgmt` });
+      specs.push({ port: unit.mgmtPort + offset, name: `${unit.id}-mgmt` });
     }
   }
   return specs;
 }
 
-/** The set of container names that legitimately OWN a mesh port (manifest mesh containers). */
+/**
+ * The set of container names that legitimately OWN a mesh port. Each unit resolves
+ * via the `SAGA_MESH_<UNIT>_CONTAINER` env override (set from the slot's
+ * `InstanceProfile.containerEnv`) so a running `soa-s<N>-postgres-1` is recognised
+ * as ours at slot > 0; unset (slot 0) ⇒ the manifest default container names, so
+ * slot 0 is byte-identical. Kept in lock-step with `mesh.ts`'s `meshContainer`.
+ */
 export function meshOwnedContainers(m: Manifest = defaultManifest): Set<string> {
-  return new Set(allMesh(m).map((u) => u.container));
+  return new Set(
+    allMesh(m).map((u) => {
+      const envKey = `SAGA_MESH_${u.id.toUpperCase().replace(/-/g, '_')}_CONTAINER`;
+      return process.env[envKey] ?? u.container;
+    }),
+  );
 }
 
 /**

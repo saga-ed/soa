@@ -70,29 +70,54 @@ Global invariants across all five dates:
 
 ---
 
-## 3. Build sequence — API-built (recommended) vs direct-projection (fallback)
+## 3. Build sequence — self-seed the whole scenario in the spec (no new `seed.ts`)
 
-**Decision (Q3, recommended): API-built for the rotation emission→projection→read path.**
-That path is exactly where the gap lives (`01 §5`), so driving it through the real APIs is
-what "reveal reality" means. A **purpose-built seed fixture** handles only the *static
-scaffolding* (org + program + period + pods + enrollments + authz grant + warmth); the
-**spec** drives the *A/B-specific* mutations through live tRPC and asserts the reads. This
-split keeps the seed deterministic and puts the mechanism-under-test on the real wire.
+**Decision (Q1+Q3, resolved by the seed-management research): the flow uses the stock
+`profile: 'roster'` seed and self-seeds its entire scenario in the spec via live tRPC. It
+adds NO service `seed.ts` and NO CLI change.** This is both forced by how `ss` seeds and
+ideal for "reveal reality":
 
-### 3a. Seed fixture (deterministic, `only: [scheduling-api, sessions-api]` + programs-api rides along)
-Into the **Empty Org** (`deriveGroupId('emptyOrg') === EMPTY_ORG_ID ===
-52a00136-285b-522c-bc70-0887cf46463a`), reusing the journey's actor precedent:
-1. Program `P` + one period `per` (initially `no_rotation` — the spec flips it) + `podX`
-   (and a second pod `podY` optional, to prove per-pod isolation) + ≥1 student enrollment per
-   pod (SessionView asserts `participants.length ≥ 1`).
-2. **The authz grant + warmth** — reuse `seedEmptyOrgAdminAuthz` (`sessions-api/seed.ts:710`,
-   invoked at `:441`) which grants `DEV_ADMIN_PERMISSIONS` (incl.
-   `sessions:lifecycle_non_hosted_sessions`) on the emptyOrg group, and the two
-   `projectionReadiness.upsert({ warmedAt })` rows (`seed.ts:443-460`) — the read gate is
-   `sessions-api.authz-projection` (`authz-projection.ts:20`); without warmth every read
-   throws `SERVICE_UNAVAILABLE`. **Without the grant, `dayList` masks to 0** (false green).
+- **`ss` has no per-flow seed.** A flow's `seed` block selects *which* services run their
+  fixed `pnpm db:seed`, not *what data* they produce; each program-hub `seed.ts` is an
+  unconditional demo seed reading only `DATABASE_URL` (no `SEED_PROFILE`/scenario env reaches
+  it — verified across the CLI seed pipeline `compose-seed-plan.ts` / `profiles.ts` /
+  `stack-api.ts`). A bespoke A/B shape can therefore only come from (a) editing a shared
+  `seed.ts` (pollutes the fixed demo for *every* flow, not flow-scopable), (b) a new CLI
+  `addOn` (coarse, enum-closed `playback`/`qtf`, needs CLI-registry + service edits —
+  overkill for one shape), or **(c) self-seeding in the spec** — the established precedent:
+  `journey` and `connect-smoke` both start from `roster` and build their scenario through the
+  stages, touching no `seed.ts`. **We take (c).**
+- **`profile: 'roster'` already provides everything the read path needs on a cold DB.** It
+  runs the `sessions` seed step (`PROFILE_STEPS.roster = ['iam-dev-user','iam','sessions']`),
+  whose `seedDemo` unconditionally seeds `seedEmptyOrgAdminAuthz` (the `empty@saga.org`
+  admin's `DEV_ADMIN_PERMISSIONS` incl. `sessions:lifecycle_non_hosted_sessions` on the
+  emptyOrg group; `sessions-api/seed.ts:710`, invoked `:439-461`) **and** the two
+  `projection_readiness` warmth rows (incl. `sessions-api.authz-projection`, the fail-closed
+  read gate; without warmth every read throws `SERVICE_UNAVAILABLE`, and without the grant
+  `dayList` masks to 0 — a false green). It does **not** run the `programs`/`scheduling` seeds,
+  so nothing pre-built collides with what the spec builds.
+- **Self-seeding maximizes fidelity.** Every entity (program → period → pods → enrollments →
+  rotation config → schedule → pod assignments) flows through the real programs-api /
+  scheduling-api emission → sessions-api projection path — exactly where the gap lives and
+  what the flow must exercise to reveal reality.
 
-### 3b. Spec setup — live tRPC (this is the path under test)
+### 3a. Spec `beforeAll` — bootstrap the scenario entities (programs-api, live tRPC)
+Backend-only (no dash UI), so we self-seed via **tRPC-direct mutations** (the `rpcPost`
+pattern), not the journey's UI clicks — the same programs-api procedures the journey UI drives
+under the hood. Into the **Empty Org** (`x-organization-id: EMPTY_ORG_ID ===
+deriveGroupId('emptyOrg') === 52a00136-285b-522c-bc70-0887cf46463a`):
+1. `programs.create` → program `P` under the Empty Org.
+2. `periods.create` → one period `per` (created `no_rotation`; the pattern is flipped in §3b).
+3. `pods.create` → `podX`, plus `podY` (rotation-A-only) to prove per-pod isolation (§7 Q2).
+4. Enroll ≥1 student per pod (SessionView asserts `participants.length ≥ 1`).
+
+**Authorization note (confirm at author time):** the roster-seeded emptyOrg admin grant
+authorizes reads/writes on a program whose grant-group is the emptyOrg group. A spec-created
+program under `x-organization-id: EMPTY_ORG_ID` should inherit that group — the journey proves
+this for a UI-built program in the same org. The exact programs-api create-procedure
+inputs/names are pinned in §3a-refs (pending the bootstrap-procedure lookup).
+
+### 3b. Spec setup — the A/B build (live tRPC, this is the path under test)
 tRPC procedures pinned from code (`rpcGet` = query, `rpcPost` = mutation, both via
 `page.request` carrying the `iam_session` cookie + `x-organization-id: EMPTY_ORG_ID` +
 `...previewHeaders()`; `schedule.e2e.test.ts:97-105`):
@@ -153,7 +178,11 @@ slotId`, `slotId: null`), and two `pod_assignment_projection` rows (`podX→slot
 `podX→slotB=NON_TUTORED`) — the shape the current single-rotation seed *explicitly declines
 to build* (`sessions-api/seed.ts:199`, the VARIES-modeling-gap comment). Green here + red on
 the API path = **the read engine is correct and the gap is upstream in emission/projection**,
-which is itself a precise, valuable finding. Prefer API-built; keep this in the back pocket.
+which is itself a precise, valuable finding. Prefer self-seed-in-spec; keep this in the back
+pocket. **Cost caveat:** per the seed-management finding, a direct-projection seed can't be a
+per-flow file — it would mean editing the shared `sessions-api/seed.ts` (polluting the fixed
+demo) or adding a CLI `addOn`, so it's a heavier, cross-flow-affecting fallback, not a cheap
+toggle. Only reach for it if §3b's live path proves un-bootstrappable.
 
 ---
 
@@ -186,8 +215,8 @@ Optional **`rangeList`** cross-check (`{ programIds:[P], from: M0, to: M0+4 }`, 
 Optional **topology** (DB, via a Prisma client in the spec or a `db-*` helper): assert the 2
 `slot_projection` + 2 `pod_assignment_projection` rows per §2.
 
-**Warmth:** don't invent a readiness endpoint — the seed warms `sessions-api.authz-projection`
-(§3a.2); the `expect.poll` on `dayList` itself (timeout 30_000) absorbs any residual
+**Warmth:** don't invent a readiness endpoint — the stock `roster` seed warms
+`sessions-api.authz-projection` (§3); the `expect.poll` on `dayList` itself (timeout 30_000) absorbs any residual
 cold-read `SERVICE_UNAVAILABLE` retry, exactly as the journey polls the composed read rather
 than a warmth flag.
 
@@ -255,12 +284,14 @@ than exists today. Either way the flow earns its keep.
 
 ## 7. Open questions for review (before authoring)
 
-1. **Seed scaffolding mechanism.** §3a assumes a purpose-built fixture creates
-   program/period/pods/enrollments into the Empty Org. Confirm: build that as a new seed entry
-   in `sessions-api`/`scheduling-api` `seed.ts` (deterministic ids via `derive*`), or as a
-   spec `beforeAll` that drives `programs.create`/`pods.create`/enrollment tRPC? Fixture is
-   more deterministic; spec-driven exercises more of the real path. **Recommend fixture for
-   scaffolding, live APIs for the A/B mechanism.**
+1. **Seed scaffolding mechanism — RESOLVED (spec `beforeAll`, no `seed.ts`).** The
+   seed-management research settled this: `ss` has no per-flow seed, so a bespoke fixture would
+   mean editing a shared `seed.ts` (pollutes the fixed demo) or a CLI `addOn` (coarse,
+   registry edit). The established precedent (journey, connect-smoke) is to start from stock
+   `profile: 'roster'` and self-seed the scenario in the spec via tRPC. §3 now reflects this;
+   §3a bootstraps program/period/pods via `programs.create`/`periods.create`/`pods.create` +
+   enrollment. The only residual to confirm at author time is the grant-group inheritance
+   (§3a authorization note).
 2. **One pod or two?** `podX`-in-both-rotations is the minimal A/B. Adding `podY` in only
    rotation A proves per-pod isolation (podY has no Fri session) at low cost. **Recommend
    adding podY.**

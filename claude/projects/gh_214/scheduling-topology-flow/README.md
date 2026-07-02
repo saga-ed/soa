@@ -43,4 +43,14 @@ plan** (R1 "does the weekday variant mint 2 slot-scoped slots" is the hinge — 
 proof, red = a sharper restatement of saga-dash#226). Step 1 (understanding) remains the
 oracle: the multi-rotation slot-scoped A/B path is contract/engine-supported but **not seeded
 or tested end-to-end today** (VARIES modeling gap / saga-dash#226). Next: review `02` §7 open
-questions → build seed + `flows.json` + spec → run + reveal.
+questions → build `flows.json` + spec → run + reveal.
+
+**Seed strategy resolved (2026-07-02):** `ss` has **no per-flow seed** — its `seed` block
+selects *which* services run their fixed `pnpm db:seed`, not *what data*. So this flow adds
+**no `seed.ts`**: it uses stock `profile: 'roster'` (which already seeds the empty-admin authz
+grant + `projection_readiness` warmth) and **self-seeds its scenario in the spec via tRPC**
+(program → period → pods → rotation config → schedule → pod assignments) — the journey /
+connect-smoke precedent, and the highest-fidelity way to exercise the emission→projection path
+we want to reveal. `02` §3 updated accordingly. Deliverables narrow to: `flows.json` + spec
+(no seed fixture). **Author-only scope this pass** — the reveal run is handed off (the
+scheduling stack must not collide with the concurrent M8 live DB validations on `gh_214`).

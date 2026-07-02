@@ -1,0 +1,38 @@
+# Repo-wide fast quality gate — thin caller of the fleet-shared workflow.
+#
+# The 2026-07 check-coverage audit found two structural holes here: (1)
+# apps/** (210 files, 26 test files) is outside every workflow's path filter
+# — an apps-only PR triggers zero checks; (2) a lockfile-only PR triggers
+# nothing either, even though every job installs with --frozen-lockfile.
+# This runs build/check-types/lint/test across the whole workspace on every
+# PR push, drafts included, no path filters — for the repo that publishes
+# the 30 packages the rest of the fleet consumes.
+#
+# Keep the job id `quality`: the ruleset that makes green required pins the
+# `quality / Quality Gate` context fleet-wide (ci-actions
+# docs/required-checks.md). Audit: ci-actions docs/check-coverage-audit-2026-07.md.
+
+name: Quality
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    uses: saga-ed/ci-actions/.github/workflows/quality-checks.yml@v1
+    with:
+      ci-role-arn: ${{ vars.AWS_ROLE_ARN }}
+      node-version: '24'

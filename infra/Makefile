@@ -26,7 +26,9 @@ COMPOSE   := docker compose --env-file .env.defaults -f compose/projects/$(PROJE
 -include .env.defaults
 -include .env
 
-export COMPOSE_PROJECT_NAME ?= soa   # ?= so the CLI can override per-slot via env (soa-s1, …); still soa by default
+# ?= (not :=) so an env COMPOSE_PROJECT_NAME can override the project per-slot (soa-s1, …); still `soa` by default.
+# NOTE: no inline comment on the assignment line — trailing chars become part of the value ("soa   ") and docker compose rejects it.
+export COMPOSE_PROJECT_NAME ?= soa
 export SEED_PROFILE := $(PROFILE)
 
 .PHONY: up switch down reset status logs list-projects list-profiles \

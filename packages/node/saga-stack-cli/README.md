@@ -1,49 +1,120 @@
 # @saga-ed/saga-stack-cli
 
-`saga-stack` — the unified CLI for bringing up, seeding, verifying, resetting,
-and end-to-end testing the **synthetic saga dev stack** across every repo
-(soa, rostering, program-hub, saga-dash, sds, qboard, rtsm, fleek).
+`saga-stack` (alias **`ss`**) — the unified CLI for bringing up, seeding, verifying,
+resetting, snapshotting, and end-to-end testing the **synthetic saga dev stack** across
+every repo (soa, rostering, program-hub, saga-dash, sds, qboard, rtsm, coach, fleek).
 
-It is **one OCLIF v4 package, two topics** (`stack`, `e2e`) over a shared,
-pure, unit-tested core. The binary uses a space topic separator:
+One OCLIF v4 package, **two topics** (`stack`, `e2e`) over a shared, pure, unit-tested
+core (500+ tests). Everything is driven by a single **frozen TypeScript service manifest**
+(ports, `dependsOn` graph, launch env, databases, migrate specs, seed steps) as the one
+source of truth — so behavior lives in data you can read, not in env-vars and branchy bash
+you have to reverse-engineer.
 
+```bash
+ss stack up --only scheduling-api,sessions-api   # boot just those + their deps
+ss stack status                                  # per-service health
+ss e2e run saga-dash/journey --through attendance
 ```
-saga-stack stack up --only scheduling-api --dry-run
-saga-stack stack status
-saga-stack e2e run connect-session
+
+## Non-destructive by design
+
+This CLI is **additive**. The synthetic-dev bash scripts (`up.sh`, `verify.sh`,
+`tunnel.sh`, `bootstrap.sh`, `refresh-suite.sh`) **stay in place and fully supported** —
+`ss` is the *recommended, optional* alternative, not a forced migration. Adopt it one
+command at a time; every command that has flipped to a native implementation keeps a
+`--legacy` escape that routes back to the bash path. It also supersedes
+`@saga-ed/mesh-fixture-cli` (folding the snapshot/fixture lifecycle into `stack snapshot`).
+
+## Install
+
+```bash
+cd ~/dev/soa/packages/node/saga-stack-cli && pnpm build && pnpm link --global
+# `ss` and `saga-stack` are then on PATH, runnable from any directory.
 ```
+Re-run `pnpm build` after code changes. No-build alternative (runs straight from `src` via
+tsx): `node <abs>/bin/dev.js …`. Undo with `pnpm uninstall --global @saga-ed/saga-stack-cli`.
 
-This package **supersedes `@saga-ed/mesh-fixture-cli`**: it folds the
-fixture/snapshot lifecycle into a manifest-driven stack manager and replaces
-the ~600+ lines of `up.sh`/`verify.sh`/seed bash with one frozen TS service
-manifest plus a handful of generic, unit-tested consumers (`computeClosure`,
-launch order, seed-plan composition, health probes).
+Every command supports structured output: `--output-json` (machine-readable) and
+`--porcelain` (minimal, scriptable), alongside the default human view. `--help` (and `-h`)
+plus tab-completion work at every level.
 
-## Status — M0 (scaffold + pure core)
+## `ss stack …` — the stack lifecycle
 
-This milestone ships the **pure core only**: the TS service manifest, the
-dependency-closure engine, the seed-plan composer, the `BaseCommand`/`emit()`
-triple-output (human / `--output-json` / `--porcelain`), the global flag set,
-unit tests, and `stack up --only … --dry-run` (prints the computed closure
-with **no docker**). There is **no** docker / pnpm / curl / git execution yet —
-that lands in M1+ (`runtime/**`).
+| Command | What it does |
+| --- | --- |
+| **`up`** | Bring the stack up. `--only a,b` / `--with <bundle>` boots the minimal dependency **closure** natively (prep → provision → migrate → launch → seed); bare full-stack wraps `up.sh`. `--slot N` runs an isolated concurrent instance. `--dry-run` prints the plan. |
+| **`down`** | Stop the stack (`--mesh` also tears the mesh down). Native + slot-safe at `--slot N`. |
+| **`status`** | Per-service health, probing manifest-derived endpoints (native, read-only, never exits non-zero). `--only` scopes it. |
+| **`verify`** | Native health gate — exits non-zero if a required service is down. `--only` scopes to a closure; `--tolerate` allows named services down; `--full` delegates the deep data + git-posture checks to `verify.sh`. |
+| **`reset`** | Truncate the data DBs to an empty baseline (preserving migration history) + re-seed the dev user (native; `--legacy` → `up.sh --reset`). |
+| **`seed`** | Seed a running stack (`--with playback\|qtf` add-ons). |
+| **`snapshot`** | `store` / `list` / `restore` / `validate` / `delete` native DB fixtures (pg_dump/mongodump, schema-ahead guard, restore-as-owner) — restore a known-good DB state in seconds instead of re-running `db:seed`. |
+| **`bundle list`** | Show the `--with` convenience bundles (name → services + seed). |
+| **`overlay`** | Overlay your in-flight PRs onto a main-based stack. |
+| **`tunnel`** | Expose the local stack via the vms rendezvous (share your stack). |
+| **`bootstrap`** | One-command stand-up on `main` (ensure repos → up → verify). |
+| **`login`** / **`restart`** | Log in a persona / cleanly bounce the stack (no data wipe). |
 
-Architecture invariant: `src/core/**` is pure (zero IO). Everything that
-touches the world lives in `src/runtime/**`. The boundary is enforced by an
-ESLint `no-restricted-imports` rule (see `eslint.config.js`).
+### Dependency-aware sub-stacks (N-of-M)
 
-## Invocation modes
+`ss stack up --only scheduling-api,sessions-api` walks the manifest graph, computes the
+**minimal dependency closure**, and boots just those services plus what they need — not all
+~14. Test two services without paying for the whole stack.
 
-- **run from anywhere (recommended):** `pnpm build && pnpm link --global` once — then
-  `saga-stack …` or the short alias `ss …` work from **any** directory (both are put on
-  PATH; the bins resolve the package via `import.meta.url`, so cwd doesn't matter).
-  Re-run `pnpm build` after code changes. Undo with `pnpm uninstall --global @saga-ed/saga-stack-cli`.
-- **dev, no build:** `./bin/dev.js …` (tsx loader runs straight from `src/`; absolute path works from any cwd)
-- **monorepo filter:** `pnpm --filter @saga-ed/saga-stack-cli saga-stack -- …`
+### Bundles — common shapes in one word
 
-`saga-stack -h` / `ss -h` and `--help` both print help at every level.
+`--with dash|connect|coach|playback|qtf` expand to a set of `--only` includes (sugar over
+the closure, composable: `--with dash --with coach`). Shared across `up`/`status`/`verify`/
+`seed`/`reset`/`snapshot store`. See `ss stack bundle list`.
+
+### Slots — multiple stacks on one box
+
+`--slot N` (1–9) brings up an **isolated** `soa-s<N>` stack: ports offset by `N*1000`,
+project-keyed docker volumes, its own state + snapshot dirs. Several devs — or parallel
+agents — run concurrent stacks with no clobbering. Slot 0 (default) is byte-identical to
+the bash path. (Slot >0 is a backend sub-stack today; `connect` is excluded pending
+literal-port tokenization.)
+
+### Native prep — a fresh checkout provisions + migrates itself
+
+For the native (`--only`/`--with`/slot) paths, `stack up` runs a faithful port of `up.sh`'s
+`prep()` before launch: **install + build + `db:generate`** → **idempotent role/DB
+provisioning** (incl. `coach_api`) → **migrate every closure DB** in canonical order, then
+launch + seed. Idempotent (a re-up is a fast no-op) and validated byte-identical to
+`up.sh`'s resulting schema. `--skip-prep` skips the build pass.
+
+## `ss e2e …` — flows as data
+
+E2e scenarios are **data** (`flows.json`), not hardcoded bash.
+
+| Command | What it does |
+| --- | --- |
+| **`run`** | `ss e2e run <spa>/<flow>` → discover the flow → compute just the stack it needs → seed → run Playwright. `--through <stage>` runs a prefix of a progressive flow; `--headless`. |
+| **`list`** | Discoverable SPAs, their flows, and stages. |
+| **`connect`** | Open a live interactive Connect session (1 tutor + 2 students). |
+
+Onboarding a new SPA or scenario is a registry row + a `flows.json` entry (progressive
+multi-stage journeys, prerequisites, foreground/AV markers, per-stage `requiredSystems`) —
+**zero new orchestration code**. A clamped occurrence-date is injected so weekend runs don't
+flake.
+
+## Architecture
+
+- **`core/**` — pure, no IO:** the frozen `manifest` (services/databases/mesh), `computeClosure`
+  (N-of-M dependency engine), launch-order + launch-env resolution, seed-plan composition,
+  bundles, the slot factory (`deriveInstance`), flow resolution. Unit-tested exhaustively.
+  The boundary is enforced by an ESLint `no-restricted-imports` rule.
+- **`runtime/**` — IO only, behind injectable seams:** docker/pnpm/psql/git runners
+  (`Runner`), health prober, snapshot store, native prep/provision/migrate/reset, launcher.
+- **`commands/**`** — thin oclif commands over the core + runtime, with `emit()` giving the
+  human / `--output-json` / `--porcelain` triple output.
+
+Because the manifest is the single source of truth, native `status`/`verify` cover endpoints
+the hand-maintained `verify.sh` list missed, a missing sibling repo is skipped-with-a-warning
+(not a red stack), and adding a service is a manifest edit — not code sprawl.
 
 ## Plan
 
-Authoritative design + manifest data + decisions:
-`soa/claude/projects/gh_214/plans/01-saga-stack-cli-plan.md` (saga-ed/soa#214).
+Authoritative design, research, decisions, and the elevator pitch:
+`soa/claude/projects/gh_214/` (saga-ed/soa#214) — start with `plans/01-saga-stack-cli-plan.md`
+and `ELEVATOR-PITCH.md`.

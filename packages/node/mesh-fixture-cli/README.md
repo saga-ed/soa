@@ -1,8 +1,18 @@
 # @saga-ed/mesh-fixture-cli
 
+> ## ⚠️ Deprecated — superseded by `@saga-ed/saga-stack-cli`
+>
+> The snapshot/fixture lifecycle this tool provides now lives in **`saga-stack` / `ss`**
+> (`../saga-stack-cli`, saga-ed/soa#214) as `ss stack snapshot store|list|restore|validate|delete`
+> and `ss stack seed`, folded into the manifest-driven stack manager. Prefer those for new work.
+>
+> This package is **deprecated but still functional** — it is intentionally left in place and
+> not removed, so existing scripts keep working. It will only be retired later, with owner
+> sign-off, once nothing depends on it. No action is required of you today.
+
 Cross-repo fixture authoring + snapshot lifecycle for the saga-mesh (rostering + program-hub + student-data-system).
 
-**Status:** Phase 3 D3.1–D3.3 shipped. Built on oclif v4 (ported from commander 2026-04); commands are discovered from `dist/commands/<topic>/<verb>.js` via oclif's pattern strategy.
+**Status:** Deprecated (see above) — superseded by `@saga-ed/saga-stack-cli`'s `stack snapshot`/`stack seed`. Historically: Phase 3 D3.1–D3.3 shipped, built on oclif v4 (ported from commander 2026-04); commands are discovered from `dist/commands/<topic>/<verb>.js` via oclif's pattern strategy.
 
 ## Install (local-dev)
 

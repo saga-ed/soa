@@ -37,6 +37,34 @@ fixtures, no proxy, recording deferred). Ten is **rtsm-api** (rtsm,
                   # (multi-user Connect) — see getting-started.md "tunnel mode"
 ```
 
+## Two entrypoints — bash (`up.sh`) or the CLI (`ss`)
+
+There are now **two supported ways** to drive this stack, and you can use either:
+
+- **Bash (`./up.sh` and friends)** — the original, fully-supported path documented
+  throughout this README. Nothing here is going away; **no migration is required.**
+- **`saga-stack` / `ss`** — a newer, manifest-driven CLI
+  (`../../packages/node/saga-stack-cli`, saga-ed/soa#214) that reimplements this stack's
+  behavior in typed, unit-tested TypeScript. It is **additive and recommended-but-optional**:
+  adopt it at your own pace, one command at a time. Rough map:
+
+  | bash | CLI |
+  | --- | --- |
+  | `./up.sh` | `ss stack up` |
+  | `./up.sh --reset --seed full` | `ss stack up --reset --seed full` |
+  | `./up.sh --status` | `ss stack status` |
+  | `./verify.sh` | `ss stack verify` (`--full` delegates back to `verify.sh`) |
+  | `./up.sh --down` | `ss stack down` |
+  | `./bootstrap.sh` | `ss stack bootstrap` |
+  | (per-repo `db:seed`/reset) | `ss stack reset` / `ss stack seed` |
+  | `mesh-fixture` snapshots | `ss stack snapshot store\|list\|restore` |
+
+  The CLI adds things bash doesn't: **N-of-M sub-stacks** (`ss stack up --only a,b` boots
+  just those + deps), **bundles** (`--with dash\|connect\|coach\|playback`), **concurrent
+  slots** (`--slot N`, isolated stacks on one box), and **data-driven e2e flows**
+  (`ss e2e run <spa>/<flow>`). See its README for the full surface. Commands that have gone
+  native keep a `--legacy` escape back to bash.
+
 Branch posture (decision `../decisions/d1.1`): everything on **main**.
 sds_92 is merged, so ads-adm now runs from the canonical
 `~/dev/student-data-system` checkout (the sds_92 worktree was retired).

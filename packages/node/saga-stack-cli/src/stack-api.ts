@@ -418,7 +418,21 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
             const spec = byId.get(id);
             /* c8 ignore next — every wave id comes from the same closure as the specs. */
             if (!spec) throw new Error(`stack-api: no launch spec for ${id}`);
-            const { command, args } = head(spec.command.split(/\s+/));
+            const argv = spec.command.split(/\s+/);
+            // M7: frontends bake their BASE listen-port into the repo dev script /
+            // vite config, so at an offset slot they'd bind slot 0's port. For any
+            // `isFrontend` service at slot > 0, append `--port <base+offset>`
+            // (`launchContext.ports[id]` is already the slot's offset port). vite/cac
+            // honours the LAST `--port`, overriding the baked-in flag + config.
+            // Appended WITHOUT a `--` separator: `pnpm dev --port N` forwards the flag
+            // through to vite, whereas `pnpm dev -- --port N` makes pnpm inject a
+            // literal `--` that vite treats as end-of-options (the flag is dropped and
+            // the base port wins — verified empirically). At slot 0 (slot falsy /
+            // offset 0) nothing is appended, so the command is byte-identical to today.
+            if (getService(id, manifest).isFrontend && (runtime.slot ?? 0) > 0) {
+              argv.push('--port', String(launchContext.ports[id]));
+            }
+            const { command, args } = head(argv);
             return launcher.launch({
               id,
               cwd: spec.cwd,

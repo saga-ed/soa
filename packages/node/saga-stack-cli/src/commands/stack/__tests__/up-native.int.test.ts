@@ -236,10 +236,11 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     }
   });
 
-  it('excludes the literal-port backends + frontends (backend sub-stack), and namespaces the mesh at soa-s1', async () => {
-    // request a frontend (saga-dash) + the literal-port playback trio at slot 1:
-    // the closure pulls the backend deps, but every excluded service is dropped —
-    // slot > 0 is a BACKEND sub-stack.
+  it('slot > 0 is a backend + saga-dash/coach frontend sub-stack: dash launches on its offset --port; literal-port backends + connect-web dropped', async () => {
+    // request the saga-dash frontend + the literal-port playback trio at slot 1:
+    // the closure pulls the backend deps; saga-dash now comes up (on its offset
+    // port), but every excluded service (literal-port backends + connect-web) is
+    // dropped — slot > 0 is a backend + saga-dash/coach frontend sub-stack.
     await StackUp.run(['--only', 'saga-dash', '--with', 'playback', '--slot', '1', ...WS], config);
 
     const ids = launches.map((s) => s.id);
@@ -247,11 +248,14 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     expect(ids).toContain('iam-api');
     expect(ids).toContain('sessions-api');
     expect(ids).toContain('content-api');
-    // … but every excluded service is dropped from the slot bring-up:
-    // frontends (no listen-port seam) …
-    expect(ids).not.toContain('saga-dash');
+    // … and saga-dash is now IN the slot, listening on its offset port via `--port`.
+    expect(ids).toContain('saga-dash');
+    const dash = launches.find((s) => s.id === 'saga-dash');
+    expect(dash?.command).toBe('pnpm');
+    expect(dash?.args).toEqual(['dev', '--port', '9900']); // 8900 + slot 1 offset
+    // … but the still-un-slottable services are dropped from the slot bring-up:
+    // connect-web (depends on the un-tokenized connect-api) …
     expect(ids).not.toContain('connect-web');
-    expect(ids).not.toContain('coach-web');
     // … and the literal-port backends (bypass the offset).
     expect(ids).not.toContain('ads-adm-api');
     expect(ids).not.toContain('connect-api');
@@ -272,14 +276,17 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     expect(process.env.SAGA_MESH_SNAPSHOTS_DIR?.endsWith('/.saga-mesh/snapshots-s1')).toBe(true);
   });
 
-  it('slot > 0 excludes saga-dash entirely — the dash prelaunch hook never runs (backend sub-stack)', async () => {
-    // saga-dash is a frontend with no listen-port seam, so it is EXCLUDED at slot > 0
-    // (it would bind slot 0's :8900). Its backend deps still come up, but the dash
-    // prelaunch hook (tied to saga-dash's own launch) never fires.
+  it('slot > 0 launches saga-dash on its offset --port and WRITES the slot dash config', async () => {
+    // saga-dash listens on its offset port now (launch-seam `--port 9900`), so it is
+    // included at slot > 0. Its prelaunch hook fires and WRITES config.local.json
+    // pointing each dash service at its offset localhost port (not slot 0's).
     await StackUp.run(['--only', 'saga-dash', '--slot', '1', ...WS], config);
-    expect(launches.map((s) => s.id)).not.toContain('saga-dash');
-    expect(launches.map((s) => s.id)).toContain('iam-api'); // backend dep still up
-    expect(dashCalls).toEqual([]); // no write, no remove — hook never ran
+    expect(launches.map((s) => s.id)).toContain('saga-dash');
+    const dash = launches.find((s) => s.id === 'saga-dash');
+    expect(dash?.args).toEqual(['dev', '--port', '9900']); // 8900 + slot 1 offset
+    expect(launches.map((s) => s.id)).toContain('iam-api'); // backend dep up too
+    // dash prelaunch hook ran and WROTE the offset-port slot config (not removed).
+    expect(dashCalls.some((c) => c.startsWith('write:'))).toBe(true);
   });
 
   it('BARE full-stack --slot 1 routes through the NATIVE path (never the up.sh wrapper)', async () => {
@@ -292,15 +299,16 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     // never resolved/ran the up.sh wrapper.
     expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
 
-    // launched natively — the backend set is present, the excluded services are not.
+    // launched natively — the backend set + saga-dash/coach frontends present, the
+    // still-un-slottable services (literal-port backends + connect) are not.
     const ids = launches.map((s) => s.id);
     expect(ids.length).toBeGreaterThan(0);
     expect(ids).toContain('iam-api');
     expect(ids).toContain('sessions-api');
-    expect(ids).not.toContain('saga-dash');
+    expect(ids).toContain('saga-dash'); // frontend now slottable via --port
+    expect(ids).toContain('coach-web');
     expect(ids).not.toContain('connect-api');
     expect(ids).not.toContain('connect-web');
-    expect(ids).not.toContain('coach-web');
     expect(ids).not.toContain('ads-adm-api');
 
     // mesh came up under the slot project on offset ports (soa-s1, +1000).

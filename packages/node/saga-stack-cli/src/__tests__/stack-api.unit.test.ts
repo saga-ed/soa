@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { computeClosure } from '../core/closure.js';
+import { deriveInstance } from '../core/derive-instance.js';
 import { defaultLaunchContext } from '../core/launch-plan.js';
 import type { LaunchContext } from '../core/launch-plan.js';
 import { manifest } from '../core/manifest/index.js';
@@ -47,6 +48,7 @@ const REPO_ROOTS = {
   QBOARD: '/dev/qboard',
   RTSM: '/dev/rtsm',
   FLEEK: '/dev/fleek',
+  COACH: '/dev/coach',
 } as Record<RepoKey, string>;
 
 function ctx(): LaunchContext {
@@ -190,6 +192,40 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     expect(res.dash?.action).toBe('noop-absent'); // existsFile:false, non-tunnel ⇒ nothing to remove
     expect(fakes.dashCalls.some((c) => c.startsWith('existsDir:'))).toBe(true);
     expect(fakes.launches.some((s) => s.id === 'saga-dash')).toBe(true);
+  });
+
+  it('slot 0: a frontend launch command is byte-identical (no --port appended)', async () => {
+    const { runtime, fakes } = makeRuntime(); // default slot (undefined ⇒ 0)
+    const api = makeStackApi(manifest, runtime);
+    await api.up(['saga-dash'] as ServiceId[]);
+
+    const dash = fakes.launches.find((s) => s.id === 'saga-dash');
+    expect(dash?.command).toBe('pnpm');
+    expect(dash?.args).toEqual(['dev']); // no --port append at slot 0
+  });
+
+  it('slot > 0: appends `--port <base+offset>` to a frontend so it binds its offset port', async () => {
+    // Build a slot-1 launch context (offset ports) exactly as the up command does.
+    const profile = deriveInstance({ slot: 1 });
+    const slotCtx = defaultLaunchContext({
+      repoRoots: REPO_ROOTS,
+      syntheticDevDir: '/dev/soa/tools/synthetic-dev',
+      portOverrides: profile.portOverrides,
+      meshOffset: profile.meshOffset,
+    });
+    const { runtime, fakes } = makeRuntime({ launchContext: slotCtx, slot: 1 });
+    const api = makeStackApi(manifest, runtime);
+    await api.up(['saga-dash', 'coach-web'] as ServiceId[]);
+
+    // saga-dash 8900 + 1000 offset ⇒ appended `--port 9900`; vite honours the last --port.
+    const dash = fakes.launches.find((s) => s.id === 'saga-dash');
+    expect(dash?.command).toBe('pnpm');
+    expect(dash?.args).toEqual(['dev', '--port', '9900']);
+    // coach-web 8800 + 1000 ⇒ `--port 9800` (general over isFrontend, not per-service).
+    const coach = fakes.launches.find((s) => s.id === 'coach-web');
+    expect(coach?.args).toEqual(['dev', '--port', '9800']);
+    // coach-web's outbound dep URL offsets too: PUBLIC_COACH_API_URL ← offset coach-api.
+    expect(coach?.env.PUBLIC_COACH_API_URL).toBe('http://localhost:7105'); // 6105 + 1000
   });
 
   it('aborts (ok:false) and stops launching when a wave service never goes healthy', async () => {

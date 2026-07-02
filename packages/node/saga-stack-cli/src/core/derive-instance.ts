@@ -20,16 +20,19 @@
  * own default) — deterministic per host, no filesystem touch — which the fixed
  * `{ slot }` signature requires. `src/core/**` never imports `src/runtime/**`.
  *
- * SLOT > 0 IS A BACKEND SUB-STACK (Phase-2 MVP). Slot > 0 brings up the backend
- * mesh + services only — `iam/programs/scheduling/sessions/content/sis/rtsm/
- * coach-api` + the mesh. The literal-port backends and ALL browser frontends are
- * EXCLUDED (`SLOT_EXCLUDED_SERVICES`): `connect-api` carries literal cross-slot
- * ports (`:3007` sessions, `ws://…:7880` livekit) that bypass the offset and would
- * split-brain onto slot 0's stateful services; the three frontends (`saga-dash`/
- * `connect-web`/`coach-web`, all `isFrontend`) have NO listen-port seam (their
- * `portEnvVar` metadata is DEAD — unconsumed anywhere), so at slot > 0 they'd bind
- * their built-in default port (= slot 0's) and `verify --slot N` could never be
- * green. Frontend multi-slot lands when the frontends grow a port seam.
+ * SLOT > 0 IS A BACKEND + saga-dash/coach FRONTEND SUB-STACK (connect excluded
+ * pending tokenization). Slot > 0 brings up the backend mesh + services —
+ * `iam/programs/scheduling/sessions/content/sis/rtsm/coach-api` + the mesh — PLUS
+ * the `saga-dash` and `coach-web` frontends, which now listen on their OFFSET port
+ * (the launch seam appends `--port <base+offset>` to their `pnpm dev`; vite honours
+ * the last `--port`, overriding the port baked into the repo dev script / vite
+ * config). The literal-port backends stay EXCLUDED (`SLOT_EXCLUDED_SERVICES`):
+ * `connect-api` carries literal cross-slot ports (`:3007` sessions, `ws://…:7880`
+ * livekit) that bypass the offset and would split-brain onto slot 0's stateful
+ * services, so `connect-web` (which depends on it) is excluded too until connect
+ * is tokenized (the remaining fast-follow). saga-dash/coach frontend→backend edges
+ * are `browser` and don't pull the excluded literal-port services, so their
+ * backend closures are fully slottable today.
  *
  * The port-override map is derived GENERICALLY over `manifest.services` (never a
  * hand-maintained table), so any future service slots for free. After computing,
@@ -46,8 +49,8 @@ import type { Manifest, ServiceId } from './manifest/index.js';
 export const SLOT_PORT_STRIDE = 1000;
 
 /**
- * Services EXCLUDED from a slot > 0 bring-up (plan §6 collision matrix). Two
- * classes, both of which would CLOBBER or SPLIT-BRAIN onto slot 0:
+ * Services EXCLUDED from a slot > 0 bring-up (plan §6 collision matrix). All
+ * would CLOBBER or SPLIT-BRAIN onto slot 0:
  *
  *   LITERAL-PORT backends — carry LITERAL ports in their launch env that bypass
  *   the generic `${…_PORT}` / mesh-offset token machinery, so at an offset slot
@@ -59,26 +62,33 @@ export const SLOT_PORT_STRIDE = 1000;
  *                          would read/write slot 0's stateful sessions-api.
  *     - the playback trio — literal `POSTGRES_PORT '5432'` + `EXPRESS_SERVER_PORT`.
  *
- *   FRONTENDS (`isFrontend`) — `saga-dash`/`connect-web`/`coach-web` have NO
- *   listen-port seam (their `portEnvVar` metadata is DEAD — unconsumed anywhere),
- *   so at slot > 0 they'd bind their built-in default port (= slot 0's) and
- *   `verify --slot N` could never be green. Excluded until they grow a port seam.
+ *   `connect-web` FRONTEND — depends on `connect-api` (a browser edge), which is
+ *   excluded above for its un-tokenized literal ports. connect-web itself now has
+ *   a listen-port seam (the launch layer appends `--port` for any `isFrontend`
+ *   service at an offset slot), so it is excluded ONLY because its backend isn't
+ *   slottable yet. FAST-FOLLOW: tokenize connect-api's `:3007`/`ws://…:7880`
+ *   literals, then drop both `connect-api` and `connect-web` from this list.
  *
- * Consequence: slot > 0 is a BACKEND sub-stack (see the file header). They are
- * excluded EXPLICITLY (not via transitive drop, which would orphan a dependent).
- * At slot 0 nothing is excluded (the set is empty), so slot 0 is unaffected.
+ * The OTHER two frontends — `saga-dash` and `coach-web` — are NO LONGER excluded:
+ * they listen on their offset port via the launch-seam `--port` append, and their
+ * backend deps (iam/programs/scheduling/sessions/content/sis, coach-api) all run at
+ * slot > 0. Their frontend→backend edges are `browser`, so they don't pull the
+ * excluded literal-port services.
+ *
+ * Consequence: slot > 0 is a backend + saga-dash/coach frontend sub-stack (see the
+ * file header). Services are excluded EXPLICITLY (not via transitive drop, which
+ * would orphan a dependent). At slot 0 nothing is excluded (the set is empty), so
+ * slot 0 is unaffected.
  */
 export const SLOT_EXCLUDED_SERVICES: readonly ServiceId[] = [
-  // literal-port backends
+  // literal-port backends (bypass the offset)
   'ads-adm-api',
   'connect-api',
   'transcripts-api',
   'insights-api',
   'chat-api',
-  // frontends — no listen-port seam
-  'saga-dash',
+  // connect-web frontend — excluded pending connect-api port tokenization (fast-follow)
   'connect-web',
-  'coach-web',
 ];
 
 /**

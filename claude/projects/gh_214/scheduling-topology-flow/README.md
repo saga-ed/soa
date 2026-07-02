@@ -31,7 +31,7 @@ This is the concrete instance of the "author *new* flow scenarios" work.
   (design → seed → author → run). Decisions locked: purpose-built A/B seed (reveal
   reality); `varies_by_day_type` weekday pattern first. **Read this to pick up the work.**
 - `01-understanding.md` — the synthesized understanding (from parallel code research). ✅ **done**
-- `02-flow-design.md` — the concrete flow scenario + expected behavior + assertions. ✅ **drafted (review gate)**
+- `02-flow-design.md` — the concrete flow scenario + expected behavior + assertions. ✅ **done**; deliverables **authored** (§8).
 
 ## Status
 **Step 2 (flow design) drafted — awaiting review.** `02-flow-design.md` pins the locked
@@ -54,3 +54,7 @@ connect-smoke precedent, and the highest-fidelity way to exercise the emission�
 we want to reveal. `02` §3 updated accordingly. Deliverables narrow to: `flows.json` + spec
 (no seed fixture). **Author-only scope this pass** — the reveal run is handed off (the
 scheduling stack must not collide with the concurrent M8 live DB validations on `gh_214`).
+
+**Authored (2026-07-02).** `flows.json` + spec + Playwright project live on saga-dash branch
+`flow/scheduling-topology-ab` (commit `71899699`); the spec typechecks + lints clean. Only the
+reveal run remains (handed off). Design/handoff detail + run notes in `02` §8.

@@ -310,15 +310,36 @@ than exists today. Either way the flow earns its keep.
 
 ## 8. Deliverables checklist (feeds §221 "New flow #1")
 
-- [ ] This design doc reviewed (gate).
-- [ ] Purpose-built seed fixture: Empty-Org program + period + podX(+podY) + enrollments +
-      authz grant + warmth (reuse `seedEmptyOrgAdminAuthz`).
-- [ ] `saga-dash/apps/web/dash/e2e/flows.json` (created) + the `scheduling-topology` entry.
-- [ ] Spec `saga-dash/apps/web/dash/e2e/scheduling/topology-ab.e2e.test.ts` (rpcGet/rpcPost +
-      poll patterns from the journey; oracle from §2/§4).
-- [ ] Playwright `scheduling-topology` project wired in the saga-dash config.
-- [ ] Run report: `ss stack up --only scheduling-api,sessions-api` → `ss e2e run
-      saga-dash/scheduling-topology`; capture green/red per §6 → back to #221 / saga-dash#226.
+Authored on saga-dash branch `flow/scheduling-topology-ab` (commit `71899699`).
+
+- [x] Design doc (this file) — self-seed strategy resolved.
+- [x] ~~Purpose-built seed fixture~~ — **dropped**: `ss` has no per-flow seed; the spec
+      self-seeds from stock `profile: roster` (which already seeds `seedEmptyOrgAdminAuthz` +
+      warmth). No `seed.ts` added.
+- [x] `saga-dash/apps/web/dash/e2e/flows.json` (created) + the `scheduling-topology` entry.
+- [x] Spec `saga-dash/apps/web/dash/e2e/scheduling/topology-ab.e2e.test.ts` (rpcGet/rpcPost +
+      poll patterns from the journey; oracle from §2/§4). Typechecks + lints clean.
+- [x] Playwright `scheduling-topology` project wired in `playwright.stack.config.ts`
+      (standalone, no dependencies; run targeted).
+- [ ] **Run report (handed off — author-only pass):** bring up scheduling-api + sessions-api +
+      programs-api (seeded `profile: roster`), run `--project scheduling-topology`, capture
+      green/red per §6 → back to #221 / saga-dash#226. Deferred to avoid colliding with the
+      concurrent M8 live DB validations on `gh_214`.
+
+### Author-time notes carried into the run
+- **Participants:** pods created without students (a session composes per
+  `(date,period,slot,pod)` from the pod_assignment, independent of membership). If the composer
+  suppresses member-less pods, enroll a real iam-seeded roster student
+  (`@saga-ed/iam-seed-ids` `personId('s-N')`, add as an e2e devDependency). Not on the A/B
+  critical path.
+- **Pipeline interaction:** the `scheduling-topology` Playwright project has no `dependencies`,
+  so a bare `playwright test` includes it; since it's "reveal" coverage that may be red until
+  the gap closes, tag-exclude it from default pipeline runs if that red is disruptive.
+- **Input-shape confidences:** `programs.create {name}`+org header, `periods.create
+  {programId,name,rotationPattern}`, `periods.setRotationCount {id,rotationCount}`,
+  `periods.setRotationConfig {periodId,rotations,calendarDays}`, `schedules.upsert {...}`,
+  `podAssignments.upsert {podId,slotId,treatmentKind}` — all pinned from code; any mismatch
+  surfaces immediately as an HTTP 400 zod error on first run.
 
 ## References
 `01-understanding.md` (oracle) · `HANDOFF.md` (locked decisions). Code (all quoted from the

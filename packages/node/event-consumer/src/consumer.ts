@@ -177,10 +177,23 @@ export class EventConsumer {
 
     async start(): Promise<void> {
         this.stopped = false;
-        await this.setupChannel();
-        this.opts.logger.info(
-            `[EventConsumer:${this.opts.consumerName}] started (queue=${this.opts.queue})`,
-        );
+        try {
+            await this.setupChannel();
+        } catch (err) {
+            // A transient broker failure at boot must not leave the consumer
+            // permanently silent: callers in this fleet often log-and-continue
+            // on startup errors (the durable queue buffers meanwhile), and
+            // without this the backoff loop would only ever start from a
+            // channel 'close'. Callers treating the rejection as fatal exit
+            // anyway, making the scheduled retry moot.
+            this.scheduleReconnect();
+            throw err;
+        }
+        if (!this.stopped) {
+            this.opts.logger.info(
+                `[EventConsumer:${this.opts.consumerName}] started (queue=${this.opts.queue})`,
+            );
+        }
     }
 
     /**
@@ -209,7 +222,9 @@ export class EventConsumer {
                 `[EventConsumer:${this.opts.consumerName}] channel error: ${err.message}`,
             );
         });
+        let closed = false;
         channel.on('close', () => {
+            closed = true;
             if (this.channel === channel) {
                 this.channel = null;
                 this.consumerTag = null;
@@ -259,7 +274,24 @@ export class EventConsumer {
         const consumeRes = await channel.consume(
             this.opts.queue,
             (msg) => {
-                if (!msg) return;
+                if (!msg) {
+                    // Broker-initiated consumer cancel (queue deleted, HA
+                    // failover) — amqplib signals it with a null message.
+                    // The channel stays open, so no 'close' fires; recover
+                    // explicitly or the consumer stalls silently.
+                    if (this.channel === channel && !this.stopped) {
+                        this.channel = null;
+                        this.consumerTag = null;
+                        this.opts.logger.warn(
+                            `[EventConsumer:${this.opts.consumerName}] consumer cancelled by broker; scheduling re-subscribe`,
+                        );
+                        void Promise.resolve()
+                            .then(() => channel.close())
+                            .catch(() => {});
+                        this.scheduleReconnect();
+                    }
+                    return;
+                }
                 // Bind dispatch to THIS channel: delivery tags are
                 // channel-scoped, so a message must never be acked/nacked on
                 // a replacement channel.
@@ -270,6 +302,19 @@ export class EventConsumer {
 
         this.channel = channel;
         this.consumerTag = consumeRes.consumerTag;
+        // Setup can race a channel death ('close' fired before the
+        // assignments above, so the listener's identity guard missed it) or
+        // a concurrent stop(). Either way this channel must not stay live.
+        if (closed || this.stopped) {
+            this.channel = null;
+            this.consumerTag = null;
+            void Promise.resolve()
+                .then(() => channel.close())
+                .catch(() => {});
+            if (closed && !this.stopped) {
+                throw new Error('channel closed during setup');
+            }
+        }
     }
 
     /**
@@ -376,9 +421,14 @@ export class EventConsumer {
         try {
             op();
         } catch (err) {
-            this.opts.logger.warn(
-                `[EventConsumer:${this.opts.consumerName}] ack/nack failed on dead channel (broker will redeliver): ${err instanceof Error ? err.message : String(err)}`,
-            );
+            const detail = `[EventConsumer:${this.opts.consumerName}] ack/nack failed on dead channel (broker will redeliver): ${err instanceof Error ? err.message : String(err)}`;
+            // Routine during graceful shutdown (stop() closes the channel
+            // while a handler is in flight) — only unexpected while running.
+            if (this.stopped) {
+                this.opts.logger.debug(detail);
+            } else {
+                this.opts.logger.warn(detail);
+            }
         }
     }
 

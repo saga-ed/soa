@@ -90,11 +90,20 @@ export class OutboxRelay {
     private timer: NodeJS.Timeout | null = null;
     private running = false;
     private consecutiveFailures = 0;
+    private lastFailureMessage: string | null = null;
 
     constructor(private readonly opts: OutboxRelayOpts) {}
 
     async start(): Promise<void> {
-        await this.ensureChannel();
+        // `running` flips on BEFORE the first channel acquisition so
+        // ensureChannel's stop-race guard can see a concurrent stop().
+        this.running = true;
+        try {
+            await this.ensureChannel();
+        } catch (err) {
+            this.running = false;
+            throw err;
+        }
         // Publishes use `persistent: true` for durability but do NOT wait for
         // publisher confirms — `@saga-ed/soa-rabbitmq` exposes only a plain
         // Channel today, not a ConfirmChannel. A broker crash between
@@ -102,7 +111,6 @@ export class OutboxRelay {
         // soa-rabbitmq with `newConfirmChannel()` to restore strict
         // at-least-once.
 
-        this.running = true;
         this.opts.logger.info(`[OutboxRelay] started (exchange=${this.opts.exchange})`);
         this.scheduleNext();
     }
@@ -134,7 +142,9 @@ export class OutboxRelay {
         channel.on('error', (err: Error) => {
             this.opts.logger.warn(`[OutboxRelay] channel error: ${err.message}`);
         });
+        let closed = false;
         channel.on('close', () => {
+            closed = true;
             if (this.channel === channel) {
                 this.channel = null;
                 if (this.running) {
@@ -146,6 +156,20 @@ export class OutboxRelay {
         });
         await channel.assertExchange(this.opts.exchange, 'topic', { durable: true });
         this.channel = channel;
+        // Setup can race a channel death ('close' fired before the
+        // assignment above, so the listener's identity guard missed it) or
+        // a concurrent stop(). Either way this channel must not be cached.
+        if (closed || !this.running) {
+            this.channel = null;
+            void Promise.resolve()
+                .then(() => channel.close())
+                .catch(() => {});
+            throw new Error(
+                closed
+                    ? 'channel closed during setup'
+                    : 'relay stopped during channel setup',
+            );
+        }
         return channel;
     }
 
@@ -178,7 +202,10 @@ export class OutboxRelay {
         try {
             await this.drainBatch();
             this.consecutiveFailures = 0;
+            this.lastFailureMessage = null;
         } catch (err) {
+            // A tick interrupted by stop() isn't a failure worth reporting.
+            if (!this.running) return;
             const e = err instanceof Error ? err : new Error(String(err));
             if (isFatalPgError(e)) {
                 // Configuration / permission errors aren't going to fix
@@ -197,12 +224,19 @@ export class OutboxRelay {
                 }
                 return;
             }
-            // Throttle repeat failures: at a 500ms poll interval a persistent
-            // fault (broker outage, wedged channel) would otherwise emit ~2
-            // multi-line error logs per second until someone intervenes.
-            // Log the first failure and then one heartbeat per ~60s.
+            // Throttle repeat failures: a persistent fault (broker outage,
+            // wedged channel) would otherwise emit a multi-line error log
+            // every poll tick until someone intervenes. Log each NEW error
+            // (first of a streak, or the failure mode changing mid-outage)
+            // immediately, then one heartbeat per ~60s of poll ticks.
             this.consecutiveFailures++;
-            if (this.consecutiveFailures === 1 || this.consecutiveFailures % 120 === 0) {
+            const ticksPerHeartbeat = Math.max(
+                1,
+                Math.round(60_000 / (this.opts.pollIntervalMs ?? 500)),
+            );
+            const newError = e.message !== this.lastFailureMessage;
+            this.lastFailureMessage = e.message;
+            if (newError || this.consecutiveFailures % ticksPerHeartbeat === 0) {
                 this.opts.logger.error(
                     `[OutboxRelay] poll failed (${this.consecutiveFailures} consecutive)`,
                     e,

@@ -63,6 +63,21 @@ describe('ConnectionManager.ensureConnected', () => {
         expect(mockConnect).toHaveBeenCalledTimes(1);
         expect(cm.state()).toBe('READY');
     });
+
+    it("rejects when connect() resolves without a usable connection (log-and-continue breaker trip)", async () => {
+        // In 'log-and-continue' mode, a circuit-breaker trip makes connect()
+        // RESOLVE with no connection. ensureConnected must still throw so
+        // recovery callers (relay tick, consumer backoff) don't proceed onto
+        // a dead channelModel believing the connection is usable.
+        vi.mocked(mockConnect).mockRejectedValue(new Error('ECONNREFUSED'));
+        const cm = new ConnectionManager(NOOP_LOGGER as never, {
+            url: 'amqp://localhost',
+            failureMode: 'log-and-continue',
+            reconnect: { enabled: true, maxRetries: 1, initialDelay: 1, maxDelay: 2 },
+        });
+        await expect(cm.ensureConnected()).rejects.toThrow(/connection unavailable/);
+        expect(cm.state()).toBe('CIRCUIT_OPEN');
+    });
 });
 
 describe('ConnectionManager.connect single-flight', () => {

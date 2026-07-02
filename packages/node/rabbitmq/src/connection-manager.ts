@@ -102,6 +102,7 @@ export class ConnectionManager {
   }
 
   private setState(state: ConnectionState) {
+    if (state === this.currentState) return;
     this.currentState = state;
     this.logger.info(`[MQConnectionManager] State: ${state}`);
   }
@@ -138,14 +139,22 @@ export class ConnectionManager {
    * fresh channel — it covers the gap where an automatic reconnect after
    * 'close' exhausted its retries and nothing else would ever try again.
    * No-op when READY (or DEGRADED, i.e. connected but flow-blocked).
-   * Throws while the circuit breaker is open — callers are expected to
-   * retry on their own cadence (poll tick, backoff timer).
+   * Throws when the connection is not usable afterwards — including in
+   * `log-and-continue` mode, where connect() itself resolves after a
+   * circuit-breaker trip. Callers are expected to retry on their own
+   * cadence (poll tick, backoff timer).
    */
   async ensureConnected(): Promise<void> {
     if (this.currentState === "READY" || this.currentState === "DEGRADED") {
       return;
     }
-    return this.connect();
+    await this.connect();
+    const state = this.state();
+    if (state !== "READY" && state !== "DEGRADED") {
+      throw new Error(
+        `RabbitMQ connection unavailable after connect attempt (state=${state})`,
+      );
+    }
   }
 
   private async doConnect(): Promise<void> {

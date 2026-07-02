@@ -129,6 +129,78 @@ describe('EventConsumer channel recovery', () => {
         expect(newChannel).toHaveBeenCalledTimes(1);
     });
 
+    it("does not keep a channel whose 'close' fired during setup", async () => {
+        vi.useFakeTimers();
+        const ch1 = makeChannel();
+        // 'close' arrives before setupChannel's assignment resumes — the
+        // close listener's identity guard can't catch it.
+        ch1.consume.mockImplementationOnce(async () => {
+            ch1.emit('close');
+            return { consumerTag: 'tag-1' };
+        });
+        const ch2 = makeChannel();
+        const newChannel = vi.fn().mockResolvedValueOnce(ch1).mockResolvedValueOnce(ch2);
+        const { consumer } = makeConsumer(newChannel);
+
+        await expect(consumer.start()).rejects.toThrow(/closed during setup/);
+        expect(ch1.close).toHaveBeenCalled();
+
+        // start() schedules the backoff loop before rethrowing.
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(ch2.consume).toHaveBeenCalledTimes(1);
+    });
+
+    it('a stop() racing an in-flight setup closes the channel instead of resuming consumption', async () => {
+        const ch1 = makeChannel();
+        let releaseChannel!: (ch: unknown) => void;
+        const newChannel = vi.fn().mockReturnValue(
+            new Promise((res) => {
+                releaseChannel = res;
+            }),
+        );
+        const { consumer } = makeConsumer(newChannel);
+
+        const starting = consumer.start();
+        await consumer.stop(); // wins the race while setupChannel awaits newChannel
+        releaseChannel(ch1);
+        await starting;
+
+        await vi.waitFor(() => expect(ch1.close).toHaveBeenCalled());
+        expect((consumer as unknown as { channel: unknown }).channel).toBeNull();
+    });
+
+    it('schedules the backoff loop when start() itself fails (no silent boot stall)', async () => {
+        vi.useFakeTimers();
+        const ch1 = makeChannel();
+        const newChannel = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('boot flake'))
+            .mockResolvedValue(ch1);
+        const { consumer } = makeConsumer(newChannel);
+
+        await expect(consumer.start()).rejects.toThrow('boot flake');
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(ch1.consume).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers from a broker-initiated consumer cancel (null message)', async () => {
+        vi.useFakeTimers();
+        const ch1 = makeChannel();
+        const ch2 = makeChannel();
+        const newChannel = vi.fn().mockResolvedValueOnce(ch1).mockResolvedValueOnce(ch2);
+        const { consumer, logger } = makeConsumer(newChannel);
+
+        await consumer.start();
+        const onMessage = ch1.consume.mock.calls[0][1] as (msg: unknown) => void;
+        onMessage(null); // queue deleted / HA failover: channel stays open
+
+        expect(logger.warn).toHaveBeenCalledWith(
+            expect.stringContaining('cancelled by broker'),
+        );
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(ch2.consume).toHaveBeenCalledTimes(1);
+    });
+
     it('ack/nack on a dead channel is absorbed (broker redelivers; idempotency dedups)', async () => {
         const ch1 = makeChannel();
         const newChannel = vi.fn().mockResolvedValue(ch1);

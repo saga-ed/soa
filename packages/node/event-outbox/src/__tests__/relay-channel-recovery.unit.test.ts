@@ -1,7 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { OutboxRelay } from '../relay.js';
 import type { OutboxRelayOpts } from '../relay.js';
+
+// tick() reschedules itself; fake timers keep those schedules inert so
+// manually driven ticks don't spawn real 500ms follow-ups.
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 /**
  * The ConnectionManager auto-reconnects the *connection* after a socket drop,
@@ -63,6 +69,9 @@ function makeRelay(newChannel: ReturnType<typeof vi.fn>) {
         exchange: 'test.events',
         logger: logger as unknown as OutboxRelayOpts['logger'],
     });
+    // Mark "started" — ensureChannel refuses to cache a channel acquired
+    // after stop(), and tick() suppresses post-stop failure logs.
+    (relay as unknown as { running: boolean }).running = true;
     return { relay, connectionManager, logger };
 }
 
@@ -119,6 +128,36 @@ describe('OutboxRelay channel recovery', () => {
         expect(ch2.publish).toHaveBeenCalledTimes(1);
     });
 
+    it("does not cache a channel whose 'close' fired during setup", async () => {
+        const ch1 = makeChannel();
+        // 'close' arrives before ensureChannel's assignment resumes — the
+        // close listener's identity guard can't catch it.
+        ch1.assertExchange.mockImplementationOnce(async () => {
+            ch1.emit('close');
+            return {};
+        });
+        const ch2 = makeChannel();
+        const newChannel = vi.fn().mockResolvedValueOnce(ch1).mockResolvedValueOnce(ch2);
+        const { relay } = makeRelay(newChannel);
+
+        await expect(drain(relay)).rejects.toThrow(/closed during setup/);
+        expect(ch1.close).toHaveBeenCalled();
+
+        await drain(relay);
+        expect(ch2.publish).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not cache a channel acquired while stop() raced the setup', async () => {
+        const ch1 = makeChannel();
+        const newChannel = vi.fn().mockResolvedValue(ch1);
+        const { relay } = makeRelay(newChannel);
+        (relay as unknown as { running: boolean }).running = false; // stop() won the race
+
+        await expect(drain(relay)).rejects.toThrow(/stopped during channel setup/);
+        expect(ch1.close).toHaveBeenCalled();
+        expect((relay as unknown as { channel: unknown }).channel).toBeNull();
+    });
+
     it("swallows channel 'error' events (no unhandled EventEmitter crash)", async () => {
         const ch1 = makeChannel();
         const newChannel = vi.fn().mockResolvedValue(ch1);
@@ -135,6 +174,7 @@ describe('OutboxRelay channel recovery', () => {
 
 describe('OutboxRelay failure-log throttling', () => {
     it('logs the first consecutive failure, then goes quiet until the heartbeat', async () => {
+        vi.useFakeTimers();
         const newChannel = vi.fn().mockRejectedValue(new Error('broker down'));
         const { relay, logger } = makeRelay(newChannel);
 
@@ -149,7 +189,26 @@ describe('OutboxRelay failure-log throttling', () => {
         );
     });
 
+    it('logs immediately when the failure mode changes mid-streak', async () => {
+        vi.useFakeTimers();
+        const newChannel = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('broker down'))
+            .mockRejectedValueOnce(new Error('broker down'))
+            .mockRejectedValueOnce(new Error('pool exhausted'));
+        const { relay, logger } = makeRelay(newChannel);
+
+        await tick(relay); // 'broker down' → logged (new error)
+        await tick(relay); // same error → throttled
+        await tick(relay); // 'pool exhausted' → logged (changed error)
+
+        expect(logger.error).toHaveBeenCalledTimes(2);
+        const messages = logger.error.mock.calls.map((c) => (c[1] as Error).message);
+        expect(messages).toEqual(['broker down', 'pool exhausted']);
+    });
+
     it('resets the failure counter after a successful poll', async () => {
+        vi.useFakeTimers();
         const ch1 = makeChannel();
         const newChannel = vi
             .fn()

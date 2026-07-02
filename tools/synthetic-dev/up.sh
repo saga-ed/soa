@@ -1967,7 +1967,22 @@ open_login_browser(){
   local email=$1
   [[ -f "$BROWSER_LOGIN" ]] || { printf "\033[33m⚠\033[0m %s missing — skipping browser auto-login (cookie jar is ready)\n" "$BROWSER_LOGIN"; return 0; }
   command -v node >/dev/null 2>&1 || { printf "\033[33m⚠\033[0m node not found — skipping browser auto-login (cookie jar is ready)\n"; return 0; }
-  [[ -d "$SAGA_DASH/apps/web/dash/node_modules/playwright" ]] || { printf "\033[33m⚠\033[0m playwright not installed in saga-dash — skipping browser auto-login. Run: (cd %s/apps/web/dash && pnpm install && pnpm exec playwright install chromium)\n" "$SAGA_DASH"; return 0; }
+  local dashdir="$SAGA_DASH/apps/web/dash"
+  [[ -d "$dashdir/node_modules/playwright" ]] || { printf "\033[33m⚠\033[0m playwright not installed in saga-dash — skipping browser auto-login. Run: (cd %s && pnpm install && pnpm exec playwright install chromium)\n" "$dashdir"; return 0; }
+  # Playwright downloads its browser binaries separately from the npm package,
+  # into ~/.cache/ms-playwright/chromium-<rev> where <rev> is pinned to the
+  # installed playwright version. A version bump (or a fresh cache) leaves the
+  # package present but that revision's binary missing — the exact "Executable
+  # doesn't exist at …/chromium-<rev>/…" launch failure. Detect it via
+  # Playwright's own executablePath() (revision-agnostic) and install on demand.
+  if ! ( cd "$dashdir" && node -e 'try{const{chromium}=require("playwright");process.exit(require("fs").existsSync(chromium.executablePath())?0:1)}catch{process.exit(1)}' ) 2>/dev/null; then
+    say "Chromium browser binary missing — installing (pnpm exec playwright install chromium)…"
+    if ! ( cd "$dashdir" && pnpm exec playwright install chromium ) >"$STATE/playwright-install.log" 2>&1; then
+      printf "\033[33m⚠\033[0m Chromium install failed — skipping browser auto-login (cookie jar is ready). Full log: %s\n" "$STATE/playwright-install.log"
+      return 0
+    fi
+    ok "Chromium browser installed"
+  fi
   if [[ -f "$STATE/browser-login.pid" ]]; then
     kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null || true; rm -f "$STATE/browser-login.pid"; sleep 1
   fi

@@ -100,6 +100,20 @@ export interface Runtime {
   /** `<moniker>.<VMS_BASE>` — required when `tunnel` is true. */
   tunnelDomain?: string;
   /**
+   * Stack instance slot (M7). > 0 ⇒ `up` brings the mesh up under the slot's
+   * `soa-s<N>` project on offset ports and WRITES the slot's stack-lane dash
+   * config. Default 0 (or absent) ⇒ byte-identical to the pre-M7 build.
+   */
+  slot?: number;
+  /**
+   * COMPOSE_PROJECT_NAME for the mesh at slot > 0 (`soa-s<N>`); OMITTED at slot 0.
+   * Threaded into `meshUp`/`meshDown` so the slot's mesh is namespaced and torn
+   * down independently of the default project.
+   */
+  meshProject?: string;
+  /** Offset added to every published mesh port at slot > 0 (`slot * 1000`); 0 at slot 0. */
+  meshOffset?: number;
+  /**
    * Delegate a wrapped bash `ScriptPlan` to up.sh (the M1 Runner + script path),
    * returning its exit code. M4 wires `reset`/`login` through this because their
    * native ports are M6+. The command layer points it at `BaseCommand.runScript`
@@ -343,6 +357,9 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         portProbe,
         units: neededMesh(services, manifest),
         manifest,
+        // M7: slot > 0 namespaces + offsets the mesh; slot 0 leaves both undefined/0.
+        project: runtime.meshProject,
+        meshOffset: runtime.meshOffset,
       });
       if (!mesh.ok) return { ok: false, mesh, launched: [], skipped: [] };
 
@@ -374,7 +391,15 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       let dash: DashSyncResult | undefined;
       if (launchable.includes('saga-dash')) {
         dash = syncDashLocalDefaults(
-          { sagaDashRoot: runtime.sagaDashRoot, tunnel: runtime.tunnel, tunnelDomain: runtime.tunnelDomain },
+          {
+            sagaDashRoot: runtime.sagaDashRoot,
+            tunnel: runtime.tunnel,
+            tunnelDomain: runtime.tunnelDomain,
+            // M7: slot > 0 stack lane WRITES config.local.json with the offset
+            // localhost ports (launchContext.ports are already offset for the slot).
+            slot: runtime.slot,
+            stackPorts: launchContext.ports,
+          },
           dashFs,
         );
       }

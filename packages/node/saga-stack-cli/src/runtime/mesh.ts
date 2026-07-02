@@ -59,6 +59,18 @@ export interface MeshContext {
   soaRoot: string;
   /** The Runner the `make up` invocation goes through (shared M1 process seam). */
   runner: Runner;
+  /**
+   * COMPOSE_PROJECT_NAME for this slot (M7). `soa-s<N>` at slot > 0; OMITTED at
+   * slot 0 so the make argv/env stay byte-identical (the Makefile defaults to
+   * `soa` via `?=`). Passed BOTH as a make arg (visible/testable) and via child
+   * env (the Makefile's `?=` env-override path).
+   */
+  project?: string;
+  /**
+   * Offset added to every published mesh port (M7). `slot * 1000` at slot > 0; 0
+   * (the default) at slot 0 ⇒ base ports, byte-identical to no offset.
+   */
+  meshOffset?: number;
   /** The readiness-probe seam. Default `makeRealMeshExec()`. */
   exec?: MeshExec;
   /**
@@ -104,21 +116,31 @@ export function meshContainer(unit: MeshDef): string {
 /**
  * Build the `make` argv that brings the mesh up. Ports come from the manifest
  * mesh defs (postgres/redis/rabbitmq + mgmt/connect-mongo), so this can't drift.
+ *
+ * M7: `opts.offset` shifts every published mesh port by `slot * 1000`, and
+ * `opts.project` prepends `COMPOSE_PROJECT_NAME=<project>` so the mesh comes up
+ * under the slot's `soa-s<N>` namespace. At slot 0 (offset 0, no project) the
+ * argv is byte-identical to the pre-M7 form.
  */
-export function meshMakeArgs(m: Manifest = defaultManifest): string[] {
+export function meshMakeArgs(
+  m: Manifest = defaultManifest,
+  opts: { project?: string; offset?: number } = {},
+): string[] {
+  const offset = opts.offset ?? 0;
   const pg = getMesh('postgres', m);
   const redis = getMesh('redis', m);
   const rabbit = getMesh('rabbitmq', m);
   const mongo = getMesh('connect-mongo', m);
   return [
     'up',
+    ...(opts.project ? [`COMPOSE_PROJECT_NAME=${opts.project}`] : []),
     'PROJECT=saga-mesh',
     'PROFILE=empty',
-    `POSTGRES_PORT=${pg.port}`,
-    `REDIS_PORT=${redis.port}`,
-    `RABBITMQ_PORT=${rabbit.port}`,
-    `RABBITMQ_MGMT_PORT=${rabbit.mgmtPort ?? 15672}`,
-    `CONNECT_MONGO_PORT=${mongo.port}`,
+    `POSTGRES_PORT=${pg.port + offset}`,
+    `REDIS_PORT=${redis.port + offset}`,
+    `RABBITMQ_PORT=${rabbit.port + offset}`,
+    `RABBITMQ_MGMT_PORT=${(rabbit.mgmtPort ?? 15672) + offset}`,
+    `CONNECT_MONGO_PORT=${mongo.port + offset}`,
   ];
 }
 
@@ -128,6 +150,12 @@ export interface MeshDownContext {
   soaRoot: string;
   /** The Runner the `make down` invocation goes through (shared M1 process seam). */
   runner: Runner;
+  /**
+   * COMPOSE_PROJECT_NAME for this slot (M7). `soa-s<N>` at slot > 0; OMITTED at
+   * slot 0 (defaults to `soa`). CRITICAL: without it `make down` tears down the
+   * DEFAULT project — i.e. slot 0's mesh — instead of the slot's own.
+   */
+  project?: string;
 }
 
 /** The outcome of `meshDown`. */
@@ -144,8 +172,12 @@ export interface MeshDownResult {
  * the PORT vars nor PROFILE (infra's `down:` target is just `docker compose down`,
  * keyed only by PROJECT), so we pass only PROJECT.
  */
-export function meshDownArgs(): string[] {
-  return ['down', 'PROJECT=saga-mesh'];
+export function meshDownArgs(opts: { project?: string } = {}): string[] {
+  return [
+    'down',
+    ...(opts.project ? [`COMPOSE_PROJECT_NAME=${opts.project}`] : []),
+    'PROJECT=saga-mesh',
+  ];
 }
 
 /**
@@ -158,8 +190,10 @@ export async function meshDown(ctx: MeshDownContext): Promise<MeshDownResult> {
   const { code } = await ctx.runner.run({
     cwd: join(ctx.soaRoot, 'infra'),
     command: 'make',
-    args: meshDownArgs(),
-    env: {},
+    args: meshDownArgs({ project: ctx.project }),
+    // COMPOSE_PROJECT_NAME also via env (the Makefile's `?=` override path); OMITTED
+    // at slot 0 so the env stays byte-identical to the pre-M7 `{}`.
+    env: ctx.project ? { COMPOSE_PROJECT_NAME: ctx.project } : {},
     stdio: 'inherit',
   });
   return { ok: code === 0, code };
@@ -175,21 +209,29 @@ export async function meshUp(ctx: MeshContext): Promise<MeshResult> {
   const exec = ctx.exec ?? makeRealMeshExec();
   const probe = ctx.portProbe ?? makeRealPortProbe();
   const gatedIds = ctx.units ?? (Object.keys(m.mesh) as MeshId[]);
+  const offset = ctx.meshOffset ?? 0;
 
-  // 1. check_ports preflight (unless the caller already did it).
+  // 1. check_ports preflight (unless the caller already did it) — probe the SLOT's
+  // offset ports, and treat the slot's own `soa-s<N>-*` containers as owned (via
+  // the env-aware `meshOwnedContainers`) so an idempotent re-up isn't a conflict.
   if (!ctx.skipPreflight) {
-    const conflicts = await checkPorts(meshPortSpecs(m), probe, meshOwnedContainers(m));
+    const conflicts = await checkPorts(meshPortSpecs(m, offset), probe, meshOwnedContainers(m));
     if (conflicts.length > 0) {
       return { ok: false, conflicts, makeOk: false, units: [] };
     }
   }
 
-  // 2. make up — the mesh always starts as a whole; ports are manifest-derived.
+  // 2. make up — the mesh always starts as a whole; ports are manifest-derived
+  // (+ the slot offset). COMPOSE_PROJECT_NAME goes both as a make arg and via env
+  // (the Makefile's `?=` env-override path). At slot 0 both are omitted ⇒ identical.
   const { code } = await ctx.runner.run({
     cwd: join(ctx.soaRoot, 'infra'),
     command: 'make',
-    args: meshMakeArgs(m),
-    env: { EXTRA_POSTGRES_SEED_DIR: '../../projects/saga-mesh/seed' },
+    args: meshMakeArgs(m, { project: ctx.project, offset }),
+    env: {
+      EXTRA_POSTGRES_SEED_DIR: '../../projects/saga-mesh/seed',
+      ...(ctx.project ? { COMPOSE_PROJECT_NAME: ctx.project } : {}),
+    },
     stdio: 'inherit',
   });
   if (code !== 0) {

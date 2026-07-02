@@ -46,6 +46,38 @@ describe('meshPortSpecs / meshOwnedContainers', () => {
     expect(owned.has('soa-postgres-1')).toBe(true);
     expect(owned.has('soa-connect-mongo-1')).toBe(true);
   });
+
+  it('M7 slot > 0: offsets every mesh host port', () => {
+    expect(meshPortSpecs(manifest, 1000)).toEqual([
+      { port: 6432, name: 'postgres' },
+      { port: 7379, name: 'redis' },
+      { port: 6672, name: 'rabbitmq' },
+      { port: 16672, name: 'rabbitmq-mgmt' },
+      { port: 28037, name: 'connect-mongo' },
+    ]);
+    // offset 0 is byte-identical to the default.
+    expect(meshPortSpecs(manifest, 0)).toEqual(meshPortSpecs(manifest));
+  });
+
+  it('M7 slot > 0: owned containers follow the SAGA_MESH_*_CONTAINER env (soa-s<N>)', () => {
+    const saved = {
+      pg: process.env.SAGA_MESH_POSTGRES_CONTAINER,
+      mongo: process.env.SAGA_MESH_CONNECT_MONGO_CONTAINER,
+    };
+    process.env.SAGA_MESH_POSTGRES_CONTAINER = 'soa-s1-postgres-1';
+    process.env.SAGA_MESH_CONNECT_MONGO_CONTAINER = 'soa-s1-connect-mongo-1';
+    try {
+      const owned = meshOwnedContainers(manifest);
+      expect(owned.has('soa-s1-postgres-1')).toBe(true);
+      expect(owned.has('soa-s1-connect-mongo-1')).toBe(true);
+      expect(owned.has('soa-postgres-1')).toBe(false); // base name no longer owned
+    } finally {
+      if (saved.pg === undefined) delete process.env.SAGA_MESH_POSTGRES_CONTAINER;
+      else process.env.SAGA_MESH_POSTGRES_CONTAINER = saved.pg;
+      if (saved.mongo === undefined) delete process.env.SAGA_MESH_CONNECT_MONGO_CONTAINER;
+      else process.env.SAGA_MESH_CONNECT_MONGO_CONTAINER = saved.mongo;
+    }
+  });
 });
 
 describe('checkPorts', () => {

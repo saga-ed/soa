@@ -212,6 +212,131 @@ describe('stack up --only — native partial-stack', () => {
   });
 });
 
+describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
+  // applyInstanceEnv mutates process.env (SAGA_MESH_*_CONTAINER + SNAPSHOTS_DIR);
+  // snapshot + restore the affected keys so a slot run can't leak into siblings.
+  const SLOT_ENV_KEYS = [
+    'SAGA_MESH_POSTGRES_CONTAINER',
+    'SAGA_MESH_REDIS_CONTAINER',
+    'SAGA_MESH_RABBITMQ_CONTAINER',
+    'SAGA_MESH_MONGO_CONTAINER',
+    'SAGA_MESH_CONNECT_MONGO_CONTAINER',
+    'SAGA_MESH_SNAPSHOTS_DIR',
+  ];
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    savedEnv = {};
+    for (const k of SLOT_ENV_KEYS) savedEnv[k] = process.env[k];
+  });
+  afterEach(() => {
+    for (const k of SLOT_ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it('excludes the literal-port backends + frontends (backend sub-stack), and namespaces the mesh at soa-s1', async () => {
+    // request a frontend (saga-dash) + the literal-port playback trio at slot 1:
+    // the closure pulls the backend deps, but every excluded service is dropped —
+    // slot > 0 is a BACKEND sub-stack.
+    await StackUp.run(['--only', 'saga-dash', '--with', 'playback', '--slot', '1', ...WS], config);
+
+    const ids = launches.map((s) => s.id);
+    // the slot-safe BACKEND deps launched …
+    expect(ids).toContain('iam-api');
+    expect(ids).toContain('sessions-api');
+    expect(ids).toContain('content-api');
+    // … but every excluded service is dropped from the slot bring-up:
+    // frontends (no listen-port seam) …
+    expect(ids).not.toContain('saga-dash');
+    expect(ids).not.toContain('connect-web');
+    expect(ids).not.toContain('coach-web');
+    // … and the literal-port backends (bypass the offset).
+    expect(ids).not.toContain('ads-adm-api');
+    expect(ids).not.toContain('connect-api');
+    expect(ids).not.toContain('transcripts-api');
+    expect(ids).not.toContain('insights-api');
+    expect(ids).not.toContain('chat-api');
+
+    // mesh came up under the slot project on offset ports.
+    const makeUp = runs.find((r) => r.command === 'make');
+    expect(makeUp?.args).toContain('COMPOSE_PROJECT_NAME=soa-s1');
+    expect(makeUp?.args).toContain('POSTGRES_PORT=6432');
+    expect(makeUp?.env).toMatchObject({ COMPOSE_PROJECT_NAME: 'soa-s1' });
+    // readiness gated the slot's containers (env seam applied).
+    expect(meshGated.every((c) => c.startsWith('soa-s1-'))).toBe(true);
+
+    // env seam set for the snapshot store + container resolvers.
+    expect(process.env.SAGA_MESH_POSTGRES_CONTAINER).toBe('soa-s1-postgres-1');
+    expect(process.env.SAGA_MESH_SNAPSHOTS_DIR?.endsWith('/.saga-mesh/snapshots-s1')).toBe(true);
+  });
+
+  it('slot > 0 excludes saga-dash entirely — the dash prelaunch hook never runs (backend sub-stack)', async () => {
+    // saga-dash is a frontend with no listen-port seam, so it is EXCLUDED at slot > 0
+    // (it would bind slot 0's :8900). Its backend deps still come up, but the dash
+    // prelaunch hook (tied to saga-dash's own launch) never fires.
+    await StackUp.run(['--only', 'saga-dash', '--slot', '1', ...WS], config);
+    expect(launches.map((s) => s.id)).not.toContain('saga-dash');
+    expect(launches.map((s) => s.id)).toContain('iam-api'); // backend dep still up
+    expect(dashCalls).toEqual([]); // no write, no remove — hook never ran
+  });
+
+  it('BARE full-stack --slot 1 routes through the NATIVE path (never the up.sh wrapper)', async () => {
+    // BLOCKER-1: a bare `up --slot 1` (no --only) must NOT fall through to up.sh
+    // (hardcoded project soa / base ports / slot-0 STATE → clobbers slot 0). It is
+    // expanded to the full non-optional set and brought up natively as a soa-s1
+    // BACKEND sub-stack.
+    await StackUp.run(['--slot', '1', ...WS], config);
+
+    // never resolved/ran the up.sh wrapper.
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+
+    // launched natively — the backend set is present, the excluded services are not.
+    const ids = launches.map((s) => s.id);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids).toContain('iam-api');
+    expect(ids).toContain('sessions-api');
+    expect(ids).not.toContain('saga-dash');
+    expect(ids).not.toContain('connect-api');
+    expect(ids).not.toContain('connect-web');
+    expect(ids).not.toContain('coach-web');
+    expect(ids).not.toContain('ads-adm-api');
+
+    // mesh came up under the slot project on offset ports (soa-s1, +1000).
+    const makeUp = runs.find((r) => r.command === 'make');
+    expect(makeUp?.args).toContain('COMPOSE_PROJECT_NAME=soa-s1');
+    expect(makeUp?.args).toContain('POSTGRES_PORT=6432');
+    expect(makeUp?.env).toMatchObject({ COMPOSE_PROJECT_NAME: 'soa-s1' });
+  });
+
+  it('BARE full-stack at slot 0 keeps the up.sh wrapper (byte-identical)', async () => {
+    // The slot-0 wrapper path is covered in wrappers.int.test.ts (it mocks getRunner
+    // only); here we just prove a bare slot-0 run does NOT take the native path — no
+    // native service launches happen (it delegates entirely to up.sh via the Runner).
+    await StackUp.run([...WS], config);
+    expect(launches).toEqual([]);
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(true);
+  });
+
+  it('--slot 10 is rejected at the flag layer (rabbitmq-mgmt collision ceiling)', async () => {
+    await expect(StackUp.run(['--slot', '10', ...WS], config)).rejects.toThrow(
+      /9|less than or equal|cannot be greater/i,
+    );
+    expect(launches).toEqual([]);
+    expect(runs).toEqual([]);
+  });
+
+  it('slot 0 launches ads-adm-api and REMOVES the dash config (byte-identical)', async () => {
+    await StackUp.run(['--only', 'saga-dash', ...WS], config);
+    expect(launches.map((s) => s.id)).toContain('ads-adm-api');
+    expect(meshGated.every((c) => !c.startsWith('soa-s1-'))).toBe(true);
+    // dash existsFile()=false in the fake ⇒ non-tunnel slot-0 path is a noop-absent
+    // (no write). The key assertion: NO stack-slot write happened at slot 0.
+    expect(dashCalls.some((c) => c.startsWith('write:'))).toBe(false);
+  });
+});
+
 describe('stack up --only --dry-run — planner prints the native launch + seed plan', () => {
   it('does NOT touch any seam and emits the seed plan', async () => {
     const logged: string[] = [];

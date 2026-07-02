@@ -7,12 +7,15 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  DASH_LOCAL_SERVICES,
   DASH_TUNNEL_LABELS,
   dashLocalConfigPath,
+  stackSlotConfigContents,
   syncDashLocalDefaults,
   tunnelConfigContents,
 } from '../dash-defaults.js';
 import type { DashFs } from '../dash-defaults.js';
+import type { ServiceId } from '../../core/manifest/index.js';
 
 const DASH = '/repo/saga-dash';
 const CFG = dashLocalConfigPath(DASH);
@@ -93,5 +96,55 @@ describe('syncDashLocalDefaults', () => {
     // /no/such/dash has no static dir → noop-no-static via the real fs.
     const res = syncDashLocalDefaults({ sagaDashRoot: '/no/such/dash-xyz' });
     expect(res.action).toBe('noop-no-static');
+  });
+});
+
+describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
+  /** slot-N port map for the dash-backing services. */
+  const slotPorts = (offset: number): Partial<Record<ServiceId, number>> => ({
+    'iam-api': 3010 + offset,
+    'programs-api': 3006 + offset,
+    'scheduling-api': 3008 + offset,
+    'sessions-api': 3007 + offset,
+    'sis-api': 3100 + offset,
+    'content-api': 3009 + offset,
+    'connect-api': 6106 + offset,
+  });
+
+  it('slot 0 still REMOVES config.local.json (byte-identical) even with stackPorts present', () => {
+    const { fs, removed, written } = fakeFs({ hasConfig: true });
+    const res = syncDashLocalDefaults(
+      { sagaDashRoot: DASH, slot: 0, stackPorts: slotPorts(0) },
+      fs,
+    );
+    expect(res).toEqual({ action: 'removed', path: CFG });
+    expect(removed).toEqual([CFG]);
+    expect(written).toEqual([]);
+  });
+
+  it('slot > 0 (stack lane) WRITES config.local.json with offset localhost ports', () => {
+    const { fs, written, removed } = fakeFs({ hasConfig: true });
+    const res = syncDashLocalDefaults(
+      { sagaDashRoot: DASH, slot: 1, stackPorts: slotPorts(1000) },
+      fs,
+    );
+    expect(res).toEqual({ action: 'wrote-stack-slot', path: CFG });
+    expect(removed).toEqual([]); // it writes, does not remove
+    expect(written).toHaveLength(1);
+    const parsed = JSON.parse(written[0].contents);
+    // iam offset: 3010 + 1000; program-hub + enrollment-api both back programs-api (4006).
+    expect(parsed.localDefaults.iam).toEqual({ type: 'url', url: 'http://localhost:4010' });
+    expect(parsed.localDefaults['program-hub']).toEqual({ type: 'url', url: 'http://localhost:4006' });
+    expect(parsed.localDefaults['enrollment-api']).toEqual({ type: 'url', url: 'http://localhost:4006' });
+    expect(parsed.localDefaults.connect).toEqual({ type: 'url', url: 'http://localhost:7106' });
+    // same key set as the tunnel writer.
+    expect(Object.keys(parsed.localDefaults).sort()).toEqual(Object.keys(DASH_LOCAL_SERVICES).sort());
+    expect(written[0].contents.endsWith('\n')).toBe(true);
+  });
+
+  it('stackSlotConfigContents omits a dash key whose backing service has no resolved port', () => {
+    const parsed = JSON.parse(stackSlotConfigContents({ 'iam-api': 4010 }));
+    expect(parsed.localDefaults.iam).toEqual({ type: 'url', url: 'http://localhost:4010' });
+    expect(parsed.localDefaults.connect).toBeUndefined(); // connect-api port absent → dropped
   });
 });

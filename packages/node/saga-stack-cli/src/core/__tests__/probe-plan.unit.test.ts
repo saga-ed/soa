@@ -64,3 +64,28 @@ describe('healthProbes — manifest-derived probe list', () => {
     expect(() => healthProbes(manifest, ['nope' as ServiceId])).toThrow(/unknown service id/);
   });
 });
+
+describe('healthProbes — M7 slot offset (portOverrides)', () => {
+  /** slot-N port map: every service's base port + N*1000. */
+  const offsetPorts = (offset: number): Partial<Record<ServiceId, number>> => {
+    const out: Partial<Record<ServiceId, number>> = {};
+    for (const id of Object.keys(manifest.services) as ServiceId[]) {
+      out[id] = manifest.services[id].port + offset;
+    }
+    return out;
+  };
+
+  it('slot 0 (base-port overrides) is byte-identical to no overrides', () => {
+    expect(healthProbes(manifest, undefined, offsetPorts(0))).toEqual(healthProbes(manifest));
+  });
+
+  it('slot > 0: each URL uses the RESOLVED offset port, not base', () => {
+    const by = Object.fromEntries(
+      healthProbes(manifest, undefined, offsetPorts(1000)).map((p) => [p.id, p.url]),
+    );
+    expect(by['iam-api']).toBe('http://localhost:4010/health'); // 3010 + 1000
+    expect(by['content-api']).toBe('http://localhost:4009/health'); // 3009 + 1000
+    expect(by['connect-api']).toBe('http://localhost:7106/connectv3/v1/health'); // 6106 + 1000
+    expect(by['saga-dash']).toBe('http://localhost:9900/'); // 8900 + 1000, root path
+  });
+});

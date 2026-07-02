@@ -20,6 +20,17 @@
  * own default) — deterministic per host, no filesystem touch — which the fixed
  * `{ slot }` signature requires. `src/core/**` never imports `src/runtime/**`.
  *
+ * SLOT > 0 IS A BACKEND SUB-STACK (Phase-2 MVP). Slot > 0 brings up the backend
+ * mesh + services only — `iam/programs/scheduling/sessions/content/sis/rtsm/
+ * coach-api` + the mesh. The literal-port backends and ALL browser frontends are
+ * EXCLUDED (`SLOT_EXCLUDED_SERVICES`): `connect-api` carries literal cross-slot
+ * ports (`:3007` sessions, `ws://…:7880` livekit) that bypass the offset and would
+ * split-brain onto slot 0's stateful services; the three frontends (`saga-dash`/
+ * `connect-web`/`coach-web`, all `isFrontend`) have NO listen-port seam (their
+ * `portEnvVar` metadata is DEAD — unconsumed anywhere), so at slot > 0 they'd bind
+ * their built-in default port (= slot 0's) and `verify --slot N` could never be
+ * green. Frontend multi-slot lands when the frontends grow a port seam.
+ *
  * The port-override map is derived GENERICALLY over `manifest.services` (never a
  * hand-maintained table), so any future service slots for free. After computing,
  * the factory ASSERTS full-set port disjointness (every service port + the five
@@ -33,6 +44,50 @@ import type { Manifest, ServiceId } from './manifest/index.js';
 
 /** The stride between adjacent slots' port bands. `offset = slot * STRIDE`. */
 export const SLOT_PORT_STRIDE = 1000;
+
+/**
+ * Services EXCLUDED from a slot > 0 bring-up (plan §6 collision matrix). Two
+ * classes, both of which would CLOBBER or SPLIT-BRAIN onto slot 0:
+ *
+ *   LITERAL-PORT backends — carry LITERAL ports in their launch env that bypass
+ *   the generic `${…_PORT}` / mesh-offset token machinery, so at an offset slot
+ *   they would still dial slot 0's ports (postgres :5432, sessions :3007, iam
+ *   :3010, dash CORS :8900, EXPRESS_SERVER_PORT 6301-6303, livekit ws :7880) and
+ *   silently corrupt / collide with the default stack:
+ *     - `ads-adm-api`    — literal `@localhost:5432`, `:3007`, `:3010`, CORS `:8900`.
+ *     - `connect-api`    — literal `SESSIONS_API_BASE_URL :3007` + livekit `ws :7880`;
+ *                          would read/write slot 0's stateful sessions-api.
+ *     - the playback trio — literal `POSTGRES_PORT '5432'` + `EXPRESS_SERVER_PORT`.
+ *
+ *   FRONTENDS (`isFrontend`) — `saga-dash`/`connect-web`/`coach-web` have NO
+ *   listen-port seam (their `portEnvVar` metadata is DEAD — unconsumed anywhere),
+ *   so at slot > 0 they'd bind their built-in default port (= slot 0's) and
+ *   `verify --slot N` could never be green. Excluded until they grow a port seam.
+ *
+ * Consequence: slot > 0 is a BACKEND sub-stack (see the file header). They are
+ * excluded EXPLICITLY (not via transitive drop, which would orphan a dependent).
+ * At slot 0 nothing is excluded (the set is empty), so slot 0 is unaffected.
+ */
+export const SLOT_EXCLUDED_SERVICES: readonly ServiceId[] = [
+  // literal-port backends
+  'ads-adm-api',
+  'connect-api',
+  'transcripts-api',
+  'insights-api',
+  'chat-api',
+  // frontends — no listen-port seam
+  'saga-dash',
+  'connect-web',
+  'coach-web',
+];
+
+/**
+ * The services excluded from a bring-up at `slot`: `[]` at slot 0 (byte-identical
+ * regression guard), `SLOT_EXCLUDED_SERVICES` for N ≥ 1. Pure.
+ */
+export function slotExcludedServices(slot: number): ServiceId[] {
+  return slot === 0 ? [] : [...SLOT_EXCLUDED_SERVICES];
+}
 
 /**
  * The complete per-slot namespacing profile. Slot 0 is byte-identical to
@@ -69,6 +124,11 @@ export interface InstanceProfile {
   portOverrides: Partial<Record<ServiceId, number>>;
   /** Offset fed to the mesh ports (postgres/rabbitmq/mongo) — equals `offset`. */
   meshOffset: number;
+  /**
+   * Services excluded from THIS slot's bring-up closure (literal-port services
+   * that bypass the offset — see `SLOT_EXCLUDED_SERVICES`). Empty at slot 0.
+   */
+  excludedServices: ServiceId[];
 }
 
 /**
@@ -167,5 +227,6 @@ export function deriveInstance(
     seedProfile: 'empty',
     portOverrides,
     meshOffset: offset,
+    excludedServices: slotExcludedServices(slot),
   };
 }

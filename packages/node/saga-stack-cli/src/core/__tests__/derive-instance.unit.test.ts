@@ -11,8 +11,10 @@
 import { homedir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
+  SLOT_EXCLUDED_SERVICES,
   SLOT_PORT_STRIDE,
   deriveInstance,
+  slotExcludedServices,
 } from '../derive-instance.js';
 import { getMesh, manifest } from '../manifest/index.js';
 import type { ServiceId } from '../manifest/index.js';
@@ -96,6 +98,57 @@ describe('no-collision property — union of ALL resolved ports is duplicate-fre
       );
     }
     expect(new Set(all).size).toBe(all.length);
+  });
+});
+
+describe('literal-port service exclusion (plan §6)', () => {
+  it('slot 0 excludes nothing (byte-identical bring-up)', () => {
+    expect(deriveInstance({ slot: 0 }).excludedServices).toEqual([]);
+    expect(slotExcludedServices(0)).toEqual([]);
+  });
+
+  it('slot > 0 excludes the literal-port backends + the browser frontends (backend sub-stack)', () => {
+    const excluded = deriveInstance({ slot: 1 }).excludedServices;
+    expect(excluded).toEqual([...SLOT_EXCLUDED_SERVICES]);
+    expect(new Set(excluded)).toEqual(
+      new Set([
+        // literal-port backends (bypass the offset)
+        'ads-adm-api',
+        'connect-api',
+        'transcripts-api',
+        'insights-api',
+        'chat-api',
+        // frontends — no listen-port seam
+        'saga-dash',
+        'connect-web',
+        'coach-web',
+      ]),
+    );
+    expect(slotExcludedServices(3)).toEqual([...SLOT_EXCLUDED_SERVICES]);
+  });
+});
+
+describe('two-slot (1 vs 2) — the full resolved port set is disjoint', () => {
+  it('no service port and no mesh port is shared between slot 1 and slot 2', () => {
+    const collect = (slot: number): number[] => {
+      const p = deriveInstance({ slot });
+      const offset = slot * SLOT_PORT_STRIDE;
+      const rabbit = getMesh('rabbitmq');
+      return [
+        ...(Object.keys(p.portOverrides) as ServiceId[]).map((id) => p.portOverrides[id] as number),
+        getMesh('postgres').port + offset,
+        getMesh('redis').port + offset,
+        rabbit.port + offset,
+        (rabbit.mgmtPort ?? 15672) + offset,
+        getMesh('connect-mongo').port + offset,
+      ];
+    };
+    const s1 = collect(1);
+    const s2 = collect(2);
+    // no intersection, and the union is duplicate-free.
+    const union = [...s1, ...s2];
+    expect(new Set(union).size).toBe(union.length);
+    expect(s1.some((p) => s2.includes(p))).toBe(false);
   });
 });
 

@@ -167,30 +167,78 @@ export class EventConsumer {
     private channel: Channel | null = null;
     private consumerTag: string | null = null;
     private readonly handlerMap: HandlerMap;
+    private stopped = true;
+    private reconnectTimer: NodeJS.Timeout | null = null;
+    private reconnectAttempts = 0;
 
     constructor(private readonly opts: EventConsumerOpts) {
         this.handlerMap = buildHandlerMap(opts.handlers);
     }
 
     async start(): Promise<void> {
-        this.channel = await this.opts.connectionManager.newChannel();
-        await this.channel.prefetch(this.opts.prefetch ?? 10);
+        this.stopped = false;
+        await this.setupChannel();
+        this.opts.logger.info(
+            `[EventConsumer:${this.opts.consumerName}] started (queue=${this.opts.queue})`,
+        );
+    }
+
+    /**
+     * Open a channel, declare the topology, and begin consuming. Runs once
+     * from start() and again from the reconnect path whenever the channel
+     * dies: the ConnectionManager auto-reconnects the *connection* after a
+     * socket drop, but channels are not resurrected with it — without the
+     * re-subscribe, a consumer that lost its channel would silently stop
+     * consuming while messages pile up in the queue.
+     */
+    private async setupChannel(): Promise<void> {
+        // Covers the case where the manager's own post-'close' reconnect
+        // exhausted its retries — nothing else would retry the connection.
+        // Older soa-rabbitmq versions predate ensureConnected(); the consumer
+        // then falls through to newChannel(), which fails descriptively on a
+        // dead connection and is retried by the backoff loop.
+        if (typeof this.opts.connectionManager.ensureConnected === 'function') {
+            await this.opts.connectionManager.ensureConnected();
+        }
+        const channel = await this.opts.connectionManager.newChannel();
+        // 'error' must have a listener (an unhandled EventEmitter 'error'
+        // crashes the process); the terminal signal is the 'close' that
+        // follows, which schedules the re-subscribe.
+        channel.on('error', (err: Error) => {
+            this.opts.logger.warn(
+                `[EventConsumer:${this.opts.consumerName}] channel error: ${err.message}`,
+            );
+        });
+        channel.on('close', () => {
+            if (this.channel === channel) {
+                this.channel = null;
+                this.consumerTag = null;
+                if (!this.stopped) {
+                    this.opts.logger.warn(
+                        `[EventConsumer:${this.opts.consumerName}] channel lost; scheduling re-subscribe`,
+                    );
+                    this.scheduleReconnect();
+                }
+            }
+        });
+
+        await channel.prefetch(this.opts.prefetch ?? 10);
 
         // Wire DLQ first if configured — must be declared before the main queue
         // so the main queue's x-dead-letter-exchange resolves.
         if (this.opts.dlq) {
-            await this.channel.assertExchange(this.opts.dlq.exchange, 'topic', {
+            await channel.assertExchange(this.opts.dlq.exchange, 'topic', {
                 durable: true,
             });
-            await this.channel.assertQueue(this.opts.dlq.queue, { durable: true });
-            await this.channel.bindQueue(
+            await channel.assertQueue(this.opts.dlq.queue, { durable: true });
+            await channel.bindQueue(
                 this.opts.dlq.queue,
                 this.opts.dlq.exchange,
                 '#',
             );
         }
 
-        await this.channel.assertQueue(this.opts.queue, {
+        await channel.assertQueue(this.opts.queue, {
             durable: true,
             ...(this.opts.dlq
                 ? { arguments: { 'x-dead-letter-exchange': this.opts.dlq.exchange } }
@@ -198,32 +246,68 @@ export class EventConsumer {
         });
 
         for (const binding of this.opts.bindings) {
-            await this.channel.assertExchange(binding.exchange, 'topic', {
+            await channel.assertExchange(binding.exchange, 'topic', {
                 durable: true,
             });
-            await this.channel.bindQueue(
+            await channel.bindQueue(
                 this.opts.queue,
                 binding.exchange,
                 binding.routingKey,
             );
         }
 
-        const consumeRes = await this.channel.consume(
+        const consumeRes = await channel.consume(
             this.opts.queue,
             (msg) => {
                 if (!msg) return;
-                void this.dispatch(msg);
+                // Bind dispatch to THIS channel: delivery tags are
+                // channel-scoped, so a message must never be acked/nacked on
+                // a replacement channel.
+                void this.dispatch(channel, msg);
             },
             { noAck: false },
         );
 
+        this.channel = channel;
         this.consumerTag = consumeRes.consumerTag;
-        this.opts.logger.info(
-            `[EventConsumer:${this.opts.consumerName}] started (queue=${this.opts.queue})`,
-        );
+    }
+
+    /**
+     * Exponential backoff (1s → 30s cap) around setupChannel(). Retries
+     * forever until it succeeds or stop() is called — the queue and its
+     * bindings are durable, so messages accumulate safely while the broker
+     * is unreachable.
+     */
+    private scheduleReconnect(): void {
+        if (this.stopped || this.reconnectTimer) return;
+        const delay = Math.min(30_000, 1_000 * 2 ** this.reconnectAttempts);
+        this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            if (this.stopped) return;
+            void this.setupChannel().then(
+                () => {
+                    this.reconnectAttempts = 0;
+                    this.opts.logger.info(
+                        `[EventConsumer:${this.opts.consumerName}] re-subscribed (queue=${this.opts.queue})`,
+                    );
+                },
+                (err: unknown) => {
+                    this.reconnectAttempts++;
+                    this.opts.logger.warn(
+                        `[EventConsumer:${this.opts.consumerName}] re-subscribe failed (attempt ${this.reconnectAttempts}): ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                    this.scheduleReconnect();
+                },
+            );
+        }, delay);
     }
 
     async stop(): Promise<void> {
+        this.stopped = true;
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
         if (this.channel && this.consumerTag) {
             try {
                 await this.channel.cancel(this.consumerTag);
@@ -260,10 +344,10 @@ export class EventConsumer {
         await this.processEnvelope(envelope);
     }
 
-    private async dispatch(msg: ConsumeMessage): Promise<void> {
+    private async dispatch(channel: Channel, msg: ConsumeMessage): Promise<void> {
         try {
             await this.handleMessage(msg.content);
-            this.channel?.ack(msg);
+            this.settle(() => channel.ack(msg));
         } catch (err) {
             // Poison errors never requeue — re-delivering an unparseable or
             // unrouteable message just spins the same failure forever and
@@ -277,7 +361,24 @@ export class EventConsumer {
                 `[EventConsumer:${this.opts.consumerName}] handler error → ${fate}`,
                 err instanceof Error ? err : undefined,
             );
-            this.channel?.nack(msg, false, requeue);
+            this.settle(() => channel.nack(msg, false, requeue));
+        }
+    }
+
+    /**
+     * Ack/nack can race a channel death (handler ran while the socket
+     * dropped). Settling on a dead channel throws IllegalOperationError; the
+     * broker will redeliver the unsettled message on the replacement channel
+     * and the consumed_events idempotency check absorbs the duplicate, so
+     * the right move is to log and move on rather than crash the dispatch.
+     */
+    private settle(op: () => void): void {
+        try {
+            op();
+        } catch (err) {
+            this.opts.logger.warn(
+                `[EventConsumer:${this.opts.consumerName}] ack/nack failed on dead channel (broker will redeliver): ${err instanceof Error ? err.message : String(err)}`,
+            );
         }
     }
 

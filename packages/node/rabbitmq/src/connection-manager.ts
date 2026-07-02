@@ -68,6 +68,14 @@ export class ConnectionManager {
 
   private currentState: ConnectionState = "DISCONNECTED";
 
+  /**
+   * Single-flight guard: concurrent connect()/ensureConnected() callers all
+   * await the same underlying attempt instead of racing parallel connection
+   * loops (each channel holder — outbox relay, event consumers — recovers
+   * independently, so concurrent calls are the norm after a drop).
+   */
+  private connectPromise: Promise<void> | null = null;
+
   // Circuit breaker prameters
   private failureCount = 0;
   private circuitOpen = false;
@@ -116,6 +124,31 @@ export class ConnectionManager {
   }
 
   async connect(): Promise<void> {
+    if (!this.connectPromise) {
+      this.connectPromise = this.doConnect().finally(() => {
+        this.connectPromise = null;
+      });
+    }
+    return this.connectPromise;
+  }
+
+  /**
+   * Reconnect if (and only if) the connection is not currently usable.
+   * Channel holders call this from their recovery paths before requesting a
+   * fresh channel — it covers the gap where an automatic reconnect after
+   * 'close' exhausted its retries and nothing else would ever try again.
+   * No-op when READY (or DEGRADED, i.e. connected but flow-blocked).
+   * Throws while the circuit breaker is open — callers are expected to
+   * retry on their own cadence (poll tick, backoff timer).
+   */
+  async ensureConnected(): Promise<void> {
+    if (this.currentState === "READY" || this.currentState === "DEGRADED") {
+      return;
+    }
+    return this.connect();
+  }
+
+  private async doConnect(): Promise<void> {
     if (this.isCircuitOpen()) {
       this.setState("CIRCUIT_OPEN");
       throw new Error("RabbitMQ circuit breaker is OPEN");

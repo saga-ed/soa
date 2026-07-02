@@ -18,8 +18,8 @@ importers:
         specifier: ^14.0.0
         version: 14.0.2
       zod:
-        specifier: 4.3.5
-        version: 4.3.5
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       prettier:
         specifier: ^3.5.3
@@ -332,8 +332,8 @@ importers:
         specifier: ^11.1.0
         version: 11.1.0
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -363,8 +363,8 @@ importers:
   apps/node/trpc-api/trpc-types:
     dependencies:
       zod:
-        specifier: ^3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@trpc/client':
         specifier: ^11.4.3
@@ -520,8 +520,8 @@ importers:
         specifier: ^0.11.2
         version: 0.11.3(class-transformer@0.5.1)(class-validator@0.14.3)
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -780,8 +780,8 @@ importers:
         specifier: ^2.0.0-beta.3
         version: 2.0.0-rc.2(class-validator@0.14.3)(graphql-scalars@1.25.0(graphql@16.12.0))(graphql@16.12.0)
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-logger':
         specifier: workspace:*
@@ -826,8 +826,8 @@ importers:
   packages/node/api-util:
     dependencies:
       zod:
-        specifier: ^4.2.1
-        version: 4.3.5
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-logger':
         specifier: workspace:*
@@ -893,9 +893,6 @@ importers:
       js-yaml:
         specifier: ^4.1.0
         version: 4.1.1
-      zod-to-json-schema:
-        specifier: ^3.23.5
-        version: 3.25.2(zod@3.25.67)
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -916,8 +913,8 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/node/db:
     dependencies:
@@ -940,8 +937,8 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-config':
         specifier: workspace:*
@@ -986,8 +983,8 @@ importers:
         specifier: ^8.13.0
         version: 8.20.0
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -1017,8 +1014,8 @@ importers:
         specifier: ^1.9.0
         version: 1.9.1
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -1162,8 +1159,8 @@ importers:
         specifier: ^0.11.2
         version: 0.11.3(class-transformer@0.5.1)(class-validator@0.14.3)
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/infra-compose':
         specifier: workspace:*
@@ -1244,8 +1241,8 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
       zod:
-        specifier: ^3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/node/logger:
     dependencies:
@@ -1268,8 +1265,8 @@ importers:
         specifier: ^0.11.2
         version: 0.11.3(class-transformer@0.5.1)(class-validator@0.14.3)
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@opentelemetry/context-async-hooks':
         specifier: ^1.28.0
@@ -1302,8 +1299,8 @@ importers:
         specifier: ^11.0.0
         version: 11.1.0
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -1412,8 +1409,8 @@ importers:
         specifier: ^0.2.2
         version: 0.2.2
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -1479,8 +1476,8 @@ importers:
         specifier: ^6.2.2
         version: 6.2.2(reflect-metadata@0.2.2)
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -1513,8 +1510,8 @@ importers:
         specifier: ^11.1.0
         version: 11.1.0
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -1556,8 +1553,8 @@ importers:
         specifier: ^11.1.0
         version: 11.1.0
       zod:
-        specifier: 3.25.67
-        version: 3.25.67
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
@@ -9915,16 +9912,8 @@ packages:
     resolution: {integrity: sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA==}
     engines: {node: '>= 14'}
 
-  zod-to-json-schema@3.25.2:
-    resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
-    peerDependencies:
-      zod: ^3.25.28 || ^4
-
-  zod@3.25.67:
-    resolution: {integrity: sha512-idA2YXwpCdqUSKRCACDE6ItZD9TZzy3OZMtpfLoh6oPR47lipysRrJfjzMqFxQ3uJuUPyUeWe1r9vLH33xO/Qw==}
-
-  zod@4.3.5:
-    resolution: {integrity: sha512-k7Nwx6vuWx1IJ9Bjuf4Zt1PEllcwe7cls3VNzm4CQ1/hgtFUK2bRNG3rvnpPUhFjmqJKAKtjV576KnUkHocg/g==}
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
 snapshots:
 
@@ -20954,10 +20943,4 @@ snapshots:
       compress-commons: 6.0.2
       readable-stream: 4.7.0
 
-  zod-to-json-schema@3.25.2(zod@3.25.67):
-    dependencies:
-      zod: 3.25.67
-
-  zod@3.25.67: {}
-
-  zod@4.3.5: {}
+  zod@4.4.3: {}

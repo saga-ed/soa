@@ -16,11 +16,13 @@
  *   node bin/dev.js stack down            # services down, mesh stays up
  *   node bin/dev.js stack down --mesh     # services down + mesh down
  *
- * SLOT > 0 (M7 Phase 2): the host-global `up.sh --down` service-stop is NEVER run
- * (its `pkill -f tsup` + slot-0 STATE would kill slot 0's watchers). Only the
- * slot-correct native mesh teardown runs, and only with `--mesh`. Stop a slot's
- * own services by killing its process group / Ctrl-C until native per-slot
- * service-stop lands in Phase 3. Slot 0 is unchanged.
+ * SLOT > 0 (M7 Phase 3): the host-global `up.sh --down` service-stop is NEVER run
+ * (its `pkill -f tsup` + slot-0 STATE would kill slot 0's watchers). Instead the
+ * slot's OWN dev servers are stopped NATIVELY by `stopServices(profile.stateDir)` —
+ * SIGTERM→grace→SIGKILL of exactly the pids the native `up --slot N` recorded under
+ * the slot's state dir (`/tmp/sds-synthetic-s<N>`), which physically cannot reach
+ * slot 0's pidfiles. With `--mesh` the slot-correct native mesh teardown runs too.
+ * Slot 0 is unchanged (up.sh --down wrapper).
  */
 
 import { Flags } from '@oclif/core';
@@ -29,7 +31,7 @@ import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
 import * as flagMap from '../../core/flag-map.js';
 import { meshDown, resolveRepoRoot } from '../../runtime/index.js';
-import type { MeshDownResult, ScriptContext } from '../../runtime/index.js';
+import type { MeshDownResult, ScriptContext, StopServiceResult } from '../../runtime/index.js';
 
 export default class StackDown extends BaseCommand {
   static description =
@@ -50,10 +52,11 @@ export default class StackDown extends BaseCommand {
   };
 
   /**
-   * M7 Phase 2: `stack down --mesh --slot N` tears down the RIGHT per-slot mesh
-   * project. At slot > 0 the DESTRUCTIVE host-global `up.sh --down` service-stop is
-   * NOT run at all (see BLOCKER-2 below) — only the slot-correct native mesh
-   * teardown runs, and native per-slot service-stop is Phase 3.
+   * M7 Phase 3: `stack down --slot N` stops the slot's OWN services natively
+   * (`stopServices` kill-by-pidfile against the slot's state dir) and, with
+   * `--mesh`, tears down the RIGHT per-slot mesh project. The DESTRUCTIVE
+   * host-global `up.sh --down` service-stop is NEVER run at slot > 0 (see BLOCKER-2
+   * below). Slot 0 is unchanged (up.sh wrapper).
    */
   protected slotAware(): boolean {
     return true;
@@ -70,20 +73,33 @@ export default class StackDown extends BaseCommand {
     // up.sh --down does `pkill -f tsup` (HOST-GLOBAL — kills every slot's watchers)
     // and kills the pids recorded under the hardcoded slot-0 STATE
     // (/tmp/sds-synthetic) — running it from a slot would kill slot 0's services.
-    // So at slot > 0 we run ONLY the slot-correct native mesh teardown (when --mesh)
-    // and NEVER the up.sh service-stop.
+    // So at slot > 0 we run the NATIVE slot-safe service-stop (Phase 3) instead: it
+    // enumerates only the pidfiles under THIS slot's state dir and NEVER a global
+    // pkill, so it cannot reach slot 0's watchers. With --mesh the slot-correct mesh
+    // teardown runs after.
     if (profile.slot > 0) {
-      this.warn(
-        `slot ${profile.slot}: NOT running the host-global 'up.sh --down' (its 'pkill -f tsup' + ` +
-          'slot-0 STATE=/tmp/sds-synthetic would kill slot 0\'s watchers). Native per-slot ' +
-          "service-stop (kill-by-pidfile against this slot's state dir) is Phase 3 — for now stop " +
-          "slot N's services by killing that slot's process group / Ctrl-C.",
-      );
+      // Phase 3: native, slot-safe service-stop — SIGTERM→grace→SIGKILL of exactly
+      // the pids native `up --slot N` recorded. An EXPLICIT `--state-dir` wins;
+      // otherwise the slot's `profile.stateDir` (`/tmp/sds-synthetic-s<N>`). This
+      // MUST mirror `up`'s resolution (`up.ts` ~:470) — `up --slot N --state-dir
+      // /custom` records pids under /custom, so a `down` that ignored `--state-dir`
+      // would enumerate the slot's default dir, find nothing, and leak every server.
+      // (Not a slot-safety breach — `down` always drives a slot>0 dir — just an
+      // under-kill that this closes.)
+      const stateDir = flags['state-dir'] ?? profile.stateDir;
+      const stopper = this.getServiceStopper();
+      const stopped = await stopper(stateDir);
+      this.reportStopped(profile, stateDir, stopped);
 
       if (!flags.mesh) return;
 
       // --mesh: tear down ONLY this slot's mesh project (never the default `soa`).
       const mesh = await this.tearMeshDown(flags, profile);
+      this.log(
+        mesh.ok
+          ? `mesh (${profile.project}): down`
+          : `mesh (${profile.project}): make down exited ${mesh.code}`,
+      );
       if (mesh.code !== 0) this.exit(mesh.code);
       return;
     }
@@ -126,5 +142,44 @@ export default class StackDown extends BaseCommand {
       runner: this.getRunner(),
       project: profile.slot === 0 ? undefined : profile.project,
     });
+  }
+
+  /**
+   * Render what the native slot-safe service-stop did: the services that were
+   * actually stopped (SIGTERM'd, or SIGKILL'd if they outlived the grace window),
+   * any that SURVIVED even SIGKILL (`alive` — a leak the teardown couldn't close),
+   * and any stale pidfiles that were already dead (a clean no-op). Names the RESOLVED
+   * state dir (which honours `--state-dir`) so the scope of the teardown is
+   * unambiguous.
+   */
+  private reportStopped(
+    profile: InstanceProfile,
+    stateDir: string,
+    stopped: StopServiceResult[],
+  ): void {
+    const stopped_ = stopped.filter((s) => s.outcome === 'term' || s.outcome === 'kill');
+    const survived = stopped.filter((s) => s.outcome === 'alive');
+    const stale = stopped.filter((s) => s.outcome === 'stale');
+
+    this.log(
+      `slot ${profile.slot}: stopped ${stopped_.length} service(s) from ${stateDir} ` +
+        '(native kill-by-pidfile — no host-global pkill)',
+    );
+    this.log(
+      `stopped: ${
+        stopped_.map((s) => `${s.id}${s.outcome === 'kill' ? ' (SIGKILL)' : ''}`).join(', ') ||
+        '(none running)'
+      }`,
+    );
+    if (survived.length > 0) {
+      this.log(
+        `STILL ALIVE after SIGTERM+SIGKILL (leaked — pidfile kept): ${survived
+          .map((s) => `${s.id}${s.pid !== undefined ? ` (pid ${s.pid})` : ''}`)
+          .join(', ')}`,
+      );
+    }
+    if (stale.length > 0) {
+      this.log(`stale pidfiles (already gone): ${stale.map((s) => s.id).join(', ')}`);
+    }
   }
 }

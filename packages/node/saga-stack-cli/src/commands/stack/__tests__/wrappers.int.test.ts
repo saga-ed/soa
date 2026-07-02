@@ -24,7 +24,7 @@ import { resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import type { RunResult, ScriptInvocation } from '../../../runtime/index.js';
+import type { RunResult, ScriptInvocation, StopServiceResult } from '../../../runtime/index.js';
 import StackUp from '../up.js';
 import StackDown from '../down.js';
 import StackSeed from '../seed.js';
@@ -59,6 +59,23 @@ function installFakeRunner(code = 0): void {
       },
     },
   );
+}
+
+/**
+ * Install a fake native service-stopper on the BaseCommand prototype (M7 Phase 3).
+ * Records the state dir each `down --slot N` drives it against and returns a canned
+ * teardown result — so NO real process/fs is touched.
+ */
+function installFakeStopper(result: StopServiceResult[]): { stopCalls: string[] } {
+  const stopCalls: string[] = [];
+  vi.spyOn(
+    BaseCommand.prototype as unknown as { getServiceStopper: () => unknown },
+    'getServiceStopper',
+  ).mockReturnValue(async (stateDir: string) => {
+    stopCalls.push(stateDir);
+    return result;
+  });
+  return { stopCalls };
 }
 
 beforeEach(async () => {
@@ -168,18 +185,52 @@ describe('stack down — slot-safe teardown (M7 BLOCKER-2)', () => {
     expect(calls[1].env).toEqual({});
   });
 
-  it('slot > 0 does NOT invoke up.sh --down (no host-global service-stop)', async () => {
+  it('slot > 0 stops the slot NATIVELY against its state dir (never up.sh)', async () => {
+    const { stopCalls } = installFakeStopper([
+      { id: 'iam-api', pid: 200, outcome: 'term' },
+      { id: 'rtsm-api', pid: 201, outcome: 'kill' },
+    ]);
+
     await StackDown.run(['--slot', '1', ...WS], config);
+
     // no up.sh service-stop at all — its pkill/slot-0 STATE would kill slot 0.
     expect(calls.some((c) => c.command.endsWith('up.sh'))).toBe(false);
+    // no mesh teardown without --mesh.
     expect(calls).toHaveLength(0);
+    // the native stopper was driven against THIS slot's state dir (Phase 3).
+    expect(stopCalls).toEqual(['/tmp/sds-synthetic-s1']);
   });
 
-  it('slot > 0 --mesh: ONLY the native mesh teardown for the slot project (no up.sh)', async () => {
+  it('slot > 0 honours --state-dir (mirrors `up`) — stops against the custom dir, not the slot default', async () => {
+    const { stopCalls } = installFakeStopper([{ id: 'iam-api', pid: 200, outcome: 'term' }]);
+
+    // `up --slot 1 --state-dir /custom` records pids under /custom; `down` MUST
+    // enumerate /custom too or it leaks every slot-1 server.
+    await StackDown.run(['--slot', '1', '--state-dir', '/custom', ...WS], config);
+
+    expect(calls).toHaveLength(0); // still native — never up.sh.
+    expect(stopCalls).toEqual(['/custom']); // NOT /tmp/sds-synthetic-s1.
+  });
+
+  it('slot > 0 tolerates stale/absent pidfiles (nothing running)', async () => {
+    const { stopCalls } = installFakeStopper([]); // no pidfiles under the slot dir
+
+    await StackDown.run(['--slot', '2', ...WS], config);
+
+    expect(calls).toHaveLength(0);
+    expect(stopCalls).toEqual(['/tmp/sds-synthetic-s2']);
+  });
+
+  it('slot > 0 --mesh: native service-stop THEN the slot-project mesh teardown (no up.sh)', async () => {
+    const { stopCalls } = installFakeStopper([{ id: 'iam-api', pid: 200, outcome: 'term' }]);
+
     await StackDown.run(['--slot', '1', '--mesh', ...WS], config);
+
     // never the host-global up.sh --down.
     expect(calls.some((c) => c.command.endsWith('up.sh'))).toBe(false);
-    // exactly one call: make down for THIS slot's project.
+    // native stop ran against the slot's state dir first.
+    expect(stopCalls).toEqual(['/tmp/sds-synthetic-s1']);
+    // exactly one Runner call: make down for THIS slot's project.
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe('make');
     expect(calls[0].cwd).toBe(INFRA_DIR);

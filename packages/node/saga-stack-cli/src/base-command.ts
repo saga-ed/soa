@@ -40,6 +40,7 @@ import {
   makeRealSnapshotIO,
   resolveScript,
   scriptCwd,
+  stopServices,
   REPO_ENV_VAR,
 } from './runtime/index.js';
 import type {
@@ -52,6 +53,7 @@ import type {
   Runner,
   ScriptContext,
   ServiceLauncher,
+  ServiceStopper,
   SnapshotIO,
 } from './runtime/index.js';
 
@@ -175,6 +177,21 @@ export abstract class BaseCommand extends Command {
    */
   protected getLauncher(stateDir?: string): ServiceLauncher {
     return makeRealLauncher({ stateDir });
+  }
+
+  /**
+   * The injectable native slot-safe service-stopper seam (M7 Phase 3). Production
+   * returns the real `stopServices` (real fs enumeration of `<stateDir>/<id>.pid` +
+   * `process.kill`) — the ONLY place `down --slot N` reaches a slot's dev-server
+   * processes, and it reaches ONLY the pids recorded under the state dir it is given
+   * (never a host-global `pkill`). `stack down` at slot > 0 calls this against the
+   * slot's `profile.stateDir`; the TESTS spy it on the prototype (or drive the raw
+   * `stopServices` with a fake fs + fake killer) to assert the SIGTERM/SIGKILL
+   * targets are EXACTLY that slot's pids WITHOUT touching a real process — mirroring
+   * how `getRunner`/`getLauncher`/… are mocked.
+   */
+  protected getServiceStopper(): ServiceStopper {
+    return (stateDir: string) => stopServices(stateDir);
   }
 
   /**

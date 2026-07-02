@@ -9,13 +9,14 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { makeRealLauncher, pidFilePath } from '../launcher.js';
+import { makeRealLauncher, pidFilePath, stopServices } from '../launcher.js';
 import type {
   ChildLike,
   LaunchResult,
   LaunchSpec,
   ServiceLauncher,
   SpawnFn,
+  StopServicesDeps,
 } from '../launcher.js';
 import type { HealthProber, ProbeResult } from '../health.js';
 
@@ -192,5 +193,203 @@ describe('makeRealLauncher.stopServices', () => {
     });
     const res = await launcher.stopServices(['iam-api']);
     expect(res).toEqual([{ id: 'iam-api', stopped: false, pid: 99 }]);
+  });
+});
+
+// ── native slot-safe stopServices(stateDir) — M7 Phase 3 ─────────────────────
+//
+// The pidfile-enumeration teardown that `down --slot N` drives. These pin its
+// slot-safety (kills ONLY the given dir's recorded pids) and the SIGTERM→grace→
+// SIGKILL escalation, all with a fake fs of pidfiles + a fake killer — no real
+// process/fs is touched.
+
+/**
+ * A fake fs of pidfiles + a fake process table. `tree` maps a state dir to its
+ * `{ serviceId → pid }`. `stubborn` pids survive SIGTERM (need SIGKILL); `unkillable`
+ * pids survive even SIGKILL (an under-kill); `dead` pids are already gone before the
+ * teardown starts.
+ *
+ * NB the fake `kill` is invoked with the NEGATIVE (process-group) pid — that is the
+ * group-kill contract `stopServices` must honour — so the harness normalises with
+ * `Math.abs` against the positive process table. `isAlive` is called with the
+ * positive recorded pid (the group negation is the default probe's concern).
+ */
+function stopHarness(
+  tree: Record<string, Record<string, number>>,
+  opts: {
+    stubborn?: number[];
+    unkillable?: number[];
+    dead?: number[];
+    extraFiles?: Record<string, string[]>;
+  } = {},
+): { deps: StopServicesDeps; signals: Array<{ pid: number; signal: string }>; removed: string[]; alive: Set<number> } {
+  const raw: Record<string, string> = {}; // pidfile path → contents
+  const entries: Record<string, string[]> = {}; // dir → filenames
+  const alive = new Set<number>();
+  for (const [dir, svcs] of Object.entries(tree)) {
+    entries[dir] = [...(opts.extraFiles?.[dir] ?? [])];
+    for (const [id, pid] of Object.entries(svcs)) {
+      entries[dir].push(`${id}.pid`);
+      raw[pidFilePath(dir, id)] = `${pid}\n`;
+      alive.add(pid);
+    }
+  }
+  for (const d of opts.dead ?? []) alive.delete(d);
+  const stubborn = new Set(opts.stubborn ?? []);
+  const unkillable = new Set(opts.unkillable ?? []);
+
+  const signals: Array<{ pid: number; signal: string }> = [];
+  const removed: string[] = [];
+  const deps: StopServicesDeps = {
+    listDir: (dir) => entries[dir] ?? [],
+    readPid: (path) => (path in raw ? raw[path] : null),
+    removePid: (path) => {
+      removed.push(path);
+      delete raw[path];
+    },
+    kill: (pid, signal) => {
+      signals.push({ pid, signal }); // pid is NEGATIVE — the process group.
+      const bare = Math.abs(pid);
+      if (signal === 'SIGTERM' && !stubborn.has(bare) && !unkillable.has(bare)) alive.delete(bare);
+      if (signal === 'SIGKILL' && !unkillable.has(bare)) alive.delete(bare);
+    },
+    isAlive: (pid) => alive.has(pid),
+    sleep: async () => {},
+    graceMs: 100,
+    pollIntervalMs: 50, // ⇒ 2 liveness polls per service
+  };
+  return { deps, signals, removed, alive };
+}
+
+const S0 = '/tmp/sds-synthetic';
+const S1 = '/tmp/sds-synthetic-s1';
+
+describe('stopServices(stateDir) — native slot-safe teardown', () => {
+  it('SIGTERMs the GROUP of EXACTLY the given dir\'s pids and unlinks them — never another slot\'s', async () => {
+    const { deps, signals, removed } = stopHarness({
+      // slot 0 is live and MUST NOT be touched by a slot-1 teardown.
+      [S0]: { 'iam-api': 100, 'sis-api': 101 },
+      [S1]: { 'iam-api': 200, 'programs-api': 201 },
+    });
+
+    const res = await stopServices(S1, deps);
+
+    // The signal target is the process GROUP (negative pid), reaching the watcher +
+    // port-holding grandchild — not just the leader. Only slot 1's groups were
+    // signalled; slot 0's (100/101, i.e. -100/-101) never appear.
+    expect(signals.map((s) => s.pid).sort((a, b) => a - b)).toEqual([-201, -200]);
+    expect(signals.every((s) => s.signal === 'SIGTERM')).toBe(true);
+    // Only slot 1's pidfiles were unlinked.
+    expect(removed.sort()).toEqual([pidFilePath(S1, 'iam-api'), pidFilePath(S1, 'programs-api')]);
+    expect(res).toEqual([
+      { id: 'iam-api', pid: 200, outcome: 'term' },
+      { id: 'programs-api', pid: 201, outcome: 'term' },
+    ]);
+  });
+
+  it('escalates to a GROUP SIGKILL when a process outlives the grace window', async () => {
+    const { deps, signals } = stopHarness({ [S1]: { 'rtsm-api': 300 } }, { stubborn: [300] });
+
+    const res = await stopServices(S1, deps);
+
+    // Both signals target the group (-300), not the bare leader.
+    expect(signals).toEqual([
+      { pid: -300, signal: 'SIGTERM' },
+      { pid: -300, signal: 'SIGKILL' },
+    ]);
+    expect(res).toEqual([{ id: 'rtsm-api', pid: 300, outcome: 'kill' }]);
+  });
+
+  it('reports `alive` (leak) when a process survives BOTH SIGTERM and SIGKILL — keeps the pidfile', async () => {
+    const { deps, signals, removed } = stopHarness(
+      { [S1]: { 'rtsm-api': 300 } },
+      { unkillable: [300] },
+    );
+
+    const res = await stopServices(S1, deps);
+
+    // Escalated all the way and STILL alive on the final re-check ⇒ under-kill.
+    expect(signals).toEqual([
+      { pid: -300, signal: 'SIGTERM' },
+      { pid: -300, signal: 'SIGKILL' },
+    ]);
+    // The pidfile is KEPT so the leak is visible and a re-run retries.
+    expect(removed).toEqual([]);
+    expect(res).toEqual([{ id: 'rtsm-api', pid: 300, outcome: 'alive' }]);
+  });
+
+  it('falls back to the bare pid when the group signal throws ESRCH (not a group leader)', async () => {
+    const targets: number[] = [];
+    const deps: StopServicesDeps = {
+      listDir: (dir) => (dir === S1 ? ['iam-api.pid'] : []),
+      readPid: () => '700\n',
+      isAlive: (() => {
+        // alive for the initial check, then gone on the first grace poll (the bare-pid
+        // fallback SIGTERM landed) ⇒ a graceful `term`, no SIGKILL.
+        let calls = 0;
+        return () => {
+          calls += 1;
+          return calls <= 1;
+        };
+      })(),
+      kill: (pid, _signal) => {
+        targets.push(pid);
+        if (pid < 0) {
+          const err = new Error('ESRCH') as NodeJS.ErrnoException;
+          err.code = 'ESRCH';
+          throw err; // group is gone / pid was never a group leader
+        }
+        // positive-pid fallback lands
+      },
+      removePid: () => {},
+      sleep: async () => {},
+      graceMs: 100,
+      pollIntervalMs: 50,
+    };
+
+    const res = await stopServices(S1, deps);
+
+    // Tried the group first (-700), then degraded to the bare pid (700).
+    expect(targets).toEqual([-700, 700]);
+    expect(res).toEqual([{ id: 'iam-api', pid: 700, outcome: 'term' }]);
+  });
+
+  it('tolerates a stale pidfile (process already dead) — no signal, unlinks it', async () => {
+    const { deps, signals, removed } = stopHarness({ [S1]: { 'iam-api': 400 } }, { dead: [400] });
+
+    const res = await stopServices(S1, deps);
+
+    expect(signals).toEqual([]); // never signalled a dead pid
+    expect(removed).toEqual([pidFilePath(S1, 'iam-api')]);
+    expect(res).toEqual([{ id: 'iam-api', pid: 400, outcome: 'stale' }]);
+  });
+
+  it('tolerates an unparseable pidfile and an absent state dir', async () => {
+    const deps: StopServicesDeps = {
+      listDir: (dir) => (dir === S1 ? ['iam-api.pid'] : []),
+      readPid: () => 'not-a-pid\n',
+      kill: () => {
+        throw new Error('should not be called');
+      },
+      isAlive: () => true,
+      removePid: () => {},
+      sleep: async () => {},
+    };
+
+    expect(await stopServices(S1, deps)).toEqual([{ id: 'iam-api', outcome: 'stale' }]);
+    // absent dir ⇒ nothing to do.
+    expect(await stopServices('/tmp/does-not-exist', deps)).toEqual([]);
+  });
+
+  it('ignores non-.pid files under the state dir (logs etc.)', async () => {
+    const { deps, signals } = stopHarness(
+      { [S1]: { 'iam-api': 500 } },
+      { extraFiles: { [S1]: ['iam-api.log', 'notes.txt'] } },
+    );
+
+    const res = await stopServices(S1, deps);
+
+    expect(signals).toEqual([{ pid: -500, signal: 'SIGTERM' }]);
+    expect(res).toEqual([{ id: 'iam-api', pid: 500, outcome: 'term' }]);
   });
 });

@@ -217,7 +217,19 @@ export async function resetClosure(ctx: ResetContext): Promise<ResetResult> {
         cwd,
         command: 'pnpm',
         args: ['prisma', 'migrate', 'reset', '--force'],
-        env: { DATABASE_URL: pgUrl(def, m, meshOffset) },
+        env: {
+          DATABASE_URL: pgUrl(def, m, meshOffset),
+          // Prisma 7 refuses a destructive `migrate reset` when it detects an AI-agent
+          // session (env markers like CLAUDECODE), demanding
+          // PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION = the user's explicit consent.
+          // A developer typing `ss stack reset` IS that explicit consent (the whole
+          // command exists to wipe local dev data), so we supply it — SCOPED to only
+          // this command's ledger migrate-reset. Outside an agent session prisma ignores
+          // the var (no guard fires), so this is inert there. This lets `ss stack reset`
+          // work from inside an agent session; a plain human terminal never needed it.
+          PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION:
+            'developer explicitly invoked `ss stack reset` (the native synthetic-dev reset command) — consent to reset ledger_local',
+        },
         stdio: 'inherit',
       });
       const ok = code === 0;

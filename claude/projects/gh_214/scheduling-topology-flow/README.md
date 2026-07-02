@@ -27,6 +27,9 @@ This is the concrete instance of the "author *new* flow scenarios" work.
 
 ## Contents
 - `README.md` — this file.
+- **`HANDOFF.md`** — self-contained prompt for a fresh agent to continue this effort
+  (design → seed → author → run). Decisions locked: purpose-built A/B seed (reveal
+  reality); `varies_by_day_type` weekday pattern first. **Read this to pick up the work.**
 - `01-understanding.md` — the synthesized understanding (from parallel code research). ✅ **done**
 - `02-flow-design.md` — the concrete flow scenario + expected behavior + assertions. _(next — pending a design decision, see 01 §8)_
 

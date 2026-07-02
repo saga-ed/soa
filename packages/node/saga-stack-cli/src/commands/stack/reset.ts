@@ -95,6 +95,11 @@ export default class StackReset extends BaseCommand {
     const migrateResetFailed =
       res.native?.dbs.filter((d) => d.action === 'migrate-reset' && !d.ok).map((d) => d.db) ?? [];
     const mongo = res.native?.dbs.filter((d) => d.action === 'mongo-dropped').map((d) => d.db) ?? [];
+    // Probe-skipped DBs: a not-yet-provisioned DB (e.g. coach_api after a partial `up`)
+    // is skipped rather than errored — surfaced so the tolerance is visible, exit unaffected.
+    const skippedAbsent =
+      res.native?.dbs.filter((d) => d.action === 'skipped' && d.reason === 'not provisioned').map((d) => d.db) ??
+      [];
 
     this.emit(
       flags,
@@ -106,6 +111,7 @@ export default class StackReset extends BaseCommand {
         migrateReset: migrateReset.join(','),
         migrateResetFailed: migrateResetFailed.join(','),
         mongoDropped: mongo.join(','),
+        skippedAbsent: skippedAbsent.join(','),
         devUserReseeded: res.seed?.ok ?? false,
       },
       [
@@ -123,6 +129,8 @@ export default class StackReset extends BaseCommand {
           ? [`⚠ migrate-reset FAILED (warn-only, exit unaffected): ${migrateResetFailed.join(', ')}`]
           : []),
         ...(mongo.length ? [`mongo dropped: ${mongo.join(', ')}`] : []),
+        // A not-yet-provisioned DB (partial `up`) is skipped, not failed — parity with up.sh.
+        ...(skippedAbsent.length ? [`skipped (not provisioned): ${skippedAbsent.join(', ')}`] : []),
         `dev-user re-seed: ${res.seed ? (res.seed.ok ? 'OK' : 'FAILED') : '(skipped — iam-api not in set)'}`,
       ],
     );

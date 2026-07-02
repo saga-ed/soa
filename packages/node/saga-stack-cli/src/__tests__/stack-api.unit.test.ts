@@ -579,9 +579,10 @@ describe('StackApi.reset — native (M8 R4) + --legacy escape', () => {
     const res = await api.reset(['ads-adm-api', 'connect-api', 'iam-api'] as ServiceId[]);
     expect(res.code).toBe(0);
 
-    // ledger_local → `pnpm prisma migrate reset --force --skip-seed` with DATABASE_URL at ledger.
+    // ledger_local → `pnpm prisma migrate reset --force` with DATABASE_URL at ledger (NO
+    // --skip-seed — prisma 7.8.0's `migrate reset` rejects it; ledger-db configures no seed hook).
     const migReset = fakes.runs.find(
-      (r) => r.command === 'pnpm' && r.args.join(' ') === 'prisma migrate reset --force --skip-seed',
+      (r) => r.command === 'pnpm' && r.args.join(' ') === 'prisma migrate reset --force',
     );
     expect(migReset).toBeDefined();
     expect(migReset?.env.DATABASE_URL).toContain('/ledger_local');
@@ -619,7 +620,7 @@ describe('StackApi.reset — native (M8 R4) + --legacy escape', () => {
     expect(trunc?.args[1]).toBe('soa-s1-postgres-1');
     // ledger migrate-reset URL at the offset mesh port (5432 + 1000).
     const migReset = fakes.runs.find(
-      (r) => r.command === 'pnpm' && r.args.join(' ') === 'prisma migrate reset --force --skip-seed',
+      (r) => r.command === 'pnpm' && r.args.join(' ') === 'prisma migrate reset --force',
     );
     expect(migReset?.env.DATABASE_URL).toContain(':6432/ledger_local');
   });

@@ -662,6 +662,10 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         meshOffset: runtime.meshOffset,
         withPlayback: opts.withPlayback,
         runner,
+        // R2/R3 probe seam: SKIP (don't truncate/migrate-reset) a pg DB that a partial
+        // `up` never provisioned (e.g. coach_api) — matches up.sh's reset_data tolerance,
+        // so a bare reset after a partial up exits 0 instead of erroring on the absent DB.
+        probe: runtime.pgProbe,
         manifest,
       });
 

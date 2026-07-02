@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DbId } from '../../core/manifest/index.js';
 import type { RunResult, Runner, ScriptInvocation } from '../exec.js';
+import type { PgProbe } from '../pg-probe.js';
 import { mongoDropArgs, resetClosure, truncateSql, truncateArgs } from '../reset.js';
 
 const REPO_ROOTS = {
@@ -37,6 +38,22 @@ function fakeRunner(code = 0): { runner: Runner; calls: ScriptInvocation[] } {
     },
   };
   return { runner, calls };
+}
+
+/** A fake PgProbe whose `databaseExists` answers from a set of PRESENT db names. */
+function fakeProbe(present: string[]): PgProbe {
+  const set = new Set(present);
+  return {
+    async databaseExists(_c, db): Promise<boolean> {
+      return set.has(db);
+    },
+    async hasMigrationsTable(): Promise<boolean> {
+      return false;
+    },
+    async publicTableCount(): Promise<number> {
+      return 0;
+    },
+  };
 }
 
 /** The `-c "<sql>"` payload of a `docker exec … psql … -c <sql>` invocation. */
@@ -98,12 +115,17 @@ describe('resetClosure — per-DB reset plan (R4)', () => {
     expect(res.dbs).toEqual([{ db: 'ledger_local', action: 'migrate-reset', ok: true }]);
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe('pnpm');
-    // --skip-seed: rebuild schema only, never inject the package seed.
-    expect(calls[0].args).toEqual(['prisma', 'migrate', 'reset', '--force', '--skip-seed']);
+    // NO --skip-seed: prisma 7.8.0's `migrate reset` rejects that flag (usage + non-zero
+    // exit). ledger-db configures no prisma seed hook, so `--force` alone never seeds.
+    expect(calls[0].args).toEqual(['prisma', 'migrate', 'reset', '--force']);
+    expect(calls[0].args).not.toContain('--skip-seed');
     // runs in the ledger-db package (the VERIFIED schema owner, owned by the SDS repo —
-    // NOT ads-adm-db) with DATABASE_URL at ledger.
+    // NOT ads-adm-db) with DATABASE_URL at ledger (ledger-db's prisma.config.ts THROWS
+    // without it, so the migrate-reset step MUST carry it).
     expect(calls[0].cwd).toBe('/dev/student-data-system/packages/node/ledger-db');
     expect(calls[0].env.DATABASE_URL).toContain('/ledger_local');
+    // slot 0: base mesh pg port (no offset).
+    expect(calls[0].env.DATABASE_URL).toContain(':5432/ledger_local');
     // no docker truncate for ledger.
     expect(calls.some((c) => c.command === 'docker')).toBe(false);
   });
@@ -157,7 +179,49 @@ describe('resetClosure — per-DB reset plan (R4)', () => {
     const trunc = calls.find((c) => c.command === 'docker' && c.args.includes('psql'));
     expect(trunc?.args[1]).toBe('soa-s1-postgres-1');
     const mig = calls.find((c) => c.command === 'pnpm');
+    // migrate-reset carries DATABASE_URL at the OFFSET mesh port (5432 + 1000) for ledger.
     expect(mig?.env.DATABASE_URL).toContain(':6432/ledger_local');
+  });
+
+  it('probe reports coach_api ABSENT → skipped (not provisioned), no truncate; existing DB truncated; exit 0', async () => {
+    const { runner, calls } = fakeRunner();
+    // coach_api not provisioned (partial `up` never brought coach up); programs exists.
+    const res = await resetClosure(
+      baseCtx(['iam_local', 'coach_api', 'programs'] as DbId[], {
+        runner,
+        probe: fakeProbe(['iam_local', 'programs']),
+      }),
+    );
+    // Absent DB skipped (ok:true), existing DBs truncated — exit stays ok. Results come
+    // back in CANONICAL manifest order (iam_local, programs, coach_api), not input order.
+    expect(res.ok).toBe(true);
+    expect(res.dbs).toEqual([
+      { db: 'iam_local', action: 'truncated', ok: true },
+      { db: 'programs', action: 'truncated', ok: true },
+      { db: 'coach_api', action: 'skipped', ok: true, reason: 'not provisioned' },
+    ]);
+    // NO truncate was attempted against coach_api.
+    const truncatedDbs = calls
+      .filter((c) => c.command === 'docker' && c.args.includes('psql'))
+      .map((c) => c.args[c.args.indexOf('-d') + 1]);
+    expect(truncatedDbs).toEqual(['iam_local', 'programs']);
+    expect(truncatedDbs).not.toContain('coach_api');
+  });
+
+  it('probe reports an ABSENT migrate-reset DB (ledger_local) → skipped, no prisma run', async () => {
+    const { runner, calls } = fakeRunner();
+    const res = await resetClosure(
+      baseCtx(['ledger_local'] as DbId[], { runner, probe: fakeProbe([]) }),
+    );
+    expect(res.dbs).toEqual([{ db: 'ledger_local', action: 'skipped', ok: true, reason: 'not provisioned' }]);
+    expect(calls).toHaveLength(0); // no `pnpm prisma migrate reset` against an absent DB.
+  });
+
+  it('no probe wired ⇒ acts on every DB unconditionally (pre-guard behaviour)', async () => {
+    const { runner, calls } = fakeRunner();
+    const res = await resetClosure(baseCtx(['coach_api'] as DbId[], { runner }));
+    expect(res.dbs).toEqual([{ db: 'coach_api', action: 'truncated', ok: true }]);
+    expect(calls).toHaveLength(1);
   });
 
   it('IDEMPOTENT/safe: an already-empty DB truncate is still a single no-op statement', async () => {

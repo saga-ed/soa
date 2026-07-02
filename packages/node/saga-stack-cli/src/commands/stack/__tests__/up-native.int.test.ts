@@ -82,18 +82,35 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     remove: (p: string) => dashCalls.push(`remove:${p}`),
     write: (p: string) => dashCalls.push(`write:${p}`),
   };
+  // Stateful DB existence: a DB is ABSENT until R2 provision runs its
+  // `CREATE DATABASE <name>` psql, after which it EXISTS. This models the real
+  // `up --reset` order (provision → reset): every DB probes absent at provision
+  // time (so provision CREATEs each), but exists by RESET time (so the R4 reset's
+  // existence probe truncates them rather than skipping — the live-run BUG 2).
+  // The playback DBs (meshProvisioned:false) are NOT created by R2 provision — their
+  // own services create them during launch — so they already EXIST by reset time.
+  // Pre-seed them present so the `--with playback --reset` truncate path is exercised
+  // (mesh-provisioned DBs are added below when provision runs their CREATE DATABASE).
+  const provisioned = new Set<string>(['transcripts_local', 'insights_local', 'chat_local']);
   const runner: Runner = {
     async run(spec: ScriptInvocation): Promise<RunResult> {
       runs.push(spec);
+      const ci = spec.args.indexOf('-c');
+      if (ci >= 0) {
+        const m = /CREATE DATABASE (\w+)/.exec(spec.args[ci + 1] ?? '');
+        if (m) provisioned.add(m[1]);
+      }
       return { code: 0 };
     },
   };
   // M8 native prep pass: a fake pg probe so R2 provision + R3 migrate assert their
-  // PLAN with NO real docker/postgres. Every DB probes ABSENT + table-empty, so
-  // provision CREATEs each and migrate takes the `empty → db:deploy` branch.
+  // PLAN with NO real docker/postgres. Each DB probes ABSENT (until provision CREATEs
+  // it) + table-empty, so provision CREATEs each and migrate takes the `empty →
+  // db:deploy` branch (migrate's branch consults hasMigrationsTable/publicTableCount,
+  // NOT databaseExists, so the stateful existence doesn't perturb it).
   const pgProbe: PgProbe = {
-    async databaseExists(): Promise<boolean> {
-      return false;
+    async databaseExists(_c, db): Promise<boolean> {
+      return provisioned.has(db);
     },
     async hasMigrationsTable(): Promise<boolean> {
       return false;

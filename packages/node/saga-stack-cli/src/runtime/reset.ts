@@ -13,10 +13,10 @@
  *      re-migrate (up.sh:1663 verbatim). `RESTART IDENTITY CASCADE` clears sequences
  *      + fk-linked rows — matching up.sh.
  *   2. postgres `resetMode:'migrate-reset'` DBs (ledger_local, decision 2026-06-30 —
- *      NOT in up.sh's truncate list) → `pnpm prisma migrate reset --force --skip-seed`
+ *      NOT in up.sh's truncate list) → `pnpm prisma migrate reset --force`
  *      in the OWNING package (ledger-db, the verified schema owner — its own migrations,
  *      not ads-adm-db's) with `DATABASE_URL` forced at the mesh (drop + remigrate to
- *      head, no package seed).
+ *      head; ledger-db configures no prisma seed hook, so reset never seeds).
  *   3. mongo (`connectv3`) → `docker exec <mongoContainer> mongosh --quiet --eval
  *      'db.getSiblingDB("connectv3").dropDatabase()'` (up.sh:1689) — collections
  *      auto-recreate on first write, so a drop IS the empty baseline.
@@ -37,7 +37,9 @@
  * IDEMPOTENT/SAFE: a TRUNCATE of an already-empty DB is a no-op, and preserving
  * `_prisma_migrations` means a reset never re-migrates. Per-DB failures are
  * collected + surfaced (like up.sh's per-DB `⚠` warnings) but do NOT abort the
- * pass — a DB that doesn't exist yet just warns.
+ * pass. A DB that isn't provisioned yet is PROBED (the R2/R3 `PgProbe` seam) and
+ * SKIPPED with a note rather than erroring — matching up.sh's reset_data tolerance
+ * for a not-yet-created DB (e.g. `coach_api` after a partial `up`).
  *
  * INVARIANT: docker/process IO lives only in `src/runtime/**`; `src/core/**` never
  * imports this and stays pure. All DB names/roles/modes come from the manifest.
@@ -46,6 +48,7 @@
 import { getDb, manifest as defaultManifest } from '../core/manifest/index.js';
 import type { DbId, Manifest, RepoKey } from '../core/manifest/index.js';
 import type { Runner } from './exec.js';
+import type { PgProbe } from './pg-probe.js';
 
 /** Inputs to the R4 reset pass. */
 export interface ResetContext {
@@ -63,6 +66,14 @@ export interface ResetContext {
   withPlayback?: boolean;
   /** Process seam — the `docker exec …` / `pnpm prisma …` statements run through it. */
   runner: Runner;
+  /**
+   * Read-only postgres-probe seam (R2/R3). When PRESENT, each pg DB's existence is
+   * probed FIRST and a not-yet-provisioned DB is SKIPPED (never truncated/migrate-reset)
+   * — matching up.sh's `reset_data` tolerance for a DB that a partial `up` never created
+   * (e.g. `coach_api` when coach-api was never brought up). ABSENT ⇒ no probing (every
+   * pg DB is acted on), the pre-guard behaviour the reset unit tests rely on.
+   */
+  probe?: PgProbe;
   /** Manifest (defaults to the frozen one). */
   manifest?: Manifest;
 }
@@ -74,7 +85,8 @@ export interface ResetDbResult {
    * - `truncated`     — generic TRUNCATE preserving `_prisma_migrations`.
    * - `migrate-reset` — `prisma migrate reset --force` (ledger_local).
    * - `mongo-dropped` — `dropDatabase()` (connectv3).
-   * - `skipped`       — playback DB without `--with playback`, or no owning repo.
+   * - `skipped`       — playback DB without `--with playback`, no owning repo, or a
+   *                     pg DB the probe reports ABSENT (not yet provisioned).
    */
   action: 'truncated' | 'migrate-reset' | 'mongo-dropped' | 'skipped';
   /** True iff the op exited 0 (a per-DB failure warns but does not abort the pass). */
@@ -169,6 +181,19 @@ export async function resetClosure(ctx: ResetContext): Promise<ResetResult> {
       continue;
     }
 
+    // Existence probe (R2/R3 seam): a pg DB a partial `up` never provisioned (e.g.
+    // `coach_api` when coach-api was never brought up) does NOT exist, so a TRUNCATE /
+    // migrate-reset against it would error (`database "…" does not exist`). Probe first
+    // and SKIP an absent DB with a clear note — matching up.sh's reset_data, whose per-DB
+    // loop warns + continues on a not-yet-created DB. Cleaner than truncate-and-catch
+    // (no error is provoked) and NOT a failure (ok:true ⇒ exit stays 0). Only reached for
+    // pg DBs we intend to act on (mongo returned above; mongo dropDatabase on an absent
+    // db is already a no-op). No probe wired ⇒ act unconditionally (pre-guard behaviour).
+    if (ctx.probe && !(await ctx.probe.databaseExists(ctx.pgContainer, def.name))) {
+      results.push({ db: id, action: 'skipped', ok: true, reason: 'not provisioned' });
+      continue;
+    }
+
     // ledger_local (migrate-reset): drop + remigrate via prisma, NOT truncate.
     if (def.resetMode === 'migrate-reset') {
       const repo = ownerRepoOf(id, m);
@@ -177,14 +202,21 @@ export async function resetClosure(ctx: ResetContext): Promise<ResetResult> {
         continue;
       }
       const cwd = `${ctx.repoRoots[repo].replace(/\/+$/, '')}/${def.migrate.dir.replace(/^\/+/, '')}`;
-      // `--skip-seed`: the reset only rebuilds SCHEMA (drop + remigrate to head) —
-      // it must NOT inject the owning package's `db:seed`. Defense-in-depth even
-      // though ledger-db's seed may be intended-empty: matches "wipe + re-migrate to
-      // head", never "re-seed". Without it, prisma runs the package seed after reset.
+      // `prisma migrate reset --force` rebuilds SCHEMA ONLY (drop + remigrate to head),
+      // never re-seeds: prisma 7.8.0's `migrate reset` supports ONLY `--force`/`--schema`
+      // (NO `--skip-seed` — passing it makes prisma 7 print usage + exit non-zero, which
+      // silently failed this step and left ledger_local with 0 tables). Prisma only
+      // auto-runs a seed when a `prisma.seed` hook is CONFIGURED — and ledger-db
+      // (@saga-ed/ledger-db, prisma ^7.8.0) configures NONE: no `prisma.seed` in
+      // package.json (its `db:seed` is a plain npm SCRIPT, which prisma does NOT auto-run)
+      // and no `seed` in prisma.config.ts. So `migrate reset --force` will NOT seed here,
+      // and dropping `--skip-seed` is fully safe — it matches "wipe + re-migrate to head".
+      // DATABASE_URL is injected below (ledger-db's prisma.config.ts THROWS without it);
+      // pgUrl() is slot-offset-correct so a slot>0 reset lands on the offset mesh port.
       const { code } = await ctx.runner.run({
         cwd,
         command: 'pnpm',
-        args: ['prisma', 'migrate', 'reset', '--force', '--skip-seed'],
+        args: ['prisma', 'migrate', 'reset', '--force'],
         env: { DATABASE_URL: pgUrl(def, m, meshOffset) },
         stdio: 'inherit',
       });

@@ -1063,8 +1063,12 @@ prep(){
   # (not the pre-existing saga_user), so create the role too on existing volumes.
   if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -tAc \
         "SELECT 1 FROM pg_database WHERE datname='coach_api'" 2>/dev/null)" != 1 ]]; then
+    # Two separate -c flags on purpose: a single -c with both statements runs them
+    # in one implicit transaction, and CREATE DATABASE can't run inside a txn block.
     db_step "coach_api role+db create" "$SOA" docker exec soa-postgres-1 \
-      psql -U postgres_admin -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coach_api_app') THEN CREATE ROLE coach_api_app LOGIN PASSWORD 'dev-password-coach-api-app'; END IF; END \$\$; CREATE DATABASE coach_api OWNER coach_api_app"
+      psql -U postgres_admin \
+      -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coach_api_app') THEN CREATE ROLE coach_api_app LOGIN PASSWORD 'dev-password-coach-api-app'; END IF; END \$\$" \
+      -c "CREATE DATABASE coach_api OWNER coach_api_app"
   fi
   # coach's prisma schema lives in the coach-db PACKAGE (not the app); it has
   # committed migrations, so migrate deploy lands cleanly.

@@ -25,6 +25,10 @@ export type SeedStepId =
   | 'scheduling'
   | 'content'
   | 'coach-pg'
+  | 'coach-mongo' //           M8 R5: coach curriculum mongoimport (stdinFile)
+  | 'transcripts-provision' // M8 R5: playback bootstrap SQL + migrate (--with playback)
+  | 'insights-provision'
+  | 'chat-provision'
   | 'transcripts'
   | 'insights'
   | 'chat';
@@ -32,12 +36,24 @@ export type SeedStepId =
 /** Profile → the seed-step ids it contributes (plan §4.1). */
 export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>> = {
   roster: ['iam-dev-user', 'iam', 'sessions'],
-  full: ['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content', 'coach-pg'],
+  // M8 R5: coach-mongo (curriculum) is now expressible (stdinFile) — un-gated so
+  // native `--seed full` seeds BOTH coach stores (mongo curriculum + pg progress).
+  full: ['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content', 'coach-pg', 'coach-mongo'],
 };
 
 /** Add-on → the seed-step ids it contributes (plan §4.1). */
 export const ADDON_STEPS: Readonly<Record<SeedAddOn, readonly SeedStepId[]>> = {
-  playback: ['transcripts', 'insights', 'chat'],
+  // M8 R5: the playback DBs are meshProvisioned:false, so they need their
+  // bootstrap SQL + migrate (`*-provision`) BEFORE the fixture seed (`pnpm seed`).
+  // Now expressible via stdinFile, so native `--with playback` is un-gated.
+  playback: [
+    'transcripts-provision',
+    'insights-provision',
+    'chat-provision',
+    'transcripts',
+    'insights',
+    'chat',
+  ],
   qtf: ['qtf-demo'],
 };
 
@@ -56,6 +72,11 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
   'scheduling',
   'content',
   'coach-pg',
+  'coach-mongo',
+  // playback provisioning (bootstrap + migrate) precedes the playback fixtures.
+  'transcripts-provision',
+  'insights-provision',
+  'chat-provision',
   'transcripts',
   'insights',
   'chat',
@@ -66,6 +87,64 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
 /** The mesh postgres address (single shared instance — up.sh PROGRAMS_DB_URL et al.). */
 const MESH_PG_HOST = 'localhost';
 const MESH_PG_PORT = 5432;
+
+/**
+ * M8 R5 — container-name tokens the runtime resolves per SLOT. The registry is
+ * PURE (can't read `process.env`/the slot profile), so a docker-exec seed step
+ * (coach curriculum / playback bootstrap) references its target container by
+ * token; the facade's seed runner expands it against the RESOLVED slot containers
+ * (`soa-s<N>-postgres-1` / `soa-s<N>-connect-mongo-1`), exactly like R2/R3 receive
+ * the resolved `pgContainer`. At slot 0 they expand to `soa-postgres-1` /
+ * `soa-connect-mongo-1`.
+ */
+const MONGO_CONTAINER_TOKEN = '${SAGA_MESH_CONNECT_MONGO_CONTAINER}';
+const PG_CONTAINER_TOKEN = '${SAGA_MESH_POSTGRES_CONTAINER}';
+
+/** The mesh superuser creds up.sh's playback `*_DB_URL` migrate as (up.sh:235-237). */
+function playbackDbUrl(db: DatabaseDef): string {
+  return `postgresql://postgres_admin:password123@${MESH_PG_HOST}:${MESH_PG_PORT}/${db.name}`;
+}
+
+/**
+ * M8 R5 — a playback DB provisioning step (up.sh `provision_playback_dbs`,
+ * up.sh:937-951). The `*-db` package's `seed/local-bootstrap.sql` creates the DB +
+ * least-privilege app role + grants, piped to the mesh postgres via stdin
+ * (`docker exec -i <pg> psql < local-bootstrap.sql`); the tail step then migrates
+ * it as MASTER (`postgres_admin`) with `pnpm db:deploy` (a freshly-bootstrapped DB
+ * is empty → replays the full migration history). Gated under `--with playback`.
+ */
+function playbackProvisionStep(m: Manifest, id: SeedStepId, service: ServiceId, dbId: DbId): SeedStep {
+  const db = getDb(dbId, m);
+  // The bootstrap SQL + the migrations both live in the owning `*-db` package
+  // (packages/node/<app>-db) — the manifest already carries that dir.
+  const dbDir = db.migrate?.dir ?? getService(service, m).subpath;
+  return {
+    id,
+    service,
+    databases: [dbId],
+    cwd: dbDir,
+    // psql reads the bootstrap SQL from stdin (\gexec + IF NOT EXISTS ⇒ idempotent).
+    command: ['docker', 'exec', '-i', PG_CONTAINER_TOKEN, 'psql', '-U', 'postgres_admin', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1'],
+    stdinFile: 'seed/local-bootstrap.sql',
+    env: { kind: 'inline', vars: {} },
+    requiresServiceUp: [],
+    // Opt-in path — warn (not fatal) so a playback hiccup never reddens the stack;
+    // the fixture seed step that follows fails visibly if the DB never came up.
+    failureMode: 'warn',
+    optionalSteps: [
+      {
+        id: `${id}-migrate`,
+        service,
+        databases: [dbId],
+        cwd: dbDir,
+        command: ['pnpm', 'db:deploy'],
+        env: { kind: 'inline', vars: { DATABASE_URL: playbackDbUrl(db) } },
+        requiresServiceUp: [],
+        failureMode: 'warn',
+      },
+    ],
+  };
+}
 
 /** `postgresql://<owner>:<pw>@localhost:5432/<dbname>` — derived from DatabaseDef. */
 function pgUrl(db: DatabaseDef): string {
@@ -285,11 +364,8 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
     // default is :5433). main runs it best-effort in seed_stack full after content
     // (up.sh:1808-1816, `warn` on failure — coach may be absent / coach#155 unmerged).
     //
-    // TODO(coach-curriculum): main's seed_coach ALSO mongoimports coach's curriculum
-    // fixtures into the mesh mongo (up.sh:1780-1798 seed_coach_mongo_only —
-    // `docker exec -i soa-connect-mongo-1 mongoimport … < content_coach.json`). The
-    // SeedStep model has no stdin-redirect (`< file`) support, so that step is NOT
-    // expressible cleanly and is intentionally OMITTED here rather than hacked in.
+    // M8 R5: the curriculum mongoimport is now the 'coach-mongo' step below (was
+    // OMITTED for lack of stdin redirect; `stdinFile` makes it expressible).
     'coach-pg': {
       id: 'coach-pg',
       service: 'coach-api',
@@ -300,6 +376,51 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       requiresServiceUp: [], // direct pg db:seed — offline
       failureMode: 'warn',
     },
+    // M8 R5 — coach curriculum mongoimport (up.sh:1780-1798 seed_coach_mongo_only).
+    // TWO upserts into the mesh mongo: content_coach.json (single object) →
+    // saga_local.content_coach, and content.json (array) → wmlms_local.content —
+    // the dbs coach-api's launch_if points at. Curriculum is static committed
+    // fixtures, so `--mode upsert` makes re-seeds converge. Reads each file from
+    // stdin (`stdinFile`) so no `docker cp` into the container. `--port 27017` is
+    // the CONTAINER-internal port (slot-invariant); the container name is the
+    // slot-resolved token. Best-effort (coach may be absent).
+    'coach-mongo': {
+      id: 'coach-mongo',
+      service: 'coach-api',
+      databases: [], // mongo curriculum (saga_local/wmlms_local) — not a tracked DbId; always seeds
+      cwd: 'apps/node/coach-api',
+      command: [
+        'docker', 'exec', '-i', MONGO_CONTAINER_TOKEN,
+        'mongoimport', '--quiet', '--port', '27017',
+        '-d', 'saga_local', '-c', 'content_coach', '--mode', 'upsert', '--upsertFields', 'name',
+      ],
+      stdinFile: 'scripts/data/content_coach.json',
+      env: { kind: 'inline', vars: {} },
+      requiresServiceUp: [],
+      failureMode: 'warn',
+      optionalSteps: [
+        {
+          id: 'coach-mongo-content',
+          service: 'coach-api',
+          databases: [],
+          cwd: 'apps/node/coach-api',
+          command: [
+            'docker', 'exec', '-i', MONGO_CONTAINER_TOKEN,
+            'mongoimport', '--quiet', '--port', '27017',
+            '-d', 'wmlms_local', '-c', 'content', '--jsonArray', '--mode', 'upsert', '--upsertFields', 'id',
+          ],
+          stdinFile: 'scripts/data/content.json',
+          env: { kind: 'inline', vars: {} },
+          requiresServiceUp: [],
+          failureMode: 'warn',
+        },
+      ],
+    },
+    // M8 R5 — playback DB provisioning (bootstrap SQL + migrate; up.sh:937-951),
+    // gated under `--with playback`. Precede the fixture seed steps below.
+    'transcripts-provision': playbackProvisionStep(m, 'transcripts-provision', 'transcripts-api', 'transcripts_local'),
+    'insights-provision': playbackProvisionStep(m, 'insights-provision', 'insights-api', 'insights_local'),
+    'chat-provision': playbackProvisionStep(m, 'chat-provision', 'chat-api', 'chat_local'),
     // playback fixtures (sds_93) — each app's `pnpm seed`, app-role POSTGRES_* inline.
     transcripts: playbackStep(m, 'transcripts', 'transcripts-api', 'transcripts_local'),
     insights: playbackStep(m, 'insights', 'insights-api', 'insights_local'),

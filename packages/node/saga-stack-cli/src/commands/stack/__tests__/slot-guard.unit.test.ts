@@ -17,7 +17,6 @@ import { resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import { SLOT_UNSUPPORTED_COMMAND_MESSAGE } from '../../../shared-flags.js';
 import StackReset from '../reset.js';
 import StackRestart from '../restart.js';
 import StackSeed from '../seed.js';
@@ -56,15 +55,13 @@ describe('slot-aware commands ACCEPT --slot > 0 (Phase 2)', () => {
       StackUp.run(['--only', 'iam-api', '--dry-run', '--slot', '7', ...WS], config),
     ).resolves.toBeUndefined();
   });
+
+  it('stack reset --slot 1 is accepted (M8 R4: native reset targets the slot containers)', async () => {
+    await expect(StackReset.run(['--slot', '1', ...WS], config)).resolves.toBeUndefined();
+  });
 });
 
 describe('wrapper-lifecycle commands HARD-ERROR at --slot > 0', () => {
-  it('stack reset --slot 1 is rejected with the unsupported-command error', async () => {
-    await expect(StackReset.run(['--slot', '1', ...WS], config)).rejects.toThrow(
-      SLOT_UNSUPPORTED_COMMAND_MESSAGE,
-    );
-  });
-
   it('stack restart --slot 1 is rejected', async () => {
     await expect(StackRestart.run(['--slot', '1', ...WS], config)).rejects.toThrow(
       /not supported for this command/,

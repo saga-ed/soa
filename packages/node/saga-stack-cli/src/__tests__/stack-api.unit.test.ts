@@ -544,25 +544,225 @@ describe('StackApi.down — stop in reverse launch order', () => {
   });
 });
 
-describe('StackApi.reset / login — delegated to up.sh (M4)', () => {
-  it('reset delegates `up.sh --reset`', async () => {
+describe('StackApi.reset — native (M8 R4) + --legacy escape', () => {
+  /** The `-c "<sql>"` payload of a `docker exec … psql … -c <sql>` run. */
+  const sqlOf = (r: ScriptInvocation): string => r.args[r.args.indexOf('-c') + 1];
+
+  it('native: truncates closure DBs preserving _prisma_migrations + re-seeds the dev user', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
-    const res = await api.reset(['iam-api'] as ServiceId[]);
-    expect(res).toEqual({ delegated: true, code: 0 });
-    expect(fakes.delegated[0].args).toEqual(['--reset']);
+    const closure = computeClosure(manifest, ['sessions-api'] as ServiceId[]);
+
+    const res = await api.reset(closure.services);
+
+    expect(res.delegated).toBe(false);
+    expect(res.code).toBe(0);
+    // TRUNCATE ran as docker-exec psql, preserving _prisma_migrations, on soa-postgres-1.
+    const truncs = fakes.runs.filter((r) => r.command === 'docker' && r.args.includes('psql'));
+    expect(truncs.length).toBeGreaterThan(0);
+    for (const t of truncs) {
+      expect(t.args.slice(0, 3)).toEqual(['exec', 'soa-postgres-1', 'psql']);
+      expect(sqlOf(t)).toContain("tablename <> '_prisma_migrations'");
+      expect(sqlOf(t)).toContain('RESTART IDENTITY CASCADE');
+    }
+    // dev-user re-seed ran (iam-api is in the closure) via the seed path.
+    expect(res.seed?.ok).toBe(true);
+    expect(res.native?.dbs.some((d) => d.action === 'truncated')).toBe(true);
+    // no up.sh delegation on the native path.
+    expect(fakes.delegated).toEqual([]);
   });
 
+  it('ledger_local takes migrate-reset (not truncate); connectv3 dropped via mongosh', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+
+    const res = await api.reset(['ads-adm-api', 'connect-api', 'iam-api'] as ServiceId[]);
+    expect(res.code).toBe(0);
+
+    // ledger_local → `pnpm prisma migrate reset --force --skip-seed` with DATABASE_URL at ledger.
+    const migReset = fakes.runs.find(
+      (r) => r.command === 'pnpm' && r.args.join(' ') === 'prisma migrate reset --force --skip-seed',
+    );
+    expect(migReset).toBeDefined();
+    expect(migReset?.env.DATABASE_URL).toContain('/ledger_local');
+    // runs in the ledger-db package (verified schema owner), NOT ads-adm-db.
+    expect(migReset?.cwd).toContain('packages/node/ledger-db');
+    // ledger_local is NEVER truncated (it's migrate-reset).
+    expect(fakes.runs.some((r) => r.command === 'docker' && r.args.includes('ledger_local'))).toBe(false);
+    // connectv3 dropped on the mongo container.
+    const mongo = fakes.runs.find((r) => r.command === 'docker' && r.args.includes('mongosh'));
+    expect(mongo?.args.slice(0, 2)).toEqual(['exec', 'soa-connect-mongo-1']);
+    expect(mongo?.args[mongo.args.indexOf('--eval') + 1]).toContain(
+      'db.getSiblingDB("connectv3").dropDatabase()',
+    );
+  });
+
+  it('playback DBs are reset ONLY under withPlayback (idempotent gating)', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    await api.reset(['transcripts-api', 'iam-api'] as ServiceId[]);
+    // bare reset leaves the playback DB alone.
+    expect(fakes.runs.some((r) => r.command === 'docker' && r.args.includes('transcripts_local'))).toBe(false);
+
+    const { runtime: rt2, fakes: fk2 } = makeRuntime();
+    const api2 = makeStackApi(manifest, rt2);
+    await api2.reset(['transcripts-api', 'iam-api'] as ServiceId[], { withPlayback: true });
+    expect(fk2.runs.some((r) => r.command === 'docker' && r.args.includes('transcripts_local'))).toBe(true);
+  });
+
+  it('slot > 0: truncate targets the slot pg container + migrate-reset uses the offset URL', async () => {
+    const { runtime, fakes } = makeRuntime({ pgContainer: 'soa-s1-postgres-1', meshOffset: 1000 });
+    const api = makeStackApi(manifest, runtime);
+    await api.reset(['ads-adm-api', 'iam-api'] as ServiceId[]);
+    // truncate hit the slot container.
+    const trunc = fakes.runs.find((r) => r.command === 'docker' && r.args.includes('psql'));
+    expect(trunc?.args[1]).toBe('soa-s1-postgres-1');
+    // ledger migrate-reset URL at the offset mesh port (5432 + 1000).
+    const migReset = fakes.runs.find(
+      (r) => r.command === 'pnpm' && r.args.join(' ') === 'prisma migrate reset --force --skip-seed',
+    );
+    expect(migReset?.env.DATABASE_URL).toContain(':6432/ledger_local');
+  });
+
+  it('EXIT-CODE CONTRACT: a ledger migrate-reset failure is WARN-only (exit 0) when the core truncates + mongo drop succeeded', async () => {
+    // up.sh's reset always exits 0; a wrapper `stack reset && stack up` must not break
+    // on the most realistic divergence — a ledger migrate hiccup while every core
+    // truncate + the mongo drop succeeded. Only the ledger `pnpm` run fails here.
+    const { runtime, fakes } = makeRuntime({
+      runner: {
+        async run(spec: ScriptInvocation): Promise<RunResult> {
+          fakes.runs.push(spec);
+          const isLedgerReset = spec.command === 'pnpm' && spec.args.includes('reset');
+          return { code: isLedgerReset ? 1 : 0 };
+        },
+      },
+    });
+    const api = makeStackApi(manifest, runtime);
+
+    const res = await api.reset(['ads-adm-api', 'connect-api', 'iam-api'] as ServiceId[]);
+
+    // ledger migrate-reset recorded as failed but the command exit is 0 (warn-only).
+    const ledger = res.native?.dbs.find((d) => d.action === 'migrate-reset');
+    expect(ledger?.ok).toBe(false);
+    expect(res.native?.ok).toBe(false); // the runner-level all-ok flag still reflects it
+    expect(res.code).toBe(0); // …but the CONTRACT exit code is 0 — core set succeeded
+  });
+
+  it('EXIT-CODE CONTRACT: a real TRUNCATE failure DOES flip the exit code to 1', async () => {
+    // The core truncate set stays meaningful — a docker psql truncate failure is a
+    // real data failure and must surface as exit 1 (unlike the warn-only ledger case).
+    const { runtime, fakes } = makeRuntime({
+      runner: {
+        async run(spec: ScriptInvocation): Promise<RunResult> {
+          fakes.runs.push(spec);
+          const isTruncate = spec.command === 'docker' && spec.args.includes('psql');
+          return { code: isTruncate ? 1 : 0 };
+        },
+      },
+    });
+    const api = makeStackApi(manifest, runtime);
+
+    const res = await api.reset(['sessions-api', 'iam-api'] as ServiceId[]);
+    expect(res.code).toBe(1);
+  });
+
+  it('--legacy routes to `up.sh --reset` (non-destructive escape); no native truncate', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.reset(['iam-api'] as ServiceId[], { legacy: true });
+    expect(res).toEqual({ delegated: true, code: 0 });
+    expect(fakes.delegated[0].args).toEqual(['--reset']);
+    expect(fakes.runs.some((r) => r.command === 'docker' && r.args.includes('psql'))).toBe(false);
+  });
+
+  it('--legacy --with playback → `up.sh --reset --with-playback`', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    await api.reset(['iam-api'] as ServiceId[], { legacy: true, withPlayback: true });
+    expect(fakes.delegated[0].args).toEqual(['--reset', '--with-playback']);
+  });
+
+  it('--legacy throws without a delegate wired', async () => {
+    const { runtime } = makeRuntime({ delegate: undefined });
+    const api = makeStackApi(manifest, runtime);
+    await expect(api.reset(['iam-api'] as ServiceId[], { legacy: true })).rejects.toThrow(/delegate/);
+  });
+});
+
+describe('StackApi.seed — R5 stdinFile steps (coach curriculum + playback bootstrap)', () => {
+  it('coach curriculum: mongoimport with the resolved mongo container + stdinFile piped', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    // full profile, narrowed to coach-api ⇒ coach-pg + coach-mongo (offline).
+    const plan = composeSeedPlan(
+      { profile: 'full', only: ['coach-api'] },
+      new Set(['coach-api'] as ServiceId[]),
+      new Set<ServiceId>(),
+    );
+    const res = await api.seed(plan);
+    expect(res.ok).toBe(true);
+
+    const mongoimports = fakes.runs.filter((r) => r.command === 'docker' && r.args.includes('mongoimport'));
+    // both upserts ran: content_coach (main) + content (optional tail).
+    expect(mongoimports).toHaveLength(2);
+    const [contentCoach, content] = mongoimports;
+    // container token expanded to the resolved slot-0 mongo container.
+    expect(contentCoach.args.slice(0, 4)).toEqual(['exec', '-i', 'soa-connect-mongo-1', 'mongoimport']);
+    // NO dangling ${TOKEN} survives in the argv.
+    for (const a of contentCoach.args) expect(a).not.toMatch(/\$\{/);
+    // stdinFile resolved to the coach-api fixtures under the COACH repo root.
+    expect(contentCoach.stdinFile).toBe('/dev/coach/apps/node/coach-api/scripts/data/content_coach.json');
+    expect(contentCoach.args).toContain('content_coach');
+    expect(content.stdinFile).toBe('/dev/coach/apps/node/coach-api/scripts/data/content.json');
+    expect(content.args).toContain('--jsonArray');
+  });
+
+  it('playback provisioning: psql bootstrap from stdin + the migrate tail, gated behind --with playback', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const plan = composeSeedPlan(
+      { profile: 'roster', addOns: ['playback'] },
+      new Set(['iam-api', 'sessions-api', 'transcripts-api', 'insights-api', 'chat-api'] as ServiceId[]),
+      new Set<ServiceId>(),
+    );
+    const res = await api.seed(plan);
+    expect(res.ok).toBe(true);
+
+    // transcripts bootstrap: docker exec -i <pg> psql, reading local-bootstrap.sql from stdin.
+    const bootstrap = fakes.runs.find(
+      (r) => r.command === 'docker' && r.args.includes('psql') && r.stdinFile?.includes('transcripts-db'),
+    );
+    expect(bootstrap).toBeDefined();
+    expect(bootstrap?.args.slice(0, 3)).toEqual(['exec', '-i', 'soa-postgres-1']);
+    expect(bootstrap?.stdinFile).toBe(
+      '/dev/student-data-system/packages/node/transcripts-db/seed/local-bootstrap.sql',
+    );
+    // the migrate tail ran as MASTER (postgres_admin) after the bootstrap.
+    const migrate = fakes.runs.find(
+      (r) => r.command === 'pnpm' && r.args.includes('db:deploy') && r.env.DATABASE_URL?.includes('transcripts_local'),
+    );
+    expect(migrate?.env.DATABASE_URL).toContain('postgres_admin');
+  });
+
+  it('slot-0 seed steps WITHOUT a stdinFile carry no stdin redirect (unchanged path)', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const plan = composeSeedPlan(
+      { profile: 'roster' },
+      new Set(['iam-api', 'sessions-api'] as ServiceId[]),
+      new Set<ServiceId>(),
+    );
+    await api.seed(plan);
+    // the iam db:seed steps are unaffected — no stdinFile on any of them.
+    for (const r of fakes.runs) expect(r.stdinFile).toBeUndefined();
+  });
+});
+
+describe('StackApi.login — delegated to up.sh', () => {
   it('login delegates `up.sh --login [email]`', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
     await api.login('teacher@saga.org');
     expect(fakes.delegated[0].args).toEqual(['--login', 'teacher@saga.org']);
-  });
-
-  it('reset throws without a delegate (native partial reset is M6)', async () => {
-    const { runtime } = makeRuntime({ delegate: undefined });
-    const api = makeStackApi(manifest, runtime);
-    await expect(api.reset(['iam-api'] as ServiceId[])).rejects.toThrow(/M6/);
   });
 });

@@ -38,20 +38,12 @@ import { deriveInstance, slotExcludedServices } from '../../core/derive-instance
 import type { InstanceProfile } from '../../core/derive-instance.js';
 import * as flagMap from '../../core/flag-map.js';
 import type { RecordMode } from '../../core/flag-map.js';
-import { defaultLaunchContext } from '../../core/launch-plan.js';
 import { manifest } from '../../core/manifest/index.js';
-import type { RepoKey, ServiceId } from '../../core/manifest/index.js';
+import type { ServiceId } from '../../core/manifest/index.js';
 import { composeSeedPlan } from '../../core/seed/compose-seed-plan.js';
 import type { SeedAddOn, SeedPlan, SeedProfile, SeedSelection } from '../../core/seed/types.js';
 import { makeStackApi } from '../../stack-api.js';
 import type { Runtime, StackApi } from '../../stack-api.js';
-import {
-  REPO_DEFAULT_DIR,
-  REPO_ENV_VAR,
-  resolveRepoRoot,
-  scriptCwd,
-} from '../../runtime/index.js';
-import type { ScriptContext } from '../../runtime/index.js';
 
 export default class StackUp extends BaseCommand {
   static description =
@@ -337,11 +329,13 @@ export default class StackUp extends BaseCommand {
       return;
     }
 
-    // 2. (optional) reset — DELEGATED to up.sh for M4 (native partial reset is M6).
-    // up.sh --reset truncates + re-seeds the running partial stack; the native seed
-    // below then applies the SELECTED profile/add-ons on top (idempotent upserts).
+    // 2. (optional) reset — NATIVE (M8 R4). Truncates the closure's DBs to an empty
+    // baseline; the native seed below then applies the SELECTED profile/add-ons on top
+    // (idempotent upserts). `withPlayback` MUST be threaded so `--with playback --reset`
+    // also truncates the playback trio (transcripts/insights/chat) — matching both
+    // `up.sh --reset --with-playback` and the dedicated `stack reset --with playback`.
     if (flags.reset) {
-      const reset = await api.reset(services);
+      const reset = await api.reset(services, { withPlayback });
       if (reset.code !== 0) this.exit(reset.code);
     }
 
@@ -440,96 +434,12 @@ export default class StackUp extends BaseCommand {
   }
 
   /**
-   * Assemble the in-process `Runtime` from the BaseCommand seams + the resolved
-   * workspace. The seams (`getLauncher`/`getMeshExec`/…) are injectable, so a test
-   * spies them on the prototype to drive the whole native path with fakes.
+   * Assemble the in-process `Runtime` — delegates to the shared
+   * `BaseCommand.buildNativeRuntime` (which wires the slot threading, repo-root
+   * resolution, and the M8 prep seams in one place, shared with `stack reset`).
    */
   private buildRuntime(flags: NativeFlags, profile: InstanceProfile): Runtime {
-    // Pinned repo roots from the per-repo flags (kebab key → manifest env-var key).
-    const pinned: Partial<Record<RepoKey, string>> = {};
-    for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
-      const value = (flags as unknown as Record<string, string | undefined>)[kebab];
-      if (value) pinned[REPO_ENV_VAR[kebab] as RepoKey] = value;
-    }
-    const ctx: ScriptContext = { dev: flags.dev, repoRoots: pinned };
-
-    // Resolve the FULL repo-root map (every manifest repo, defaulted via up.sh's
-    // precedence) so the launch planner can place any closure service's cwd.
-    const repoRoots = {} as Record<RepoKey, string>;
-    for (const repo of Object.keys(REPO_DEFAULT_DIR) as RepoKey[]) {
-      repoRoots[repo] = resolveRepoRoot(repo, ctx);
-    }
-
-    const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
-
-    // M7: the ONE slot-injection site. The `deriveInstance` profile (computed by the
-    // caller) maps the numeric slot to its port offset / project / state+snapshot
-    // dirs / container env. At slot 0 (offset 0) `portOverrides` is the base-port
-    // map and `meshOffset` is 0, so the launch context is byte-identical to the
-    // pre-M7 no-offset build — the regression guard.
-    //
-    // Apply the slot's env seam (SAGA_MESH_*_CONTAINER + SAGA_MESH_SNAPSHOTS_DIR) so
-    // the mesh-readiness resolver, the preflight owned-container set, and the
-    // snapshot store all target `soa-s<N>-<unit>-1`. No-op at slot 0.
-    this.applyInstanceEnv(profile);
-
-    // State dir (item 4): an EXPLICIT `--state-dir` wins; otherwise the slot's
-    // `profile.stateDir` (`/tmp/sds-synthetic` at slot 0, `…-s<N>` at slot > 0).
-    // `--state-dir` carries no oclif default, so an unset flag is `undefined` here.
-    const stateDir = flags['state-dir'] ?? profile.stateDir;
-
-    // Mirror up.sh's `${PINO_LOGGER_LEVEL:-info}` / `${…ISEXPRESSCONTEXT:-true}`:
-    // honour an ambient override, else the planner's defaults.
-    const launchContext = defaultLaunchContext({
-      repoRoots,
-      syntheticDevDir,
-      portOverrides: profile.portOverrides,
-      meshOffset: profile.meshOffset,
-      pinoLevel: process.env.PINO_LOGGER_LEVEL,
-      pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
-    });
-
-    return {
-      lane: 'stack',
-      launchContext,
-      soaRoot: repoRoots.SOA,
-      sagaDashRoot: repoRoots.SAGA_DASH,
-      // M7 slot threading: > 0 namespaces the mesh (soa-s<N>) + offsets its ports +
-      // writes the slot's stack-lane dash config. At slot 0 project is undefined and
-      // offset 0, so `up` is byte-identical to the pre-M7 build.
-      slot: profile.slot,
-      meshProject: profile.slot === 0 ? undefined : profile.project,
-      meshOffset: profile.meshOffset,
-      // Default the launcher state-dir from the slot when `--state-dir` isn't given
-      // (see the explicit-set detection below). At slot 0 both are
-      // `/tmp/sds-synthetic`, so this is a no-op today.
-      launcher: this.getLauncher(stateDir),
-      meshExec: this.getMeshExec(),
-      portProbe: this.getPortProbe(),
-      dashFs: this.getDashFs(),
-      prober: this.getProber(),
-      runner: this.getRunner(),
-      // M8 native prep pass: wiring `pgProbe` turns on R1 build → R2 provision → R3
-      // migrate between mesh-up and launch, so a fresh checkout/volume provisions +
-      // migrates itself (no prior up.sh run needed). All idempotent. `pgContainer`
-      // is left to the facade default (`meshContainer(postgres)`, which reads the
-      // slot's SAGA_MESH_POSTGRES_CONTAINER that applyInstanceEnv set above).
-      pgProbe: this.getPgProbe(),
-      // M8 --skip-prep: skips R1 (build/install) ONLY — R2 provision + R3 migrate
-      // still run (unlike up.sh's SKIP_PREP, which wraps the whole prep). Documented
-      // in runtime/prep.ts + the flag help.
-      skipPrep: flags['skip-prep'],
-      prepIsFresh: this.getPrepFreshCheck(),
-      prepDbGenerateScan: this.getDbGenerateScan(),
-      // Skip (warn, not fail) any service whose sibling repo isn't cloned — e.g. a
-      // missing coach checkout no longer reddens the whole stack.
-      repoDirExists: this.getRepoDirCheck(),
-      tunnel: false, // native path drives the stack lane; --tunnel forces the up.sh wrapper.
-      // reset/login delegate to up.sh through the M1 script path (resolution stays
-      // in BaseCommand.runScript); read-only exit handling so a delegate failure is
-      // surfaced via our own exit code, not double-propagated.
-      delegate: (plan) => this.runScript(plan, flags, { propagateExit: false }),
-    };
+    return this.buildNativeRuntime(flags, profile);
   }
 
   /** Print a structured failure when the native bring-up did not reach all-healthy. */

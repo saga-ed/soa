@@ -30,9 +30,10 @@ describe('composeSeedPlan — gate 1: partial-stack drop', () => {
     expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam']);
     expect(plan.online).toEqual([]);
 
-    // sessions / programs / scheduling / content / coach-pg dropped as service-inactive.
+    // sessions / programs / scheduling / content / coach-pg + coach-mongo dropped as
+    // service-inactive (coach-api owns two full-profile steps now — dedupe the services).
     const dropped = plan.skipped.filter((s) => s.reason === 'service-inactive');
-    expect(dropped.map((s) => s.service).sort()).toEqual(
+    expect([...new Set(dropped.map((s) => s.service))].sort()).toEqual(
       ['coach-api', 'content-api', 'programs-api', 'scheduling-api', 'sessions-api'].sort(),
     );
   });
@@ -61,6 +62,21 @@ describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () =
   // partial ⇒ still seed)" computation lives in the snapshot layer that decides
   // whether iam-api ∈ restored; it is not part of composeSeedPlan (M0).
   it.todo('snapshot layer: iam-api ∈ restored only when BOTH iam DBs restored (partial ⇒ kept)');
+
+  it('EXEMPTS a `databases: []` static-fixture step (coach-mongo) even when its service is restored', () => {
+    // A coach-api PG snapshot restore puts coach-api ∈ restored — that skips its
+    // PG-writing step (coach-pg) but MUST NOT skip the coach curriculum mongoimport
+    // (coach-mongo, `databases: []`), whose mongo data is NOT in the PG snapshot.
+    // up.sh's seed_coach_mongo_only always runs (else subjectData 500s post-restore).
+    const sel: SeedSelection = { profile: 'full' };
+    const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api', 'coach-api');
+    const plan = composeSeedPlan(sel, active, set('coach-api'));
+
+    // coach-mongo (databases: []) survives; coach-pg (databases:['coach_api']) skipped.
+    expect(ids(plan.offline)).toContain('coach-mongo');
+    expect(ids(plan.offline)).not.toContain('coach-pg');
+    expect(plan.skipped.filter((s) => s.reason === 'service-restored').map((s) => s.id)).toEqual(['coach-pg']);
+  });
 });
 
 describe('composeSeedPlan — gate 3: offline / online partition', () => {
@@ -70,9 +86,17 @@ describe('composeSeedPlan — gate 3: offline / online partition', () => {
     const plan = composeSeedPlan(sel, active, set());
 
     // qtf-demo (requires sessions-api) + content (requires content-api) defer online;
-    // scheduling + coach-pg (db:seed, no requiresServiceUp) stay offline. coach-pg
-    // trails content in the canonical run order.
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'coach-pg']);
+    // scheduling + coach-pg + coach-mongo (db:seed / docker-exec, no requiresServiceUp)
+    // stay offline. coach-pg + coach-mongo trail content in the canonical run order.
+    expect(ids(plan.offline)).toEqual([
+      'iam-dev-user',
+      'iam',
+      'sessions',
+      'programs',
+      'scheduling',
+      'coach-pg',
+      'coach-mongo',
+    ]);
     expect(ids(plan.online)).toEqual(['qtf-demo', 'content']);
     expect(plan.skipped).toEqual([]);
   });
@@ -89,14 +113,19 @@ describe('composeSeedPlan — service with no seed steps', () => {
 });
 
 describe('composeSeedPlan — selection refinements', () => {
-  it('addOns: playback adds transcripts/insights/chat offline steps', () => {
+  it('addOns: playback adds the provision (bootstrap+migrate) + fixture offline steps', () => {
     const sel: SeedSelection = { profile: 'roster', addOns: ['playback'] };
     const active = set('iam-api', 'sessions-api', 'transcripts-api', 'insights-api', 'chat-api');
     const plan = composeSeedPlan(sel, active, set());
+    // M8 R5: each playback DB is provisioned (bootstrap SQL + migrate) BEFORE its
+    // fixture seed, so the provision steps precede transcripts/insights/chat.
     expect(ids(plan.offline)).toEqual([
       'iam-dev-user',
       'iam',
       'sessions',
+      'transcripts-provision',
+      'insights-provision',
+      'chat-provision',
       'transcripts',
       'insights',
       'chat',

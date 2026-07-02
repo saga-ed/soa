@@ -11,7 +11,10 @@
  *      snapshot. `restored` is the set of fully-restored services (the snapshot
  *      layer computes "all of a service's DBs restored" → service ∈ restored;
  *      a PARTIAL restore leaves the service OUT, so the step is KEPT — matching
- *      up.sh:1727's `restored_db` all-DBs rule).
+ *      up.sh:1727's `restored_db` all-DBs rule). EXEMPTION: a `databases: []`
+ *      static-fixture step (e.g. the coach curriculum mongoimport, whose mongo
+ *      data is NOT in the service's PG snapshot) is KEPT even when restored — its
+ *      data isn't part of what a snapshot restores (up.sh always runs it).
  *   3. partition — split the survivors into `offline` / `online` by
  *      `requiresServiceUp` (online = deferred until those services are up).
  *
@@ -70,7 +73,12 @@ export function composeSeedPlan(
     }
 
     // Gate 2: service fully restored from a snapshot (partial restore ⇒ kept).
-    if (restored.has(step.service)) {
+    // EXEMPTION: a step with `databases: []` seeds a STATIC FIXTURE that lives OUTSIDE
+    // the service's tracked (PG) snapshot — e.g. the coach curriculum mongoimport
+    // (saga_local/wmlms_local mongo, NOT in coach-api's PG snapshot). up.sh's
+    // seed_coach_mongo_only ALWAYS runs, so a coach PG-snapshot restore must not skip
+    // it (else subjectData 500s post-restore). Only DB-writing steps are snapshot-gated.
+    if (restored.has(step.service) && step.databases.length > 0) {
       skipped.push({
         id,
         service: step.service,

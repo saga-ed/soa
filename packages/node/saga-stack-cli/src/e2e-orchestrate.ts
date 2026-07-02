@@ -437,8 +437,10 @@ export async function executeResolvedFlow(
     // 2. reset + seed (coupled; skipped on --skip-reset or when a prerequisite built the state).
     const effectiveReset = resolved.reset && !opts.skipReset;
     if (effectiveReset) {
-      deps.log('==> reset (delegated to up.sh) + native seed');
-      const reset = await deps.api.reset(services);
+      deps.log('==> reset (delegated to up.sh --legacy) + native seed');
+      // e2e keeps the whole-stack bash reset (up.sh --reset) for now — the native
+      // per-DB reset (M8 R4) is the `stack reset` default; e2e opts into `--legacy`.
+      const reset = await deps.api.reset(services, { legacy: true });
       if (reset.code !== 0) throw new FlowExecError(`reset failed (up.sh exit ${reset.code})`);
       if (resolved.seedSelection) {
         const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());

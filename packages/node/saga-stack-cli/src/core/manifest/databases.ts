@@ -127,12 +127,15 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     engine: 'postgres',
     // Major fix: profile-empty.sql creates a dedicated `ledger` role and
     // `CREATE DATABASE ledger_local OWNER ledger`; snapshot restore connects AS the
-    // owner, so ownerRole must be `ledger` (not ads_adm). The schema is managed by the
-    // ads-adm-db package (lazily populated). Reset via migrate-reset (drop + remigrate),
-    // NOT TRUNCATE — decision 2026-06-29.
-    // TODO(verify): confirm ledger_local's schema is migrated from packages/node/ads-adm-db
-    // (vs. a dedicated ledger-db package) when the migrate-reset runner lands (M3/M4).
-    migrate: { dir: 'packages/node/ads-adm-db', cmd: 'prisma migrate deploy' },
+    // owner, so ownerRole must be `ledger` (not ads_adm). Reset via migrate-reset
+    // (drop + remigrate), NOT TRUNCATE — decision 2026-06-29.
+    // VERIFIED 2026-07-01: ledger_local's TRUE schema owner is the dedicated
+    // `ledger-db` package (packages/node/ledger-db — its OWN prisma migrations under
+    // src/prisma/migrations, `db:deploy: prisma migrate deploy`, prisma.config reads
+    // DATABASE_URL), NOT ads-adm-db (which owns a DIFFERENT db, ads_adm_local, with
+    // its own db:seed). Pointing migrate here at ads-adm-db would rebuild ledger_local
+    // with ads-adm-db's schema + seed on `prisma migrate reset` — corrected below.
+    migrate: { dir: 'packages/node/ledger-db', cmd: 'prisma migrate deploy' },
     ownerRole: 'ledger',
     ownerPw: 'ledger',
     resettable: true,

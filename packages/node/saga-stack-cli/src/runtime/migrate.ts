@@ -34,12 +34,17 @@
  *     e.g. `packages/node/iam-db`); prisma resolves its `src/prisma/migrations`
  *     from the package's prisma.config.ts, exactly as up.sh's `( cd "$dir" && … )`.
  *
- * PER-PACKAGE DEDUP: ledger_local shares ads_adm_local's owning package
- * (`packages/node/ads-adm-db`); up.sh migrates that package ONCE (against the
- * default DB = ads_adm_local) and populates ledger_local lazily at runtime — it is
- * NOT a prep-migrate target. The manifest can't yet express "lazily populated", so
- * we dedup by owning `(repo, dir)`: the first DB in canonical order wins, the
- * later same-package DB (ledger_local) is skipped. See the report's fidelity notes.
+ * LEDGER (migrate-reset target): ledger_local is NOT a prep-migrate target —
+ * up.sh's prep chain (up.sh:1041-1073) has no ledger step. profile-empty.sql
+ * provisions it empty and its schema is (re)built by the R4 reset's migrate-reset
+ * (drop + remigrate) against its own owning package, `packages/node/ledger-db`
+ * (the VERIFIED schema owner — NOT ads-adm-db). R3 skips any `resetMode:'migrate-reset'`
+ * DB for that reason.
+ *
+ * PER-PACKAGE DEDUP: a general guard for two DBs sharing one owning `(repo, dir)`
+ * package — the first in canonical order migrates, the later same-package DB is
+ * skipped (up.sh migrates a package once). No current DB pair trips it (ledger_local
+ * and ads_adm_local now own DISTINCT packages), but it stays as a safety net.
  *
  * SLOT-AWARE + IDEMPOTENT: probes/creates target the resolved slot pg container;
  * `migrate deploy`/`db:deploy` are idempotent (apply-pending — a re-up on a
@@ -201,6 +206,16 @@ export async function migrateClosure(ctx: MigrateContext): Promise<MigrateResult
     }
     if (!def.meshProvisioned) {
       results.push({ db: id, branch: null, ok: true, skipped: 'not mesh-provisioned (playback — R5)' });
+      continue;
+    }
+    if (def.resetMode === 'migrate-reset') {
+      // ledger_local (resetMode:'migrate-reset') is NOT a prep-migrate target —
+      // up.sh's prep chain (up.sh:1041-1073) has NO ledger step. profile-empty.sql
+      // provisions it empty and its schema is (re)built by the R4 reset's
+      // migrate-reset (drop + remigrate) against its OWN owning package (ledger-db).
+      // Skipping it here keeps R3 faithful to up.sh now that ledger-db is a DISTINCT
+      // package (so the per-package dedup below no longer coincidentally catches it).
+      results.push({ db: id, branch: null, ok: true, skipped: 'migrate-reset target (schema via R4 reset, not prep)' });
       continue;
     }
 

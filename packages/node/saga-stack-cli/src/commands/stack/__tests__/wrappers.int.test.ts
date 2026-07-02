@@ -268,21 +268,23 @@ describe('stack seed — --with bundles map to up.sh seed add-ons', () => {
   });
 });
 
-describe('stack reset — --with playback also truncates the playback DBs', () => {
-  it('bare → up.sh --reset', async () => {
-    await StackReset.run([...WS], config);
+describe('stack reset --legacy — wraps up.sh --reset (the non-destructive escape)', () => {
+  // The default `stack reset` is now NATIVE (M8 R4 — asserted in stack-api.unit);
+  // the up.sh mapping lives behind `--legacy`.
+  it('bare --legacy → up.sh --reset', async () => {
+    await StackReset.run(['--legacy', ...WS], config);
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe(UP_SH);
     expect(calls[0].args).toEqual(['--reset']);
   });
 
-  it('--with playback → --reset --with-playback (== the old --with-playback)', async () => {
-    await StackReset.run(['--with', 'playback', ...WS], config);
+  it('--legacy --with playback → --reset --with-playback (== the old --with-playback)', async () => {
+    await StackReset.run(['--legacy', '--with', 'playback', ...WS], config);
     expect(calls[0].args).toEqual(['--reset', '--with-playback']);
   });
 
-  it('a bundle already in the default reset set (--with coach) is a no-op', async () => {
-    await StackReset.run(['--with', 'coach', ...WS], config);
+  it('--legacy with a bundle already in the default reset set (--with coach) is a no-op', async () => {
+    await StackReset.run(['--legacy', '--with', 'coach', ...WS], config);
     expect(calls[0].args).toEqual(['--reset']);
   });
 });

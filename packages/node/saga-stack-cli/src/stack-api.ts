@@ -22,9 +22,10 @@
  *  - `verify`— NATIVE. Reuses the M2 manifest-derived probe path (the injectable
  *              `HealthProber`), with a `tolerate` set.
  *  - `down`  — NATIVE. `ServiceLauncher.stopServices` (read pid files, kill).
- *  - `reset` — DELEGATED for M4. Native partial reset is M6; for M4 it delegates
- *              to `up.sh --reset` through the M1 script `delegate` (lower-risk
- *              than re-implementing the truncate + re-seed matrix). See `reset`.
+ *  - `reset` — NATIVE (M8 R4). Truncates the closure's DBs to an empty baseline
+ *              (preserving `_prisma_migrations`), migrate-resets ledger, drops
+ *              connectv3, then re-seeds the dev user via the seed path. `--legacy`
+ *              still routes to `up.sh --reset` (the non-destructive escape). See `reset`.
  *  - `login` — DELEGATED for M4. Browser-session minting is not ported natively;
  *              delegates to `up.sh --login [email]`. See `login`.
  *
@@ -41,6 +42,7 @@ import { launchOrder } from './core/launch-order.js';
 import { getMesh, getService, manifest as defaultManifest } from './core/manifest/index.js';
 import type { DbId, Lane, Manifest, MeshId, RepoKey, ServiceId } from './core/manifest/index.js';
 import type { HealthProbe } from './core/probe-plan.js';
+import { buildSeedRegistry } from './core/seed/profiles.js';
 import type { SeedPlan, SeedStep, SkipNote } from './core/seed/types.js';
 import {
   meshContainer,
@@ -48,6 +50,7 @@ import {
   migrateClosure,
   prepClosure,
   provisionDbs,
+  resetClosure,
   syncDashLocalDefaults,
 } from './runtime/index.js';
 import type {
@@ -62,6 +65,7 @@ import type {
   PortProbe,
   PrepResult,
   ProvisionResult,
+  ResetResult,
   Runner,
   ServiceLauncher,
   StopResult,
@@ -230,12 +234,37 @@ export interface DownResult {
   stopped: StopResult[];
 }
 
-/** The outcome of a DELEGATED `reset` / `login` (M4 wraps up.sh). */
+/** The outcome of a DELEGATED `login` (native login is a later milestone). */
 export interface DelegatedResult {
-  /** Always true for M4 (the op was delegated to up.sh). */
+  /** Always true (the op was delegated to up.sh). */
   delegated: boolean;
   /** up.sh's exit code. */
   code: number;
+}
+
+/** Per-call `reset` knobs (M8 R4). */
+export interface ResetOpts {
+  /** Route to `up.sh --reset` (the non-destructive bash escape) instead of the native runner. */
+  legacy?: boolean;
+  /** Also reset the opt-in playback DBs (transcripts/insights/chat). */
+  withPlayback?: boolean;
+}
+
+/** The outcome of a `reset` (M8 R4 — native by default, `--legacy` delegates to up.sh). */
+export interface ResetOutcome {
+  /** True iff routed to `up.sh --reset` (`--legacy`); false for the native runner. */
+  delegated: boolean;
+  /**
+   * 0 on success; non-zero when a CORE reset op (a truncate or the mongo drop) or the
+   * dev-user re-seed failed (or up.sh's code under `--legacy`). A failed ledger
+   * migrate-reset is warn-only and does NOT flip this (parity with up.sh's always-0
+   * reset), though it is still recorded ok:false in `native.dbs`.
+   */
+  code: number;
+  /** The native per-DB reset result (absent under `--legacy`). */
+  native?: ResetResult;
+  /** The dev-user re-seed result (absent under `--legacy`). */
+  seed?: SeedResult;
 }
 
 /** Per-call `up` knobs (reserved; tunnel/tunnelDomain live on the `Runtime`). */
@@ -254,7 +283,7 @@ export interface VerifyOpts {
 export interface StackApi {
   up(closureServices: ServiceId[], opts?: UpOpts): Promise<UpResult>;
   down(closureServices: ServiceId[]): Promise<DownResult>;
-  reset(closureServices: ServiceId[]): Promise<DelegatedResult>;
+  reset(closureServices: ServiceId[], opts?: ResetOpts): Promise<ResetOutcome>;
   seed(plan: SeedPlan): Promise<SeedResult>;
   verify(probes: HealthProbe[], opts?: VerifyOpts): Promise<VerifyResult>;
   login(user?: string): Promise<DelegatedResult>;
@@ -329,6 +358,20 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
   const { launchContext, lane, launcher, meshExec, portProbe, dashFs, prober, runner } = runtime;
   const tokens = launchContext.tokens as unknown as Record<string, string | undefined>;
 
+  // M8 R4/R5: the SLOT-RESOLVED mesh containers, resolved ONCE (env-aware
+  // `meshContainer` reads the slot's `SAGA_MESH_*_CONTAINER`, set by
+  // `applyInstanceEnv` before this facade is built). `pgContainer` honours an
+  // explicit runtime override (as `up`'s prep pass does). These drive the native
+  // reset (R4) and the docker-exec seed steps' `${SAGA_MESH_*_CONTAINER}` tokens
+  // (R5 — coach curriculum / playback bootstrap), so both target the right slot.
+  const pgContainer = runtime.pgContainer ?? meshContainer(getMesh('postgres', manifest));
+  const mongoContainer = meshContainer(getMesh('connect-mongo', manifest));
+  const seedTokens: Record<string, string | undefined> = {
+    ...tokens,
+    SAGA_MESH_POSTGRES_CONTAINER: pgContainer,
+    SAGA_MESH_CONNECT_MONGO_CONTAINER: mongoContainer,
+  };
+
   /** Resolve a seed step's cwd: owning service's repo root + step.cwd. */
   function seedCwd(step: SeedStep): string {
     // up.sh's content demo-polls runs from the synthetic-dev tool dir ($SCRIPT_DIR),
@@ -356,9 +399,29 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
     }
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(step.env.vars)) {
-      out[k] = expandTokens(v, tokens, `seed.${step.id}.env.${k}`);
+      out[k] = expandTokens(v, seedTokens, `seed.${step.id}.env.${k}`);
     }
     return out;
+  }
+
+  /**
+   * Resolve a seed step's command argv, expanding `${TOKEN}`s (incl. the M8 R5
+   * `${SAGA_MESH_*_CONTAINER}` slot containers) so a docker-exec step targets the
+   * right slot. Steps with no tokens (the pnpm db:seed family) pass through verbatim.
+   */
+  function seedArgs(step: SeedStep): string[] {
+    return step.command.map((a) => expandTokens(a, seedTokens, `seed.${step.id}.cmd`));
+  }
+
+  /**
+   * Resolve a seed step's `stdinFile` (M8 R5) to an absolute path: expand tokens,
+   * then join to the step's resolved cwd unless already absolute. Undefined ⇒ no
+   * stdin redirect (the child inherits the parent stdin).
+   */
+  function seedStdin(step: SeedStep): string | undefined {
+    if (step.stdinFile === undefined) return undefined;
+    const p = expandTokens(step.stdinFile, seedTokens, `seed.${step.id}.stdinFile`);
+    return p.startsWith('/') ? p : joinPath(seedCwd(step), p);
   }
 
   /**
@@ -369,7 +432,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
    * unhandled rejection (defense-in-depth for the repo-absent skip guard).
    */
   async function runSeedStep(step: SeedStep, phase: 'offline' | 'online', ran: SeedResult['ran']): Promise<boolean> {
-    const { command, args } = head(step.command);
+    const { command, args } = head(seedArgs(step));
     let code: number;
     try {
       ({ code } = await runner.run({
@@ -377,19 +440,29 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         command,
         args,
         env: seedEnv(step),
+        // M8 R5: pipe `stdinFile` (coach curriculum / playback bootstrap) to stdin.
+        stdinFile: seedStdin(step),
         stdio: 'inherit',
       }));
     } catch {
       code = -1; // spawn failure (ENOENT etc.) — treat as non-zero, honour failureMode
     }
 
-    // Optional tail steps (content demo-polls / legacy-poll) are always warn-mode;
+    // Optional tail steps (content demo-polls / legacy-poll; the coach curriculum's
+    // second mongoimport; the playback bootstrap's migrate) are always warn-mode;
     // run them best-effort after the main step regardless of the main exit code —
     // and a spawn throw there is likewise swallowed (they never fail the seed).
     for (const sub of step.optionalSteps ?? []) {
-      const sh = head(sub.command);
+      const sh = head(seedArgs(sub));
       try {
-        await runner.run({ cwd: seedCwd(sub), command: sh.command, args: sh.args, env: seedEnv(sub), stdio: 'inherit' });
+        await runner.run({
+          cwd: seedCwd(sub),
+          command: sh.command,
+          args: sh.args,
+          env: seedEnv(sub),
+          stdinFile: seedStdin(sub),
+          stdio: 'inherit',
+        });
       } catch {
         // best-effort tail; a missing script/dir is a no-op warning, never fatal.
       }
@@ -564,16 +637,57 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       return { stopped };
     },
 
-    async reset(_services: ServiceId[]): Promise<DelegatedResult> {
-      // M4: native partial reset is M6. Delegate to `up.sh --reset` (whole-stack
-      // truncate + re-seed) via the M1 script path — lower-risk than porting the
-      // per-DB truncate/migrate-reset matrix now. `_services` is accepted for the
-      // future native partial reset but is unused in the delegated path.
-      if (!runtime.delegate) {
-        throw new Error('stack reset: native partial reset is M6; no up.sh delegate wired into this Runtime');
+    async reset(services: ServiceId[], opts: ResetOpts = {}): Promise<ResetOutcome> {
+      // `--legacy`: the non-destructive bash escape — route to `up.sh --reset`
+      // through the M1 script path (kept indefinitely per the plan's non-destructive
+      // guarantee). Requires a wired delegate.
+      if (opts.legacy) {
+        if (!runtime.delegate) {
+          throw new Error('stack reset --legacy: no up.sh delegate wired into this Runtime');
+        }
+        const code = await runtime.delegate(flagMap.reset({ withPlayback: opts.withPlayback }));
+        return { delegated: true, code };
       }
-      const code = await runtime.delegate(flagMap.reset({}));
-      return { delegated: true, code };
+
+      // M8 R4 — NATIVE reset: truncate the closure's DBs to an empty baseline
+      // (preserving `_prisma_migrations`), migrate-reset ledger, drop connectv3,
+      // then re-seed the dev user via the EXISTING seed path. Slot-aware: the
+      // resolved slot containers + offset (computed at facade scope).
+      const dbs = neededDbs(services, manifest);
+      const native = await resetClosure({
+        dbs,
+        pgContainer,
+        mongoContainer,
+        repoRoots: launchContext.repoRoots,
+        meshOffset: runtime.meshOffset,
+        withPlayback: opts.withPlayback,
+        runner,
+        manifest,
+      });
+
+      // Dev-user re-seed (up.sh:1695-1696) through the existing seed path — reuse the
+      // canonical `iam-dev-user` SeedStep so its env handling stays in ONE place.
+      // Only when iam-api is in the reset closure (its DBs were just truncated).
+      let seed: SeedResult | undefined;
+      if (services.includes('iam-api')) {
+        const ran: SeedResult['ran'] = { offline: [], online: [] };
+        const devUser = buildSeedRegistry(manifest)['iam-dev-user'];
+        const ok = await runSeedStep(devUser, 'offline', ran);
+        seed = { ok, ran, skipped: [], ...(ok ? {} : { failed: devUser.id }) };
+      }
+
+      // EXIT-CODE CONTRACT (M8 fold-in): up.sh's reset always exits 0 (per-DB failures
+      // are warn-only), so a wrapper `stack reset && stack up` must not break where
+      // up.sh didn't. We keep native reset's exit code MEANINGFUL for real data
+      // failures — a failed TRUNCATE or the mongo drop (the CORE reset set) or the
+      // dev-user re-seed DOES flip the code to 1 — but a failed ledger MIGRATE-RESET is
+      // treated as a WARNING on the exit code (still recorded ok:false in `native.dbs`
+      // and surfaced by the command). Rationale: the most realistic divergence is a
+      // ledger migrate hiccup while all the core truncates + the mongo drop succeeded;
+      // that end-state (empty core DBs) matches up.sh, so it should not fail the command.
+      const coreOk = native.dbs.every((d) => d.action === 'migrate-reset' || d.ok);
+      const code = coreOk && (seed?.ok ?? true) ? 0 : 1;
+      return { delegated: false, code, native, seed };
     },
 
     async seed(plan: SeedPlan): Promise<SeedResult> {

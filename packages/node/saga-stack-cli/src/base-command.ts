@@ -28,7 +28,9 @@ import type { Interfaces } from '@oclif/core';
 import { SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import type { ScriptPlan } from './core/flag-map.js';
+import { defaultLaunchContext } from './core/launch-plan.js';
 import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
+import type { Runtime } from './stack-api.js';
 import {
   buildRepoEnv,
   makeRealDashFs,
@@ -39,9 +41,11 @@ import {
   makeRealProber,
   makeRealRunner,
   makeRealSnapshotIO,
+  resolveRepoRoot,
   resolveScript,
   scriptCwd,
   stopServices,
+  REPO_DEFAULT_DIR,
   REPO_ENV_VAR,
 } from './runtime/index.js';
 import type {
@@ -68,6 +72,17 @@ export type WorkspaceFlags = {
   dev?: string;
   soa?: string;
 } & Partial<Record<RepoKey, string>>;
+
+/**
+ * The flags `buildNativeRuntime` reads: the workspace flags plus the optional
+ * `--state-dir` (launcher pid/log dir) and `--skip-prep` (M8 R1 skip). Every
+ * native command's parsed flags satisfy this (all spread `baseFlags`; `--skip-prep`
+ * is undefined for commands that don't declare it, which the prep pass tolerates).
+ */
+export type NativeRuntimeFlags = WorkspaceFlags & {
+  'state-dir'?: string;
+  'skip-prep'?: boolean;
+};
 
 export abstract class BaseCommand extends Command {
   static baseFlags = baseFlags;
@@ -279,6 +294,76 @@ export abstract class BaseCommand extends Command {
    */
   protected getRepoDirCheck(): (dir: string) => boolean {
     return (dir: string) => existsSync(dir);
+  }
+
+  /**
+   * Assemble the in-process native `Runtime` (M4 + M8) from the shared BaseCommand
+   * seams + a resolved slot `InstanceProfile`. Shared by every native command that
+   * drives `makeStackApi` (`stack up`, `stack reset`, …) so the slot threading
+   * (ports/project/container-env), repo-root resolution, and the M8 prep seams are
+   * wired in ONE place. The seams (`getLauncher`/`getMeshExec`/`getPgProbe`/…) are
+   * injectable, so a test spies them on the prototype to drive the whole native path
+   * with fakes. At slot 0 the profile is the byte-identical no-offset default.
+   */
+  protected buildNativeRuntime(flags: NativeRuntimeFlags, profile: InstanceProfile): Runtime {
+    // Pinned repo roots from the per-repo flags (kebab key → manifest env-var key).
+    const pinned: Partial<Record<ManifestRepoKey, string>> = {};
+    for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
+      const value = (flags as unknown as Record<string, string | undefined>)[kebab];
+      if (value) pinned[REPO_ENV_VAR[kebab] as ManifestRepoKey] = value;
+    }
+    const ctx: ScriptContext = { dev: flags.dev, repoRoots: pinned };
+
+    // Resolve the FULL repo-root map (every manifest repo, defaulted via up.sh's
+    // precedence) so the launch planner can place any closure service's cwd.
+    const repoRoots = {} as Record<ManifestRepoKey, string>;
+    for (const repo of Object.keys(REPO_DEFAULT_DIR) as ManifestRepoKey[]) {
+      repoRoots[repo] = resolveRepoRoot(repo, ctx);
+    }
+
+    const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
+
+    // M7: the ONE slot-injection site — apply the slot's env seam so the mesh
+    // resolver, preflight owned-container set, and snapshot store target
+    // `soa-s<N>-<unit>-1`. No-op at slot 0.
+    this.applyInstanceEnv(profile);
+
+    const stateDir = flags['state-dir'] ?? profile.stateDir;
+
+    const launchContext = defaultLaunchContext({
+      repoRoots,
+      syntheticDevDir,
+      portOverrides: profile.portOverrides,
+      meshOffset: profile.meshOffset,
+      pinoLevel: process.env.PINO_LOGGER_LEVEL,
+      pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
+    });
+
+    return {
+      lane: 'stack',
+      launchContext,
+      soaRoot: repoRoots.SOA,
+      sagaDashRoot: repoRoots.SAGA_DASH,
+      slot: profile.slot,
+      meshProject: profile.slot === 0 ? undefined : profile.project,
+      meshOffset: profile.meshOffset,
+      launcher: this.getLauncher(stateDir),
+      meshExec: this.getMeshExec(),
+      portProbe: this.getPortProbe(),
+      dashFs: this.getDashFs(),
+      prober: this.getProber(),
+      runner: this.getRunner(),
+      // M8 native prep pass (R1 build → R2 provision → R3 migrate on `up`; harmless
+      // on the other native commands, which never invoke the prep pass).
+      pgProbe: this.getPgProbe(),
+      skipPrep: flags['skip-prep'],
+      prepIsFresh: this.getPrepFreshCheck(),
+      prepDbGenerateScan: this.getDbGenerateScan(),
+      repoDirExists: this.getRepoDirCheck(),
+      tunnel: false,
+      // reset --legacy / login delegate to up.sh through the M1 script path.
+      delegate: (plan) => this.runScript(plan, flags, { propagateExit: false }),
+    };
   }
 
   /**

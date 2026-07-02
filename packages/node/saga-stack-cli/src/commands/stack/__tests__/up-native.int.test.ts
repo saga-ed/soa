@@ -221,14 +221,36 @@ describe('stack up --only — native partial-stack', () => {
     expect(launches.map((s) => s.id)).toEqual(['iam-api']);
   });
 
-  it('--reset delegates `up.sh --reset` after bring-up, then native seed still runs', async () => {
+  it('--reset natively truncates the closure DBs (no up.sh), then native seed still runs', async () => {
     await StackUp.run(['--only', 'iam-api', '--reset', ...WS], config);
-    const upSh = runs.filter((r) => r.command.endsWith('up.sh'));
-    expect(upSh).toHaveLength(1);
-    // flagMap.reset() is a flag-only invocation (no leading `up` verb).
-    expect(upSh[0].args).toEqual(['--reset']);
+    // M8 R4: `--reset` is NATIVE now — never delegates to up.sh.
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+    // TRUNCATE ran as docker-exec psql, preserving _prisma_migrations (the DO block).
+    const truncs = runs.filter(
+      (r) =>
+        r.command === 'docker' &&
+        r.args.includes('psql') &&
+        r.args.includes('-c') &&
+        r.args[r.args.indexOf('-c') + 1].includes("tablename <> '_prisma_migrations'"),
+    );
+    expect(truncs.length).toBeGreaterThan(0);
     // native seed steps still ran (roster baseline).
     expect(runs.some((r) => r.args.some((a) => a.includes('seed-dev-user')))).toBe(true);
+  });
+
+  it('--with playback --reset threads withPlayback into the native reset (playback DBs truncated)', async () => {
+    // BLOCKER 2: the up-path reset must forward `withPlayback` so `--with playback
+    // --reset` also truncates the playback trio (transcripts/insights/chat). Without
+    // the thread, resetClosure would skip them (meshProvisioned:false) even though
+    // --with playback pulled them into the closure — diverging from up.sh --reset
+    // --with-playback and from `stack reset --with playback`.
+    await StackUp.run(['--with', 'playback', '--reset', ...WS], config);
+    const truncatedDbs = runs
+      .filter((r) => r.command === 'docker' && r.args.includes('psql') && r.args.includes('-d'))
+      .map((r) => r.args[r.args.indexOf('-d') + 1]);
+    expect(truncatedDbs).toContain('transcripts_local');
+    expect(truncatedDbs).toContain('insights_local');
+    expect(truncatedDbs).toContain('chat_local');
   });
 });
 

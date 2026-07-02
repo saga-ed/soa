@@ -65,6 +65,15 @@ export interface SeedStep {
   cwd: string;
   /** Command argv (e.g. `['pnpm', 'db:seed']`). */
   command: string[];
+  /**
+   * M8 R5 — optional stdin redirection (the `< file` up.sh idiom `command:string[]`
+   * can't express). A path resolved relative to the step's resolved cwd (or absolute)
+   * that the seed runner pipes to the child's stdin. Models the coach curriculum
+   * `mongoimport … < content_coach.json` (up.sh:1789-1794) and the playback
+   * `psql < local-bootstrap.sql` (up.sh:941-942). `${TOKEN}`s in the path are
+   * expanded like `command`/`env`. Absent ⇒ the child inherits the parent stdin.
+   */
+  stdinFile?: string;
   /** How the step's env is supplied (connection data derived from the manifest). */
   env: SeedEnv;
   /** Non-empty ⇒ the step is `online` (deferred until these services are up). */

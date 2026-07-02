@@ -170,7 +170,7 @@ describe('migrateClosure — canonical order + the three-way branch (R3)', () =>
     expect(byCwd('sis-db')?.env.SIS_DATABASE_URL).toBe('postgresql://sis:sis@localhost:6432/sis_db');
   });
 
-  it('ads_adm_local + ledger_local: package migrated ONCE (ledger deduped, not a prep target)', async () => {
+  it('ads_adm_local migrates; ledger_local is SKIPPED (migrate-reset target, not a prep-migrate)', async () => {
     const { runner, calls } = fakeRunner();
     const res = await migrateClosure({
       ...base,
@@ -178,12 +178,13 @@ describe('migrateClosure — canonical order + the three-way branch (R3)', () =>
       runner,
       probe: fakeProbe(),
     });
-    // ads_adm_local migrated (FIXED prisma migrate deploy); ledger_local skipped (same package).
+    // ads_adm_local migrated (FIXED prisma migrate deploy); ledger_local skipped —
+    // up.sh never prep-migrates ledger (its schema is (re)built by the R4 reset).
     expect(res.dbs.find((d) => d.db === 'ads_adm_local')?.branch).toBe('fixed');
     const ledger = res.dbs.find((d) => d.db === 'ledger_local');
     expect(ledger?.branch).toBeNull();
-    expect(ledger?.skipped).toMatch(/duplicate package/);
-    // exactly ONE migrate ran, in the ads-adm-db package.
+    expect(ledger?.skipped).toMatch(/migrate-reset target/);
+    // exactly ONE migrate ran, in the ads-adm-db package (ledger-db is NOT prep-migrated).
     expect(calls).toHaveLength(1);
     expect(calls[0].cwd).toBe('/dev/student-data-system/packages/node/ads-adm-db');
   });

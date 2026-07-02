@@ -18,6 +18,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { closeSync, openSync } from 'node:fs';
 
 /**
  * A fully-resolved request to run one external script. The command layer
@@ -43,6 +44,15 @@ export interface ScriptInvocation {
    * Defaults to `'inherit'` in the real runner.
    */
   stdio?: 'inherit';
+  /**
+   * M8 R5 — stdin redirection from a file (the `< file` up.sh idiom the
+   * `command:string[]` model can't express). When set, the real runner opens the
+   * file read-only and wires it to the child's stdin (`[<fd>, 'inherit',
+   * 'inherit']`), so a `docker exec -i … mongoimport` / `psql < bootstrap.sql`
+   * reads the file while stdout/stderr still stream to the user's TTY. A fake
+   * runner just records the path (no fd opened). Absent ⇒ stdin follows `stdio`.
+   */
+  stdinFile?: string;
 }
 
 /** The result of running a script: just the process exit code. */
@@ -70,13 +80,41 @@ export function makeRealRunner(): Runner {
   return {
     run(spec: ScriptInvocation): Promise<RunResult> {
       return new Promise<RunResult>((resolve, reject) => {
+        // M8 R5: with `stdinFile`, open the file read-only and hand its fd as the
+        // child's stdin while stdout/stderr stay inherited (the `< file` redirect).
+        // A missing file throws here (openSync ENOENT) → the promise rejects, which
+        // the seed runner folds into a non-zero code so a warn-mode step degrades.
+        let stdinFd: number | undefined;
+        if (spec.stdinFile !== undefined) {
+          stdinFd = openSync(spec.stdinFile, 'r');
+        }
+        const stdio: ('inherit' | number)[] | 'inherit' =
+          stdinFd !== undefined ? [stdinFd, 'inherit', 'inherit'] : (spec.stdio ?? 'inherit');
         const child = spawn(spec.command, spec.args, {
           cwd: spec.cwd,
           env: { ...process.env, ...spec.env },
-          stdio: spec.stdio ?? 'inherit',
+          stdio,
         });
-        child.on('error', reject);
-        child.on('close', (code) => resolve({ code: code ?? 0 }));
+        // Node does NOT auto-close a raw fd passed in the stdio array — close it
+        // once the child has been wired up (spawn has already dup'd it).
+        const closeStdin = (): void => {
+          if (stdinFd !== undefined) {
+            try {
+              closeSync(stdinFd);
+            } catch {
+              /* already closed */
+            }
+            stdinFd = undefined;
+          }
+        };
+        child.on('error', (err) => {
+          closeStdin();
+          reject(err);
+        });
+        child.on('close', (code) => {
+          closeStdin();
+          resolve({ code: code ?? 0 });
+        });
       });
     },
   };

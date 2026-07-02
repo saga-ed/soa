@@ -6,6 +6,42 @@
 > **oracle** for the new flow — what *correct* behavior is — plus where reality currently
 > falls short. Parent: soa#214 · tracker: soa#221 (Flow content → new scenarios).
 
+## Reference legend (how to read the shorthand in this doc)
+
+The body is deliberately terse; every coded reference below is resolvable here.
+
+- **Design-decision codes — `D8`, `D17`** → the resolved-decisions registry
+  `program-hub/specs/context/decisions.md` (headed `## D<n> — …`). Used here:
+  - **D8** — *"Slot regeneration is a known break-deep-links operation."* Slots are
+    **soft-deactivated** (`deactivatedAt`), never hard-deleted, so a re-mint preserves
+    started-session identity and deep links.
+  - **D17** — *"Timezone is owned at the Schedule level."* Exactly one authoritative,
+    non-null IANA tz per `Schedule`; slots/rules carry none and derive it.
+    `UpsertSchedule.timezone` is **required** (fail-loud if ever absent, never a server-tz
+    fallback); `Program.timezone` is only a creation-time prefill.
+- **Issue / PR references:**
+  - **soa#214** — parent effort: the OCLIF CLI for synthetic-dev (saga-stack-cli).
+  - **soa#221** — the saga-stack-cli work tracker; this flow is its
+    *"Flow content → new scenarios"* item.
+  - **saga-dash#226** — *"the VARIES modeling gap"*: the live `createVariesByDayType`
+    path emits **no recurring `slot.created`** for a day-type schedule's base cadence, so
+    `VARIES_BY_DAY_TYPE` schedules don't drive sessions the way weekly ones do. Fully
+    unpacked in **§5**.
+  - **#175 / #189** (branch `feat/rotation-slots-unified`) — the rotation-slots
+    implementation PRs (Kevin Zhang) that introduced the A/B mechanics dissected in **§3**.
+- **`P0c`** — the scheduling **per-date-overrides** workstream/phase; it added the
+  `SlotOccurrenceCancellation`, `OccurrenceTimeOverride`, and `ManualAddition` models (§2).
+- **"stage-N" (e.g. stage-5/6)** — the **saga-dash journey e2e stages**
+  (`saga-dash/apps/web/dash/e2e/journey/*.e2e.test.ts`): **stage-5 = schedule**,
+  **stage-6 = sessions**. Their tRPC-direct `rpcGet` + `expect.poll` pattern is the
+  assertion precedent this flow mirrors (see §6, and `02-flow-design.md` §4).
+- **rrule syntax** (`FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=…`, and `rrule=''`) — RFC 5545 iCalendar
+  recurrence rules. `rrule=''` = a **blank placeholder** that fires no occurrences.
+- **`:NN` after a filename** (e.g. `schema.prisma:101`) — a **line number** in the file
+  named at the start of that section.
+
+---
+
 ## 0. The one-sentence oracle
 
 An **"A/B switch between treatments"** is a program **period with ≥2 rotations**, where

@@ -7,6 +7,12 @@
 > (weekday-driven)**. Parent: soa#214 · tracker: soa#221 (Flow content → new scenarios).
 >
 > **This doc is the review gate.** Get it reviewed before mass-authoring the seed + spec.
+>
+> **Shorthand:** coded references (`D<n>` design decisions, issue/PR refs, `stage-N` e2e
+> stages, rrule syntax) are resolved in `01-understanding.md` → *Reference legend*.
+> `D<n>` codes point at `program-hub/specs/context/decisions.md`. treatmentKind is
+> **triple-cased**: `CONNECT|NON_TUTORED` (wire/API), `TUTORING|NON_TUTORED` (Prisma/DB),
+> `tutoring|non_tutored` (event) — assert the **wire** value.
 
 ---
 

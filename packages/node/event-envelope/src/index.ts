@@ -33,7 +33,7 @@ export const EventEnvelopeSchema = z
         aggregateType: z.string().min(1),
         aggregateId: z.string().min(1),
         occurredAt: z.string().datetime({ offset: true }),
-        payload: z.record(z.unknown()),
+        payload: z.record(z.string(), z.unknown()),
         meta: EventEnvelopeMetaSchema.optional(),
     })
     .strip();

@@ -57,9 +57,9 @@ export class MockConfigManager implements IConfigManager {
       // Generate mock data based on the Zod type
       if (def instanceof z.ZodString) {
         input[key] = def.minLength || 0 ? 'mock'.padEnd(def.minLength || 3, 'x') : 'mock';
-      } else if (def instanceof z.ZodNumber || def instanceof z.ZodEffects) {
+      } else if (def instanceof z.ZodNumber || def instanceof z.ZodPipe) {
         input[key] = '42'; // String for preprocessed numbers
-      } else if (def instanceof z.ZodBoolean || def instanceof z.ZodEffects) {
+      } else if (def instanceof z.ZodBoolean) {
         input[key] = 'true'; // String for preprocessed booleans
       } else if (def instanceof z.ZodEnum) {
         input[key] = def.options[0];

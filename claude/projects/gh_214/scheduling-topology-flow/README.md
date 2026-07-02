@@ -31,12 +31,16 @@ This is the concrete instance of the "author *new* flow scenarios" work.
   (design → seed → author → run). Decisions locked: purpose-built A/B seed (reveal
   reality); `varies_by_day_type` weekday pattern first. **Read this to pick up the work.**
 - `01-understanding.md` — the synthesized understanding (from parallel code research). ✅ **done**
-- `02-flow-design.md` — the concrete flow scenario + expected behavior + assertions. _(next — pending a design decision, see 01 §8)_
+- `02-flow-design.md` — the concrete flow scenario + expected behavior + assertions. ✅ **drafted (review gate)**
 
 ## Status
-**Step 1 (understanding) complete** — `01-understanding.md` synthesizes three code deep-dives
-into the oracle (what correct A/B-treatment→session behavior is) + the observable assertion
-surfaces. **Key finding:** the multi-rotation slot-scoped A/B-treatment→session path is
-contract- and engine-supported but **not seeded or tested end-to-end today** (the VARIES
-modeling gap / saga-dash#226) — so this flow is net-new coverage and likely drives closing
-that gap. Next: pick the flow scenario (`01-understanding.md` §8 open decisions) → `02-flow-design.md`.
+**Step 2 (flow design) drafted — awaiting review.** `02-flow-design.md` pins the locked
+scenario (weekday `varies_by_day_type`, Rotation A=Mon/Wed=`CONNECT`, B=Fri=`NON_TUTORED`,
+one pod in both) into a precise oracle table, the **API-built** build sequence (exact tRPC
+calls: `periods.update`/`setRotationConfig` → `schedules.upsert` → poll `slots.list` →
+`podAssignments.upsert` → assert `sessions.dayList`), the assertion surface, and a **reveal
+plan** (R1 "does the weekday variant mint 2 slot-scoped slots" is the hinge — green = net-new
+proof, red = a sharper restatement of saga-dash#226). Step 1 (understanding) remains the
+oracle: the multi-rotation slot-scoped A/B path is contract/engine-supported but **not seeded
+or tested end-to-end today** (VARIES modeling gap / saga-dash#226). Next: review `02` §7 open
+questions → build seed + `flows.json` + spec → run + reveal.

@@ -29,6 +29,7 @@ import type {
   LaunchResult,
   LaunchSpec,
   MeshExec,
+  PgProbe,
   PortProbe,
   ProbeResult,
   RunResult,
@@ -49,6 +50,7 @@ let launches: LaunchSpec[];
 let runs: ScriptInvocation[];
 let logged: string[];
 let warned: string[];
+let launcherSpy: ReturnType<typeof vi.spyOn>;
 
 /** Install fakes for every native-path seam. Ids in `launchFail` answer health-down. */
 function installSeams(launchFail: Set<string> = new Set()): void {
@@ -78,13 +80,26 @@ function installSeams(launchFail: Set<string> = new Set()): void {
     },
   };
 
+  // M7 slot > 0 native-prep seams — mocked so a `--slot N` run's provision/migrate
+  // pass is a hermetic no-op (DBs already present + migrated, repos fresh). Harmless
+  // at slot 0, where buildStackContext never wires them into the runtime.
+  const pgProbe: PgProbe = {
+    async databaseExists(): Promise<boolean> { return true; },
+    async hasMigrationsTable(): Promise<boolean> { return true; },
+    async publicTableCount(): Promise<number> { return 1; },
+  };
+
   const proto = BaseCommand.prototype as unknown as Record<string, () => unknown>;
-  vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
+  launcherSpy = vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
   vi.spyOn(proto, 'getMeshExec').mockReturnValue(meshExec);
   vi.spyOn(proto, 'getPortProbe').mockReturnValue(portProbe);
   vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
   vi.spyOn(proto, 'getProber').mockReturnValue(prober);
   vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
+  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pgProbe);
+  vi.spyOn(proto, 'getPrepFreshCheck').mockReturnValue(() => true);
+  vi.spyOn(proto, 'getDbGenerateScan').mockReturnValue(() => []);
+  vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
 }
 
 /** Workspace flags: stub saga-dash (no flows.json → bundled fallback) + real soa. */
@@ -240,5 +255,82 @@ describe('e2e run — native orchestration (stack lane)', () => {
     await expect(
       E2eRun.run(['journey', '--headed', '--headless', ...ws()], config),
     ).rejects.toMatchObject({ message: expect.stringContaining('mutually exclusive') });
+  });
+});
+
+describe('e2e run — slot isolation (M7)', () => {
+  /** Pull the emitted `--output-json` dry-run object out of the logged lines. */
+  function dryRunJson(): Record<string, unknown> {
+    const line = logged.find((l) => l.trim().startsWith('{'));
+    if (!line) throw new Error(`no JSON emitted; logged: ${logged.join('\\n')}`);
+    return JSON.parse(line) as Record<string, unknown>;
+  }
+
+  it('--slot 1 --dry-run: no hard-error (slotAware), OFFSET service URLs, excluded service dropped', async () => {
+    // The full journey closure includes ads-adm-api (attendance) — an excluded
+    // service at slot > 0. --slot 1 must be ACCEPTED (was a hard-error before slotAware).
+    await E2eRun.run(['journey', '--slot', '1', '--dry-run', '--output-json', ...ws()], config);
+
+    const json = dryRunJson();
+    const closure = json.closure as { services: string[] };
+    const env = json.env as Record<string, string>;
+
+    // excluded literal-port service dropped from the slot's closure.
+    expect(closure.services).not.toContain('ads-adm-api');
+    expect(closure.services).toContain('iam-api');
+    expect(closure.services).toContain('scheduling-api');
+
+    // every injected Playwright service URL carries the +1000 offset.
+    expect(env.PLAYWRIGHT_BASE_URL).toBe('http://localhost:9900'); // saga-dash → :9900
+    expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:4010');
+    expect(env.PLAYWRIGHT_SCHEDULING_URL).toBe('http://localhost:4008');
+    expect(env.PLAYWRIGHT_SESSIONS_URL).toBe('http://localhost:4007');
+  });
+
+  it('--slot 0 --dry-run: BASE service URLs, excluded service PRESENT (byte-identical)', async () => {
+    await E2eRun.run(['journey', '--slot', '0', '--dry-run', '--output-json', ...ws()], config);
+
+    const json = dryRunJson();
+    const closure = json.closure as { services: string[] };
+    const env = json.env as Record<string, string>;
+
+    // nothing excluded at slot 0 — the full closure, ads-adm-api included.
+    expect(closure.services).toContain('ads-adm-api');
+
+    // base ports (the split-brain guard — slot 0 stays on the defaults).
+    expect(env.PLAYWRIGHT_BASE_URL).toBe('http://localhost:8900');
+    expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:3010');
+    expect(env.PLAYWRIGHT_SCHEDULING_URL).toBe('http://localhost:3008');
+    expect(env.PLAYWRIGHT_SESSIONS_URL).toBe('http://localhost:3007');
+  });
+
+  it('--slot 1 real run: launches EXCLUDE the literal-port service, Playwright env drives the OFFSET URLs, reset is native (not up.sh)', async () => {
+    await E2eRun.run(
+      ['journey', '--through', 'attendance', '--headless', '--slot', '1', ...ws()],
+      config,
+    );
+
+    // ads-adm-api (required by the attendance stage) is EXCLUDED at slot 1 — never launched.
+    expect(launches.map((s) => s.id)).not.toContain('ads-adm-api');
+    // …but the slottable backends still come up on their offset ports.
+    expect(launches.map((s) => s.id)).toContain('iam-api');
+    const iam = launches.find((s) => s.id === 'iam-api');
+    expect(iam?.healthUrl).toContain(':4010'); // offset launch, not :3010
+
+    // the reset routed NATIVELY (slot-aware) — NOT the slot-0-hardcoded up.sh --reset.
+    expect(runs.some((r) => r.command.endsWith('up.sh') && r.args.includes('--reset'))).toBe(false);
+
+    // the Playwright child drives the slot's OWN service URLs (the split-brain guard).
+    const pw = playwrightRuns();
+    expect(pw).toHaveLength(1);
+    expect(pw[0].env?.PLAYWRIGHT_BASE_URL).toBe('http://localhost:9900');
+    expect(pw[0].env?.PLAYWRIGHT_IAM_URL).toBe('http://localhost:4010');
+    expect(pw[0].env?.PLAYWRIGHT_SCHEDULING_URL).toBe('http://localhost:4008');
+  });
+
+  it('--slot 1 points the launcher at the slot state dir (/tmp/sds-synthetic-s1) for pid/log isolation', async () => {
+    await E2eRun.run(['journey', '--through', 'pods', '--headless', '--slot', '1', ...ws()], config);
+    // the launcher seam was built with the slot's isolated state dir (no --state-dir given).
+    expect(launcherSpy).toHaveBeenCalledWith('/tmp/sds-synthetic-s1');
   });
 });

@@ -58,6 +58,15 @@ export const DASH_LOCAL_SERVICES: Readonly<Record<string, ServiceId>> = {
   'sis-api': 'sis-api',
   'content-api': 'content-api',
   connect: 'connect-api',
+  // The browser dials these two for REAL (the dash's attendance/transcripts tRPC
+  // clients), so a slot's config.local.json MUST offset them too — else a slot > 0
+  // dash keeps the base config.json ports (ads-adm 5005 / transcripts 6302 = SLOT
+  // 0's services) and a stage-7 attendance WRITE silently corrupts slot 0's
+  // ads-adm projection. ads-adm-api is excluded from slot > 0 bring-up, so the
+  // offset port (6005 at slot 1) has nothing listening ⇒ the call fails LOUD
+  // (connection refused) instead of writing cross-slot — the corruption gate.
+  'ads-adm': 'ads-adm-api',
+  'transcripts-api': 'transcripts-api',
 };
 
 /** Inputs to the dash-defaults prelaunch hook. */

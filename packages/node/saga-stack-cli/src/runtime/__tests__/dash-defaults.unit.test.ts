@@ -109,6 +109,8 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
     'sis-api': 3100 + offset,
     'content-api': 3009 + offset,
     'connect-api': 6106 + offset,
+    'ads-adm-api': 5005 + offset,
+    'transcripts-api': 6302 + offset,
   });
 
   it('slot 0 still REMOVES config.local.json (byte-identical) even with stackPorts present', () => {
@@ -137,6 +139,15 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
     expect(parsed.localDefaults['program-hub']).toEqual({ type: 'url', url: 'http://localhost:4006' });
     expect(parsed.localDefaults['enrollment-api']).toEqual({ type: 'url', url: 'http://localhost:4006' });
     expect(parsed.localDefaults.connect).toEqual({ type: 'url', url: 'http://localhost:7106' });
+    // ads-adm + transcripts-api MUST offset too (the browser dials them for real —
+    // the split-brain BLOCKER). Base config.json ports (5005 / 6302 = slot 0) must
+    // NOT leak through: slot 1 ⇒ 6005 / 7302.
+    expect(parsed.localDefaults['ads-adm']).toEqual({ type: 'url', url: 'http://localhost:6005' });
+    expect(parsed.localDefaults['ads-adm'].url).not.toContain(':5005'); // NOT slot 0's ads-adm
+    expect(parsed.localDefaults['transcripts-api']).toEqual({
+      type: 'url',
+      url: 'http://localhost:7302',
+    });
     // same key set as the tunnel writer.
     expect(Object.keys(parsed.localDefaults).sort()).toEqual(Object.keys(DASH_LOCAL_SERVICES).sort());
     expect(written[0].contents.endsWith('\n')).toBe(true);

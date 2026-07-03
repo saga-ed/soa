@@ -28,6 +28,7 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import type { WorkspaceFlags } from '../../base-command.js';
 import { parseFlowRef, resolveFlow } from '../../core/flow/index.js';
+import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
 import type { Lane } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
@@ -93,6 +94,11 @@ export default class E2eRun extends BaseCommand {
     }),
   };
 
+  /** M7: `e2e run --slot N` brings up + drives an ISOLATED `soa-s<N>` stack. */
+  protected slotAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(E2eRun);
 
@@ -129,6 +135,13 @@ export default class E2eRun extends BaseCommand {
     const appCwd = resolveAppCwd(resolved.spa, flags, process.env);
     const now = new Date(); // the ONLY wall-clock read — fed into the pure clamp.
 
+    // M7: resolve the slot profile once — it drives the offset ports/project/
+    // container-env threading (buildStackContext), the Playwright service-URL offset,
+    // and the excluded-service filter. At slot 0 it is the byte-identical no-offset
+    // default (offset 0, project soa, base ports, empty container env, no exclusions).
+    const profile = deriveInstance({ slot: flags.slot });
+    const excluded = new Set(profile.excludedServices);
+
     // ── --dry-run: pure projection, no IO, no seam. ──
     if (flags['dry-run']) {
       const desc = describeResolved(resolved, {
@@ -137,29 +150,50 @@ export default class E2eRun extends BaseCommand {
         appCwd,
         passthrough,
         skipReset: flags['skip-reset'],
+        ports: profile.portOverrides,
+        excluded,
       });
       this.emit(flags, { dryRun: true, ...desc } as unknown as Record<string, unknown>, dryRunLines(desc));
       return;
     }
 
     // ── real run: build the in-process StackApi from the BaseCommand seams. ──
+    // Apply the slot's container-env seam (mesh container names + snapshot dir) and
+    // point the launcher at the slot's state dir (pids/logs) — both no-ops at slot 0.
+    this.applyInstanceEnv(profile);
+    const stateDir = flags['state-dir'] ?? profile.stateDir;
     const seams = {
-      launcher: this.getLauncher(flags['state-dir']),
+      launcher: this.getLauncher(stateDir),
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
+      // Slot > 0 native-prep seams (built always; wired into the runtime only at
+      // slot > 0 by buildStackContext, so slot 0 never reaches a real pgProbe).
+      pgProbe: this.getPgProbe(),
+      prepIsFresh: this.getPrepFreshCheck(),
+      prepDbGenerateScan: this.getDbGenerateScan(),
+      repoDirExists: this.getRepoDirCheck(),
     };
     const delegate = (plan: ScriptPlan): Promise<number> =>
       this.runScript(plan, flags as WorkspaceFlags, { propagateExit: false });
-    const { runtime } = buildStackContext(flags, seams, delegate);
+    const { runtime } = buildStackContext(flags, seams, delegate, profile);
     const api = makeStackApi(serviceManifest, runtime);
 
     try {
       const code = await executeResolvedFlow(
         resolved,
-        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l) },
+        {
+          api,
+          runner: seams.runner,
+          appCwd,
+          now,
+          log: (l) => this.log(l),
+          slot: profile.slot,
+          ports: runtime.launchContext.ports,
+          excluded,
+        },
         { lane, skipReset: flags['skip-reset'], passthrough },
       );
       if (code !== 0) this.exit(code);

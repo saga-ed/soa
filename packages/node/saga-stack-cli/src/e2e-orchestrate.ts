@@ -41,6 +41,8 @@ import {
   splitSpaPaths,
 } from './core/flow/index.js';
 import type { ResolvedFlow, SpaDescriptor } from './core/flow/index.js';
+import { deriveInstance } from './core/derive-instance.js';
+import type { InstanceProfile } from './core/derive-instance.js';
 import { defaultLaunchContext } from './core/launch-plan.js';
 import { manifest as serviceManifest } from './core/manifest/index.js';
 import type { Manifest, RepoKey, ServiceId } from './core/manifest/index.js';
@@ -60,6 +62,7 @@ import type {
   DashFs,
   HealthProber,
   MeshExec,
+  PgProbe,
   PortProbe,
   Runner,
   ScriptContext,
@@ -175,6 +178,18 @@ export interface StackSeams {
   dashFs: DashFs;
   prober: HealthProber;
   runner: Runner;
+  /**
+   * M7 slot > 0 ONLY — the native-prep seams wired into the runtime so a fresh
+   * slot stack provisions/migrates itself (R1 build → R2 provision → R3 migrate)
+   * instead of leaning on a prior up.sh run. UNSET at slot 0, where they are never
+   * wired (the pre-slot e2e runtime is byte-identical). The command builds them
+   * from `getPgProbe()`/`getPrepFreshCheck()`/… and passes them through.
+   */
+  pgProbe?: PgProbe;
+  prepIsFresh?: (repoRoot: string) => boolean;
+  prepDbGenerateScan?: (repoRoot: string) => string[];
+  repoDirExists?: (dir: string) => boolean;
+  skipPrep?: boolean;
 }
 
 /**
@@ -183,14 +198,33 @@ export interface StackSeams {
  * the Playwright cwd). `delegate` wires reset/login back to up.sh through the
  * caller's `runScript`. The native path drives the local `stack` lane.
  *
- * NOTE: this mirrors `commands/stack/up.ts::buildRuntime`. TODO(post-soak):
- * extract the shared builder once both call sites are proven, so there is one
- * source of truth for the launch context.
+ * SLOT PARITY (M7): mirrors `commands/stack/up.ts::buildRuntime` → the shared
+ * `BaseCommand.buildNativeRuntime` for slots. It threads the resolved slot
+ * `profile` (`deriveInstance({slot})`, passed in by the command) exactly as the
+ * stack path does: `profile.portOverrides` + `profile.meshOffset` feed
+ * `defaultLaunchContext` (so `launchContext.ports` carry the offset), and at
+ * slot > 0 it sets `runtime.{slot, meshProject: profile.project, meshOffset}` and
+ * wires the native-prep seams (`pgProbe`/`prepIsFresh`/…) so the slot's fresh DBs
+ * provision + migrate per-slot. The per-slot container-env (`profile.containerEnv`
+ * / `snapshotsDir`) and the launcher's `profile.stateDir` are applied by the
+ * COMMAND (`applyInstanceEnv` + `getLauncher(stateDir)`) before this is called,
+ * so the seam-injection pattern (command builds seams, this composes them) holds.
+ *
+ * SLOT 0 (the default) is BYTE-IDENTICAL to the pre-slot runtime: `deriveInstance`
+ * guarantees slot-0 `portOverrides`/`meshOffset` resolve the base context, and the
+ * slot fields + prep seams are OMITTED entirely (not set to 0/undefined), so the
+ * split-brain regression guard holds.
+ *
+ * We THREAD the profile here (rather than calling `buildNativeRuntime` directly)
+ * because `buildNativeRuntime` wires the native-prep seams UNCONDITIONALLY — at
+ * slot 0 that would (a) break the byte-identical guard and (b) make the hermetic
+ * slot-0 e2e tests reach a real pgProbe. e2e wires prep at slot > 0 ONLY.
  */
 export function buildStackContext(
   flags: FlagBag,
   seams: StackSeams,
   delegate: (plan: ScriptPlan) => Promise<number>,
+  profile: InstanceProfile = deriveInstance({ slot: 0 }),
 ): { runtime: Runtime; repoRoots: Record<RepoKey, string> } {
   const pinned: Partial<Record<RepoKey, string>> = {};
   for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
@@ -205,9 +239,13 @@ export function buildStackContext(
   }
 
   const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
+  // Thread the slot's port-override map + mesh offset (byte-identical base context
+  // at slot 0 — `deriveInstance` guarantees slot-0 overrides resolve the defaults).
   const launchContext = defaultLaunchContext({
     repoRoots,
     syntheticDevDir,
+    portOverrides: profile.portOverrides,
+    meshOffset: profile.meshOffset,
     pinoLevel: process.env.PINO_LOGGER_LEVEL,
     pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
   });
@@ -225,6 +263,21 @@ export function buildStackContext(
     runner: seams.runner,
     tunnel: false,
     delegate,
+    // M7 slot > 0: namespace the mesh (`soa-s<N>`), carry the offset, and wire the
+    // native-prep seams so the slot's fresh DBs provision + migrate per-slot. OMITTED
+    // at slot 0, so the pre-slot runtime is byte-identical.
+    ...(profile.slot > 0
+      ? {
+          slot: profile.slot,
+          meshProject: profile.project,
+          meshOffset: profile.meshOffset,
+          pgProbe: seams.pgProbe,
+          skipPrep: seams.skipPrep,
+          prepIsFresh: seams.prepIsFresh,
+          prepDbGenerateScan: seams.prepDbGenerateScan,
+          repoDirExists: seams.repoDirExists,
+        }
+      : {}),
   };
 
   return { runtime, repoRoots };
@@ -271,13 +324,76 @@ export function playwrightArgv(resolved: ResolvedFlow, passthrough: string[] = [
 }
 
 /**
- * The env overlaid on the Playwright child: the centralized clamped date env
- * (`computeEnv` — the Monday-flake fix, plus the flow's own `env`), plus
- * `PLAYWRIGHT_LANE` for the non-stack (deployed) lanes. `now` is supplied by the
- * command (`new Date()`); this never reads the clock.
+ * The `PLAYWRIGHT_<X>_URL` env key → the manifest `ServiceId` whose RESOLVED
+ * (offset-carrying) stack port backs it. This is the crux of slot isolation for
+ * the Playwright run: the specs' `e2e/fixtures/lane.ts` reads each service base
+ * URL as `process.env.PLAYWRIGHT_<X>_URL ?? http://localhost:<base port>`, and the
+ * Playwright config's `baseURL` is `PLAYWRIGHT_BASE_URL ?? http://localhost:8900`.
+ * By injecting each key from `launchContext.ports[svc]` (= manifest base + slot
+ * offset), a slot-1 journey drives saga-dash on :9900 and hits iam :4010 /
+ * scheduling :4008 / sessions :4007 / … instead of slot 0's base ports. Keyed to
+ * the exact env vars `lane.ts` consumes today (nothing invented).
  */
-export function playwrightEnv(resolved: ResolvedFlow, now: Date, lane: Lane): Record<string, string> {
-  const env = computeEnv(resolved.flow, now);
+export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = Object.freeze({
+  PLAYWRIGHT_BASE_URL: 'saga-dash', // the dash frontend origin (Playwright `baseURL`)
+  PLAYWRIGHT_IAM_URL: 'iam-api',
+  PLAYWRIGHT_SIS_URL: 'sis-api',
+  PLAYWRIGHT_PROGRAMS_URL: 'programs-api',
+  PLAYWRIGHT_SCHEDULING_URL: 'scheduling-api',
+  PLAYWRIGHT_SESSIONS_URL: 'sessions-api',
+  PLAYWRIGHT_ADS_ADM_URL: 'ads-adm-api',
+  PLAYWRIGHT_CONNECT_URL: 'connect-web',
+});
+
+/**
+ * Build the stack-lane service-URL env from RESOLVED ports (each = manifest base +
+ * slot offset). At slot 0 the ports are the base ports, so this yields the SAME
+ * URLs `lane.ts` would default to (behaviour-identical); at slot N > 0 every URL
+ * carries the `N * 1000` offset. Derived from `launchContext.ports` — never a
+ * hardcoded port — so a re-banded/remapped service slots for free. A service with
+ * no resolved port is omitted rather than emitting `localhost:undefined`.
+ */
+export function serviceUrlEnv(ports: Partial<Record<ServiceId, number>>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, svc] of Object.entries(PLAYWRIGHT_SERVICE_URL_ENV)) {
+    const port = ports[svc];
+    if (port !== undefined) env[key] = `http://localhost:${port}`;
+  }
+  return env;
+}
+
+/**
+ * The env overlaid on the Playwright child: the centralized clamped date env
+ * (`computeEnv` — the Monday-flake fix, with the flow's own `env` merged last so a
+ * date-fixed flow's date pins win), THEN the offset-carrying stack-lane service
+ * URLs (from the resolved `ports`, so each slot targets its OWN ports), plus
+ * `PLAYWRIGHT_LANE` for the non-stack (deployed) lanes. The service URLs are
+ * overlaid AFTER the date env so the slot offset ALWAYS wins for the
+ * `PLAYWRIGHT_*_URL` keys — a `flow.env` that pins a service URL can never override
+ * the slot offset and point slot > 0 back at slot 0's base port (the split-brain
+ * guard), while `flow.env` keeps winning for the date env. On a deployed lane the
+ * service URLs are the lane's own hostnames (resolved in `lane.ts`), NOT localhost,
+ * so we do NOT inject them. `now` is supplied by the command (`new Date()`); this
+ * never reads the clock.
+ */
+export function playwrightEnv(
+  resolved: ResolvedFlow,
+  now: Date,
+  lane: Lane,
+  ports?: Partial<Record<ServiceId, number>>,
+): Record<string, string> {
+  // The date env (with `flow.env` merged LAST inside `computeEnv`) comes first, so
+  // a flow's own env keeps winning for the occurrence-date clamp. Then, on the
+  // stack lane, the slot-offset service URLs are overlaid AFTER — so the slot
+  // offset ALWAYS wins for the PLAYWRIGHT_*_URL keys and a `flow.env` that pins a
+  // service URL can never point slot > 0 back at slot 0's base port (same
+  // split-brain class as the dash config.local.json offset). On a deployed lane
+  // the service URLs are the lane's own hostnames (resolved in `lane.ts`), so we
+  // do NOT inject/override them.
+  const env: Record<string, string> = {
+    ...computeEnv(resolved.flow, now),
+    ...(lane === 'stack' && ports ? serviceUrlEnv(ports) : {}),
+  };
   if (lane !== 'stack') env.PLAYWRIGHT_LANE = lane;
   return env;
 }
@@ -310,6 +426,17 @@ export interface DescribeOptions {
   passthrough: string[];
   skipReset: boolean;
   manifest?: Manifest;
+  /**
+   * Resolved per-service stack ports (`launchContext.ports`, offset-carrying) —
+   * threaded into the Playwright env so the dry-run shows the slot's OFFSET service
+   * URLs. Absent (slot 0 caller may still pass the base map) ⇒ no service URLs.
+   */
+  ports?: Partial<Record<ServiceId, number>>;
+  /**
+   * Services excluded from THIS slot's closure (`profile.excludedServices`) — the
+   * literal-port + connect frontends that would collide with slot 0. Empty at slot 0.
+   */
+  excluded?: Set<ServiceId>;
 }
 
 /**
@@ -321,10 +448,15 @@ export interface DescribeOptions {
 export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions): ResolvedFlowDescription {
   const dateEnv = computeEnv(resolved.flow, opts.now);
   const effectiveReset = resolved.reset && !opts.skipReset;
+  // Drop the slot's excluded services (literal-port + connect frontends) from the
+  // closure so the dry-run matches what a `--slot N` run actually brings up. Empty
+  // set at slot 0 ⇒ the full closure, byte-identical.
+  const excluded = opts.excluded ?? new Set<ServiceId>();
+  const services = resolved.closure.services.filter((id) => !excluded.has(id));
   const seed =
     effectiveReset && resolved.seedSelection
       ? (() => {
-          const plan = composeSeedPlan(resolved.seedSelection, new Set(resolved.closure.services), new Set<ServiceId>());
+          const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());
           return {
             offline: plan.offline.map((s) => s.id),
             online: plan.online.map((s) => s.id),
@@ -343,7 +475,7 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
     headed: resolved.playwright.headed,
     requiredSystems: resolved.requiredSystems,
     closure: {
-      services: resolved.closure.services,
+      services,
       databases: resolved.closure.databases,
       mesh: resolved.closure.mesh,
     },
@@ -355,7 +487,7 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
       argv: playwrightArgv(resolved, opts.passthrough),
     },
     occurrenceDate: dateEnv[ENV_OCCURRENCE_DATE] ?? '',
-    env: playwrightEnv(resolved, opts.now, opts.lane),
+    env: playwrightEnv(resolved, opts.now, opts.lane, opts.ports),
     // The prerequisite always builds the end-state headless + owns its own reset;
     // it gets no user passthrough.
     prerequisite: resolved.prerequisite
@@ -379,6 +511,23 @@ export interface ExecDeps {
   manifest?: Manifest;
   /** Sink for progress lines (the command's `log`). */
   log: (line: string) => void;
+  /**
+   * The stack instance slot (M7). 0 (default) ⇒ the pre-slot path: reset delegates
+   * to `up.sh --reset` (legacy). > 0 ⇒ the reset runs NATIVELY per-slot (the M8 R4
+   * slot-aware runner) instead of up.sh — which is hardcoded to slot 0 and would
+   * clobber the default stack.
+   */
+  slot?: number;
+  /**
+   * Resolved per-service stack ports (`launchContext.ports`, offset-carrying),
+   * injected into the Playwright env so specs drive the slot's OWN service URLs.
+   */
+  ports?: Partial<Record<ServiceId, number>>;
+  /**
+   * Services excluded from THIS slot's bring-up (`profile.excludedServices`).
+   * Filtered out of the closure before up/reset/seed/verify. Empty at slot 0.
+   */
+  excluded?: Set<ServiceId>;
 }
 
 /** Per-run knobs. */
@@ -424,7 +573,12 @@ export async function executeResolvedFlow(
     }
   }
 
-  const services = resolved.closure.services;
+  // Drop this slot's excluded services (literal-port + connect frontends that would
+  // collide with slot 0) from the closure BEFORE up/reset/seed/verify. Empty set at
+  // slot 0 ⇒ the full closure, byte-identical.
+  const excluded = deps.excluded ?? new Set<ServiceId>();
+  const services = resolved.closure.services.filter((id) => !excluded.has(id));
+  const slot = deps.slot ?? 0;
 
   if (opts.lane === 'stack') {
     // 1. native bring-up.
@@ -437,11 +591,20 @@ export async function executeResolvedFlow(
     // 2. reset + seed (coupled; skipped on --skip-reset or when a prerequisite built the state).
     const effectiveReset = resolved.reset && !opts.skipReset;
     if (effectiveReset) {
-      deps.log('==> reset (delegated to up.sh --legacy) + native seed');
-      // e2e keeps the whole-stack bash reset (up.sh --reset) for now — the native
-      // per-DB reset (M8 R4) is the `stack reset` default; e2e opts into `--legacy`.
-      const reset = await deps.api.reset(services, { legacy: true });
-      if (reset.code !== 0) throw new FlowExecError(`reset failed (up.sh exit ${reset.code})`);
+      // Slot 0: the whole-stack bash reset (up.sh --reset, `--legacy`) — unchanged.
+      // Slot > 0: up.sh is hardcoded to slot 0 (project soa, base ports) and would
+      // CLOBBER the default stack, so run the NATIVE per-slot reset (M8 R4 — slot-aware
+      // via the runtime's offset + slot containers) instead.
+      const legacy = slot === 0;
+      deps.log(
+        legacy
+          ? '==> reset (delegated to up.sh --legacy) + native seed'
+          : `==> reset (native, slot ${slot}) + native seed`,
+      );
+      const reset = await deps.api.reset(services, { legacy });
+      if (reset.code !== 0) {
+        throw new FlowExecError(`reset failed (${legacy ? `up.sh exit ${reset.code}` : `native exit ${reset.code}`})`);
+      }
       if (resolved.seedSelection) {
         const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());
         const seeded = await deps.api.seed(plan);
@@ -462,9 +625,10 @@ export async function executeResolvedFlow(
     deps.log(`==> ${opts.lane} lane: no local stack to bring up; running Playwright against the deployed composition`);
   }
 
-  // 4. Playwright (foreground, stdio inherited). The clamped date env is overlaid.
+  // 4. Playwright (foreground, stdio inherited). The clamped date env + the slot's
+  // offset service URLs are overlaid (so a slot's specs drive its OWN ports).
   const argv = playwrightArgv(resolved, opts.passthrough);
-  const env = playwrightEnv(resolved, deps.now, opts.lane);
+  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports);
   deps.log(`==> playwright: ${resolved.flow.name} — pnpm ${argv.join(' ')} (cwd ${deps.appCwd})`);
   const { code } = await deps.runner.run({
     cwd: deps.appCwd,

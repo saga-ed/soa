@@ -12,6 +12,8 @@
 # `quality / Quality Gate` context fleet-wide (ci-actions
 # docs/required-checks.md). Audit: ci-actions docs/check-coverage-audit-2026-07.md.
 
+# NB: initial rollout hit a stale reusable-workflow resolution cache on @v1
+# (see ci-actions#21); this comment revision forced a fresh lookup.
 name: Quality
 
 on:

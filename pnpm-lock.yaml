@@ -366,6 +366,12 @@ importers:
         specifier: ^3.25.67
         version: 3.25.67
     devDependencies:
+      '@saga-ed/soa-pubsub-core':
+        specifier: workspace:^
+        version: link:../../../../packages/node/pubsub-core
+      '@saga-ed/soa-typescript-config':
+        specifier: workspace:*
+        version: link:../../../../packages/core/typescript-config
       '@trpc/client':
         specifier: ^11.4.3
         version: 11.8.0(@trpc/server@11.8.0(typescript@5.8.2))(typescript@5.8.2)

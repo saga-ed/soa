@@ -12,8 +12,6 @@
 # `quality / Quality Gate` context fleet-wide (ci-actions
 # docs/required-checks.md). Audit: ci-actions docs/check-coverage-audit-2026-07.md.
 
-# NB: initial rollout hit a stale reusable-workflow resolution cache on @v1
-# (see ci-actions#21); this comment revision forced a fresh lookup.
 name: Quality
 
 on:
@@ -34,7 +32,11 @@ concurrency:
 
 jobs:
   quality:
-    uses: saga-ed/ci-actions/.github/workflows/quality-checks.yml@v1
+    # Pinned to the #22 release SHA (== v1) because this repo's Actions
+    # service holds a stale negative resolution for the @v1 ref from the
+    # pre-release rollout window (details: ci-actions#21). Flip back to @v1
+    # once a probe dispatch succeeds against it.
+    uses: saga-ed/ci-actions/.github/workflows/quality-checks.yml@67c0cbe6dfca9a46e8ab9a03482e2d0c392bdfa4
     with:
       ci-role-arn: ${{ vars.AWS_ROLE_ARN }}
       node-version: '24'

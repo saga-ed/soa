@@ -1,16 +1,25 @@
-# Repo-wide fast quality gate — thin caller of the fleet-shared workflow.
+# Repo-wide fast quality gate — STANDALONE, not the fleet-shared caller.
 #
-# The 2026-07 check-coverage audit found two structural holes here: (1)
-# apps/** (210 files, 26 test files) is outside every workflow's path filter
-# — an apps-only PR triggers zero checks; (2) a lockfile-only PR triggers
-# nothing either, even though every job installs with --frozen-lockfile.
-# This runs build/check-types/lint/test across the whole workspace on every
-# PR push, drafts included, no path filters — for the repo that publishes
-# the 30 packages the rest of the fleet consumes.
+# soa is the fleet's one PUBLIC repo, and GitHub forbids public repos from
+# using reusable workflows or composite actions that live in private repos
+# (the resolution error is a deliberately opaque "workflow was not found") —
+# so it cannot call saga-ed/ci-actions quality-checks.yml@v1 like its
+# siblings (details: saga-ed/ci-actions#21). This is a hand-inlined
+# equivalent; the setup recipe is copied from publish-all-packages.yml,
+# which hand-rolls it for the same reason.
 #
-# Keep the job id `quality`: the ruleset that makes green required pins the
-# `quality / Quality Gate` context fleet-wide (ci-actions
-# docs/required-checks.md). Audit: ci-actions docs/check-coverage-audit-2026-07.md.
+# The job layout mirrors the shared gate, but because this is a plain
+# workflow the requireable check context is
+#   Quality Gate
+# (no `quality / ` prefix). Point soa's `2q` ruleset at that.
+#
+# The audit's soa findings (apps/** outside every path filter; lockfile-only
+# PRs triggering nothing) are covered the same way as the shared gate:
+# repo-wide turbo, no path filters, no draft gate. Fork PRs cannot assume
+# the OIDC role (no id-token for forks), so the gate is red for them —
+# same behavior as every other workflow in this repo.
+#
+# Audit: saga-ed/ci-actions docs/check-coverage-audit-2026-07.md § soa.
 
 name: Quality
 
@@ -22,8 +31,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9.0.0"
+  AWS_REGION: us-west-2
+  CODEARTIFACT_DOMAIN: saga
+  CODEARTIFACT_OWNER: "531314149529"
+
 permissions:
-  id-token: write
+  id-token: write # OIDC for CodeArtifact auth (@saga-ed/* installs)
   contents: read
 
 concurrency:
@@ -32,11 +48,104 @@ concurrency:
 
 jobs:
   quality:
-    # Pinned to the #22 release SHA (== v1) because this repo's Actions
-    # service holds a stale negative resolution for the @v1 ref from the
-    # pre-release rollout window (details: ci-actions#21). Flip back to @v1
-    # once a probe dispatch succeeds against it.
-    uses: saga-ed/ci-actions/.github/workflows/quality-checks.yml@67c0cbe6dfca9a46e8ab9a03482e2d0c392bdfa4
-    with:
-      ci-role-arn: ${{ vars.AWS_ROLE_ARN }}
-      node-version: '24'
+    name: Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Integration tests stay out of this rung by fleet convention (they
+      # gate on SKIP_INT and need brokers/DBs). Unit/lint/typecheck/build only.
+      SKIP_INT: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get CodeArtifact auth token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+            --domain ${{ env.CODEARTIFACT_DOMAIN }} \
+            --domain-owner ${{ env.CODEARTIFACT_OWNER }} \
+            --query authorizationToken \
+            --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
+
+      - name: Configure CodeArtifact registry
+        run: |
+          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
+
+      - name: Get pnpm store directory
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Repo-wide on purpose: no --filter, so reverse-dependency and orphan
+      # packages (the audit's biggest blind spot) are covered.
+      - name: Build / typecheck / lint / test (repo-wide)
+        run: pnpm turbo run build check-types lint test
+
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: actionlint (workflow rules only)
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color -shellcheck=
+
+  # The single requireable context. Required status checks match by name and
+  # a never-reporting check blocks merges, so the ruleset pins exactly this
+  # one name, which reports on every PR.
+  gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [quality, actionlint]
+    if: ${{ always() }}
+    permissions: {}
+    steps:
+      - name: Aggregate results
+        env:
+          QUALITY: ${{ needs.quality.result }}
+          ACTIONLINT: ${{ needs.actionlint.result }}
+        run: |
+          echo "quality=${QUALITY} actionlint=${ACTIONLINT}"
+          fail=0
+          if [ "$QUALITY" != "success" ]; then
+            echo "::error::Quality job did not succeed (${QUALITY})"
+            fail=1
+          fi
+          if [ "$ACTIONLINT" != "success" ]; then
+            echo "::error::Actionlint job did not succeed (${ACTIONLINT})"
+            fail=1
+          fi
+          exit "$fail"

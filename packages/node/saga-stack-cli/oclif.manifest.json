@@ -873,7 +873,7 @@
           ]
         }
       },
-      "description": "Overlay your in-flight PRs onto a main-based synthetic-dev (wraps refresh-suite.sh).",
+      "description": "Overlay your in-flight PRs onto a main-based synthetic-dev (native git engine; compose-rest/--legacy wrap refresh-suite.sh).",
       "examples": [
         "<%= config.bin %> <%= command.id %> list",
         "<%= config.bin %> <%= command.id %> apply --prs 165 saga-dash",
@@ -980,7 +980,7 @@
           "type": "option"
         },
         "prs": {
-          "description": "apply: ad-hoc PR/branch set to overlay (refresh-suite.sh --prs <#s|branch>); requires one or more trailing repo names",
+          "description": "apply: ad-hoc PR/branch set to overlay (numeric → gh PR head ref; bare name → literal branch); requires one or more trailing repo names",
           "name": "prs",
           "hasDynamicHelp": false,
           "multiple": false,
@@ -992,6 +992,12 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "legacy": {
+          "description": "route the WHOLE verb to the bash refresh-suite.sh instead of the native git engine.",
+          "name": "legacy",
+          "allowNo": false,
+          "type": "boolean"
         },
         "ttl-hours": {
           "description": "compose-rest: sandbox TTL in hours (refresh-suite.sh env SANDBOX_TTL_HOURS)",

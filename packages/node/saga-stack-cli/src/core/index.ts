@@ -19,6 +19,8 @@ export * from './want-service.js';
 export * from './flag-map.js';
 export * from './e2e-map.js';
 export * from './probe-plan.js';
+export * from './overlay-plan.js';
+export * from './overlay-tsv.js';
 
 // Owned by the seed/flow vertical — planned core sub-barrels (plan §2.1, §4, §5).
 export * from './seed/index.js';

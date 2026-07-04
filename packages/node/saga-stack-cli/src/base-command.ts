@@ -35,10 +35,12 @@ import type { Runtime } from './stack-api.js';
 import {
   buildRepoEnv,
   makeRealDashFs,
+  makeRealGhRunner,
   makeRealGitRunner,
   makeRealLauncher,
   makeRealMeshExec,
   makeRealPgProbe,
+  makeRealOverlayFs,
   makeRealPortProbe,
   makeRealProber,
   makeRealRunner,
@@ -53,9 +55,11 @@ import {
 } from './runtime/index.js';
 import type {
   DashFs,
+  GhRunner,
   GitRunner,
   HealthProber,
   MeshExec,
+  OverlayFs,
   PgProbe,
   PortProbe,
   RepoKey,
@@ -314,6 +318,27 @@ export abstract class BaseCommand extends Command {
    */
   protected getGitRunner(): GitRunner {
     return makeRealGitRunner();
+  }
+
+  /**
+   * The injectable `gh` seam (M10 — overlay engine). Production returns
+   * `makeRealGhRunner()` — the only place `gh pr view` is spawned (per-repo cwd, to
+   * resolve a numeric PR token to its head branch). The native `stack overlay` TESTS
+   * spy this on the prototype to drive PR resolution WITHOUT a live `gh`/network —
+   * mirroring how `getGitRunner`/`getRunner`/… are mocked.
+   */
+  protected getGhRunner(): GhRunner {
+    return makeRealGhRunner();
+  }
+
+  /**
+   * The injectable overlay-file fs seam (M10). Production returns `makeRealOverlayFs()`
+   * — the only place `integration-suite.local.tsv` is read. The native `stack overlay
+   * list`/`apply` (file-driven) TESTS spy this on the prototype to feed canned tsv text
+   * WITHOUT touching the filesystem.
+   */
+  protected getOverlayFs(): OverlayFs {
+    return makeRealOverlayFs();
   }
 
   /**

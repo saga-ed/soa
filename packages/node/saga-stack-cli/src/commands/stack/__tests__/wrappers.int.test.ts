@@ -301,9 +301,20 @@ describe('stack reset --legacy — wraps up.sh --reset (the non-destructive esca
 // `getProber` instead of `getRunner`. (verify --full still delegates to verify.sh
 // and is covered there.)
 
-describe('stack overlay — wraps refresh-suite.sh', () => {
-  it('apply (bare) → refresh-suite.sh with no argv (file-driven)', async () => {
-    await StackOverlay.run(['apply', ...WS], config);
+// NOTE (M10): `overlay apply|list|reset` are NO LONGER shell-out wrappers — the git
+// engine is native (see overlay-native.int.test.ts, which mocks the git/gh/overlay-fs
+// seams). `compose-rest` (cloud orchestrator) and `--legacy` (whole-verb escape) remain
+// ScriptPlan wrappers over refresh-suite.sh — the still-wrapped cases live here.
+describe('stack overlay — compose-rest + --legacy still wrap refresh-suite.sh', () => {
+  it('rejects apply with positional repos but no --prs (would silently drop them)', async () => {
+    await expect(
+      StackOverlay.run(['apply', 'saga-dash', ...WS], config),
+    ).rejects.toMatchObject({ message: expect.stringContaining('ignores positional repos unless --prs') });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('--legacy apply → refresh-suite.sh ScriptPlan (the whole-verb escape)', async () => {
+    await StackOverlay.run(['apply', '--legacy', ...WS], config);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       cwd: SYNTH_DIR,
@@ -314,27 +325,16 @@ describe('stack overlay — wraps refresh-suite.sh', () => {
     });
   });
 
-  it('apply --prs <set> <repo…> → ad-hoc overlay argv (repos read off positionals)', async () => {
-    await StackOverlay.run(['apply', '--prs', '165', 'saga-dash', ...WS], config);
+  it('--legacy apply --prs <set> <repo…> → ad-hoc overlay argv (repos read off positionals)', async () => {
+    await StackOverlay.run(['apply', '--legacy', '--prs', '165', 'saga-dash', ...WS], config);
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe(REFRESH_SH);
     expect(calls[0].args).toEqual(['--prs', '165', 'saga-dash']);
   });
 
-  it('rejects apply with positional repos but no --prs (would silently drop them)', async () => {
-    await expect(
-      StackOverlay.run(['apply', 'saga-dash', ...WS], config),
-    ).rejects.toMatchObject({ message: expect.stringContaining('ignores positional repos unless --prs') });
-    expect(calls).toHaveLength(0);
-  });
-
-  it('list → --list', async () => {
-    await StackOverlay.run(['list', ...WS], config);
-    expect(calls[0].args).toEqual(['--list']);
-  });
-
-  it('reset <repo…> → --reset <repo…>', async () => {
-    await StackOverlay.run(['reset', 'rostering', ...WS], config);
+  it('--legacy reset <repo…> → --reset <repo…>', async () => {
+    await StackOverlay.run(['reset', '--legacy', 'rostering', ...WS], config);
+    expect(calls[0].command).toBe(REFRESH_SH);
     expect(calls[0].args).toEqual(['--reset', 'rostering']);
   });
 

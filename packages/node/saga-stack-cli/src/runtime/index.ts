@@ -25,5 +25,7 @@ export * from './provision.js';
 export * from './migrate.js';
 export * from './reset.js';
 export * from './git.js';
+export * from './gh.js';
 export * from './auto-pull.js';
+export * from './overlay.js';
 export * from './vite-clear.js';

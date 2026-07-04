@@ -18,6 +18,8 @@ import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import type {
+  DashFs,
+  GitRunner,
   LaunchResult,
   LaunchSpec,
   MeshExec,
@@ -28,7 +30,7 @@ import type {
   ScriptInvocation,
   ServiceLauncher,
   StopResult,
-  DashFs,
+  ViteClear,
 } from '../../../runtime/index.js';
 import StackUp from '../up.js';
 
@@ -118,6 +120,24 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     async publicTableCount(): Promise<number> {
       return 0;
     },
+    async scalar(): Promise<string> {
+      return '';
+    },
+  };
+
+  // M9 fakes: an all-up-to-date git seam (so auto-pull runs hermetically — no real git
+  // spawn) + a no-op vite-clear. Both keep the suite's "nothing spawned" invariant.
+  const gitRunner: GitRunner = {
+    async statusPorcelain() { return ''; },
+    async branchShowCurrent() { return 'main'; },
+    async symbolicRefDefault() { return 'main'; },
+    async fetch() { return true; },
+    async hasUpstream() { return true; },
+    async revListCount() { return 0; }, // up to date ⇒ no ff
+    async mergeFfOnly() { return true; },
+  };
+  const viteClear: ViteClear = {
+    async clear() { return { removed: [] }; },
   };
 
   const proto = BaseCommand.prototype as unknown as {
@@ -127,6 +147,8 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     getDashFs: () => DashFs;
     getRunner: () => Runner;
     getPgProbe: () => PgProbe;
+    getGitRunner: () => GitRunner;
+    getViteClear: () => ViteClear;
     getPrepFreshCheck: () => (repoRoot: string) => boolean;
     getRepoDirCheck: () => (dir: string) => boolean;
   };
@@ -136,6 +158,8 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
   vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
   vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
   vi.spyOn(proto, 'getPgProbe').mockReturnValue(pgProbe);
+  vi.spyOn(proto, 'getGitRunner').mockReturnValue(gitRunner);
+  vi.spyOn(proto, 'getViteClear').mockReturnValue(viteClear);
   // Never fresh in these tests (fixed /fixed/dev paths don't exist) ⇒ R1 prep runs.
   vi.spyOn(proto, 'getPrepFreshCheck').mockReturnValue(() => false);
   // The fake workspace paths (--dev /fixed/dev) don't exist on disk; default the
@@ -451,40 +475,31 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
   });
 });
 
-describe('stack up — Connect AV native-gap warning (#221)', () => {
-  const AV_RE = /Connect AV \(livekit :7880 \/ coturn\) is not started by the native path/;
-
-  function captureLogs(): string[] {
-    const logged: string[] = [];
-    vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m?: string) => {
-      logged.push(String(m ?? ''));
-    });
-    return logged;
+describe('stack up — native Connect AV (#221, M9)', () => {
+  /** The AV bring-up compose call the native path fires at slot 0 when connect is present. */
+  function avCall(): ScriptInvocation | undefined {
+    return runs.find((r) => r.command === 'docker' && r.args.includes('livekit'));
   }
 
-  it('WARNS when Connect (connect-api) is in the native closure', async () => {
-    const logged = captureLogs();
+  it('STARTS livekit + coturn from qboard compose when Connect (connect-api) is in the native closure', async () => {
     await StackUp.run(['--only', 'connect-api', ...WS], config);
-    // connect-api is in the launched closure ⇒ the AV degradation warning fires.
     expect(launches.map((s) => s.id)).toContain('connect-api');
-    expect(logged.join('\n')).toMatch(AV_RE);
+    const av = avCall();
+    expect(av).toBeDefined();
+    // `docker compose -f <QBOARD>/docker-compose.yml up -d livekit coturn`.
+    expect(av?.args).toEqual(['compose', '-f', resolve(DEV_ROOT, 'qboard', 'docker-compose.yml'), 'up', '-d', 'livekit', 'coturn']);
   });
 
-  it('does NOT warn when Connect is absent from the native closure (backend path stays quiet)', async () => {
-    const logged = captureLogs();
+  it('does NOT start AV when Connect is absent from the native closure (backend path stays quiet)', async () => {
     await StackUp.run(['--only', 'iam-api', ...WS], config);
-    // no connect service in the closure ⇒ the common backend path emits no AV warning.
     expect(launches.map((s) => s.id)).not.toContain('connect-api');
-    expect(launches.map((s) => s.id)).not.toContain('connect-web');
-    expect(logged.join('\n')).not.toMatch(AV_RE);
+    expect(avCall()).toBeUndefined();
   });
 
-  it('never warns on the --legacy (up.sh wrapper) path — up.sh brings AV up itself', async () => {
-    const logged = captureLogs();
+  it('does NOT start AV natively on the --legacy (up.sh wrapper) path — up.sh runs connect_av_up itself', async () => {
     await StackUp.run(['--legacy', ...WS], config);
-    // wrapped path launches nothing natively and up.sh runs connect_av_up itself.
     expect(launches).toEqual([]);
-    expect(logged.join('\n')).not.toMatch(AV_RE);
+    expect(avCall()).toBeUndefined();
   });
 });
 

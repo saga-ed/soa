@@ -106,10 +106,10 @@ describe('stack up --legacy — the up.sh escape (FLIP 1: bare up is native-by-d
     });
   });
 
-  it('--no-auto-pull / --skip-prep surface as env on the invocation (under the repo env)', async () => {
-    // --no-auto-pull is a native-unsupported flag, so a bare invocation carrying it
-    // still routes to the up.sh wrapper (no --legacy needed) — SKIP_PREP rides along.
-    await StackUp.run(['--no-auto-pull', '--skip-prep', ...WS], config);
+  it('--no-auto-pull / --skip-prep still map to env under --legacy (M9: native by default, but the wrapper mapping is intact)', async () => {
+    // M9: a BARE `--no-auto-pull` / `--skip-prep` now runs NATIVELY (they select the
+    // auto-pull mode / skip R1). The flag→env mapping is preserved for `--legacy`.
+    await StackUp.run(['--legacy', '--no-auto-pull', '--skip-prep', ...WS], config);
 
     expect(calls).toHaveLength(1);
     expect(calls[0].args).toEqual(['up']);

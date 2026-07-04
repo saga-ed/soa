@@ -51,6 +51,9 @@ function fakeProbe(state: Partial<Record<string, 'managed' | 'empty' | 'unmanage
       const s = state[db] ?? 'empty';
       return s === 'unmanaged' ? 3 : 0; // >0 tables + no _prisma_migrations ⇒ unmanaged
     },
+    async scalar(): Promise<string> {
+      return '';
+    },
   };
 }
 

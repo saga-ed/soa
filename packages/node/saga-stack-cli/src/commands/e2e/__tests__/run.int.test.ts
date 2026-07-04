@@ -99,6 +99,7 @@ function installSeams(launchFail: Set<string> = new Set()): void {
     async databaseExists(_c, db): Promise<boolean> { return provisioned.has(db); },
     async hasMigrationsTable(): Promise<boolean> { return false; },
     async publicTableCount(): Promise<number> { return 0; },
+    async scalar(): Promise<string> { return ''; },
   };
 
   const proto = BaseCommand.prototype as unknown as Record<string, () => unknown>;

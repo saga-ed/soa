@@ -23,8 +23,10 @@ import { healthProbes } from '../core/probe-plan.js';
 import { composeSeedPlan } from '../core/seed/compose-seed-plan.js';
 import { makeStackApi } from '../stack-api.js';
 import type { Runtime } from '../stack-api.js';
+import { stopServices } from '../runtime/index.js';
 import type {
   DashFs,
+  GitRunner,
   HealthProber,
   LaunchResult,
   LaunchSpec,
@@ -35,6 +37,10 @@ import type {
   ScriptInvocation,
   ServiceLauncher,
   StopResult,
+  StopServicesDeps,
+  ViteCachePaths,
+  ViteClear,
+  ViteClearResult,
 } from '../runtime/index.js';
 
 // ── fakes ──────────────────────────────────────────────────────────────────
@@ -288,6 +294,9 @@ function fakePgProbe(
     },
     async publicTableCount(_c, db): Promise<number> {
       return (opts.branch?.[db] ?? 'empty') === 'unmanaged' ? 3 : 0;
+    },
+    async scalar(): Promise<string> {
+      return '';
     },
   };
 }
@@ -840,5 +849,245 @@ describe('StackApi.login — delegated to up.sh', () => {
     const api = makeStackApi(manifest, runtime);
     await api.login('teacher@saga.org');
     expect(fakes.delegated[0].args).toEqual(['--login', 'teacher@saga.org']);
+  });
+});
+
+// ── M9 — auto-pull, Connect AV, restart ──────────────────────────────────────
+
+/** A GitRunner that reports every proceed-eligible repo up-to-date unless overridden. */
+function fakeGitRunner(over: Partial<GitRunner> = {}): { git: GitRunner; ffd: string[] } {
+  const ffd: string[] = [];
+  const git: GitRunner = {
+    async statusPorcelain() {
+      return '';
+    },
+    async branchShowCurrent() {
+      return 'main';
+    },
+    async symbolicRefDefault() {
+      return 'main';
+    },
+    async fetch() {
+      return true;
+    },
+    async hasUpstream() {
+      return true;
+    },
+    async revListCount() {
+      return 0;
+    },
+    async mergeFfOnly(p) {
+      ffd.push(p);
+      return true;
+    },
+    ...over,
+  };
+  return { git, ffd };
+}
+
+/** A ViteClear that records the paths it was asked to clear. */
+function fakeViteClear(): { seam: ViteClear; cleared: ViteCachePaths[] } {
+  const cleared: ViteCachePaths[] = [];
+  const seam: ViteClear = {
+    async clear(paths: ViteCachePaths): Promise<ViteClearResult> {
+      cleared.push(paths);
+      return { removed: [...paths.explicit] };
+    },
+  };
+  return { seam, cleared };
+}
+
+describe('StackApi.up — M9 auto-pull', () => {
+  it('runs the ff-only sync BEFORE the mesh when a git seam + mode are wired', async () => {
+    const { git } = fakeGitRunner({ async revListCount() { return 3; } });
+    const { runtime } = makeRuntime({ gitRunner: git, autoPull: 'auto', repoDirExists: () => true });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['scheduling-api'] as ServiceId[]);
+    expect(res.autoPull?.mode).toBe('auto');
+    // SOA (mesh infra) + program-hub (programs-api) + rostering (iam-api) are synced.
+    const names = res.autoPull?.repos.map((r) => r.name);
+    expect(names).toContain('soa');
+    expect(names).toContain('program-hub');
+    // all on main, behind 3 ⇒ every one fast-forwarded.
+    expect(res.autoPull?.repos.every((r) => r.action === 'ff')).toBe(true);
+  });
+
+  it('M1: NO auto-pull at slot > 0 (shared siblings belong to slot 0 — would race a slot-0 up)', async () => {
+    const { git, ffd } = fakeGitRunner({ async revListCount() { return 3; } });
+    const { runtime } = makeRuntime({ gitRunner: git, autoPull: 'auto', repoDirExists: () => true, slot: 1 });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['iam-api'] as ServiceId[]);
+    // The ff-only sync is gated to slot 0 (parity with the Connect-AV gate) — a slot-1
+    // up must NOT fetch/ff the shared checkouts.
+    expect(res.autoPull).toBeUndefined();
+    expect(ffd).toEqual([]);
+    expect(res.ok).toBe(true);
+  });
+
+  it('NO auto-pull when the mode is false (--no-auto-pull / NO_AUTO_PULL)', async () => {
+    const { git } = fakeGitRunner();
+    const { runtime } = makeRuntime({ gitRunner: git, autoPull: false });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['iam-api'] as ServiceId[]);
+    expect(res.autoPull).toBeUndefined();
+  });
+
+  it('NO auto-pull when no git seam is wired (byte-identical to pre-M9)', async () => {
+    const { runtime } = makeRuntime({ autoPull: 'auto' }); // gitRunner absent
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['iam-api'] as ServiceId[]);
+    expect(res.autoPull).toBeUndefined();
+  });
+
+  it('a fetch failure warns-and-continues (up still ok)', async () => {
+    const { git } = fakeGitRunner({ async fetch() { return false; } });
+    const { runtime } = makeRuntime({ gitRunner: git, autoPull: 'auto', repoDirExists: () => true });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['iam-api'] as ServiceId[]);
+    expect(res.ok).toBe(true); // fetch failure never aborts
+    expect(res.autoPull?.repos.every((r) => r.action === 'skip' && r.reason === 'fetch-failed')).toBe(true);
+  });
+});
+
+describe('StackApi.up — M9 Connect AV', () => {
+  const AV_ARGS = ['compose', '-f', '/dev/qboard/docker-compose.yml', 'up', '-d', 'livekit', 'coturn'];
+
+  it('starts livekit + coturn from qboard compose when connect is in the closure at slot 0', async () => {
+    const { runtime, fakes } = makeRuntime({ connectAv: true });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['connect-api'] as ServiceId[]);
+    const av = fakes.runs.find((r) => r.command === 'docker');
+    expect(av?.args).toEqual(AV_ARGS);
+    expect(res.av).toMatchObject({ attempted: true, ok: true });
+  });
+
+  it('does NOT start AV when connect is absent from the closure', async () => {
+    const { runtime, fakes } = makeRuntime({ connectAv: true });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['scheduling-api'] as ServiceId[]);
+    expect(fakes.runs.find((r) => r.command === 'docker')).toBeUndefined();
+    expect(res.av).toBeUndefined();
+  });
+
+  it('NEVER starts AV at slot > 0 (single-node :7880 would split-brain onto slot 0)', async () => {
+    const { runtime, fakes } = makeRuntime({ connectAv: true, slot: 1 });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['connect-api'] as ServiceId[]);
+    expect(fakes.runs.find((r) => r.command === 'docker')).toBeUndefined();
+    expect(res.av).toBeUndefined();
+  });
+
+  it('AV failure is warn-only — never fails the up', async () => {
+    // A runner that fails the docker AV call but succeeds `make up`.
+    const runs: ScriptInvocation[] = [];
+    const runner: Runner = {
+      async run(spec): Promise<RunResult> {
+        runs.push(spec);
+        return { code: spec.command === 'docker' ? 1 : 0 };
+      },
+    };
+    const { runtime } = makeRuntime({ connectAv: true, runner });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['connect-api'] as ServiceId[]);
+    expect(res.av).toMatchObject({ attempted: true, ok: false });
+    expect(res.ok).toBe(true); // AV never aborts the bring-up
+  });
+});
+
+describe('StackApi.restart — M9 native bounce (down → vite-clear → up, no wipe)', () => {
+  it('stops services, clears the vite caches, then brings the stack up — in that order, no reset', async () => {
+    const { seam, cleared } = fakeViteClear();
+    const { runtime, fakes } = makeRuntime({ viteClear: seam });
+    const api = makeStackApi(manifest, runtime);
+    const out = await api.restart(['iam-api'] as ServiceId[]);
+
+    // down ran (services stopped by pidfile — not a host-global pkill).
+    expect(fakes.stopped).toContain('iam-api');
+    // vite-clear ran with the byte-faithful dash + qboard paths.
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0].explicit).toContain('/dev/saga-dash/apps/web/dash/node_modules/.vite');
+    expect(cleared[0].explicit).toContain('/dev/qboard/apps/web/connectv3/node_modules/.vite');
+    // up ran (the service was relaunched) and NO reset delegate fired (no data wipe).
+    expect(fakes.launches.some((s) => s.id === 'iam-api')).toBe(true);
+    expect(fakes.delegated).toEqual([]);
+    expect(out.up.ok).toBe(true);
+    expect(out.vite?.removed.length).toBeGreaterThan(0);
+  });
+
+  it('skips the vite-clear when no seam is wired (still down → up)', async () => {
+    const { runtime, fakes } = makeRuntime(); // no viteClear
+    const api = makeStackApi(manifest, runtime);
+    const out = await api.restart(['iam-api'] as ServiceId[]);
+    expect(out.vite).toBeUndefined();
+    expect(fakes.stopped).toContain('iam-api');
+    expect(fakes.launches.some((s) => s.id === 'iam-api')).toBe(true);
+  });
+
+  // B1: restart MUST reap the process GROUP (kill(-pid)) via the dir-scoped
+  // stopServices(stateDir) — the SAME group killer down --slot N uses — NOT the
+  // leader-only launcher.stopServices(kill(pid)). A naive leader kill leaves the
+  // `tsup --watch` child + the port-holding `node dist/main.js` grandchild alive, so
+  // the follow-up up() health-probes the STALE server, sees 200, and never launches
+  // fresh code — the exact trap restart exists to escape.
+  it('B1: routes the stop through the GROUP killer (kill(-pid)) when a stopper+stateDir seam is wired, not the naive leader kill', async () => {
+    const STATE = '/tmp/sds-synthetic';
+    const signals: Array<{ pid: number; signal: string }> = [];
+    const alive = new Set([4242]);
+    const deps: StopServicesDeps = {
+      listDir: (dir) => (dir === STATE ? ['iam-api.pid'] : []),
+      readPid: () => '4242\n',
+      isAlive: (pid) => alive.has(pid),
+      kill: (pid, signal) => {
+        signals.push({ pid, signal }); // NEGATIVE pid ⇒ the process group.
+        if (signal === 'SIGTERM') alive.delete(Math.abs(pid));
+      },
+      removePid: () => {},
+      sleep: async () => {},
+      graceMs: 100,
+      pollIntervalMs: 50,
+    };
+    const { seam } = fakeViteClear();
+    const { runtime, fakes } = makeRuntime({
+      viteClear: seam,
+      // Wire the REAL group killer against the fake fs/process table (production wires
+      // this.getServiceStopper() + the slot's stateDir in buildNativeRuntime).
+      serviceStopper: (dir) => stopServices(dir, deps),
+      stateDir: STATE,
+    });
+    const api = makeStackApi(manifest, runtime);
+    const out = await api.restart(['iam-api'] as ServiceId[]);
+
+    // The GROUP was signalled (negative pid) — the watcher + port-holding grandchild go
+    // down with the leader. This is the fix.
+    expect(signals).toContainEqual({ pid: -4242, signal: 'SIGTERM' });
+    expect(signals.every((s) => s.pid < 0)).toBe(true);
+    // The naive leader-only launcher.stopServices path was NOT taken.
+    expect(fakes.stopped).toEqual([]);
+    // The reap is surfaced and up() still ran fresh afterwards.
+    expect(out.reaped?.map((r) => r.id)).toContain('iam-api');
+    expect(out.down.stopped.find((s) => s.id === 'iam-api')?.stopped).toBe(true);
+    expect(fakes.launches.some((s) => s.id === 'iam-api')).toBe(true);
+  });
+
+  // B1 (leak surfacing): a server that survives SIGTERM+SIGKILL is reported alive and
+  // NOT counted as stopped — restart must never claim a stale-serving process dead.
+  it('B1: a survivor (alive) is not reported stopped, and the reap carries the leak', async () => {
+    const STATE = '/tmp/sds-synthetic';
+    const deps: StopServicesDeps = {
+      listDir: (dir) => (dir === STATE ? ['iam-api.pid'] : []),
+      readPid: () => '9000\n',
+      isAlive: () => true, // survives every signal — an under-kill
+      kill: () => {},
+      removePid: () => {},
+      sleep: async () => {},
+      graceMs: 100,
+      pollIntervalMs: 50,
+    };
+    const { runtime } = makeRuntime({ serviceStopper: (dir) => stopServices(dir, deps), stateDir: STATE });
+    const api = makeStackApi(manifest, runtime);
+    const out = await api.restart(['iam-api'] as ServiceId[]);
+
+    expect(out.reaped?.find((r) => r.id === 'iam-api')?.outcome).toBe('alive');
+    expect(out.down.stopped.find((s) => s.id === 'iam-api')?.stopped).toBe(false);
   });
 });

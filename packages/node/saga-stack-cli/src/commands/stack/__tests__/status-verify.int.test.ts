@@ -21,7 +21,7 @@ import { computeClosure } from '../../../core/closure.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { HealthProber, ProbeResult } from '../../../runtime/health.js';
-import type { RunResult, ScriptInvocation } from '../../../runtime/index.js';
+import type { MeshExec, PgProbe, RunResult, ScriptInvocation } from '../../../runtime/index.js';
 import StackStatus from '../status.js';
 import StackVerify from '../verify.js';
 
@@ -69,6 +69,32 @@ function installRunner(code = 0): void {
       return { code };
     },
   });
+}
+
+/**
+ * Fake pg-scalar + mesh-readiness seams for the native `--full` DATA checks (M9).
+ * Defaults to a fully-green stack (205 users, dev id, 6 admin personas, sis migrated,
+ * mongo up); overrides flip individual readings to drive the hard-fail paths.
+ */
+function installDataProbes(over: { users?: string; devId?: string; admin?: string; sisMigrated?: boolean; mongoReachable?: boolean } = {}): void {
+  const pg: PgProbe = {
+    async databaseExists(): Promise<boolean> { return true; },
+    async hasMigrationsTable(): Promise<boolean> { return over.sisMigrated ?? true; },
+    async publicTableCount(): Promise<number> { return 0; },
+    async scalar(_c, _db, sql): Promise<string> {
+      if (sql.includes('FROM users WHERE')) return over.devId ?? '1';
+      if (sql.includes('FROM users')) return over.users ?? '205';
+      if (sql.includes('personas')) return over.admin ?? '6';
+      return '';
+    },
+  };
+  const mesh: MeshExec = { async ready(): Promise<boolean> { return over.mongoReachable ?? true; } };
+  const proto = BaseCommand.prototype as unknown as {
+    getPgProbe: () => PgProbe;
+    getMeshExec: () => MeshExec;
+  };
+  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pg);
+  vi.spyOn(proto, 'getMeshExec').mockReturnValue(mesh);
 }
 
 beforeEach(async () => {
@@ -263,10 +289,13 @@ describe('status / verify — a service whose repo is not cloned is not-cloned, 
   });
 });
 
-describe('stack verify --full — delegates the deep checks to verify.sh', () => {
-  it('runs verify.sh via the Runner and does NOT probe natively', async () => {
+describe('stack verify --full — native health + DATA, delegated posture (M9)', () => {
+  it('runs the native health gate + native DATA, and STILL delegates source-posture to verify.sh', async () => {
+    installDataProbes(); // fully-green stack
     await StackVerify.run(['--full', ...WS], config);
-    expect(probed).toHaveLength(0);
+    // native health ran (NOT pure delegation) — the probe seam was exercised.
+    expect(probed.length).toBeGreaterThan(0);
+    // source-posture is still delegated to verify.sh.
     expect(runnerCalls).toHaveLength(1);
     expect(runnerCalls[0]).toEqual({
       cwd: SYNTH_DIR,
@@ -277,7 +306,8 @@ describe('stack verify --full — delegates the deep checks to verify.sh', () =>
     });
   });
 
-  it('--full --health-only adds VERIFY_HEALTH_ONLY=1 to the delegated run', async () => {
+  it('--full --health-only narrows the DELEGATED verify.sh to VERIFY_HEALTH_ONLY=1 (native DATA still runs)', async () => {
+    installDataProbes();
     await StackVerify.run(['--full', '--health-only', ...WS], config);
     expect(runnerCalls[0].env).toEqual({
       DEV: DEV_ROOT,
@@ -286,10 +316,18 @@ describe('stack verify --full — delegates the deep checks to verify.sh', () =>
     });
   });
 
-  it('--full propagates verify.sh non-zero exit code verbatim', async () => {
+  it('HARD-FAILS (exit 1) on a native DATA gap even when verify.sh would pass (D5 mongo unreachable)', async () => {
+    installDataProbes({ mongoReachable: false });
+    await expect(StackVerify.run(['--full', ...WS], config)).rejects.toMatchObject({
+      oclif: { exit: 1 },
+    });
+  });
+
+  it('HARD-FAILS (exit 1) when the delegated source-posture (verify.sh) exits non-zero', async () => {
+    installDataProbes();
     installRunner(4);
     await expect(StackVerify.run(['--full', ...WS], config)).rejects.toMatchObject({
-      oclif: { exit: 4 },
+      oclif: { exit: 1 },
     });
   });
 });

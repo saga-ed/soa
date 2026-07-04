@@ -13,13 +13,14 @@
  *    drive the in-process `StackApi.up(closure)` (native prep → native mesh +
  *    topo-wave service launch, NOT up.sh) → composeSeedPlan over the active closure
  *    → `StackApi.seed(plan)`. `--reset` is native (M8 R4); `--login` delegates to
- *    up.sh through the facade. HONEST GAPS — the native bare `up` does NOT reproduce
- *    up.sh's implicit auto-pull / branch-layout preflight, nor its Connect AV bring-up
- *    (livekit :7880 / coturn); reach for `--legacy` (full up.sh bring-up incl. AV) or
- *    `--pull` (force the sibling-repo sync) when you need those.
+ *    up.sh through the facade. M9: the native bare `up` now RUNS the ff-only auto-pull
+ *    sibling sync (up.sh `pull_repos auto`; `--pull` = `all` mode, `--no-auto-pull` /
+ *    `NO_AUTO_PULL` opt out) AND best-effort Connect AV (livekit :7880 + coturn, slot-0
+ *    only, when connect is in the closure). Remaining gap: up.sh's branch-layout
+ *    preflight (M12).
  *  - WRAPPED (the escape): `--legacy` forces the up.sh wrapper for the WHOLE
  *    bring-up. Additionally, a bare invocation carrying a flag the native path can't
- *    honour yet (sandbox/tunnel/workspace/record/pull/no-auto-pull), or a
+ *    honour yet (sandbox/tunnel/workspace/record), or a
  *    SINGLE-service `--only` + such a flag, still falls back to the up.sh wrapper: a
  *    THIN WRAPPER mapping flags → `flagMap.up()` → the exact up.sh argv/env, shelled
  *    out with stdio inherited. A MULTI-service `--only` + such a flag is rejected
@@ -94,11 +95,12 @@ export default class StackUp extends BaseCommand {
       options: ['roster', 'full'],
     }),
     pull: Flags.boolean({
-      description: 'force a full ff-only sync of every sibling repo before build (up.sh --pull)',
+      description:
+        'NATIVE (M9): run the ff-only sibling sync in `all` mode — every on-branch clean sibling, not just default-branch ones (up.sh --pull).',
       default: false,
     }),
     'no-auto-pull': Flags.boolean({
-      description: 'opt out of the automatic auto-pull pass (up.sh env NO_AUTO_PULL=1)',
+      description: 'NATIVE (M9): opt out of the ff-only auto-pull sync entirely (up.sh env NO_AUTO_PULL=1).',
       default: false,
     }),
     'skip-prep': Flags.boolean({
@@ -173,24 +175,22 @@ export default class StackUp extends BaseCommand {
     }
 
     // Flags the native path does NOT yet implement (sandbox/tunnel overlays, the
-    // pull / auto-pull / record bash prep) — a bring-up carrying one of these still
-    // routes through the up.sh wrapper. `--skip-prep` is NOT here: it is NATIVE (M8),
-    // threading into the native prep pass as SKIP_PREP (skip R1 build; R2 provision +
-    // R3 migrate still run).
+    // record bash prep) — a bring-up carrying one of these still routes through the
+    // up.sh wrapper. `--skip-prep` is NOT here: it is NATIVE (M8). `--pull` /
+    // `--no-auto-pull` are NOT here either: they are NATIVE (M9) — they select the
+    // ff-only auto-pull mode (`all` / opt-out) the native `up` runs before the mesh/prep.
     const needsUpSh =
       flags.sandbox !== undefined ||
       flags.workspace !== undefined ||
       flags.tunnel ||
-      flags.record !== undefined ||
-      flags.pull ||
-      flags['no-auto-pull'];
+      flags.record !== undefined;
 
     // ── FLIP 1: a BARE full-stack `up` is NATIVE-BY-DEFAULT. Expand the bare request
     // to the FULL non-optional service set and route it through the native path
     // (native prep → launch → seed) — the SAME path `--only` uses. Two exceptions
     // both keep the up.sh wrapper for a bare invocation:
     //   • a native-unsupported flag is present at slot 0 (sandbox/tunnel/workspace/
-    //     record/pull/no-auto-pull) — those combos still need the bash prep, so the
+    //     record) — those combos still need the bash prep, so the
     //     bare set is left empty and falls through to `runWrapped` below.
     //   • (there is no slot-0 wrapper exception beyond that — plain `ss stack up` now
     //     boots the full non-optional closure natively.)
@@ -223,7 +223,7 @@ export default class StackUp extends BaseCommand {
       // overlays for --sandbox/--tunnel/… at slot > 0 are a documented fast-follow.)
       if (flags.slot > 0) {
         this.error(
-          `slot ${flags.slot}: --sandbox/--tunnel/--workspace/--record/--pull/--no-auto-pull/--skip-prep ` +
+          `slot ${flags.slot}: --sandbox/--tunnel/--workspace/--record ` +
             'route through the up.sh wrapper, which is hardcoded to slot 0 (project soa, base ports, ' +
             'STATE=/tmp/sds-synthetic) and would clobber it. Drop the flag to bring the slot up natively.',
         );
@@ -231,7 +231,7 @@ export default class StackUp extends BaseCommand {
 
       if (requested.length > 1) {
         this.error(
-          'a multi-service --only/--with set boots the closure NATIVELY, but that path does not yet support --sandbox/--tunnel/--workspace/--record/--pull/--no-auto-pull/--skip-prep. Drop the unsupported flag (native), pass a single service (up.sh fallback), or use --dry-run to preview.',
+          'a multi-service --only/--with set boots the closure NATIVELY, but that path does not yet support --sandbox/--tunnel/--workspace/--record. Drop the unsupported flag (native), pass a single service (up.sh fallback), or use --dry-run to preview.',
         );
       }
       // Single service + an unsupported-native flag ⇒ fall through to the up.sh
@@ -241,7 +241,7 @@ export default class StackUp extends BaseCommand {
 
     // ── WRAPPED (the up.sh escape): thin wrapper over up.sh. Reached only at slot 0
     // and only for (a) a BARE invocation carrying a native-unsupported flag
-    // (sandbox/tunnel/workspace/record/pull/no-auto-pull → bare set left un-expanded
+    // (sandbox/tunnel/workspace/record → bare set left un-expanded
     // above), or (b) a SINGLE-service --only + such a flag. `--legacy` is handled
     // earlier (forces the wrapper unconditionally). slot > 0 can never reach here
     // (bare → native above; --only + unsupported flag → hard-error above). ──
@@ -363,8 +363,20 @@ export default class StackUp extends BaseCommand {
 
     const api = makeStackApi(manifest, this.buildRuntime(flags, profile));
 
-    // 1. native bring-up (mesh + topo-wave service launch).
+    // 1. native bring-up (mesh + topo-wave service launch + M9 auto-pull + AV).
     const up = await api.up(services);
+
+    // M9 auto-pull: surface the ff-only sibling-sync outcome per repo (up.sh's
+    // pull_repos ⚠/·/✓ lines). Printed first so a fast-forward / skip is visible even
+    // on a later failure. Ran only when a git seam + a non-opt-out mode were wired.
+    if (up.autoPull) {
+      this.log(`sibling sync (ff-only — ${up.autoPull.mode}):`);
+      for (const r of up.autoPull.repos) this.log(`  ${r.message}`);
+    }
+
+    // M9 Connect AV: best-effort livekit + coturn (slot-0 + connect-in-closure). up.sh's
+    // connect_av_up ✓/⚠ — never a failure.
+    if (up.av) this.log(up.av.message);
 
     // Surface any services skipped because their sibling repo isn't cloned (warn,
     // not fail) — e.g. a missing coach checkout. Printed before the failure/emit
@@ -411,19 +423,6 @@ export default class StackUp extends BaseCommand {
       this.log(`⚠ prep: ${w.repo} ${w.kind} failed (non-fatal, continued)`);
     }
 
-    // AV GAP (#221): up.sh's bare `up` runs `connect_av_up` (livekit :7880 + coturn
-    // from qboard's compose, best-effort); the native path has no AV step yet, so a
-    // native bring-up that INCLUDES Connect boots it with no AV backend (degrades to
-    // CRDT-only) silently. Warn only when Connect is actually in the closure so the
-    // common backend/dash path stays quiet. `--legacy` never reaches here (wrapped
-    // path handles AV).
-    if (services.includes('connect-api') || services.includes('connect-web')) {
-      this.log(
-        '⚠ Connect AV (livekit :7880 / coturn) is not started by the native path yet — ' +
-          'video/audio sessions are unavailable (CRDT-only). Use `stack up --legacy` for AV, or see #221.',
-      );
-    }
-
     // Report.
     const launchedIds = up.launched.map((r) => `${r.id}${r.alreadyUp ? ' (already up)' : ''}`);
     this.emit(
@@ -431,6 +430,15 @@ export default class StackUp extends BaseCommand {
       {
         native: true,
         services,
+        ...(up.autoPull
+          ? {
+              autoPull: {
+                mode: up.autoPull.mode,
+                repos: up.autoPull.repos.map((r) => ({ name: r.name, action: r.action, ...(r.reason ? { reason: r.reason } : {}), ...(r.behind !== undefined ? { behind: r.behind } : {}) })),
+              },
+            }
+          : {}),
+        ...(up.av ? { av: { attempted: up.av.attempted, ok: up.av.ok } } : {}),
         launched: up.launched.map((r) => ({ id: r.id, ok: r.ok, alreadyUp: r.alreadyUp ?? false, pid: r.pid ?? null })),
         skipped: up.skipped.map((s) => ({ id: s.id, repo: s.repo, repoDir: s.repoDir })),
         mesh: { ok: up.mesh.ok, units: up.mesh.units.map((u) => ({ id: u.id, ok: u.ok })) },
@@ -537,6 +545,8 @@ type NativeFlags = DryRunFlags & {
   reset: boolean;
   login: boolean;
   'skip-prep': boolean;
+  pull: boolean;
+  'no-auto-pull': boolean;
 };
 type WrappedFlags = WorkspaceFlags & {
   reset: boolean;

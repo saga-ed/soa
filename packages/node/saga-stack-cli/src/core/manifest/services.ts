@@ -73,6 +73,13 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // main's up.sh sets it (services_up ~1467, added after gh_214 branched); the CLI
         // must too — same class as the VITE_SESSION_MEASURED miss.
         JANUS_REQUIRED: 'false',
+        // apply_fixes parity (up.sh ~457-467): lift the login rate-limit and the
+        // access-token TTL far above prod caps so a long local dev / e2e session is
+        // never rate-limited (prod caps requests) or forced to re-auth every 15m (prod
+        // JWT TTL is 900s). Native injects these on the LAUNCH env rather than mutating
+        // iam-api/.env (the dotfile writes are superseded — plan §2.4).
+        SECURITY_RATELIMITMAXREQUESTS: '1000000',
+        JWT_ACCESSTOKENTTLSECONDS: '28800',
       },
     },
     seed: ['iam-dev-user', 'iam'],

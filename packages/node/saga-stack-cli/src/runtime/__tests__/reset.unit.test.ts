@@ -53,6 +53,9 @@ function fakeProbe(present: string[]): PgProbe {
     async publicTableCount(): Promise<number> {
       return 0;
     },
+    async scalar(): Promise<string> {
+      return '';
+    },
   };
 }
 

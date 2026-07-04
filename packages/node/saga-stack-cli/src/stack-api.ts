@@ -44,7 +44,10 @@ import type { DbId, Lane, Manifest, MeshId, RepoKey, ServiceId } from './core/ma
 import type { HealthProbe } from './core/probe-plan.js';
 import { buildSeedRegistry } from './core/seed/profiles.js';
 import type { SeedPlan, SeedStep, SkipNote } from './core/seed/types.js';
+import type { PullMode } from './core/auto-pull.js';
 import {
+  REPO_DEFAULT_DIR,
+  autoPullRepos,
   meshContainer,
   meshUp,
   migrateClosure,
@@ -52,10 +55,14 @@ import {
   provisionDbs,
   resetClosure,
   syncDashLocalDefaults,
+  viteCachePaths,
 } from './runtime/index.js';
 import type {
+  AutoPullRepo,
+  AutoPullResult,
   DashFs,
   DashSyncResult,
+  GitRunner,
   HealthProber,
   LaunchResult,
   MeshExec,
@@ -68,7 +75,11 @@ import type {
   ResetResult,
   Runner,
   ServiceLauncher,
+  ServiceStopper,
   StopResult,
+  StopServiceResult,
+  ViteClear,
+  ViteClearResult,
 } from './runtime/index.js';
 
 // ── runtime bundle ───────────────────────────────────────────────────────────
@@ -162,6 +173,50 @@ export interface Runtime {
    * so script-path resolution stays in ONE place. Absent ⇒ `reset`/`login` throw.
    */
   delegate?: (plan: ScriptPlan) => Promise<number>;
+  /**
+   * The ff-only git seam (M9 — auto-pull). When PRESENT AND `autoPull` is a mode
+   * (`'auto'`/`'all'`), `up` runs the ff-only sibling sync BEFORE the mesh/prep, so a
+   * bare native `up` never builds/migrates a checkout silently behind origin. ABSENT ⇒
+   * the pass is skipped (the facade unit/int tests that don't wire it stay byte-identical).
+   */
+  gitRunner?: GitRunner;
+  /**
+   * Auto-pull mode for `up`: `'auto'` (default pre-build sync — default-branch siblings
+   * only), `'all'` (explicit `--pull` — every on-branch clean sibling), or `false`
+   * (opted out via `--no-auto-pull` / `NO_AUTO_PULL`). Absent/false ⇒ no sync.
+   */
+  autoPull?: PullMode | false;
+  /**
+   * The vite-cache-clear fs seam (M9 — native `restart`). Wired by every native command;
+   * `restart` invokes it between the service stop and the fresh bring-up. Absent ⇒
+   * `restart` skips the clear (the facade tests that don't wire it stay byte-identical).
+   */
+  viteClear?: ViteClear;
+  /**
+   * The native slot-safe GROUP-killing service-stopper (M7 Phase 3 — the standalone
+   * `stopServices(stateDir)`). Native `restart` routes its stop through THIS (not the
+   * leader-only `launcher.stopServices`) so the `tsup --watch` child + the port-holding
+   * `node dist/main.js` grandchild are group-reaped (`kill(-pid, …)` SIGTERM→grace→
+   * SIGKILL) — otherwise the survivor keeps 200-ing and the follow-up `up()` sees
+   * `alreadyUp` and serves STALE code. Dir-scoped ⇒ still slot-safe (never a host-global
+   * `pkill`). Wired with `stateDir` below. Absent ⇒ `restart` falls back to the pidfile
+   * leader method (the facade unit tests that don't wire it stay byte-identical).
+   */
+  serviceStopper?: ServiceStopper;
+  /**
+   * The resolved state dir whose recorded pidfiles the `serviceStopper` enumerates
+   * (`--state-dir` override, else the slot's `/tmp/sds-synthetic[-s<N>]`). Same dir the
+   * launcher writes pids under, so the restart reap targets exactly this run's servers.
+   */
+  stateDir?: string;
+  /**
+   * Best-effort Connect AV bring-up (M9 — livekit + coturn from qboard's compose). When
+   * true AND slot 0 AND connect is in the closure, `up` starts AV via the Runner (parity
+   * with up.sh's `connect_av_up`). Only at slot 0 — single-node livekit `:7880` bypasses
+   * the slot offset, so starting it at slot > 0 would split-brain onto slot 0. Absent/false
+   * ⇒ no AV step.
+   */
+  connectAv?: boolean;
   /** Manifest (defaults to the frozen one). */
   manifest?: Manifest;
 }
@@ -180,10 +235,24 @@ export interface UpSkip {
   message: string;
 }
 
+/** The best-effort Connect AV bring-up outcome (M9). */
+export interface AvResult {
+  /** True iff the AV step ran (connect in closure, slot 0, seam enabled). */
+  attempted: boolean;
+  /** True iff `docker compose … up -d livekit coturn` exited 0. */
+  ok: boolean;
+  /** Human-readable note (up.sh's `connect_av_up` best-effort ✓/⚠). */
+  message: string;
+}
+
 /** The outcome of a native `up`. */
 export interface UpResult {
   /** True iff the mesh came ready, the dash hook ran (if needed), and every launched wave went healthy. */
   ok: boolean;
+  /** The auto-pull (ff-only sibling sync) result — only when a git seam was wired + not opted out. */
+  autoPull?: AutoPullResult;
+  /** The best-effort Connect AV bring-up — only when connect was in the closure at slot 0 with AV enabled. */
+  av?: AvResult;
   /** The mesh bring-up result (preflight conflicts / make-up / per-unit readiness). */
   mesh: MeshResult;
   /** R1 native build/prep outcome (only when the native-prep pass ran). */
@@ -279,10 +348,28 @@ export interface VerifyOpts {
   tolerate?: string[];
 }
 
-/** The six-method in-process facade (plan §6.3). */
+/** The outcome of a native `restart` (M9 — down → vite-clear → up, no data wipe). */
+export interface RestartOutcome {
+  /** The service-stop result (native kill-by-pidfile — NOT a host-global pkill). */
+  down: DownResult;
+  /**
+   * The raw GROUP-reap results (SIGTERM→grace→SIGKILL per pidfile) — present when the
+   * `serviceStopper` seam was wired (production). Carries the richer per-service
+   * `outcome` (`term`/`kill`/`stale`/`alive`) so the command can surface a leaked
+   * (`alive`) survivor — an under-kill that would let `up()` serve stale code.
+   */
+  reaped?: StopServiceResult[];
+  /** The vite-cache clear (absent when no viteClear seam was wired). */
+  vite?: ViteClearResult;
+  /** The fresh bring-up (mesh + prep + launch + auto-pull + AV). */
+  up: UpResult;
+}
+
+/** The in-process facade (plan §6.3) — M9 adds native `restart`. */
 export interface StackApi {
   up(closureServices: ServiceId[], opts?: UpOpts): Promise<UpResult>;
   down(closureServices: ServiceId[]): Promise<DownResult>;
+  restart(closureServices: ServiceId[]): Promise<RestartOutcome>;
   reset(closureServices: ServiceId[], opts?: ResetOpts): Promise<ResetOutcome>;
   seed(plan: SeedPlan): Promise<SeedResult>;
   verify(probes: HealthProbe[], opts?: VerifyOpts): Promise<VerifyResult>;
@@ -344,6 +431,75 @@ function isTolerated(id: ServiceId, tolerate: Set<string>, m: Manifest): boolean
   if (tolerate.has(id)) return true;
   const repo = m.services[id].repo;
   return tolerate.has(repo) || tolerate.has(repo.toLowerCase().replace(/_/g, '-'));
+}
+
+/**
+ * up.sh's `pull_repos` sibling ORDER (`SOA:soa … RTSM:rtsm`, ~964-966) — fleek is
+ * excluded. Names match up.sh's labels (`REPO_DEFAULT_DIR` gives `student-data-system`
+ * for `SDS`, etc.). The native pass narrows this to the CLOSURE's repos (+ SOA, whose
+ * `infra` the mesh `make up` runs from) — up.sh always syncs all 8, but a native
+ * `--only` only needs the repos it will build.
+ */
+const AUTO_PULL_REPO_ORDER: RepoKey[] = [
+  'SOA',
+  'ROSTERING',
+  'PROGRAM_HUB',
+  'SAGA_DASH',
+  'COACH',
+  'SDS',
+  'QBOARD',
+  'RTSM',
+];
+
+/**
+ * The siblings to auto-pull for a closure: SOA (mesh infra) ∪ every closure service's
+ * repo, in up.sh's `pull_repos` order, mapped to `{ name, path }` from the resolved
+ * repo roots. Pure.
+ */
+function autoPullRepoList(
+  services: ServiceId[],
+  m: Manifest,
+  repoRoots: Record<RepoKey, string>,
+): AutoPullRepo[] {
+  const wanted = new Set<RepoKey>(['SOA']);
+  for (const id of services) wanted.add(getService(id, m).repo);
+  return AUTO_PULL_REPO_ORDER.filter((r) => wanted.has(r)).map((repo) => ({
+    name: REPO_DEFAULT_DIR[repo],
+    path: repoRoots[repo],
+  }));
+}
+
+/**
+ * Best-effort Connect AV bring-up: `docker compose -f <QBOARD>/docker-compose.yml up
+ * -d livekit coturn` through the Runner (parity with up.sh's `connect_av_up`,
+ * ~599-607). Missing compose / name drift ⇒ a ⚠ note, NEVER an abort (no health poll,
+ * no teardown). The caller gates on slot 0 + connect-in-closure.
+ */
+async function startConnectAv(qboardRoot: string, runner: Runner): Promise<AvResult> {
+  const composeFile = joinPath(qboardRoot, 'docker-compose.yml');
+  try {
+    const { code } = await runner.run({
+      cwd: qboardRoot,
+      command: 'docker',
+      args: ['compose', '-f', composeFile, 'up', '-d', 'livekit', 'coturn'],
+      env: {},
+      stdio: 'inherit',
+    });
+    return code === 0
+      ? { attempted: true, ok: true, message: '✓ connect AV up — livekit :7880 + coturn (qboard compose)' }
+      : {
+          attempted: true,
+          ok: false,
+          message: `⚠ livekit/coturn failed to start (exit ${code}) — Connect still works CRDT-only`,
+        };
+  } catch {
+    // A missing `docker` / compose file surfaces as a spawn throw — fold to a warning.
+    return {
+      attempted: true,
+      ok: false,
+      message: '⚠ livekit/coturn could not be started (docker/compose unavailable) — Connect still works CRDT-only',
+    };
+  }
 }
 
 // ── facade ────────────────────────────────────────────────────────────────────
@@ -486,6 +642,28 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
 
   return {
     async up(services: ServiceId[], _opts: UpOpts = {}): Promise<UpResult> {
+      // 0. AUTO-PULL (M9) — ff-only sibling sync BEFORE anything is built/migrated, so a
+      // bare native `up` never runs a checkout silently behind origin (up.sh runs
+      // `pull_repos` before mesh_up/prep). Warn-and-continue on every per-repo issue; a
+      // fetch failure NEVER aborts. Runs only when a git seam is wired AND not opted out
+      // (`--no-auto-pull` / `NO_AUTO_PULL` set `autoPull` false/absent) AND at SLOT 0.
+      // SLOT GUARD (parity with the Connect-AV gate below): the ff-only sync MUTATES the
+      // SHARED sibling checkouts (fetch + `merge --ff-only`), which belong to slot 0. A
+      // `stack up --slot N` (N>0) that synced them could race a concurrent slot-0 up on
+      // the same repos — so only a slot-0 up syncs siblings; slot > 0 skips auto-pull.
+      let autoPull: AutoPullResult | undefined;
+      if (runtime.gitRunner && runtime.autoPull && (runtime.slot ?? 0) === 0) {
+        autoPull = await autoPullRepos({
+          repos: autoPullRepoList(services, manifest, launchContext.repoRoots as Record<RepoKey, string>),
+          mode: runtime.autoPull,
+          git: runtime.gitRunner,
+          // The `.git` existence check reuses the injected repo-dir predicate (a
+          // `fs.existsSync` wrapper in production); absent ⇒ autoPullRepos defaults to
+          // real existsSync. Tests inject it to drive the not-cloned gate fs-free.
+          pathExists: runtime.repoDirExists,
+        });
+      }
+
       // 1+2. mesh: check_ports preflight → `make up` (whole mesh) → readiness-gate
       // the closure's mesh units. meshUp runs the preflight internally.
       const mesh = await meshUp({
@@ -499,7 +677,21 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         project: runtime.meshProject,
         meshOffset: runtime.meshOffset,
       });
-      if (!mesh.ok) return { ok: false, mesh, launched: [], skipped: [] };
+      if (!mesh.ok) return { ok: false, autoPull, mesh, launched: [], skipped: [] };
+
+      // 2.5. CONNECT AV (M9) — best-effort livekit + coturn from qboard's compose, right
+      // after mesh-up (parity with up.sh's `connect_av_up`). ONLY at slot 0 (single-node
+      // livekit :7880 bypasses the slot offset → split-brain at slot > 0) and ONLY when
+      // connect is actually in the closure (a native improvement over up.sh's
+      // unconditional call). Warn-only — a missing compose / name drift never aborts.
+      let av: AvResult | undefined;
+      if (
+        runtime.connectAv &&
+        (runtime.slot ?? 0) === 0 &&
+        (services.includes('connect-api') || services.includes('connect-web'))
+      ) {
+        av = await startConnectAv((launchContext.repoRoots as Record<RepoKey, string>).QBOARD, runner);
+      }
 
       // 3. skip any service whose sibling-repo checkout is absent — a missing repo
       // (e.g. the coach repo not cloned) is a WARNING, not a failure. Generic across
@@ -552,11 +744,11 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
           dbGenerateScan: runtime.prepDbGenerateScan,
           manifest,
         });
-        if (!prep.ok) return { ok: false, mesh, prep, launched: [], skipped };
+        if (!prep.ok) return { ok: false, autoPull, av, mesh, prep, launched: [], skipped };
 
         // R2 — idempotent role+DB provisioning fallback (coach_api #221 blocker incl.).
         provision = await provisionDbs({ dbs, pgContainer, runner, probe: runtime.pgProbe, manifest });
-        if (!provision.ok) return { ok: false, mesh, prep, provision, launched: [], skipped };
+        if (!provision.ok) return { ok: false, autoPull, av, mesh, prep, provision, launched: [], skipped };
 
         // R3 — migrate every closure DB in canonical order (the three-way branch).
         migrate = await migrateClosure({
@@ -568,7 +760,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
           probe: runtime.pgProbe,
           manifest,
         });
-        if (!migrate.ok) return { ok: false, mesh, prep, provision, migrate, launched: [], skipped };
+        if (!migrate.ok) return { ok: false, autoPull, av, mesh, prep, provision, migrate, launched: [], skipped };
       }
 
       // 4. dash prelaunch hook — ONLY when saga-dash is actually launchable (it reads
@@ -631,11 +823,11 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         launched.push(...results);
         const failed = results.find((r) => !r.ok);
         if (failed) {
-          return { ok: false, mesh, prep, provision, migrate, dash, launched, skipped, failedAt: failed.id as ServiceId };
+          return { ok: false, autoPull, av, mesh, prep, provision, migrate, dash, launched, skipped, failedAt: failed.id as ServiceId };
         }
       }
 
-      return { ok: true, mesh, prep, provision, migrate, dash, launched, skipped };
+      return { ok: true, autoPull, av, mesh, prep, provision, migrate, dash, launched, skipped };
     },
 
     async down(services: ServiceId[]): Promise<DownResult> {
@@ -644,6 +836,57 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       const order = launchOrder(services, manifest).flat().reverse();
       const stopped = await launcher.stopServices(order);
       return { stopped };
+    },
+
+    async restart(services: ServiceId[]): Promise<RestartOutcome> {
+      // Native `restart` (M9 — up.sh `restart`, ~2293-2306): a clean bounce with NO
+      // data wipe. down → vite-clear → up, in that order.
+      //
+      // 1. down — GROUP-reap the running servers via the dir-scoped
+      //    `stopServices(stateDir)` (the SAME group-killer `down --slot N` uses), NOT
+      //    the leader-only `launcher.stopServices`. A naive `kill(pid)` on the positive
+      //    LEADER leaves the `tsup --watch` child + the port-holding `node dist/main.js`
+      //    GRANDCHILD alive; the follow-up `up()` then health-probes that STALE server,
+      //    sees it still 200-ing, returns `alreadyUp`, and NEVER launches the fresh code
+      //    — the exact stale-bundle/port-hold trap `restart` exists to escape. The group
+      //    reap (`kill(-pid, …)` SIGTERM→grace→SIGKILL) takes down the whole subtree and
+      //    frees the port so `up()` boots fresh. STILL a DELIBERATE DIVERGENCE from
+      //    up.sh's `services_down`: no host-global `pkill -f tsup` / `fuser -k <port>` —
+      //    the stopper only ever enumerates THIS state dir's pidfiles, so it is dir-scoped
+      //    / slot-safe and never crosses a peer slot. Falls back to the pidfile leader
+      //    method only when no stopper/stateDir seam is wired (facade unit tests).
+      let down: DownResult;
+      let reaped: StopServiceResult[] | undefined;
+      if (runtime.serviceStopper && runtime.stateDir !== undefined) {
+        reaped = await runtime.serviceStopper(runtime.stateDir);
+        down = {
+          stopped: reaped.map((r) => ({
+            id: r.id,
+            // A server still `alive` after SIGKILL was NOT stopped — never report a
+            // surviving (stale-serving) process as down.
+            stopped: r.outcome === 'term' || r.outcome === 'kill',
+            pid: r.pid,
+          })),
+        };
+      } else {
+        down = await this.down(services);
+      }
+
+      // 2. vite-clear — drop the stale optimized-bundle caches (up.sh `nuke_vite`) so a
+      //    dead watcher can't serve old JS. Paths are byte-faithful to up.sh; skipped
+      //    when no seam is wired.
+      let vite: ViteClearResult | undefined;
+      if (runtime.viteClear) {
+        const repoRoots = launchContext.repoRoots as Record<RepoKey, string>;
+        vite = await runtime.viteClear.clear(
+          viteCachePaths({ sagaDashRoot: repoRoots.SAGA_DASH, qboardRoot: repoRoots.QBOARD }),
+        );
+      }
+
+      // 3. up — the SAME native bring-up (mesh + prep + launch + auto-pull + AV). NO
+      //    reset (restart never truncates data); the caller passes only the closure.
+      const up = await this.up(services);
+      return { down, reaped, vite, up };
     },
 
     async reset(services: ServiceId[], opts: ResetOpts = {}): Promise<ResetOutcome> {

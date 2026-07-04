@@ -26,6 +26,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { Command } from '@oclif/core';
 import type { Interfaces } from '@oclif/core';
 import { SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
+import type { PullMode } from './core/auto-pull.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import type { ScriptPlan } from './core/flag-map.js';
 import { defaultLaunchContext } from './core/launch-plan.js';
@@ -34,6 +35,7 @@ import type { Runtime } from './stack-api.js';
 import {
   buildRepoEnv,
   makeRealDashFs,
+  makeRealGitRunner,
   makeRealLauncher,
   makeRealMeshExec,
   makeRealPgProbe,
@@ -41,6 +43,7 @@ import {
   makeRealProber,
   makeRealRunner,
   makeRealSnapshotIO,
+  makeRealViteClear,
   resolveRepoRoot,
   resolveScript,
   scriptCwd,
@@ -50,6 +53,7 @@ import {
 } from './runtime/index.js';
 import type {
   DashFs,
+  GitRunner,
   HealthProber,
   MeshExec,
   PgProbe,
@@ -61,6 +65,7 @@ import type {
   ServiceLauncher,
   ServiceStopper,
   SnapshotIO,
+  ViteClear,
 } from './runtime/index.js';
 
 /**
@@ -82,6 +87,10 @@ export type WorkspaceFlags = {
 export type NativeRuntimeFlags = WorkspaceFlags & {
   'state-dir'?: string;
   'skip-prep'?: boolean;
+  /** M9 auto-pull: `--pull` ⇒ `all` mode. Undefined for commands that don't declare it. */
+  pull?: boolean;
+  /** M9 auto-pull: `--no-auto-pull` ⇒ opt out. Undefined for commands that don't declare it. */
+  'no-auto-pull'?: boolean;
 };
 
 export abstract class BaseCommand extends Command {
@@ -297,6 +306,40 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * The injectable ff-only git seam (M9 — auto-pull). Production returns
+   * `makeRealGitRunner()` — the only place the read-only git probes + the single
+   * `merge --ff-only` run for the native sibling sync. The native `stack up` TESTS spy
+   * this on the prototype to drive the skip/ff decision WITHOUT a real repo/network —
+   * mirroring how `getRunner`/`getMeshExec`/… are mocked.
+   */
+  protected getGitRunner(): GitRunner {
+    return makeRealGitRunner();
+  }
+
+  /**
+   * The injectable vite-cache-clear fs seam (M9 — native `restart`). Production returns
+   * `makeRealViteClear()` — the only place the `nuke_vite` `rm -rf` runs. The `stack
+   * restart` TESTS spy this on the prototype to assert the exact cache paths WITHOUT
+   * touching the filesystem.
+   */
+  protected getViteClear(): ViteClear {
+    return makeRealViteClear();
+  }
+
+  /**
+   * Resolve the M9 auto-pull mode from the native flags + env: `--pull` ⇒ `'all'`;
+   * `--no-auto-pull` OR `NO_AUTO_PULL=1` ⇒ `false` (opt out); otherwise `'auto'` (the
+   * default pre-build sync). Mirrors up.sh's precedence (`DO_PULL` wins; `NO_AUTO_PULL`
+   * checked as exactly `1`). Commands without the flags (e.g. `reset`) default to
+   * `'auto'`, which is harmless — only `up` runs the pass.
+   */
+  protected resolveAutoPull(flags: NativeRuntimeFlags): PullMode | false {
+    if (flags.pull) return 'all';
+    if (flags['no-auto-pull'] || process.env.NO_AUTO_PULL === '1') return false;
+    return 'auto';
+  }
+
+  /**
    * Assemble the in-process native `Runtime` (M4 + M8) from the shared BaseCommand
    * seams + a resolved slot `InstanceProfile`. Shared by every native command that
    * drives `makeStackApi` (`stack up`, `stack reset`, …) so the slot threading
@@ -360,6 +403,19 @@ export abstract class BaseCommand extends Command {
       prepIsFresh: this.getPrepFreshCheck(),
       prepDbGenerateScan: this.getDbGenerateScan(),
       repoDirExists: this.getRepoDirCheck(),
+      // M9: the ff-only sibling sync (up.sh `pull_repos`) + its mode, the vite-cache
+      // clear (native `restart`), and best-effort Connect AV (slot-0 + connect-in-closure,
+      // gated in the facade). All three no-op unless the relevant native path invokes them.
+      gitRunner: this.getGitRunner(),
+      autoPull: this.resolveAutoPull(flags),
+      viteClear: this.getViteClear(),
+      // Native `restart` routes its stop through the dir-scoped GROUP killer (kill(-pid))
+      // over THIS state dir's pidfiles, so a `tsup --watch` / port-holding grandchild is
+      // reaped and the follow-up `up()` boots fresh code instead of finding the stale
+      // server still alive. Slot-safe (no host-global pkill). Same dir the launcher wrote.
+      serviceStopper: this.getServiceStopper(),
+      stateDir,
+      connectAv: true,
       tunnel: false,
       // reset --legacy / login delegate to up.sh through the M1 script path.
       delegate: (plan) => this.runScript(plan, flags, { propagateExit: false }),

@@ -33,8 +33,11 @@ import { BUNDLE_NAMES } from '../../core/bundles.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import * as flagMap from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
-import { manifest } from '../../core/manifest/index.js';
+import { getMesh, manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
+import { DATA_SQL, assessData } from '../../core/verify-data.js';
+import type { DataReadings } from '../../core/verify-data.js';
+import { meshContainer } from '../../runtime/index.js';
 import { partitionByRepoPresence, repoContextFromFlags, resolveServiceSet } from './status.js';
 
 export default class StackVerify extends BaseCommand {
@@ -85,13 +88,17 @@ export default class StackVerify extends BaseCommand {
   async run(): Promise<void> {
     const { flags } = await this.parse(StackVerify);
 
-    // ── --full: delegate the deep checks to the still-canonical verify.sh. ──
+    // ── --full: native health + native DATA (D1–D5) + DELEGATED source-posture. ──
+    // M9: the DATA half is no longer delegated — `stack verify --full` runs D1–D5
+    // NATIVELY and hard-fails on an unseeded/unmigrated/mongo-unreachable stack. The
+    // source-posture (P1–P4) checks stay delegated to verify.sh (M12); verify.sh
+    // re-runs its own health/data before posture (a documented redundancy the M12 port
+    // removes), but the native hard-fail here is the authoritative DATA gate.
     if (flags.full) {
       if (flags.only) {
-        this.warn('--only is ignored with --full (verify.sh checks the whole stack).');
+        this.warn('--only is ignored with --full (the DATA checks + verify.sh cover the whole stack).');
       }
-      const plan = flagMap.verify({ healthOnly: flags['health-only'] });
-      await this.runScript(plan, flags); // propagates verify.sh's exit code verbatim
+      await this.runFull(flags);
       return;
     }
 
@@ -172,8 +179,89 @@ export default class StackVerify extends BaseCommand {
     }
 
     // Native health gate is the exit code: non-zero iff a non-tolerated required
-    // service is down. (--full delegates the exit code to verify.sh above.)
+    // service is down. (--full runs the DATA gate + delegates posture above.)
     if (!passed) this.exit(1);
+  }
+
+  /**
+   * `--full`: native health gate over ALL required services + native DATA (D1–D5) +
+   * delegated source-posture. Hard-fails (exit 1) on any down required service, any
+   * failed DATA check, OR a non-zero verify.sh (posture). `users != 205` is a NOTE.
+   *
+   * SLOT: `--full` is slot-0 only (verify.sh is hardcoded to slot 0, and the DATA
+   * probes read the base `soa-*` mesh containers) — refuse at slot > 0.
+   */
+  private async runFull(flags: {
+    slot: number;
+    porcelain: boolean;
+    'output-json': boolean;
+    'health-only': boolean;
+    dev: string;
+    soa?: string;
+  }): Promise<void> {
+    if (flags.slot > 0) {
+      this.error(
+        `slot ${flags.slot}: verify --full reads the base slot-0 mesh + delegates to verify.sh ` +
+          '(hardcoded to slot 0). Use a plain `stack verify --slot N` for the native health gate.',
+      );
+    }
+
+    // 1. native health gate over every required (non-optional) service.
+    const ids = Object.values(manifest.services)
+      .filter((s) => !s.optional)
+      .map((s) => s.id);
+    const prober = this.getProber();
+    const healthRows = await Promise.all(
+      healthProbes(manifest, ids).map(async (p) => {
+        const r = await prober.probe(p.url);
+        return { id: p.id, url: p.url, ok: r.ok, status: r.status };
+      }),
+    );
+    const healthDown = healthRows.filter((r) => !r.ok);
+    this.log('── service health ──');
+    for (const r of healthRows) {
+      this.log(`${r.ok ? '✓' : '✗'} ${r.id.padEnd(16)} ${r.url}  (${r.status ?? 'down'})`);
+    }
+
+    // 2. native DATA checks (D1–D5). Reads as postgres_admin against the base mesh
+    // containers (documented divergence from verify.sh's `-U iam` — same rows).
+    const pg = this.getPgProbe();
+    const meshExec = this.getMeshExec();
+    const pgContainer = meshContainer(getMesh('postgres', manifest));
+    const mongo = getMesh('connect-mongo', manifest);
+    const mongoContainer = meshContainer(mongo);
+    const readings: DataReadings = {
+      usersRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.users),
+      devIdRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.devId),
+      adminPersonasRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.adminPersonas),
+      sisMigrated: await pg.hasMigrationsTable(pgContainer, 'sis_db'),
+      mongoReachable: await meshExec.ready(mongoContainer, mongo.readinessCmd),
+    };
+    const data = assessData(readings);
+    this.log('── data ──');
+    for (const c of data.checks) this.log(`${c.ok ? '✓' : '✗'} ${c.label}`);
+    for (const note of data.notes) this.log(`· ${note}`);
+
+    // 3. DELEGATED source-posture (P1–P4) — verify.sh remains canonical for posture
+    // (M12). Its exit reflects its own health/data re-check + posture badlines; captured
+    // (not propagated) so we can fold it with the native gates.
+    const plan = flagMap.verify({ healthOnly: flags['health-only'] });
+    const postureCode = await this.runScript(plan, flags, { propagateExit: false });
+
+    // Combined verdict: native health, native DATA, and posture must all pass.
+    const healthOk = healthDown.length === 0;
+    this.log(
+      healthOk && data.passed && postureCode === 0
+        ? '✓ verify --full: health + data + posture all green'
+        : `✗ verify --full: ${[
+            healthOk ? null : `${healthDown.length} service(s) down`,
+            data.passed ? null : `${data.checks.filter((c) => !c.ok).length} data check(s) failed`,
+            postureCode === 0 ? null : 'source-posture failed',
+          ]
+            .filter(Boolean)
+            .join('; ')}`,
+    );
+    if (!(healthOk && data.passed && postureCode === 0)) this.exit(1);
   }
 }
 

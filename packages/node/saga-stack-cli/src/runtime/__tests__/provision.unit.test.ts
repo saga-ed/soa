@@ -38,6 +38,9 @@ function fakeProbe(exists: Partial<Record<string, boolean>> = {}): PgProbe {
     async publicTableCount(): Promise<number> {
       return 0;
     },
+    async scalar(): Promise<string> {
+      return '';
+    },
   };
 }
 

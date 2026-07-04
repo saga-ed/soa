@@ -24,3 +24,6 @@ export * from './prep.js';
 export * from './provision.js';
 export * from './migrate.js';
 export * from './reset.js';
+export * from './git.js';
+export * from './auto-pull.js';
+export * from './vite-clear.js';

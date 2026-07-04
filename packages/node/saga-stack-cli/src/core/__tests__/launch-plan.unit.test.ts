@@ -82,6 +82,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       REDIS_HOST: 'localhost',
       REDIS_PORT: '6379', // slot 0 base — offset-aware (:7379 at slot 1), see launch-plan.slot test
       JANUS_REQUIRED: 'false', // main up.sh:1467 — without it iam 401s every local S2S/devLogin
+      SECURITY_RATELIMITMAXREQUESTS: '1000000', // apply_fixes (up.sh:457) — no local rate-limit
+      JWT_ACCESSTOKENTTLSECONDS: '28800', // apply_fixes (up.sh:465) — 8h TTL for long dev/e2e sessions
     });
   });
 

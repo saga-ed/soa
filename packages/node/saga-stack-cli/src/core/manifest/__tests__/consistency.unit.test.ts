@@ -67,4 +67,12 @@ describe('manifest consistency — every edge resolves', () => {
     expect(manifest.services['coach-web'].dependsOn).toEqual(['coach-api']);
     expect(manifest.databases['coach_api'].ownerRole).toBe('coach_api_app');
   });
+
+  // M9 (apply_fixes parity, up.sh ~457-467): iam-api's launch env lifts the login
+  // rate-limit + access-token TTL far above prod caps for long local dev/e2e sessions.
+  it("iam-api launch.env carries the apply_fixes rate-limit + JWT-TTL knobs", () => {
+    const env = manifest.services['iam-api'].launch.env;
+    expect(env.SECURITY_RATELIMITMAXREQUESTS).toBe('1000000');
+    expect(env.JWT_ACCESSTOKENTTLSECONDS).toBe('28800');
+  });
 });

@@ -39,6 +39,14 @@ export interface PgProbe {
   hasMigrationsTable(container: string, db: string): Promise<boolean>;
   /** Count of `db`'s public tables (`0` ⇒ empty/fresh; `NaN` on a probe error). */
   publicTableCount(container: string, db: string): Promise<number>;
+  /**
+   * Run an arbitrary read-only scalar query against `db` and return its trimmed
+   * single-value output (`''` on any error). Powers the `verify --full` DATA checks
+   * (D1/D2/D3 — `count(*) FROM users`, the dev-id probe, admin-persona count). Reads
+   * as `postgres_admin` (the mesh superuser); `''` distinguishes an unreachable DB
+   * from a legitimate `0`.
+   */
+  scalar(container: string, db: string, sql: string): Promise<string>;
 }
 
 /** Run `docker exec <container> psql …args`, resolving trimmed stdout ('' on any error). NEVER throws. */
@@ -89,6 +97,11 @@ export function makeRealPgProbe(): PgProbe {
       // Empty string (probe error) ⇒ NaN, which the migrate branch treats as
       // "not empty" → unmanaged, exactly like up.sh's `[[ "" == 0 ]]` being false.
       return out === '' ? Number.NaN : Number.parseInt(out, 10);
+    },
+    scalar(container: string, db: string, sql: string): Promise<string> {
+      // `-tAc` = tuples-only, unaligned, single command — a bare scalar, exactly the
+      // verify.sh `psql -tAc` DATA reads. Connects as postgres_admin (mesh superuser).
+      return dockerPsql(container, ['-U', 'postgres_admin', '-d', db, '-tAc', sql]);
     },
   };
 }

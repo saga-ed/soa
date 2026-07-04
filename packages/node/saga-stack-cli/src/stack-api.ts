@@ -34,9 +34,11 @@
  */
 
 import * as flagMap from './core/flag-map.js';
-import type { ScriptPlan } from './core/flag-map.js';
+import type { RecordMode, ScriptPlan } from './core/flag-map.js';
 import { launchPlan } from './core/launch-plan.js';
 import type { LaunchContext } from './core/launch-plan.js';
+import { recordPlan } from './core/record-plan.js';
+import type { RecordPlan } from './core/record-plan.js';
 import { launchOrder } from './core/launch-order.js';
 import { getMesh, getService, manifest as defaultManifest } from './core/manifest/index.js';
 import type { DbId, Lane, Manifest, MeshId, RepoKey, ServiceId } from './core/manifest/index.js';
@@ -216,9 +218,32 @@ export interface Runtime {
    * ⇒ no AV step.
    */
   connectAv?: boolean;
+  /**
+   * `--record [crdt|av]` (Phase 2) — when set AND fleek is checked out, `up` starts
+   * the fleek recording sidecars (recorder :7890 + recordings-api :8444 + MinIO; `av`
+   * adds the LiveKit egress) after the launch waves, via `recordUp`. Absent ⇒ no record
+   * step. When fleek is NOT cloned the step is SKIPPED with a warning (never a failure),
+   * mirroring the repo-absent service skip.
+   */
+  record?: RecordMode;
+  /**
+   * The `--record` bring-up seam (production shells the fleek docker-compose stack +
+   * CodeArtifact token; tests inject a fake). Absent ⇒ `--record` is planned + fleek-gated
+   * but not executed (the facade unit tests stay IO-free). Receives the pure `RecordPlan`
+   * + the qboard root (for the redis/livekit recording wiring).
+   */
+  recordUp?: RecordUp;
+  /** Per-user recordings dir (up.sh `$FLEEK_REC_DIR`); defaults to `$HOME/.fleek-local/recordings`. */
+  recordingsDir?: string;
   /** Manifest (defaults to the frozen one). */
   manifest?: Manifest;
 }
+
+/** The `--record` bring-up seam signature (production impl in `runtime/record.ts`). */
+export type RecordUp = (
+  plan: RecordPlan,
+  ctx: { qboardRoot: string },
+) => Promise<{ ok: boolean; message: string }>;
 
 // ── results ────────────────────────────────────────────────────────────────
 
@@ -244,10 +269,26 @@ export interface AvResult {
   message: string;
 }
 
+/** The `--record` fleek-stack bring-up outcome (Phase 2). */
+export interface RecordResult {
+  /** The requested record mode. */
+  mode: RecordMode;
+  /** True iff the fleek stack was actually brought up (fleek present + seam ran + ok). */
+  ok: boolean;
+  /** True iff SKIPPED because the fleek repo is not cloned (warn, not fail). */
+  skipped: boolean;
+  /** The compose services the plan targeted (recorder/recordings-api/minio[/egress]). */
+  services: string[];
+  /** Human-readable note (✓ up / ⚠ skipped-fleek-absent / ⚠ bring-up failed). */
+  message: string;
+}
+
 /** The outcome of a native `up`. */
 export interface UpResult {
   /** True iff the mesh came ready, the dash hook ran (if needed), and every launched wave went healthy. */
   ok: boolean;
+  /** The `--record` fleek-stack bring-up outcome — only when `--record` was requested. */
+  record?: RecordResult;
   /** The auto-pull (ff-only sibling sync) result — only when a git seam was wired + not opted out. */
   autoPull?: AutoPullResult;
   /** The best-effort Connect AV bring-up — only when connect was in the closure at slot 0 with AV enabled. */
@@ -822,7 +863,48 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         }
       }
 
-      return { ok: true, autoPull, av, mesh, prep, provision, migrate, dash, launched, skipped };
+      // 6. RECORD (Phase 2, `--record [crdt|av]`) — start the fleek recording sidecars
+      // AFTER the launch waves (connect-api must be up for the recorder to observe it).
+      // Fleek-gated: a missing fleek checkout is a WARNING skip (like a repo-absent
+      // service), never a failure. The seam does the real docker-compose + CodeArtifact
+      // bring-up; absent ⇒ planned + gated but not executed (facade unit tests stay IO-free).
+      let record: RecordResult | undefined;
+      if (runtime.record) {
+        const repoRoots = launchContext.repoRoots as Record<RepoKey, string>;
+        const fleekRoot = repoRoots.FLEEK;
+        if (runtime.repoDirExists && !runtime.repoDirExists(fleekRoot)) {
+          record = {
+            mode: runtime.record,
+            ok: false,
+            skipped: true,
+            services: [],
+            message: `⚠ --record skipped — fleek repo dir ${fleekRoot} not present (clone git@github.com:saga-ed/fleek.git)`,
+          };
+        } else {
+          const plan = recordPlan(runtime.record, {
+            fleekRoot,
+            recordingsDir: runtime.recordingsDir ?? `${process.env.HOME ?? ''}/.fleek-local/recordings`,
+            rtsmPort: Number(tokens.RTSM_PORT),
+            devUserUuid: tokens.DEV_USER_UUID as string,
+            connectWebUrl: tokens.CONNECT_WEB_URL as string,
+            sagaApiTarget: tokens.SAGA_API_TARGET as string,
+          });
+          if (runtime.recordUp) {
+            const res = await runtime.recordUp(plan, { qboardRoot: repoRoots.QBOARD });
+            record = { mode: plan.mode, ok: res.ok, skipped: false, services: plan.services, message: res.message };
+          } else {
+            record = {
+              mode: plan.mode,
+              ok: false,
+              skipped: false,
+              services: plan.services,
+              message: `record plan resolved (${plan.services.join(', ')}) — no recordUp seam wired`,
+            };
+          }
+        }
+      }
+
+      return { ok: true, autoPull, av, mesh, prep, provision, migrate, dash, launched, skipped, record };
     },
 
     async down(services: ServiceId[]): Promise<DownResult> {

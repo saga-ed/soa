@@ -136,12 +136,26 @@ export interface LaunchTokens {
   PINO_LOGGER_ISEXPRESSCONTEXT: string;
 
   // ── lane-template tokens (sandbox/tunnel lanes only; absent ⇒ stack lane) ──
-  /** up.sh `SANDBOX_NAME` — only set under `--sandbox` (sandbox lane URLs). */
+  /** up.sh `SANDBOX_NAME` — only set under `--sandbox` (sandbox lane URLs + `sandbox_env` gate). */
   SANDBOX_NAME?: string;
-  /** up.sh `SANDBOX_BASE` — dev-fleet base domain (sandbox lane URLs). */
+  /** up.sh `SANDBOX_BASE` — dev-fleet base domain (sandbox lane URLs + `sandbox_env` iam host). */
   SANDBOX_BASE?: string;
-  /** up.sh `TUNNEL_DOMAIN` — `<moniker>.$VMS_BASE`, only set under `--tunnel`. */
+  /** up.sh `TUNNEL_DOMAIN` — `<moniker>.$VMS_BASE`, only set under `--tunnel` (`tunnel_env` gate). */
   TUNNEL_DOMAIN?: string;
+  /**
+   * up.sh `$STATE/rtsm-fleet-tunnel.json` — the tunnel-flavoured rtsm fleet file the
+   * `--tunnel` block generates (endpoint swapped to `rtsm.<domain>`). Only set under
+   * `--tunnel`; drives rtsm-api's `tunnel_env` FLEET_CONFIG_PATH override.
+   */
+  TUNNEL_RTSM_FLEET_PATH?: string;
+  /**
+   * up.sh `$TUNNEL_LK_KEY` / `$TUNNEL_LK_SECRET` — the fleek dev-cluster LiveKit creds
+   * (`qboard/fleek/livekit-creds`) up.sh best-effort-fetches from Secrets Manager under
+   * `--tunnel`. Only present when the runtime resolved them; absent ⇒ up.sh's no-creds
+   * branch (connect-api signs with the dev key; cluster rejects → AV fails, CRDT works).
+   */
+  TUNNEL_LK_KEY?: string;
+  TUNNEL_LK_SECRET?: string;
 }
 
 /**
@@ -203,18 +217,126 @@ function expand(template: string, tokens: Record<string, string | undefined>, wh
 }
 
 /**
- * Lane-specific env OVERRIDES, splatted on top of the base launch env (up.sh's
- * `sandbox_env`/`tunnel_env`, ~lines 1166-1280). M4's native path drives the
- * local `stack` lane, for which there is NO overlay (returns `{}`). The
- * sandbox/tunnel overlays stay on the up.sh wrapper path for now.
- *
- * TODO(post-M4): port `sandbox_env` (iam-api dep URL flip + PREVIEW_ORIGINATE_MAP
- * for sis-api/programs-api/scheduling-api/sessions-api) and `tunnel_env`
- * (browser-plane CORS / cookie-domain / VITE_* flips) here when native hybrid
- * lanes land. Until then a non-`stack` lane resolves the base env only.
+ * The fleek dev-cluster AV topology up.sh's `--tunnel` block hardcodes for
+ * connect-api (up.sh ~2205-2206). LiveKit media is UDP and can't ride the HTTP
+ * tunnels, so tunnel mode ALWAYS points connect-api's AV at the public cluster.
+ * `TUNNEL_FLEEK_DEFAULT_URL` MUST match `TUNNEL_FLEEK_TOPOLOGY`'s `_default`.
  */
-function laneOverlay(_service: ServiceId, _lane: Lane, _ctx: LaunchContext): Record<string, string> {
-  return {};
+const TUNNEL_FLEEK_DEFAULT_URL = 'wss://chi-1.fleek.wootdev.com';
+const TUNNEL_FLEEK_TOPOLOGY =
+  '{"domain":"fleek.wootdev.com","cityMap":{"phx":"wss://phx-1.fleek.wootdev.com","chi":"wss://chi-1.fleek.wootdev.com","nyc":"wss://nyc-1.fleek.wootdev.com","_default":"wss://chi-1.fleek.wootdev.com"}}';
+
+/**
+ * `sandbox_env` (up.sh ~1216-1260) as pure data — the per-service env that
+ * repoints a locally-run service's iam-api DEP at a cloud sandbox and originates
+ * the `x-saga-preview-iam-api: sandbox-<name>` routing header. Gated on
+ * `SANDBOX_NAME` being present (up.sh's `IAM_SANDBOX` scalar); returns `{}` in
+ * pure-local mode. FAITHFUL: only iam-api is wired as a dep today; sis-api and
+ * programs-api ALSO originate the preview header (they parse PREVIEW_ORIGINATE_MAP).
+ */
+function sandboxOverlay(service: ServiceId, tokens: LaunchTokens): Record<string, string> {
+  const name = tokens.SANDBOX_NAME;
+  if (name === undefined) return {};
+  const iamHost = `https://iam.${tokens.SANDBOX_BASE ?? 'wootdev.com'}`;
+  const originate = `x-saga-preview-iam-api=sandbox-${name}`;
+  switch (service) {
+    case 'sis-api':
+      return {
+        IAM_BASEURL: `${iamHost}/trpc`,
+        IAM_TOKENURL: `${iamHost}/v1/oauth/token`,
+        PREVIEW_ORIGINATE_MAP: originate,
+      };
+    case 'programs-api':
+      return { IAM_API_URL: iamHost, PREVIEW_ORIGINATE_MAP: originate };
+    case 'scheduling-api':
+    case 'sessions-api':
+      // URL flip only (no outbound iam S2S client to originate for — up.sh note).
+      return { IAM_API_URL: iamHost };
+    default:
+      return {}; // iam-api itself / saga-dash / ads-adm / rtsm / connect: no dep repoint wired
+  }
+}
+
+/**
+ * `tunnel_env` (up.sh ~1292-1366) as pure data — the browser-plane env that
+ * flips CORS origins, the iam session-cookie domain, and the VITE_* dependency
+ * URLs to the public tunnel hosts. Gated on `TUNNEL_DOMAIN`; returns `{}` when
+ * the tunnel is not requested. Splatted AFTER `sandbox_env` (env last-wins),
+ * matching up.sh's trailing `$(sandbox_env x) $(tunnel_env x)` order.
+ */
+function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string, string> {
+  const td = tokens.TUNNEL_DOMAIN;
+  if (td === undefined) return {};
+  const dash = tokens.DASH_URL;
+  const connectWeb = tokens.CONNECT_WEB_URL;
+  switch (service) {
+    case 'iam-api':
+      return {
+        AUTH_SESSIONCOOKIEDOMAIN: `.${td}`,
+        CORS_ORIGIN: `${dash},${connectWeb},https://dash.${td},https://connect.${td}`,
+        MAIL_FRONTEND_BASE_URL: `https://iam.${td}/demo`,
+      };
+    case 'sis-api':
+      return {
+        CORS_ORIGIN: `${dash},http://localhost:${tokens.IAM_PORT},https://dash.${td},https://iam.${td}`,
+      };
+    case 'programs-api':
+    case 'scheduling-api':
+    case 'sessions-api':
+    case 'ads-adm-api':
+      return {
+        CORS_ORIGIN: `${dash},https://dash.${td}`,
+        JANUS_LOGIN_HOST: `iam.${td}/demo`,
+      };
+    case 'connect-api': {
+      const env: Record<string, string> = {
+        ALLOWED_ORIGINS: `${connectWeb},https://connect.${td}`,
+        PUBLIC_API_URL: `https://connect-api.${td}`,
+        JANUS_LOGIN_HOST: `iam.${td}/demo`,
+        // AV → the fleek dev cluster (ALWAYS in tunnel mode; local LiveKit is UDP).
+        FLEEK_TOPOLOGY_JSON: TUNNEL_FLEEK_TOPOLOGY,
+        LIVEKIT_URL: TUNNEL_FLEEK_DEFAULT_URL,
+      };
+      // Real cluster creds overlay ONLY when the runtime resolved them (up.sh's
+      // best-effort Secrets Manager fetch); absent ⇒ signs with the dev key.
+      if (tokens.TUNNEL_LK_KEY && tokens.TUNNEL_LK_SECRET) {
+        env.LIVEKIT_API_KEY = tokens.TUNNEL_LK_KEY;
+        env.LIVEKIT_API_SECRET = tokens.TUNNEL_LK_SECRET;
+      }
+      return env;
+    }
+    case 'connect-web':
+      return {
+        VITE_CONNECTV3_API_URL: `https://connect-api.${td}`,
+        VITE_IAM_API_URL: `https://iam.${td}`,
+        VITE_RTSM_BOOTSTRAP_URL: `https://rtsm.${td}`,
+        VITE_JANUS_LOGIN_HOST: `https://iam.${td}/demo`,
+        VITE_DASHBOARD_URL: `https://dash.${td}`,
+        __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: `connect.${td}`,
+      };
+    case 'rtsm-api':
+      // Advertise the tunnel host as the node endpoint (the generated fleet file);
+      // absent path ⇒ keep the base local fleet (remote discovery falls back).
+      return tokens.TUNNEL_RTSM_FLEET_PATH
+        ? { FLEET_CONFIG_PATH: tokens.TUNNEL_RTSM_FLEET_PATH }
+        : {};
+    case 'saga-dash':
+      return { __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: `dash.${td}` };
+    default:
+      return {}; // everything else: dev CORS wildcard already admits *.wootdev.com
+  }
+}
+
+/**
+ * Lane-specific env OVERRIDES, splatted on top of the base launch env — a
+ * FAITHFUL port of up.sh's `sandbox_env` + `tunnel_env` (Phase 2, saga-ed/soa#214).
+ * Both are gated on their token being present in `ctx` (not on `lane`): the
+ * native hybrid/tunnel launch drives the local `stack` lane URLs but repoints the
+ * relevant deps/browser env exactly as up.sh's trailing `$(sandbox_env x)
+ * $(tunnel_env x)` splat did. Pure-local (`stack up`) ⇒ neither token set ⇒ `{}`.
+ */
+function laneOverlay(service: ServiceId, _lane: Lane, ctx: LaunchContext): Record<string, string> {
+  return { ...sandboxOverlay(service, ctx.tokens), ...tunnelOverlay(service, ctx.tokens) };
 }
 
 // ── public API ────────────────────────────────────────────────────────────────
@@ -329,10 +451,15 @@ export interface LaunchContextInputs {
   recorderControlPort?: number;
   /** Fleek recordings-api port (up.sh `RECORDINGS_API_PORT`; default 8444). */
   recordingsApiPort?: number;
-  /** Sandbox lane inputs — set only under `--sandbox`. */
+  /** Sandbox lane inputs — set only under `--sandbox` (drives `sandbox_env`). */
   sandbox?: { name: string; base?: string };
-  /** Tunnel lane input — set only under `--tunnel`. */
-  tunnel?: { domain: string };
+  /**
+   * Tunnel lane input — set only under `--tunnel` (drives `tunnel_env`). `domain`
+   * is `<moniker>.<VMS_BASE>` (from the vendored `tunnel.sh moniker`); `rtsmFleetPath`
+   * is the generated `rtsm-fleet-tunnel.json` (rtsm-api FLEET_CONFIG_PATH override);
+   * `lkKey`/`lkSecret` are the best-effort fleek-cluster LiveKit creds.
+   */
+  tunnel?: { domain: string; rtsmFleetPath?: string; lkKey?: string; lkSecret?: string };
   /** up.sh `${PINO_LOGGER_LEVEL:-info}` — ambient override, else `info`. */
   pinoLevel?: string;
   /** up.sh `${PINO_LOGGER_ISEXPRESSCONTEXT:-true}` — ambient override, else `true`. */
@@ -426,7 +553,14 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     ...(inputs.sandbox
       ? { SANDBOX_NAME: inputs.sandbox.name, SANDBOX_BASE: inputs.sandbox.base ?? 'wootdev.com' }
       : {}),
-    ...(inputs.tunnel ? { TUNNEL_DOMAIN: inputs.tunnel.domain } : {}),
+    ...(inputs.tunnel
+      ? {
+          TUNNEL_DOMAIN: inputs.tunnel.domain,
+          ...(inputs.tunnel.rtsmFleetPath ? { TUNNEL_RTSM_FLEET_PATH: inputs.tunnel.rtsmFleetPath } : {}),
+          ...(inputs.tunnel.lkKey ? { TUNNEL_LK_KEY: inputs.tunnel.lkKey } : {}),
+          ...(inputs.tunnel.lkSecret ? { TUNNEL_LK_SECRET: inputs.tunnel.lkSecret } : {}),
+        }
+      : {}),
   };
 
   return { ports, repoRoots: inputs.repoRoots, tokens };

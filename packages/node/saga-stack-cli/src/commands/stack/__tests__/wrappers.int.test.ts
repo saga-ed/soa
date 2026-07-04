@@ -89,55 +89,37 @@ afterEach(() => {
 /** The workspace flags every case shares for deterministic path/env resolution. */
 const WS = ['--soa', SOA_ROOT, '--dev', DEV_ROOT];
 
-describe('stack up — sole-implementation up.sh wrap (--sandbox/--workspace/--record; bare up is native)', () => {
+describe('stack up — FULLY NATIVE (Phase 2: --sandbox/--tunnel/--record/--workspace no longer wrap up.sh)', () => {
   it('--dry-run does NOT invoke the Runner (planner-only path)', async () => {
     await StackUp.run(['--dry-run', '--only', 'scheduling-api,sessions-api', ...WS], config);
     expect(calls).toHaveLength(0);
   });
 
-  // B2 revert (saga-ed/soa#214): `up --tunnel` is back to wrapping up.sh (native `up`'s
-  // LOCALHOST posture can't serve a tunnel without up.sh's per-service tunnel_env — a
-  // Phase-2 port). The standalone `stack tunnel` command stays decoupled onto vendored
-  // tunnel.sh. --tunnel is again a native-unsupported flag alongside
-  // --sandbox/--workspace/--record.
-  it('rejects a comma-list --only + native-unsupported flag (--sandbox)', async () => {
-    await expect(
-      StackUp.run(['--only', 'scheduling-api,sessions-api', '--sandbox', 'demo', ...WS], config),
-    ).rejects.toMatchObject({ message: expect.stringContaining('boots the closure NATIVELY') });
-    expect(calls).toHaveLength(0);
-  });
-
-  // A SINGLE-service --only with a native-unsupported flag (--sandbox) still
-  // falls back to the up.sh wrapper — the sole-implementation escape (no native path).
-  it('single-service --only + --sandbox falls back to the up.sh wrapper', async () => {
-    await StackUp.run(['--only', 'scheduling-api', '--sandbox', 'demo', ...WS], config);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe(UP_SH);
-    expect(calls[0].args).toEqual(['up', '--only', 'scheduling-api', '--sandbox', 'demo']);
-  });
-
-  it('per-repo overrides (--rostering / --program-hub) become up.sh repo env vars on the --sandbox wrap', async () => {
-    await StackUp.run(
-      ['--only', 'scheduling-api', '--sandbox', 'demo', '--rostering', '/x/rostering', '--program-hub', '/y/ph', ...WS],
-      config,
-    );
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].env).toEqual({
-      DEV: DEV_ROOT,
-      SOA: SOA_ROOT,
-      ROSTERING: '/x/rostering',
-      PROGRAM_HUB: '/y/ph',
+  // Phase 2 (saga-ed/soa#214): --sandbox/--tunnel/--record/--workspace are all NATIVE now —
+  // the `up` command has NO up.sh wrapper (`needsUpSh`/`runWrapped`/`flagMap.up` removed).
+  // The native bring-up assertions (sandbox_env / tunnel_env overlays, the record plan,
+  // the workspace parse) live in up-native.int.test.ts, which fakes EVERY native seam.
+  // This file only mocks getRunner, so it can only prove the NEGATIVE here: a
+  // guard-rejected invocation never reaches (and never shells) up.sh.
+  it('--sandbox without --only/--with hard-errors (never shells up.sh)', async () => {
+    await expect(StackUp.run(['--sandbox', 'demo', ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('--sandbox <name> requires --only'),
     });
+    expect(calls.some((c) => c.command === UP_SH)).toBe(false);
   });
 
-  it('propagates a non-zero up.sh exit code via this.exit()', async () => {
-    installFakeRunner(3);
-    // oclif's this.exit(code) throws an ExitError carrying `oclif.exit === code`.
+  it('--tunnel at slot > 0 hard-errors (fixed slot-0 browser ports; never shells up.sh)', async () => {
+    await expect(StackUp.run(['--tunnel', '--slot', '1', ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('--tunnel fronts the FIXED slot-0 browser ports'),
+    });
+    expect(calls.some((c) => c.command === UP_SH)).toBe(false);
+  });
+
+  it('--workspace + --only hard-errors (mutually exclusive; never shells up.sh)', async () => {
     await expect(
-      StackUp.run(['--only', 'scheduling-api', '--sandbox', 'demo', ...WS], config),
-    ).rejects.toMatchObject({ oclif: { exit: 3 } });
-    expect(calls).toHaveLength(1);
+      StackUp.run(['--workspace', '/tmp/ws.json', '--only', 'iam-api', ...WS], config),
+    ).rejects.toMatchObject({ message: expect.stringContaining('--workspace cannot be combined') });
+    expect(calls.some((c) => c.command === UP_SH)).toBe(false);
   });
 });
 

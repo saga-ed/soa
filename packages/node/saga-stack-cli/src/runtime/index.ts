@@ -34,3 +34,5 @@ export * from './vite-clear.js';
 export * from './ensure-repos.js';
 export * from './http-post.js';
 export * from './login.js';
+export * from './record.js';
+export * from './tunnel-prep.js';

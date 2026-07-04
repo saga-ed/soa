@@ -28,10 +28,10 @@ import type { Interfaces } from '@oclif/core';
 import { SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
 import type { PullMode } from './core/auto-pull.js';
 import type { InstanceProfile } from './core/derive-instance.js';
-import type { ScriptPlan } from './core/flag-map.js';
+import type { RecordMode, ScriptPlan } from './core/flag-map.js';
 import { defaultLaunchContext } from './core/launch-plan.js';
 import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
-import type { Runtime } from './stack-api.js';
+import type { RecordUp, Runtime } from './stack-api.js';
 import {
   buildRepoEnv,
   makeRealConfirm,
@@ -46,10 +46,13 @@ import {
   makeRealOverlayFs,
   makeRealPortProbe,
   makeRealProber,
+  makeRealRecordUp,
   makeRealRunner,
   makeRealSnapshotIO,
   makeRealViteClear,
+  generateTunnelFleetConfig,
   resolveRepoRoot,
+  resolveTunnelMoniker,
   resolveScript,
   scriptCwd,
   stopServices,
@@ -101,6 +104,25 @@ export type NativeRuntimeFlags = WorkspaceFlags & {
   pull?: boolean;
   /** M9 auto-pull: `--no-auto-pull` ⇒ opt out. Undefined for commands that don't declare it. */
   'no-auto-pull'?: boolean;
+};
+
+/**
+ * Phase-2 lane/record overlays `buildNativeRuntime` threads into the launch
+ * context + runtime (saga-ed/soa#214). Only `stack up` passes these (for
+ * `--sandbox`/`--tunnel`/`--record`); every other native command omits them, so
+ * its runtime is byte-identical to the pre-Phase-2 build.
+ */
+export type NativeOverlays = {
+  /** `--sandbox <name>` (+ base) ⇒ the `sandbox_env` dep-repoint overlay. */
+  sandbox?: { name: string; base?: string };
+  /** `--tunnel` ⇒ the `tunnel_env` browser-plane overlay (domain from `tunnel.sh moniker`). */
+  tunnel?: { domain: string; rtsmFleetPath?: string; lkKey?: string; lkSecret?: string };
+  /** `--record [crdt|av]` ⇒ start the fleek recording stack after launch. */
+  record?: RecordMode;
+  /** The `--record` bring-up seam (production shells docker/aws; tests inject a fake). */
+  recordUp?: RecordUp;
+  /** Per-user recordings dir override (up.sh `$FLEEK_REC_DIR`). */
+  recordingsDir?: string;
 };
 
 export abstract class BaseCommand extends Command {
@@ -316,6 +338,40 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * The injectable `--record` bring-up seam (Phase 2). Production returns
+   * `makeRealRecordUp()` — the only place the fleek recording docker-compose stack +
+   * CodeArtifact token fetch is shelled. The native `stack up --record` TESTS spy this
+   * on the prototype to assert the record PLAN (services/env) WITHOUT docker/aws —
+   * mirroring how `getLauncher`/`getRunner`/… are mocked.
+   */
+  protected getRecordUp(): RecordUp {
+    return makeRealRecordUp();
+  }
+
+  /**
+   * The injectable `--tunnel` moniker resolver (Phase 2). Production runs the VENDORED
+   * `tunnel.sh moniker` (stdin/stderr on the TTY for the first-run prompt) and returns
+   * the captured moniker; the command composes `<moniker>.<VMS_BASE>` into the tunnel
+   * domain BEFORE building the launch env. Tests spy this on the prototype to return a
+   * fixed moniker WITHOUT spawning tunnel.sh.
+   */
+  protected getTunnelMoniker(): (vendorTunnelSh: string) => Promise<string> {
+    return resolveTunnelMoniker;
+  }
+
+  /**
+   * The injectable `--tunnel` rtsm fleet-config generator (Phase 2). Production returns
+   * `generateTunnelFleetConfig` — renders `<stateDir>/rtsm-fleet-tunnel.json` from the
+   * base `rtsm-fleet-local.json` with the node endpoint swapped to `rtsm.<domain>`, so
+   * rtsm-api's `tunnel_env` FLEET_CONFIG_PATH advertises a browser-reachable node (up.sh
+   * ~2170-2188). Best-effort: returns `null` when the base file can't be read/written.
+   * Tests spy this on the prototype to return a fixed path WITHOUT touching the fs.
+   */
+  protected getTunnelFleetGen(): typeof generateTunnelFleetConfig {
+    return generateTunnelFleetConfig;
+  }
+
+  /**
    * The injectable ff-only git seam (M9 — auto-pull). Production returns
    * `makeRealGitRunner()` — the only place the read-only git probes + the single
    * `merge --ff-only` run for the native sibling sync. The native `stack up` TESTS spy
@@ -407,14 +463,29 @@ export abstract class BaseCommand extends Command {
    * injectable, so a test spies them on the prototype to drive the whole native path
    * with fakes. At slot 0 the profile is the byte-identical no-offset default.
    */
-  protected buildNativeRuntime(flags: NativeRuntimeFlags, profile: InstanceProfile): Runtime {
-    // Pinned repo roots from the per-repo flags (kebab key → manifest env-var key).
+  /**
+   * Build the `ScriptContext` (workspace `--dev` + the per-repo `--<repo>` path pins)
+   * from a command's parsed workspace flags — the one place the kebab-flag → manifest
+   * env-var-key mapping lives. Shared by `buildNativeRuntime` and any command that
+   * needs to resolve a repo/script path off the same flags (e.g. `up`'s `--tunnel`
+   * fleet-config generation).
+   */
+  protected scriptContextFromFlags(flags: WorkspaceFlags): ScriptContext {
     const pinned: Partial<Record<ManifestRepoKey, string>> = {};
     for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
       const value = (flags as unknown as Record<string, string | undefined>)[kebab];
       if (value) pinned[REPO_ENV_VAR[kebab] as ManifestRepoKey] = value;
     }
-    const ctx: ScriptContext = { dev: flags.dev, repoRoots: pinned };
+    return { dev: flags.dev, repoRoots: pinned };
+  }
+
+  protected buildNativeRuntime(
+    flags: NativeRuntimeFlags,
+    profile: InstanceProfile,
+    overlays: NativeOverlays = {},
+  ): Runtime {
+    // Pinned repo roots from the per-repo flags (kebab key → manifest env-var key).
+    const ctx: ScriptContext = this.scriptContextFromFlags(flags);
 
     // Resolve the FULL repo-root map (every manifest repo, defaulted via up.sh's
     // precedence) so the launch planner can place any closure service's cwd.
@@ -439,6 +510,10 @@ export abstract class BaseCommand extends Command {
       meshOffset: profile.meshOffset,
       pinoLevel: process.env.PINO_LOGGER_LEVEL,
       pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
+      // Phase 2: the sandbox / tunnel lane overlays (sandbox_env / tunnel_env). Absent
+      // for a plain `up` (and for `reset`, which never passes overlays) ⇒ base env only.
+      sandbox: overlays.sandbox,
+      tunnel: overlays.tunnel,
     });
 
     return {
@@ -475,7 +550,14 @@ export abstract class BaseCommand extends Command {
       serviceStopper: this.getServiceStopper(),
       stateDir,
       connectAv: true,
-      tunnel: false,
+      // Phase 2: `--tunnel` flips the dash prelaunch hook to tunnel routing + drives the
+      // per-service tunnel_env overlay above. `--record` starts the fleek recording stack
+      // after launch (fleek-gated). Both absent on a plain `up`/`reset` ⇒ byte-identical.
+      tunnel: overlays.tunnel !== undefined,
+      tunnelDomain: overlays.tunnel?.domain,
+      record: overlays.record,
+      recordUp: overlays.recordUp,
+      recordingsDir: overlays.recordingsDir,
       // `up --login` / `login --browser` delegate to up.sh through the script path.
       delegate: (plan) => this.runScript(plan, flags, { propagateExit: false }),
     };

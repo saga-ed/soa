@@ -2,43 +2,43 @@
  * `saga-stack stack up` — bring the synthetic dev stack up (NATIVE-BY-DEFAULT,
  * FLIP 1).
  *
- * THREE PATHS:
+ * FULLY NATIVE (Phase 2, saga-ed/soa#214): `up` NEVER shells out to up.sh. TWO PATHS:
  *  - `--dry-run` (M0): resolve the dependency closure (`computeClosure`) and
  *    `emit()` it (services in launch order, databases, mesh, why each service is
  *    present). With `--only` it also prints the resolved native LAUNCH plan + the
  *    composed SEED plan. No docker / pnpm / health IO.
- *  - NATIVE (M4 partial-stack + FLIP 1 full-stack): the DEFAULT. `--only <svc,…>`
- *    boots that closure; a BARE `stack up` (no --only/--with) now EXPANDS to the
+ *  - NATIVE (the DEFAULT, and now the ONLY bring-up path). `--only <svc,…>` boots
+ *    that closure; a BARE `stack up` (no --only/--with/--workspace) EXPANDS to the
  *    full non-optional service set and boots it the SAME way. computeClosure →
  *    drive the in-process `StackApi.up(closure)` (native prep → native mesh +
- *    topo-wave service launch, NOT up.sh) → composeSeedPlan over the active closure
- *    → `StackApi.seed(plan)`. `--reset` is native (M8 R4); `--login` delegates to
- *    up.sh through the facade. M9: the native bare `up` now RUNS the ff-only auto-pull
- *    sibling sync (up.sh `pull_repos auto`; `--pull` = `all` mode, `--no-auto-pull` /
- *    `NO_AUTO_PULL` opt out) AND best-effort Connect AV (livekit :7880 + coturn, slot-0
- *    only, when connect is in the closure). Remaining gap: up.sh's branch-layout
- *    preflight (M12).
- *  - WRAPPED (sole-implementation escape): a bare invocation carrying a flag the
- *    native path can't honour yet (sandbox/tunnel/workspace/record), or a
- *    SINGLE-service `--only` + such a flag, falls back to the up.sh wrapper: a
- *    THIN WRAPPER mapping flags → `flagMap.up()` → the exact up.sh argv/env, shelled
- *    out with stdio inherited. A MULTI-service `--only` + such a flag is rejected
- *    (up.sh --only is single-service only). up.sh is hardcoded to slot 0, so at
- *    slot > 0 the bare set is always native and an unsupported flag hard-errors
- *    rather than clobbering slot 0.
+ *    topo-wave service launch) → composeSeedPlan → `StackApi.seed(plan)`.
+ *    Phase-2 flags are all NATIVE overlays on this ONE path:
+ *      • `--sandbox <name>` / `--workspace <f>.json`  → the `sandbox_env` dep-repoint
+ *        overlay (iam URL flip + PREVIEW_ORIGINATE_MAP), resolved in `resolveLaunchEnv`.
+ *      • `--tunnel`  → resolve the moniker from the VENDORED `tunnel.sh`, build the
+ *        launch env with the `tunnel_env` browser-plane overlay, then run vendored
+ *        `tunnel.sh up` after a healthy launch. slot-0 only (fixed browser ports).
+ *      • `--record [crdt|av]`  → start the fleek recording sidecars after launch
+ *        (fleek-gated: a missing checkout is a warning skip, never a failure).
+ *    `--reset` is native (M8 R4); the ff-only auto-pull + best-effort Connect AV run
+ *    on the bare native `up` (M9). The ONLY residual up.sh touch from `up` is the
+ *    `--login` DELEGATION (browser-session minting; native login is a later milestone).
  *
  *   node bin/dev.js stack up --only scheduling-api,sessions-api --dry-run
  *   node bin/dev.js stack up --only scheduling-api,sessions-api          # native
  *   node bin/dev.js stack up                                             # native full stack
- *   node bin/dev.js stack up --only scheduling-api --sandbox dev         # wrapped (up.sh)
+ *   node bin/dev.js stack up --only sis-api --sandbox dev                # native (sandbox_env)
+ *   node bin/dev.js stack up --tunnel                                    # native + vendored tunnel.sh
  *
  * Imports come straight from the specific core modules (not the `core/index`
  * barrel) so this command stays decoupled from the seed/flow sub-barrels.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import type { WorkspaceFlags } from '../../base-command.js';
+import type { NativeOverlays, WorkspaceFlags } from '../../base-command.js';
 import {
   BUNDLE_NAMES,
   combineRequested,
@@ -54,12 +54,18 @@ import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import { composeSeedPlan } from '../../core/seed/compose-seed-plan.js';
 import type { SeedAddOn, SeedPlan, SeedProfile, SeedSelection } from '../../core/seed/types.js';
+import { parseWorkspace } from '../../core/workspace.js';
+import type { WorkspaceSelection } from '../../core/workspace.js';
+import { resolveVendorScript, scriptCwd } from '../../runtime/index.js';
 import { makeStackApi } from '../../stack-api.js';
 import type { Runtime, StackApi } from '../../stack-api.js';
 
+/** `--sandbox <name>` shape gate (up.sh ~2154; the composition API's IDENTIFIER shape). */
+const SANDBOX_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$/;
+
 export default class StackUp extends BaseCommand {
   static description =
-    'Bring the synthetic dev stack up NATIVELY (--only boots the dependency closure; a bare up boots the full stack). --sandbox/--workspace/--record/--tunnel wrap up.sh; --dry-run prints the planner.';
+    'Bring the synthetic dev stack up NATIVELY (--only boots the dependency closure; a bare up boots the full stack). --sandbox/--workspace/--record/--tunnel are native overlays (NO up.sh); --dry-run prints the planner.';
 
   static examples = [
     '<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api --dry-run',
@@ -71,7 +77,7 @@ export default class StackUp extends BaseCommand {
     ...BaseCommand.baseFlags,
     only: Flags.string({
       description:
-        'services to bring up. With --dry-run, a comma-list whose dependency closure is printed. On a real run (M4) a comma-list boots the closure NATIVELY (not via up.sh); combine with a flag the native path cannot honour yet (sandbox/tunnel/workspace/record/pull/prep) and a SINGLE service still falls back to up.sh.',
+        'services to bring up. With --dry-run, a comma-list whose dependency closure is printed. On a real run a comma-list boots the closure NATIVELY (never up.sh); combine freely with --sandbox/--tunnel/--record (all native Phase-2 overlays).',
     }),
     with: Flags.string({
       multiple: true,
@@ -83,14 +89,14 @@ export default class StackUp extends BaseCommand {
       description: 'plan only: print the resolved closure (+ launch/seed plan for --only) and exit without touching docker/pnpm',
       default: false,
     }),
-    // ── up.sh trailing flags (wrapped path; some also drive the native path) ──
+    // ── daily-driver flags — all NATIVE (no up.sh wrapper remains). ──
     reset: Flags.boolean({
-      description: 'truncate + re-seed the data DBs before bringing services up (up.sh --reset)',
+      description: 'truncate + re-seed the data DBs before bringing services up (native — up.sh --reset parity)',
       default: false,
     }),
     seed: Flags.string({
       description:
-        'seed the named profile after launch (up.sh --seed <profile>). A value is required in the wrapper; up.sh\'s bare `--seed` default is `roster`, so pass `--seed roster` for that behavior.',
+        'seed the named profile after launch (native). An absent --seed still seeds the `roster` baseline (the up.sh bare-default).',
       options: ['roster', 'full'],
     }),
     pull: Flags.boolean({
@@ -104,28 +110,31 @@ export default class StackUp extends BaseCommand {
     }),
     'skip-prep': Flags.boolean({
       description:
-        'skip the R1 install+build prep pass. NATIVE (--only): skips R1 ONLY — R2 DB provision + R3 migrate still run (both idempotent). WRAPPED (full-stack): up.sh env SKIP_PREP=1 wraps the whole prep.',
+        'skip the R1 install+build prep pass (NATIVE); R2 DB provision + R3 migrate still run (both idempotent).',
       default: false,
     }),
     record: Flags.string({
       description:
-        'record session traffic (up.sh --record <mode>). A value is required in the wrapper; up.sh\'s bare `--record` default is `crdt`, so pass `--record crdt` for that behavior.',
+        'NATIVE (Phase 2): after launch, start the fleek recording stack (recorder :7890 + recordings-api :8444 + MinIO; `av` adds the LiveKit egress). Fleek-gated: skipped with a warning if the fleek repo is not cloned.',
       options: ['crdt', 'av'],
     }),
     tunnel: Flags.boolean({
-      description: 'open the public tunnel for the stack (up.sh --tunnel)',
+      description:
+        'NATIVE (Phase 2): launch with the tunnel_env browser-plane overlay (moniker from the vendored tunnel.sh) then run vendored tunnel.sh up. Slot-0 only (fixed browser ports).',
       default: false,
     }),
     login: Flags.boolean({
       description:
-        'log in the default persona (dev@saga.org) after launch (up.sh --login); use `stack login <email>` to override the persona',
+        'log in the default persona (dev@saga.org) after launch; use `stack login <email>` to override. (The one residual up.sh delegation — native login is a later milestone.)',
       default: false,
     }),
     sandbox: Flags.string({
-      description: 'named sandbox to launch into (up.sh --sandbox <name>; accompanies --only)',
+      description:
+        'NATIVE (Phase 2): point a local service set at a cloud sandbox — the sandbox_env dep-repoint overlay (iam URL flip + preview-routing header). Accompanies --only/--with.',
     }),
     workspace: Flags.string({
-      description: 'workspace file to launch from (up.sh --workspace <file.json>)',
+      description:
+        'NATIVE (Phase 2): a switchboard workspace.json selecting per-service run mode (local-source/sandbox) — the general case of --only/--sandbox.',
     }),
   };
 
@@ -137,11 +146,18 @@ export default class StackUp extends BaseCommand {
   async run(): Promise<void> {
     const { flags } = await this.parse(StackUp);
 
-    // requested = --only ids ∪ --with bundle ids (sugar over --only); `--with`
-    // participates in the same closure resolution the native/dry-run paths use.
-    let requested: ServiceId[] = combineRequested(flags.only, flags.with, (m) => this.error(m));
-    let isOnly = requested.length > 0;
-    const withPlayback = effectiveWithPlayback(flags.with);
+    // ── --workspace (Phase 2): a switchboard manifest is the GENERAL case of
+    // --only/--sandbox — parse it (pure) into the run-set + iam-sandbox + playback,
+    // rejecting the combos up.sh rejects. Its run-set becomes `requested`. ──
+    const ws = this.resolveWorkspace(flags);
+
+    // requested = workspace run-set, else --only ids ∪ --with bundle ids (sugar over
+    // --only); `--with` participates in the same closure resolution.
+    let requested: ServiceId[] = ws
+      ? ws.runSet
+      : combineRequested(flags.only, flags.with, (m) => this.error(m));
+    let isOnly = requested.length > 0 || ws !== undefined;
+    const withPlayback = ws ? ws.playback : effectiveWithPlayback(flags.with);
 
     // ── --dry-run (M0/M4): planner only. ──
     if (flags['dry-run']) {
@@ -149,82 +165,130 @@ export default class StackUp extends BaseCommand {
       return;
     }
 
-    // Flags the native path does NOT yet implement (sandbox/workspace overlays, the
-    // record bash prep, the tunnel service env) — a bring-up carrying one of these
-    // still routes through the up.sh wrapper. `--skip-prep` is NOT here: it is NATIVE
-    // (M8). `--pull` / `--no-auto-pull` are NOT here either: they are NATIVE (M9).
-    // `--tunnel` IS here (Phase 2 item, saga-ed/soa#214): native `up` launches services
-    // with LOCALHOST posture, but a working tunnel needs up.sh's per-service tunnel_env
-    // (CORS_ORIGIN tunnel origins, AUTH_SESSIONCOOKIEDOMAIN, VITE_* tunnel URLs), which
-    // isn't ported yet — so `up --tunnel` wraps up.sh (and, being in needsUpSh, hard-errors
-    // at slot > 0 rather than clobbering slot 0). The standalone `stack tunnel` command IS
-    // decoupled onto the vendored tunnel.sh; only `up --tunnel` stays wrapped for now.
-    const needsUpSh =
-      flags.sandbox !== undefined ||
-      flags.workspace !== undefined ||
-      flags.record !== undefined ||
-      flags.tunnel;
+    // ── Phase 2 flag guards (all four flags are now NATIVE — no up.sh wrapper). ──
+    //  - `--sandbox <name>` accompanies a service set (up.sh: --sandbox requires --only)
+    //    and must match the composition-API IDENTIFIER shape.
+    //  - `--tunnel` fronts the FIXED slot-0 browser ports (dash :8900 / connect :6210 /
+    //    iam :3010) via the vms rendezvous box, so it is slot-0-only (hard-error at slot > 0,
+    //    mirroring up.sh's hardcoded-slot-0 tunnel).
+    const sandboxName = ws?.iamSandbox ?? flags.sandbox;
+    if (flags.sandbox !== undefined) {
+      if (!isOnly) {
+        this.error('--sandbox <name> requires --only/--with (point a LOCAL service set at the sandbox; the rest are the sandbox)');
+      }
+      if (!SANDBOX_NAME_RE.test(flags.sandbox)) {
+        this.error(`--sandbox: '${flags.sandbox}' must match [a-zA-Z0-9][a-zA-Z0-9-]{0,39}`);
+      }
+    }
+    if (flags.tunnel && flags.slot > 0) {
+      this.error(
+        `slot ${flags.slot}: --tunnel fronts the FIXED slot-0 browser ports (dash :8900 / connect :6210 / iam :3010) ` +
+          'via the vms rendezvous box, so it cannot run against a peer slot. Bring the slot up without --tunnel.',
+      );
+    }
 
-    // ── FLIP 1: a BARE full-stack `up` is NATIVE-BY-DEFAULT. Expand the bare request
-    // to the FULL non-optional service set and route it through the native path
-    // (native prep → launch → seed) — the SAME path `--only` uses. Two exceptions
-    // both keep the up.sh wrapper for a bare invocation:
-    //   • a native-unsupported flag is present at slot 0 (sandbox/tunnel/workspace/
-    //     record) — those combos still need the bash prep, so the
-    //     bare set is left empty and falls through to `runWrapped` below.
-    //   • (there is no slot-0 wrapper exception beyond that — plain `ss stack up` now
-    //     boots the full non-optional closure natively.)
-    // M7 BLOCKER-1: at slot > 0 the bare request is ALWAYS expanded + native (up.sh is
-    // hardcoded to slot 0 — project `soa`, base ports, STATE=/tmp/sds-synthetic — and
-    // would clobber the default stack); a native-unsupported flag there hard-errors in
-    // the `isOnly` block below rather than reaching `runWrapped`. The per-slot
-    // exclusion filter in `runNative` drops the literal-port / un-slottable services,
-    // so slot > 0 comes up as a BACKEND (+ saga-dash/coach) sub-stack.
-    if (!isOnly && (flags.slot > 0 || !needsUpSh)) {
+    // ── FLIP 1: a BARE full-stack `up` (no --only/--with/--workspace) is NATIVE — expand
+    // to the FULL non-optional service set and route it through the native path (native
+    // prep → launch → seed), the SAME path `--only` uses. There is NO up.sh wrapper left:
+    // --sandbox/--tunnel/--record are all NATIVE now (Phase 2, saga-ed/soa#214). ──
+    if (!isOnly) {
       requested = Object.values(manifest.services)
         .filter((s) => !s.optional)
         .map((s) => s.id);
       isOnly = true;
     }
 
-    // ── NATIVE (M4 partial-stack / FLIP 1 full-stack): the requested set boots the
-    // closure natively. Flags the native path can't honour yet force the up.sh
-    // wrapper, which ONLY accepts a single service — so a multi-service set + such a
-    // flag is rejected. ──
-    if (isOnly) {
-      if (!needsUpSh) {
-        await this.runNative(flags, requested, withPlayback);
-        return;
-      }
+    // ── NATIVE: the requested set boots the closure natively, carrying the resolved
+    // sandbox/tunnel/record overlays. No path shells out to up.sh. ──
+    //
+    // BLOCKER-1 (Phase 2): the sandboxed deps live in the CLOUD, so they must NOT be
+    // launched locally even though the closure pulls them in — parity with up.sh's
+    // `want_service` (launch only the run-set; mode:sandbox services live in the cloud).
+    //  - `--sandbox <name>` accompanies `--only`: launch the run-set ALONE (subtract the
+    //    deps the closure pulled in — iam-api et al. live at the cloud sandbox).
+    //  - `--workspace`: subtract EVERY mode:sandbox service id (`ws.sandboxServices`).
+    const overlays = await this.resolveOverlays(flags, sandboxName);
+    await this.runNative(flags, requested, withPlayback, overlays, {
+      sandboxHybrid: flags.sandbox !== undefined,
+      sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
+    });
+  }
 
-      // M7 BLOCKER-1: the up.sh fallback below is hardcoded to slot 0 (project `soa`,
-      // base ports, STATE=/tmp/sds-synthetic). At slot > 0 it would clobber slot 0,
-      // so REFUSE rather than corrupt it — never fall through to `runWrapped`. (Native
-      // overlays for --sandbox/--tunnel/… at slot > 0 are a documented fast-follow.)
-      if (flags.slot > 0) {
-        this.error(
-          `slot ${flags.slot}: --sandbox/--tunnel/--workspace/--record ` +
-            'route through the up.sh wrapper, which is hardcoded to slot 0 (project soa, base ports, ' +
-            'STATE=/tmp/sds-synthetic) and would clobber it. Drop the flag to bring the slot up natively.',
-        );
-      }
+  /**
+   * Parse `--workspace <file.json>` (pure `parseWorkspace`) into the native launch
+   * selection, enforcing up.sh's mutual-exclusion with --only/--with/--sandbox and
+   * surfacing the parser's non-fatal warnings. Returns `undefined` when --workspace
+   * is absent.
+   */
+  private resolveWorkspace(flags: WorkspaceParseFlags): WorkspaceSelection | undefined {
+    if (flags.workspace === undefined) return undefined;
+    if (flags.only !== undefined || flags.with !== undefined || flags.sandbox !== undefined) {
+      this.error('--workspace cannot be combined with --only/--with/--sandbox (it is the general case of both)');
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(flags.workspace, 'utf8'));
+    } catch (e) {
+      this.error(`--workspace: cannot read/parse '${flags.workspace}': ${(e as Error).message}`);
+    }
+    let selection: WorkspaceSelection;
+    try {
+      selection = parseWorkspace(raw as Parameters<typeof parseWorkspace>[0]);
+    } catch (e) {
+      this.error((e as Error).message);
+    }
+    for (const w of selection.warnings) this.log(`⚠ ${w}`);
+    return selection;
+  }
 
-      if (requested.length > 1) {
-        this.error(
-          'a multi-service --only/--with set boots the closure NATIVELY, but that path does not yet support --sandbox/--tunnel/--workspace/--record. Drop the unsupported flag (native), pass a single service (up.sh fallback), or use --dry-run to preview.',
-        );
-      }
-      // Single service + an unsupported-native flag ⇒ fall through to the up.sh
-      // wrapper below (preserves the M1 --sandbox/single-service behaviour). Only
-      // reached at slot 0 (slot > 0 hard-errored just above).
+  /**
+   * Resolve the Phase-2 native overlays from the flags: the `sandbox_env` input
+   * (`--sandbox`/workspace iam-sandbox), the `tunnel_env` input (resolving the moniker
+   * via the VENDORED tunnel.sh BEFORE the launch env is built so the URLs are correct),
+   * and the `--record` seam. IO (moniker resolution) happens here, behind the
+   * `getTunnelMoniker` seam so unit tests inject a fixed moniker.
+   */
+  private async resolveOverlays(flags: OverlayFlags, sandboxName?: string): Promise<NativeOverlays> {
+    const overlays: NativeOverlays = {};
+
+    if (sandboxName !== undefined) {
+      // up.sh SANDBOX_BASE default (dev fleet); env-overridable like up.sh.
+      overlays.sandbox = { name: sandboxName, base: process.env.SANDBOX_BASE };
     }
 
-    // ── WRAPPED (sole-implementation up.sh escape): thin wrapper over up.sh. Reached
-    // only at slot 0 and only for (a) a BARE invocation carrying a native-unsupported
-    // flag (sandbox/tunnel/workspace/record → bare set left un-expanded above), or
-    // (b) a SINGLE-service --only + such a flag. slot > 0 can never reach here (bare →
-    // native above; --only + unsupported flag → hard-error above). ──
-    await this.runWrapped(flags, requested);
+    if (flags.tunnel) {
+      // Resolve the moniker from the VENDORED tunnel.sh (up.sh `$(tunnel.sh moniker)`)
+      // BEFORE building the launch env — tunnel_env needs <moniker>.<VMS_BASE>.
+      const vmsBase = process.env.VMS_BASE ?? 'vms.wootdev.com';
+      const moniker = await this.getTunnelMoniker()(resolveVendorScript('tunnel.sh'));
+      const domain = `${moniker}.${vmsBase}`;
+      overlays.tunnel = { domain };
+
+      // BLOCKER-2 (Phase 2): GENERATE `<stateDir>/rtsm-fleet-tunnel.json` (node endpoint
+      // swapped to `rtsm.<domain>`) and point `overlays.tunnel.rtsmFleetPath` at it, so
+      // `tunnelOverlay(rtsm-api)` flips FLEET_CONFIG_PATH off the localhost:6110 local
+      // fleet and a remote browser's CRDT discovery resolves a reachable node (up.sh
+      // ~2170-2188). Base-command forwards `tunnel.rtsmFleetPath` → TUNNEL_RTSM_FLEET_PATH.
+      // Best-effort: a null (unreadable base file) leaves rtsm-api on its local fleet.
+      const ctx = this.scriptContextFromFlags(flags);
+      const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
+      // --tunnel is slot-0-only (guarded upstream), so this is the slot-0 STATE dir
+      // unless the user pinned `--state-dir`.
+      const stateDir = flags['state-dir'] ?? deriveInstance({ slot: flags.slot }).stateDir;
+      const rtsmFleetPath = this.getTunnelFleetGen()({
+        localFleetPath: `${syntheticDevDir}/rtsm-fleet-local.json`,
+        outPath: `${stateDir}/rtsm-fleet-tunnel.json`,
+        tunnelDomain: domain,
+      });
+      if (rtsmFleetPath) overlays.tunnel.rtsmFleetPath = rtsmFleetPath;
+    }
+
+    if (flags.record !== undefined) {
+      overlays.record = flags.record as RecordMode;
+      overlays.recordUp = this.getRecordUp();
+    }
+
+    return overlays;
   }
 
   /** M0/M4 dry-run: print the closure (+ native launch/seed plan when --only/--with). */
@@ -311,6 +375,8 @@ export default class StackUp extends BaseCommand {
     flags: NativeFlags,
     requested: ServiceId[],
     withPlayback: boolean,
+    overlays: NativeOverlays = {},
+    prune: LaunchPrune = {},
   ): Promise<void> {
     const known = new Set(Object.keys(manifest.services));
     const unknown = requested.filter((s) => !known.has(s));
@@ -331,7 +397,21 @@ export default class StackUp extends BaseCommand {
     // SLOT_EXCLUDED_SERVICES). So slot > 0 is a BACKEND sub-stack. Empty at slot 0,
     // so slot 0 is unchanged.
     const excluded = new Set(profile.excludedServices);
-    const services = fullClosure.services.filter((id) => !excluded.has(id));
+
+    // BLOCKER-1 (Phase 2): the sandbox-hosted deps live in the CLOUD — subtract them
+    // from the LOCAL launch set (parity with up.sh's `want_service`, which launches
+    // only the run-set; a mode:sandbox dep pulled into the closure never boots locally).
+    // The launched services' own mesh/DBs still come up (neededMesh/neededDbs run over
+    // this pruned set); the excluded deps' don't. Plain `--only` closure is UNTOUCHED.
+    const sandboxDrop = new Set<ServiceId>();
+    if (prune.sandboxHybrid) {
+      // `--sandbox`: launch the requested run-set ALONE (subtract the pulled-in deps).
+      const keep = new Set<ServiceId>(requested);
+      for (const id of fullClosure.services) if (!keep.has(id)) sandboxDrop.add(id);
+    }
+    if (prune.sandboxServices) for (const id of prune.sandboxServices) sandboxDrop.add(id);
+
+    const services = fullClosure.services.filter((id) => !excluded.has(id) && !sandboxDrop.has(id));
     const droppedForSlot = fullClosure.services.filter((id) => excluded.has(id));
     if (droppedForSlot.length > 0) {
       this.log(
@@ -339,8 +419,15 @@ export default class StackUp extends BaseCommand {
           `service(s) that would collide with slot 0: ${droppedForSlot.join(', ')}`,
       );
     }
+    const droppedForSandbox = fullClosure.services.filter((id) => sandboxDrop.has(id) && !excluded.has(id));
+    if (droppedForSandbox.length > 0) {
+      this.log(
+        '⚠ sandbox/workspace: launching the local run-set only — the sandbox-hosted ' +
+          `dep(s) live in the cloud, not launched locally: ${droppedForSandbox.join(', ')}`,
+      );
+    }
 
-    const api = makeStackApi(manifest, this.buildRuntime(flags, profile));
+    const api = makeStackApi(manifest, this.buildRuntime(flags, profile, overlays));
 
     // 1. native bring-up (mesh + topo-wave service launch + M9 auto-pull + AV).
     const up = await api.up(services);
@@ -393,8 +480,23 @@ export default class StackUp extends BaseCommand {
     );
     const seeded = await api.seed(plan);
 
-    // 4. (optional) login — DELEGATED to up.sh for M4.
+    // 4. (optional) login — DELEGATED to up.sh (native login is a later milestone).
     if (flags.login) await api.login();
+
+    // Phase 2 --record: surface the fleek recording-stack bring-up (✓ up / ⚠ skipped
+    // fleek-absent / ⚠ failed). Never fatal — a record hiccup can't redden an
+    // otherwise-healthy stack (like the AV bring-up).
+    if (up.record) this.log(up.record.message);
+
+    // Phase 2 --tunnel: after a successful native (tunnel-aware) launch, start the
+    // reverse tunnels via the VENDORED tunnel.sh (up.sh drives the frpc tunnels the
+    // same way). stdio-inherited so the frpc progress owns the TTY.
+    if (overlays.tunnel && seeded.ok) {
+      const script = resolveVendorScript('tunnel.sh');
+      const plan = flagMap.tunnel('up');
+      await this.runVendor({ cwd: dirname(script), command: script, args: plan.args, env: plan.env }, flags);
+      this.log(`tunnel mode: browser plane at https://<svc>.${overlays.tunnel.domain}`);
+    }
 
     // MAJOR-C: R1 records non-fatal build/db:generate failures as warnings (up.sh
     // warn+continue) rather than aborting — surface them so they're visible.
@@ -446,30 +548,6 @@ export default class StackUp extends BaseCommand {
   }
 
   /**
-   * M1 wrapped path: map flags → up.sh argv/env and shell out. `--with` bundles
-   * resolve to up.sh's `--only` (the combined `requested` set — a single service
-   * on the wrapped fallback, or empty for the full stack) and drive `withPlayback`.
-   */
-  private async runWrapped(flags: WrappedFlags, requested: ServiceId[]): Promise<void> {
-    const plan = flagMap.up({
-      reset: flags.reset,
-      seed: flags.seed as SeedProfile | undefined,
-      pull: flags.pull,
-      noAutoPull: flags['no-auto-pull'],
-      skipPrep: flags['skip-prep'],
-      record: flags.record as RecordMode | undefined,
-      withPlayback: effectiveWithPlayback(flags.with),
-      withQtfDemo: (flags.with ?? []).includes('qtf'),
-      tunnel: flags.tunnel,
-      login: flags.login,
-      only: requested.length > 0 ? requested.join(',') : flags.only,
-      sandbox: flags.sandbox,
-      workspace: flags.workspace,
-    });
-    await this.runScript(plan, flags);
-  }
-
-  /**
    * Build the seed selection from the up flags: the profile plus the seed add-ons
    * the `--with` features contribute (`--with playback` ⇒ playback, `--with qtf`
    * ⇒ qtf) — derived from the bundle registry so it cannot drift from `--with`.
@@ -486,8 +564,12 @@ export default class StackUp extends BaseCommand {
    * `BaseCommand.buildNativeRuntime` (which wires the slot threading, repo-root
    * resolution, and the M8 prep seams in one place, shared with `stack reset`).
    */
-  private buildRuntime(flags: NativeFlags, profile: InstanceProfile): Runtime {
-    return this.buildNativeRuntime(flags, profile);
+  private buildRuntime(
+    flags: NativeFlags,
+    profile: InstanceProfile,
+    overlays: NativeOverlays,
+  ): Runtime {
+    return this.buildNativeRuntime(flags, profile, overlays);
   }
 
   /** Print a structured failure when the native bring-up did not reach all-healthy. */
@@ -527,17 +609,29 @@ type NativeFlags = DryRunFlags & {
   pull: boolean;
   'no-auto-pull': boolean;
 };
-type WrappedFlags = WorkspaceFlags & {
-  reset: boolean;
-  seed?: string;
-  pull: boolean;
-  'no-auto-pull': boolean;
-  'skip-prep': boolean;
-  record?: string;
-  with?: string[];
-  tunnel: boolean;
-  login: boolean;
-  only?: string;
-  sandbox?: string;
+/**
+ * BLOCKER-1 launch-set narrowing for the sandbox/workspace cases (Phase 2). Absent
+ * for a plain `--only`/bare `up`, so those closures are byte-identical.
+ */
+interface LaunchPrune {
+  /** `--sandbox <name>`: launch the requested run-set ALONE (subtract the pulled-in deps). */
+  sandboxHybrid?: boolean;
+  /** `--workspace`: the mode:sandbox service ids to subtract (they live in the cloud). */
+  sandboxServices?: ReadonlySet<ServiceId>;
+}
+/** The subset `resolveWorkspace` reads (the mutual-exclusion + the file path). */
+type WorkspaceParseFlags = {
   workspace?: string;
+  only?: string;
+  with?: string[];
+  sandbox?: string;
+};
+/**
+ * The subset `resolveOverlays` reads: the Phase-2 native overlay flags PLUS the
+ * workspace/slot/state-dir flags the `--tunnel` fleet-config generation needs to
+ * resolve the synthetic-dev + STATE dirs (`scriptContextFromFlags` + `deriveInstance`).
+ */
+type OverlayFlags = NativeFlags & {
+  tunnel: boolean;
+  record?: string;
 };

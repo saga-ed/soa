@@ -1743,7 +1743,7 @@
     "stack:up": {
       "aliases": [],
       "args": {},
-      "description": "Bring the synthetic dev stack up NATIVELY (--only boots the dependency closure; a bare up boots the full stack). --sandbox/--workspace/--record/--tunnel wrap up.sh; --dry-run prints the planner.",
+      "description": "Bring the synthetic dev stack up NATIVELY (--only boots the dependency closure; a bare up boots the full stack). --sandbox/--workspace/--record/--tunnel are native overlays (NO up.sh); --dry-run prints the planner.",
       "examples": [
         "<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api --dry-run",
         "<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api",
@@ -1849,7 +1849,7 @@
           "type": "option"
         },
         "only": {
-          "description": "services to bring up. With --dry-run, a comma-list whose dependency closure is printed. On a real run (M4) a comma-list boots the closure NATIVELY (not via up.sh); combine with a flag the native path cannot honour yet (sandbox/tunnel/workspace/record/pull/prep) and a SINGLE service still falls back to up.sh.",
+          "description": "services to bring up. With --dry-run, a comma-list whose dependency closure is printed. On a real run a comma-list boots the closure NATIVELY (never up.sh); combine freely with --sandbox/--tunnel/--record (all native Phase-2 overlays).",
           "name": "only",
           "hasDynamicHelp": false,
           "multiple": false,
@@ -1876,13 +1876,13 @@
           "type": "boolean"
         },
         "reset": {
-          "description": "truncate + re-seed the data DBs before bringing services up (up.sh --reset)",
+          "description": "truncate + re-seed the data DBs before bringing services up (native — up.sh --reset parity)",
           "name": "reset",
           "allowNo": false,
           "type": "boolean"
         },
         "seed": {
-          "description": "seed the named profile after launch (up.sh --seed <profile>). A value is required in the wrapper; up.sh's bare `--seed` default is `roster`, so pass `--seed roster` for that behavior.",
+          "description": "seed the named profile after launch (native). An absent --seed still seeds the `roster` baseline (the up.sh bare-default).",
           "name": "seed",
           "hasDynamicHelp": false,
           "multiple": false,
@@ -1905,13 +1905,13 @@
           "type": "boolean"
         },
         "skip-prep": {
-          "description": "skip the R1 install+build prep pass. NATIVE (--only): skips R1 ONLY — R2 DB provision + R3 migrate still run (both idempotent). WRAPPED (full-stack): up.sh env SKIP_PREP=1 wraps the whole prep.",
+          "description": "skip the R1 install+build prep pass (NATIVE); R2 DB provision + R3 migrate still run (both idempotent).",
           "name": "skip-prep",
           "allowNo": false,
           "type": "boolean"
         },
         "record": {
-          "description": "record session traffic (up.sh --record <mode>). A value is required in the wrapper; up.sh's bare `--record` default is `crdt`, so pass `--record crdt` for that behavior.",
+          "description": "NATIVE (Phase 2): after launch, start the fleek recording stack (recorder :7890 + recordings-api :8444 + MinIO; `av` adds the LiveKit egress). Fleek-gated: skipped with a warning if the fleek repo is not cloned.",
           "name": "record",
           "hasDynamicHelp": false,
           "multiple": false,
@@ -1922,26 +1922,26 @@
           "type": "option"
         },
         "tunnel": {
-          "description": "open the public tunnel for the stack (up.sh --tunnel)",
+          "description": "NATIVE (Phase 2): launch with the tunnel_env browser-plane overlay (moniker from the vendored tunnel.sh) then run vendored tunnel.sh up. Slot-0 only (fixed browser ports).",
           "name": "tunnel",
           "allowNo": false,
           "type": "boolean"
         },
         "login": {
-          "description": "log in the default persona (dev@saga.org) after launch (up.sh --login); use `stack login <email>` to override the persona",
+          "description": "log in the default persona (dev@saga.org) after launch; use `stack login <email>` to override. (The one residual up.sh delegation — native login is a later milestone.)",
           "name": "login",
           "allowNo": false,
           "type": "boolean"
         },
         "sandbox": {
-          "description": "named sandbox to launch into (up.sh --sandbox <name>; accompanies --only)",
+          "description": "NATIVE (Phase 2): point a local service set at a cloud sandbox — the sandbox_env dep-repoint overlay (iam URL flip + preview-routing header). Accompanies --only/--with.",
           "name": "sandbox",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
         },
         "workspace": {
-          "description": "workspace file to launch from (up.sh --workspace <file.json>)",
+          "description": "NATIVE (Phase 2): a switchboard workspace.json selecting per-service run mode (local-source/sandbox) — the general case of --only/--sandbox.",
           "name": "workspace",
           "hasDynamicHelp": false,
           "multiple": false,

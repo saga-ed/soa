@@ -13,7 +13,9 @@
  * wrappers.int.test.ts (which only mocks getRunner).
  */
 
-import { resolve } from 'node:path';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
@@ -44,6 +46,8 @@ let launches: LaunchSpec[];
 let runs: ScriptInvocation[];
 let meshGated: string[];
 let dashCalls: string[];
+let recordUps: { plan: import('../../../core/record-plan.js').RecordPlan; ctx: { qboardRoot: string } }[];
+let fleetGenCalls: { localFleetPath: string; outPath: string; tunnelDomain: string }[];
 
 /** Install fakes for ALL native-path seams. `launchFail` ids answer health-down. */
 function installNativeSeams(launchFail: Set<string> = new Set()): void {
@@ -51,6 +55,8 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
   runs = [];
   meshGated = [];
   dashCalls = [];
+  recordUps = [];
+  fleetGenCalls = [];
 
   const launcher: ServiceLauncher = {
     async launch(spec: LaunchSpec): Promise<LaunchResult> {
@@ -151,8 +157,31 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     getViteClear: () => ViteClear;
     getPrepFreshCheck: () => (repoRoot: string) => boolean;
     getRepoDirCheck: () => (dir: string) => boolean;
+    getTunnelMoniker: () => (vendorTunnelSh: string) => Promise<string>;
+    getTunnelFleetGen: () => (opts: {
+      localFleetPath: string;
+      outPath: string;
+      tunnelDomain: string;
+    }) => string | null;
+    getRecordUp: () => (
+      plan: import('../../../core/record-plan.js').RecordPlan,
+      ctx: { qboardRoot: string },
+    ) => Promise<{ ok: boolean; message: string }>;
   };
   vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
+  // Phase 2: a fixed moniker (never spawn tunnel.sh) + a recording seam that records
+  // the resolved RecordPlan (never touches docker/aws).
+  vi.spyOn(proto, 'getTunnelMoniker').mockReturnValue(async () => 'testmoniker');
+  // Phase 2 (BLOCKER-2): a fake fleet-config generator that records the request and
+  // echoes the outPath as the generated fleet path (never touches the fs).
+  vi.spyOn(proto, 'getTunnelFleetGen').mockReturnValue((opts) => {
+    fleetGenCalls.push(opts);
+    return opts.outPath;
+  });
+  vi.spyOn(proto, 'getRecordUp').mockReturnValue(async (plan, ctx) => {
+    recordUps.push({ plan, ctx });
+    return { ok: true, message: `✓ recording stack up (mode: ${plan.mode})` };
+  });
   vi.spyOn(proto, 'getMeshExec').mockReturnValue(meshExec);
   vi.spyOn(proto, 'getPortProbe').mockReturnValue(portProbe);
   vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
@@ -425,31 +454,35 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
   });
 
 
-  it('FLIP 1: BARE full-stack + a native-unsupported flag (--sandbox) still wraps up.sh', async () => {
-    // A native-unsupported flag on a bare invocation keeps the up.sh wrapper (the
-    // native path can't honour --sandbox/--tunnel/--workspace/--record yet). --tunnel
-    // is back to being such a flag (B2 revert, Phase-2 item) — see the --tunnel case below.
-    await StackUp.run(['--sandbox', 'demo', ...WS], config);
+  it('BARE full-stack + --sandbox (no --only) hard-errors (--sandbox requires --only; never up.sh)', async () => {
+    // Phase 2: --sandbox is NATIVE but must accompany a service set (up.sh constraint).
+    await expect(StackUp.run(['--sandbox', 'demo', ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('--sandbox <name> requires --only'),
+    });
     expect(launches).toEqual([]);
-    const upSh = runs.filter((r) => r.command.endsWith('up.sh'));
-    expect(upSh).toHaveLength(1);
-    expect(upSh[0].args).toEqual(['up', '--sandbox', 'demo']);
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
   });
 
-  it('BARE up --tunnel wraps up.sh (native `up` posture can\'t serve a tunnel yet — Phase 2)', async () => {
-    // B2 revert (saga-ed/soa#214): native `up` launches services with LOCALHOST posture,
-    // but a working tunnel needs up.sh's per-service tunnel_env (CORS_ORIGIN, cookie
-    // domain, VITE_* tunnel URLs), not yet ported — so `up --tunnel` wraps up.sh again.
-    // The standalone `stack tunnel` command stays decoupled onto vendored tunnel.sh.
+  it('BARE up --tunnel is NATIVE: tunnel_env launch env + vendored tunnel.sh up (never up.sh)', async () => {
+    // Phase 2 (saga-ed/soa#214): native `up --tunnel` resolves the moniker (fixed seam),
+    // launches every service with the tunnel_env overlay, then runs the VENDORED tunnel.sh
+    // up — NO up.sh anywhere.
     await StackUp.run(['--tunnel', ...WS], config);
 
-    // NO native launches — the whole up routed through the up.sh wrapper.
-    expect(launches).toEqual([]);
-    const upSh = runs.filter((r) => r.command.endsWith('up.sh'));
-    expect(upSh).toHaveLength(1);
-    expect(upSh[0].args).toEqual(['up', '--tunnel']);
-    // the native tunnel.sh step is gone — up.sh owns the tunnel now.
-    expect(runs.some((r) => r.command.endsWith('tunnel.sh'))).toBe(false);
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+
+    // iam-api carries the tunnel cookie-domain + CORS tunnel origins (tunnel_env).
+    const iam = launches.find((s) => s.id === 'iam-api');
+    expect(iam?.env.AUTH_SESSIONCOOKIEDOMAIN).toBe('.testmoniker.vms.wootdev.com');
+    expect(iam?.env.CORS_ORIGIN).toContain('https://dash.testmoniker.vms.wootdev.com');
+    // connect-web's VITE_* deps flip to the tunnel hosts.
+    const cweb = launches.find((s) => s.id === 'connect-web');
+    expect(cweb?.env.VITE_IAM_API_URL).toBe('https://iam.testmoniker.vms.wootdev.com');
+    expect(cweb?.env.VITE_CONNECTV3_API_URL).toBe('https://connect-api.testmoniker.vms.wootdev.com');
+    // the VENDORED tunnel.sh up ran after the launch (not soa's tools/synthetic-dev copy).
+    const tun = runs.find((r) => r.command.endsWith('tunnel.sh'));
+    expect(tun?.args).toEqual(['up']);
+    expect(tun?.command).toContain('vendor');
   });
 
   it('--slot 10 is rejected at the flag layer (rabbitmq-mgmt collision ceiling)', async () => {
@@ -506,5 +539,144 @@ describe('stack up --only --dry-run — planner prints the native launch + seed 
     const text = logged.join('\n');
     expect(text).toContain('native partial-stack: would launch');
     expect(text).toContain('offline:');
+  });
+});
+
+describe('stack up — Phase 2 native --sandbox / --tunnel / --record / --workspace (no up.sh)', () => {
+  it('--only sis-api --sandbox foo → native; launches ONLY sis-api (iam lives at the cloud sandbox)', async () => {
+    await StackUp.run(['--only', 'sis-api', '--sandbox', 'foo', ...WS], config);
+
+    // never shelled up.sh — the sandbox hybrid is fully native now.
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+
+    // BLOCKER-1: the launch set is EXACTLY [sis-api] — iam-api (a pulled-in dep) is NOT
+    // launched locally; it lives at the cloud sandbox (sis-api is repointed there below).
+    expect(launches.map((s) => s.id)).toEqual(['sis-api']);
+    expect(launches.some((s) => s.id === 'iam-api')).toBe(false);
+
+    // sis-api's iam DEP is repointed at the cloud sandbox + it originates the preview header.
+    const sis = launches.find((s) => s.id === 'sis-api');
+    expect(sis?.env.IAM_BASEURL).toBe('https://iam.wootdev.com/trpc');
+    expect(sis?.env.IAM_TOKENURL).toBe('https://iam.wootdev.com/v1/oauth/token');
+    expect(sis?.env.PREVIEW_ORIGINATE_MAP).toBe('x-saga-preview-iam-api=sandbox-foo');
+
+    // mesh gate is narrowed to sis-api's own mesh (postgres) — iam-api's deps don't come up.
+    expect(meshGated).toEqual(['soa-postgres-1']);
+  });
+
+  it('--tunnel → rtsm-api FLEET_CONFIG_PATH points at the GENERATED tunnel fleet (not the localhost fleet)', async () => {
+    // BLOCKER-2: `--tunnel` must GENERATE rtsm-fleet-tunnel.json and flip rtsm-api's
+    // FLEET_CONFIG_PATH to it, so a remote browser's CRDT discovery resolves a reachable
+    // node (else it keeps rtsm-fleet-local.json → localhost:6110 → "no reachable fleet").
+    await StackUp.run(['--tunnel', ...WS], config);
+
+    // the fleet-config generator was invoked with the tunnel domain + a *-tunnel.json outPath.
+    expect(fleetGenCalls).toHaveLength(1);
+    expect(fleetGenCalls[0].tunnelDomain).toBe('testmoniker.vms.wootdev.com');
+    expect(fleetGenCalls[0].outPath).toMatch(/\/rtsm-fleet-tunnel\.json$/);
+    expect(fleetGenCalls[0].localFleetPath).toMatch(/\/rtsm-fleet-local\.json$/);
+
+    // rtsm-api's resolved launch env carries FLEET_CONFIG_PATH = the generated tunnel
+    // fleet (TUNNEL_RTSM_FLEET_PATH populated), NOT the localhost:6110 local fleet.
+    const rtsm = launches.find((s) => s.id === 'rtsm-api');
+    expect(rtsm?.env.FLEET_CONFIG_PATH).toBe(fleetGenCalls[0].outPath);
+    expect(rtsm?.env.FLEET_CONFIG_PATH).toMatch(/\/rtsm-fleet-tunnel\.json$/);
+    expect(rtsm?.env.FLEET_CONFIG_PATH).not.toMatch(/rtsm-fleet-local\.json$/);
+  });
+
+  it('--only programs-api --sandbox demo → programs-api gets IAM_API_URL flip + originate (sandbox_env)', async () => {
+    await StackUp.run(['--only', 'programs-api', '--sandbox', 'demo', ...WS], config);
+    const programs = launches.find((s) => s.id === 'programs-api');
+    expect(programs?.env.IAM_API_URL).toBe('https://iam.wootdev.com');
+    expect(programs?.env.PREVIEW_ORIGINATE_MAP).toBe('x-saga-preview-iam-api=sandbox-demo');
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+  });
+
+  it('--sandbox validates the IDENTIFIER shape (rejects bad names before any launch)', async () => {
+    await expect(
+      StackUp.run(['--only', 'sis-api', '--sandbox', 'BAD NAME!', ...WS], config),
+    ).rejects.toMatchObject({ message: expect.stringContaining('must match') });
+    expect(launches).toEqual([]);
+  });
+
+  it('--only connect-api --record crdt → record plan resolved via the seam (no up.sh)', async () => {
+    await StackUp.run(['--only', 'connect-api', '--record', 'crdt', ...WS], config);
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+    expect(recordUps).toHaveLength(1);
+    expect(recordUps[0].plan.mode).toBe('crdt');
+    expect(recordUps[0].plan.services).toEqual(['recorder', 'recordings-api', 'minio', 'minio-init']);
+    // connect-api still launched natively (the recorder observes it).
+    expect(launches.map((s) => s.id)).toContain('connect-api');
+  });
+
+  it('--record av adds the LiveKit egress sidecar to the record plan', async () => {
+    await StackUp.run(['--only', 'connect-api', '--record', 'av', ...WS], config);
+    expect(recordUps).toHaveLength(1);
+    expect(recordUps[0].plan.services).toContain('egress');
+  });
+
+  it('--record SKIPS with a warning (seam never called) when the fleek repo is not cloned', async () => {
+    // fleek dir absent; every other repo present.
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue((dir: string) => !dir.endsWith('/fleek'));
+
+    await StackUp.run(['--only', 'connect-api', '--record', 'crdt', ...WS], config);
+    // the record seam was NOT invoked (fleek-absent skip), and no up.sh anywhere.
+    expect(recordUps).toEqual([]);
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+  });
+
+  it('--workspace f.json → parses the run-set into a native closure (no up.sh)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-ws-'));
+    const file = join(dir, 'ws.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: '1',
+        services: { 'iam-api': { mode: 'local-source' }, 'sis-api': { mode: 'local-source' } },
+      }),
+    );
+    await StackUp.run(['--workspace', file, ...WS], config);
+
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+    const ids = launches.map((s) => s.id);
+    expect(ids).toContain('iam-api');
+    expect(ids).toContain('sis-api');
+  });
+
+  it('--workspace with iam-api sandbox-hosted → sis-api gets the sandbox_env overlay', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-ws-'));
+    const file = join(dir, 'ws.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: '1',
+        services: {
+          'iam-api': { mode: 'sandbox', sandboxName: 'ws1' },
+          'sis-api': { mode: 'local-source' },
+        },
+      }),
+    );
+    await StackUp.run(['--workspace', file, ...WS], config);
+
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+    const sis = launches.find((s) => s.id === 'sis-api');
+    expect(sis?.env.PREVIEW_ORIGINATE_MAP).toBe('x-saga-preview-iam-api=sandbox-ws1');
+  });
+
+  it('--workspace rejects a local-image entry (Phase-2 unsupported; never up.sh)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-ws-'));
+    const file = join(dir, 'ws.json');
+    writeFileSync(
+      file,
+      JSON.stringify({ version: '1', services: { 'iam-api': { mode: 'local-image' } } }),
+    );
+    await expect(StackUp.run(['--workspace', file, ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('local-image'),
+    });
+    expect(launches).toEqual([]);
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
   });
 });

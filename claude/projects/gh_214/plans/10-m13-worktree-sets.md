@@ -32,17 +32,17 @@ checkout churn, naturally per-developer, room for sibling files like locks later
         "journey-fix": {
             "slot": 1,
             "repos": {
-                "saga-dash": "~/wt/saga-dash-journey",
-                "rostering": "~/wt/rostering-a",
-                "sds": "~/wt/sds-clean-main"
+                "saga-dash": "~/dev/worktrees/saga-dash-journey",
+                "rostering": "~/dev/worktrees/rostering-a",
+                "sds": "~/dev/worktrees/sds-clean-main"
             },
             "note": "PR #345 weekend-tolerant journey"
         },
         "topology": {
             "slot": 2,
             "repos": {
-                "saga-dash": "~/wt/saga-dash-topology",
-                "rostering": "~/wt/rostering-c"
+                "saga-dash": "~/dev/worktrees/saga-dash-topology",
+                "rostering": "~/dev/worktrees/rostering-c"
             }
         }
     }
@@ -62,9 +62,15 @@ checkout churn, naturally per-developer, room for sibling files like locks later
 - Paths: `~` expanded, relative paths resolved against the file's dir (discouraged),
   stored verbatim. Existence is checked by `set check` and at `up`-time, not at parse.
 - `version` field for forward-compat; unknown top-level keys tolerated.
+- Repo entries `ss set create` made carry provenance the plain string form doesn't:
+  `{ "path": "...", "createdBy": "ss", "createdFrom": "<branch>" }` — `createdBy` gates
+  `rm --and-worktrees` (§2.4), `createdFrom` powers the branch-drift warning (§2.4).
+  A bare string path (hand-recorded) means "not ours, no drift tracking".
 - Zod schema in `src/core/set/` (pure parse/validate, no fs — mirrors the
   `core`-pure / `runtime`-io split used everywhere else); a thin `runtime/set-store.ts`
   does the read (missing file ⇒ empty store, same tolerance as `runtime/flows.ts`).
+  File path: `$SAGA_STACK_SETS` env override, else `~/.saga-stack/worktree-sets.json`
+  (CI/tests get hermetic fixture files for free).
 
 ---
 
@@ -112,12 +118,17 @@ against all four precedence rungs.
 
 MVP ships **read + create** (create was promoted into MVP by skelly — see §2.5):
 
-- `ss set list` — table: name, slot, repos, note.
+- `ss set list` — table: name, slot, **ACTIVE**, repos, note. ACTIVE is **derived live**
+  (a slot is active iff its state dir `/tmp/sds-synthetic-s<N>` holds live pids or the
+  `soa-s<N>` compose project has running containers — the existing status probes); no
+  `active.json` write path in MVP, so nothing can go stale.
 - `ss set show <name>` — full entry + per-repo resolved branch (`git -C <path> branch
   --show-current`) and dirty flag.
 - `ss set check <name>` — validation: paths exist, repos buildable-vs-prebuilt, branch
-  report, **cross-set build-collision dry-check** (§4), primary-checkout detection.
-  Exit 1 on hard violations. Also run implicitly at `up --set` time.
+  report, **branch-drift warning** (current branch ≠ `createdFrom` for ss-created
+  entries — warn only, never block: worktrees are workspaces and the set maps *paths*),
+  **cross-set build-collision dry-check** (§4), primary-checkout detection.
+  Exit 1 on hard violations (drift is not one). Also run implicitly at `up --set` time.
 - `ss set create <name> --slot N --from-branches saga-dash=feat/x,rostering=feat/y
   [--wt-root <dir>]` — creates worktrees (`git -C <primary> worktree add <wt-root>/<repo>-<name> <branch>`),
   runs the existing prep pass (install/build via `src/runtime/prep.ts` — reuse, not
@@ -139,7 +150,9 @@ containment so it doesn't destabilize the core:
   the primary checkout is read-only to `ss` except `git worktree add`.
 - Failure mid-create: report per-repo results, keep successfully created worktrees,
   write **no** set entry unless all repos succeeded (no half-sets).
-- Default worktree root `~/wt/` (open question §9.1 for skelly to confirm).
+- Default worktree root **`~/dev/worktrees/`** (skelly's call — one tree next to the
+  primaries under `~/dev`, easy to back up/grep/clean); `--wt-root` overrides.
+  Worktree dir name: `<repo>-<set-name>`.
 
 ---
 
@@ -336,20 +349,21 @@ mitigated (warm-up pass).
 
 ---
 
-## 9. Open questions for skelly
+## 9. Follow-up questions — RESOLVED (skelly, 2026-07-04)
 
-1. **Default worktree root** for `set create`: `~/wt/` (short paths) vs
-   `~/dev/worktrees/` (near the repos)? Plan assumes `~/wt/`, `--wt-root` overrides.
-2. **Active-set visibility**: is "derive active slots from state dirs + compose
-   projects" enough, or should `up --set` also record `name → slot` into
-   `~/.saga-stack/active.json` so `ss set list` can show a live ACTIVE column? (Plan
-   assumes derive-only for MVP; the file adds a write path + staleness risk.)
-3. **`set check` strictness on branch drift**: should `check` warn when a worktree's
-   current branch no longer matches what `--from-branches` created it from (someone
-   switched branches inside the worktree)? Cheap to add via the branch probe; default
-   assumed *warn*.
-4. **`$SAGA_STACK_SETS` env override** for the sets-file path (CI / tests will want it;
-   assumed yes, trivially).
+1. **Default worktree root**: **`~/dev/worktrees/`** (near the primaries; one tree to
+   back up/grep/clean). `--wt-root` overrides. Folded into §2.5.
+2. **Active-set visibility**: **derive-only for MVP** — ACTIVE in `set list` comes live
+   from state-dir pids / `soa-s<N>` compose containers; no `active.json` write path
+   (nothing to go stale). Revisit only if a real "which set was this slot, post-edit"
+   gap shows up. Folded into §2.4.
+3. **Branch drift**: **warn, never block** — `set check`/up-preflight compare the
+   worktree's current branch to the recorded `createdFrom` and warn on mismatch; sets
+   map paths, worktrees stay workspaces. Folded into §1.2/§2.4.
+4. **`$SAGA_STACK_SETS`**: **yes** — env override for the sets-file path, default
+   `~/.saga-stack/worktree-sets.json`. Folded into §1.2.
+
+No open questions remain; the plan is ready to implement (M13-A first, §6).
 
 ---
 
@@ -361,6 +375,9 @@ mitigated (warm-up pass).
 | CLI surface | `--set` on up/down/status/verify/reset/seed/snapshot/e2e-run; `ss set list/show/check/create/rm`; hand-edit supported; precedence flag > set > env > default |
 | Slot binding | Set owns slot (1..9, unique); `--set X --slot N` mismatch = hard error; slot 0 reserved for baseline |
 | Build guard | Up-front cross-slot buildable-realpath check (hard error) + realpath-keyed prep lock; buildable-at-primary refused, `--allow-primary` escape |
-| Worktree creation | **In MVP** (`set create --from-branches`: worktree add + install/build + entry write; add-only, all-or-nothing) |
+| Worktree creation | **In MVP** (`set create --from-branches`: worktree add + install/build + entry write; add-only, all-or-nothing); default root `~/dev/worktrees/`, `--wt-root` overrides |
+| Active detection | Derive-only (state-dir pids + compose projects); no active.json in MVP |
+| Branch drift | Warn via recorded `createdFrom`, never block |
+| Sets-file path | `$SAGA_STACK_SETS` env override, else `~/.saga-stack/worktree-sets.json` |
 | Baseline | Slot 0 + primary checkouts + `e2e run --baseline` clean/main preflight (`--strict` to error); clean-main set on a spare slot documented as a pattern |
 | e2e threading | Pure injection: set → repo env + slot; flows.json/spec discovery already follows the set's SAGA_DASH (`resolveAppCwd`, `core/flow/discover.ts`) |

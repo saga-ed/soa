@@ -515,6 +515,81 @@ describe('StackApi.seed — offline then online via the Runner', () => {
   });
 });
 
+// ── seed() slot-offset port resolution (the :5432 hardcode bugfix) ───────────
+
+describe('StackApi.seed — the mesh postgres port resolves to the slot offset', () => {
+  // Compose a full+playback plan over every pg-DATABASE_URL seed service, run it
+  // through the fake Runner, and read back the RESOLVED env each seed child got.
+  async function seedEnvByStepDb(over: Partial<Runtime>): Promise<Map<string, ScriptInvocation>> {
+    const { runtime, fakes } = makeRuntime(over);
+    const api = makeStackApi(manifest, runtime);
+    const services = [
+      'iam-api',
+      'sessions-api',
+      'programs-api',
+      'scheduling-api',
+      'content-api',
+      'transcripts-api',
+      'insights-api',
+      'chat-api',
+    ] as ServiceId[];
+    const plan = composeSeedPlan(
+      { profile: 'full', addOns: ['playback'] },
+      new Set<ServiceId>(services),
+      new Set<ServiceId>(),
+    );
+    await api.seed(plan);
+    // key each seed run by a stable DB marker present in its resolved env.
+    const byDb = new Map<string, ScriptInvocation>();
+    for (const r of fakes.runs) {
+      const url = r.env.DATABASE_URL ?? r.env.PII_DATABASE_URL ?? '';
+      const m = /@localhost:\d+\/([a-z_]+)/.exec(url);
+      if (m) byDb.set(m[1], r);
+      if (r.env.POSTGRES_PORT) byDb.set(`POSTGRES_PORT:${r.env.POSTGRES_DATABASE}`, r);
+    }
+    return byDb;
+  }
+
+  it('slot 0 (meshOffset undefined): every pg seed DATABASE_URL/POSTGRES_PORT is :5432 (byte-identical)', async () => {
+    const byDb = await seedEnvByStepDb({});
+    // iam carries BOTH DATABASE_URL and PII_DATABASE_URL — assert both ports.
+    const iam = byDb.get('iam_local') ?? byDb.get('iam_pii_local');
+    expect(iam?.env.DATABASE_URL).toBe('postgresql://iam:iam@localhost:5432/iam_local');
+    expect(iam?.env.PII_DATABASE_URL).toBe('postgresql://iam_pii:iam_pii@localhost:5432/iam_pii_local');
+    expect(byDb.get('sessions')?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:5432/sessions');
+    expect(byDb.get('programs')?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:5432/programs');
+    expect(byDb.get('scheduling')?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:5432/scheduling');
+    expect(byDb.get('content')?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:5432/content');
+    // playback apps read the POSTGRES_* set — POSTGRES_PORT is the mesh port too.
+    expect(byDb.get('POSTGRES_PORT:transcripts_local')?.env.POSTGRES_PORT).toBe('5432');
+    // no resolved seed env leaks a dangling ${TOKEN}.
+    for (const r of byDb.values()) for (const v of Object.values(r.env)) expect(v).not.toMatch(/\$\{/);
+  });
+
+  it('slot 1 (meshOffset 1000): every pg seed DATABASE_URL/POSTGRES_PORT is :6432', async () => {
+    const byDb = await seedEnvByStepDb({ meshOffset: 1000, pgContainer: 'soa-s1-postgres-1' });
+    const iam = byDb.get('iam_local') ?? byDb.get('iam_pii_local');
+    expect(iam?.env.DATABASE_URL).toBe('postgresql://iam:iam@localhost:6432/iam_local');
+    expect(iam?.env.PII_DATABASE_URL).toBe('postgresql://iam_pii:iam_pii@localhost:6432/iam_pii_local');
+    expect(byDb.get('sessions')?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:6432/sessions');
+    expect(byDb.get('programs')?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:6432/programs');
+    expect(byDb.get('scheduling')?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:6432/scheduling');
+    expect(byDb.get('content')?.env.DATABASE_URL).toBe('postgresql://saga_user:password123@localhost:6432/content');
+    expect(byDb.get('POSTGRES_PORT:transcripts_local')?.env.POSTGRES_PORT).toBe('6432');
+  });
+
+  it('slot 1: the reset dev-user re-seed also dials the offset mesh port', async () => {
+    // reset()'s dev-user re-seed reuses buildSeedRegistry(...)['iam-dev-user'] through
+    // the SAME seedEnv path, so its DATABASE_URL must carry the slot offset too.
+    const { runtime, fakes } = makeRuntime({ meshOffset: 1000, pgContainer: 'soa-s1-postgres-1' });
+    const api = makeStackApi(manifest, runtime);
+    await api.reset(['iam-api'] as ServiceId[]);
+    const devUser = fakes.runs.find((r) => r.args.includes('dist/seed-dev-user.js'));
+    expect(devUser?.env.DATABASE_URL).toBe('postgresql://iam:iam@localhost:6432/iam_local');
+    expect(devUser?.env.PII_DATABASE_URL).toBe('postgresql://iam_pii:iam_pii@localhost:6432/iam_pii_local');
+  });
+});
+
 // ── verify() / down() / reset() / login() ───────────────────────────────────
 
 describe('StackApi.verify — manifest probes + tolerate', () => {

@@ -86,7 +86,15 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
 
 /** The mesh postgres address (single shared instance — up.sh PROGRAMS_DB_URL et al.). */
 const MESH_PG_HOST = 'localhost';
-const MESH_PG_PORT = 5432;
+/**
+ * The mesh postgres PORT is emitted as a `${MESH_PG_PORT}` TOKEN, not a literal —
+ * this module is PURE (no slot/offset context), so it cannot know the slot's offset
+ * port. The facade's seed-env resolver (`stack-api.ts` `seedEnv`) expands the token
+ * against the runtime, exactly like `${SAGA_MESH_*_CONTAINER}`: at slot 0 it resolves
+ * to `5432` (byte-identical to before), at slot N>0 to `5432 + meshOffset` (:6432 at
+ * slot 1). Baking a literal here dialed slot 0's postgres from every slot (the bug).
+ */
+const MESH_PG_PORT_TOKEN = '${MESH_PG_PORT}';
 
 /**
  * M8 R5 — container-name tokens the runtime resolves per SLOT. The registry is
@@ -102,7 +110,7 @@ const PG_CONTAINER_TOKEN = '${SAGA_MESH_POSTGRES_CONTAINER}';
 
 /** The mesh superuser creds up.sh's playback `*_DB_URL` migrate as (up.sh:235-237). */
 function playbackDbUrl(db: DatabaseDef): string {
-  return `postgresql://postgres_admin:password123@${MESH_PG_HOST}:${MESH_PG_PORT}/${db.name}`;
+  return `postgresql://postgres_admin:password123@${MESH_PG_HOST}:${MESH_PG_PORT_TOKEN}/${db.name}`;
 }
 
 /**
@@ -146,9 +154,9 @@ function playbackProvisionStep(m: Manifest, id: SeedStepId, service: ServiceId, 
   };
 }
 
-/** `postgresql://<owner>:<pw>@localhost:5432/<dbname>` — derived from DatabaseDef. */
+/** `postgresql://<owner>:<pw>@localhost:${MESH_PG_PORT}/<dbname>` — derived from DatabaseDef; port token resolved per-slot in `seedEnv`. */
 function pgUrl(db: DatabaseDef): string {
-  return `postgresql://${db.ownerRole}:${db.ownerPw}@${MESH_PG_HOST}:${MESH_PG_PORT}/${db.name}`;
+  return `postgresql://${db.ownerRole}:${db.ownerPw}@${MESH_PG_HOST}:${MESH_PG_PORT_TOKEN}/${db.name}`;
 }
 
 /** Single inline `DATABASE_URL` override (programs/sessions/content/qtf). */
@@ -162,7 +170,7 @@ function postgresVarSet(db: DatabaseDef, instanceName: string): SeedEnv {
     kind: 'inline-multi',
     vars: {
       POSTGRES_HOST: MESH_PG_HOST,
-      POSTGRES_PORT: String(MESH_PG_PORT),
+      POSTGRES_PORT: MESH_PG_PORT_TOKEN,
       POSTGRES_DATABASE: db.name,
       POSTGRES_USERNAME: db.ownerRole,
       POSTGRES_PASSWORD: db.ownerPw,

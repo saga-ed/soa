@@ -14,8 +14,11 @@ describe('buildSeedRegistry — iam seed env (regression: DATABASE_URL is requir
       const step = reg[id];
       expect(step.env.kind).toBe('inline-multi');
       const vars = (step.env as { vars: Record<string, string> }).vars;
-      expect(vars.DATABASE_URL).toBe('postgresql://iam:iam@localhost:5432/iam_local');
-      expect(vars.PII_DATABASE_URL).toBe('postgresql://iam_pii:iam_pii@localhost:5432/iam_pii_local');
+      // The pure registry emits the mesh postgres port as a `${MESH_PG_PORT}` TOKEN
+      // (resolved per-slot in stack-api's seedEnv: 5432 at slot 0, 5432+offset above);
+      // everything else is the literal manifest-derived connection data.
+      expect(vars.DATABASE_URL).toBe('postgresql://iam:iam@localhost:${MESH_PG_PORT}/iam_local');
+      expect(vars.PII_DATABASE_URL).toBe('postgresql://iam_pii:iam_pii@localhost:${MESH_PG_PORT}/iam_pii_local');
       expect(vars.PII_CRYPTO_PIIDEKHEX).toMatch(/^[0-9a-f]{64}$/);
       expect(vars.PII_CRYPTO_PIIHMACKEYHEX).toMatch(/^[0-9a-f]{64}$/);
     });
@@ -24,6 +27,30 @@ describe('buildSeedRegistry — iam seed env (regression: DATABASE_URL is requir
   it('no seed step uses the unimplemented dotenv env kind', () => {
     for (const step of Object.values(reg)) {
       expect(step.env.kind).not.toBe('dotenv');
+    }
+  });
+
+  // Slot bugfix: the pure registry must NEVER bake a literal mesh postgres port —
+  // it has no slot/offset context. Every pg connection var carries the
+  // `${MESH_PG_PORT}` token (resolved per-slot in stack-api's seedEnv), so a seed at
+  // slot N>0 dials the slot's offset postgres instead of slot 0's :5432.
+  it('every pg seed env var emits the ${MESH_PG_PORT} token, never a literal :5432', () => {
+    const collect = (step: (typeof reg)[keyof typeof reg]): Record<string, string>[] => [
+      step.env.kind !== 'dotenv' ? step.env.vars : {},
+      ...(step.optionalSteps ?? []).map((s) => (s.env.kind !== 'dotenv' ? s.env.vars : {})),
+    ];
+    for (const step of Object.values(reg)) {
+      for (const vars of collect(step)) {
+        for (const [k, v] of Object.entries(vars)) {
+          // A pg connection var either names the port var or embeds a postgres URL.
+          if (k === 'POSTGRES_PORT') {
+            expect(v).toBe('${MESH_PG_PORT}');
+          } else if (v.startsWith('postgresql://')) {
+            expect(v).toContain(':${MESH_PG_PORT}/');
+            expect(v).not.toMatch(/:\d+\//); // no literal port
+          }
+        }
+      }
     }
   });
 

@@ -366,10 +366,19 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
   // (R5 — coach curriculum / playback bootstrap), so both target the right slot.
   const pgContainer = runtime.pgContainer ?? meshContainer(getMesh('postgres', manifest));
   const mongoContainer = meshContainer(getMesh('connect-mongo', manifest));
+  // M8 slot bugfix: profiles.ts is PURE, so a pg-DATABASE_URL/POSTGRES_PORT seed step
+  // emits the mesh postgres port as a `${MESH_PG_PORT}` TOKEN rather than a literal.
+  // Resolve it HERE (the one place with slot context) to the slot's offset port —
+  // base 5432 + meshOffset — so a TCP seed at slot N>0 dials the slot's postgres
+  // (:6432 at slot 1) instead of slot 0's :5432. At slot 0 (offset 0) it resolves to
+  // :5432, byte-identical to before. The docker-exec seeds still target the container
+  // via `${SAGA_MESH_*_CONTAINER}` (their psql runs INSIDE the container on :5432).
+  const pgPort = getMesh('postgres', manifest).port + (runtime.meshOffset ?? 0);
   const seedTokens: Record<string, string | undefined> = {
     ...tokens,
     SAGA_MESH_POSTGRES_CONTAINER: pgContainer,
     SAGA_MESH_CONNECT_MONGO_CONTAINER: mongoContainer,
+    MESH_PG_PORT: String(pgPort),
   };
 
   /** Resolve a seed step's cwd: owning service's repo root + step.cwd. */

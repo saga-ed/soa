@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/mesh-fixture-cli",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "description": "DEPRECATED \u2014 superseded by @saga-ed/saga-stack-cli (ss stack snapshot/seed). Left functional, not removed. CLI for authoring, storing, and restoring cross-repo fixtures on the saga-mesh (rostering + program-hub + SDS). Part of saga-ed/student-data-system#80 Phase 3.",
   "bin": {
@@ -56,7 +56,7 @@
     "@oclif/core": "^4.0.0",
     "@oclif/plugin-help": "^6.0.0",
     "uuid": "^11.0.0",
-    "zod": "3.25.67"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",

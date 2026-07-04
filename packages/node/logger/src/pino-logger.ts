@@ -1,5 +1,7 @@
+import { hostname } from 'node:os';
 import { injectable, inject } from 'inversify';
 import pino, { Logger, TransportTargetOptions } from 'pino';
+import { trace } from '@opentelemetry/api';
 import { ILogger } from './i-logger.js';
 import type { PinoLoggerConfig } from './pino-logger-schema.js';
 
@@ -62,6 +64,74 @@ const REDACT_PATHS = [
 /** Shared so both pino construction paths (prod stdout + transport) redact identically. */
 export const redact = { paths: [...REDACT_PATHS], censor: '[REDACTED]' };
 
+/**
+ * Merges the active OTel span's trace/span IDs into every log line so
+ * Datadog can link a log to its trace. pino calls this on each log call
+ * (cheaper than wrapping every public method) and merges the result under
+ * the log object. `trace.getActiveSpan()` returns undefined outside a
+ * traced context (e.g. startup messages), so those logs are unaffected.
+ *
+ * OTel's SpanContext.traceId/spanId are already lowercase hex strings
+ * (32/16 chars) per the W3C Trace Context spec — the exact format Datadog
+ * expects for its `trace_id`/`span_id` log fields, no conversion needed.
+ */
+export function traceCorrelationMixin(): Record<string, string> {
+  const spanContext = trace.getActiveSpan()?.spanContext();
+  if (!spanContext) {
+    return {};
+  }
+  return { trace_id: spanContext.traceId, span_id: spanContext.spanId };
+}
+
+/**
+ * Deployment context for every log line, sourced from the SAME env var the
+ * OTel tracer reads (OTEL_RESOURCE_ATTRIBUTES, set per-container by the
+ * service templates, e.g. `deployment.environment.name=dev,
+ * deployment.identifier=main`). Traces already carry these as resource
+ * attributes; mirroring them into the log JSON gives Datadog the matching
+ * `@deployment.identifier` / `@deployment.environment.name` log attributes,
+ * so one facet filters logs AND traces to a specific sandbox deployment.
+ * `version` alone can't do that — one version is often live on several
+ * sandboxes at once.
+ *
+ * Degrade-safe: containers without the env var (or without the deployment.*
+ * keys) log exactly as before — no empty placeholder keys are emitted.
+ * Values are percent-decoded per the OTel spec (W3C-baggage-style encoding);
+ * a value that fails to decode is kept raw rather than dropped.
+ *
+ * Exported for unit testing.
+ */
+export function resolveDeploymentBindings(
+  raw: string | undefined = process.env.OTEL_RESOURCE_ATTRIBUTES,
+): { deployment?: { environment?: { name: string }; identifier?: string } } {
+  if (!raw) return {};
+  const attrs = new Map<string, string>();
+  for (const pair of raw.split(',')) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const key = pair.slice(0, eq).trim();
+    let value = pair.slice(eq + 1).trim();
+    try {
+      value = decodeURIComponent(value);
+    } catch {
+      // Not valid percent-encoding — treat as a literal value.
+    }
+    if (key && value) attrs.set(key, value);
+  }
+  // `deployment.environment` is the pre-1.27 OTel semconv name; templates set
+  // both during the transition, newer ones may set only `.name`.
+  const name =
+    attrs.get('deployment.environment.name') ?? attrs.get('deployment.environment');
+  const identifier = attrs.get('deployment.identifier');
+  if (!name && !identifier) return {};
+  return {
+    deployment: {
+      ...(name ? { environment: { name } } : {}),
+      ...(identifier ? { identifier } : {}),
+    },
+  };
+}
+
 @injectable()
 export class PinoLogger implements ILogger {
   private readonly logger: Logger;
@@ -71,6 +141,21 @@ export class PinoLogger implements ILogger {
     const isForeground = Boolean(process.stdout.isTTY);
     const isExpressContext = config.isExpressContext;
     const logFile = config.logFile;
+
+    // Pretty output requires a real terminal. Deployed dev services (NODE_ENV
+    // =development, no TTY) used to hit the fallback below with prettyPrint on
+    // and ship ANSI-colored multi-line text to CloudWatch — unparseable by
+    // Datadog (no level, no attributes, stack traces split line-by-line).
+    // Gating on isForeground makes every non-TTY context emit structured JSON.
+    const pretty = Boolean(config.prettyPrint) && isForeground;
+
+    // Passing `base` replaces pino's default ({pid, hostname}), so re-seed
+    // those alongside the deployment context.
+    const base = {
+      pid: process.pid,
+      hostname: hostname(),
+      ...resolveDeploymentBindings(),
+    };
 
     // pino's ESM default interop (CJS package, ESM consumer).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,7 +171,10 @@ export class PinoLogger implements ILogger {
     // driver → CloudWatch.
     if (env === 'production' && isExpressContext) {
       const dest = pinoFn.destination({ dest: logFile ?? 1, sync: false });
-      this.logger = pinoFn({ level: config.level, redact }, dest);
+      this.logger = pinoFn(
+        { level: config.level, redact, base, mixin: traceCorrelationMixin },
+        dest,
+      );
       this.logger.info(`Logger initialized with level ${config.level}`);
       return;
     }
@@ -97,8 +185,8 @@ export class PinoLogger implements ILogger {
     if (env === 'local') {
       // Always console logger
       targets.push({
-        target: config.prettyPrint ? 'pino-pretty' : 'pino/file',
-        options: config.prettyPrint
+        target: pretty ? 'pino-pretty' : 'pino/file',
+        options: pretty
           ? {
               colorize: true,
               levelFirst: true,
@@ -118,8 +206,8 @@ export class PinoLogger implements ILogger {
     else if (env === 'development') {
       if (isExpressContext && isForeground) {
         targets.push({
-          target: config.prettyPrint ? 'pino-pretty' : 'pino/file',
-          options: config.prettyPrint
+          target: pretty ? 'pino-pretty' : 'pino/file',
+          options: pretty
             ? {
                 colorize: true,
                 levelFirst: true,
@@ -141,8 +229,8 @@ export class PinoLogger implements ILogger {
     // Fallback/default: always log to console
     if (targets.length === 0) {
       targets.push({
-        target: config.prettyPrint ? 'pino-pretty' : 'pino/file',
-        options: config.prettyPrint
+        target: pretty ? 'pino-pretty' : 'pino/file',
+        options: pretty
           ? {
               colorize: true,
               levelFirst: true,
@@ -155,6 +243,8 @@ export class PinoLogger implements ILogger {
     this.logger = pinoFn({
       level: config.level,
       redact,
+      base,
+      mixin: traceCorrelationMixin,
       transport: {
         targets,
       },

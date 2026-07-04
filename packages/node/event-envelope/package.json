@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-event-envelope",
-    "version": "0.1.0-dev.3",
+    "version": "0.1.0-dev.6",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -21,7 +21,7 @@
     },
     "dependencies": {
         "@opentelemetry/api": "^1.9.0",
-        "zod": "3.25.67"
+        "zod": "^4.4.3"
     },
     "devDependencies": {
         "@saga-ed/soa-typescript-config": "workspace:*",

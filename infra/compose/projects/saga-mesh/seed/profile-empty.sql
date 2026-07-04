@@ -1,6 +1,6 @@
 -- saga-mesh / profile=empty
 --
--- Creates the eight per-app databases and owners for the SDS fixture mesh.
+-- Creates the per-app databases and owners for the SDS fixture mesh.
 -- No application data is seeded here — each app runs its own prisma
 -- migrations into its database after this file executes.
 --
@@ -17,6 +17,7 @@ CREATE USER saga_user      WITH PASSWORD 'password123';
 CREATE USER ads_adm        WITH PASSWORD 'ads_adm';
 CREATE USER ledger         WITH PASSWORD 'ledger';
 CREATE USER sis            WITH PASSWORD 'sis';
+CREATE USER coach_api_app  WITH PASSWORD 'dev-password-coach-api-app';
 
 -- ── Databases ───────────────────────────────────────────────────────
 -- Owner set at creation time so prisma migrate deploy can CREATE SCHEMA.
@@ -29,6 +30,7 @@ CREATE DATABASE content         OWNER saga_user;
 CREATE DATABASE ads_adm_local   OWNER ads_adm;
 CREATE DATABASE ledger_local    OWNER ledger;
 CREATE DATABASE sis_db          OWNER sis;
+CREATE DATABASE coach_api       OWNER coach_api_app;
 
 -- ── Grants (belt-and-suspenders; owner already has these) ──────────
 GRANT ALL PRIVILEGES ON DATABASE iam_local     TO iam;
@@ -40,6 +42,7 @@ GRANT ALL PRIVILEGES ON DATABASE content       TO saga_user;
 GRANT ALL PRIVILEGES ON DATABASE ads_adm_local TO ads_adm;
 GRANT ALL PRIVILEGES ON DATABASE ledger_local  TO ledger;
 GRANT ALL PRIVILEGES ON DATABASE sis_db        TO sis;
+GRANT ALL PRIVILEGES ON DATABASE coach_api     TO coach_api_app;
 
 -- The sentinel row in _profile_meta.seeded is written by
 -- services/postgres/seed/init-and-seed.sh after this file completes.

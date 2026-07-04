@@ -52,7 +52,7 @@ const REPO_ROOTS = {
 } as Record<RepoKey, string>;
 
 function ctx(): LaunchContext {
-  return defaultLaunchContext({ repoRoots: REPO_ROOTS, syntheticDevDir: '/dev/soa/tools/synthetic-dev' });
+  return defaultLaunchContext({ repoRoots: REPO_ROOTS, vendorDir: '/dev/vendor' });
 }
 
 interface Fakes {
@@ -333,9 +333,9 @@ describe('StackApi — up() then seed() run the composed offline-THEN-online pla
     expect(onlineDemoPollsIdx).toBeGreaterThan(offlineIamIdx);
 
     // the online content optional demo-polls tail resolved its CONTENT_API token and
-    // ran from the synthetic-dev tool dir under SOA (the $SCRIPT_DIR shim).
+    // ran from the CLI's VENDORED dir (VENDOR_DIR token), NOT tools/synthetic-dev.
     const demoPolls = fakes.runs.find((r) => r.args.includes('seed-demo-polls.mjs'));
     expect(demoPolls?.env.CONTENT_API).toBe('http://localhost:3009');
-    expect(demoPolls?.cwd).toBe('/dev/soa/tools/synthetic-dev');
+    expect(demoPolls?.cwd).toBe('/dev/vendor'); // VENDORED seed-demo-polls.mjs dir (VENDOR_DIR token)
   });
 });

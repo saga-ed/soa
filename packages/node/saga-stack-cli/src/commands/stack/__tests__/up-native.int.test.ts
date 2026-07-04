@@ -20,13 +20,17 @@ import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import type {
+  CookiePoster,
   DashFs,
   GitRunner,
+  JarWriter,
   LaunchResult,
   LaunchSpec,
   MeshExec,
   PgProbe,
   PortProbe,
+  PostOptions,
+  PostResult,
   RunResult,
   Runner,
   ScriptInvocation,
@@ -44,6 +48,8 @@ const WS = ['--soa', SOA_ROOT, '--dev', DEV_ROOT];
 let config: Config;
 let launches: LaunchSpec[];
 let runs: ScriptInvocation[];
+let posts: { url: string; opts: PostOptions }[];
+let jarWrites: { path: string; contents: string }[];
 let meshGated: string[];
 let dashCalls: string[];
 let recordUps: { plan: import('../../../core/record-plan.js').RecordPlan; ctx: { qboardRoot: string } }[];
@@ -53,10 +59,23 @@ let fleetGenCalls: { localFleetPath: string; outPath: string; tunnelDomain: stri
 function installNativeSeams(launchFail: Set<string> = new Set()): void {
   launches = [];
   runs = [];
+  posts = [];
+  jarWrites = [];
   meshGated = [];
   dashCalls = [];
   recordUps = [];
   fleetGenCalls = [];
+
+  // Native `--login` seams: a fake devLogin POST (200 + canned Set-Cookies) + a jar
+  // capture — so `up --login` mints the native cookie jar with NO real network/fs and
+  // NEVER shells up.sh. (Default real seams would make a real POST — must be faked.)
+  const poster: CookiePoster = {
+    async post(url: string, opts: PostOptions): Promise<PostResult> {
+      posts.push({ url, opts });
+      return { status: 200, ok: true, setCookies: ['iam_session=jwt; Path=/; HttpOnly'] };
+    },
+  };
+  const jar: JarWriter = { write: (path, contents) => jarWrites.push({ path, contents }) };
 
   const launcher: ServiceLauncher = {
     async launch(spec: LaunchSpec): Promise<LaunchResult> {
@@ -167,8 +186,13 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
       plan: import('../../../core/record-plan.js').RecordPlan,
       ctx: { qboardRoot: string },
     ) => Promise<{ ok: boolean; message: string }>;
+    getCookiePoster: () => CookiePoster;
+    getJarWriter: () => JarWriter;
   };
   vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
+  // Native `up --login` seams (fake POST + jar capture) — never a real network/fs, never up.sh.
+  vi.spyOn(proto, 'getCookiePoster').mockReturnValue(poster);
+  vi.spyOn(proto, 'getJarWriter').mockReturnValue(jar);
   // Phase 2: a fixed moniker (never spawn tunnel.sh) + a recording seam that records
   // the resolved RecordPlan (never touches docker/aws).
   vi.spyOn(proto, 'getTunnelMoniker').mockReturnValue(async () => 'testmoniker');
@@ -251,15 +275,49 @@ describe('stack up --only — native partial-stack', () => {
     expect(launches.map((s) => s.id)).toEqual(['iam-api']);
   });
 
-  it('--login delegates to up.sh after the native bring-up + seed', async () => {
+  it('--login mints the NATIVE cookie jar + best-effort vendored browser after bring-up + seed (NO up.sh)', async () => {
     await StackUp.run(['--only', 'iam-api', '--login', ...WS], config);
     // native launch + seed happened …
     expect(launches.map((s) => s.id)).toEqual(['iam-api']);
-    // … and up.sh was invoked ONLY for the delegated --login.
-    const upSh = runs.filter((r) => r.command.endsWith('up.sh'));
-    expect(upSh).toHaveLength(1);
-    // flagMap.login() is a flag-only invocation (no leading `up` verb).
-    expect(upSh[0].args).toEqual(['--login']);
+
+    // … and login was NATIVE: an origin-checked devLogin POST at the slot-0 iam URL for
+    // the default persona, and the Netscape jar written to <stateDir>/cookies.txt.
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe('http://localhost:3010/trpc/auth.devLogin');
+    expect(posts[0]?.opts.origin).toBe('http://localhost:3010');
+    expect(posts[0]?.opts.body).toBe('{"email":"dev@saga.org"}');
+    expect(jarWrites).toHaveLength(1);
+    expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');
+    expect(jarWrites[0]?.contents).toContain('iam_session\tjwt');
+
+    // up.sh was NEVER invoked. The only spawn from the login step is the VENDORED
+    // browser-login.mjs (best-effort headful auto-login), never up.sh --login.
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+    const browserLogin = runs.find((r) => r.command === 'node' && r.args.some((a) => a.endsWith('browser-login.mjs')));
+    expect(browserLogin).toBeDefined();
+    expect(browserLogin?.args[0]).toContain('vendor');
+    expect(browserLogin?.args[0]).not.toContain('tools/synthetic-dev');
+    expect(browserLogin?.args).not.toContain('--login');
+  });
+
+  it('--login stays GREEN when saga-dash is absent — browser step warn-skipped, jar still minted', async () => {
+    // The decoupling-finish blocker regression: saga-dash-absent is a supported state
+    // (`up` skips it with a warning), but the browser step's spawn cwd
+    // (<saga-dash>/apps/web/dash) wouldn't exist → spawn ENOENT rejected → `up` reddened.
+    // The guard must warn-and-skip the browser instead; the headless jar is independent.
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue((dir: string) => !dir.includes('/saga-dash'));
+
+    await expect(StackUp.run(['--only', 'iam-api', '--login', ...WS], config)).resolves.toBeUndefined();
+
+    // the native jar was still minted …
+    expect(posts).toHaveLength(1);
+    expect(jarWrites).toHaveLength(1);
+    // … but the vendored browser was never spawned (warn-skip, not ENOENT).
+    expect(runs.some((r) => r.command === 'node' && r.args.some((a) => a.endsWith('browser-login.mjs')))).toBe(false);
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
   });
 
   it('coach absent + --seed full: coach-pg is NOT planned and the run does not fail', async () => {
@@ -539,6 +597,23 @@ describe('stack up --only --dry-run — planner prints the native launch + seed 
     const text = logged.join('\n');
     expect(text).toContain('native partial-stack: would launch');
     expect(text).toContain('offline:');
+  });
+
+  it('--sandbox surfaces the PRUNED launch set (the sandbox-hosted deps are not launched locally)', async () => {
+    const logged: string[] = [];
+    vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m?: string) => {
+      logged.push(String(m ?? ''));
+    });
+    await StackUp.run(['--only', 'sis-api', '--sandbox', 'foo', '--dry-run', ...WS], config);
+
+    expect(launches).toEqual([]);
+    expect(runs).toEqual([]);
+    const text = logged.join('\n');
+    // The dry-run reflects what actually launches: only sis-api locally; iam-api (a
+    // pulled-in dep) is HOSTED at the cloud sandbox 'foo' and NOT launched locally.
+    expect(text).toContain('launch set (sandbox/workspace prune): sis-api');
+    expect(text).toContain('iam-api');
+    expect(text).toContain("at sandbox 'foo'");
   });
 });
 

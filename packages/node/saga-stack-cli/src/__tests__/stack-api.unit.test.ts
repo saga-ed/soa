@@ -9,7 +9,7 @@
  *   seed()  — offline then online steps via the Runner; fatal aborts, warn continues.
  *   verify()— probe each URL; tolerate by id or repo.
  *   down()  — stopServices in reverse launch order.
- *   reset()/login() — delegated to up.sh via the `delegate` seam (M4).
+ *   reset() — NATIVE (M8 R4); login() is now native at the command layer (removed here).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -58,7 +58,7 @@ const REPO_ROOTS = {
 } as Record<RepoKey, string>;
 
 function ctx(): LaunchContext {
-  return defaultLaunchContext({ repoRoots: REPO_ROOTS, syntheticDevDir: '/dev/soa/tools/synthetic-dev' });
+  return defaultLaunchContext({ repoRoots: REPO_ROOTS, vendorDir: '/dev/vendor' });
 }
 
 interface Fakes {
@@ -215,7 +215,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     const profile = deriveInstance({ slot: 1 });
     const slotCtx = defaultLaunchContext({
       repoRoots: REPO_ROOTS,
-      syntheticDevDir: '/dev/soa/tools/synthetic-dev',
+      vendorDir: '/dev/vendor',
       portOverrides: profile.portOverrides,
       meshOffset: profile.meshOffset,
     });
@@ -519,8 +519,8 @@ describe('StackApi.seed — offline then online via the Runner', () => {
     // the demo-polls optional step resolves CONTENT_API from the launch tokens.
     const demoPolls = fakes.runs.find((r) => r.args.includes('seed-demo-polls.mjs'));
     expect(demoPolls?.env.CONTENT_API).toBe('http://localhost:3009');
-    // and runs from the synthetic-dev tool dir under SOA (the $SCRIPT_DIR shim).
-    expect(demoPolls?.cwd).toBe('/dev/soa/tools/synthetic-dev');
+    // and runs from the CLI's VENDORED dir (VENDOR_DIR token), NOT tools/synthetic-dev.
+    expect(demoPolls?.cwd).toBe('/dev/vendor'); // VENDORED seed-demo-polls.mjs dir (VENDOR_DIR token)
   });
 });
 
@@ -820,14 +820,10 @@ describe('StackApi.seed — R5 stdinFile steps (coach curriculum + playback boot
   });
 });
 
-describe('StackApi.login — delegated to up.sh', () => {
-  it('login delegates `up.sh --login [email]`', async () => {
-    const { runtime, fakes } = makeRuntime();
-    const api = makeStackApi(manifest, runtime);
-    await api.login('teacher@saga.org');
-    expect(fakes.delegated[0].args).toEqual(['--login', 'teacher@saga.org']);
-  });
-});
+// NOTE: `StackApi.login` was REMOVED (Phase-2 FINISH decoupling). `login` is now fully
+// NATIVE at the command layer (`BaseCommand.mintNativeLoginJar` + `openVendoredBrowser`,
+// covered by `login-native.int.test.ts` + `up-native.int.test.ts`), so the facade no
+// longer delegates `up.sh --login`.
 
 // ── M9 — auto-pull, Connect AV, restart ──────────────────────────────────────
 

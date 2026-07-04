@@ -49,8 +49,10 @@ export type RecordMode = 'crdt' | 'av';
  * resolved `<repoRoot>` (override env / DEV-based default) with `relPath` to
  * get the absolute command; the script's own directory is used as the cwd.
  *
- * Examples:
- *   { repo: 'SOA',       relPath: 'tools/synthetic-dev/up.sh' }
+ * The ONLY remaining `ScriptLocator` today is the SAGA_DASH e2e wrapper (a
+ * different repo — `core/e2e-map.ts`); every synthetic-dev script is vendored.
+ *
+ * Example:
  *   { repo: 'SAGA_DASH', relPath: 'apps/web/dash/e2e/check-e2e.sh' }
  */
 export interface ScriptLocator {
@@ -77,41 +79,24 @@ export interface ScriptPlan {
   env: Record<string, string>;
 }
 
-/** Repo-relative dir holding the synthetic-dev bash scripts (up/verify/refresh/tunnel/bootstrap). */
+/**
+ * Repo-relative dir holding the per-dev overlay tsv DATA file
+ * (`integration-suite.local.tsv`). This is the SOLE remaining reference to
+ * `tools/synthetic-dev` — a gitignored per-dev DATA path (read by `stack verify`
+ * + `stack overlay`), NOT a script. Every synthetic-dev SCRIPT (up.sh/verify.sh/
+ * refresh-suite.sh/tunnel.sh/browser-login.mjs/seed-demo-polls.mjs) + the
+ * rtsm-fleet-local.json config are now VENDORED under the CLI's `vendor/` dir, so
+ * NOTHING here builds a `tools/synthetic-dev` SCRIPT locator anymore.
+ */
 export const SYNTH_DEV_DIR = 'tools/synthetic-dev';
 
-/**
- * Terse locator builder for a script in `soa`'s `tools/synthetic-dev/` dir —
- * keeps the up()/verify() (and the later overlay/tunnel/bootstrap) mappers
- * concise. Later phases wrapping saga-dash e2e scripts build their own
- * `{ repo: 'SAGA_DASH', relPath: 'apps/web/dash/e2e/…' }` locators directly.
- */
-export function synthScript(name: string): ScriptLocator {
-  return { repo: 'SOA', relPath: `${SYNTH_DEV_DIR}/${name}` };
-}
-
-// NOTE (Phase 2, saga-ed/soa#214): the `up()` mapper + `UpFlags` were REMOVED — the
-// `stack up` command is now FULLY NATIVE (no up.sh wrapper: `--sandbox`/`--tunnel`/
-// `--record`/`--workspace` are all ported into the native launch path). The remaining
-// up.sh mappers below (`status`/`login`) serve the still-wrapped `stack status` /
-// `stack login` commands (and `up --login`'s delegation), NOT the `up` bring-up.
-
-/** `stack status` → up.sh `--status` (flag-only; health + row counts, then exit). */
-export function status(): ScriptPlan {
-  return { script: synthScript('up.sh'), args: ['--status'], env: {} };
-}
-
-/**
- * `stack login [email]` → up.sh `--login [email]`. A bare invocation logs in the
- * default persona (dev@saga.org); an email overrides it. Used by `stack login
- * --browser` (the headful Chromium auto-login) and by the native `up --login`
- * delegation in the StackApi facade.
- */
-export function login(email?: string): ScriptPlan {
-  const args = ['--login'];
-  if (email !== undefined) args.push(email);
-  return { script: synthScript('up.sh'), args, env: {} };
-}
+// NOTE (Phase 2/FINISH, saga-ed/soa#214): the `up()`/`status()`/`login()` up.sh
+// mappers + the `synthScript()` up.sh locator builder were ALL REMOVED — `stack up`,
+// `stack status`, and `stack login` (+ `up --login`) are now FULLY NATIVE (no up.sh
+// wrapper: native launch/health/cookie-jar). There is NO `synthScript('up.sh')` left
+// anywhere; the only wrapped bash scripts remaining are the VENDORED ones
+// (overlay→refresh-suite.sh, tunnel→tunnel.sh, both via `resolveVendorScript`) and the
+// SAGA_DASH e2e scripts (`core/e2e-map.ts`, a different repo's ScriptLocator).
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The remaining sole-implementation synthetic-dev wrappers: overlay / tunnel.

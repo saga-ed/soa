@@ -25,13 +25,17 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { Command } from '@oclif/core';
 import type { Interfaces } from '@oclif/core';
+import { dirname, join } from 'node:path';
 import { SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
 import type { PullMode } from './core/auto-pull.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import type { RecordMode, ScriptPlan } from './core/flag-map.js';
 import { defaultLaunchContext } from './core/launch-plan.js';
+import { resolveIamUrl } from './core/login.js';
 import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
 import type { RecordUp, Runtime } from './stack-api.js';
+import { COOKIE_JAR_FILE, nativeLogin } from './runtime/login.js';
+import type { NativeLoginResult } from './runtime/login.js';
 import {
   buildRepoEnv,
   makeRealConfirm,
@@ -54,6 +58,7 @@ import {
   resolveRepoRoot,
   resolveTunnelMoniker,
   resolveScript,
+  resolveVendorScript,
   scriptCwd,
   stopServices,
   REPO_DEFAULT_DIR,
@@ -494,7 +499,10 @@ export abstract class BaseCommand extends Command {
       repoRoots[repo] = resolveRepoRoot(repo, ctx);
     }
 
-    const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
+    // rtsm-api's non-tunnel FLEET_CONFIG_PATH reads `${VENDOR_DIR}/rtsm-fleet-local.json`;
+    // point VENDOR_DIR at the CLI's VENDORED copy (Phase-2 DECOUPLING) — NOT a soa
+    // checkout's `tools/synthetic-dev`. (The `--tunnel` case overrides it in `up.ts`.)
+    const vendorDir = dirname(resolveVendorScript('rtsm-fleet-local.json'));
 
     // M7: the ONE slot-injection site — apply the slot's env seam so the mesh
     // resolver, preflight owned-container set, and snapshot store target
@@ -505,7 +513,7 @@ export abstract class BaseCommand extends Command {
 
     const launchContext = defaultLaunchContext({
       repoRoots,
-      syntheticDevDir,
+      vendorDir,
       portOverrides: profile.portOverrides,
       meshOffset: profile.meshOffset,
       pinoLevel: process.env.PINO_LOGGER_LEVEL,
@@ -558,7 +566,8 @@ export abstract class BaseCommand extends Command {
       record: overlays.record,
       recordUp: overlays.recordUp,
       recordingsDir: overlays.recordingsDir,
-      // `up --login` / `login --browser` delegate to up.sh through the script path.
+      // `delegate` runs a resolved `ScriptPlan` (today only the SAGA_DASH e2e wrapper);
+      // the `stack` lifecycle is fully native and never delegates. Kept for the e2e lane.
       delegate: (plan) => this.runScript(plan, flags, { propagateExit: false }),
     };
   }
@@ -660,6 +669,88 @@ export abstract class BaseCommand extends Command {
       this.exit(code);
     }
     return code;
+  }
+
+  /**
+   * SHARED native headless-login: mint the cookie jar (the curl half of up.sh's
+   * `login_user`, ~1935-1960) — POST iam's dev-only, origin-checked devLogin and write
+   * the captured cookies to a Netscape jar at `<stateDir>/cookies.txt`. Both `stack
+   * login` and `up --login` call this, so the login logic lives in ONE place and NEITHER
+   * touches `up.sh`. The iam URL is slot-aware (`LOGIN_IAM_URL` overrides for the tunnel).
+   * Returns the `NativeLoginResult` (ok / status / captured / resolved iamUrl+jarPath) —
+   * the caller owns the messaging + exit policy (hard-fail for `stack login`, best-effort
+   * for `up --login`). Never throws (a non-200 truncates the jar and returns `ok:false`).
+   */
+  protected async mintNativeLoginJar(opts: {
+    email: string;
+    slot: number;
+    stateDir: string;
+  }): Promise<NativeLoginResult> {
+    // LOGIN_IAM_URL wins (tunnel: login goes through the PUBLIC iam host); else slot-offset localhost.
+    const iamUrl = resolveIamUrl({ slot: opts.slot, loginIamUrl: process.env.LOGIN_IAM_URL });
+    const jarPath = join(opts.stateDir, COOKIE_JAR_FILE);
+    return nativeLogin(
+      { email: opts.email, iamUrl, jarPath },
+      { poster: this.getCookiePoster(), jar: this.getJarWriter() },
+    );
+  }
+
+  /**
+   * SHARED best-effort headful auto-login: open an auto-logged-in Chromium via the CLI's
+   * VENDORED `browser-login.mjs` (Phase-1 DECOUPLING) — the native replacement for up.sh's
+   * `open_login_browser`. Both `stack login --browser` and `up --login` call this.
+   *
+   * Passes the exact env browser-login.mjs reads: `IAM_URL` (the resolved iam host),
+   * `DASH_URL` (`LOGIN_DASH_URL` override else localhost:8900), `LOGIN_EMAIL` (the persona),
+   * `PROFILE_DIR` (`<stateDir>/browser-profile`, up.sh's BROWSER_PROFILE), and
+   * `SAGA_DASH_DASH` (the resolved saga-dash dash app dir). node runs with `cwd` = that
+   * dash dir so `createRequire`'d playwright + its browsers resolve there.
+   *
+   * BEST-EFFORT (`propagateExit:false`): the headless jar is already minted, so a browser
+   * failure (playwright absent, no DISPLAY, …) — which browser-login.mjs reports as an
+   * `AUTOLOGIN_FAIL` line on the inherited stdio — must NOT flip the caller's exit code,
+   * mirroring up.sh's best-effort browser step.
+   */
+  protected async openVendoredBrowser(
+    flags: WorkspaceFlags,
+    ctx: { email: string; iamUrl: string; stateDir: string },
+  ): Promise<void> {
+    const script = resolveVendorScript('browser-login.mjs');
+    const sagaDashDash = join(
+      resolveRepoRoot('SAGA_DASH', this.scriptContextFromFlags(flags)),
+      'apps',
+      'web',
+      'dash',
+    );
+    // TRULY best-effort — guard SPAWN-level failures too, mirroring up.sh's
+    // open_login_browser preflight ([[ -f BROWSER_LOGIN ]] / command -v node /
+    // [[ -d …/dash ]] each warn-and-return). `propagateExit:false` only tolerates a
+    // NON-ZERO child exit; a missing cwd rejects with ENOENT from the spawn 'error'
+    // event and would otherwise redden `up`/`login` even though the headless jar is
+    // already minted. saga-dash-absent is a supported state (`up` skips it with a
+    // warning), so the browser step must degrade the same way.
+    if (!this.getRepoDirCheck()(sagaDashDash)) {
+      this.warn(
+        `headful browser skipped — saga-dash dash app not found at ${sagaDashDash} ` +
+          '(the headless cookie jar is minted; clone saga-dash for the browser step)',
+      );
+      return;
+    }
+    const env: Record<string, string> = {
+      IAM_URL: ctx.iamUrl,
+      DASH_URL: process.env.LOGIN_DASH_URL || 'http://localhost:8900',
+      LOGIN_EMAIL: ctx.email,
+      PROFILE_DIR: join(ctx.stateDir, 'browser-profile'),
+      SAGA_DASH_DASH: sagaDashDash,
+    };
+    try {
+      await this.runVendor({ cwd: sagaDashDash, command: 'node', args: [script], env }, flags, {
+        propagateExit: false,
+      });
+    } catch (err) {
+      // spawn-level failure (node missing, ENOENT race, …) — warn, never redden.
+      this.warn(`headful browser skipped — ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**

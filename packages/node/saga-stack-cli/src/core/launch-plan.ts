@@ -123,8 +123,9 @@ export interface LaunchTokens {
   RECORDING_TOKEN: string;
   /** up.sh `DEV_USER_UUID` — the iam seed dev-user uuid (`f0000004-…beef`). */
   DEV_USER_UUID: string;
-  /** up.sh `$SCRIPT_DIR` — the synthetic-dev tool dir (rtsm `FLEET_CONFIG_PATH`). */
-  SYNTHETIC_DEV_DIR: string;
+  /** The CLI's VENDORED-scripts dir — holds `rtsm-fleet-local.json` (rtsm's non-tunnel
+   *  `FLEET_CONFIG_PATH`). Replaces up.sh's `$SCRIPT_DIR`/synthetic-dev tool dir. */
+  VENDOR_DIR: string;
 
   // ── global launch env (up.sh services_up `export`s these ONCE, ~1384-1385, so
   //    every `pnpm dev` child inherits them; soa-logger/soa-config validate them
@@ -163,7 +164,7 @@ export interface LaunchTokens {
  * No field is read from `process.env` here — the runtime resolves them (ports
  * via `check_ports`, paths via `runtime/scripts`, scalars via up.sh's defaults)
  * and hands them in. `defaultLaunchContext` builds the up.sh defaults so the
- * runtime usually only supplies `repoRoots` + `syntheticDevDir`.
+ * runtime usually only supplies `repoRoots` + `vendorDir`.
  */
 export interface LaunchContext {
   /**
@@ -434,8 +435,10 @@ export function launchPlan(
 export interface LaunchContextInputs {
   /** Absolute repo checkout roots keyed by manifest `RepoKey`. */
   repoRoots: Record<RepoKey, string>;
-  /** up.sh's `$SCRIPT_DIR` — the synthetic-dev tool dir. */
-  syntheticDevDir: string;
+  /** The CLI's VENDORED-scripts dir (holds `rtsm-fleet-local.json`) — the runtime
+   *  passes `dirname(resolveVendorScript('rtsm-fleet-local.json'))`. Replaces up.sh's
+   *  `$SCRIPT_DIR`/synthetic-dev tool dir for rtsm's non-tunnel FLEET_CONFIG_PATH. */
+  vendorDir: string;
   /** `SAGA_API_TARGET` override (up.sh honours `$SAGA_API_TARGET`; default https://wootmath.com). */
   sagaApiTarget?: string;
   /** Per-service port overrides (e.g. a `check_ports` remap); defaults to the manifest port. */
@@ -475,7 +478,7 @@ function pgUrl(dbId: Parameters<typeof getDb>[0], pgPort: number, m: Manifest): 
 /**
  * Build the canonical `LaunchContext` from up.sh's variable block (~182-299),
  * as PURE data. The runtime supplies only the genuinely host-derived bits
- * (`repoRoots`, `syntheticDevDir`, optional port/sandbox/tunnel overrides); all
+ * (`repoRoots`, `vendorDir`, optional port/sandbox/tunnel overrides); all
  * URLs / DB URLs / mesh creds are derived here from the manifest so there is a
  * single faithful source the audit can check against up.sh.
  *
@@ -543,7 +546,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     // misc scalars (up.sh hardcodes these verbatim)
     RECORDING_TOKEN: 'local-dev-token',
     DEV_USER_UUID: 'f0000004-0000-4000-8000-00000000beef',
-    SYNTHETIC_DEV_DIR: inputs.syntheticDevDir,
+    VENDOR_DIR: inputs.vendorDir,
 
     // global launch env (up.sh `:-` defaults; runtime may pass ambient overrides)
     PINO_LOGGER_LEVEL: inputs.pinoLevel ?? 'info',

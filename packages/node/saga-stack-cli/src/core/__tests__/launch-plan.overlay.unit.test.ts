@@ -29,7 +29,7 @@ const REPO_ROOTS: Record<RepoKey, string> = {
 
 const baseInputs: LaunchContextInputs = {
   repoRoots: REPO_ROOTS,
-  syntheticDevDir: '/w/soa/tools/synthetic-dev',
+  vendorDir: '/w/vendor',
 };
 
 const envFor = (id: ServiceId, extra: Partial<LaunchContextInputs>): Record<string, string> =>
@@ -135,7 +135,7 @@ describe('tunnel_env overlay (--tunnel)', () => {
   it('rtsm-api: FLEET_CONFIG_PATH override ONLY when a generated tunnel fleet path is supplied', () => {
     // no fleet path ⇒ keeps the base local fleet.
     expect(envFor('rtsm-api', TUN).FLEET_CONFIG_PATH).toBe(
-      '/w/soa/tools/synthetic-dev/rtsm-fleet-local.json',
+      '/w/vendor/rtsm-fleet-local.json',
     );
     // with the generated path ⇒ points at the tunnel fleet file.
     const e = envFor('rtsm-api', { tunnel: { domain: TD, rtsmFleetPath: '/state/rtsm-fleet-tunnel.json' } });

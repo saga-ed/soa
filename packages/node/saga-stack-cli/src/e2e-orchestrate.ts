@@ -30,6 +30,7 @@
  * core date-purity rule the clamp depends on.
  */
 
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { composeSeedPlan } from './core/seed/compose-seed-plan.js';
 import { computeEnv, ENV_OCCURRENCE_DATE } from './core/flow/env.js';
@@ -56,7 +57,7 @@ import {
   REPO_DEFAULT_DIR,
   REPO_ENV_VAR,
   resolveRepoRoot,
-  scriptCwd,
+  resolveVendorScript,
 } from './runtime/index.js';
 import type {
   DashFs,
@@ -238,12 +239,14 @@ export function buildStackContext(
     repoRoots[repo] = resolveRepoRoot(repo, ctx);
   }
 
-  const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
+  // rtsm-api's non-tunnel FLEET_CONFIG_PATH reads `${VENDOR_DIR}/rtsm-fleet-local.json`;
+  // point VENDOR_DIR at the CLI's VENDORED copy (Phase-2 DECOUPLING), NOT tools/synthetic-dev.
+  const vendorDir = dirname(resolveVendorScript('rtsm-fleet-local.json'));
   // Thread the slot's port-override map + mesh offset (byte-identical base context
   // at slot 0 — `deriveInstance` guarantees slot-0 overrides resolve the defaults).
   const launchContext = defaultLaunchContext({
     repoRoots,
-    syntheticDevDir,
+    vendorDir,
     portOverrides: profile.portOverrides,
     meshOffset: profile.meshOffset,
     pinoLevel: process.env.PINO_LOGGER_LEVEL,

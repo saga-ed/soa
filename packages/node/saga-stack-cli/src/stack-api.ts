@@ -25,15 +25,16 @@
  *  - `reset` — NATIVE (M8 R4). Truncates the closure's DBs to an empty baseline
  *              (preserving `_prisma_migrations`), migrate-resets ledger, drops
  *              connectv3, then re-seeds the dev user via the seed path. See `reset`.
- *  - `login` — DELEGATED. Browser-session minting is not ported natively;
- *              delegates to `up.sh --login [email]` (the `login --browser` flow). See `login`.
+ *
+ * `login` is NO LONGER on this facade — it is fully NATIVE at the command layer
+ * (`BaseCommand.mintNativeLoginJar` + `openVendoredBrowser`), shared by `stack
+ * login` and `up --login`, so nothing here delegates to `up.sh --login`.
  *
  * INVARIANT (plan hard constraint): this file imports pure `core` planners and
  * the `runtime` seams, but performs NO direct IO of its own — every spawn /
  * docker / fetch / fs touch happens behind a seam the caller injected.
  */
 
-import * as flagMap from './core/flag-map.js';
 import type { RecordMode, ScriptPlan } from './core/flag-map.js';
 import { launchPlan } from './core/launch-plan.js';
 import type { LaunchContext } from './core/launch-plan.js';
@@ -168,10 +169,11 @@ export interface Runtime {
   /** Offset added to every published mesh port at slot > 0 (`slot * 1000`); 0 at slot 0. */
   meshOffset?: number;
   /**
-   * Delegate a wrapped bash `ScriptPlan` to up.sh (the M1 Runner + script path),
-   * returning its exit code. M4 wires `reset`/`login` through this because their
-   * native ports are M6+. The command layer points it at `BaseCommand.runScript`
-   * so script-path resolution stays in ONE place. Absent ⇒ `reset`/`login` throw.
+   * Delegate a wrapped bash `ScriptPlan` to its resolved script, returning the exit
+   * code. The command layer points it at `BaseCommand.runScript` so script-path
+   * resolution stays in ONE place. TODAY this only ever carries a SAGA_DASH e2e
+   * `ScriptPlan` (`core/e2e-map.ts`, a different repo) — the `stack` lifecycle
+   * (up/down/reset/login/status/verify) is fully native and never delegates.
    */
   delegate?: (plan: ScriptPlan) => Promise<number>;
   /**
@@ -343,13 +345,6 @@ export interface DownResult {
   stopped: StopResult[];
 }
 
-/** The outcome of a DELEGATED `login` (native login is a later milestone). */
-export interface DelegatedResult {
-  /** Always true (the op was delegated to up.sh). */
-  delegated: boolean;
-  /** up.sh's exit code. */
-  code: number;
-}
 
 /** Per-call `reset` knobs (M8 R4). */
 export interface ResetOpts {
@@ -409,7 +404,6 @@ export interface StackApi {
   reset(closureServices: ServiceId[], opts?: ResetOpts): Promise<ResetOutcome>;
   seed(plan: SeedPlan): Promise<SeedResult>;
   verify(probes: HealthProbe[], opts?: VerifyOpts): Promise<VerifyResult>;
-  login(user?: string): Promise<DelegatedResult>;
 }
 
 // ── helpers (pure) ───────────────────────────────────────────────────────────
@@ -575,10 +569,12 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
 
   /** Resolve a seed step's cwd: owning service's repo root + step.cwd. */
   function seedCwd(step: SeedStep): string {
-    // up.sh's content demo-polls runs from the synthetic-dev tool dir ($SCRIPT_DIR),
-    // which lives under SOA — not the owning service's repo. Honour that one shim.
-    if (step.cwd.startsWith('tools/synthetic-dev')) {
-      return joinPath(launchContext.repoRoots.SOA, step.cwd);
+    // The content demo-polls step runs the CLI's VENDORED `seed-demo-polls.mjs`
+    // (Phase-2 DECOUPLING) — the runtime resolved the package's `vendor/` dir into
+    // the `VENDOR_DIR` launch token, so this step runs there (NOT a soa checkout's
+    // `tools/synthetic-dev`). This is the one non-repo-relative seed cwd.
+    if (step.cwd === 'vendor') {
+      return launchContext.tokens.VENDOR_DIR;
     }
     const repo = getService(step.service, manifest).repo;
     return joinPath(launchContext.repoRoots[repo], step.cwd);
@@ -1045,16 +1041,6 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       );
       const passed = rows.every((r) => r.ok || r.tolerated);
       return { passed, rows };
-    },
-
-    async login(user?: string): Promise<DelegatedResult> {
-      // M4: browser-session minting is not ported natively. Delegate to
-      // `up.sh --login [email]` via the M1 script path.
-      if (!runtime.delegate) {
-        throw new Error('stack login: native login is a later milestone; no up.sh delegate wired into this Runtime');
-      }
-      const code = await runtime.delegate(flagMap.login(user));
-      return { delegated: true, code };
     },
   };
 }

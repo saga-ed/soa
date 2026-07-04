@@ -24,19 +24,14 @@
  *   node bin/dev.js stack login --browser               # native jar + vendored browser-login.mjs
  */
 
-import { join } from 'node:path';
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import type { WorkspaceFlags } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
-import { DEFAULT_LOGIN_USER, loginFailureHint, resolveIamUrl } from '../../core/login.js';
-import { COOKIE_JAR_FILE, nativeLogin } from '../../runtime/login.js';
-import { resolveRepoRoot, resolveVendorScript } from '../../runtime/index.js';
-import { repoContextFromFlags } from './status.js';
+import { DEFAULT_LOGIN_USER, loginFailureHint } from '../../core/login.js';
 
 export default class StackLogin extends BaseCommand {
   static description =
-    'Mint a session against the running stack. Native headless cookie jar by default; --browser opens an auto-logged-in Chromium via up.sh.';
+    'Mint a session against the running stack. Native headless cookie jar by default; --browser ALSO opens an auto-logged-in Chromium via the vendored browser-login.mjs.';
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
@@ -79,17 +74,13 @@ export default class StackLogin extends BaseCommand {
     }
 
     // ── NATIVE headless cookie jar (BOTH the default AND the --browser path). ──
+    // Shared with `up --login` via the BaseCommand helper — NEITHER touches up.sh.
     const email = args.email ?? DEFAULT_LOGIN_USER;
     const profile = deriveInstance({ slot: flags.slot });
     const stateDir = flags['state-dir'] ?? profile.stateDir;
-    // LOGIN_IAM_URL wins (tunnel: login goes through the PUBLIC iam host); else slot-offset localhost.
-    const iamUrl = resolveIamUrl({ slot: flags.slot, loginIamUrl: process.env.LOGIN_IAM_URL });
-    const jarPath = join(stateDir, COOKIE_JAR_FILE);
 
-    const res = await nativeLogin(
-      { email, iamUrl, jarPath },
-      { poster: this.getCookiePoster(), jar: this.getJarWriter() },
-    );
+    const res = await this.mintNativeLoginJar({ email, slot: flags.slot, stateDir });
+    const { iamUrl, jarPath } = res;
 
     const json: Record<string, unknown> = {
       native: true,
@@ -122,50 +113,10 @@ export default class StackLogin extends BaseCommand {
         : '  `stack login --browser` opens an auto-logged-in Chromium.',
     ]);
 
-    // ── --browser: ALSO open the headful Chromium via the VENDORED browser-login.mjs. ──
+    // ── --browser: ALSO open the headful Chromium via the shared VENDORED browser-login.mjs
+    // helper (BaseCommand.openVendoredBrowser) — the same one `up --login` uses. ──
     if (flags.browser) {
       await this.openVendoredBrowser(flags, { email, iamUrl, stateDir });
     }
-  }
-
-  /**
-   * Open the auto-logged-in headful Chromium via the CLI's VENDORED `browser-login.mjs`
-   * (Phase 1 DECOUPLING) — replacing up.sh's `open_login_browser`. Passes the exact env
-   * browser-login.mjs reads: `IAM_URL` (the resolved slot-0 / LOGIN_IAM_URL iam host),
-   * `DASH_URL` (LOGIN_DASH_URL override else localhost:8900), `LOGIN_EMAIL` (the persona),
-   * `PROFILE_DIR` (`<stateDir>/browser-profile`, up.sh's BROWSER_PROFILE), and
-   * `SAGA_DASH_DASH` (the resolved saga-dash dash app dir). node runs with `cwd` = that
-   * dash dir so `createRequire`'d playwright + its browsers resolve there.
-   *
-   * BEST-EFFORT (`propagateExit:false`): the headless jar is already minted, so a browser
-   * failure (playwright not installed, no DISPLAY, …) — which browser-login.mjs reports as
-   * an `AUTOLOGIN_FAIL` line on the inherited stdio — must NOT flip the login's exit code,
-   * mirroring up.sh's best-effort browser step. Unlike up.sh (which nohup-backgrounds the
-   * browser), this runs in the FOREGROUND: the command stays attached to the headful
-   * Chromium and returns when the window is closed (headless verification exits at once).
-   */
-  private async openVendoredBrowser(
-    flags: WorkspaceFlags,
-    ctx: { email: string; iamUrl: string; stateDir: string },
-  ): Promise<void> {
-    const script = resolveVendorScript('browser-login.mjs');
-    const sagaDashDash = join(
-      resolveRepoRoot('SAGA_DASH', repoContextFromFlags(flags as unknown as Record<string, unknown>)),
-      'apps',
-      'web',
-      'dash',
-    );
-    const env: Record<string, string> = {
-      IAM_URL: ctx.iamUrl,
-      DASH_URL: process.env.LOGIN_DASH_URL || 'http://localhost:8900',
-      LOGIN_EMAIL: ctx.email,
-      PROFILE_DIR: join(ctx.stateDir, 'browser-profile'),
-      SAGA_DASH_DASH: sagaDashDash,
-    };
-    await this.runVendor(
-      { cwd: sagaDashDash, command: 'node', args: [script], env },
-      flags,
-      { propagateExit: false },
-    );
   }
 }

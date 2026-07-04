@@ -21,8 +21,8 @@
  *      • `--record [crdt|av]`  → start the fleek recording sidecars after launch
  *        (fleek-gated: a missing checkout is a warning skip, never a failure).
  *    `--reset` is native (M8 R4); the ff-only auto-pull + best-effort Connect AV run
- *    on the bare native `up` (M9). The ONLY residual up.sh touch from `up` is the
- *    `--login` DELEGATION (browser-session minting; native login is a later milestone).
+ *    on the bare native `up` (M9). `--login` is NATIVE too (Phase-2 FINISH): it mints the
+ *    headless cookie jar + best-effort-opens the vendored browser-login.mjs — NO up.sh.
  *
  *   node bin/dev.js stack up --only scheduling-api,sessions-api --dry-run
  *   node bin/dev.js stack up --only scheduling-api,sessions-api          # native
@@ -50,13 +50,14 @@ import { deriveInstance, slotExcludedServices } from '../../core/derive-instance
 import type { InstanceProfile } from '../../core/derive-instance.js';
 import * as flagMap from '../../core/flag-map.js';
 import type { RecordMode } from '../../core/flag-map.js';
+import { DEFAULT_LOGIN_USER } from '../../core/login.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import { composeSeedPlan } from '../../core/seed/compose-seed-plan.js';
 import type { SeedAddOn, SeedPlan, SeedProfile, SeedSelection } from '../../core/seed/types.js';
 import { parseWorkspace } from '../../core/workspace.js';
 import type { WorkspaceSelection } from '../../core/workspace.js';
-import { resolveVendorScript, scriptCwd } from '../../runtime/index.js';
+import { resolveVendorScript } from '../../runtime/index.js';
 import { makeStackApi } from '../../stack-api.js';
 import type { Runtime, StackApi } from '../../stack-api.js';
 
@@ -125,7 +126,7 @@ export default class StackUp extends BaseCommand {
     }),
     login: Flags.boolean({
       description:
-        'log in the default persona (dev@saga.org) after launch; use `stack login <email>` to override. (The one residual up.sh delegation — native login is a later milestone.)',
+        'log in the default persona (dev@saga.org) after launch (NATIVE — mints the headless cookie jar + best-effort opens the vendored browser-login.mjs, no up.sh); use `stack login <email>` to override.',
       default: false,
     }),
     sandbox: Flags.string({
@@ -159,9 +160,14 @@ export default class StackUp extends BaseCommand {
     let isOnly = requested.length > 0 || ws !== undefined;
     const withPlayback = ws ? ws.playback : effectiveWithPlayback(flags.with);
 
-    // ── --dry-run (M0/M4): planner only. ──
+    // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the
+    // launch path applies (BLOCKER-1) so the dry-run reflects what actually launches. ──
     if (flags['dry-run']) {
-      this.runDryRun(flags, requested, isOnly, withPlayback);
+      this.runDryRun(flags, requested, isOnly, withPlayback, {
+        sandboxHybrid: flags.sandbox !== undefined,
+        sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
+        sandboxName: ws?.iamSandbox ?? flags.sandbox,
+      });
       return;
     }
 
@@ -211,6 +217,7 @@ export default class StackUp extends BaseCommand {
     await this.runNative(flags, requested, withPlayback, overlays, {
       sandboxHybrid: flags.sandbox !== undefined,
       sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
+      sandboxName,
     });
   }
 
@@ -270,13 +277,13 @@ export default class StackUp extends BaseCommand {
       // fleet and a remote browser's CRDT discovery resolves a reachable node (up.sh
       // ~2170-2188). Base-command forwards `tunnel.rtsmFleetPath` → TUNNEL_RTSM_FLEET_PATH.
       // Best-effort: a null (unreadable base file) leaves rtsm-api on its local fleet.
-      const ctx = this.scriptContextFromFlags(flags);
-      const syntheticDevDir = scriptCwd({ repo: 'SOA', relPath: 'tools/synthetic-dev/up.sh' }, ctx);
       // --tunnel is slot-0-only (guarded upstream), so this is the slot-0 STATE dir
       // unless the user pinned `--state-dir`.
       const stateDir = flags['state-dir'] ?? deriveInstance({ slot: flags.slot }).stateDir;
       const rtsmFleetPath = this.getTunnelFleetGen()({
-        localFleetPath: `${syntheticDevDir}/rtsm-fleet-local.json`,
+        // Generate the tunnel fleet from the CLI's VENDORED base (Phase-2 DECOUPLING) —
+        // NOT a soa checkout's `tools/synthetic-dev/rtsm-fleet-local.json`.
+        localFleetPath: resolveVendorScript('rtsm-fleet-local.json'),
         outPath: `${stateDir}/rtsm-fleet-tunnel.json`,
         tunnelDomain: domain,
       });
@@ -297,6 +304,7 @@ export default class StackUp extends BaseCommand {
     requested: ServiceId[],
     isOnly: boolean,
     withPlayback: boolean,
+    prune: LaunchPrune = {},
   ): void {
     const resolvedRequest: ServiceId[] = isOnly
       ? requested
@@ -318,6 +326,19 @@ export default class StackUp extends BaseCommand {
       closure.services.includes(id),
     );
 
+    // BLOCKER-1 (Phase 2): compute the SAME sandbox/workspace prune `runNative` applies —
+    // the sandbox-hosted deps live in the CLOUD and are NOT launched locally. Surface the
+    // resulting LAUNCH SET (+ which deps are hosted) so the dry-run reflects reality.
+    const slotExcludedSet = new Set<ServiceId>(slotExcluded);
+    const sandboxDrop = new Set<ServiceId>();
+    if (prune.sandboxHybrid) {
+      const keep = new Set<ServiceId>(requested);
+      for (const id of closure.services) if (!keep.has(id)) sandboxDrop.add(id);
+    }
+    if (prune.sandboxServices) for (const id of prune.sandboxServices) sandboxDrop.add(id);
+    const sandboxHosted = closure.services.filter((id) => sandboxDrop.has(id) && !slotExcludedSet.has(id));
+    const launchSet = closure.services.filter((id) => !slotExcludedSet.has(id) && !sandboxDrop.has(id));
+
     const reasonsObj: Record<string, string[]> = {};
     for (const svc of closure.services) reasonsObj[svc] = closure.reasons.get(svc) ?? [];
 
@@ -335,6 +356,9 @@ export default class StackUp extends BaseCommand {
       mesh: closure.mesh,
       reasons: reasonsObj,
       ...(slotExcluded.length > 0 ? { slot: flags.slot, slotExcluded } : {}),
+      ...(sandboxHosted.length > 0
+        ? { launchSet, sandboxHosted, ...(prune.sandboxName ? { sandbox: prune.sandboxName } : {}) }
+        : {}),
       ...(seedPlan
         ? {
             native: true,
@@ -356,6 +380,12 @@ export default class StackUp extends BaseCommand {
       ...closure.services.map((svc) => `  ${svc}: ${(closure.reasons.get(svc) ?? []).join('; ')}`),
       ...(slotExcluded.length > 0
         ? [`slot ${flags.slot}: backend sub-stack — would EXCLUDE (literal-port + frontends, collide with slot 0): ${slotExcluded.join(', ')}`]
+        : []),
+      ...(sandboxHosted.length > 0
+        ? [
+            `launch set (sandbox/workspace prune): ${launchSet.join(', ') || '(none)'} ` +
+              `(${sandboxHosted.join(', ')} hosted${prune.sandboxName ? ` at sandbox '${prune.sandboxName}'` : ''}, not launched locally)`,
+          ]
         : []),
     ];
     if (seedPlan) {
@@ -480,8 +510,38 @@ export default class StackUp extends BaseCommand {
     );
     const seeded = await api.seed(plan);
 
-    // 4. (optional) login — DELEGATED to up.sh (native login is a later milestone).
-    if (flags.login) await api.login();
+    // 4. (optional) login — NATIVE (Phase-2 FINISH, saga-ed/soa#214). No up.sh: mint the
+    // headless cookie jar (default persona dev@saga.org, slot-aware) via the SHARED
+    // BaseCommand helper, then best-effort open the vendored browser-login.mjs — exactly
+    // what up.sh's `--login` did (jar + best-effort headful browser). BEST-EFFORT: a
+    // devLogin miss (login-before-seed) or a browser failure (no DISPLAY/playwright) is a
+    // warning only — it must NOT redden an otherwise-healthy stack, so it never exits `up`.
+    if (flags.login) {
+      const loginStateDir = flags['state-dir'] ?? profile.stateDir;
+      const res = await this.mintNativeLoginJar({
+        email: DEFAULT_LOGIN_USER,
+        slot: flags.slot,
+        stateDir: loginStateDir,
+      });
+      if (res.ok) {
+        this.log(`✓ login: session minted — cookie jar → ${res.jarPath} (cookies: ${res.captured.join(', ') || '(none)'})`);
+        // Best-effort headful Chromium — up.sh --login opens it too. browser-login.mjs
+        // targets the FIXED slot-0 dash, so only attempt it at slot 0 (a slot > 0 up
+        // still gets its native jar; the browser step is simply skipped).
+        if (flags.slot === 0) {
+          await this.openVendoredBrowser(flags, {
+            email: DEFAULT_LOGIN_USER,
+            iamUrl: res.iamUrl,
+            stateDir: loginStateDir,
+          });
+        }
+      } else {
+        this.log(
+          `⚠ login: devLogin failed (HTTP ${res.status}) for ${DEFAULT_LOGIN_USER} — the rostered ` +
+            'admin only exists after a roster seed. Seed first, then `stack login`. (Stack is up; login is best-effort.)',
+        );
+      }
+    }
 
     // Phase 2 --record: surface the fleek recording-stack bring-up (✓ up / ⚠ skipped
     // fleek-absent / ⚠ failed). Never fatal — a record hiccup can't redden an
@@ -618,6 +678,8 @@ interface LaunchPrune {
   sandboxHybrid?: boolean;
   /** `--workspace`: the mode:sandbox service ids to subtract (they live in the cloud). */
   sandboxServices?: ReadonlySet<ServiceId>;
+  /** The sandbox name (`--sandbox` / workspace `iamSandbox`), surfaced in the dry-run prune line. */
+  sandboxName?: string;
 }
 /** The subset `resolveWorkspace` reads (the mutual-exclusion + the file path). */
 type WorkspaceParseFlags = {

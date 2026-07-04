@@ -738,7 +738,7 @@
           "required": false
         }
       },
-      "description": "Mint a session against the running stack. Native headless cookie jar by default; --browser opens an auto-logged-in Chromium via up.sh.",
+      "description": "Mint a session against the running stack. Native headless cookie jar by default; --browser ALSO opens an auto-logged-in Chromium via the vendored browser-login.mjs.",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> teacher@saga.org",
@@ -1928,7 +1928,7 @@
           "type": "boolean"
         },
         "login": {
-          "description": "log in the default persona (dev@saga.org) after launch; use `stack login <email>` to override. (The one residual up.sh delegation — native login is a later milestone.)",
+          "description": "log in the default persona (dev@saga.org) after launch (NATIVE — mints the headless cookie jar + best-effort opens the vendored browser-login.mjs, no up.sh); use `stack login <email>` to override.",
           "name": "login",
           "allowNo": false,
           "type": "boolean"
@@ -2128,6 +2128,131 @@
         "commands",
         "stack",
         "verify.js"
+      ]
+    },
+    "stack:bundle:list": {
+      "aliases": [],
+      "args": {},
+      "description": "List the --with convenience bundles (name, services, seed add-on, description). Read-only.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --output-json"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "default": "/home/skelly/dev",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:bundle:list",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "bundle",
+        "list.js"
       ]
     },
     "stack:snapshot:delete": {
@@ -2848,131 +2973,6 @@
         "stack",
         "snapshot",
         "validate.js"
-      ]
-    },
-    "stack:bundle:list": {
-      "aliases": [],
-      "args": {},
-      "description": "List the --with convenience bundles (name, services, seed add-on, description). Read-only.",
-      "examples": [
-        "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --output-json"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "name": "slot",
-          "default": 0,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "default": "/home/skelly/dev",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "stack:bundle:list",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "stack",
-        "bundle",
-        "list.js"
       ]
     }
   },

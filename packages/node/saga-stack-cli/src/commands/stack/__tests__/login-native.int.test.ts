@@ -148,6 +148,12 @@ describe('stack login — native headless cookie jar', () => {
   it('--browser mints the native jar THEN opens the VENDORED browser-login.mjs (never up.sh --login)', async () => {
     installPoster(OK_COOKIES);
     installJar();
+    // The spawn guard checks the saga-dash dash dir exists; the fixed /fixed/dev root is
+    // fake, so report it present for this test (the absent case is covered separately).
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue(() => true);
 
     await StackLogin.run(['--browser', 'teacher@saga.org', ...WS], config);
 

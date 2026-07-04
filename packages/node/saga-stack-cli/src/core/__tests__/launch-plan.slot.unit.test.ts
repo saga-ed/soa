@@ -27,7 +27,7 @@ const REPO_ROOTS: Record<RepoKey, string> = {
   FLEEK: '/w/fleek',
 };
 
-const baseInputs = { repoRoots: REPO_ROOTS, syntheticDevDir: '/w/soa/tools/synthetic-dev' };
+const baseInputs = { repoRoots: REPO_ROOTS, vendorDir: '/w/vendor' };
 
 /** Extract the `host:port` from a URL-ish token for a robust port assertion. */
 const portOf = (s: string): number => Number(new URL(s).port);

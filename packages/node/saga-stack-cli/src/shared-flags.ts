@@ -83,10 +83,10 @@ export const repoFlags = {
  * `slotAware()`. Slot 0 (the default) is unaffected everywhere.
  */
 export const SLOT_UNSUPPORTED_COMMAND_MESSAGE =
-  "multi-slot (--slot > 0) is not supported for this command yet — only 'stack up', 'stack status', " +
-  "'stack verify', and 'stack down' are slot-aware. The wrapper-lifecycle commands " +
-  '(reset/restart/overlay/bootstrap/seed) delegate to up.sh host-global teardown ' +
-  '(pkill/nuke_vite), which would clobber other slots; run them against slot 0 only.';
+  'multi-slot (--slot > 0) is not supported for this command yet — the slot-aware set is ' +
+  "'stack up/status/verify/down/reset/login' and 'e2e run'. The rest (restart/overlay/" +
+  'bootstrap/seed/snapshot/tunnel) operate on shared checkouts, slot-0 state, or fixed ' +
+  'slot-0 ports and would cross slots; run them against slot 0 only.';
 
 export const baseFlags = {
   porcelain: Flags.boolean({

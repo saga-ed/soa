@@ -32,7 +32,7 @@ const REPO_ROOTS: Record<RepoKey, string> = {
 
 const ctx: LaunchContext = defaultLaunchContext({
   repoRoots: REPO_ROOTS,
-  syntheticDevDir: '/w/soa/tools/synthetic-dev',
+  vendorDir: '/w/vendor',
 });
 
 // up.sh `export`s these globally in services_up (~1384-1385) so EVERY launched
@@ -62,7 +62,7 @@ describe('global PINO logger env (up.sh services_up export ~1384-1385)', () => {
   it('an ambient override flows through defaultLaunchContext', () => {
     const overridden = defaultLaunchContext({
       repoRoots: REPO_ROOTS,
-      syntheticDevDir: '/w/soa/tools/synthetic-dev',
+      vendorDir: '/w/vendor',
       pinoLevel: 'debug',
       pinoIsExpressContext: 'false',
     });
@@ -200,10 +200,10 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     });
   });
 
-  it('rtsm-api (FLEET_CONFIG_PATH resolved to the synthetic-dev dir)', () => {
+  it('rtsm-api (FLEET_CONFIG_PATH resolved to the VENDORED rtsm-fleet-local.json)', () => {
     expect(env('rtsm-api')).toEqual({
       EXPRESS_SERVER_PORT: '6110',
-      FLEET_CONFIG_PATH: '/w/soa/tools/synthetic-dev/rtsm-fleet-local.json',
+      FLEET_CONFIG_PATH: '/w/vendor/rtsm-fleet-local.json',
       FLEET_NODE_NAME: 'local',
     });
   });
@@ -287,7 +287,7 @@ describe('launchPlan — ordered native specs for a closure', () => {
   it('honours a check_ports port remap in the health URL', () => {
     const remapped = defaultLaunchContext({
       repoRoots: REPO_ROOTS,
-      syntheticDevDir: '/w/soa/tools/synthetic-dev',
+      vendorDir: '/w/vendor',
       portOverrides: { 'sessions-api': 13007 },
     });
     const p = launchPlan(manifest, ['sessions-api'], 'stack', remapped);

@@ -399,10 +399,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         EXPRESS_SERVER_PORT: '${RTSM_PORT}',
-        // up.sh resolves this against the synthetic-dev tool dir (rtsm-fleet-local.json).
-        // TODO(verify): the runtime adapter must point FLEET_CONFIG_PATH at the shipped
-        // single-node fleet file; this token is a stub for M0.
-        FLEET_CONFIG_PATH: '${SYNTHETIC_DEV_DIR}/rtsm-fleet-local.json',
+        // Non-tunnel FLEET_CONFIG_PATH → the CLI's VENDORED single-node fleet
+        // (`vendor/rtsm-fleet-local.json`), resolved via the `VENDOR_DIR` launch token
+        // (Phase-2 DECOUPLING) — NOT a soa checkout's `tools/synthetic-dev`. The
+        // `--tunnel` case overrides this with the generated rtsm-fleet-tunnel.json.
+        FLEET_CONFIG_PATH: '${VENDOR_DIR}/rtsm-fleet-local.json',
         FLEET_NODE_NAME: 'local',
       },
     },

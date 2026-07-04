@@ -333,13 +333,14 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       failureMode: 'warn',
       optionalSteps: [
         {
-          // seed-demo-polls.mjs (HTTP authoring against content-api :3009).
-          // TODO(M3/M4): cwd here is the synthetic-dev tool dir ($SCRIPT_DIR), not a
-          // repo subpath — the runtime adapter resolves the shipped script location.
+          // seed-demo-polls.mjs (HTTP authoring against content-api :3009). The script
+          // is VENDORED under the CLI's `vendor/` dir (Phase-2 DECOUPLING) — the `vendor`
+          // sentinel cwd tells the runtime adapter (`stack-api` seedCwd) to run it from
+          // there (resolved via the VENDOR_DIR launch token), NOT `tools/synthetic-dev`.
           id: 'demo-polls',
           service: 'content-api',
           databases: ['content'],
-          cwd: 'tools/synthetic-dev',
+          cwd: 'vendor',
           command: ['node', 'seed-demo-polls.mjs'],
           env: { kind: 'inline', vars: { CONTENT_API: '${CONTENT_API_URL}' } },
           requiresServiceUp: ['content-api'],

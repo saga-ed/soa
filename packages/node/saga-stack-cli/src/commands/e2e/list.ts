@@ -29,6 +29,19 @@ export default class E2eList extends BaseCommand {
     }),
   };
 
+  /**
+   * M13-A: `e2e list --set <name>` browses THAT worktree's flows.json —
+   * read-only discovery, so both opt-ins are safe (the injected slot is inert
+   * here; it only satisfies the central guard for a set bound to slot ≥ 1).
+   */
+  protected slotAware(): boolean {
+    return true;
+  }
+
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(E2eList);
 

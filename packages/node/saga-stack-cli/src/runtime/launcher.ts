@@ -111,7 +111,14 @@ export interface RealLauncherDeps {
   stateDir?: string;
   /** Health prober (reused HTTP seam). Default `makeRealProber()`. */
   prober?: HealthProber;
-  /** Max health-poll attempts (up.sh `wait_healthy` ⇒ 40). Default 40. */
+  /**
+   * Max health-poll attempts (× `pollIntervalMs`). up.sh's `wait_healthy` uses ~40
+   * (its services launch from a WARM `dist/`), but the native path runs `pnpm dev`,
+   * which does a COLD `tsup` rebuild on start (heavy services can take 30-60s) plus a
+   * cold-mesh rabbitmq/redis handshake — so 40s is too tight and a healthy service is
+   * spuriously reported down (esp. concurrent slots under load). Default 120; override
+   * with `$SAGA_STACK_HEALTH_POLL_ATTEMPTS`.
+   */
   pollAttempts?: number;
   /** Delay between health polls in ms (up.sh `sleep 1`). Default 1000. */
   pollIntervalMs?: number;
@@ -155,6 +162,14 @@ export function logFilePath(stateDir: string, id: string): string {
   return join(stateDir, `${id}.log`);
 }
 
+/** Read a positive integer from an env var, or undefined if unset/invalid. */
+function envInt(name: string): number | undefined {
+  const raw = process.env[name];
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 /**
  * The production launcher: spawns each service as a DETACHED background `pnpm
  * dev` (stdout/stderr → `$STATE/<id>.log`), records its pid, and polls the health
@@ -165,7 +180,7 @@ export function logFilePath(stateDir: string, id: string): string {
 export function makeRealLauncher(deps: RealLauncherDeps = {}): ServiceLauncher {
   const stateDir = deps.stateDir ?? DEFAULT_STATE_DIR;
   const prober = deps.prober ?? makeRealProber();
-  const pollAttempts = deps.pollAttempts ?? 40;
+  const pollAttempts = deps.pollAttempts ?? envInt('SAGA_STACK_HEALTH_POLL_ATTEMPTS') ?? 120;
   const pollIntervalMs = deps.pollIntervalMs ?? 1000;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const ensureDir = deps.ensureDir ?? ((dir: string) => mkdirSync(dir, { recursive: true }));

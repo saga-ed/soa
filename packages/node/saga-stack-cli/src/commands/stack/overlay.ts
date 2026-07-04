@@ -28,7 +28,7 @@
  *   node bin/dev.js stack overlay compose-rest dev --ttl-hours 6
  */
 
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import * as flagMap from '../../core/flag-map.js';
@@ -48,6 +48,7 @@ import {
   resetOverlay,
   resolveOverlayRepo,
   resolveRepoRoot,
+  resolveVendorScript,
   INTEGRATION_BRANCH,
 } from '../../runtime/index.js';
 import type { RefreshRepoTarget, ResetRepoTarget, ScriptContext } from '../../runtime/index.js';
@@ -137,7 +138,12 @@ export default class StackOverlay extends BaseCommand {
     }
 
     // compose-rest ALWAYS wraps (cloud orchestrator — the sole implementation, no
-    // native path). apply/list/reset are native (below).
+    // native path). apply/list/reset are native (below). Phase 1 DECOUPLING
+    // (saga-ed/soa#214): the script is the CLI's VENDORED copy (vendor/refresh-suite.sh),
+    // resolved via `resolveVendorScript` — NOT soa's tools/synthetic-dev/refresh-suite.sh.
+    // The exit-2 ("spec printed, composed NOTHING") semantics + BASE/SANDBOX_* env-not-argv
+    // contract are preserved: `flagMap.overlay` still maps the argv/env, and `runVendor`
+    // propagates the child exit code verbatim.
     if (v === 'compose-rest') {
       const plan = flagMap.overlay(v, {
         sandbox: rest[0],
@@ -146,8 +152,24 @@ export default class StackOverlay extends BaseCommand {
         seedProfile: flags['seed-profile'],
         bypassHeader: flags['bypass-header'],
       });
-      // Propagate the child exit code verbatim — preserves compose-rest's exit-2.
-      await this.runScript(plan, flags);
+      const script = resolveVendorScript('refresh-suite.sh');
+      // B1 (saga-ed/soa#214): the VENDORED refresh-suite.sh lives under vendor/ (no pin
+      // manifest), so point it at the dev's REAL per-dev pin file in the soa checkout —
+      // the SAME `tools/synthetic-dev/integration-suite.local.tsv` the native
+      // apply/list/reset read (via `overlayPaths`). Without this, PINS is empty and
+      // compose-rest composes EVERY managed repo instead of the complement of the
+      // dev's pinned set. Env override honored by the vendored copy's MANIFEST/EXAMPLE.
+      const ctx = repoContextFromFlags(flags as unknown as Record<string, unknown>);
+      const { manifest, example } = this.overlayPaths(ctx);
+      await this.runVendor(
+        {
+          cwd: dirname(script),
+          command: script,
+          args: plan.args,
+          env: { ...plan.env, OVERLAY_FILE: manifest, OVERLAY_EXAMPLE_FILE: example },
+        },
+        flags,
+      );
       return;
     }
 

@@ -427,12 +427,29 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
 
   it('FLIP 1: BARE full-stack + a native-unsupported flag (--sandbox) still wraps up.sh', async () => {
     // A native-unsupported flag on a bare invocation keeps the up.sh wrapper (the
-    // native path can't honour --sandbox/--tunnel/--pull/… yet).
+    // native path can't honour --sandbox/--tunnel/--workspace/--record yet). --tunnel
+    // is back to being such a flag (B2 revert, Phase-2 item) — see the --tunnel case below.
     await StackUp.run(['--sandbox', 'demo', ...WS], config);
     expect(launches).toEqual([]);
     const upSh = runs.filter((r) => r.command.endsWith('up.sh'));
     expect(upSh).toHaveLength(1);
     expect(upSh[0].args).toEqual(['up', '--sandbox', 'demo']);
+  });
+
+  it('BARE up --tunnel wraps up.sh (native `up` posture can\'t serve a tunnel yet — Phase 2)', async () => {
+    // B2 revert (saga-ed/soa#214): native `up` launches services with LOCALHOST posture,
+    // but a working tunnel needs up.sh's per-service tunnel_env (CORS_ORIGIN, cookie
+    // domain, VITE_* tunnel URLs), not yet ported — so `up --tunnel` wraps up.sh again.
+    // The standalone `stack tunnel` command stays decoupled onto vendored tunnel.sh.
+    await StackUp.run(['--tunnel', ...WS], config);
+
+    // NO native launches — the whole up routed through the up.sh wrapper.
+    expect(launches).toEqual([]);
+    const upSh = runs.filter((r) => r.command.endsWith('up.sh'));
+    expect(upSh).toHaveLength(1);
+    expect(upSh[0].args).toEqual(['up', '--tunnel']);
+    // the native tunnel.sh step is gone — up.sh owns the tunnel now.
+    expect(runs.some((r) => r.command.endsWith('tunnel.sh'))).toBe(false);
   });
 
   it('--slot 10 is rejected at the flag layer (rabbitmq-mgmt collision ceiling)', async () => {

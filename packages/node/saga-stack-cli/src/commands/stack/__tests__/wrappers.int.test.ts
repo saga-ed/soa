@@ -34,9 +34,12 @@ import StackTunnel from '../tunnel.js';
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
 const SYNTH_DIR = resolve(SOA_ROOT, 'tools', 'synthetic-dev');
-const UP_SH = resolve(SYNTH_DIR, 'up.sh');
-const REFRESH_SH = resolve(SYNTH_DIR, 'refresh-suite.sh');
-const TUNNEL_SH = resolve(SYNTH_DIR, 'tunnel.sh');
+const UP_SH = resolve(SYNTH_DIR, 'up.sh'); // up.sh is STILL wrapped (Phase 2 owns --sandbox/--workspace/--record).
+// Phase 1 DECOUPLING (saga-ed/soa#214): tunnel.sh + refresh-suite.sh are now the CLI's
+// VENDORED copies under <pkg>/vendor, NOT soa's tools/synthetic-dev.
+const VENDOR_DIR = resolve(PKG_ROOT, 'vendor');
+const REFRESH_SH = resolve(VENDOR_DIR, 'refresh-suite.sh');
+const TUNNEL_SH = resolve(VENDOR_DIR, 'tunnel.sh');
 const DEV_ROOT = '/fixed/dev';
 
 let config: Config;
@@ -92,12 +95,14 @@ describe('stack up — sole-implementation up.sh wrap (--sandbox/--workspace/--r
     expect(calls).toHaveLength(0);
   });
 
-  // M4: a comma-list --only boots the closure NATIVELY (covered in
-  // up-native.int.test.ts). Combined with a flag the native path can't honour
-  // (here --tunnel) there is no single-service up.sh fallback, so it's rejected.
-  it('rejects a comma-list --only + native-unsupported flag (--tunnel)', async () => {
+  // B2 revert (saga-ed/soa#214): `up --tunnel` is back to wrapping up.sh (native `up`'s
+  // LOCALHOST posture can't serve a tunnel without up.sh's per-service tunnel_env — a
+  // Phase-2 port). The standalone `stack tunnel` command stays decoupled onto vendored
+  // tunnel.sh. --tunnel is again a native-unsupported flag alongside
+  // --sandbox/--workspace/--record.
+  it('rejects a comma-list --only + native-unsupported flag (--sandbox)', async () => {
     await expect(
-      StackUp.run(['--only', 'scheduling-api,sessions-api', '--tunnel', ...WS], config),
+      StackUp.run(['--only', 'scheduling-api,sessions-api', '--sandbox', 'demo', ...WS], config),
     ).rejects.toMatchObject({ message: expect.stringContaining('boots the closure NATIVELY') });
     expect(calls).toHaveLength(0);
   });
@@ -250,12 +255,21 @@ describe('stack overlay compose-rest — still wraps refresh-suite.sh (sole impl
       config,
     );
     expect(calls[0].command).toBe(REFRESH_SH);
+    // decoupled: the VENDORED refresh-suite.sh, NOT soa's tools/synthetic-dev copy.
+    expect(calls[0].command).not.toContain('tools/synthetic-dev');
+    expect(calls[0].command).toContain('vendor');
+    expect(calls[0].cwd).toBe(VENDOR_DIR);
     expect(calls[0].args).toEqual(['--compose-rest', 'dev']);
     expect(calls[0].env).toEqual({
       DEV: DEV_ROOT,
       SOA: SOA_ROOT,
       SANDBOX_TTL_HOURS: '6',
       SANDBOX_SEED_PROFILE: 'canonical',
+      // B1: the VENDORED refresh-suite.sh has no pin manifest next to it, so the CLI
+      // points it at the dev's REAL soa pin file (the same one apply/list/reset read)
+      // — else PINS is empty and compose-rest composes every managed repo.
+      OVERLAY_FILE: resolve(SYNTH_DIR, 'integration-suite.local.tsv'),
+      OVERLAY_EXAMPLE_FILE: resolve(SYNTH_DIR, 'integration-suite.example.tsv'),
     });
   });
 
@@ -275,21 +289,25 @@ describe('stack overlay compose-rest — still wraps refresh-suite.sh (sole impl
   });
 });
 
-describe('stack tunnel — wraps tunnel.sh', () => {
-  it('up → tunnel.sh up', async () => {
+describe('stack tunnel — runs the VENDORED tunnel.sh (Phase 1 decoupling)', () => {
+  it('up → vendor/tunnel.sh up (cwd = the vendor dir, NOT tools/synthetic-dev)', async () => {
     await StackTunnel.run(['up', ...WS], config);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
-      cwd: SYNTH_DIR,
+      cwd: VENDOR_DIR,
       command: TUNNEL_SH,
       args: ['up'],
       env: { DEV: DEV_ROOT, SOA: SOA_ROOT },
       stdio: 'inherit',
     });
+    // decoupled: it is NOT soa's tools/synthetic-dev/tunnel.sh.
+    expect(calls[0].command).not.toContain('tools/synthetic-dev');
+    expect(calls[0].command).toContain('vendor');
   });
 
   it('moniker is the dispatch VERB (never a flag value); --vms-base → env VMS_BASE', async () => {
     await StackTunnel.run(['moniker', '--vms-base', 'vms.example.com', ...WS], config);
+    expect(calls[0].command).toBe(TUNNEL_SH);
     expect(calls[0].args).toEqual(['moniker']);
     expect(calls[0].env).toEqual({
       DEV: DEV_ROOT,

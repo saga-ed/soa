@@ -27,8 +27,6 @@ import { login, overlay, status, synthScript, tunnel, up } from '../flag-map.js'
 // real builder, so these stay byte-for-byte in lockstep with what the mappers emit
 // ({ repo: 'SOA', relPath: 'tools/synthetic-dev/…' }).
 const UP = synthScript('up.sh');
-const REFRESH = synthScript('refresh-suite.sh');
-const TUNNEL = synthScript('tunnel.sh');
 
 describe('up() — verb + trailing flags → up.sh argv', () => {
   it('bare up → just the `up` verb, no flags, no env', () => {
@@ -226,13 +224,11 @@ describe('login() — up.sh --login [email]', () => {
 
 describe('overlay() — refresh-suite.sh verbs', () => {
   it('apply (bare) → no args (file-driven integration-suite.local.tsv)', () => {
-    expect(overlay('apply')).toEqual({ script: REFRESH, args: [], env: {} });
-    expect(overlay('apply', {})).toEqual({ script: REFRESH, args: [], env: {} });
+    expect(overlay('apply')).toEqual({ args: [], env: {} });
+    expect(overlay('apply', {})).toEqual({ args: [], env: {} });
   });
   it('apply --prs <set> <repo…> → ad-hoc overlay argv', () => {
-    expect(overlay('apply', { prs: '165', repos: ['saga-dash'] })).toEqual({
-      script: REFRESH,
-      args: ['--prs', '165', 'saga-dash'],
+    expect(overlay('apply', { prs: '165', repos: ['saga-dash'] })).toEqual({ args: ['--prs', '165', 'saga-dash'],
       env: {},
     });
     expect(overlay('apply', { prs: '410,432', repos: ['rostering', 'program-hub'] }).args).toEqual([
@@ -243,16 +239,14 @@ describe('overlay() — refresh-suite.sh verbs', () => {
     ]);
   });
   it('list → --list (ignores repos/env)', () => {
-    expect(overlay('list')).toEqual({ script: REFRESH, args: ['--list'], env: {} });
+    expect(overlay('list')).toEqual({ args: ['--list'], env: {} });
   });
   it('reset → --reset; reset <repo…> → --reset <repo…>', () => {
-    expect(overlay('reset')).toEqual({ script: REFRESH, args: ['--reset'], env: {} });
+    expect(overlay('reset')).toEqual({ args: ['--reset'], env: {} });
     expect(overlay('reset', { repos: ['rostering'] }).args).toEqual(['--reset', 'rostering']);
   });
   it('compose-rest <name> → --compose-rest <name>', () => {
-    expect(overlay('compose-rest', { sandbox: 'dev' })).toEqual({
-      script: REFRESH,
-      args: ['--compose-rest', 'dev'],
+    expect(overlay('compose-rest', { sandbox: 'dev' })).toEqual({ args: ['--compose-rest', 'dev'],
       env: {},
     });
   });
@@ -265,9 +259,7 @@ describe('overlay() — refresh-suite.sh verbs', () => {
         seedProfile: 'canonical',
         bypassHeader: 'X-Foo: bar',
       }),
-    ).toEqual({
-      script: REFRESH,
-      args: ['--compose-rest', 'dev'],
+    ).toEqual({ args: ['--compose-rest', 'dev'],
       env: {
         SANDBOX_TTL_HOURS: '6',
         SANDBOX_SEED_PROFILE: 'canonical',
@@ -280,13 +272,11 @@ describe('overlay() — refresh-suite.sh verbs', () => {
 describe('tunnel() — tunnel.sh verb dispatch', () => {
   it('each verb → tunnel.sh <verb> (moniker is the VERB, never a flag value)', () => {
     for (const v of ['up', 'down', 'status', 'moniker', 'urls', 'aws-profile'] as const) {
-      expect(tunnel(v)).toEqual({ script: TUNNEL, args: [v], env: {} });
+      expect(tunnel(v)).toEqual({ args: [v], env: {} });
     }
   });
   it('--vms-base surfaces as env VMS_BASE', () => {
-    expect(tunnel('up', { vmsBase: 'vms.example.com' })).toEqual({
-      script: TUNNEL,
-      args: ['up'],
+    expect(tunnel('up', { vmsBase: 'vms.example.com' })).toEqual({ args: ['up'],
       env: { VMS_BASE: 'vms.example.com' },
     });
   });

@@ -149,16 +149,21 @@ export default class StackUp extends BaseCommand {
       return;
     }
 
-    // Flags the native path does NOT yet implement (sandbox/tunnel overlays, the
-    // record bash prep) — a bring-up carrying one of these still routes through the
-    // up.sh wrapper. `--skip-prep` is NOT here: it is NATIVE (M8). `--pull` /
-    // `--no-auto-pull` are NOT here either: they are NATIVE (M9) — they select the
-    // ff-only auto-pull mode (`all` / opt-out) the native `up` runs before the mesh/prep.
+    // Flags the native path does NOT yet implement (sandbox/workspace overlays, the
+    // record bash prep, the tunnel service env) — a bring-up carrying one of these
+    // still routes through the up.sh wrapper. `--skip-prep` is NOT here: it is NATIVE
+    // (M8). `--pull` / `--no-auto-pull` are NOT here either: they are NATIVE (M9).
+    // `--tunnel` IS here (Phase 2 item, saga-ed/soa#214): native `up` launches services
+    // with LOCALHOST posture, but a working tunnel needs up.sh's per-service tunnel_env
+    // (CORS_ORIGIN tunnel origins, AUTH_SESSIONCOOKIEDOMAIN, VITE_* tunnel URLs), which
+    // isn't ported yet — so `up --tunnel` wraps up.sh (and, being in needsUpSh, hard-errors
+    // at slot > 0 rather than clobbering slot 0). The standalone `stack tunnel` command IS
+    // decoupled onto the vendored tunnel.sh; only `up --tunnel` stays wrapped for now.
     const needsUpSh =
       flags.sandbox !== undefined ||
       flags.workspace !== undefined ||
-      flags.tunnel ||
-      flags.record !== undefined;
+      flags.record !== undefined ||
+      flags.tunnel;
 
     // ── FLIP 1: a BARE full-stack `up` is NATIVE-BY-DEFAULT. Expand the bare request
     // to the FULL non-optional service set and route it through the native path

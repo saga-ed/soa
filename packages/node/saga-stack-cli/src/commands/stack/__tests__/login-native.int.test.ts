@@ -5,15 +5,17 @@
  * BaseCommand prototype:
  *   - `getCookiePoster` — a fake POST recording url/origin/body + returning canned Set-Cookies.
  *   - `getJarWriter`    — captures the jar path + bytes (no fs).
- *   - `getRunner`       — the up.sh ScriptPlan seam; asserted NOT called natively, IS called for --browser.
+ *   - `getRunner`       — the process seam; asserted NOT called on the native default path,
+ *                         and (Phase 1 DECOUPLING) called to run the VENDORED browser-login.mjs
+ *                         for --browser — NEVER up.sh --login.
  *
  * Contract: native login builds the origin-checked devLogin POST at the slot-aware iam URL
  * (+ LOGIN_IAM_URL override), writes the Netscape jar to <stateDir>/cookies.txt, keeps the
  * browser half a `--browser` feature flag, surfaces the login-after-seed hint on 401 (no
- * crash), and --browser routes the full flow to up.sh --login.
+ * crash), and --browser mints the native jar THEN opens the vendored browser-login.mjs.
  */
 
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
@@ -143,16 +145,53 @@ describe('stack login — native headless cookie jar', () => {
     expect(text).toContain('--browser'); // headful browser flow surfaced as the feature flag
   });
 
-  it('--browser routes the FULL flow (jar + headful Chromium) to up.sh --login', async () => {
-    installPoster(OK_COOKIES); // present but must NOT be used
+  it('--browser mints the native jar THEN opens the VENDORED browser-login.mjs (never up.sh --login)', async () => {
+    installPoster(OK_COOKIES);
     installJar();
 
     await StackLogin.run(['--browser', 'teacher@saga.org', ...WS], config);
 
-    // the up.sh Runner WAS called; the native poster/jar were NOT.
+    // the native jar STILL ran (poster + jar), unlike the old up.sh-delegated flow.
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.opts.body).toBe('{"email":"teacher@saga.org"}');
+    expect(jarWrites).toHaveLength(1);
+    expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');
+
+    // exactly one process spawn: node running the VENDORED browser-login.mjs — NOT up.sh.
     expect(runnerCalls).toHaveLength(1);
-    expect(runnerCalls[0]?.args).toEqual(['--login', 'teacher@saga.org']);
+    const spawn = runnerCalls[0];
+    expect(spawn?.command).toBe('node');
+    expect(spawn?.args).toHaveLength(1);
+    const browserLogin = spawn?.args[0] ?? '';
+    expect(browserLogin.endsWith('browser-login.mjs')).toBe(true);
+    expect(browserLogin).toContain('vendor');
+    expect(browserLogin).not.toContain('tools/synthetic-dev');
+    // never up.sh --login.
+    expect(runnerCalls.some((c) => c.command.endsWith('up.sh'))).toBe(false);
+    expect(spawn?.args).not.toContain('--login');
+
+    // env browser-login.mjs reads, from THIS command (not up.sh): slot-0 iam/dash,
+    // the persona, the state-dir profile, and the resolved saga-dash dash dir (which
+    // is ALSO the cwd, so createRequire'd playwright resolves there).
+    const dashDir = join(DEV_ROOT, 'saga-dash', 'apps', 'web', 'dash');
+    expect(spawn?.cwd).toBe(dashDir);
+    expect(spawn?.env).toMatchObject({
+      IAM_URL: 'http://localhost:3010',
+      DASH_URL: 'http://localhost:8900',
+      LOGIN_EMAIL: 'teacher@saga.org',
+      PROFILE_DIR: '/tmp/sds-synthetic/browser-profile',
+      SAGA_DASH_DASH: dashDir,
+    });
+  });
+
+  it('--browser at slot > 0 is refused (browser-login targets slot 0 dash)', async () => {
+    installPoster(OK_COOKIES);
+    installJar();
+    await expect(StackLogin.run(['--browser', '--slot', '1', ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('slot 1'),
+    });
+    // refused BEFORE minting a jar or spawning anything.
     expect(posts ?? []).toHaveLength(0);
-    expect(jarWrites).toHaveLength(0);
+    expect(runnerCalls).toHaveLength(0);
   });
 });

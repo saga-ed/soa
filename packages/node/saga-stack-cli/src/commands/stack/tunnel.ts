@@ -17,15 +17,24 @@
  * user's terminal, exactly like the script. `AWS_PROFILE` is resolved by
  * tunnel.sh itself from the ambient env, so it is not surfaced as a flag.
  *
+ * DECOUPLING (Phase 1, saga-ed/soa#214): the script is now the CLI's VENDORED copy
+ * (`vendor/tunnel.sh`), resolved via `resolveVendorScript` — NOT `soa`'s
+ * `tools/synthetic-dev/tunnel.sh`. tunnel.sh reads/writes its `.vms-moniker`
+ * ALONGSIDE itself (`SCRIPT_DIR=dirname($0)`), so the moniker now lives next to the
+ * vendored copy (`vendor/.vms-moniker`) rather than in the soa checkout. The
+ * flag→argv/env mapping (`flagMap.tunnel`) is unchanged; only the path is repointed.
+ *
  *   node bin/dev.js stack tunnel up
  *   node bin/dev.js stack tunnel status
  *   node bin/dev.js stack tunnel moniker
  */
 
+import { dirname } from 'node:path';
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import * as flagMap from '../../core/flag-map.js';
 import type { TunnelVerb } from '../../core/flag-map.js';
+import { resolveVendorScript } from '../../runtime/index.js';
 
 const VERBS: readonly TunnelVerb[] = ['up', 'down', 'status', 'moniker', 'urls', 'aws-profile'];
 
@@ -56,7 +65,10 @@ export default class StackTunnel extends BaseCommand {
 
   async run(): Promise<void> {
     const { args, flags } = await this.parse(StackTunnel);
+    // Reuse the pure flag→argv/env mapping, but RESOLVE + RUN the VENDORED copy
+    // (vendor/tunnel.sh) instead of soa's tools/synthetic-dev/tunnel.sh.
     const plan = flagMap.tunnel(args.verb as TunnelVerb, { vmsBase: flags['vms-base'] });
-    await this.runScript(plan, flags);
+    const script = resolveVendorScript('tunnel.sh');
+    await this.runVendor({ cwd: dirname(script), command: script, args: plan.args, env: plan.env }, flags);
   }
 }

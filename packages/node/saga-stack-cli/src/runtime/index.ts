@@ -11,6 +11,7 @@
 export * from './exec.js';
 export * from './health.js';
 export * from './scripts.js';
+export * from './vendor.js';
 export * from './repos.js';
 export * from './snapshot.js';
 export * from './snapshot-store.js';

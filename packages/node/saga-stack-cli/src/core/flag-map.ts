@@ -67,6 +67,14 @@ export interface ScriptLocator {
  * `script` (a `ScriptLocator`) to an absolute path under its owning repo and
  * spawns it with `args`, merging `env` over the inherited process env.
  */
+/** A pure argv/env plan for a command that resolves its OWN (vendored) script path.
+ * (overlay compose-rest / tunnel resolve via resolveVendorScript, so they emit no
+ * synthetic-dev ScriptLocator — 0 source coupling to tools/synthetic-dev.) */
+export interface ArgvPlan {
+  args: string[];
+  env: Record<string, string>;
+}
+
 export interface ScriptPlan {
   script: ScriptLocator;
   args: string[];
@@ -245,7 +253,7 @@ export interface OverlayOptions {
  * preserves it by propagating the child's exit code verbatim (no `propagateExit:
  * false`), so a `&&` chain / CI sees the 2.
  */
-export function overlay(verb: OverlayVerb, opts: OverlayOptions = {}): ScriptPlan {
+export function overlay(verb: OverlayVerb, opts: OverlayOptions = {}): ArgvPlan {
   const args: string[] = [];
   const repos = opts.repos ?? [];
 
@@ -275,7 +283,7 @@ export function overlay(verb: OverlayVerb, opts: OverlayOptions = {}): ScriptPla
   if (opts.seedProfile !== undefined) env.SANDBOX_SEED_PROFILE = opts.seedProfile;
   if (opts.bypassHeader !== undefined) env.SANDBOX_BYPASS_HEADER = opts.bypassHeader;
 
-  return { script: synthScript('refresh-suite.sh'), args, env };
+  return { args, env }; // vendored refresh-suite.sh resolved by the command via resolveVendorScript
 }
 
 /** `stack tunnel` sub-verbs → tunnel.sh dispatch (`case "${1:-up}"`). */
@@ -298,9 +306,9 @@ export interface TunnelOptions {
  * user's terminal). `AWS_PROFILE` is honored from the ambient env by tunnel.sh
  * (it resolves the dev-account profile itself), so it is not a flag here.
  */
-export function tunnel(verb: TunnelVerb, opts: TunnelOptions = {}): ScriptPlan {
+export function tunnel(verb: TunnelVerb, opts: TunnelOptions = {}): ArgvPlan {
   const env: Record<string, string> = {};
   if (opts.vmsBase !== undefined) env.VMS_BASE = opts.vmsBase;
-  return { script: synthScript('tunnel.sh'), args: [verb], env };
+  return { args: [verb], env }; // vendored tunnel.sh resolved by the command via resolveVendorScript
 }
 

@@ -533,6 +533,54 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * Build the per-repo override env (`DEV` + the `--<repo>` path pins) a child
+   * process inherits — the same map `runScript` layers under a plan's own env,
+   * factored out so `runVendor` can reuse it. Keyed by the manifest env-var name
+   * up.sh/tunnel.sh/refresh-suite.sh read (`SOA`, `SAGA_DASH`, …).
+   */
+  protected buildRepoOverrideEnv(flags: WorkspaceFlags): Record<string, string> {
+    const overrides: RepoOverrides = { dev: flags.dev };
+    for (const repo of Object.keys(REPO_ENV_VAR) as RepoKey[]) {
+      const value = flags[repo];
+      if (value) overrides[repo] = value;
+    }
+    return buildRepoEnv(overrides);
+  }
+
+  /**
+   * Run a VENDORED script (Phase 1 decoupling) through the injectable Runner.
+   *
+   * Parallel to `runScript`, but for the scripts the CLI now SHIPS under its own
+   * `vendor/` dir (`tunnel.sh` / `browser-login.mjs` / `refresh-suite.sh`) instead
+   * of resolving from a `soa` checkout's `tools/synthetic-dev`. The caller resolves
+   * the absolute path via `resolveVendorScript(name)` and passes the fully-formed
+   * invocation (`command` = the vendored script's path, or `node` with the script as
+   * `args[0]`; `cwd` = the script's own dir, or the saga-dash dash app dir for
+   * playwright resolution). The per-repo path overrides (`--dev`/`--<repo>`) are
+   * layered UNDER the caller's `env`, stdio is inherited, and the child exit code is
+   * propagated (unless `propagateExit:false`, e.g. the best-effort browser step).
+   */
+  protected async runVendor(
+    spec: { cwd: string; command: string; args: string[]; env: Record<string, string> },
+    flags: WorkspaceFlags,
+    opts: { propagateExit?: boolean } = {},
+  ): Promise<number> {
+    const env = { ...this.buildRepoOverrideEnv(flags), ...spec.env };
+    const runner = this.getRunner();
+    const { code } = await runner.run({
+      cwd: spec.cwd,
+      command: spec.command,
+      args: spec.args,
+      env,
+      stdio: 'inherit',
+    });
+    if (opts.propagateExit !== false && code !== 0) {
+      this.exit(code);
+    }
+    return code;
+  }
+
+  /**
    * Emit a result in one of three shapes, picked by flags:
    *   --output-json → JSON.stringify(json, null, 2)
    *   --porcelain   → one key=value line per entry (primitives only)

@@ -14,7 +14,10 @@
  * refresh-suite.sh.
  */
 
-import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
@@ -25,7 +28,9 @@ import StackOverlay from '../overlay.js';
 
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
-const REFRESH_SH = resolve(SOA_ROOT, 'tools', 'synthetic-dev', 'refresh-suite.sh');
+// Phase 1 DECOUPLING (saga-ed/soa#214): compose-rest now runs the CLI's VENDORED
+// refresh-suite.sh under <pkg>/vendor, NOT soa's tools/synthetic-dev copy.
+const REFRESH_SH = resolve(PKG_ROOT, 'vendor', 'refresh-suite.sh');
 const DEV_ROOT = '/fixed/dev';
 const WS = ['--soa', SOA_ROOT, '--dev', DEV_ROOT];
 
@@ -238,5 +243,50 @@ describe('overlay compose-rest — still wraps refresh-suite.sh (sole implementa
     expect(runnerCalls).toHaveLength(1);
     expect(runnerCalls[0].command).toBe(REFRESH_SH);
     expect(runnerCalls[0].args).toEqual(['--compose-rest', 'dev']);
+  });
+
+  it('B1: points OVERLAY_FILE at the dev\'s REAL soa pin manifest (not vendor/)', async () => {
+    // The VENDORED refresh-suite.sh has no pin manifest next to it; the CLI must point
+    // it (OVERLAY_FILE env) at the SAME tools/synthetic-dev/integration-suite.local.tsv
+    // the native apply/list/reset read, so compose-rest composes the COMPLEMENT of the
+    // dev's pinned set — not every managed repo.
+    installFakeGit();
+    installFakeGh({});
+    await StackOverlay.run(['compose-rest', 'dev', ...WS], config);
+    const synth = resolve(SOA_ROOT, 'tools', 'synthetic-dev');
+    expect(runnerCalls[0].env.OVERLAY_FILE).toBe(resolve(synth, 'integration-suite.local.tsv'));
+    expect(runnerCalls[0].env.OVERLAY_EXAMPLE_FILE).toBe(resolve(synth, 'integration-suite.example.tsv'));
+  });
+});
+
+describe('B1: vendored refresh-suite.sh honors OVERLAY_FILE (spec-only exit-2)', () => {
+  it('composes the COMPLEMENT — a pinned repo\'s services are EXCLUDED from the spec', async () => {
+    // Drive the REAL vendored script (no SANDBOX_BYPASS_HEADER ⇒ spec-only, exit 2, no
+    // cloud POST). With program-hub pinned, its services (programs-api/scheduling-api/
+    // sessions-api) must be absent from the composed spec while the rest (iam-api/sis-api/
+    // saga-dash) remain — proving OVERLAY_FILE is read as the pin source.
+    const tmp = mkdtempSync(join(tmpdir(), 'overlay-b1-'));
+    try {
+      const manifest = join(tmp, 'integration-suite.local.tsv');
+      writeFileSync(manifest, '# repo\tprs\nprogram-hub\t165\n');
+
+      const res = spawnSync(REFRESH_SH, ['--compose-rest', 'dev'], {
+        encoding: 'utf8',
+        env: { ...process.env, OVERLAY_FILE: manifest, SANDBOX_BYPASS_HEADER: '' },
+      });
+
+      expect(res.status).toBe(2); // "spec printed, composed NOTHING"
+      const out = `${res.stdout}${res.stderr}`;
+      // the pinned repo is called out and its services excluded from the composed spec…
+      expect(out).toContain('program-hub');
+      expect(out).not.toContain('scheduling-api');
+      expect(out).not.toContain('sessions-api');
+      expect(out).not.toContain('programs-api');
+      // …while the complement (unpinned repos' services) IS composed.
+      expect(out).toContain('iam-api');
+      expect(out).toContain('sis-api');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

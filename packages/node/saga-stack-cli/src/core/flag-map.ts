@@ -35,7 +35,7 @@
 // SeedAddOn / SeedProfile are owned by `core/seed` (re-exported through the core
 // barrel) — imported here as types, not re-exported, to avoid a duplicate-name
 // clash in `core/index.ts`'s `export *`.
-import type { SeedAddOn, SeedProfile } from './seed/types.js';
+import type { SeedProfile } from './seed/types.js';
 // The script LOCATOR names which sibling repo a wrapped bash script lives in.
 // `RepoKey` is the manifest's env-var-name union (SOA, SAGA_DASH, …). Imported
 // as a TYPE only — `import type` never re-exports, so `core/index.ts`'s
@@ -87,17 +87,6 @@ export function synthScript(name: string): ScriptLocator {
 }
 
 /**
- * Thrown when a CLI flag has no bash antecedent and is not yet wired in M1.
- * The command layer renders `.message` as a friendly oclif error.
- */
-export class FlagNotAvailableError extends Error {
-  constructor(flag: string, milestone: string) {
-    super(`${flag} is not available until ${milestone}.`);
-    this.name = 'FlagNotAvailableError';
-  }
-}
-
-/**
  * `stack up` flags (normalized to camelCase by the command layer).
  *
  * `seed` / `login` / `record` model up.sh's optional positional after the flag:
@@ -136,45 +125,6 @@ export interface UpFlags {
   sandbox?: string;
   /** `--workspace <file.json>` (up.sh: mutually exclusive with --only/--sandbox; self-validated). */
   workspace?: string;
-}
-
-/** `stack seed` flags. */
-export interface SeedFlags {
-  /** Base profile. A bare `stack seed` should be resolved to `'roster'` by the command layer. */
-  profile: SeedProfile;
-  /** Orthogonal add-ons layered on the profile (`playback` ⇒ --with-playback, `qtf` ⇒ --with-qtf-demo). */
-  addOns?: SeedAddOn[];
-}
-
-/** `stack reset` flags. */
-export interface ResetFlags {
-  /** Also truncate the opt-in playback DBs (up.sh: `--reset --with-playback`). */
-  withPlayback?: boolean;
-}
-
-/** `stack verify` flags. */
-export interface VerifyFlags {
-  /** Fast health gate ⇒ env VERIFY_HEALTH_ONLY=1 (verify.sh ~129). */
-  healthOnly?: boolean;
-  /**
-   * NEW flag (generalizes verify.sh's hardcoded dash tolerance). It has NO
-   * antecedent in verify.sh, which is purely env-driven and accepts no argv —
-   * so it is M1-unsupported and lands when verify is re-implemented natively (M2).
-   */
-  tolerate?: string | string[];
-}
-
-/** Map a `SeedAddOn` to its up.sh flag spelling. */
-function addOnFlag(addOn: SeedAddOn): string {
-  switch (addOn) {
-    case 'playback':
-      return '--with-playback';
-    case 'qtf':
-      return '--with-qtf-demo';
-    /* c8 ignore next 2 — exhaustive guard for a 2-member union. */
-    default:
-      throw new Error(`unknown seed add-on: ${String(addOn)}`);
-  }
 }
 
 /**
@@ -223,50 +173,16 @@ export function up(flags: UpFlags = {}): ScriptPlan {
   return { script: synthScript('up.sh'), args, env };
 }
 
-/**
- * `stack down` → up.sh `--down` (flag-only invocation; up.sh skips the up path,
- * stops services, and leaves the mesh up).
- *
- * NOTE: the plan's NEW `stack down --mesh` (also tear the mesh down) has no
- * up.sh antecedent and is not part of this M1 mapper — add when it lands.
- */
-export function down(): ScriptPlan {
-  return { script: synthScript('up.sh'), args: ['--down'], env: {} };
-}
-
-/** `stack restart` → up.sh `restart` (leading verb; clean bounce, no data wipe). */
-export function restart(): ScriptPlan {
-  return { script: synthScript('up.sh'), args: ['restart'], env: {} };
-}
-
 /** `stack status` → up.sh `--status` (flag-only; health + row counts, then exit). */
 export function status(): ScriptPlan {
   return { script: synthScript('up.sh'), args: ['--status'], env: {} };
 }
 
 /**
- * `stack seed` → up.sh `--seed <profile>` (+ add-ons). Flag-only invocation:
- * against an already-running stack up.sh skips the up step and just seeds.
- */
-export function seed(flags: SeedFlags): ScriptPlan {
-  const args = ['--seed', flags.profile];
-  for (const addOn of flags.addOns ?? []) args.push(addOnFlag(addOn));
-  return { script: synthScript('up.sh'), args, env: {} };
-}
-
-/**
- * `stack reset` → up.sh `--reset` (+ `--with-playback` to also truncate the
- * playback DBs). Flag-only invocation.
- */
-export function reset(flags: ResetFlags = {}): ScriptPlan {
-  const args = ['--reset'];
-  if (flags.withPlayback) args.push('--with-playback');
-  return { script: synthScript('up.sh'), args, env: {} };
-}
-
-/**
  * `stack login [email]` → up.sh `--login [email]`. A bare invocation logs in the
- * default persona (dev@saga.org); an email overrides it.
+ * default persona (dev@saga.org); an email overrides it. Used by `stack login
+ * --browser` (the headful Chromium auto-login) and by the native `up --login`
+ * delegation in the StackApi facade.
  */
 export function login(email?: string): ScriptPlan {
   const args = ['--login'];
@@ -274,32 +190,14 @@ export function login(email?: string): ScriptPlan {
   return { script: synthScript('up.sh'), args, env: {} };
 }
 
-/**
- * `stack verify` → verify.sh. verify.sh takes NO argv; its only mode knob is the
- * `VERIFY_HEALTH_ONLY=1` env gate. `--tolerate` is M1-unsupported (no bash
- * antecedent — see VerifyFlags).
- */
-export function verify(flags: VerifyFlags = {}): ScriptPlan {
-  if (
-    flags.tolerate !== undefined &&
-    (Array.isArray(flags.tolerate) ? flags.tolerate.length > 0 : true)
-  ) {
-    throw new FlagNotAvailableError('verify --tolerate', 'M2');
-  }
-  const env: Record<string, string> = {};
-  if (flags.healthOnly) env.VERIFY_HEALTH_ONLY = '1';
-  return { script: synthScript('verify.sh'), args: [], env };
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// M2 — the remaining synthetic-dev wrappers: overlay / tunnel / bootstrap.
+// The remaining sole-implementation synthetic-dev wrappers: overlay / tunnel.
 //
-// As with the M1 mappers above, these are PURE flag→invocation transforms,
+// As with the mappers above, these are PURE flag→invocation transforms,
 // transcribed flag-for-flag from the scripts' own arg parsers:
 //   overlay   → refresh-suite.sh  (arg loop ~lines 328-343; verbs --prs/--list/
 //               --reset/--compose-rest, env BASE + SANDBOX_* knobs)
 //   tunnel    → tunnel.sh         (verb dispatch `case "${1:-up}"` ~258-269)
-//   bootstrap → bootstrap.sh      (arg loop ~28-35; --no-refresh / --seed)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** `stack overlay` sub-verbs → refresh-suite.sh modes. */
@@ -406,38 +304,3 @@ export function tunnel(verb: TunnelVerb, opts: TunnelOptions = {}): ScriptPlan {
   return { script: synthScript('tunnel.sh'), args: [verb], env };
 }
 
-/** `stack bootstrap` options. */
-export interface BootstrapFlags {
-  /** `--no-refresh`: skip step 2 (the refresh-suite overlay) — bootstrap.sh ~30. */
-  noRefresh?: boolean;
-  /** `--seed <roster|full>`: the seed profile passed to up.sh in step 3 — bootstrap.sh ~31. */
-  seed?: SeedProfile;
-  /**
-   * `--yes`: NEW non-interactive auto-confirm. It has NO bootstrap.sh antecedent:
-   * the script's `ensure_repos` prompt is purely interactive and its non-TTY
-   * branch hard-exits, and bootstrap.sh rejects any unknown flag — so the wrap
-   * CANNOT honor `--yes`. It lands when bootstrap goes native (a later milestone).
-   */
-  yes?: boolean;
-}
-
-/**
- * `stack bootstrap` → bootstrap.sh.
- *
- * `--no-refresh` and `--seed <p>` are faithful bootstrap.sh args. `--yes` throws
- * `FlagNotAvailableError` — see `BootstrapFlags.yes`: the current bootstrap.sh has
- * no non-interactive provisioning path to wrap (and would reject the unknown
- * flag), so we surface a clear message rather than silently no-op or break bash.
- */
-export function bootstrap(flags: BootstrapFlags = {}): ScriptPlan {
-  if (flags.yes) {
-    throw new FlagNotAvailableError(
-      'bootstrap --yes',
-      'a later milestone (bootstrap.sh has no non-interactive antecedent to wrap)',
-    );
-  }
-  const args: string[] = [];
-  if (flags.noRefresh) args.push('--no-refresh');
-  if (flags.seed !== undefined) args.push('--seed', flags.seed);
-  return { script: synthScript('bootstrap.sh'), args, env: {} };
-}

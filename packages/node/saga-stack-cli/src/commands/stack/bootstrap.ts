@@ -11,8 +11,7 @@
  * STAGED fail-before-up: an ensure/clone failure ABORTS before step 2/3 (a late
  * prep-install failure must not subsume the explicit clone step).
  *
- * `--legacy` routes the WHOLE chain to bootstrap.sh (which has no `--yes` antecedent —
- * `--legacy --yes` is rejected). `--yes` is the NATIVE non-interactive auto-confirm.
+ * `--yes` is the NATIVE non-interactive auto-confirm.
  *
  *   node bin/dev.js stack bootstrap
  *   node bin/dev.js stack bootstrap --no-refresh --seed full
@@ -22,9 +21,6 @@
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import type { WorkspaceFlags } from '../../base-command.js';
-import * as flagMap from '../../core/flag-map.js';
-import { FlagNotAvailableError } from '../../core/flag-map.js';
-import type { SeedProfile } from '../../core/seed/types.js';
 import { REPO_ENV_VAR, bootstrapRepos, ensureReposNative } from '../../runtime/index.js';
 import { repoContextFromFlags } from './status.js';
 import StackOverlay from './overlay.js';
@@ -33,7 +29,7 @@ import StackVerify from './verify.js';
 
 export default class StackBootstrap extends BaseCommand {
   static description =
-    'Stand up the synthetic-dev stack on main: ensure repos → overlay → up --reset --seed → verify (native; --legacy wraps bootstrap.sh).';
+    'Stand up the synthetic-dev stack on main: ensure repos → overlay → up --reset --seed → verify (native).';
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
@@ -57,32 +53,10 @@ export default class StackBootstrap extends BaseCommand {
         'non-interactive auto-confirm: clone any missing sibling repos WITHOUT a TTY prompt (for CI / background agents).',
       default: false,
     }),
-    legacy: Flags.boolean({
-      description:
-        'route the WHOLE chain to the bash bootstrap.sh (the escape). bootstrap.sh has no --yes antecedent, so --legacy --yes is rejected.',
-      default: false,
-    }),
   };
 
   async run(): Promise<void> {
     const { flags } = await this.parse(StackBootstrap);
-
-    // ── LEGACY: the whole chain via bootstrap.sh (no non-interactive antecedent). ──
-    if (flags.legacy) {
-      let plan;
-      try {
-        plan = flagMap.bootstrap({
-          noRefresh: flags['no-refresh'],
-          seed: flags.seed as SeedProfile | undefined,
-          yes: flags.yes,
-        });
-      } catch (err) {
-        if (err instanceof FlagNotAvailableError) this.error(err.message);
-        throw err;
-      }
-      await this.runScript(plan, flags);
-      return;
-    }
 
     // ── NATIVE chain ──
     const ws = this.workspaceArgs(flags);

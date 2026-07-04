@@ -21,30 +21,14 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-  bootstrap,
-  down,
-  FlagNotAvailableError,
-  login,
-  overlay,
-  reset,
-  restart,
-  seed,
-  status,
-  synthScript,
-  tunnel,
-  up,
-  verify,
-} from '../flag-map.js';
+import { login, overlay, status, synthScript, tunnel, up } from '../flag-map.js';
 
-// The M2 locator shape: up.sh/verify.sh both live in soa's synthetic-dev dir.
-// `synthScript` is the real builder, so these stay byte-for-byte in lockstep
-// with what the mappers emit ({ repo: 'SOA', relPath: 'tools/synthetic-dev/…' }).
+// The locator shape: up.sh lives in soa's synthetic-dev dir. `synthScript` is the
+// real builder, so these stay byte-for-byte in lockstep with what the mappers emit
+// ({ repo: 'SOA', relPath: 'tools/synthetic-dev/…' }).
 const UP = synthScript('up.sh');
-const VERIFY = synthScript('verify.sh');
 const REFRESH = synthScript('refresh-suite.sh');
 const TUNNEL = synthScript('tunnel.sh');
-const BOOTSTRAP = synthScript('bootstrap.sh');
 
 describe('up() — verb + trailing flags → up.sh argv', () => {
   it('bare up → just the `up` verb, no flags, no env', () => {
@@ -221,67 +205,9 @@ describe('up() — verb + trailing flags → up.sh argv', () => {
   });
 });
 
-describe('down() / restart() / status() — flag-only / verb invocations', () => {
-  it('down → up.sh --down (stops services, leaves the mesh up)', () => {
-    expect(down()).toEqual({ script: UP, args: ['--down'], env: {} });
-  });
-  it('restart → up.sh restart (leading verb)', () => {
-    expect(restart()).toEqual({ script: UP, args: ['restart'], env: {} });
-  });
+describe('status() — flag-only invocation', () => {
   it('status → up.sh --status', () => {
     expect(status()).toEqual({ script: UP, args: ['--status'], env: {} });
-  });
-});
-
-describe('seed() — up.sh --seed <profile> (+ add-ons)', () => {
-  it('profile roster → --seed roster', () => {
-    expect(seed({ profile: 'roster' })).toEqual({
-      script: UP,
-      args: ['--seed', 'roster'],
-      env: {},
-    });
-  });
-  it('profile full → --seed full', () => {
-    expect(seed({ profile: 'full' }).args).toEqual(['--seed', 'full']);
-  });
-  it('empty add-on list behaves like no add-ons', () => {
-    expect(seed({ profile: 'roster', addOns: [] }).args).toEqual(['--seed', 'roster']);
-  });
-  it('playback add-on → --with-playback', () => {
-    expect(seed({ profile: 'roster', addOns: ['playback'] }).args).toEqual([
-      '--seed',
-      'roster',
-      '--with-playback',
-    ]);
-  });
-  it('qtf add-on → --with-qtf-demo', () => {
-    expect(seed({ profile: 'full', addOns: ['qtf'] }).args).toEqual([
-      '--seed',
-      'full',
-      '--with-qtf-demo',
-    ]);
-  });
-  it('both add-ons → --with-playback --with-qtf-demo (in add-on array order)', () => {
-    expect(seed({ profile: 'full', addOns: ['playback', 'qtf'] }).args).toEqual([
-      '--seed',
-      'full',
-      '--with-playback',
-      '--with-qtf-demo',
-    ]);
-  });
-});
-
-describe('reset() — up.sh --reset', () => {
-  it('bare → --reset', () => {
-    expect(reset()).toEqual({ script: UP, args: ['--reset'], env: {} });
-    expect(reset({})).toEqual({ script: UP, args: ['--reset'], env: {} });
-  });
-  it('--with-playback also truncates the opt-in playback DBs', () => {
-    expect(reset({ withPlayback: true })).toEqual({
-      script: UP,
-      args: ['--reset', '--with-playback'],
-      env: {},
-    });
   });
 });
 
@@ -295,28 +221,6 @@ describe('login() — up.sh --login [email]', () => {
       args: ['--login', 'teacher@saga.org'],
       env: {},
     });
-  });
-});
-
-describe('verify() — verify.sh (no argv; env-gated only)', () => {
-  it('default → verify.sh, no args, no env', () => {
-    expect(verify()).toEqual({ script: VERIFY, args: [], env: {} });
-    expect(verify({})).toEqual({ script: VERIFY, args: [], env: {} });
-  });
-  it('--health-only → env VERIFY_HEALTH_ONLY=1, still no argv', () => {
-    expect(verify({ healthOnly: true })).toEqual({
-      script: VERIFY,
-      args: [],
-      env: { VERIFY_HEALTH_ONLY: '1' },
-    });
-  });
-  it('--tolerate (string or non-empty list) is M1-unsupported → FlagNotAvailableError(M2)', () => {
-    expect(() => verify({ tolerate: 'saga-dash' })).toThrow(FlagNotAvailableError);
-    expect(() => verify({ tolerate: ['saga-dash', 'rtsm-api'] })).toThrow(/not available until M2/);
-  });
-  it('empty --tolerate list does not throw (treated as unset)', () => {
-    expect(() => verify({ tolerate: [] })).not.toThrow();
-    expect(verify({ tolerate: [] })).toEqual({ script: VERIFY, args: [], env: {} });
   });
 });
 
@@ -385,25 +289,5 @@ describe('tunnel() — tunnel.sh verb dispatch', () => {
       args: ['up'],
       env: { VMS_BASE: 'vms.example.com' },
     });
-  });
-});
-
-describe('bootstrap() — bootstrap.sh', () => {
-  it('bare → no args', () => {
-    expect(bootstrap()).toEqual({ script: BOOTSTRAP, args: [], env: {} });
-    expect(bootstrap({})).toEqual({ script: BOOTSTRAP, args: [], env: {} });
-  });
-  it('--no-refresh and --seed <p> map to argv', () => {
-    expect(bootstrap({ noRefresh: true }).args).toEqual(['--no-refresh']);
-    expect(bootstrap({ seed: 'full' }).args).toEqual(['--seed', 'full']);
-    expect(bootstrap({ noRefresh: true, seed: 'roster' }).args).toEqual([
-      '--no-refresh',
-      '--seed',
-      'roster',
-    ]);
-  });
-  it('--yes is not yet wrappable → FlagNotAvailableError', () => {
-    expect(() => bootstrap({ yes: true })).toThrow(FlagNotAvailableError);
-    expect(() => bootstrap({ yes: true })).toThrow(/bootstrap --yes is not available/);
   });
 });

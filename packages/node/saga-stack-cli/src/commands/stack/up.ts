@@ -18,10 +18,9 @@
  *    `NO_AUTO_PULL` opt out) AND best-effort Connect AV (livekit :7880 + coturn, slot-0
  *    only, when connect is in the closure). Remaining gap: up.sh's branch-layout
  *    preflight (M12).
- *  - WRAPPED (the escape): `--legacy` forces the up.sh wrapper for the WHOLE
- *    bring-up. Additionally, a bare invocation carrying a flag the native path can't
- *    honour yet (sandbox/tunnel/workspace/record), or a
- *    SINGLE-service `--only` + such a flag, still falls back to the up.sh wrapper: a
+ *  - WRAPPED (sole-implementation escape): a bare invocation carrying a flag the
+ *    native path can't honour yet (sandbox/tunnel/workspace/record), or a
+ *    SINGLE-service `--only` + such a flag, falls back to the up.sh wrapper: a
  *    THIN WRAPPER mapping flags → `flagMap.up()` → the exact up.sh argv/env, shelled
  *    out with stdio inherited. A MULTI-service `--only` + such a flag is rejected
  *    (up.sh --only is single-service only). up.sh is hardcoded to slot 0, so at
@@ -31,7 +30,7 @@
  *   node bin/dev.js stack up --only scheduling-api,sessions-api --dry-run
  *   node bin/dev.js stack up --only scheduling-api,sessions-api          # native
  *   node bin/dev.js stack up                                             # native full stack
- *   node bin/dev.js stack up --legacy --seed roster --login             # wrapped (up.sh)
+ *   node bin/dev.js stack up --only scheduling-api --sandbox dev         # wrapped (up.sh)
  *
  * Imports come straight from the specific core modules (not the `core/index`
  * barrel) so this command stays decoupled from the seed/flow sub-barrels.
@@ -60,7 +59,7 @@ import type { Runtime, StackApi } from '../../stack-api.js';
 
 export default class StackUp extends BaseCommand {
   static description =
-    'Bring the synthetic dev stack up. --only boots the dependency closure NATIVELY; full-stack wraps up.sh; --dry-run prints the planner.';
+    'Bring the synthetic dev stack up NATIVELY (--only boots the dependency closure; a bare up boots the full stack). --sandbox/--workspace/--record/--tunnel wrap up.sh; --dry-run prints the planner.';
 
   static examples = [
     '<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api --dry-run',
@@ -128,11 +127,6 @@ export default class StackUp extends BaseCommand {
     workspace: Flags.string({
       description: 'workspace file to launch from (up.sh --workspace <file.json>)',
     }),
-    legacy: Flags.boolean({
-      default: false,
-      description:
-        'force the bash `up.sh` wrapper for the WHOLE bring-up (the non-destructive escape) instead of the native path. Bare `stack up` is native-by-default; `--legacy` restores the old up.sh full-stack bring-up regardless of the other flags.',
-    }),
   };
 
   /** M7 Phase 2: `stack up` brings up an isolated `soa-s<N>` stack at slot > 0. */
@@ -152,25 +146,6 @@ export default class StackUp extends BaseCommand {
     // ── --dry-run (M0/M4): planner only. ──
     if (flags['dry-run']) {
       this.runDryRun(flags, requested, isOnly, withPlayback);
-      return;
-    }
-
-    // ── FLIP 1: `--legacy` is the non-destructive escape — force the up.sh wrapper
-    // for the WHOLE bring-up regardless of the other flags. Reached before any native
-    // routing so `ss stack up --legacy` reproduces the old bash full-stack up. ──
-    if (flags.legacy) {
-      // M7 BLOCKER-1: up.sh is hardcoded to slot 0 (project soa, base ports,
-      // STATE=/tmp/sds-synthetic). At slot > 0 --legacy would shell out to up.sh and
-      // CLOBBER the default slot-0 stack (silent data loss) — REFUSE rather than corrupt
-      // it, mirroring the slot > 0 wrapper-fallback guard below.
-      if (flags.slot > 0) {
-        this.error(
-          `slot ${flags.slot}: --legacy routes through the up.sh wrapper, which is hardcoded ` +
-            'to slot 0 (project soa, base ports, STATE=/tmp/sds-synthetic) and would clobber it. ' +
-            'Drop --legacy to bring the slot up natively.',
-        );
-      }
-      await this.runWrapped(flags, requested);
       return;
     }
 
@@ -239,12 +214,11 @@ export default class StackUp extends BaseCommand {
       // reached at slot 0 (slot > 0 hard-errored just above).
     }
 
-    // ── WRAPPED (the up.sh escape): thin wrapper over up.sh. Reached only at slot 0
-    // and only for (a) a BARE invocation carrying a native-unsupported flag
-    // (sandbox/tunnel/workspace/record → bare set left un-expanded
-    // above), or (b) a SINGLE-service --only + such a flag. `--legacy` is handled
-    // earlier (forces the wrapper unconditionally). slot > 0 can never reach here
-    // (bare → native above; --only + unsupported flag → hard-error above). ──
+    // ── WRAPPED (sole-implementation up.sh escape): thin wrapper over up.sh. Reached
+    // only at slot 0 and only for (a) a BARE invocation carrying a native-unsupported
+    // flag (sandbox/tunnel/workspace/record → bare set left un-expanded above), or
+    // (b) a SINGLE-service --only + such a flag. slot > 0 can never reach here (bare →
+    // native above; --only + unsupported flag → hard-error above). ──
     await this.runWrapped(flags, requested);
   }
 

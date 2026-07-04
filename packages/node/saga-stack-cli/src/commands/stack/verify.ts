@@ -32,7 +32,6 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { BUNDLE_NAMES } from '../../core/bundles.js';
 import { deriveInstance } from '../../core/derive-instance.js';
-import * as flagMap from '../../core/flag-map.js';
 import { SYNTH_DEV_DIR } from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { getMesh, manifest } from '../../core/manifest/index.js';
@@ -47,7 +46,7 @@ import { partitionByRepoPresence, repoContextFromFlags, resolveServiceSet } from
 
 export default class StackVerify extends BaseCommand {
   static description =
-    'Verify the stack: native manifest-derived health gate (--full delegates the deep checks to verify.sh).';
+    'Verify the stack: native manifest-derived health gate (--full adds the native DATA + posture checks).';
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
@@ -80,12 +79,7 @@ export default class StackVerify extends BaseCommand {
     }),
     full: Flags.boolean({
       description:
-        'run the CANONICAL complete check FULLY NATIVELY: native health gate + native DATA (D1–D5) + native source-posture (P1–P4). Nothing is delegated (use --legacy for the bash verify.sh). --health-only skips the posture/freshness pass.',
-      default: false,
-    }),
-    legacy: Flags.boolean({
-      description:
-        'route the WHOLE verify to the bash verify.sh instead of the native gates (escape hatch; --health-only ⇒ VERIFY_HEALTH_ONLY=1).',
+        'run the CANONICAL complete check FULLY NATIVELY: native health gate + native DATA (D1–D5) + native source-posture (P1–P4). --health-only skips the posture/freshness pass.',
       default: false,
     }),
   };
@@ -97,15 +91,6 @@ export default class StackVerify extends BaseCommand {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(StackVerify);
-
-    // ── --legacy: the escape hatch — route the WHOLE verify to bash verify.sh. ──
-    // The native path (default + --full) is now FULLY native; --legacy is the only
-    // thing that still shells out. --health-only narrows it to VERIFY_HEALTH_ONLY=1.
-    if (flags.legacy) {
-      const plan = flagMap.verify({ healthOnly: flags['health-only'] });
-      await this.runScript(plan, flags); // propagate verify.sh's exit code verbatim
-      return;
-    }
 
     // ── --full: FULLY NATIVE — native health + native DATA (D1–D5) + native posture. ──
     // M12: the source-posture (P1–P4) checks are now NATIVE too (warn-only), so `stack
@@ -206,7 +191,7 @@ export default class StackVerify extends BaseCommand {
    * service or a failed DATA check. `users != 205` is a NOTE. The posture pass is STRICTLY
    * WARN-ONLY: it emits `✓`/`⚠`/`·` lines but NEVER contributes to the exit code (a wrong
    * branch, an unmerged pin, an unpinned overlay, or a behind-origin repo is a warning, not
-   * a failure). Nothing is delegated to verify.sh (that is `--legacy`).
+   * a failure). Nothing is delegated to verify.sh.
    *
    * `--health-only` skips the posture/freshness pass (health + DATA only) — the native
    * equivalent of the old VERIFY_HEALTH_ONLY=1 delegation.

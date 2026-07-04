@@ -628,7 +628,7 @@ describe('StackApi.down — stop in reverse launch order', () => {
   });
 });
 
-describe('StackApi.reset — native (M8 R4) + --legacy escape', () => {
+describe('StackApi.reset — native (M8 R4)', () => {
   /** The `-c "<sql>"` payload of a `docker exec … psql … -c <sql>` run. */
   const sqlOf = (r: ScriptInvocation): string => r.args[r.args.indexOf('-c') + 1];
 
@@ -639,7 +639,6 @@ describe('StackApi.reset — native (M8 R4) + --legacy escape', () => {
 
     const res = await api.reset(closure.services);
 
-    expect(res.delegated).toBe(false);
     expect(res.code).toBe(0);
     // TRUNCATE ran as docker-exec psql, preserving _prisma_migrations, on soa-postgres-1.
     const truncs = fakes.runs.filter((r) => r.command === 'docker' && r.args.includes('psql'));
@@ -749,28 +748,6 @@ describe('StackApi.reset — native (M8 R4) + --legacy escape', () => {
 
     const res = await api.reset(['sessions-api', 'iam-api'] as ServiceId[]);
     expect(res.code).toBe(1);
-  });
-
-  it('--legacy routes to `up.sh --reset` (non-destructive escape); no native truncate', async () => {
-    const { runtime, fakes } = makeRuntime();
-    const api = makeStackApi(manifest, runtime);
-    const res = await api.reset(['iam-api'] as ServiceId[], { legacy: true });
-    expect(res).toEqual({ delegated: true, code: 0 });
-    expect(fakes.delegated[0].args).toEqual(['--reset']);
-    expect(fakes.runs.some((r) => r.command === 'docker' && r.args.includes('psql'))).toBe(false);
-  });
-
-  it('--legacy --with playback → `up.sh --reset --with-playback`', async () => {
-    const { runtime, fakes } = makeRuntime();
-    const api = makeStackApi(manifest, runtime);
-    await api.reset(['iam-api'] as ServiceId[], { legacy: true, withPlayback: true });
-    expect(fakes.delegated[0].args).toEqual(['--reset', '--with-playback']);
-  });
-
-  it('--legacy throws without a delegate wired', async () => {
-    const { runtime } = makeRuntime({ delegate: undefined });
-    const api = makeStackApi(manifest, runtime);
-    await expect(api.reset(['iam-api'] as ServiceId[], { legacy: true })).rejects.toThrow(/delegate/);
   });
 });
 

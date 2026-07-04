@@ -8,7 +8,7 @@
  *     spied to record ORDER + argv (so we assert the chain without booting a real stack).
  *
  * Focus: the ensure-repos DELTA + the STAGED fail-before-up ordering (an ensure/clone
- * failure aborts BEFORE the up step). The bootstrap.sh `--legacy` wrap is in wrappers.int.test.ts.
+ * failure aborts BEFORE the up step). `stack bootstrap` is fully native — no bash wrap.
  */
 
 import { resolve } from 'node:path';

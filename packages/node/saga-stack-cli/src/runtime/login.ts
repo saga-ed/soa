@@ -7,8 +7,8 @@
  * state-dir path — exactly up.sh's `curl -c "$COOKIE_JAR"` result, so curl `--cookie`
  * and Playwright `storageState` harnesses read the SAME `$STATE/cookies.txt`.
  *
- * The BROWSER half (headful Playwright auto-login) STAYS DELEGATED (plan §2.3): a native
- * process cannot inject HttpOnly cookies into a real browser, so `stack login --legacy`
+ * The BROWSER half (headful Playwright auto-login) is a `--browser` feature flag: a native
+ * process cannot inject HttpOnly cookies into a real browser, so `stack login --browser`
  * routes the full flow to up.sh. Native login = this headless jar only.
  *
  * The request-shaping is PURE (`core/login.ts` + `core/cookie-jar.ts`); this module only

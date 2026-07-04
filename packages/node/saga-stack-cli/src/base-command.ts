@@ -476,7 +476,7 @@ export abstract class BaseCommand extends Command {
       stateDir,
       connectAv: true,
       tunnel: false,
-      // reset --legacy / login delegate to up.sh through the M1 script path.
+      // `up --login` / `login --browser` delegate to up.sh through the script path.
       delegate: (plan) => this.runScript(plan, flags, { propagateExit: false }),
     };
   }

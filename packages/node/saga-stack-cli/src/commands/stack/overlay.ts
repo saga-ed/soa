@@ -9,12 +9,11 @@
  * contract (0 clean / 1 if any repo conflicted-or-missing) — byte-faithful to
  * refresh-suite.sh 125-195 / 346-408.
  *
- * STILL WRAPPED:
+ * STILL WRAPPED (sole implementation — no native path):
  *   - `compose-rest` — the cloud sandbox orchestrator (AWS Secrets / HTTP / 20m poll,
  *     creates real billable sandboxes). Routes to refresh-suite.sh via a `ScriptPlan`,
  *     preserving its exit-2 ("spec printed, composed NOTHING") semantics + BASE/SANDBOX_*
  *     env contract.
- *   - `--legacy` — the whole-script escape: routes the given verb to refresh-suite.sh.
  *
  * Verbs:
  *   apply [--prs <#s|branch> <repo…>]   bare → apply integration-suite.local.tsv;
@@ -62,7 +61,7 @@ const OVERLAY_EXAMPLE = 'integration-suite.example.tsv';
 
 export default class StackOverlay extends BaseCommand {
   static description =
-    'Overlay your in-flight PRs onto a main-based synthetic-dev (native git engine; compose-rest/--legacy wrap refresh-suite.sh).';
+    'Overlay your in-flight PRs onto a main-based synthetic-dev (native git engine; compose-rest wraps refresh-suite.sh).';
 
   static examples = [
     '<%= config.bin %> <%= command.id %> list',
@@ -91,10 +90,6 @@ export default class StackOverlay extends BaseCommand {
     }),
     base: Flags.string({
       description: 'base ref the overlay rebuilds on (refresh-suite.sh env BASE; default main)',
-    }),
-    legacy: Flags.boolean({
-      default: false,
-      description: 'route the WHOLE verb to the bash refresh-suite.sh instead of the native git engine.',
     }),
     'ttl-hours': Flags.string({
       description: 'compose-rest: sandbox TTL in hours (refresh-suite.sh env SANDBOX_TTL_HOURS)',
@@ -141,12 +136,11 @@ export default class StackOverlay extends BaseCommand {
       this.error('overlay list takes no positional arguments.');
     }
 
-    // compose-rest ALWAYS wraps (cloud orchestrator); `--legacy` wraps the whole verb.
-    if (v === 'compose-rest' || flags.legacy) {
+    // compose-rest ALWAYS wraps (cloud orchestrator — the sole implementation, no
+    // native path). apply/list/reset are native (below).
+    if (v === 'compose-rest') {
       const plan = flagMap.overlay(v, {
-        prs: flags.prs,
-        repos: v === 'reset' || v === 'apply' ? rest : undefined,
-        sandbox: v === 'compose-rest' ? rest[0] : undefined,
+        sandbox: rest[0],
         base: flags.base,
         ttlHours: flags['ttl-hours'],
         seedProfile: flags['seed-profile'],

@@ -453,7 +453,7 @@
     "stack:bootstrap": {
       "aliases": [],
       "args": {},
-      "description": "Stand up the synthetic-dev stack on main: ensure repos → overlay → up --reset --seed → verify (native; --legacy wraps bootstrap.sh).",
+      "description": "Stand up the synthetic-dev stack on main: ensure repos → overlay → up --reset --seed → verify (native).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> --no-refresh --seed full",
@@ -581,12 +581,6 @@
           "name": "yes",
           "allowNo": false,
           "type": "boolean"
-        },
-        "legacy": {
-          "description": "route the WHOLE chain to the bash bootstrap.sh (the escape). bootstrap.sh has no --yes antecedent, so --legacy --yes is rejected.",
-          "name": "legacy",
-          "allowNo": false,
-          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -608,7 +602,7 @@
     "stack:down": {
       "aliases": [],
       "args": {},
-      "description": "Stop the running stack (wraps up.sh --down; leaves the mesh up unless --mesh).",
+      "description": "Stop the running stack natively (kill-by-pidfile; leaves the mesh up unless --mesh).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> --mesh"
@@ -744,11 +738,11 @@
           "required": false
         }
       },
-      "description": "Mint a session against the running stack. Native headless cookie jar by default; --legacy adds the headful Chromium via up.sh.",
+      "description": "Mint a session against the running stack. Native headless cookie jar by default; --browser opens an auto-logged-in Chromium via up.sh.",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> teacher@saga.org",
-        "<%= config.bin %> <%= command.id %> --legacy"
+        "<%= config.bin %> <%= command.id %> --browser"
       ],
       "flags": {
         "porcelain": {
@@ -849,9 +843,9 @@
           "multiple": false,
           "type": "option"
         },
-        "legacy": {
-          "description": "route the FULL login (headless jar + headful Chromium auto-login) to up.sh --login. Native login mints only the headless cookie jar.",
-          "name": "legacy",
+        "browser": {
+          "description": "open an auto-logged-in Chromium via up.sh --login (headless jar + headful browser). The default mints only the native headless cookie jar.",
+          "name": "browser",
           "allowNo": false,
           "type": "boolean"
         }
@@ -887,7 +881,7 @@
           ]
         }
       },
-      "description": "Overlay your in-flight PRs onto a main-based synthetic-dev (native git engine; compose-rest/--legacy wrap refresh-suite.sh).",
+      "description": "Overlay your in-flight PRs onto a main-based synthetic-dev (native git engine; compose-rest wraps refresh-suite.sh).",
       "examples": [
         "<%= config.bin %> <%= command.id %> list",
         "<%= config.bin %> <%= command.id %> apply --prs 165 saga-dash",
@@ -1007,12 +1001,6 @@
           "multiple": false,
           "type": "option"
         },
-        "legacy": {
-          "description": "route the WHOLE verb to the bash refresh-suite.sh instead of the native git engine.",
-          "name": "legacy",
-          "allowNo": false,
-          "type": "boolean"
-        },
         "ttl-hours": {
           "description": "compose-rest: sandbox TTL in hours (refresh-suite.sh env SANDBOX_TTL_HOURS)",
           "name": "ttl-hours",
@@ -1054,11 +1042,10 @@
     "stack:reset": {
       "aliases": [],
       "args": {},
-      "description": "Truncate the data DBs to an empty baseline + re-seed the dev user (native; --legacy wraps up.sh --reset).",
+      "description": "Truncate the data DBs to an empty baseline + re-seed the dev user (native).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --with playback",
-        "<%= config.bin %> <%= command.id %> --legacy"
+        "<%= config.bin %> <%= command.id %> --with playback"
       ],
       "flags": {
         "porcelain": {
@@ -1172,12 +1159,6 @@
             "qtf"
           ],
           "type": "option"
-        },
-        "legacy": {
-          "description": "route to the bash `up.sh --reset` (the non-destructive escape) instead of the native runner.",
-          "name": "legacy",
-          "allowNo": false,
-          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -1199,10 +1180,9 @@
     "stack:restart": {
       "aliases": [],
       "args": {},
-      "description": "Cleanly bounce the stack NATIVELY (down → clear vite caches → up; no data wipe). --legacy wraps up.sh restart.",
+      "description": "Cleanly bounce the stack NATIVELY (down → clear vite caches → up; no data wipe).",
       "examples": [
-        "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --legacy"
+        "<%= config.bin %> <%= command.id %>"
       ],
       "flags": {
         "porcelain": {
@@ -1302,12 +1282,6 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
-        },
-        "legacy": {
-          "description": "force the bash `up.sh restart` wrapper instead of the native down → vite-clear → up path.",
-          "name": "legacy",
-          "allowNo": false,
-          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -1339,11 +1313,10 @@
           ]
         }
       },
-      "description": "Seed a running stack (native; --legacy wraps up.sh --seed <profile>).",
+      "description": "Seed a running stack (native).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> full --with playback",
-        "<%= config.bin %> <%= command.id %> --legacy"
+        "<%= config.bin %> <%= command.id %> full --with playback"
       ],
       "flags": {
         "porcelain": {
@@ -1457,12 +1430,6 @@
             "qtf"
           ],
           "type": "option"
-        },
-        "legacy": {
-          "description": "route to the bash `up.sh --seed <profile>` (the non-destructive escape) instead of the native seed runner.",
-          "name": "legacy",
-          "allowNo": false,
-          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -1776,7 +1743,7 @@
     "stack:up": {
       "aliases": [],
       "args": {},
-      "description": "Bring the synthetic dev stack up. --only boots the dependency closure NATIVELY; full-stack wraps up.sh; --dry-run prints the planner.",
+      "description": "Bring the synthetic dev stack up NATIVELY (--only boots the dependency closure; a bare up boots the full stack). --sandbox/--workspace/--record/--tunnel wrap up.sh; --dry-run prints the planner.",
       "examples": [
         "<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api --dry-run",
         "<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api",
@@ -1979,12 +1946,6 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
-        },
-        "legacy": {
-          "description": "force the bash `up.sh` wrapper for the WHOLE bring-up (the non-destructive escape) instead of the native path. Bare `stack up` is native-by-default; `--legacy` restores the old up.sh full-stack bring-up regardless of the other flags.",
-          "name": "legacy",
-          "allowNo": false,
-          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -2006,7 +1967,7 @@
     "stack:verify": {
       "aliases": [],
       "args": {},
-      "description": "Verify the stack: native manifest-derived health gate (--full delegates the deep checks to verify.sh).",
+      "description": "Verify the stack: native manifest-derived health gate (--full adds the native DATA + posture checks).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> --only scheduling-api,sessions-api",
@@ -2147,14 +2108,8 @@
           "type": "option"
         },
         "full": {
-          "description": "run the CANONICAL complete check FULLY NATIVELY: native health gate + native DATA (D1–D5) + native source-posture (P1–P4). Nothing is delegated (use --legacy for the bash verify.sh). --health-only skips the posture/freshness pass.",
+          "description": "run the CANONICAL complete check FULLY NATIVELY: native health gate + native DATA (D1–D5) + native source-posture (P1–P4). --health-only skips the posture/freshness pass.",
           "name": "full",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "legacy": {
-          "description": "route the WHOLE verify to the bash verify.sh instead of the native gates (escape hatch; --health-only ⇒ VERIFY_HEALTH_ONLY=1).",
-          "name": "legacy",
           "allowNo": false,
           "type": "boolean"
         }

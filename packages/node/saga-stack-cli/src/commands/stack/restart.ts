@@ -14,35 +14,25 @@
  * ARE byte-faithful to `nuke_vite` (else the stale-bundle trap returns).
  *
  *   node bin/dev.js stack restart            # native down → vite-clear → up
- *   node bin/dev.js stack restart --legacy   # wraps up.sh restart
  */
 
-import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import type { NativeRuntimeFlags } from '../../base-command.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
-import * as flagMap from '../../core/flag-map.js';
 import { manifest } from '../../core/manifest/index.js';
 import { makeStackApi } from '../../stack-api.js';
 import type { Runtime } from '../../stack-api.js';
 
 export default class StackRestart extends BaseCommand {
   static description =
-    'Cleanly bounce the stack NATIVELY (down → clear vite caches → up; no data wipe). --legacy wraps up.sh restart.';
+    'Cleanly bounce the stack NATIVELY (down → clear vite caches → up; no data wipe).';
 
-  static examples = [
-    '<%= config.bin %> <%= command.id %>',
-    '<%= config.bin %> <%= command.id %> --legacy',
-  ];
+  static examples = ['<%= config.bin %> <%= command.id %>'];
 
   static flags = {
     ...BaseCommand.baseFlags,
-    legacy: Flags.boolean({
-      default: false,
-      description: 'force the bash `up.sh restart` wrapper instead of the native down → vite-clear → up path.',
-    }),
   };
 
   // NOTE: restart is SLOT-0 ONLY (not `slotAware`) — up.sh's `restart` verb is hardcoded
@@ -51,12 +41,6 @@ export default class StackRestart extends BaseCommand {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(StackRestart);
-
-    // ── --legacy: the up.sh wrapper (clean bounce, no data wipe). ──
-    if (flags.legacy) {
-      await this.runScript(flagMap.restart(), flags);
-      return;
-    }
 
     // ── NATIVE: down → vite-clear → up over the full non-optional closure. ──
     const profile = deriveInstance({ slot: flags.slot });

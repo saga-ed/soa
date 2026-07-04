@@ -1,24 +1,18 @@
 /**
  * `saga-stack stack reset` — truncate the data DBs to an empty baseline + re-seed
- * the dev user (M8 R4 — NATIVE by default; `--legacy` wraps up.sh --reset).
+ * the dev user (M8 R4 — fully NATIVE).
  *
- * NATIVE (default): the in-process facade (`StackApi.reset`) truncates every
- * closure data DB PRESERVING `_prisma_migrations` (so no re-migrate), migrate-resets
- * ledger_local (drop + remigrate), drops connectv3 (connect mongo), then re-seeds
- * the dev user through the existing seed path. Slot-aware — targets the slot's
- * postgres/connect-mongo containers.
+ * NATIVE: the in-process facade (`StackApi.reset`) truncates every closure data DB
+ * PRESERVING `_prisma_migrations` (so no re-migrate), migrate-resets ledger_local
+ * (drop + remigrate), drops connectv3 (connect mongo), then re-seeds the dev user
+ * through the existing seed path. Slot-aware — targets the slot's postgres/
+ * connect-mongo containers.
  *
- * `--legacy`: the non-destructive bash escape — routes to `up.sh --reset`
- * (`+ --with-playback` to also truncate the opt-in playback DBs). Kept indefinitely
- * per the plan's non-destructive guarantee.
- *
- * up.sh's reset always truncates every NON-optional data DB; the only opt-in axis
- * is the playback trio (transcripts/insights/chat) — only `--with playback`
- * truncates them, reproducing the old `--with-playback` boolean.
+ * The only opt-in axis is the playback trio (transcripts/insights/chat) — only
+ * `--with playback` truncates them, reproducing the old `--with-playback` boolean.
  *
  *   node bin/dev.js stack reset
  *   node bin/dev.js stack reset --with playback
- *   node bin/dev.js stack reset --legacy
  */
 
 import { Flags } from '@oclif/core';
@@ -32,12 +26,11 @@ import { makeStackApi } from '../../stack-api.js';
 
 export default class StackReset extends BaseCommand {
   static description =
-    'Truncate the data DBs to an empty baseline + re-seed the dev user (native; --legacy wraps up.sh --reset).';
+    'Truncate the data DBs to an empty baseline + re-seed the dev user (native).';
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
     '<%= config.bin %> <%= command.id %> --with playback',
-    '<%= config.bin %> <%= command.id %> --legacy',
   ];
 
   static flags = {
@@ -47,11 +40,6 @@ export default class StackReset extends BaseCommand {
       options: [...BUNDLE_NAMES],
       description:
         "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. Only `--with playback` changes the set (it also truncates the opt-in playback DBs — transcripts, insights, chat = the old --with-playback); every other bundle's DBs are already reset by default. Repeatable: --with playback.",
-    }),
-    legacy: Flags.boolean({
-      default: false,
-      description:
-        'route to the bash `up.sh --reset` (the non-destructive escape) instead of the native runner.',
     }),
   };
 
@@ -78,17 +66,7 @@ export default class StackReset extends BaseCommand {
       (id) => !excluded.has(id),
     );
 
-    const res = await api.reset(services, { legacy: flags.legacy, withPlayback });
-
-    if (res.delegated) {
-      this.emit(
-        flags,
-        { native: false, legacy: true, code: res.code },
-        `reset delegated to up.sh --reset (exit ${res.code})`,
-      );
-      if (res.code !== 0) this.exit(res.code);
-      return;
-    }
+    const res = await api.reset(services, { withPlayback });
 
     const truncated = res.native?.dbs.filter((d) => d.action === 'truncated').map((d) => d.db) ?? [];
     const migrateReset = res.native?.dbs.filter((d) => d.action === 'migrate-reset').map((d) => d.db) ?? [];

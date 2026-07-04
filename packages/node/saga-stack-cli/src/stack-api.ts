@@ -24,10 +24,9 @@
  *  - `down`  — NATIVE. `ServiceLauncher.stopServices` (read pid files, kill).
  *  - `reset` — NATIVE (M8 R4). Truncates the closure's DBs to an empty baseline
  *              (preserving `_prisma_migrations`), migrate-resets ledger, drops
- *              connectv3, then re-seeds the dev user via the seed path. `--legacy`
- *              still routes to `up.sh --reset` (the non-destructive escape). See `reset`.
- *  - `login` — DELEGATED for M4. Browser-session minting is not ported natively;
- *              delegates to `up.sh --login [email]`. See `login`.
+ *              connectv3, then re-seeds the dev user via the seed path. See `reset`.
+ *  - `login` — DELEGATED. Browser-session minting is not ported natively;
+ *              delegates to `up.sh --login [email]` (the `login --browser` flow). See `login`.
  *
  * INVARIANT (plan hard constraint): this file imports pure `core` planners and
  * the `runtime` seams, but performs NO direct IO of its own — every spawn /
@@ -313,26 +312,22 @@ export interface DelegatedResult {
 
 /** Per-call `reset` knobs (M8 R4). */
 export interface ResetOpts {
-  /** Route to `up.sh --reset` (the non-destructive bash escape) instead of the native runner. */
-  legacy?: boolean;
   /** Also reset the opt-in playback DBs (transcripts/insights/chat). */
   withPlayback?: boolean;
 }
 
-/** The outcome of a `reset` (M8 R4 — native by default, `--legacy` delegates to up.sh). */
+/** The outcome of a native `reset` (M8 R4). */
 export interface ResetOutcome {
-  /** True iff routed to `up.sh --reset` (`--legacy`); false for the native runner. */
-  delegated: boolean;
   /**
    * 0 on success; non-zero when a CORE reset op (a truncate or the mongo drop) or the
-   * dev-user re-seed failed (or up.sh's code under `--legacy`). A failed ledger
-   * migrate-reset is warn-only and does NOT flip this (parity with up.sh's always-0
-   * reset), though it is still recorded ok:false in `native.dbs`.
+   * dev-user re-seed failed. A failed ledger migrate-reset is warn-only and does NOT
+   * flip this (parity with up.sh's always-0 reset), though it is still recorded
+   * ok:false in `native.dbs`.
    */
   code: number;
-  /** The native per-DB reset result (absent under `--legacy`). */
+  /** The native per-DB reset result. */
   native?: ResetResult;
-  /** The dev-user re-seed result (absent under `--legacy`). */
+  /** The dev-user re-seed result. */
   seed?: SeedResult;
 }
 
@@ -890,17 +885,6 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
     },
 
     async reset(services: ServiceId[], opts: ResetOpts = {}): Promise<ResetOutcome> {
-      // `--legacy`: the non-destructive bash escape — route to `up.sh --reset`
-      // through the M1 script path (kept indefinitely per the plan's non-destructive
-      // guarantee). Requires a wired delegate.
-      if (opts.legacy) {
-        if (!runtime.delegate) {
-          throw new Error('stack reset --legacy: no up.sh delegate wired into this Runtime');
-        }
-        const code = await runtime.delegate(flagMap.reset({ withPlayback: opts.withPlayback }));
-        return { delegated: true, code };
-      }
-
       // M8 R4 — NATIVE reset: truncate the closure's DBs to an empty baseline
       // (preserving `_prisma_migrations`), migrate-reset ledger, drop connectv3,
       // then re-seed the dev user via the EXISTING seed path. Slot-aware: the
@@ -943,7 +927,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       // that end-state (empty core DBs) matches up.sh, so it should not fail the command.
       const coreOk = native.dbs.every((d) => d.action === 'migrate-reset' || d.ok);
       const code = coreOk && (seed?.ok ?? true) ? 0 : 1;
-      return { delegated: false, code, native, seed };
+      return { code, native, seed };
     },
 
     async seed(plan: SeedPlan): Promise<SeedResult> {

@@ -7,10 +7,11 @@
  *   - `getOverlayFs` — canned `integration-suite.local.tsv` text.
  *   - `getRepoDirCheck` — a fake `.git` existence predicate.
  *   - `getRunner` — the ScriptPlan (bash) seam; asserted NOT called for the native
- *     verbs, and IS called for `compose-rest` / `--legacy`.
+ *     verbs, and IS called for `compose-rest`.
  *
  * The repoint contract: `overlay apply|list|reset` run NATIVELY (never the Runner);
- * `overlay compose-rest` and any `--legacy` verb still route to refresh-suite.sh.
+ * `overlay compose-rest` (the sole-implementation cloud orchestrator) still routes to
+ * refresh-suite.sh.
  */
 
 import { resolve } from 'node:path';
@@ -229,7 +230,7 @@ describe('overlay reset — native (no Runner)', () => {
   });
 });
 
-describe('overlay compose-rest / --legacy — still wrap refresh-suite.sh', () => {
+describe('overlay compose-rest — still wraps refresh-suite.sh (sole implementation)', () => {
   it('compose-rest routes to the bash Runner (ScriptPlan), not the native engine', async () => {
     installFakeGit();
     installFakeGh({});
@@ -237,13 +238,5 @@ describe('overlay compose-rest / --legacy — still wrap refresh-suite.sh', () =
     expect(runnerCalls).toHaveLength(1);
     expect(runnerCalls[0].command).toBe(REFRESH_SH);
     expect(runnerCalls[0].args).toEqual(['--compose-rest', 'dev']);
-  });
-
-  it('--legacy reset routes to the bash Runner (whole-verb escape)', async () => {
-    installFakeGit();
-    await StackOverlay.run(['reset', '--legacy', 'rostering', ...WS], config);
-    expect(runnerCalls).toHaveLength(1);
-    expect(runnerCalls[0].command).toBe(REFRESH_SH);
-    expect(runnerCalls[0].args).toEqual(['--reset', 'rostering']);
   });
 });

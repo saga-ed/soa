@@ -402,7 +402,7 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
   });
 
   it('FLIP 1: BARE full-stack at slot 0 routes through the NATIVE path (never up.sh)', async () => {
-    // Native-by-default: a bare `stack up` (no --only/--with/--legacy) at slot 0 now
+    // Native-by-default: a bare `stack up` (no --only/--with) at slot 0 now
     // expands to the full non-optional closure and boots it NATIVELY — the same path
     // `--only` uses — instead of shelling out to up.sh.
     await StackUp.run([...WS], config);
@@ -424,28 +424,6 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     expect(runs.some((r) => r.args.some((a) => a.includes('seed-dev-user')))).toBe(true);
   });
 
-  it('FLIP 1: BARE `stack up --legacy` forces the up.sh wrapper (no native launches)', async () => {
-    // --legacy is the non-destructive escape: it restores the old up.sh full-stack
-    // bring-up regardless of the other flags — NOTHING is launched natively.
-    await StackUp.run(['--legacy', ...WS], config);
-    expect(launches).toEqual([]);
-    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(true);
-    const upSh = runs.find((r) => r.command.endsWith('up.sh'));
-    expect(upSh?.args).toEqual(['up']); // bare wrapper argv
-  });
-
-  it('BLOCKER-1: `--legacy --slot 2` hard-errors instead of clobbering slot 0 (never touches up.sh)', async () => {
-    // up.sh is hardcoded to slot 0 (project soa, base ports, STATE=/tmp/sds-synthetic).
-    // --legacy routes the whole bring-up through up.sh, so at slot > 0 it would clobber
-    // the default slot-0 stack — REFUSE rather than corrupt it. This was the unguarded
-    // hole: every other slot > 0 wrapper route already hard-errors.
-    await expect(StackUp.run(['--legacy', '--slot', '2', ...WS], config)).rejects.toThrow(
-      /slot 2:.*--legacy.*hardcoded.*slot 0.*clobber/s,
-    );
-    // never shelled out to up.sh and never launched anything natively.
-    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
-    expect(launches).toEqual([]);
-  });
 
   it('FLIP 1: BARE full-stack + a native-unsupported flag (--sandbox) still wraps up.sh', async () => {
     // A native-unsupported flag on a bare invocation keeps the up.sh wrapper (the
@@ -496,11 +474,6 @@ describe('stack up — native Connect AV (#221, M9)', () => {
     expect(avCall()).toBeUndefined();
   });
 
-  it('does NOT start AV natively on the --legacy (up.sh wrapper) path — up.sh runs connect_av_up itself', async () => {
-    await StackUp.run(['--legacy', ...WS], config);
-    expect(launches).toEqual([]);
-    expect(avCall()).toBeUndefined();
-  });
 });
 
 describe('stack up --only --dry-run — planner prints the native launch + seed plan', () => {

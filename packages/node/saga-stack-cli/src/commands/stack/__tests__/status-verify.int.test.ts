@@ -35,8 +35,6 @@ import StackVerify from '../verify.js';
 
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
-const SYNTH_DIR = resolve(SOA_ROOT, 'tools', 'synthetic-dev');
-const VERIFY_SH = resolve(SYNTH_DIR, 'verify.sh');
 const DEV_ROOT = '/fixed/dev';
 const WS = ['--soa', SOA_ROOT, '--dev', DEV_ROOT];
 
@@ -384,22 +382,6 @@ describe('stack verify --full — FULLY NATIVE: health + DATA + posture, NOTHING
     expect(out.some((l) => l.includes('✓ verify --full: health + data green') && l.includes('posture warning'))).toBe(true);
   });
 
-  it('--legacy routes the WHOLE verify to bash verify.sh (the only remaining delegation)', async () => {
-    await StackVerify.run(['--legacy', ...WS], config);
-    expect(runnerCalls).toHaveLength(1);
-    expect(runnerCalls[0]).toEqual({
-      cwd: SYNTH_DIR,
-      command: VERIFY_SH,
-      args: [],
-      env: { DEV: DEV_ROOT, SOA: SOA_ROOT },
-      stdio: 'inherit',
-    });
-  });
-
-  it('--legacy --health-only passes VERIFY_HEALTH_ONLY=1 to verify.sh', async () => {
-    await StackVerify.run(['--legacy', '--health-only', ...WS], config);
-    expect(runnerCalls[0].env).toEqual({ DEV: DEV_ROOT, SOA: SOA_ROOT, VERIFY_HEALTH_ONLY: '1' });
-  });
 });
 
 describe('stack verify --slot N — backend + saga-dash/coach gate on offset ports (M7 Phase 2)', () => {

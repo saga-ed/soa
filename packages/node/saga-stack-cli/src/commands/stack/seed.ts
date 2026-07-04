@@ -1,17 +1,13 @@
 /**
  * `saga-stack stack seed [profile]` — seed an ALREADY-RUNNING stack (FLIP 2 —
- * NATIVE by default; `--legacy` wraps up.sh --seed).
+ * fully NATIVE).
  *
- * NATIVE (default): build the `SeedSelection` (profile + the `--with` seed add-ons),
+ * NATIVE: build the `SeedSelection` (profile + the `--with` seed add-ons),
  * `composeSeedPlan` over the running stack's active service set (the full
  * non-optional closure, + the playback trio under `--with playback`), and run it
  * through `StackApi.seed` — the SAME native seed runner `stack up --only` uses. It
  * seeds a stack whose services are ALREADY up, so there is no prep / mesh / launch:
  * just the offline-then-online seed steps.
- *
- * `--legacy`: the non-destructive bash escape — routes to `up.sh --seed <profile>`
- * (+ the add-on flags). Against a running stack up.sh skips the up step and just
- * seeds. Kept indefinitely per the plan's non-destructive guarantee.
  *
  * The optional `profile` arg defaults to `roster` (up.sh's own bare-`--seed`
  * default). A bundle's DATA scope on `seed` is its SEED ADD-ON (`--with playback`
@@ -21,7 +17,6 @@
  *
  *   node bin/dev.js stack seed
  *   node bin/dev.js stack seed full --with playback
- *   node bin/dev.js stack seed --legacy
  */
 
 import { Args, Flags } from '@oclif/core';
@@ -29,7 +24,6 @@ import { BaseCommand } from '../../base-command.js';
 import { BUNDLE_NAMES, combineRequested, effectiveWithPlayback, seedAddOnsFor } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
-import * as flagMap from '../../core/flag-map.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import { composeSeedPlan } from '../../core/seed/compose-seed-plan.js';
@@ -37,13 +31,11 @@ import type { SeedAddOn, SeedProfile, SeedSelection } from '../../core/seed/type
 import { makeStackApi } from '../../stack-api.js';
 
 export default class StackSeed extends BaseCommand {
-  static description =
-    'Seed a running stack (native; --legacy wraps up.sh --seed <profile>).';
+  static description = 'Seed a running stack (native).';
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
     '<%= config.bin %> <%= command.id %> full --with playback',
-    '<%= config.bin %> <%= command.id %> --legacy',
   ];
 
   static args = {
@@ -62,11 +54,6 @@ export default class StackSeed extends BaseCommand {
       description:
         "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo. Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
     }),
-    legacy: Flags.boolean({
-      default: false,
-      description:
-        'route to the bash `up.sh --seed <profile>` (the non-destructive escape) instead of the native seed runner.',
-    }),
   };
 
   async run(): Promise<void> {
@@ -78,13 +65,7 @@ export default class StackSeed extends BaseCommand {
     // `--with qtf` ⇒ qtf.
     const addOns: SeedAddOn[] = [...seedAddOnsFor(flags.with)];
 
-    // ── --legacy: the bash escape — up.sh --seed <profile> (+ add-on flags). ──
-    if (flags.legacy) {
-      await this.runScript(flagMap.seed({ profile, addOns }), flags);
-      return;
-    }
-
-    // ── NATIVE (default): compose the plan over the RUNNING stack + run it. ──
+    // ── NATIVE: compose the plan over the RUNNING stack + run it. ──
     // The active set is the full non-optional closure (the running stack) UNIONED
     // with any services a `--with` bundle pulls in — `--with playback` adds the
     // playback trio (transcripts/insights/chat) so their add-on seed steps compose

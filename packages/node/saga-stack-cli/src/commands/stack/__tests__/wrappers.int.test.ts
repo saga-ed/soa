@@ -27,11 +27,8 @@ import { BaseCommand } from '../../../base-command.js';
 import type { RunResult, ScriptInvocation, StopServiceResult } from '../../../runtime/index.js';
 import StackUp from '../up.js';
 import StackDown from '../down.js';
-import StackSeed from '../seed.js';
-import StackReset from '../reset.js';
 import StackOverlay from '../overlay.js';
 import StackTunnel from '../tunnel.js';
-import StackBootstrap from '../bootstrap.js';
 
 // Package root = vitest cwd; soa root is three dirs up (packages/node/<pkg>).
 const PKG_ROOT = process.cwd();
@@ -40,7 +37,6 @@ const SYNTH_DIR = resolve(SOA_ROOT, 'tools', 'synthetic-dev');
 const UP_SH = resolve(SYNTH_DIR, 'up.sh');
 const REFRESH_SH = resolve(SYNTH_DIR, 'refresh-suite.sh');
 const TUNNEL_SH = resolve(SYNTH_DIR, 'tunnel.sh');
-const BOOTSTRAP_SH = resolve(SYNTH_DIR, 'bootstrap.sh');
 const DEV_ROOT = '/fixed/dev';
 
 let config: Config;
@@ -90,52 +86,7 @@ afterEach(() => {
 /** The workspace flags every case shares for deterministic path/env resolution. */
 const WS = ['--soa', SOA_ROOT, '--dev', DEV_ROOT];
 
-describe('stack up --legacy — the up.sh escape (FLIP 1: bare up is native-by-default)', () => {
-  it('maps flags to the exact up.sh ScriptInvocation and never spawns', async () => {
-    // FLIP 1: bare `stack up` now goes native; `--legacy` is the up.sh escape whose
-    // flag→argv mapping this pins.
-    await StackUp.run(['--legacy', '--reset', '--seed', 'roster', '--login', ...WS], config);
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual({
-      cwd: SYNTH_DIR,
-      command: UP_SH,
-      args: ['up', '--reset', '--seed', 'roster', '--login'],
-      env: { DEV: DEV_ROOT, SOA: SOA_ROOT },
-      stdio: 'inherit',
-    });
-  });
-
-  it('--no-auto-pull / --skip-prep still map to env under --legacy (M9: native by default, but the wrapper mapping is intact)', async () => {
-    // M9: a BARE `--no-auto-pull` / `--skip-prep` now runs NATIVELY (they select the
-    // auto-pull mode / skip R1). The flag→env mapping is preserved for `--legacy`.
-    await StackUp.run(['--legacy', '--no-auto-pull', '--skip-prep', ...WS], config);
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].args).toEqual(['up']);
-    expect(calls[0].env).toEqual({
-      DEV: DEV_ROOT,
-      SOA: SOA_ROOT,
-      NO_AUTO_PULL: '1',
-      SKIP_PREP: '1',
-    });
-  });
-
-  it('per-repo overrides (--rostering / --program-hub) become up.sh repo env vars', async () => {
-    await StackUp.run(
-      ['--legacy', '--rostering', '/x/rostering', '--program-hub', '/y/ph', ...WS],
-      config,
-    );
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0].env).toEqual({
-      DEV: DEV_ROOT,
-      SOA: SOA_ROOT,
-      ROSTERING: '/x/rostering',
-      PROGRAM_HUB: '/y/ph',
-    });
-  });
-
+describe('stack up — sole-implementation up.sh wrap (--sandbox/--workspace/--record; bare up is native)', () => {
   it('--dry-run does NOT invoke the Runner (planner-only path)', async () => {
     await StackUp.run(['--dry-run', '--only', 'scheduling-api,sessions-api', ...WS], config);
     expect(calls).toHaveLength(0);
@@ -152,41 +103,69 @@ describe('stack up --legacy — the up.sh escape (FLIP 1: bare up is native-by-d
   });
 
   // A SINGLE-service --only with a native-unsupported flag (--sandbox) still
-  // falls back to the up.sh wrapper (preserves the M1 --sandbox behaviour).
+  // falls back to the up.sh wrapper — the sole-implementation escape (no native path).
   it('single-service --only + --sandbox falls back to the up.sh wrapper', async () => {
     await StackUp.run(['--only', 'scheduling-api', '--sandbox', 'demo', ...WS], config);
     expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe(UP_SH);
     expect(calls[0].args).toEqual(['up', '--only', 'scheduling-api', '--sandbox', 'demo']);
+  });
+
+  it('per-repo overrides (--rostering / --program-hub) become up.sh repo env vars on the --sandbox wrap', async () => {
+    await StackUp.run(
+      ['--only', 'scheduling-api', '--sandbox', 'demo', '--rostering', '/x/rostering', '--program-hub', '/y/ph', ...WS],
+      config,
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].env).toEqual({
+      DEV: DEV_ROOT,
+      SOA: SOA_ROOT,
+      ROSTERING: '/x/rostering',
+      PROGRAM_HUB: '/y/ph',
+    });
   });
 
   it('propagates a non-zero up.sh exit code via this.exit()', async () => {
     installFakeRunner(3);
     // oclif's this.exit(code) throws an ExitError carrying `oclif.exit === code`.
-    await expect(StackUp.run(['--legacy', ...WS], config)).rejects.toMatchObject({ oclif: { exit: 3 } });
+    await expect(
+      StackUp.run(['--only', 'scheduling-api', '--sandbox', 'demo', ...WS], config),
+    ).rejects.toMatchObject({ oclif: { exit: 3 } });
     expect(calls).toHaveLength(1);
   });
 });
 
-describe('stack down — slot-safe teardown (M7 BLOCKER-2)', () => {
+describe('stack down — native slot-safe teardown at every slot (no up.sh)', () => {
   const INFRA_DIR = resolve(SOA_ROOT, 'infra');
 
-  it('slot 0 (bare) wraps up.sh --down (unchanged M1 behaviour)', async () => {
+  it('slot 0 (bare) stops services NATIVELY against /tmp/sds-synthetic (never up.sh)', async () => {
+    const { stopCalls } = installFakeStopper([{ id: 'iam-api', pid: 200, outcome: 'term' }]);
+
     await StackDown.run([...WS], config);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe(UP_SH);
-    expect(calls[0].args).toEqual(['--down']);
+
+    // no up.sh service-stop — the native kill-by-pidfile replaces the old up.sh --down.
+    expect(calls.some((c) => c.command.endsWith('up.sh'))).toBe(false);
+    // no mesh teardown without --mesh.
+    expect(calls).toHaveLength(0);
+    // native stopper driven against slot 0's state dir.
+    expect(stopCalls).toEqual(['/tmp/sds-synthetic']);
   });
 
-  it('slot 0 --mesh: up.sh --down THEN make down for the default project', async () => {
+  it('slot 0 --mesh: native service-stop THEN make down for the default project (no up.sh)', async () => {
+    const { stopCalls } = installFakeStopper([{ id: 'iam-api', pid: 200, outcome: 'term' }]);
+
     await StackDown.run(['--mesh', ...WS], config);
-    expect(calls).toHaveLength(2);
-    expect(calls[0].command).toBe(UP_SH);
-    expect(calls[0].args).toEqual(['--down']);
-    // mesh teardown targets the DEFAULT project (no COMPOSE_PROJECT_NAME arg/env).
-    expect(calls[1].command).toBe('make');
-    expect(calls[1].cwd).toBe(INFRA_DIR);
-    expect(calls[1].args).toEqual(['down', 'PROJECT=saga-mesh']);
-    expect(calls[1].env).toEqual({});
+
+    // never up.sh.
+    expect(calls.some((c) => c.command.endsWith('up.sh'))).toBe(false);
+    expect(stopCalls).toEqual(['/tmp/sds-synthetic']);
+    // exactly one Runner call: make down for the DEFAULT project (no COMPOSE_PROJECT_NAME).
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe('make');
+    expect(calls[0].cwd).toBe(INFRA_DIR);
+    expect(calls[0].args).toEqual(['down', 'PROJECT=saga-mesh']);
+    expect(calls[0].env).toEqual({});
   });
 
   it('slot > 0 stops the slot NATIVELY against its state dir (never up.sh)', async () => {
@@ -243,57 +222,9 @@ describe('stack down — slot-safe teardown (M7 BLOCKER-2)', () => {
   });
 });
 
-describe('stack seed --legacy — --with bundles map to up.sh seed add-ons (FLIP 2: seed is native-by-default)', () => {
-  // FLIP 2: bare `stack seed` now seeds NATIVELY (covered in seed-native.int.test.ts);
-  // `--legacy` is the up.sh escape whose flag→argv mapping these pin.
-  it('bare --legacy → up.sh --seed roster (no add-ons)', async () => {
-    await StackSeed.run(['--legacy', ...WS], config);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe(UP_SH);
-    expect(calls[0].args).toEqual(['--seed', 'roster']);
-  });
-
-  it('--legacy full --with playback → --seed full --with-playback (== the old --with-playback)', async () => {
-    await StackSeed.run(['--legacy', 'full', '--with', 'playback', ...WS], config);
-    expect(calls[0].args).toEqual(['--seed', 'full', '--with-playback']);
-  });
-
-  it('--legacy --with playback --with qtf → both add-on flags (registry order)', async () => {
-    await StackSeed.run(['--legacy', '--with', 'playback', '--with', 'qtf', ...WS], config);
-    expect(calls[0].args).toEqual(['--seed', 'roster', '--with-playback', '--with-qtf-demo']);
-  });
-
-  it('--legacy --with qtf → up.sh --with-qtf-demo (bash flag emitted by the mapper)', async () => {
-    await StackSeed.run(['--legacy', '--with', 'qtf', ...WS], config);
-    expect(calls[0].args).toEqual(['--seed', 'roster', '--with-qtf-demo']);
-  });
-
-  it('--legacy a bundle with no seed add-on (--with coach) is a no-op', async () => {
-    await StackSeed.run(['--legacy', '--with', 'coach', ...WS], config);
-    expect(calls[0].args).toEqual(['--seed', 'roster']);
-  });
-});
-
-describe('stack reset --legacy — wraps up.sh --reset (the non-destructive escape)', () => {
-  // The default `stack reset` is now NATIVE (M8 R4 — asserted in stack-api.unit);
-  // the up.sh mapping lives behind `--legacy`.
-  it('bare --legacy → up.sh --reset', async () => {
-    await StackReset.run(['--legacy', ...WS], config);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe(UP_SH);
-    expect(calls[0].args).toEqual(['--reset']);
-  });
-
-  it('--legacy --with playback → --reset --with-playback (== the old --with-playback)', async () => {
-    await StackReset.run(['--legacy', '--with', 'playback', ...WS], config);
-    expect(calls[0].args).toEqual(['--reset', '--with-playback']);
-  });
-
-  it('--legacy with a bundle already in the default reset set (--with coach) is a no-op', async () => {
-    await StackReset.run(['--legacy', '--with', 'coach', ...WS], config);
-    expect(calls[0].args).toEqual(['--reset']);
-  });
-});
+// NOTE: `stack seed` and `stack reset` are NO LONGER shell-out wrappers — they are
+// fully NATIVE (FLIP 2 / M8 R4). Their coverage lives in seed-native.int.test.ts and
+// stack-api.unit.test.ts respectively.
 
 // NOTE: `stack status` and `stack verify` are NO LONGER shell-out wrappers — M2
 // re-implemented them natively (manifest-derived health probes via the injectable
@@ -303,9 +234,9 @@ describe('stack reset --legacy — wraps up.sh --reset (the non-destructive esca
 
 // NOTE (M10): `overlay apply|list|reset` are NO LONGER shell-out wrappers — the git
 // engine is native (see overlay-native.int.test.ts, which mocks the git/gh/overlay-fs
-// seams). `compose-rest` (cloud orchestrator) and `--legacy` (whole-verb escape) remain
-// ScriptPlan wrappers over refresh-suite.sh — the still-wrapped cases live here.
-describe('stack overlay — compose-rest + --legacy still wrap refresh-suite.sh', () => {
+// seams). `compose-rest` (the cloud orchestrator, sole implementation) remains a
+// ScriptPlan wrapper over refresh-suite.sh — the still-wrapped cases live here.
+describe('stack overlay compose-rest — still wraps refresh-suite.sh (sole implementation)', () => {
   it('rejects apply with positional repos but no --prs (would silently drop them)', async () => {
     await expect(
       StackOverlay.run(['apply', 'saga-dash', ...WS], config),
@@ -313,36 +244,12 @@ describe('stack overlay — compose-rest + --legacy still wrap refresh-suite.sh'
     expect(calls).toHaveLength(0);
   });
 
-  it('--legacy apply → refresh-suite.sh ScriptPlan (the whole-verb escape)', async () => {
-    await StackOverlay.run(['apply', '--legacy', ...WS], config);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual({
-      cwd: SYNTH_DIR,
-      command: REFRESH_SH,
-      args: [],
-      env: { DEV: DEV_ROOT, SOA: SOA_ROOT },
-      stdio: 'inherit',
-    });
-  });
-
-  it('--legacy apply --prs <set> <repo…> → ad-hoc overlay argv (repos read off positionals)', async () => {
-    await StackOverlay.run(['apply', '--legacy', '--prs', '165', 'saga-dash', ...WS], config);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].command).toBe(REFRESH_SH);
-    expect(calls[0].args).toEqual(['--prs', '165', 'saga-dash']);
-  });
-
-  it('--legacy reset <repo…> → --reset <repo…>', async () => {
-    await StackOverlay.run(['reset', '--legacy', 'rostering', ...WS], config);
-    expect(calls[0].command).toBe(REFRESH_SH);
-    expect(calls[0].args).toEqual(['--reset', 'rostering']);
-  });
-
   it('compose-rest <name> → --compose-rest <name>; knobs become env', async () => {
     await StackOverlay.run(
       ['compose-rest', 'dev', '--ttl-hours', '6', '--seed-profile', 'canonical', ...WS],
       config,
     );
+    expect(calls[0].command).toBe(REFRESH_SH);
     expect(calls[0].args).toEqual(['--compose-rest', 'dev']);
     expect(calls[0].env).toEqual({
       DEV: DEV_ROOT,
@@ -392,31 +299,5 @@ describe('stack tunnel — wraps tunnel.sh', () => {
   });
 });
 
-// M11: bootstrap is NATIVE-BY-DEFAULT (ensure-repos → overlay → up → verify); only
-// `--legacy` routes the whole chain to bootstrap.sh. The native path is covered in
-// bootstrap-native.int.test.ts; here we only assert the --legacy wrap + its exact argv.
-describe('stack bootstrap --legacy — wraps bootstrap.sh', () => {
-  it('--legacy → bootstrap.sh --seed roster (the flag default)', async () => {
-    await StackBootstrap.run(['--legacy', ...WS], config);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual({
-      cwd: SYNTH_DIR,
-      command: BOOTSTRAP_SH,
-      args: ['--seed', 'roster'],
-      env: { DEV: DEV_ROOT, SOA: SOA_ROOT },
-      stdio: 'inherit',
-    });
-  });
-
-  it('--legacy --no-refresh --seed full → bootstrap.sh --no-refresh --seed full', async () => {
-    await StackBootstrap.run(['--legacy', '--no-refresh', '--seed', 'full', ...WS], config);
-    expect(calls[0].args).toEqual(['--no-refresh', '--seed', 'full']);
-  });
-
-  it('--legacy --yes is rejected (bootstrap.sh has no non-interactive antecedent) and never spawns', async () => {
-    await expect(StackBootstrap.run(['--legacy', '--yes', ...WS], config)).rejects.toMatchObject({
-      message: expect.stringContaining('bootstrap --yes is not available'),
-    });
-    expect(calls).toHaveLength(0);
-  });
-});
+// NOTE: `stack bootstrap` is NATIVE-BY-DEFAULT (ensure-repos → overlay → up → verify)
+// with no shell-out wrapper remaining. Its coverage lives in bootstrap-native.int.test.ts.

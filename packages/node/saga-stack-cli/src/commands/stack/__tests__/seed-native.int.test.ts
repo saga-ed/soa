@@ -4,8 +4,8 @@
  * FLIP 2 makes bare `stack seed` seed an already-running stack NATIVELY: build the
  * SeedSelection (profile + `--with` add-ons) → composeSeedPlan over the running
  * stack's active service set → run it through the SAME `StackApi.seed` runner the
- * `stack up --only` path uses. NO up.sh, no prep, no mesh, no launch. `--legacy` is
- * the bash escape (its up.sh --seed argv is pinned in wrappers.int.test.ts).
+ * `stack up --only` path uses. NO up.sh, no prep, no mesh, no launch — `stack seed`
+ * is fully native.
  *
  * These drive the REAL StackSeed command end-to-end but replace the process seam
  * (`getRunner`) with a fake that records each seed step — so the composed plan +

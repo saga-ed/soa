@@ -5,12 +5,12 @@
  * BaseCommand prototype:
  *   - `getCookiePoster` — a fake POST recording url/origin/body + returning canned Set-Cookies.
  *   - `getJarWriter`    — captures the jar path + bytes (no fs).
- *   - `getRunner`       — the up.sh ScriptPlan seam; asserted NOT called natively, IS called for --legacy.
+ *   - `getRunner`       — the up.sh ScriptPlan seam; asserted NOT called natively, IS called for --browser.
  *
  * Contract: native login builds the origin-checked devLogin POST at the slot-aware iam URL
  * (+ LOGIN_IAM_URL override), writes the Netscape jar to <stateDir>/cookies.txt, keeps the
- * browser half delegated, surfaces the login-after-seed hint on 401 (no crash), and
- * --legacy routes the full flow to up.sh --login.
+ * browser half a `--browser` feature flag, surfaces the login-after-seed hint on 401 (no
+ * crash), and --browser routes the full flow to up.sh --login.
  */
 
 import { resolve } from 'node:path';
@@ -105,8 +105,8 @@ describe('stack login — native headless cookie jar', () => {
     expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');
     expect(jarWrites[0]?.contents).toContain('iam_session\tjwt.tok.sig');
     expect(jarWrites[0]?.contents).toContain('iam_refresh\trefr');
-    // browser half stays delegated (surfaced to the user).
-    expect(out()).toContain('delegated');
+    // headful browser flow is surfaced as the --browser feature flag.
+    expect(out()).toContain('--browser');
   });
 
   it('an email arg overrides the persona', async () => {
@@ -140,16 +140,16 @@ describe('stack login — native headless cookie jar', () => {
     const text = out();
     expect(text).toContain('HTTP 401');
     expect(text).toContain('only exists after a roster seed');
-    expect(text).toContain('delegated'); // browser half still noted as delegated
+    expect(text).toContain('--browser'); // headful browser flow surfaced as the feature flag
   });
 
-  it('--legacy routes the FULL flow (jar + headful Chromium) to up.sh --login', async () => {
+  it('--browser routes the FULL flow (jar + headful Chromium) to up.sh --login', async () => {
     installPoster(OK_COOKIES); // present but must NOT be used
     installJar();
 
-    await StackLogin.run(['--legacy', 'teacher@saga.org', ...WS], config);
+    await StackLogin.run(['--browser', 'teacher@saga.org', ...WS], config);
 
-    // delegated: the up.sh Runner WAS called; the native poster/jar were NOT.
+    // the up.sh Runner WAS called; the native poster/jar were NOT.
     expect(runnerCalls).toHaveLength(1);
     expect(runnerCalls[0]?.args).toEqual(['--login', 'teacher@saga.org']);
     expect(posts ?? []).toHaveLength(0);

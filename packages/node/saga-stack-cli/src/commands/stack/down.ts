@@ -1,41 +1,34 @@
 /**
- * `saga-stack stack down` — stop the running stack.
+ * `saga-stack stack down` — stop the running stack (fully NATIVE at every slot).
  *
- * Default (no `--mesh`): `flagMap.down()` → `up.sh --down` — up.sh skips the up
- * path, stops the services, and LEAVES the mesh (postgres/rabbitmq/redis/
- * connect-mongo) up. Unchanged M1 behaviour.
+ * Default (no `--mesh`): the slot's OWN dev servers are stopped NATIVELY by
+ * `stopServices(stateDir)` — SIGTERM→grace→SIGKILL of exactly the pids the native
+ * `up` recorded under the state dir (slot 0 = `/tmp/sds-synthetic`, slot N =
+ * `…-s<N>`). It enumerates ONLY that dir's pidfiles and NEVER a host-global `pkill`,
+ * so it is strictly safer than the old `up.sh --down` (which did `pkill -f tsup` +
+ * killed the hardcoded slot-0 STATE) and cannot cross into a peer slot. The mesh
+ * (postgres/rabbitmq/redis/connect-mongo) is LEFT up.
  *
  * With `--mesh` (plan M2 — "stack down --mesh: also make down infra"): after the
- * services are stopped, ALSO tear the mesh down. There is NO up.sh antecedent flag
- * (up.sh's `--down` never touches the mesh), so this is a native runtime step
- * layered on the M1 wrap — the faithful inverse of up.sh's `mesh_up`, which brings
- * the mesh up with `make up PROJECT=saga-mesh …` in `$SOA/infra`. The teardown runs
+ * services are stopped, ALSO tear the mesh down — the faithful inverse of up.sh's
+ * `mesh_up` (`make up PROJECT=saga-mesh …` in `$SOA/infra`). The teardown runs
  * `make down PROJECT=saga-mesh` there (infra `down:` = `docker compose down`,
- * volumes preserved).
+ * volumes preserved), against THIS slot's project (slot 0 → the default `soa`).
  *
  *   node bin/dev.js stack down            # services down, mesh stays up
  *   node bin/dev.js stack down --mesh     # services down + mesh down
- *
- * SLOT > 0 (M7 Phase 3): the host-global `up.sh --down` service-stop is NEVER run
- * (its `pkill -f tsup` + slot-0 STATE would kill slot 0's watchers). Instead the
- * slot's OWN dev servers are stopped NATIVELY by `stopServices(profile.stateDir)` —
- * SIGTERM→grace→SIGKILL of exactly the pids the native `up --slot N` recorded under
- * the slot's state dir (`/tmp/sds-synthetic-s<N>`), which physically cannot reach
- * slot 0's pidfiles. With `--mesh` the slot-correct native mesh teardown runs too.
- * Slot 0 is unchanged (up.sh --down wrapper).
  */
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
-import * as flagMap from '../../core/flag-map.js';
 import { meshDown, resolveRepoRoot } from '../../runtime/index.js';
 import type { MeshDownResult, ScriptContext, StopServiceResult } from '../../runtime/index.js';
 
 export default class StackDown extends BaseCommand {
   static description =
-    'Stop the running stack (wraps up.sh --down; leaves the mesh up unless --mesh).';
+    'Stop the running stack natively (kill-by-pidfile; leaves the mesh up unless --mesh).';
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
@@ -52,11 +45,9 @@ export default class StackDown extends BaseCommand {
   };
 
   /**
-   * M7 Phase 3: `stack down --slot N` stops the slot's OWN services natively
-   * (`stopServices` kill-by-pidfile against the slot's state dir) and, with
-   * `--mesh`, tears down the RIGHT per-slot mesh project. The DESTRUCTIVE
-   * host-global `up.sh --down` service-stop is NEVER run at slot > 0 (see BLOCKER-2
-   * below). Slot 0 is unchanged (up.sh wrapper).
+   * `stack down [--slot N]` stops the slot's OWN services natively (`stopServices`
+   * kill-by-pidfile against the slot's state dir) and, with `--mesh`, tears down the
+   * RIGHT per-slot mesh project. Slot-aware at every slot; NO host-global `pkill`.
    */
   protected slotAware(): boolean {
     return true;
@@ -65,62 +56,35 @@ export default class StackDown extends BaseCommand {
   async run(): Promise<void> {
     const { flags } = await this.parse(StackDown);
 
-    // M7: the slot profile supplies the per-slot COMPOSE_PROJECT_NAME for the mesh
-    // teardown. At slot 0 project stays `soa` (undefined here → the default).
+    // The slot profile supplies the per-slot state dir + COMPOSE_PROJECT_NAME for the
+    // mesh teardown. At slot 0 stateDir=/tmp/sds-synthetic and project stays `soa`.
     const profile = deriveInstance({ slot: flags.slot });
 
-    // ── M7 BLOCKER-2: at slot > 0 do NOT run the host-global `up.sh --down`. ──
-    // up.sh --down does `pkill -f tsup` (HOST-GLOBAL — kills every slot's watchers)
-    // and kills the pids recorded under the hardcoded slot-0 STATE
-    // (/tmp/sds-synthetic) — running it from a slot would kill slot 0's services.
-    // So at slot > 0 we run the NATIVE slot-safe service-stop (Phase 3) instead: it
-    // enumerates only the pidfiles under THIS slot's state dir and NEVER a global
-    // pkill, so it cannot reach slot 0's watchers. With --mesh the slot-correct mesh
-    // teardown runs after.
-    if (profile.slot > 0) {
-      // Phase 3: native, slot-safe service-stop — SIGTERM→grace→SIGKILL of exactly
-      // the pids native `up --slot N` recorded. An EXPLICIT `--state-dir` wins;
-      // otherwise the slot's `profile.stateDir` (`/tmp/sds-synthetic-s<N>`). This
-      // MUST mirror `up`'s resolution (`up.ts` ~:470) — `up --slot N --state-dir
-      // /custom` records pids under /custom, so a `down` that ignored `--state-dir`
-      // would enumerate the slot's default dir, find nothing, and leak every server.
-      // (Not a slot-safety breach — `down` always drives a slot>0 dir — just an
-      // under-kill that this closes.)
-      const stateDir = flags['state-dir'] ?? profile.stateDir;
-      const stopper = this.getServiceStopper();
-      const stopped = await stopper(stateDir);
-      this.reportStopped(profile, stateDir, stopped);
-
-      if (!flags.mesh) return;
-
-      // --mesh: tear down ONLY this slot's mesh project (never the default `soa`).
-      const mesh = await this.tearMeshDown(flags, profile);
-      this.log(
-        mesh.ok
-          ? `mesh (${profile.project}): down`
-          : `mesh (${profile.project}): make down exited ${mesh.code}`,
-      );
-      if (mesh.code !== 0) this.exit(mesh.code);
-      return;
-    }
-
-    // ── Slot 0: unchanged M1 behaviour. ──
-    // 1. Stop the services (up.sh --down). Without --mesh this is the whole job,
-    //    so a non-zero exit propagates as before. With --mesh we still tear the
-    //    mesh down even if services_down reported non-zero, so defer propagation
-    //    and surface the worst code after the mesh teardown.
-    const servicesCode = await this.runScript(flagMap.down(), flags, {
-      propagateExit: !flags.mesh,
-    });
+    // ── NATIVE service-stop at EVERY slot (slot 0 included). ──
+    // SIGTERM→grace→SIGKILL of exactly the pids native `up` recorded — it enumerates
+    // ONLY the pidfiles under this slot's state dir and NEVER a host-global `pkill`, so
+    // it is strictly safer than the old `up.sh --down` and can't cross into a peer slot.
+    // An EXPLICIT `--state-dir` wins; otherwise the slot's `profile.stateDir` (slot 0 =
+    // `/tmp/sds-synthetic`). This MUST mirror `up`'s resolution (base-command
+    // `buildNativeRuntime`: `flags['state-dir'] ?? profile.stateDir`) — `up --state-dir
+    // /custom` records pids under /custom, so a `down` that ignored `--state-dir` would
+    // enumerate the default dir, find nothing, and leak every server.
+    const stateDir = flags['state-dir'] ?? profile.stateDir;
+    const stopper = this.getServiceStopper();
+    const stopped = await stopper(stateDir);
+    this.reportStopped(profile, stateDir, stopped);
 
     if (!flags.mesh) return;
 
-    // 2. --mesh: ALSO tear the mesh down (inverse of up.sh mesh_up's
-    //    `make up PROJECT=saga-mesh`).
+    // ── --mesh: ALSO tear the mesh down (inverse of up.sh mesh_up's
+    //    `make up PROJECT=saga-mesh`), against THIS slot's project (slot 0 → default `soa`). ──
     const mesh = await this.tearMeshDown(flags, profile);
-
-    const code = servicesCode !== 0 ? servicesCode : mesh.code;
-    if (code !== 0) this.exit(code);
+    this.log(
+      mesh.ok
+        ? `mesh (${profile.project}): down`
+        : `mesh (${profile.project}): make down exited ${mesh.code}`,
+    );
+    if (mesh.code !== 0) this.exit(mesh.code);
   }
 
   /**

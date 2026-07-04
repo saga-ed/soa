@@ -157,6 +157,38 @@ describe('stack snapshot store — manifest-driven, all 10 pg + connectv3 mongo'
     expect(dbsCalled('mongoDump')).toEqual([]);
   });
 
+  it('M13-A: --slot 1 scopes the DEFAULT dump to the slot-provisioned DBs (excluded services dropped)', async () => {
+    // The real applyInstanceEnv would point $SAGA_MESH_SNAPSHOTS_DIR at
+    // ~/.saga-mesh/snapshots-s1 (real home!) — redirect it into the temp
+    // snapshots root while still recording the slot profile it was given.
+    let appliedSlot: number | undefined;
+    vi.spyOn(
+      BaseCommand.prototype as unknown as {
+        applyInstanceEnv: (p: { slot: number; containerEnv: Record<string, string> }) => void;
+      },
+      'applyInstanceEnv',
+    ).mockImplementation((profile) => {
+      appliedSlot = profile.slot;
+      for (const [k, v] of Object.entries(profile.containerEnv)) process.env[k] = v;
+      process.env.SAGA_MESH_SNAPSHOTS_DIR = join(snapDir, `s${profile.slot}`);
+    });
+
+    await SnapshotStore.run(['--fixture-id', 'slotted', '--slot', '1'], config);
+    expect(appliedSlot).toBe(1);
+    const pg = dbsCalled('pgDump');
+    // The slot-excluded literal-port services' DBs are never provisioned in
+    // soa-s1 and must not be dumped. NOTE post-closure filtering is load-
+    // bearing: saga-dash's browser edge pulls ads-adm-api back into the
+    // closure, so a requested-set pre-filter would still dump ads_adm_local.
+    expect(pg).not.toContain('ads_adm_local');
+    expect(dbsCalled('mongoDump')).toEqual([]); // connect-api (connectv3) is excluded
+    // …while the slottable backends still are:
+    expect(pg).toContain('iam_local');
+    expect(pg).toContain('coach_api');
+    // And the dump landed in the slot's (redirected) snapshot root.
+    expect(process.env.SAGA_MESH_SNAPSHOTS_DIR).toBe(join(snapDir, 's1'));
+  });
+
   it('--with playback adds transcripts/insights/chat', async () => {
     await SnapshotStore.run(['--fixture-id', 'pb', '--with', 'playback'], config);
     expect(dbsCalled('pgDump')).toContain('transcripts_local');

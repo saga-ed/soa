@@ -7,6 +7,7 @@
 
 import { Args } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
+import { deriveInstance } from '../../../core/derive-instance.js';
 import { deleteSnapshot, snapshotDir, snapshotExists } from '../../../runtime/index.js';
 
 export default class SnapshotDelete extends BaseCommand {
@@ -22,8 +23,21 @@ export default class SnapshotDelete extends BaseCommand {
     ...BaseCommand.baseFlags,
   };
 
+  /** M13-A: snapshot state is env-parameterized; the slot's env seam isolates it. */
+  protected slotAware(): boolean {
+    return true;
+  }
+
+  /** M13-A: `--set` targets the set's slot's containers + snapshot dir. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(SnapshotDelete);
+    // M13-A: apply the slot env seam BEFORE any snapshot-store resolver runs —
+    // snapshotsRoot()/postgresContainer()/… read $SAGA_MESH_* at call time.
+    this.applyInstanceEnv(deriveInstance({ slot: flags.slot }));
     const fixtureId = args['fixture-id'];
     const dir = snapshotDir(fixtureId);
 

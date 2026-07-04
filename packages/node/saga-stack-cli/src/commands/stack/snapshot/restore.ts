@@ -25,6 +25,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
+import { deriveInstance } from '../../../core/derive-instance.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { DbId, RepoKey as ManifestRepoKey, ServiceId } from '../../../core/manifest/index.js';
@@ -81,8 +82,21 @@ export default class SnapshotRestore extends BaseCommand {
     return gatherLocalMigrations(snapshot, ctx);
   }
 
+  /** M13-A: snapshot state is env-parameterized; the slot's env seam isolates it. */
+  protected slotAware(): boolean {
+    return true;
+  }
+
+  /** M13-A: `--set` targets the set's slot's containers + snapshot dir. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(SnapshotRestore);
+    // M13-A: apply the slot env seam BEFORE any snapshot-store resolver runs —
+    // snapshotsRoot()/postgresContainer()/… read $SAGA_MESH_* at call time.
+    this.applyInstanceEnv(deriveInstance({ slot: flags.slot }));
     const fixtureId = args['fixture-id'];
 
     const dir = snapshotDir(fixtureId);
@@ -99,7 +113,9 @@ export default class SnapshotRestore extends BaseCommand {
       ? scopeSnapshot(full, flags.only, (m) => this.error(m))
       : full;
 
-    const ctx = workspaceContext(flags);
+    // M13-A: the SHARED context builder, so a `--set`-injected repo path is
+    // honored by the snapshot-ahead guard's migration discovery too.
+    const ctx = this.scriptContextFromFlags(flags);
     const localMigrations = this.localMigrationsFor(snapshot, ctx);
 
     const plan = restorePlan(snapshot, manifest, localMigrations, {
@@ -188,14 +204,4 @@ export function scopeSnapshot(
     );
   }
   return snapshotManifestSchema.parse({ ...snapshot, databases });
-}
-
-/** Build the script/path resolution context from the shared workspace flags. */
-function workspaceContext(flags: { dev?: string } & Partial<Record<RepoKey, string>>): ScriptContext {
-  const repoRoots: Partial<Record<ManifestRepoKey, string>> = {};
-  for (const repo of Object.keys(REPO_ENV_VAR) as RepoKey[]) {
-    const value = flags[repo];
-    if (value) repoRoots[REPO_ENV_VAR[repo] as ManifestRepoKey] = value;
-  }
-  return { dev: flags.dev, repoRoots };
 }

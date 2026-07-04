@@ -14,6 +14,7 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
+import { deriveInstance } from '../../../core/derive-instance.js';
 import { formatBytes, scanSnapshots, snapshotsRoot } from '../../../runtime/index.js';
 
 export default class SnapshotList extends BaseCommand {
@@ -34,8 +35,21 @@ export default class SnapshotList extends BaseCommand {
     }),
   };
 
+  /** M13-A: snapshot state is env-parameterized; the slot's env seam isolates it. */
+  protected slotAware(): boolean {
+    return true;
+  }
+
+  /** M13-A: `--set` targets the set's slot's containers + snapshot dir. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(SnapshotList);
+    // M13-A: apply the slot env seam BEFORE any snapshot-store resolver runs —
+    // snapshotsRoot()/postgresContainer()/… read $SAGA_MESH_* at call time.
+    this.applyInstanceEnv(deriveInstance({ slot: flags.slot }));
     const entries = scanSnapshots();
 
     if (flags['output-json']) {

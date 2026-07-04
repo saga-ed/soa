@@ -99,6 +99,11 @@ export default class E2eRun extends BaseCommand {
     return true;
   }
 
+  /** M13-A: `e2e run --set <name>` drives the set's slot + worktree flows. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(E2eRun);
 

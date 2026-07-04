@@ -56,9 +56,20 @@ export default class StackSeed extends BaseCommand {
     }),
   };
 
+  /** M13-A: seed's runtime is fully slot-parameterized (MESH_PG_PORT + container tokens). */
+  protected slotAware(): boolean {
+    return true;
+  }
+
+  /** M13-A: `stack seed --set <name>` seeds the set's slot. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(StackSeed);
     const profile = args.profile as SeedProfile;
+    const instance = deriveInstance({ slot: flags.slot });
 
     // A bundle's seed-axis contribution is its seed add-on (derived from the
     // registry so it cannot drift from `--with`): `--with playback` ⇒ playback,
@@ -77,12 +88,24 @@ export default class StackSeed extends BaseCommand {
       .map((s) => s.id);
     const bundleServices = combineRequested(undefined, flags.with, (m) => this.error(m));
     const requested = [...new Set<ServiceId>([...fullNonOptional, ...bundleServices])];
-    const active = new Set(computeClosure(manifest, requested, { withPlayback }).services);
+    // M13-A: at slot > 0 the literal-port services are not running in the slot
+    // (SLOT_EXCLUDED_SERVICES) and their DBs are never provisioned there —
+    // subtract them from the active set exactly like `reset` does, so their
+    // seed steps degrade to service-inactive skips instead of failing.
+    const excluded = new Set(instance.excludedServices);
+    const closureServices = computeClosure(manifest, requested, { withPlayback }).services;
+    const active = new Set(closureServices.filter((id) => !excluded.has(id)));
+    const droppedForSlot = closureServices.filter((id) => excluded.has(id));
+    if (droppedForSlot.length > 0) {
+      this.log(
+        `⚠ slot ${instance.slot}: backend sub-stack — excluding literal-port + frontend ` +
+          `service(s) from the seed set: ${droppedForSlot.join(', ')}`,
+      );
+    }
 
     const selection: SeedSelection = { profile, addOns };
     const plan = composeSeedPlan(selection, active, new Set<ServiceId>());
 
-    const instance = deriveInstance({ slot: flags.slot });
     const api = makeStackApi(manifest, this.buildNativeRuntime(flags, instance));
     const seeded = await api.seed(plan);
 

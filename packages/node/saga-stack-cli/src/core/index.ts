@@ -29,5 +29,8 @@ export * from './cookie-jar.js';
 export * from './seed/index.js';
 export * from './flow/index.js';
 
+// M13-A worktree sets — pure schema + parse-time flag injection.
+export * from './set/index.js';
+
 // Native snapshot fast-path — per-snapshot manifest + pure planners (plan §4.3, M3).
 export * from './snapshot/index.js';

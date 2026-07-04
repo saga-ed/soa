@@ -53,6 +53,11 @@ export default class StackDown extends BaseCommand {
     return true;
   }
 
+  /** M13-A: `--set` resolves to the set's slot; down tears that slot down. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackDown);
 

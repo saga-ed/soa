@@ -84,9 +84,23 @@ export const repoFlags = {
  */
 export const SLOT_UNSUPPORTED_COMMAND_MESSAGE =
   'multi-slot (--slot > 0) is not supported for this command yet — the slot-aware set is ' +
-  "'stack up/status/verify/down/reset/login' and 'e2e run'. The rest (restart/overlay/" +
-  'bootstrap/seed/snapshot/tunnel) operate on shared checkouts, slot-0 state, or fixed ' +
-  'slot-0 ports and would cross slots; run them against slot 0 only.';
+  "'stack up/status/verify/down/reset/seed/snapshot/login' and 'e2e run'. The rest " +
+  '(restart/overlay/bootstrap/tunnel) operate on shared checkouts, slot-0 state, or fixed ' +
+  'slot-0 ports and would cross slots; run them against slot 0 only. (A --set carrying ' +
+  'slot > 0 hits this same guard.)';
+
+/**
+ * The error surfaced when `--set` is passed on a command that cannot thread a
+ * worktree set (M13-A). A set = repo paths + a slot ≥ 1, so the set-aware
+ * commands are exactly the slot-aware lifecycle set; `restart`/`tunnel` are
+ * slot-0-only by design and the wrapper/overlay commands act on the primary
+ * checkouts. Enforced in `BaseCommand.parse`, opted in per-command via
+ * `setAware()`.
+ */
+export const SET_UNSUPPORTED_COMMAND_MESSAGE =
+  '--set is not supported for this command — worktree sets thread repo paths + a slot ' +
+  "into 'stack up/status/verify/down/reset/seed/snapshot' and 'e2e run' (see `ss set list`). " +
+  'This command is slot-0 / primary-checkout only.';
 
 export const baseFlags = {
   porcelain: Flags.boolean({
@@ -108,6 +122,15 @@ export const baseFlags = {
   'output-json': Flags.boolean({
     description: 'emit structured JSON on stdout instead of human-readable text',
     default: false,
+  }),
+  set: Flags.string({
+    // NO oclif default: an unset `--set` stays `undefined` (= no set in play),
+    // mirroring `--state-dir`. The M13-A injection in `BaseCommand.parse` then
+    // rewrites the repo flags the user did not type + `slot` from the named set.
+    description:
+      'worktree set to run against (M13): a named repo→path map bound to a slot, from ' +
+      '$SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo ' +
+      'path you did not pin explicitly (--<repo> flags win; env vars lose to the set).',
   }),
   dev: Flags.string({
     description: 'sibling-repo workspace root (where the saga repos are checked out)',

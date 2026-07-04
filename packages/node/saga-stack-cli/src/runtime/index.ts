@@ -36,3 +36,5 @@ export * from './http-post.js';
 export * from './login.js';
 export * from './record.js';
 export * from './tunnel-prep.js';
+export * from './set-store.js';
+export * from './slot-active.js';

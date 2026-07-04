@@ -22,6 +22,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
+import { deriveInstance } from '../../../core/derive-instance.js';
 import { BUNDLE_NAMES, combineRequested, effectiveWithPlayback } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
@@ -74,22 +75,57 @@ export default class SnapshotStore extends BaseCommand {
     }),
   };
 
+  /** M13-A: snapshot state is env-parameterized; the slot's env seam isolates it. */
+  protected slotAware(): boolean {
+    return true;
+  }
+
+  /** M13-A: `--set` targets the set's slot's containers + snapshot dir. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(SnapshotStore);
+    // M13-A: apply the slot env seam BEFORE any snapshot-store resolver runs —
+    // snapshotsRoot()/postgresContainer()/… read $SAGA_MESH_* at call time.
+    const instance = deriveInstance({ slot: flags.slot });
+    this.applyInstanceEnv(instance);
     const fixtureId = flags['fixture-id'];
 
     // `--with playback` admits the optional playback DBs (== the old
     // --with-playback). With `--only`, the `--with` bundle services union into
     // the scoped closure; without it, the default full-dump path is used and
     // withPlayback layers the playback trio on top.
+    //
+    // M13-A: at slot > 0 the excluded literal-port services' DBs are never
+    // provisioned in the slot's postgres — a bare full dump would pg_dump
+    // nonexistent DBs and fail. Scope the DEFAULT set to the non-excluded
+    // closure. The exclusion MUST apply POST-closure (like `up`/`reset`):
+    // filtering the requested set first is defeated by closure edges pulling
+    // an excluded service back in (e.g. saga-dash's browser edge → ads-adm-api),
+    // and it applies AFTER the --with union so `--with playback --slot N`
+    // degrades gracefully rather than dumping absent playback DBs.
     const withPlayback = effectiveWithPlayback(flags.with);
-    const only = flags.only
-      ? closureDatabases(
-          combineRequested(flags.only, flags.with, (m) => this.error(m)),
-          withPlayback,
-          (m) => this.error(m),
-        )
-      : undefined;
+    const excluded = new Set<ServiceId>(instance.excludedServices);
+    let only: DbId[] | undefined;
+    if (flags.only) {
+      only = closureDatabases(
+        combineRequested(flags.only, flags.with, (m) => this.error(m)),
+        withPlayback,
+        (m) => this.error(m),
+      );
+    } else if (instance.slot > 0) {
+      const fullNonOptional = (Object.values(manifest.services) as { id: ServiceId; optional: boolean }[])
+        .filter((s) => !s.optional)
+        .map((s) => s.id);
+      const bundleServices = combineRequested(undefined, flags.with, (m) => this.error(m));
+      const requested = [...new Set<ServiceId>([...fullNonOptional, ...bundleServices])];
+      const kept = computeClosure(manifest, requested, { withPlayback }).services.filter(
+        (id) => !excluded.has(id),
+      );
+      only = [...new Set<DbId>(kept.flatMap((id) => manifest.services[id].databases))];
+    }
 
     const plan = storePlan(manifest, {
       fixtureId,

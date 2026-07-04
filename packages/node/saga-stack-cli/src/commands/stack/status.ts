@@ -69,6 +69,11 @@ export default class StackStatus extends BaseCommand {
     return true;
   }
 
+  /** M13-A: `--set` probes the set's slot with the set's repo pins. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackStatus);
 

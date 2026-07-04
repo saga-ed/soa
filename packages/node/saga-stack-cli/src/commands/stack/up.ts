@@ -144,6 +144,11 @@ export default class StackUp extends BaseCommand {
     return true;
   }
 
+  /** M13-A: `stack up --set <name>` runs the set's repos on its slot. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackUp);
 

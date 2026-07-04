@@ -48,6 +48,11 @@ export default class StackReset extends BaseCommand {
     return true;
   }
 
+  /** M13-A: `--set` resets the set's slot's own containers. */
+  protected setAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackReset);
     const withPlayback = effectiveWithPlayback(flags.with);

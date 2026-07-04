@@ -26,7 +26,9 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { Command } from '@oclif/core';
 import type { Interfaces } from '@oclif/core';
 import { dirname, join } from 'node:path';
-import { SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
+import { SET_UNSUPPORTED_COMMAND_MESSAGE, SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
+import { applySetToFlags, resolveSet } from './core/set/index.js';
+import type { SetInjectableFlags, WorktreeSet } from './core/set/index.js';
 import type { PullMode } from './core/auto-pull.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import type { RecordMode, ScriptPlan } from './core/flag-map.js';
@@ -52,6 +54,7 @@ import {
   makeRealProber,
   makeRealRecordUp,
   makeRealRunner,
+  makeRealSetStore,
   makeRealSnapshotIO,
   makeRealViteClear,
   generateTunnelFleetConfig,
@@ -80,6 +83,7 @@ import type {
   RepoOverrides,
   Runner,
   ScriptContext,
+  SetStore,
   ServiceLauncher,
   ServiceStopper,
   SnapshotIO,
@@ -146,6 +150,27 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * Whether THIS command supports `--set <name>` (M13-A worktree sets). Default
+   * `false` — the central guard in `parse` rejects `--set` for any command that
+   * does not opt in. A set = repo paths + a slot ≥ 1, so every set-aware command
+   * must also be `slotAware()`; the lifecycle set (`up/down/status/verify/reset/
+   * seed/snapshot`) and `e2e run` override this to `true`.
+   */
+  protected setAware(): boolean {
+    return false;
+  }
+
+  /**
+   * The injectable worktree-set store seam (M13-A). Production reads
+   * `$SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json`; tests spy this on
+   * the prototype to feed a canned store without fs — mirroring
+   * `getRunner`/`getGitRunner`/`getSnapshotIO`.
+   */
+  protected getSetStore(): SetStore {
+    return makeRealSetStore();
+  }
+
+  /**
    * Parse + a CENTRAL slot guard. `--slot` lives on `baseFlags`, so every command
    * accepts it — but only the slot-aware commands (`slotAware()` ⇒ true) wire the
    * mesh-project / container / offset threading that makes `--slot > 0` isolated.
@@ -169,6 +194,46 @@ export abstract class BaseCommand extends Command {
     argv?: string[],
   ): Promise<Interfaces.ParserOutput<F, B, A>> {
     const result = await super.parse<F, B, A>(options, argv);
+
+    // ── M13-A: the ONE set-injection site. Every downstream ScriptContext /
+    // repo-env / `deriveInstance({slot})` consumer reads this parsed flags bag
+    // (there are seven independent builders), so rewriting it here threads the
+    // set through all of them. Runs BEFORE the slot guard so a set's slot is
+    // guarded exactly like a typed `--slot`.
+    const setName = (result.flags as { set?: unknown }).set;
+    if (typeof setName === 'string') {
+      if (!this.setAware()) this.error(SET_UNSUPPORTED_COMMAND_MESSAGE);
+
+      // Flags the user ACTUALLY typed (oclif raw tokens) — the only way to tell
+      // a typed `--saga-dash` from one defaulted off `$SAGA_DASH` (repo flags
+      // bake env vars in as oclif defaults). Typed flags beat the set.
+      const typed = new Set(
+        result.raw
+          .filter((t): t is { type: 'flag'; flag: string; input: string } => t.type === 'flag')
+          .map((t) => t.flag),
+      );
+
+      let set: WorktreeSet;
+      try {
+        set = resolveSet(this.getSetStore().load(), setName);
+      } catch (err) {
+        return this.error((err as Error).message);
+      }
+
+      // The set OWNS its slot (plan §3): a user-typed `--slot N` that disagrees
+      // is a hard error, never a silent retarget. An untyped `--slot` is just
+      // oclif's default 0 and is overwritten by the injection below.
+      const typedSlot = (result.flags as { slot?: unknown }).slot;
+      if (typed.has('slot') && typedSlot !== set.slot) {
+        this.error(
+          `set '${set.name}' is bound to slot ${set.slot} — drop --slot or edit the set ` +
+            `(got --slot ${typedSlot}).`,
+        );
+      }
+
+      applySetToFlags(result.flags as SetInjectableFlags, typed, set);
+    }
+
     const slot = (result.flags as { slot?: unknown }).slot;
     if (typeof slot === 'number' && slot > 0 && !this.slotAware()) {
       this.error(SLOT_UNSUPPORTED_COMMAND_MESSAGE);

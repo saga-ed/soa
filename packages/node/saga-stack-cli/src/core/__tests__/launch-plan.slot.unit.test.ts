@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { deriveInstance } from '../derive-instance.js';
-import { defaultLaunchContext } from '../launch-plan.js';
+import { defaultLaunchContext, resolveLaunchEnv } from '../launch-plan.js';
 import { getMesh, manifest } from '../manifest/index.js';
 import type { RepoKey } from '../manifest/index.js';
 
@@ -94,5 +94,41 @@ describe('slot 0 launch context is byte-identical to the pre-M7 no-offset build'
     expect(ctx1.tokens.MESH_MQ).not.toBe(legacy.tokens.MESH_MQ);
     // manifest is untouched (deriveInstance is pure).
     expect(manifest.services['iam-api'].port).toBe(legacy.ports['iam-api']);
+  });
+});
+
+describe('M13 listen-port fix — portEnvVar services are TOLD their offset port', () => {
+  it('slot 1: programs/scheduling/sessions launch env carries PORT=<base+1000>', () => {
+    const p1 = deriveInstance({ slot: 1 });
+    const ctx1 = defaultLaunchContext({
+      ...baseInputs,
+      portOverrides: p1.portOverrides,
+      meshOffset: p1.meshOffset,
+    });
+    for (const id of ['programs-api', 'scheduling-api', 'sessions-api'] as const) {
+      const env = resolveLaunchEnv(id, 'stack', ctx1);
+      expect(env.PORT).toBe(String(manifest.services[id].port + 1000));
+    }
+  });
+
+  it('slot 0: no PORT injected (byte-identical no-offset env)', () => {
+    const ctx0 = defaultLaunchContext(baseInputs);
+    for (const id of ['programs-api', 'scheduling-api', 'sessions-api'] as const) {
+      const env = resolveLaunchEnv(id, 'stack', ctx0);
+      expect(env.PORT).toBeUndefined();
+    }
+  });
+
+  it('an explicit launch.env template for the same var still wins (iam-api)', () => {
+    // iam-api's template already sets PORT via ${IAM_PORT}; the injection must
+    // not clobber it (they agree numerically, but the template is authoritative).
+    const p1 = deriveInstance({ slot: 1 });
+    const ctx1 = defaultLaunchContext({
+      ...baseInputs,
+      portOverrides: p1.portOverrides,
+      meshOffset: p1.meshOffset,
+    });
+    const env = resolveLaunchEnv('iam-api', 'stack', ctx1);
+    expect(env.PORT).toBe(String(manifest.services['iam-api'].port + 1000));
   });
 });

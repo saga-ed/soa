@@ -369,6 +369,19 @@ export function resolveLaunchEnv(
     env[key] = expand(template, tokens, `${service}.launch.env.${key}`);
   }
 
+  // M13 LISTEN-PORT FIX: a backend whose listen port is env-driven
+  // (`portEnvVar` — programs/scheduling/sessions read `$PORT || <base>`) must
+  // be TOLD its per-slot offset port, or at slot > 0 it binds its BASE port:
+  // EADDRINUSE when slot 0 is live, or a silent wrong-port bind whose health
+  // poll then times out on the offset port (the previously misdiagnosed
+  // "slot>0 programs-api cold-start wedge"). Injected ONLY when the resolved
+  // port differs from the manifest base, so slot-0 env stays byte-identical;
+  // an explicit launch.env template entry for the same var still wins.
+  const portEnvVar = def.portEnvVar;
+  if (portEnvVar != null && ctx.ports[service] !== def.port && !(portEnvVar in env)) {
+    env[portEnvVar] = String(ctx.ports[service]);
+  }
+
   // Lane overrides win (env last-wins, matching up.sh's trailing splat).
   return { ...env, ...laneOverlay(service, lane, ctx) };
 }

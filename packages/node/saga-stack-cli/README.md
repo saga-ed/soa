@@ -10,6 +10,12 @@ core (500+ tests). Everything is driven by a single **frozen TypeScript service 
 source of truth — so behavior lives in data you can read, not in env-vars and branchy bash
 you have to reverse-engineer.
 
+> **New here? → [docs/getting-started.md](./docs/getting-started.md)** — the copy-paste happy
+> path (up → status → verify → e2e → down) with the real output of each command, linking out
+> to per-feature docs ([sub-stacks](./docs/sub-stacks-and-bundles.md) · [slots](./docs/slots.md) ·
+> [verify](./docs/verify.md) · [snapshots](./docs/snapshots.md) · [e2e](./docs/e2e.md) ·
+> [integration](./docs/integration.md)).
+
 ```bash
 ss stack up --only scheduling-api,sessions-api   # boot just those + their deps
 ss stack status                                  # per-service health

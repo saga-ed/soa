@@ -287,15 +287,24 @@ guard and creation land.
 | Docs: canonical two-sets+baseline runbook in the CLI README | S | |
 | Fast-follow (not MVP): `ss e2e report` side-by-side aggregator; `set assign/edit` | — | |
 
-### P0 prerequisite (independent of M13 code, blocks V2)
+### P0 prerequisite — RESOLVED during M13 validation (2026-07-04)
 
-**slot>0 programs-api rabbitmq cold-start** (OPEN): last concurrent two-slot e2e had
-slot 0 green 20/20, slot 1 stuck at `[MQConnectionManager] CONNECTING` on a cold stack;
-env verified offset-correct; health window already 120s. Possibly related: open PR
-soa#232 "recover AMQP channels". **Treat as P0**: the two-set concurrent validation (V2)
-cannot be signed off while a cold slot>0 stack can wedge on MQ. Track it as its own
-work item (repro on a cold `up --slot 1`, then either fix in programs-api MQ init or
-gate bring-up on an MQ-readiness probe before service launch).
+**Re-diagnosis: it was never MQ.** The "slot>0 programs-api cold-start wedge" was a
+LISTEN-PORT bug: `programs-api`/`scheduling-api`/`sessions-api` read
+`Number(process.env.PORT) || <base>` for their listen port, but the manifest carried
+`portEnvVar: null` for them and the launch layer never injected the offset port — so at
+slot > 0 they bound their BASE ports. With slot 0 down (the earlier validation) the bind
+succeeded silently on the wrong port and the health poll on the offset port timed out
+while the log's last line happened to be `[MQConnectionManager] CONNECTING` — the red
+herring. Running the M13 validation WITH slot 0 live turned the same bug into an
+unambiguous `EADDRINUSE :3006/:3008`.
+
+**Fix (in M13, commit 5e27dd1):** manifest `portEnvVar: 'PORT'` for the three services
+(each verified against its `inversify.config.ts`) + `resolveLaunchEnv` injects
+`env[portEnvVar] = <resolved port>` whenever it differs from the manifest base (slot-0
+env stays byte-identical; explicit `launch.env` templates win). After the fix, slots 1/2
+bring up cold with all coherence probes green while slot 0 runs. (soa#232 "recover AMQP
+channels" may still be worthwhile — it just was not this.)
 
 ---
 

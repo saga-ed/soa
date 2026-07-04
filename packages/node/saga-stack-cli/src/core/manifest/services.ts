@@ -8,7 +8,10 @@
  *  - connect-api deps content-api (so any connect closure pulls content + its DB).
  *  - connect-web deps connect-api + rtsm-api + iam-api (browser).
  *  - tunnelSlug carries the PUBLIC host slug (tunnel.sh exposes abbreviated names).
- *  - redis is left OFF per service in mesh[] for v1 (decision 3, 2026-06-29).
+ *  - iam-api gates redis (mesh[] + REDIS_HOST/REDIS_PORT launch.env) — it is the
+ *    only redis consumer in the manifest; every other service leaves redis OFF.
+ *    (Supersedes the v1 "redis OFF per service" decision 3, 2026-06-29, which
+ *    left iam-api dialing a hardcoded :6379 and split-braining across slots.)
  *  - saga-dash carries prelaunchHook: 'sync-dash-local-defaults'.
  *
  * launch.env values are FAITHFUL, COMPLETE templates (M4): each service's env
@@ -48,7 +51,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     databases: ['iam_local', 'iam_pii_local'],
     dependsOn: [],
     depKinds: {},
-    mesh: ['postgres'], // redis off per-service for v1 (decision 3)
+    // iam-api genuinely needs redis (lockout / rate-limit / JWT+refresh stores).
+    // In mesh[] so a partial `--only iam-api` closure brings redis up; the
+    // launch.env below points it at the slot's redis (base 6379 at slot 0).
+    mesh: ['postgres', 'redis'],
     launch: {
       cmd: 'pnpm dev',
       env: {
@@ -56,6 +62,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         AUTH_DEVUSERID: '${DEV_USER_UUID}',
         CORS_ORIGIN: '${DASH_URL},${CONNECT_WEB_URL}',
         MAIL_FRONTEND_BASE_URL: 'http://localhost:${IAM_PORT}/demo',
+        // iam-api assembles its redis URL from REDIS_HOST+REDIS_PORT (localhost ⇒
+        // non-TLS redis://). Slot-offset-aware: :6379 at slot 0, :7379 at slot 1.
+        // Without these it falls back to a hardcoded localhost:6379 and dials
+        // slot 0's redis (ECONNREFUSED alone, or split-brain onto slot 0).
+        REDIS_HOST: 'localhost',
+        REDIS_PORT: '${REDIS_PORT}',
         // On a fresh clone iam-api/.env doesn't exist, so JANUS_REQUIRED fail-safes
         // to `required` → iam 401s every local S2S call + devLogin ({"realms":["janus"]}).
         // main's up.sh sets it (services_up ~1467, added after gh_214 branched); the CLI

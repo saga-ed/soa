@@ -67,6 +67,14 @@ export interface LaunchTokens {
   COACH_WEB_PORT: string;
   /** connect-mongo mesh port — up.sh `CONNECT_MONGO_PORT` (27037; coach-api's MONGO_PORT). */
   CONNECT_MONGO_PORT: string;
+  /**
+   * redis mesh port — base 6379, offset in lockstep with the mesh's published
+   * port (M7 slots). iam-api reads `REDIS_HOST`+`REDIS_PORT`; without this it
+   * falls back to its own hardcoded localhost:6379 default and dials slot 0's
+   * redis (ECONNREFUSED alone, or split-brain onto slot 0). Base 6379 at slot 0
+   * is byte-identical to that default; :7379 at slot 1 targets the slot's redis.
+   */
+  REDIS_PORT: string;
 
   // ── lane base URLs (local/stack lane: http://localhost:<port>) ──
   /** up.sh `IAM_URL`. */
@@ -363,6 +371,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
   const pgPort = getMesh('postgres', m).port + meshOffset; // 5432 (mesh shared instance)
   const mqPort = getMesh('rabbitmq', m).port + meshOffset; // 5672
   const mongoPort = getMesh('connect-mongo', m).port + meshOffset; // 27037
+  const redisPort = getMesh('redis', m).port + meshOffset; // 6379
 
   const recorderControlPort = inputs.recorderControlPort ?? 7890;
   const recordingsApiPort = inputs.recordingsApiPort ?? 8444;
@@ -379,6 +388,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     COACH_API_PORT: String(ports['coach-api']),
     COACH_WEB_PORT: String(ports['coach-web']),
     CONNECT_MONGO_PORT: String(mongoPort),
+    REDIS_PORT: String(redisPort),
 
     // lane base URLs (local/stack lane)
     IAM_URL: `http://localhost:${ports['iam-api']}`,

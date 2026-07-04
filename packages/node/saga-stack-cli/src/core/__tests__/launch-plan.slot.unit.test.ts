@@ -49,6 +49,13 @@ describe('defaultLaunchContext meshOffset — mesh connection strings offset in 
     expect(ctx.tokens.CONNECT_MONGO_PORT).toBe(String(mongoBase + offset));
   });
 
+  it('offsets REDIS_PORT (redis port) — iam-api dials its slot, not slot 0', () => {
+    const redisBase = getMesh('redis').port;
+    expect(ctx.tokens.REDIS_PORT).toBe(String(redisBase + offset)); // 7379 at slot 1
+    // slot 0 (no offset) stays at the 6379 default services already assumed.
+    expect(defaultLaunchContext(baseInputs).tokens.REDIS_PORT).toBe(String(redisBase));
+  });
+
   it('offsets every *_DB_URL (postgres port)', () => {
     for (const url of [
       ctx.tokens.SIS_DB_URL,

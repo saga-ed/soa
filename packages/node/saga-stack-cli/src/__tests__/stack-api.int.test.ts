@@ -165,9 +165,9 @@ describe('StackApi.up — full native bring-up over a concrete closure', () => {
     expect(makeRuns[0].args).toContain('up');
     expect(makeRuns[0].args).toContain('POSTGRES_PORT=5432');
 
-    // only the closure's mesh units are readiness-gated (no mongo / redis for this set).
-    expect(fakes.meshGated).toEqual(['soa-postgres-1', 'soa-rabbitmq-1']);
-    expect(res.mesh.units.map((u) => u.id)).toEqual(['postgres', 'rabbitmq']);
+    // only the closure's mesh units are readiness-gated (redis via iam-api; no mongo for this set).
+    expect(fakes.meshGated).toEqual(['soa-postgres-1', 'soa-redis-1', 'soa-rabbitmq-1']);
+    expect(res.mesh.units.map((u) => u.id)).toEqual(['postgres', 'redis', 'rabbitmq']);
 
     // launched EXACTLY the closure, deps before dependents.
     expect(fakes.launches.map((s) => s.id)).toEqual(FOUR);

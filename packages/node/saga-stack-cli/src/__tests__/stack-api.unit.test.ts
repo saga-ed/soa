@@ -156,8 +156,8 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     expect(fakes.launches[0].args).toEqual(['dev']);
     // saga-dash not in the closure ⇒ the dash prelaunch hook never touched the fs.
     expect(fakes.dashCalls).toEqual([]);
-    // mesh: only the closure's units (postgres + rabbitmq) were readiness-gated.
-    expect(res.mesh.units.map((u) => u.id)).toEqual(['postgres', 'rabbitmq']);
+    // mesh: only the closure's units (postgres + redis via iam-api + rabbitmq) were readiness-gated.
+    expect(res.mesh.units.map((u) => u.id)).toEqual(['postgres', 'redis', 'rabbitmq']);
     // `make up` ran in <soa>/infra.
     const makeUp = fakes.runs.find((r) => r.command === 'make');
     expect(makeUp?.cwd).toBe('/dev/soa/infra');

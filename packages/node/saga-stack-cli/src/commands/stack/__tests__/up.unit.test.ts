@@ -52,7 +52,7 @@ describe('stack up --dry-run — closure planning path', () => {
       'scheduling',
       'sessions',
     ]);
-    expect(closure.mesh).toEqual(['postgres', 'rabbitmq']);
+    expect(closure.mesh).toEqual(['postgres', 'redis', 'rabbitmq']); // redis via iam-api
   });
 
   it('full-stack dry-run (no --only) plans every non-optional service', () => {

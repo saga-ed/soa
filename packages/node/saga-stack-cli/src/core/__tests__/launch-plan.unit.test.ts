@@ -79,6 +79,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       AUTH_DEVUSERID: 'f0000004-0000-4000-8000-00000000beef',
       CORS_ORIGIN: 'http://localhost:8900,http://localhost:6210',
       MAIL_FRONTEND_BASE_URL: 'http://localhost:3010/demo',
+      REDIS_HOST: 'localhost',
+      REDIS_PORT: '6379', // slot 0 base — offset-aware (:7379 at slot 1), see launch-plan.slot test
       JANUS_REQUIRED: 'false', // main up.sh:1467 — without it iam 401s every local S2S/devLogin
     });
   });

@@ -40,8 +40,9 @@ describe('computeClosure — {scheduling-api, sessions-api}', () => {
     ]);
   });
 
-  it('unions the mesh to {postgres, rabbitmq} — mongo dropped (no connect-api)', () => {
-    expect(closure.mesh).toEqual(['postgres', 'rabbitmq']);
+  it('unions the mesh to {postgres, redis, rabbitmq} — mongo dropped (no connect-api)', () => {
+    // redis comes in via iam-api (its sole consumer); ordered by mesh declaration.
+    expect(closure.mesh).toEqual(['postgres', 'redis', 'rabbitmq']);
     expect(closure.mesh).not.toContain('connect-mongo');
   });
 

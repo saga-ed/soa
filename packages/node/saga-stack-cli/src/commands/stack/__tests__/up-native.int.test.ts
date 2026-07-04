@@ -170,10 +170,10 @@ describe('stack up --only — native partial-stack', () => {
     expect(launches[0].command).toBe('pnpm');
     expect(launches[0].args).toEqual(['dev']);
 
-    // mesh: make up ran in <soa>/infra; only postgres+rabbitmq gated (no mongo).
+    // mesh: make up ran in <soa>/infra; postgres+redis(via iam-api)+rabbitmq gated (no mongo).
     const makeUp = runs.find((r) => r.command === 'make');
     expect(makeUp?.cwd).toBe(resolve(SOA_ROOT, 'infra'));
-    expect(meshGated).toEqual(['soa-postgres-1', 'soa-rabbitmq-1']);
+    expect(meshGated).toEqual(['soa-postgres-1', 'soa-redis-1', 'soa-rabbitmq-1']);
 
     // native seed: roster offline steps ran through the Runner (no up.sh argv).
     const seedRuns = runs.filter((r) => r.command !== 'make');

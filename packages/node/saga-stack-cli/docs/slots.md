@@ -17,11 +17,11 @@ ss stack up --only iam-api,scheduling-api,sessions-api
 ss stack up --only iam-api,scheduling-api,sessions-api --slot 1
 ```
 
-<details><summary>Slot 1 boots on offset ports (iam :4010, scheduling :4008+1000…) under project <code>soa-s1</code>, disjoint volumes</summary>
+<details><summary>Slot 1 boots on offset ports (iam :4010, scheduling :4008…) under project <code>soa-s1</code>, disjoint volumes</summary>
 
 ```
 # slot 0: iam :3010, sis :3100, scheduling :3008, sessions :3007   (project soa)
-# slot 1: iam :4010, sis :4100, scheduling :5008, sessions :5007   (project soa-s1)
+# slot 1: iam :4010, sis :4100, scheduling :4008, sessions :4007   (project soa-s1)
 
 soa_postgres-data        soa-s1_postgres-data       ← disjoint volumes
 soa-postgres-1           soa-s1-postgres-1          ← disjoint containers
@@ -66,5 +66,7 @@ stopped: iam-api, scheduling-api, sessions-api
 - Slot ceiling is **9** (slot 10 would collide the rabbitmq-management port with slot 0).
 - Slot > 0 is a backend sub-stack today; `connect` is excluded pending literal-port tokenization.
 - Cloud/tunnel modes (`--sandbox`/`--tunnel`) are slot-0 only (they front fixed ports).
+- Want a slot to also mean *different source*? Name a repo→worktree map bound to a slot —
+  a **[worktree set](./worktree-sets.md)** — and drive everything with `--set <name>`.
 
-← [sub-stacks](./sub-stacks-and-bundles.md) · [Getting started](./getting-started.md)
+← [sub-stacks](./sub-stacks-and-bundles.md) · [worktree sets](./worktree-sets.md) · [Getting started](./getting-started.md)

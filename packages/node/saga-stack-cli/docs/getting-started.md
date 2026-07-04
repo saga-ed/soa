@@ -235,6 +235,7 @@ slot-safe — it stops exactly the pids *this* stack recorded, never a host-glob
 | `ss stack seed [--with …]` / `reset` | Seed a running stack / truncate to an empty baseline + re-seed | [sub-stacks](./sub-stacks-and-bundles.md) |
 | `ss stack snapshot store\|restore\|list` | Save/restore a known-good DB state in seconds | [snapshots](./snapshots.md) |
 | `ss e2e run\|list\|connect` | Run/discover data-driven flows; open a live Connect session | [e2e](./e2e.md) |
+| `ss set list\|show\|check` + `--set <name>` | Named worktree sets: parallel dev contexts (repo map + slot) for `up`/`e2e run`/… | [worktree-sets](./worktree-sets.md) |
 | `ss stack overlay\|bootstrap\|login\|tunnel` | Integration workflows (in-flight PRs, one-command bring-up, personas, sharing) | [integration](./integration.md) |
 | `ss stack down [--mesh] [--slot N]` | Stop the stack natively | [slots](./slots.md) |
 
@@ -244,6 +245,7 @@ slot-safe — it stops exactly the pids *this* stack recorded, never a host-glob
 
 - **[sub-stacks-and-bundles.md](./sub-stacks-and-bundles.md)** — `--only` closures, `--with` bundles, seeding
 - **[slots.md](./slots.md)** — `--slot N`: multiple isolated stacks on one box
+- **[worktree-sets.md](./worktree-sets.md)** — `--set <name>`: named repo→worktree maps on slots (parallel dev contexts, per-worktree flows, build-collision guard)
 - **[verify.md](./verify.md)** — the health / data / source-posture checks (and what fails vs warns)
 - **[snapshots.md](./snapshots.md)** — store/restore DB fixtures instead of re-seeding
 - **[e2e.md](./e2e.md)** — flows-as-data, `e2e run`/`list`/`connect`

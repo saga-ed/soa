@@ -79,9 +79,13 @@ export function splitSpaPaths(value: string | undefined): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** Treat a candidate as a `flows.json` file as-is, or as a dir to append to. */
+/**
+ * Treat a candidate as a flows FILE when it names any `*.json` (documented:
+ * `--spa-path <file-or-dir>` — a `my-flows.json` copy must work as-is, not be
+ * silently treated as a directory), else as a dir to append `flows.json` to.
+ */
 function normalizeCandidate(p: string): string {
-  return /(^|\/)flows\.json$/.test(p) ? p : joinPath(p, 'flows.json');
+  return /\.json$/.test(p) ? p : joinPath(p, 'flows.json');
 }
 
 /** Inputs for computing the ordered candidate paths to probe for a SPA. */

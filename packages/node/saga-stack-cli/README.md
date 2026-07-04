@@ -79,7 +79,18 @@ the closure, composable: `--with dash --with coach`). Shared across `up`/`status
 project-keyed docker volumes, its own state + snapshot dirs. Several devs — or parallel
 agents — run concurrent stacks with no clobbering. Slot 0 (default) is byte-identical to
 the bash path. (Slot >0 is a backend sub-stack today; `connect` is excluded pending
-literal-port tokenization.)
+literal-port tokenization.) → [docs/slots.md](./docs/slots.md)
+
+### Worktree sets — parallel dev contexts, one name each
+
+A **worktree set** names a `repo → worktree path` map bound to a slot
+(`~/.saga-stack/worktree-sets.json`): `ss e2e run --set my-fix saga-dash/journey` runs
+**that worktree's code and that worktree's `flows.json`** on the set's own stack, while
+`main` and other sets keep running untouched. `ss set list|show|check` manage/validate;
+`up`/`e2e run` re-check implicitly and a realpath-keyed prep lock + primary-checkout
+refusal (`--allow-primary` to override) make two contexts building one checkout
+impossible. Precedence: typed `--<repo>` flag > set > env > default.
+→ [docs/worktree-sets.md](./docs/worktree-sets.md)
 
 ### Native prep — a fresh checkout provisions + migrates itself
 

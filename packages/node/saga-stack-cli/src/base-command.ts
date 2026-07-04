@@ -34,9 +34,12 @@ import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
 import type { Runtime } from './stack-api.js';
 import {
   buildRepoEnv,
+  makeRealConfirm,
+  makeRealCookiePoster,
   makeRealDashFs,
   makeRealGhRunner,
   makeRealGitRunner,
+  makeRealJarWriter,
   makeRealLauncher,
   makeRealMeshExec,
   makeRealPgProbe,
@@ -54,10 +57,13 @@ import {
   REPO_ENV_VAR,
 } from './runtime/index.js';
 import type {
+  ConfirmSeam,
+  CookiePoster,
   DashFs,
   GhRunner,
   GitRunner,
   HealthProber,
+  JarWriter,
   MeshExec,
   OverlayFs,
   PgProbe,
@@ -339,6 +345,34 @@ export abstract class BaseCommand extends Command {
    */
   protected getOverlayFs(): OverlayFs {
     return makeRealOverlayFs();
+  }
+
+  /**
+   * The injectable confirm seam (M11 — bootstrap ensure-repos). Production returns
+   * `makeRealConfirm()` (the only place the provisioning prompt reads `process.stdin`);
+   * the `stack bootstrap` TESTS spy this on the prototype to drive the TTY / y-n / no-tty
+   * branches WITHOUT a real terminal — mirroring how `getRunner`/`getGitRunner`/… are mocked.
+   */
+  protected getConfirm(): ConfirmSeam {
+    return makeRealConfirm();
+  }
+
+  /**
+   * The injectable cookie-capturing POST seam (M11 — native login). Production returns
+   * `makeRealCookiePoster()` — the only place the devLogin POST is made; the `stack login`
+   * TESTS spy this on the prototype to return canned `Set-Cookie`s WITHOUT a network.
+   */
+  protected getCookiePoster(): CookiePoster {
+    return makeRealCookiePoster();
+  }
+
+  /**
+   * The injectable cookie-jar fs seam (M11 — native login). Production returns
+   * `makeRealJarWriter()` — the only place `<stateDir>/cookies.txt` is written; the
+   * `stack login` TESTS spy this on the prototype to capture the jar bytes WITHOUT fs IO.
+   */
+  protected getJarWriter(): JarWriter {
+    return makeRealJarWriter();
   }
 
   /**

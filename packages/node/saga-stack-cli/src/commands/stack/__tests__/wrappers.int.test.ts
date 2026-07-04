@@ -392,9 +392,12 @@ describe('stack tunnel — wraps tunnel.sh', () => {
   });
 });
 
-describe('stack bootstrap — wraps bootstrap.sh', () => {
-  it('default → bootstrap.sh --seed roster (the flag default)', async () => {
-    await StackBootstrap.run([...WS], config);
+// M11: bootstrap is NATIVE-BY-DEFAULT (ensure-repos → overlay → up → verify); only
+// `--legacy` routes the whole chain to bootstrap.sh. The native path is covered in
+// bootstrap-native.int.test.ts; here we only assert the --legacy wrap + its exact argv.
+describe('stack bootstrap --legacy — wraps bootstrap.sh', () => {
+  it('--legacy → bootstrap.sh --seed roster (the flag default)', async () => {
+    await StackBootstrap.run(['--legacy', ...WS], config);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       cwd: SYNTH_DIR,
@@ -405,13 +408,13 @@ describe('stack bootstrap — wraps bootstrap.sh', () => {
     });
   });
 
-  it('--no-refresh --seed full → bootstrap.sh --no-refresh --seed full', async () => {
-    await StackBootstrap.run(['--no-refresh', '--seed', 'full', ...WS], config);
+  it('--legacy --no-refresh --seed full → bootstrap.sh --no-refresh --seed full', async () => {
+    await StackBootstrap.run(['--legacy', '--no-refresh', '--seed', 'full', ...WS], config);
     expect(calls[0].args).toEqual(['--no-refresh', '--seed', 'full']);
   });
 
-  it('--yes is rejected with a clear message and never spawns', async () => {
-    await expect(StackBootstrap.run(['--yes', ...WS], config)).rejects.toMatchObject({
+  it('--legacy --yes is rejected (bootstrap.sh has no non-interactive antecedent) and never spawns', async () => {
+    await expect(StackBootstrap.run(['--legacy', '--yes', ...WS], config)).rejects.toMatchObject({
       message: expect.stringContaining('bootstrap --yes is not available'),
     });
     expect(calls).toHaveLength(0);

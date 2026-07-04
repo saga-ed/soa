@@ -29,3 +29,6 @@ export * from './gh.js';
 export * from './auto-pull.js';
 export * from './overlay.js';
 export * from './vite-clear.js';
+export * from './ensure-repos.js';
+export * from './http-post.js';
+export * from './login.js';

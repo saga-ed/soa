@@ -22,7 +22,7 @@
  * `src/core/**` never imports this and stays pure.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 
 /** Options for `merge` — the overlay engine's `merge --no-ff --no-edit <ref>`. */
 export interface MergeOptions {
@@ -70,6 +70,16 @@ export interface GitRunner {
   branchDelete(repoPath: string, name: string): Promise<boolean>;
   /** `git checkout <ref>` — switch to an existing ref (reset restores the base branch). */
   checkout(repoPath: string, ref: string): Promise<boolean>;
+
+  // ── M11 bootstrap ensure-repos verb ──
+  /**
+   * `git clone <url> <dir>` — clone a MISSING sibling repo (bootstrap.sh ensure_repos).
+   * UNLIKE every verb above this is NOT a `git -C <repo> …` (the repo doesn't exist yet)
+   * and runs with stdio INHERITED so an SSH host-key / credential prompt is visible on
+   * the user's TTY. Resolves true iff the clone exited 0. NEVER throws (a spawn error /
+   * non-zero exit folds to false ⇒ the caller aborts with a clear message).
+   */
+  clone(url: string, dir: string): Promise<boolean>;
 }
 
 /** Run `git -C <repoPath> …args`; resolve trimmed stdout (`''` on any error). NEVER throws. */
@@ -146,6 +156,17 @@ export function makeRealGitRunner(): GitRunner {
     },
     checkout(repoPath: string, ref: string): Promise<boolean> {
       return gitOk(repoPath, ['checkout', ref]);
+    },
+
+    // ── M11 bootstrap ensure-repos verb ──
+    clone(url: string, dir: string): Promise<boolean> {
+      // spawn (not execFile) with inherited stdio so a first-time SSH host-key /
+      // credential prompt reaches the user's terminal (bootstrap.sh clones interactively).
+      return new Promise((resolve) => {
+        const child = spawn('git', ['clone', url, dir], { stdio: 'inherit' });
+        child.on('error', () => resolve(false));
+        child.on('close', (code) => resolve(code === 0));
+      });
     },
   };
 }

@@ -114,6 +114,11 @@ export default class StackUp extends BaseCommand {
         'skip the R1 install+build prep pass (NATIVE); R2 DB provision + R3 migrate still run (both idempotent).',
       default: false,
     }),
+    'allow-primary': Flags.boolean({
+      description:
+        "M13-B escape hatch: let a --set entry point a BUILDABLE repo at the primary $DEV checkout (prep will build your live working copy — tenet 4 says use a clean worktree; the preflight normally refuses).",
+      default: false,
+    }),
     record: Flags.string({
       description:
         'NATIVE (Phase 2): after launch, start the fleek recording stack (recorder :7890 + recordings-api :8444 + MinIO; `av` adds the LiveKit egress). Fleek-gated: skipped with a warning if the fleek repo is not cloned.',
@@ -418,6 +423,11 @@ export default class StackUp extends BaseCommand {
     if (unknown.length > 0) {
       this.error(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
     }
+
+    // M13-B: the implicit set preflight (no-op without --set) — hard-error on
+    // missing/non-checkout paths, buildable-at-primary (unless --allow-primary),
+    // and cross-set build collisions BEFORE any stack mutation.
+    await this.runSetPreflight(flags);
 
     // M7: derive the slot profile once, up front — it drives the ports/project/
     // container-env threading (buildRuntime) AND the literal-port-service exclusion

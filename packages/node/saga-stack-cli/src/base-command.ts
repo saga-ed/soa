@@ -29,6 +29,8 @@ import { dirname, join } from 'node:path';
 import { SET_UNSUPPORTED_COMMAND_MESSAGE, SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
 import { applySetToFlags, resolveSet } from './core/set/index.js';
 import type { SetInjectableFlags, WorktreeSet } from './core/set/index.js';
+import { checkWorktreeSet, makeSlotActiveProbe } from './runtime/index.js';
+import type { SlotActiveProbe } from './runtime/index.js';
 import type { PullMode } from './core/auto-pull.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import type { RecordMode, ScriptPlan } from './core/flag-map.js';
@@ -54,6 +56,7 @@ import {
   makeRealProber,
   makeRealRecordUp,
   makeRealRunner,
+  makeRealPrepLock,
   makeRealSetStore,
   makeRealSnapshotIO,
   makeRealViteClear,
@@ -168,6 +171,48 @@ export abstract class BaseCommand extends Command {
    */
   protected getSetStore(): SetStore {
     return makeRealSetStore();
+  }
+
+  /**
+   * The injectable slot-activity probe (M13-A `set list` ACTIVE column,
+   * M13-B up-time collision check). Derived LIVE from state-dir pid liveness +
+   * compose containers — no recorded active state. Tests spy this on the
+   * prototype to pin activity without fs/docker.
+   */
+  protected getSlotActiveProbe(): SlotActiveProbe {
+    return makeSlotActiveProbe();
+  }
+
+  /**
+   * M13-B: the IMPLICIT set check at run time (plan §2.4/§4 layer 1). A no-op
+   * without `--set`. Violations (missing/non-checkout paths, buildable entry at
+   * the primary checkout unless `--allow-primary`, cross-set build collisions —
+   * sharpened with live ACTIVE-slot detection) are a HARD error before any
+   * stack mutation; warnings (branch drift, pre-built-at-primary) just print.
+   */
+  protected async runSetPreflight(
+    flags: { set?: string; dev?: string } & { 'allow-primary'?: boolean },
+  ): Promise<void> {
+    if (flags.set === undefined) return;
+    const file = this.getSetStore().load();
+    const set = resolveSet(file, flags.set); // parse() already validated the name; cheap re-resolve
+    const result = await checkWorktreeSet(set, file.sets, {
+      git: this.getGitRunner(),
+      isPrebuilt: this.getPrepFreshCheck(),
+      devRoot: flags.dev ?? join(process.env.HOME ?? '~', 'dev'),
+      activeProbe: this.getSlotActiveProbe(),
+      allowPrimary: flags['allow-primary'] === true,
+    });
+    for (const repo of result.repos) {
+      for (const w of repo.warnings) this.log(`⚠ set ${set.name}/${repo.repo}: ${w}`);
+    }
+    if (result.violationCount > 0) {
+      const lines = result.repos.flatMap((r) => r.violations.map((v) => `${r.repo}: ${v}`));
+      this.error(
+        `set '${set.name}' failed the preflight check — fix the set (or run \`ss set check ${set.name}\`):\n` +
+          lines.map((l) => `  ✗ ${l}`).join('\n'),
+      );
+    }
   }
 
   /**
@@ -609,6 +654,9 @@ export abstract class BaseCommand extends Command {
       skipPrep: flags['skip-prep'],
       prepIsFresh: this.getPrepFreshCheck(),
       prepDbGenerateScan: this.getDbGenerateScan(),
+      // M13-B: realpath-keyed build lock — two `ss` invocations can never
+      // prep-BUILD one checkout concurrently (fresh-skipped repos never lock).
+      prepLock: makeRealPrepLock(profile.slot),
       repoDirExists: this.getRepoDirCheck(),
       // M9: the ff-only sibling sync (up.sh `pull_repos`) + its mode, the vite-cache
       // clear (native `restart`), and best-effort Connect AV (slot-0 + connect-in-closure,

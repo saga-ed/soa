@@ -118,15 +118,29 @@ export interface PrepContext {
   dbGenerateScan?: (repoRoot: string) => string[];
   /** Manifest (defaults to the frozen one). */
   manifest?: Manifest;
+  /**
+   * M13-B: realpath-keyed build lock. When present, each non-fresh repo's prep
+   * acquires its lock before install/build and releases after — a held lock
+   * FAILS the pass fast (never waits) so two `ss` invocations can't build one
+   * checkout concurrently. Absent ⇒ no locking (unit-test default).
+   */
+  lock?: PrepRepoLock;
+}
+
+/** M13-B: the injectable per-repo build lock (production: `makeRealPrepLock`). */
+export interface PrepRepoLock {
+  acquire(repoRoot: string): { ok: true; release: () => void } | { ok: false; holder: string };
 }
 
 /** One prep step in the executed plan (for reporting + test assertions). */
 export interface PrepStep {
   repo: RepoKey;
-  kind: 'install' | 'db:generate' | 'build' | 'co:login';
+  kind: 'install' | 'db:generate' | 'build' | 'co:login' | 'lock';
   cwd: string;
   /** argv AFTER `pnpm` (e.g. `['install']`, `['db:generate']`, `['build']`, `['co:login']`). */
   argv: string[];
+  /** `kind: 'lock'` only — the who-holds-it description for the error surface. */
+  detail?: string;
 }
 
 /** The outcome of the R1 pass. */
@@ -223,11 +237,50 @@ export async function prepClosure(ctx: PrepContext): Promise<PrepResult> {
   for (const repo of repos) {
     const root = ctx.repoRoots[repo];
     // Fresh-skip: an already-built repo (node_modules + dist) is a no-op.
+    // (Deliberately BEFORE the lock: sharing pre-built checkouts stays legal.)
     if (ctx.isFresh?.(root)) {
       freshRepos.push(repo);
       continue;
     }
 
+    // M13-B: exclusive realpath-keyed build lock — a held lock fails FAST with
+    // who-holds-it (two invocations building one checkout is the race the
+    // whole guard family exists to prevent; plan §4 layer 2).
+    const lock = ctx.lock?.acquire(root) ?? { ok: true as const, release: () => {} };
+    if (!lock.ok) {
+      const step: PrepStep = { repo, kind: 'lock', cwd: root, argv: [], detail: lock.holder };
+      steps.push(step);
+      return { ok: false, skippedPrep: false, freshRepos, steps, warnings, failed: step };
+    }
+
+    try {
+      const failed = await prepOneRepo(ctx, m, repo, root, run, steps, warnings);
+      if (failed !== null) {
+        return { ok: false, skippedPrep: false, freshRepos, steps, warnings, failed };
+      }
+    } finally {
+      lock.release();
+    }
+  }
+
+  return { ok: true, skippedPrep: false, freshRepos, steps, warnings };
+}
+
+/**
+ * One repo's install → db:generate → build sequence. Returns the FATALLY
+ * failed step (aborting the whole pass), or `null` to continue. Extracted so
+ * the caller can hold the M13-B build lock across exactly this body.
+ */
+async function prepOneRepo(
+  ctx: PrepContext,
+  m: Manifest,
+  repo: RepoKey,
+  root: string,
+  run: (step: PrepStep) => Promise<boolean>,
+  steps: PrepStep[],
+  warnings: PrepStep[],
+): Promise<PrepStep | null> {
+  {
     // 1. install (idempotent) — FATAL (up.sh's `pnpm_install` aborts on failure).
     //    FLIP 4: on a CodeArtifact 401 (expired token), refresh via `pnpm co:login`
     //    and retry the install ONCE (up.sh:677-694). A non-401 failure does NOT
@@ -258,7 +311,7 @@ export async function prepClosure(ctx: PrepContext): Promise<PrepResult> {
       });
     }
     if (install.code !== 0) {
-      return { ok: false, skippedPrep: false, freshRepos, steps, warnings, failed: installStep };
+      return installStep;
     }
 
     // 2. db:generate — BLOCKER-B: every `db:generate` package in the repo (the scan
@@ -282,12 +335,12 @@ export async function prepClosure(ctx: PrepContext): Promise<PrepResult> {
       const build: PrepStep = { repo, kind: 'build', cwd: root, argv: ['build'] };
       if (!(await run(build))) {
         if (FATAL_BUILD_REPOS.has(repo)) {
-          return { ok: false, skippedPrep: false, freshRepos, steps, warnings, failed: build };
+          return build;
         }
         warnings.push(build);
       }
     }
   }
 
-  return { ok: true, skippedPrep: false, freshRepos, steps, warnings };
+  return null;
 }

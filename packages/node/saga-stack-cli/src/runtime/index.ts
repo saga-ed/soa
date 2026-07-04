@@ -38,3 +38,5 @@ export * from './record.js';
 export * from './tunnel-prep.js';
 export * from './set-store.js';
 export * from './slot-active.js';
+export * from './set-check.js';
+export * from './lock.js';

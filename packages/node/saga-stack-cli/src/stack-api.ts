@@ -77,6 +77,7 @@ import type {
   ResetResult,
   Runner,
   ServiceLauncher,
+  PrepRepoLock,
   ServiceStopper,
   StopResult,
   StopServiceResult,
@@ -133,6 +134,8 @@ export interface Runtime {
   skipPrep?: boolean;
   /** R1 fresh-skip predicate: is a repo root already built (`node_modules` + `dist`)? */
   prepIsFresh?: (repoRoot: string) => boolean;
+  /** M13-B: realpath-keyed per-repo build lock — held ⇒ prep fails fast (plan §4 layer 2). */
+  prepLock?: PrepRepoLock;
   /**
    * R1 `db:generate` scan (M8 BLOCKER-B): given a repo root, the repo-relative dirs
    * of every package declaring a `db:generate` script — generated before the
@@ -774,6 +777,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
           skipPrep: runtime.skipPrep,
           isFresh: runtime.prepIsFresh,
           dbGenerateScan: runtime.prepDbGenerateScan,
+          lock: runtime.prepLock,
           manifest,
         });
         if (!prep.ok) return { ok: false, autoPull, av, mesh, prep, launched: [], skipped };

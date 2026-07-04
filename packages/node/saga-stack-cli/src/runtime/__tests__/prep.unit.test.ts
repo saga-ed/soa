@@ -123,6 +123,47 @@ describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => 
     expect(calls).toHaveLength(0);
   });
 
+  it('M13-B: a HELD build lock fails the pass fast with who-holds-it; fresh repos never lock', async () => {
+    const { runner } = fakeRunner();
+    const acquired: string[] = [];
+    const released: string[] = [];
+    const res = await prepClosure({
+      services: ['iam-api', 'programs-api'] as ServiceId[],
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: (root) => root === '/dev/rostering', // rostering fresh ⇒ must NOT acquire
+      lock: {
+        acquire(root) {
+          acquired.push(root);
+          if (root === '/dev/program-hub') {
+            return { ok: false, holder: 'pid 123 (slot 2) has been building /dev/program-hub since T' };
+          }
+          return { ok: true, release: () => released.push(root) };
+        },
+      },
+    });
+    expect(res.ok).toBe(false);
+    expect(res.failed?.kind).toBe('lock');
+    expect(res.failed?.detail).toContain('pid 123 (slot 2)');
+    expect(acquired).toEqual(['/dev/program-hub']); // fresh rostering skipped the lock entirely
+    expect(released).toEqual([]); // failed acquire has nothing to release
+  });
+
+  it('M13-B: the lock is RELEASED after a successful repo prep', async () => {
+    const { runner } = fakeRunner();
+    const released: string[] = [];
+    const res = await prepClosure({
+      services: ['iam-api'] as ServiceId[],
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      lock: { acquire: (root) => ({ ok: true, release: () => released.push(root) }) },
+    });
+    expect(res.ok).toBe(true);
+    expect(released).toEqual(['/dev/rostering']);
+  });
+
   it('a FRESH repo is skipped (idempotent re-up); a stale one still preps', async () => {
     const { runner } = fakeRunner();
     const res = await prepClosure({

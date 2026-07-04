@@ -111,6 +111,11 @@ export default class E2eRun extends BaseCommand {
       this.error('--headed and --headless are mutually exclusive.');
     }
 
+    // M13-B: the implicit set preflight (no-op without --set) — e2e run brings
+    // the stack up itself, so it guards the same way `stack up --set` does.
+    // Skipped on --dry-run (plan only, touches nothing).
+    if (!flags['dry-run']) await this.runSetPreflight(flags);
+
     // The first non-flag token is the flow ref; the rest (after `--`) are passthrough.
     const positionals = (argv as string[]).filter((a) => !a.startsWith('-'));
     const ref = positionals[0];

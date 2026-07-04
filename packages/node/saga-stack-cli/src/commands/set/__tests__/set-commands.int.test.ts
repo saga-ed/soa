@@ -17,6 +17,15 @@ import SetCheck from '../check.js';
 import SetList from '../list.js';
 import SetShow from '../show.js';
 
+/** Pin the activity probe INACTIVE so no test ever consults docker/state dirs. */
+function spyInactiveProbe(): void {
+  const probe: SlotActiveProbe = { isActive: async () => false };
+  vi.spyOn(
+    BaseCommand.prototype as unknown as { getSlotActiveProbe: () => SlotActiveProbe },
+    'getSlotActiveProbe',
+  ).mockReturnValue(probe);
+}
+
 const PKG_ROOT = process.cwd();
 
 let config: Config;
@@ -60,6 +69,7 @@ beforeEach(async () => {
   vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m) => {
     logged.push(String(m ?? ''));
   });
+  spyInactiveProbe();
 });
 
 afterEach(() => {

@@ -13,8 +13,6 @@
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { SetRepoKey, WorktreeSet } from '../../core/set/index.js';
-import { makeSlotActiveProbe } from '../../runtime/index.js';
-import type { SlotActiveProbe } from '../../runtime/index.js';
 
 export default class SetList extends BaseCommand {
   static description =
@@ -25,14 +23,6 @@ export default class SetList extends BaseCommand {
   static flags = {
     ...BaseCommand.baseFlags,
   };
-
-  /**
-   * The injectable slot-activity probe — tests spy this on the prototype to
-   * pin ACTIVE without fs/docker, mirroring `getRunner`/`getSetStore`.
-   */
-  protected getSlotActiveProbe(): SlotActiveProbe {
-    return makeSlotActiveProbe();
-  }
 
   async run(): Promise<void> {
     const { flags } = await this.parse(SetList);

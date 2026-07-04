@@ -17,6 +17,7 @@ import type { GhRunner } from '../gh.js';
 import {
   INTEGRATION_BRANCH,
   applyOverlay,
+  makeRealOverlayFs,
   refreshRepo,
   resetOverlay,
   resetRepo,
@@ -386,5 +387,16 @@ describe('resolveOverlayRepo — repo_path() / repo_overridden() parity', () => 
   it('an unmapped repo name → <dev>/<name>, never overridden (the `*)` fallthrough)', () => {
     const r = resolveOverlayRepo('some-other-repo', { dev: '/w' });
     expect(r).toEqual({ path: '/w/some-other-repo', overridden: false });
+  });
+});
+
+describe('makeRealOverlayFs.readManifest — M12 warn-only guard (never throws)', () => {
+  it('a DIRECTORY at the manifest path ⇒ null (no EISDIR throw), so verify --full stays warn-only', () => {
+    const fs = makeRealOverlayFs();
+    // `/tmp` always exists and is a directory (not a regular file) ⇒ must fold to null, not throw.
+    expect(() => fs.readManifest('/tmp')).not.toThrow();
+    expect(fs.readManifest('/tmp')).toBeNull();
+    // A truly-absent path ⇒ null too.
+    expect(fs.readManifest('/nonexistent/overlay/integration-suite.local.tsv')).toBeNull();
   });
 });

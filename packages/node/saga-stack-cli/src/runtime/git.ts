@@ -71,6 +71,35 @@ export interface GitRunner {
   /** `git checkout <ref>` — switch to an existing ref (reset restores the base branch). */
   checkout(repoPath: string, ref: string): Promise<boolean>;
 
+  // ── M12 source-posture verbs (verify.sh P1–P4, ~138-288) ──
+  /**
+   * `git diff --quiet <refA> <refB>` — true iff the two trees are IDENTICAL (exit 0).
+   * verify.sh's `git diff --quiet origin/main HEAD` (P1: an empty local/integration ≡
+   * main). A missing ref / any error folds to `false` (⇒ "differs", the safe non-equal
+   * answer that only ever downgrades an OK to a WARN — never a failure).
+   */
+  diffQuiet(repoPath: string, refA: string, refB: string): Promise<boolean>;
+  /**
+   * `git merge-base --is-ancestor <ancestor> <descendant>` — true iff `<ancestor>` is an
+   * ancestor of `<descendant>` (exit 0). verify.sh's P2 `merge-base --is-ancestor <oid>
+   * HEAD` (a pinned PR's head SHA is already merged into the checkout). Any error ⇒
+   * `false` ("not merged"), which is warn-only in P2 — never a failure.
+   */
+  mergeBaseIsAncestor(repoPath: string, ancestor: string, descendant: string): Promise<boolean>;
+  /**
+   * `git log --merges --pretty=%s <range>` — the raw merge-commit subjects in `<range>`
+   * (P3 uses `origin/main..HEAD`). Returns the raw multi-line stdout (`''` on any error);
+   * the PURE `extractMergedOverlayBranches` does the sed-equivalent branch extraction.
+   */
+  logMergeSubjects(repoPath: string, range: string): Promise<string>;
+  /**
+   * `git rev-list --count HEAD..<ref>` — commits HEAD is BEHIND `<ref>` (P4 freshness,
+   * `HEAD..origin/main`). Returns the count, or `null` on any error (verify.sh's `"?"` —
+   * "could not compare"). Distinct from `revListCount` (which targets `@{u}` and folds
+   * error to 0) because P4 must tell "behind 0" apart from "couldn't compare".
+   */
+  countBehindRef(repoPath: string, ref: string): Promise<number | null>;
+
   // ── M11 bootstrap ensure-repos verb ──
   /**
    * `git clone <url> <dir>` — clone a MISSING sibling repo (bootstrap.sh ensure_repos).
@@ -156,6 +185,25 @@ export function makeRealGitRunner(): GitRunner {
     },
     checkout(repoPath: string, ref: string): Promise<boolean> {
       return gitOk(repoPath, ['checkout', ref]);
+    },
+
+    // ── M12 source-posture verbs (verify.sh P1–P4) ──
+    diffQuiet(repoPath: string, refA: string, refB: string): Promise<boolean> {
+      return gitOk(repoPath, ['diff', '--quiet', refA, refB]);
+    },
+    mergeBaseIsAncestor(repoPath: string, ancestor: string, descendant: string): Promise<boolean> {
+      return gitOk(repoPath, ['merge-base', '--is-ancestor', ancestor, descendant]);
+    },
+    logMergeSubjects(repoPath: string, range: string): Promise<string> {
+      return gitOut(repoPath, ['log', '--merges', '--pretty=%s', range]);
+    },
+    async countBehindRef(repoPath: string, ref: string): Promise<number | null> {
+      // gitOut folds any error to '' — parse that (and any non-numeric) to null so P4
+      // can render verify.sh's `?` ("could not compare") distinctly from a real 0.
+      const out = await gitOut(repoPath, ['rev-list', '--count', `HEAD..${ref}`]);
+      if (out === '') return null;
+      const n = Number.parseInt(out, 10);
+      return Number.isFinite(n) ? n : null;
     },
 
     // ── M11 bootstrap ensure-repos verb ──

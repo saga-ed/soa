@@ -21,6 +21,7 @@ export * from './e2e-map.js';
 export * from './probe-plan.js';
 export * from './overlay-plan.js';
 export * from './overlay-tsv.js';
+export * from './verify-posture.js';
 export * from './login.js';
 export * from './cookie-jar.js';
 

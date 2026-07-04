@@ -2147,8 +2147,14 @@
           "type": "option"
         },
         "full": {
-          "description": "run the CANONICAL complete check: delegate the deep data + git-posture checks to verify.sh (the native gate only covers health today).",
+          "description": "run the CANONICAL complete check FULLY NATIVELY: native health gate + native DATA (D1–D5) + native source-posture (P1–P4). Nothing is delegated (use --legacy for the bash verify.sh). --health-only skips the posture/freshness pass.",
           "name": "full",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "legacy": {
+          "description": "route the WHOLE verify to the bash verify.sh instead of the native gates (escape hatch; --health-only ⇒ VERIFY_HEALTH_ONLY=1).",
+          "name": "legacy",
           "allowNo": false,
           "type": "boolean"
         }

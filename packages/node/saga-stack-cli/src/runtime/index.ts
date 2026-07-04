@@ -28,6 +28,7 @@ export * from './git.js';
 export * from './gh.js';
 export * from './auto-pull.js';
 export * from './overlay.js';
+export * from './verify-posture.js';
 export * from './vite-clear.js';
 export * from './ensure-repos.js';
 export * from './http-post.js';

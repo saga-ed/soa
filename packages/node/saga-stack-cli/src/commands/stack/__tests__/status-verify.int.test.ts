@@ -21,7 +21,15 @@ import { computeClosure } from '../../../core/closure.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { HealthProber, ProbeResult } from '../../../runtime/health.js';
-import type { MeshExec, PgProbe, RunResult, ScriptInvocation } from '../../../runtime/index.js';
+import type {
+  GhRunner,
+  GitRunner,
+  MeshExec,
+  OverlayFs,
+  PgProbe,
+  RunResult,
+  ScriptInvocation,
+} from '../../../runtime/index.js';
 import StackStatus from '../status.js';
 import StackVerify from '../verify.js';
 
@@ -95,6 +103,47 @@ function installDataProbes(over: { users?: string; devId?: string; admin?: strin
   };
   vi.spyOn(proto, 'getPgProbe').mockReturnValue(pg);
   vi.spyOn(proto, 'getMeshExec').mockReturnValue(mesh);
+}
+
+/**
+ * Fake git + gh + overlay-fs seams for the M12 NATIVE source-posture pass. Defaults to a
+ * clean posture (no overlay file, every repo on `main`, fetch ok, 0 behind) ⇒ zero
+ * warnings; `over` flips the readings to drive drift (wrong branch / behind / unmerged
+ * pin / unpinned overlay) so the warn-only invariant can be asserted.
+ */
+function installPostureSeams(over: {
+  overlay?: string | null; // tsv text, or null (no overlay file — the default)
+  branch?: string; // branchShowCurrent for every repo (default 'main')
+  behind?: number | null; // countBehindRef for every repo (default 0)
+  isAncestor?: boolean; // mergeBaseIsAncestor (P2 pin merged; default true)
+  oid?: string; // prHeadOid (P2; default 'abc' — a resolvable head)
+  mergeSubjects?: string; // logMergeSubjects (P3; default '' — no overlays)
+  fetchOk?: boolean; // fetch (P4; default true)
+  diffQuiet?: boolean; // diffQuiet origin/main HEAD (P1 ≡main gate; default true)
+} = {}): void {
+  const git: Partial<GitRunner> = {
+    async branchShowCurrent(): Promise<string> { return over.branch ?? 'main'; },
+    async fetch(): Promise<boolean> { return over.fetchOk ?? true; },
+    async countBehindRef(): Promise<number | null> { return over.behind ?? 0; },
+    async diffQuiet(): Promise<boolean> { return over.diffQuiet ?? true; },
+    async mergeBaseIsAncestor(): Promise<boolean> { return over.isAncestor ?? true; },
+    async logMergeSubjects(): Promise<string> { return over.mergeSubjects ?? ''; },
+    async statusPorcelain(): Promise<string> { return ''; },
+  };
+  const gh: Partial<GhRunner> = {
+    async prHeadRef(): Promise<string> { return 'feat/x'; },
+    async prHeadOid(): Promise<string> { return over.oid ?? 'abc'; },
+    async prNumberForHead(): Promise<string> { return ''; },
+  };
+  const overlayFs: OverlayFs = { readManifest: () => over.overlay ?? null };
+  const proto = BaseCommand.prototype as unknown as {
+    getGitRunner: () => GitRunner;
+    getGhRunner: () => GhRunner;
+    getOverlayFs: () => OverlayFs;
+  };
+  vi.spyOn(proto, 'getGitRunner').mockReturnValue(git as GitRunner);
+  vi.spyOn(proto, 'getGhRunner').mockReturnValue(gh as GhRunner);
+  vi.spyOn(proto, 'getOverlayFs').mockReturnValue(overlayFs);
 }
 
 beforeEach(async () => {
@@ -289,13 +338,54 @@ describe('status / verify — a service whose repo is not cloned is not-cloned, 
   });
 });
 
-describe('stack verify --full — native health + DATA, delegated posture (M9)', () => {
-  it('runs the native health gate + native DATA, and STILL delegates source-posture to verify.sh', async () => {
+describe('stack verify --full — FULLY NATIVE: health + DATA + posture, NOTHING delegated (M12)', () => {
+  it('runs the native health gate + native DATA + native posture, delegating NOTHING to verify.sh', async () => {
     installDataProbes(); // fully-green stack
+    installPostureSeams(); // clean posture, no overlay
     await StackVerify.run(['--full', ...WS], config);
-    // native health ran (NOT pure delegation) — the probe seam was exercised.
+    // native health ran (NOT delegation) — the probe seam was exercised.
     expect(probed.length).toBeGreaterThan(0);
-    // source-posture is still delegated to verify.sh.
+    // M12: the posture pass is NATIVE — verify.sh is NEVER invoked under --full.
+    expect(runnerCalls).toHaveLength(0);
+    // the native posture section is rendered.
+    expect(out.some((l) => l.includes('── source posture ──'))).toBe(true);
+    expect(out.some((l) => l.includes('── freshness (behind origin) ──'))).toBe(true);
+  });
+
+  it('--full --health-only skips the posture/freshness pass (health + DATA only, still nothing delegated)', async () => {
+    installDataProbes();
+    installPostureSeams();
+    await StackVerify.run(['--full', '--health-only', ...WS], config);
+    expect(runnerCalls).toHaveLength(0);
+    expect(out.some((l) => l.includes('── source posture ──'))).toBe(false);
+    expect(out.some((l) => l.includes('── data ──'))).toBe(true);
+  });
+
+  it('HARD-FAILS (exit 1) on a native DATA gap (D5 mongo unreachable)', async () => {
+    installDataProbes({ mongoReachable: false });
+    installPostureSeams();
+    await expect(StackVerify.run(['--full', ...WS], config)).rejects.toMatchObject({
+      oclif: { exit: 1 },
+    });
+  });
+
+  // ── THE OVERRIDING INVARIANT: P1–P4 are STRICTLY WARN-ONLY. ──
+  it('P1–P4 ALL "failing" (wrong branch + behind origin) do NOT flip the verdict — verify still exits 0 when health+DATA pass', async () => {
+    installDataProbes(); // health + DATA green
+    // every repo parked on local/integration that does NOT ≡ main (P1 drift) AND behind
+    // origin (P4). local/integration is a freshness candidate, so BOTH warns fire at once.
+    installPostureSeams({ branch: 'local/integration', diffQuiet: false, behind: 7 });
+    // NO throw ⇒ exit 0. Posture drift is surfaced as warnings but never fails the gate.
+    await expect(StackVerify.run(['--full', ...WS], config)).resolves.toBeUndefined();
+    // the drift really was detected (warnings printed) — proving it's warn-only, not skipped.
+    expect(out.some((l) => l.startsWith('⚠') && l.includes('posture drift'))).toBe(true);
+    expect(out.some((l) => l.startsWith('⚠') && l.includes('behind origin/main'))).toBe(true);
+    // and the final verdict is a PASS that merely annotates the warning count.
+    expect(out.some((l) => l.includes('✓ verify --full: health + data green') && l.includes('posture warning'))).toBe(true);
+  });
+
+  it('--legacy routes the WHOLE verify to bash verify.sh (the only remaining delegation)', async () => {
+    await StackVerify.run(['--legacy', ...WS], config);
     expect(runnerCalls).toHaveLength(1);
     expect(runnerCalls[0]).toEqual({
       cwd: SYNTH_DIR,
@@ -306,29 +396,9 @@ describe('stack verify --full — native health + DATA, delegated posture (M9)',
     });
   });
 
-  it('--full --health-only narrows the DELEGATED verify.sh to VERIFY_HEALTH_ONLY=1 (native DATA still runs)', async () => {
-    installDataProbes();
-    await StackVerify.run(['--full', '--health-only', ...WS], config);
-    expect(runnerCalls[0].env).toEqual({
-      DEV: DEV_ROOT,
-      SOA: SOA_ROOT,
-      VERIFY_HEALTH_ONLY: '1',
-    });
-  });
-
-  it('HARD-FAILS (exit 1) on a native DATA gap even when verify.sh would pass (D5 mongo unreachable)', async () => {
-    installDataProbes({ mongoReachable: false });
-    await expect(StackVerify.run(['--full', ...WS], config)).rejects.toMatchObject({
-      oclif: { exit: 1 },
-    });
-  });
-
-  it('HARD-FAILS (exit 1) when the delegated source-posture (verify.sh) exits non-zero', async () => {
-    installDataProbes();
-    installRunner(4);
-    await expect(StackVerify.run(['--full', ...WS], config)).rejects.toMatchObject({
-      oclif: { exit: 1 },
-    });
+  it('--legacy --health-only passes VERIFY_HEALTH_ONLY=1 to verify.sh', async () => {
+    await StackVerify.run(['--legacy', '--health-only', ...WS], config);
+    expect(runnerCalls[0].env).toEqual({ DEV: DEV_ROOT, SOA: SOA_ROOT, VERIFY_HEALTH_ONLY: '1' });
   });
 });
 

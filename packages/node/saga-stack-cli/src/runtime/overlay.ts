@@ -23,7 +23,7 @@
  * INVARIANT: git/gh/fs IO lives only here (`src/runtime/**`); the decision is pure core.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   classifyToken,
@@ -93,7 +93,15 @@ export interface OverlayFs {
 export function makeRealOverlayFs(): OverlayFs {
   return {
     readManifest(path: string): string | null {
-      return existsSync(path) ? readFileSync(path, 'utf8') : null;
+      // WARN-ONLY guard (verify.sh `[[ -f "$MANIFEST" ]]`): a path that exists but is a
+      // directory / unreadable file must degrade to "no local overlay", NOT throw
+      // (a throw here would flip `verify --full` to exit 1 — the one hole in the invariant).
+      try {
+        if (!existsSync(path) || !statSync(path).isFile()) return null;
+        return readFileSync(path, 'utf8');
+      } catch {
+        return null;
+      }
     },
   };
 }

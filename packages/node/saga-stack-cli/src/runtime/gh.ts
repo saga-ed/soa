@@ -30,22 +30,45 @@ export interface GhRunner {
    * Resolves the trimmed head-ref branch name, or `''` on ANY error/not-found.
    */
   prHeadRef(prNumber: string, cwd: string): Promise<string>;
+
+  // ── M12 source-posture verbs (verify.sh P2/P3) ──
+  /**
+   * `gh pr view <prNumber> --json headRefOid --jq '.headRefOid'`, run in the repo's cwd.
+   * Resolves the PR's head-commit SHA (P2 then asks `merge-base --is-ancestor <oid> HEAD`).
+   * `''` on ANY error/not-found ⇒ P2 warns "couldn't resolve head via gh" (never fails).
+   */
+  prHeadOid(prNumber: string, cwd: string): Promise<string>;
+  /**
+   * `gh pr list --head <headRef> --state all --json number --jq '.[0].number'`, in cwd.
+   * Resolves a branch name back to its PR number (P3 decorates an unpinned overlay with
+   * `#<num>`). `''` on ANY error/no-match — the decoration is cosmetic and warn-only.
+   */
+  prNumberForHead(headRef: string, cwd: string): Promise<string>;
 }
 
 /** The production `gh` runner — the ONLY place `gh` is actually spawned. */
 export function makeRealGhRunner(): GhRunner {
   return {
     prHeadRef(prNumber: string, cwd: string): Promise<string> {
-      return new Promise((resolve) => {
-        execFile(
-          'gh',
-          ['pr', 'view', prNumber, '--json', 'headRefName', '--jq', '.headRefName'],
-          { cwd, encoding: 'utf8' },
-          (err, stdout) => {
-            resolve(err ? '' : (stdout ?? '').toString().trim());
-          },
-        );
-      });
+      return ghOut(['pr', 'view', prNumber, '--json', 'headRefName', '--jq', '.headRefName'], cwd);
+    },
+    prHeadOid(prNumber: string, cwd: string): Promise<string> {
+      return ghOut(['pr', 'view', prNumber, '--json', 'headRefOid', '--jq', '.headRefOid'], cwd);
+    },
+    prNumberForHead(headRef: string, cwd: string): Promise<string> {
+      return ghOut(
+        ['pr', 'list', '--head', headRef, '--state', 'all', '--json', 'number', '--jq', '.[0].number'],
+        cwd,
+      );
     },
   };
+}
+
+/** Run `gh …args` in `cwd`; resolve trimmed stdout (`''` on ANY error). NEVER throws. */
+function ghOut(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile('gh', args, { cwd, encoding: 'utf8' }, (err, stdout) => {
+      resolve(err ? '' : (stdout ?? '').toString().trim());
+    });
+  });
 }

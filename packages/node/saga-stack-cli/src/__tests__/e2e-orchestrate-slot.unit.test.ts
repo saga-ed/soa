@@ -5,8 +5,10 @@
  * a live stack / docker / Playwright:
  *   1. `buildStackContext(flags, seams, delegate, profile)` — at slot > 0 the
  *      runtime carries `meshProject=soa-s<N>` + `meshOffset=N*1000` + offset
- *      `launchContext.ports` + the wired `pgProbe`; at slot 0 it is BYTE-IDENTICAL
- *      to the pre-slot runtime (no slot fields, no pgProbe, base ports).
+ *      `launchContext.ports`; at slot 0 the slot-OFFSET fields are omitted (base
+ *      mesh project + base ports). Since FLIP 3 the native-prep seams (`pgProbe`/…)
+ *      are wired at EVERY slot — including slot 0 — so `StackApi.up` migrates the
+ *      schema before seed regardless of slot.
  *   2. `serviceUrlEnv` / `playwrightEnv` — the Playwright service URLs carry the
  *      slot offset (base + N*1000) at slot > 0 and the base ports at slot 0.
  *   3. `describeResolved` — the slot's excluded services are dropped from the closure.
@@ -80,17 +82,22 @@ describe('buildStackContext — slot threading (parity with stack up buildRuntim
     expect(runtime.launchContext.ports['iam-api']).toBe(6010); // 3010 + 3000
   });
 
-  it('slot 0: BYTE-IDENTICAL — no slot fields, no pgProbe wired, base ports', () => {
+  it('slot 0: slot-OFFSET fields omitted + base ports, but prep seams STILL wired (FLIP 3)', () => {
     const profile = deriveInstance({ slot: 0 });
     const { runtime } = buildStackContext(FLAGS, seams(), delegate, profile);
 
-    // The slot machinery is a NO-OP at slot 0: the fields are OMITTED, not set to 0.
+    // The slot-OFFSET machinery is a NO-OP at slot 0: the fields are OMITTED, not set to 0.
     expect(runtime.slot).toBeUndefined();
     expect(runtime.meshProject).toBeUndefined();
     expect(runtime.meshOffset).toBeUndefined();
-    expect(runtime.pgProbe).toBeUndefined();
-    expect(runtime.prepIsFresh).toBeUndefined();
-    expect(runtime.repoDirExists).toBeUndefined();
+
+    // FLIP 3: the native-prep seams ARE wired at slot 0 now — up.sh --reset no longer
+    // migrates the schema, so `StackApi.up` must run R1 build → R2 provision → R3 migrate
+    // at slot 0 too (else 0 migrations → seed-dev-user hits TableDoesNotExist).
+    expect(runtime.pgProbe).toBe(PG_PROBE);
+    expect(typeof runtime.prepIsFresh).toBe('function');
+    expect(typeof runtime.prepDbGenerateScan).toBe('function');
+    expect(typeof runtime.repoDirExists).toBe('function');
 
     // Base ports (no offset) — identical to the pre-slot launch context.
     expect(runtime.launchContext.ports['iam-api']).toBe(3010);
@@ -101,6 +108,8 @@ describe('buildStackContext — slot threading (parity with stack up buildRuntim
   it('the DEFAULT profile (no arg) is slot 0 — back-compat for the connect command', () => {
     const { runtime } = buildStackContext(FLAGS, seams(), delegate);
     expect(runtime.slot).toBeUndefined();
+    // prep seams wired even on the default (slot-0) profile (FLIP 3).
+    expect(runtime.pgProbe).toBe(PG_PROBE);
     expect(runtime.launchContext.ports['iam-api']).toBe(3010);
   });
 });

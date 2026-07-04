@@ -169,8 +169,9 @@ export default class E2eRun extends BaseCommand {
       dashFs: this.getDashFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
-      // Slot > 0 native-prep seams (built always; wired into the runtime only at
-      // slot > 0 by buildStackContext, so slot 0 never reaches a real pgProbe).
+      // Native-prep seams (built always; since FLIP 3 buildStackContext wires them
+      // into the runtime at EVERY slot — including slot 0 — so the native StackApi.up
+      // runs R2 provision + R3 migrate before launch+seed regardless of slot).
       pgProbe: this.getPgProbe(),
       prepIsFresh: this.getPrepFreshCheck(),
       prepDbGenerateScan: this.getDbGenerateScan(),

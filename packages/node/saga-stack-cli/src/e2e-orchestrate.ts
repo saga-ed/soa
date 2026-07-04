@@ -179,11 +179,12 @@ export interface StackSeams {
   prober: HealthProber;
   runner: Runner;
   /**
-   * M7 slot > 0 ONLY — the native-prep seams wired into the runtime so a fresh
-   * slot stack provisions/migrates itself (R1 build → R2 provision → R3 migrate)
-   * instead of leaning on a prior up.sh run. UNSET at slot 0, where they are never
-   * wired (the pre-slot e2e runtime is byte-identical). The command builds them
-   * from `getPgProbe()`/`getPrepFreshCheck()`/… and passes them through.
+   * The native-prep seams wired into the runtime so the stack provisions/migrates
+   * itself (R1 build → R2 provision → R3 migrate) instead of leaning on a prior
+   * up.sh run. Since FLIP 3 these are wired at EVERY slot (including slot 0) — the
+   * e2e's native reset replaced up.sh's prep migrate, so slot 0 must run prep too or
+   * NOTHING migrates the schema and the seed fails (TableDoesNotExist). The command
+   * builds them from `getPgProbe()`/`getPrepFreshCheck()`/… and passes them through.
    */
   pgProbe?: PgProbe;
   prepIsFresh?: (repoRoot: string) => boolean;
@@ -202,23 +203,22 @@ export interface StackSeams {
  * `BaseCommand.buildNativeRuntime` for slots. It threads the resolved slot
  * `profile` (`deriveInstance({slot})`, passed in by the command) exactly as the
  * stack path does: `profile.portOverrides` + `profile.meshOffset` feed
- * `defaultLaunchContext` (so `launchContext.ports` carry the offset), and at
- * slot > 0 it sets `runtime.{slot, meshProject: profile.project, meshOffset}` and
- * wires the native-prep seams (`pgProbe`/`prepIsFresh`/…) so the slot's fresh DBs
- * provision + migrate per-slot. The per-slot container-env (`profile.containerEnv`
- * / `snapshotsDir`) and the launcher's `profile.stateDir` are applied by the
- * COMMAND (`applyInstanceEnv` + `getLauncher(stateDir)`) before this is called,
- * so the seam-injection pattern (command builds seams, this composes them) holds.
+ * `defaultLaunchContext` (so `launchContext.ports` carry the offset). The
+ * native-prep seams (`pgProbe`/`prepIsFresh`/…) are wired at EVERY slot (see
+ * below); at slot > 0 it additionally sets `runtime.{slot, meshProject:
+ * profile.project, meshOffset}` so the slot's DBs provision + migrate on their OWN
+ * offset ports/project. The per-slot container-env (`profile.containerEnv` /
+ * `snapshotsDir`) and the launcher's `profile.stateDir` are applied by the COMMAND
+ * (`applyInstanceEnv` + `getLauncher(stateDir)`) before this is called, so the
+ * seam-injection pattern (command builds seams, this composes them) holds.
  *
- * SLOT 0 (the default) is BYTE-IDENTICAL to the pre-slot runtime: `deriveInstance`
- * guarantees slot-0 `portOverrides`/`meshOffset` resolve the base context, and the
- * slot fields + prep seams are OMITTED entirely (not set to 0/undefined), so the
- * split-brain regression guard holds.
- *
- * We THREAD the profile here (rather than calling `buildNativeRuntime` directly)
- * because `buildNativeRuntime` wires the native-prep seams UNCONDITIONALLY — at
- * slot 0 that would (a) break the byte-identical guard and (b) make the hermetic
- * slot-0 e2e tests reach a real pgProbe. e2e wires prep at slot > 0 ONLY.
+ * PREP AT EVERY SLOT (FLIP 3): the native-prep seams are wired UNCONDITIONALLY,
+ * including slot 0. FLIP 3 made the e2e's slot-0 reset native (no more `up.sh
+ * --reset`), which killed the only thing that used to migrate the schema at slot 0.
+ * So `StackApi.up` must run R1 build → R2 provision → R3 migrate at slot 0 too, or
+ * the stack comes up with 0 migrations and `seed-dev-user` fails (TableDoesNotExist).
+ * The slot-OFFSET fields (`slot`/`meshProject`/`meshOffset`) remain slot > 0-gated —
+ * slot 0 keeps the base mesh project + base ports.
  */
 export function buildStackContext(
   flags: FlagBag,
@@ -263,19 +263,25 @@ export function buildStackContext(
     runner: seams.runner,
     tunnel: false,
     delegate,
-    // M7 slot > 0: namespace the mesh (`soa-s<N>`), carry the offset, and wire the
-    // native-prep seams so the slot's fresh DBs provision + migrate per-slot. OMITTED
-    // at slot 0, so the pre-slot runtime is byte-identical.
+    // FLIP 3: wire the native-prep seams at EVERY slot (including slot 0) so the e2e's
+    // native `StackApi.up` runs R1 build → R2 provision → R3 migrate before launch+seed,
+    // regardless of slot. Slot 0 used to rely on `up.sh --reset`'s own prep migrate to
+    // create the DB schema; now that the reset is native (and up.sh is gone from the e2e
+    // path), NOTHING would migrate at slot 0 without this — seed-dev-user then fails with
+    // TableDoesNotExist. So these seams are UNCONDITIONAL.
+    pgProbe: seams.pgProbe,
+    skipPrep: seams.skipPrep,
+    prepIsFresh: seams.prepIsFresh,
+    prepDbGenerateScan: seams.prepDbGenerateScan,
+    repoDirExists: seams.repoDirExists,
+    // M7 slot > 0 ONLY: namespace the mesh (`soa-s<N>`) + carry the offset so the slot's
+    // fresh DBs provision + migrate on their OWN offset ports/project. OMITTED at slot 0,
+    // so the pre-slot runtime keeps the base mesh project + base ports.
     ...(profile.slot > 0
       ? {
           slot: profile.slot,
           meshProject: profile.project,
           meshOffset: profile.meshOffset,
-          pgProbe: seams.pgProbe,
-          skipPrep: seams.skipPrep,
-          prepIsFresh: seams.prepIsFresh,
-          prepDbGenerateScan: seams.prepDbGenerateScan,
-          repoDirExists: seams.repoDirExists,
         }
       : {}),
   };

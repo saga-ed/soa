@@ -28,6 +28,7 @@ import type {
   LaunchResult,
   LaunchSpec,
   MeshExec,
+  PgProbe,
   PortProbe,
   ProbeResult,
   RunResult,
@@ -79,11 +80,31 @@ function installSeams(launchFail: Set<string> = new Set()): void {
   const prober: HealthProber = {
     async probe(): Promise<ProbeResult> { return { ok: true, status: 200 }; },
   };
+  // FLIP 3: the e2e's native prep pass now runs at EVERY slot (including slot 0), so
+  // `StackApi.up` runs R2 provision (CREATE DATABASE) + R3 migrate (pnpm db:deploy)
+  // through this Runner before launch+seed. Track the DBs provision CREATEs so the
+  // pgProbe below reports them present by RESET time (stateful — mirrors up-native).
+  const provisioned = new Set<string>();
   const runner: Runner = {
     async run(spec: ScriptInvocation): Promise<RunResult> {
       runs.push(spec);
+      const ci = spec.args.indexOf('-c');
+      if (ci >= 0) {
+        const m = /CREATE DATABASE (\w+)/.exec(spec.args[ci + 1] ?? '');
+        if (m) provisioned.add(m[1]);
+      }
       return { code: 0 };
     },
+  };
+  // FLIP 3: a fake pg probe so slot 0's native prep (R2 provision + R3 migrate) is a
+  // hermetic no-op with NO real docker/postgres. Stateful existence (absent until
+  // provision CREATEs it) so provision CREATEs each closure DB and the reset then
+  // sees them present + truncates; table-empty so migrate takes the `empty → db:deploy`
+  // branch. Mirrors the up-native slot tests' stateful fake.
+  const pgProbe: PgProbe = {
+    async databaseExists(_c, db): Promise<boolean> { return provisioned.has(db); },
+    async hasMigrationsTable(): Promise<boolean> { return false; },
+    async publicTableCount(): Promise<number> { return 0; },
   };
 
   const proto = BaseCommand.prototype as unknown as Record<string, () => unknown>;
@@ -93,6 +114,12 @@ function installSeams(launchFail: Set<string> = new Set()): void {
   vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
   vi.spyOn(proto, 'getProber').mockReturnValue(prober);
   vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
+  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pgProbe);
+  // Never fresh (fixed /fixed/dev paths don't exist) ⇒ R1 prep build runs; repos
+  // reported present so no service is skipped.
+  vi.spyOn(proto, 'getPrepFreshCheck').mockReturnValue(() => false);
+  vi.spyOn(proto, 'getDbGenerateScan').mockReturnValue(() => []);
+  vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
 }
 
 /** Workspace flags: stub saga-dash (no flows.json → bundled fallback) + real soa. */
@@ -190,6 +217,11 @@ describe('e2e run — native orchestration (stack lane)', () => {
       ),
     ).toBe(true);
     expect(runs.some((r) => r.args.includes('db:seed'))).toBe(true);
+
+    // FLIP 3 regression guard: the native prep pass runs at slot 0 now (up.sh --reset
+    // no longer migrates the schema). R3 migrate ran `pnpm db:deploy` over the closure
+    // DBs BEFORE the seed, so seed-dev-user no longer hits an unmigrated schema.
+    expect(runs.some((r) => r.command === 'pnpm' && r.args.includes('db:deploy'))).toBe(true);
 
     // exactly one Playwright child, in the SPA appDir, with the resolved argv + date env.
     const pw = playwrightRuns();

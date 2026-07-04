@@ -291,6 +291,7 @@ WORKSPACE_FILE=""
 declare -A SVC_MODE=()       # svc → local-source|sandbox (local-image is Phase 2)
 declare -A SVC_SANDBOX=()    # svc → sandbox name (the dep lives in this cloud sandbox)
 declare -A SVC_DBPROFILE=()  # svc → DB seed profile (local-source only; restore an S3 snapshot)
+declare -A SVC_SHA=()        # svc → git commit to check out (local-source only; empty = leave as-is)
 declare -A RESTORED_OK=()    # mesh-db → 1 once it actually holds snapshot data (restore_one_db)
 declare -a WS_RUN_SET=()     # services to launch locally (local-source)
 # ── S3 DB-snapshot restore (workspace `dbProfile`): instead of seeding a
@@ -385,6 +386,54 @@ check_branches(){
       [[ "$have" == main ]] || printf "\033[33m⚠\033[0m %s on '%s' (expected 'main')\n" "$repo" "$have"
     fi
   done
+}
+
+# svc_repo_dir: the sibling-repo directory a given service's source lives in —
+# the same 13-service map services_up()'s launch_if lines hard-code, extracted
+# once here so checkout_workspace_shas doesn't duplicate it. Empty output means
+# "unknown service" (caller's problem, e.g. a manifest typo already validated
+# by parse_workspace's mode check).
+svc_repo_dir(){ # svc
+  case "$1" in
+    iam-api|sis-api) echo "$ROSTERING" ;;
+    programs-api|scheduling-api|sessions-api|content-api) echo "$PROGRAM_HUB" ;;
+    coach-api|coach-web) echo "$COACH" ;;
+    ads-adm-api) echo "$SDS" ;;
+    saga-dash) echo "$SAGA_DASH" ;;
+    rtsm-api) echo "$RTSM" ;;
+    connect-api|connect-web) echo "$QBOARD" ;;
+    *) echo "" ;;
+  esac
+}
+
+# checkout_workspace_shas: a --workspace manifest's `sha` field pins a
+# local-source service's repo to an EXACT commit (typically captured off a
+# running sandbox — see docs/promotion-pipeline.md's cloud→local capture
+# direction) rather than "whatever branch happens to be checked out", which is
+# check_branches' warn-only default. A workspace run needs the stronger
+# guarantee: fail loudly on a dirty tree rather than silently launching the
+# wrong code. No-op when the manifest carries no sha (older manifests, or rows
+# that only pin mode/dbProfile) — leaves check_branches' warn-only behavior as
+# the sole guard, unchanged.
+checkout_workspace_shas(){
+  local svc sha dir have_sha _rc=0
+  for svc in "${!SVC_SHA[@]}"; do
+    sha=${SVC_SHA[$svc]}
+    dir=$(svc_repo_dir "$svc")
+    if [[ -z "$dir" ]]; then
+      err "--workspace: service '$svc' has a sha but no known repo directory (svc_repo_dir gap)"; _rc=1; continue
+    fi
+    if [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]]; then
+      err "--workspace: '$svc' repo at '$dir' has uncommitted changes — refusing to check out sha '$sha' over them"; _rc=1; continue
+    fi
+    have_sha=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
+    [[ "$have_sha" == "$sha"* ]] && continue  # already there
+    if ! git -C "$dir" checkout --quiet "$sha" 2>/dev/null; then
+      err "--workspace: '$svc' repo at '$dir' — 'git checkout $sha' failed (unknown commit? needs a fetch?)"; _rc=1; continue
+    fi
+    say "workspace: $svc → $dir checked out to $sha"
+  done
+  [[ $_rc -eq 0 ]] || exit 1
 }
 
 # ── preflight: launch directories must exist ─────────────────────────
@@ -1157,7 +1206,7 @@ parse_workspace(){ # file
   local ver; ver=$(jq -r '.version // empty' "$f" 2>/dev/null) \
     || { err "--workspace: '$f' is not valid JSON"; exit 1; }
   [[ "$ver" == "1" ]] || warn "--workspace: version '$ver' (expected 1) — proceeding"
-  # One row per service: svc, mode, sandboxName, dbProfile, joined
+  # One row per service: svc, mode, sandboxName, dbProfile, sha, joined
   # by the ASCII unit separator (). NOT tab: `read` treats tab as IFS
   # whitespace and COLLAPSES consecutive tabs, so an empty middle field (e.g. no
   # sandboxName on a local-source row) would shift later fields left.  is non-whitespace,
@@ -1166,10 +1215,11 @@ parse_workspace(){ # file
   rows=$(jq -re '.services | to_entries[] | [
            .key, (.value.mode // ""),
            (.value.sandboxName // ""),
-           (.value.dbProfile // "")] | join("")' "$f" 2>/dev/null) \
+           (.value.dbProfile // ""),
+           (.value.sha // "")] | join("")' "$f" 2>/dev/null) \
     || { err "--workspace: '$f' has no/empty .services or is malformed"; exit 1; }
-  local svc mode sbx dbp
-  while IFS="$US" read -r svc mode sbx dbp; do
+  local svc mode sbx dbp sha
+  while IFS="$US" read -r svc mode sbx dbp sha; do
     [[ -z "$svc" ]] && continue
     case "$mode" in
       local-source|sandbox) ;;
@@ -1187,6 +1237,10 @@ parse_workspace(){ # file
       # instead of seeding from scratch" (restore_stack). Only honored for the six
       # services with a canonical snapshot source; recorded here, validated there.
       [[ -n "$dbp" ]] && SVC_DBPROFILE["$svc"]=$dbp
+      # A sha pins this service's repo to an exact commit (captured from a sandbox
+      # or another dev's local mesh) — checked out by checkout_workspace_shas,
+      # called once up front alongside check_branches. Recorded here, applied there.
+      [[ -n "$sha" ]] && SVC_SHA["$svc"]=$sha
     else # sandbox
       [[ -z "$sbx" ]] && { err "--workspace: service '$svc' is sandbox but carries no sandboxName"; exit 1; }
       SVC_SANDBOX["$svc"]=$sbx
@@ -2294,11 +2348,14 @@ fi
 # drop the restore-eligible DBs, then restore after reset_data — is a deliberate
 # future feature, not smuggled in here.)
 if [[ $DO_UP == 1 ]]; then
-  check_branches; check_layout; apply_fixes; mesh_up; connect_av_up; restore_stack; prep
+  check_branches
+  [[ ${#SVC_SHA[@]} -gt 0 ]] && checkout_workspace_shas
+  check_layout; apply_fixes; mesh_up; connect_av_up; restore_stack; prep
 elif [[ $DO_RESET == 1 || $DO_RESTART == 1 ]]; then
   check_layout; mesh_up; connect_av_up
   if [[ "${SKIP_PREP:-0}" == "1" ]]; then say "SKIP_PREP=1 — skipping install+build prep"; else prep; fi
   [[ ${#SVC_DBPROFILE[@]} -gt 0 ]] && warn "--workspace dbProfile is ignored on --reset/restart (reset truncates DBs); use a plain './up.sh --workspace ...' to restore snapshots."
+  [[ ${#SVC_SHA[@]} -gt 0 ]] && warn "--workspace sha pins are ignored on --reset/restart (same as check_branches, which also only runs on 'up'); use a plain './up.sh --workspace ...' to check them out."
 fi
 
 # A --reset ALWAYS means a CLEAN restart on current code — independent of the

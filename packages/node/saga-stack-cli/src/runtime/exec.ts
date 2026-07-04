@@ -53,12 +53,31 @@ export interface ScriptInvocation {
    * runner just records the path (no fd opened). Absent ⇒ stdin follows `stdio`.
    */
   stdinFile?: string;
+  /**
+   * FLIP 4 (native-prep 401 recovery) — when set, the real runner CAPTURES the
+   * child's combined stdout+stderr (while STILL streaming it to the user's TTY) and
+   * sets `RunResult.unauthorized` iff the output matched a CodeArtifact 401
+   * (`ERR_PNPM_FETCH_401` / `Unauthorized`). This is how the native `pnpm install`
+   * detects an expired CodeArtifact token so it can `pnpm co:login` + retry once
+   * (up.sh:677-694). A fake runner ignores it and answers `unauthorized` directly.
+   * Ignored together with `stdinFile` (install never redirects stdin).
+   */
+  detectUnauthorized?: boolean;
 }
 
-/** The result of running a script: just the process exit code. */
+/** The result of running a script: the process exit code (+ FLIP 4 auth signal). */
 export interface RunResult {
   code: number;
+  /**
+   * FLIP 4 — true iff the run was launched with `detectUnauthorized` AND its output
+   * matched a CodeArtifact 401 (`ERR_PNPM_FETCH_401` / `Unauthorized`). Drives the
+   * native prep's `pnpm co:login` + retry-once recovery. Absent on every other run.
+   */
+  unauthorized?: boolean;
 }
+
+/** A CodeArtifact 401 in pnpm's output (up.sh:678 `ERR_PNPM_FETCH_401|Unauthorized`). */
+const CODEARTIFACT_401_RE = /ERR_PNPM_FETCH_401|Unauthorized/i;
 
 /**
  * The injectable process seam. One method, returns the child's exit code.
@@ -79,6 +98,29 @@ export interface Runner {
 export function makeRealRunner(): Runner {
   return {
     run(spec: ScriptInvocation): Promise<RunResult> {
+      // FLIP 4: capture combined output (while still streaming it) so a `pnpm install`
+      // 401 is detectable for the co:login retry. Kept separate from the inherited-stdio
+      // path so every other run stays byte-identical (no pipe/tee overhead).
+      if (spec.detectUnauthorized) {
+        return new Promise<RunResult>((resolve, reject) => {
+          const child = spawn(spec.command, spec.args, {
+            cwd: spec.cwd,
+            env: { ...process.env, ...spec.env },
+            stdio: ['inherit', 'pipe', 'pipe'],
+          });
+          let buf = '';
+          const tee = (out: NodeJS.WriteStream) => (d: Buffer): void => {
+            out.write(d);
+            buf += d.toString();
+          };
+          child.stdout?.on('data', tee(process.stdout));
+          child.stderr?.on('data', tee(process.stderr));
+          child.on('error', reject);
+          child.on('close', (code) => {
+            resolve({ code: code ?? 0, unauthorized: CODEARTIFACT_401_RE.test(buf) });
+          });
+        });
+      }
       return new Promise<RunResult>((resolve, reject) => {
         // M8 R5: with `stdinFile`, open the file read-only and hand its fd as the
         // child's stdin while stdout/stderr stay inherited (the `< file` redirect).

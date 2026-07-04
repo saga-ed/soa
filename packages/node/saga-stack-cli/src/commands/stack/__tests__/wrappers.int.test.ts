@@ -90,9 +90,11 @@ afterEach(() => {
 /** The workspace flags every case shares for deterministic path/env resolution. */
 const WS = ['--soa', SOA_ROOT, '--dev', DEV_ROOT];
 
-describe('stack up — real path (no --dry-run) wraps up.sh', () => {
+describe('stack up --legacy — the up.sh escape (FLIP 1: bare up is native-by-default)', () => {
   it('maps flags to the exact up.sh ScriptInvocation and never spawns', async () => {
-    await StackUp.run(['--reset', '--seed', 'roster', '--login', ...WS], config);
+    // FLIP 1: bare `stack up` now goes native; `--legacy` is the up.sh escape whose
+    // flag→argv mapping this pins.
+    await StackUp.run(['--legacy', '--reset', '--seed', 'roster', '--login', ...WS], config);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
@@ -105,6 +107,8 @@ describe('stack up — real path (no --dry-run) wraps up.sh', () => {
   });
 
   it('--no-auto-pull / --skip-prep surface as env on the invocation (under the repo env)', async () => {
+    // --no-auto-pull is a native-unsupported flag, so a bare invocation carrying it
+    // still routes to the up.sh wrapper (no --legacy needed) — SKIP_PREP rides along.
     await StackUp.run(['--no-auto-pull', '--skip-prep', ...WS], config);
 
     expect(calls).toHaveLength(1);
@@ -119,7 +123,7 @@ describe('stack up — real path (no --dry-run) wraps up.sh', () => {
 
   it('per-repo overrides (--rostering / --program-hub) become up.sh repo env vars', async () => {
     await StackUp.run(
-      ['--rostering', '/x/rostering', '--program-hub', '/y/ph', ...WS],
+      ['--legacy', '--rostering', '/x/rostering', '--program-hub', '/y/ph', ...WS],
       config,
     );
 
@@ -158,7 +162,7 @@ describe('stack up — real path (no --dry-run) wraps up.sh', () => {
   it('propagates a non-zero up.sh exit code via this.exit()', async () => {
     installFakeRunner(3);
     // oclif's this.exit(code) throws an ExitError carrying `oclif.exit === code`.
-    await expect(StackUp.run([...WS], config)).rejects.toMatchObject({ oclif: { exit: 3 } });
+    await expect(StackUp.run(['--legacy', ...WS], config)).rejects.toMatchObject({ oclif: { exit: 3 } });
     expect(calls).toHaveLength(1);
   });
 });
@@ -239,31 +243,33 @@ describe('stack down — slot-safe teardown (M7 BLOCKER-2)', () => {
   });
 });
 
-describe('stack seed — --with bundles map to up.sh seed add-ons', () => {
-  it('bare → up.sh --seed roster (no add-ons)', async () => {
-    await StackSeed.run([...WS], config);
+describe('stack seed --legacy — --with bundles map to up.sh seed add-ons (FLIP 2: seed is native-by-default)', () => {
+  // FLIP 2: bare `stack seed` now seeds NATIVELY (covered in seed-native.int.test.ts);
+  // `--legacy` is the up.sh escape whose flag→argv mapping these pin.
+  it('bare --legacy → up.sh --seed roster (no add-ons)', async () => {
+    await StackSeed.run(['--legacy', ...WS], config);
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe(UP_SH);
     expect(calls[0].args).toEqual(['--seed', 'roster']);
   });
 
-  it('full --with playback → --seed full --with-playback (== the old --with-playback)', async () => {
-    await StackSeed.run(['full', '--with', 'playback', ...WS], config);
+  it('--legacy full --with playback → --seed full --with-playback (== the old --with-playback)', async () => {
+    await StackSeed.run(['--legacy', 'full', '--with', 'playback', ...WS], config);
     expect(calls[0].args).toEqual(['--seed', 'full', '--with-playback']);
   });
 
-  it('--with playback --with qtf → both add-on flags (registry order)', async () => {
-    await StackSeed.run(['--with', 'playback', '--with', 'qtf', ...WS], config);
+  it('--legacy --with playback --with qtf → both add-on flags (registry order)', async () => {
+    await StackSeed.run(['--legacy', '--with', 'playback', '--with', 'qtf', ...WS], config);
     expect(calls[0].args).toEqual(['--seed', 'roster', '--with-playback', '--with-qtf-demo']);
   });
 
-  it('--with qtf → up.sh --with-qtf-demo (bash flag emitted by the mapper)', async () => {
-    await StackSeed.run(['--with', 'qtf', ...WS], config);
+  it('--legacy --with qtf → up.sh --with-qtf-demo (bash flag emitted by the mapper)', async () => {
+    await StackSeed.run(['--legacy', '--with', 'qtf', ...WS], config);
     expect(calls[0].args).toEqual(['--seed', 'roster', '--with-qtf-demo']);
   });
 
-  it('a bundle with no seed add-on (--with coach) is a no-op', async () => {
-    await StackSeed.run(['--with', 'coach', ...WS], config);
+  it('--legacy a bundle with no seed add-on (--with coach) is a no-op', async () => {
+    await StackSeed.run(['--legacy', '--with', 'coach', ...WS], config);
     expect(calls[0].args).toEqual(['--seed', 'roster']);
   });
 });

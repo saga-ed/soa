@@ -42,10 +42,13 @@
  * still run (see stack-api `up`). Documented divergence: skipping the build is safe
  * (fresh-skip already no-ops a built tree), while R2/R3 stay idempotent.
  *
- * CODEARTIFACT: `pnpm install` here has NO `co:login` 401-retry (up.sh's
- * `pnpm_install`, up.sh:677-694, offers one). A native `up` therefore REQUIRES a
- * valid CodeArtifact token already in place — a 401 aborts R1 (run `pnpm co:login`
- * and re-up).
+ * CODEARTIFACT (FLIP 4): `pnpm install` here recovers from an expired CodeArtifact
+ * token exactly as up.sh's `pnpm_install` does (up.sh:677-694) — install runs with
+ * `detectUnauthorized`, and on a 401 (`ERR_PNPM_FETCH_401` / `Unauthorized`) R1 runs
+ * `pnpm co:login` (the workspace's token-refresh script) and RETRIES the install
+ * ONCE. If it still fails, the ORIGINAL failing install step is surfaced (`failed`)
+ * and the pass aborts. The 401 detection + co:login + retry all run through the
+ * injected Runner seam, so this is unit-testable with a fake (no real network/AWS).
  *
  * FRESH-SKIP (idempotent re-up): when a repo's `dist/` + `node_modules` are already
  * present (the injected `isFresh` predicate), its whole prep is skipped — so a
@@ -120,9 +123,9 @@ export interface PrepContext {
 /** One prep step in the executed plan (for reporting + test assertions). */
 export interface PrepStep {
   repo: RepoKey;
-  kind: 'install' | 'db:generate' | 'build';
+  kind: 'install' | 'db:generate' | 'build' | 'co:login';
   cwd: string;
-  /** argv AFTER `pnpm` (e.g. `['install']`, `['db:generate']`, `['build']`). */
+  /** argv AFTER `pnpm` (e.g. `['install']`, `['db:generate']`, `['build']`, `['co:login']`). */
   argv: string[];
 }
 
@@ -226,8 +229,36 @@ export async function prepClosure(ctx: PrepContext): Promise<PrepResult> {
     }
 
     // 1. install (idempotent) — FATAL (up.sh's `pnpm_install` aborts on failure).
-    if (!(await run({ repo, kind: 'install', cwd: root, argv: ['install'] }))) {
-      return { ok: false, skippedPrep: false, freshRepos, steps, warnings, failed: steps[steps.length - 1] };
+    //    FLIP 4: on a CodeArtifact 401 (expired token), refresh via `pnpm co:login`
+    //    and retry the install ONCE (up.sh:677-694). A non-401 failure does NOT
+    //    trigger the retry; if the retry still fails, the ORIGINAL install step is
+    //    surfaced as `failed`.
+    const installStep: PrepStep = { repo, kind: 'install', cwd: root, argv: ['install'] };
+    steps.push(installStep);
+    let install = await ctx.runner.run({
+      cwd: root,
+      command: 'pnpm',
+      args: ['install'],
+      env: {},
+      stdio: 'inherit',
+      detectUnauthorized: true,
+    });
+    if (install.code !== 0 && install.unauthorized) {
+      // Refresh the CodeArtifact token, then retry the install once.
+      await run({ repo, kind: 'co:login', cwd: root, argv: ['co:login'] });
+      const retryStep: PrepStep = { repo, kind: 'install', cwd: root, argv: ['install'] };
+      steps.push(retryStep);
+      install = await ctx.runner.run({
+        cwd: root,
+        command: 'pnpm',
+        args: ['install'],
+        env: {},
+        stdio: 'inherit',
+        detectUnauthorized: true,
+      });
+    }
+    if (install.code !== 0) {
+      return { ok: false, skippedPrep: false, freshRepos, steps, warnings, failed: installStep };
     }
 
     // 2. db:generate — BLOCKER-B: every `db:generate` package in the repo (the scan

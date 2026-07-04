@@ -512,10 +512,9 @@ export interface ExecDeps {
   /** Sink for progress lines (the command's `log`). */
   log: (line: string) => void;
   /**
-   * The stack instance slot (M7). 0 (default) ⇒ the pre-slot path: reset delegates
-   * to `up.sh --reset` (legacy). > 0 ⇒ the reset runs NATIVELY per-slot (the M8 R4
-   * slot-aware runner) instead of up.sh — which is hardcoded to slot 0 and would
-   * clobber the default stack.
+   * The stack instance slot (M7). Threaded only for logging + the per-slot service
+   * exclusion now — since FLIP 3 the reset runs NATIVELY at EVERY slot (it no longer
+   * delegates to `up.sh --reset` at slot 0), so this no longer selects the reset path.
    */
   slot?: number;
   /**
@@ -591,19 +590,18 @@ export async function executeResolvedFlow(
     // 2. reset + seed (coupled; skipped on --skip-reset or when a prerequisite built the state).
     const effectiveReset = resolved.reset && !opts.skipReset;
     if (effectiveReset) {
-      // Slot 0: the whole-stack bash reset (up.sh --reset, `--legacy`) — unchanged.
-      // Slot > 0: up.sh is hardcoded to slot 0 (project soa, base ports) and would
-      // CLOBBER the default stack, so run the NATIVE per-slot reset (M8 R4 — slot-aware
-      // via the runtime's offset + slot containers) instead.
-      const legacy = slot === 0;
-      deps.log(
-        legacy
-          ? '==> reset (delegated to up.sh --legacy) + native seed'
-          : `==> reset (native, slot ${slot}) + native seed`,
-      );
-      const reset = await deps.api.reset(services, { legacy });
+      // FLIP 3: the e2e reset is NATIVE at EVERY slot now (M8 R4 — slot-aware via the
+      // runtime's offset + slot containers). Slot 0 used to delegate to `up.sh --reset`,
+      // but that died whenever soa was on a feature branch (the observed slot-0 e2e
+      // failure) and up.sh is hardcoded to slot 0 anyway. This is a closure-scoped
+      // native reset (NOT byte-identical to up.sh --reset: scoped to the flow's closure,
+      // truncating neededDbs(closure) rather than up.sh's fixed 9-DB list, and it adds a
+      // ledger_local migrate-reset up.sh doesn't do). `e2e run` therefore NEVER delegates
+      // its reset to up.sh.
+      deps.log(`==> reset (native${slot > 0 ? `, slot ${slot}` : ''}) + native seed`);
+      const reset = await deps.api.reset(services);
       if (reset.code !== 0) {
-        throw new FlowExecError(`reset failed (${legacy ? `up.sh exit ${reset.code}` : `native exit ${reset.code}`})`);
+        throw new FlowExecError(`reset failed (native exit ${reset.code})`);
       }
       if (resolved.seedSelection) {
         const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());

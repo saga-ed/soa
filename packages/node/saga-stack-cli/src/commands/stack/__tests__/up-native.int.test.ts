@@ -377,13 +377,60 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     expect(makeUp?.env).toMatchObject({ COMPOSE_PROJECT_NAME: 'soa-s1' });
   });
 
-  it('BARE full-stack at slot 0 keeps the up.sh wrapper (byte-identical)', async () => {
-    // The slot-0 wrapper path is covered in wrappers.int.test.ts (it mocks getRunner
-    // only); here we just prove a bare slot-0 run does NOT take the native path — no
-    // native service launches happen (it delegates entirely to up.sh via the Runner).
+  it('FLIP 1: BARE full-stack at slot 0 routes through the NATIVE path (never up.sh)', async () => {
+    // Native-by-default: a bare `stack up` (no --only/--with/--legacy) at slot 0 now
+    // expands to the full non-optional closure and boots it NATIVELY — the same path
+    // `--only` uses — instead of shelling out to up.sh.
     await StackUp.run([...WS], config);
+
+    // never resolved/ran the up.sh wrapper.
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+
+    // launched the full non-optional closure natively (slot 0 → nothing excluded).
+    const ids = launches.map((s) => s.id);
+    expect(ids.length).toBeGreaterThan(0);
+    expect(ids).toContain('iam-api');
+    expect(ids).toContain('saga-dash');
+    expect(ids).toContain('ads-adm-api'); // literal-port backend present at slot 0
+    expect(ids).toContain('connect-api');
+    // mesh came up under the DEFAULT project (no slot offset) — base ports.
+    const makeUp = runs.find((r) => r.command === 'make');
+    expect(makeUp?.args.some((a) => a.startsWith('COMPOSE_PROJECT_NAME=soa-s'))).toBe(false);
+    // native roster seed ran (the default profile) — no up.sh.
+    expect(runs.some((r) => r.args.some((a) => a.includes('seed-dev-user')))).toBe(true);
+  });
+
+  it('FLIP 1: BARE `stack up --legacy` forces the up.sh wrapper (no native launches)', async () => {
+    // --legacy is the non-destructive escape: it restores the old up.sh full-stack
+    // bring-up regardless of the other flags — NOTHING is launched natively.
+    await StackUp.run(['--legacy', ...WS], config);
     expect(launches).toEqual([]);
     expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(true);
+    const upSh = runs.find((r) => r.command.endsWith('up.sh'));
+    expect(upSh?.args).toEqual(['up']); // bare wrapper argv
+  });
+
+  it('BLOCKER-1: `--legacy --slot 2` hard-errors instead of clobbering slot 0 (never touches up.sh)', async () => {
+    // up.sh is hardcoded to slot 0 (project soa, base ports, STATE=/tmp/sds-synthetic).
+    // --legacy routes the whole bring-up through up.sh, so at slot > 0 it would clobber
+    // the default slot-0 stack — REFUSE rather than corrupt it. This was the unguarded
+    // hole: every other slot > 0 wrapper route already hard-errors.
+    await expect(StackUp.run(['--legacy', '--slot', '2', ...WS], config)).rejects.toThrow(
+      /slot 2:.*--legacy.*hardcoded.*slot 0.*clobber/s,
+    );
+    // never shelled out to up.sh and never launched anything natively.
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+    expect(launches).toEqual([]);
+  });
+
+  it('FLIP 1: BARE full-stack + a native-unsupported flag (--sandbox) still wraps up.sh', async () => {
+    // A native-unsupported flag on a bare invocation keeps the up.sh wrapper (the
+    // native path can't honour --sandbox/--tunnel/--pull/… yet).
+    await StackUp.run(['--sandbox', 'demo', ...WS], config);
+    expect(launches).toEqual([]);
+    const upSh = runs.filter((r) => r.command.endsWith('up.sh'));
+    expect(upSh).toHaveLength(1);
+    expect(upSh[0].args).toEqual(['up', '--sandbox', 'demo']);
   });
 
   it('--slot 10 is rejected at the flag layer (rabbitmq-mgmt collision ceiling)', async () => {
@@ -401,6 +448,43 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     // dash existsFile()=false in the fake ⇒ non-tunnel slot-0 path is a noop-absent
     // (no write). The key assertion: NO stack-slot write happened at slot 0.
     expect(dashCalls.some((c) => c.startsWith('write:'))).toBe(false);
+  });
+});
+
+describe('stack up — Connect AV native-gap warning (#221)', () => {
+  const AV_RE = /Connect AV \(livekit :7880 \/ coturn\) is not started by the native path/;
+
+  function captureLogs(): string[] {
+    const logged: string[] = [];
+    vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m?: string) => {
+      logged.push(String(m ?? ''));
+    });
+    return logged;
+  }
+
+  it('WARNS when Connect (connect-api) is in the native closure', async () => {
+    const logged = captureLogs();
+    await StackUp.run(['--only', 'connect-api', ...WS], config);
+    // connect-api is in the launched closure ⇒ the AV degradation warning fires.
+    expect(launches.map((s) => s.id)).toContain('connect-api');
+    expect(logged.join('\n')).toMatch(AV_RE);
+  });
+
+  it('does NOT warn when Connect is absent from the native closure (backend path stays quiet)', async () => {
+    const logged = captureLogs();
+    await StackUp.run(['--only', 'iam-api', ...WS], config);
+    // no connect service in the closure ⇒ the common backend path emits no AV warning.
+    expect(launches.map((s) => s.id)).not.toContain('connect-api');
+    expect(launches.map((s) => s.id)).not.toContain('connect-web');
+    expect(logged.join('\n')).not.toMatch(AV_RE);
+  });
+
+  it('never warns on the --legacy (up.sh wrapper) path — up.sh brings AV up itself', async () => {
+    const logged = captureLogs();
+    await StackUp.run(['--legacy', ...WS], config);
+    // wrapped path launches nothing natively and up.sh runs connect_av_up itself.
+    expect(launches).toEqual([]);
+    expect(logged.join('\n')).not.toMatch(AV_RE);
   });
 });
 

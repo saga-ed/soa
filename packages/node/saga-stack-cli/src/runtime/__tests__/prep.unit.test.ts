@@ -223,6 +223,104 @@ describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => 
     expect(FATAL_BUILD_REPOS.has('COACH')).toBe(true);
   });
 
+  it('FLIP 4: a 401 install failure triggers `pnpm co:login` + ONE retry, then proceeds', async () => {
+    // install #1 answers a CodeArtifact 401 (unauthorized), co:login succeeds, install
+    // #2 (the retry) succeeds → the pass proceeds to build.
+    let installs = 0;
+    const calls: ScriptInvocation[] = [];
+    const runner: Runner = {
+      async run(spec): Promise<RunResult> {
+        calls.push(spec);
+        if (spec.args[0] === 'install') {
+          installs += 1;
+          return installs === 1 ? { code: 1, unauthorized: true } : { code: 0 };
+        }
+        return { code: 0 };
+      },
+    };
+    const res = await prepClosure({
+      services: ['rtsm-api'] as ServiceId[],
+      dbs: [],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+    });
+
+    expect(res.ok).toBe(true);
+    // install (401) → co:login → install (retry) → build, all on RTSM.
+    expect(res.steps.map((s) => `${s.repo}:${s.kind}`)).toEqual([
+      'RTSM:install',
+      'RTSM:co:login',
+      'RTSM:install',
+      'RTSM:build',
+    ]);
+    // install ran with the 401-detection flag; co:login ran in the repo root.
+    const installCalls = calls.filter((c) => c.args[0] === 'install');
+    expect(installCalls).toHaveLength(2);
+    expect(installCalls.every((c) => c.detectUnauthorized === true)).toBe(true);
+    const login = calls.find((c) => c.args[0] === 'co:login');
+    expect(login?.command).toBe('pnpm');
+    expect(login?.cwd).toBe('/dev/rtsm');
+  });
+
+  it('FLIP 4: a NON-401 install failure does NOT co:login/retry — it aborts immediately', async () => {
+    let installs = 0;
+    const runner: Runner = {
+      async run(spec): Promise<RunResult> {
+        if (spec.args[0] === 'install') {
+          installs += 1;
+          return { code: 1 }; // plain failure, NOT unauthorized
+        }
+        return { code: 0 };
+      },
+    };
+    const res = await prepClosure({
+      services: ['rtsm-api'] as ServiceId[],
+      dbs: [],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.failed).toMatchObject({ repo: 'RTSM', kind: 'install' });
+    // no co:login, no retry — exactly one install attempt.
+    expect(installs).toBe(1);
+    expect(res.steps.some((s) => s.kind === 'co:login')).toBe(false);
+  });
+
+  it('FLIP 4: a 401 that STILL fails after co:login surfaces the ORIGINAL install failure', async () => {
+    let installs = 0;
+    const runner: Runner = {
+      async run(spec): Promise<RunResult> {
+        if (spec.args[0] === 'install') {
+          installs += 1;
+          return { code: 1, unauthorized: true }; // still 401 on the retry
+        }
+        return { code: 0 }; // co:login "succeeds" but the token is still bad
+      },
+    };
+    const res = await prepClosure({
+      services: ['rtsm-api'] as ServiceId[],
+      dbs: [],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.failed).toMatchObject({ repo: 'RTSM', kind: 'install' });
+    // co:login + EXACTLY one retry (install ran twice, then stopped — no infinite loop).
+    expect(installs).toBe(2);
+    expect(res.steps.map((s) => `${s.repo}:${s.kind}`)).toEqual([
+      'RTSM:install',
+      'RTSM:co:login',
+      'RTSM:install',
+    ]);
+    // build never ran (the pass aborted at install).
+    expect(res.steps.some((s) => s.kind === 'build')).toBe(false);
+  });
+
   it('MAJOR-C: a db:generate failure is NON-fatal (warning), the pass continues', async () => {
     const { runner } = runnerFailingWhen((s) => s.args[0] === 'db:generate');
     const res = await prepClosure({

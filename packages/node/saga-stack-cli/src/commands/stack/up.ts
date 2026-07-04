@@ -1,24 +1,36 @@
 /**
- * `saga-stack stack up` — bring the synthetic dev stack up.
+ * `saga-stack stack up` — bring the synthetic dev stack up (NATIVE-BY-DEFAULT,
+ * FLIP 1).
  *
- * THREE PATHS (the M4 split):
+ * THREE PATHS:
  *  - `--dry-run` (M0): resolve the dependency closure (`computeClosure`) and
  *    `emit()` it (services in launch order, databases, mesh, why each service is
  *    present). With `--only` it also prints the resolved native LAUNCH plan + the
  *    composed SEED plan. No docker / pnpm / health IO.
- *  - NATIVE partial-stack (M4): `--only <svc,…>` WITHOUT --dry-run. The comma-list
- *    is now ALLOWED. computeClosure → drive the in-process `StackApi.up(closure)`
- *    (native mesh + topo-wave service launch, NOT up.sh) → composeSeedPlan over
- *    the active closure → `StackApi.seed(plan)`. `--reset`/`--login` delegate to
- *    up.sh through the facade (their native ports are M6+). This is M4's headline.
- *  - WRAPPED full-stack (M1): NO `--only` (or `--only` + a flag the native path
- *    can't yet honour — sandbox/tunnel/workspace/record/pull/prep, which fall back
- *    to up.sh for a SINGLE service). A THIN WRAPPER: flags → `flagMap.up()` → the
- *    exact up.sh argv/env, shelled out with stdio inherited. UNCHANGED from M1.
+ *  - NATIVE (M4 partial-stack + FLIP 1 full-stack): the DEFAULT. `--only <svc,…>`
+ *    boots that closure; a BARE `stack up` (no --only/--with) now EXPANDS to the
+ *    full non-optional service set and boots it the SAME way. computeClosure →
+ *    drive the in-process `StackApi.up(closure)` (native prep → native mesh +
+ *    topo-wave service launch, NOT up.sh) → composeSeedPlan over the active closure
+ *    → `StackApi.seed(plan)`. `--reset` is native (M8 R4); `--login` delegates to
+ *    up.sh through the facade. HONEST GAPS — the native bare `up` does NOT reproduce
+ *    up.sh's implicit auto-pull / branch-layout preflight, nor its Connect AV bring-up
+ *    (livekit :7880 / coturn); reach for `--legacy` (full up.sh bring-up incl. AV) or
+ *    `--pull` (force the sibling-repo sync) when you need those.
+ *  - WRAPPED (the escape): `--legacy` forces the up.sh wrapper for the WHOLE
+ *    bring-up. Additionally, a bare invocation carrying a flag the native path can't
+ *    honour yet (sandbox/tunnel/workspace/record/pull/no-auto-pull), or a
+ *    SINGLE-service `--only` + such a flag, still falls back to the up.sh wrapper: a
+ *    THIN WRAPPER mapping flags → `flagMap.up()` → the exact up.sh argv/env, shelled
+ *    out with stdio inherited. A MULTI-service `--only` + such a flag is rejected
+ *    (up.sh --only is single-service only). up.sh is hardcoded to slot 0, so at
+ *    slot > 0 the bare set is always native and an unsupported flag hard-errors
+ *    rather than clobbering slot 0.
  *
  *   node bin/dev.js stack up --only scheduling-api,sessions-api --dry-run
  *   node bin/dev.js stack up --only scheduling-api,sessions-api          # native
- *   node bin/dev.js stack up --seed roster --login                       # wrapped
+ *   node bin/dev.js stack up                                             # native full stack
+ *   node bin/dev.js stack up --legacy --seed roster --login             # wrapped (up.sh)
  *
  * Imports come straight from the specific core modules (not the `core/index`
  * barrel) so this command stays decoupled from the seed/flow sub-barrels.
@@ -114,6 +126,11 @@ export default class StackUp extends BaseCommand {
     workspace: Flags.string({
       description: 'workspace file to launch from (up.sh --workspace <file.json>)',
     }),
+    legacy: Flags.boolean({
+      default: false,
+      description:
+        'force the bash `up.sh` wrapper for the WHOLE bring-up (the non-destructive escape) instead of the native path. Bare `stack up` is native-by-default; `--legacy` restores the old up.sh full-stack bring-up regardless of the other flags.',
+    }),
   };
 
   /** M7 Phase 2: `stack up` brings up an isolated `soa-s<N>` stack at slot > 0. */
@@ -136,37 +153,65 @@ export default class StackUp extends BaseCommand {
       return;
     }
 
-    // ── M7 BLOCKER-1: a BARE full-stack `up` at slot > 0 must NOT reach the up.sh
-    // wrapper. up.sh is hardcoded to slot 0 (project `soa`, base ports, STATE=
-    // /tmp/sds-synthetic) — a bare `--slot N` falling through to `runWrapped` would
-    // CLOBBER the default stack. Expand the bare request to the FULL non-optional
-    // service set and route it through the native (slot-threaded) path below; the
-    // per-slot exclusion filter in `runNative` then drops the literal-port / frontend
-    // services, so slot > 0 comes up as a BACKEND sub-stack (see derive-instance).
-    // Slot 0 (bare) is unchanged — it keeps the up.sh wrap. ──
-    if (flags.slot > 0 && !isOnly) {
+    // ── FLIP 1: `--legacy` is the non-destructive escape — force the up.sh wrapper
+    // for the WHOLE bring-up regardless of the other flags. Reached before any native
+    // routing so `ss stack up --legacy` reproduces the old bash full-stack up. ──
+    if (flags.legacy) {
+      // M7 BLOCKER-1: up.sh is hardcoded to slot 0 (project soa, base ports,
+      // STATE=/tmp/sds-synthetic). At slot > 0 --legacy would shell out to up.sh and
+      // CLOBBER the default slot-0 stack (silent data loss) — REFUSE rather than corrupt
+      // it, mirroring the slot > 0 wrapper-fallback guard below.
+      if (flags.slot > 0) {
+        this.error(
+          `slot ${flags.slot}: --legacy routes through the up.sh wrapper, which is hardcoded ` +
+            'to slot 0 (project soa, base ports, STATE=/tmp/sds-synthetic) and would clobber it. ' +
+            'Drop --legacy to bring the slot up natively.',
+        );
+      }
+      await this.runWrapped(flags, requested);
+      return;
+    }
+
+    // Flags the native path does NOT yet implement (sandbox/tunnel overlays, the
+    // pull / auto-pull / record bash prep) — a bring-up carrying one of these still
+    // routes through the up.sh wrapper. `--skip-prep` is NOT here: it is NATIVE (M8),
+    // threading into the native prep pass as SKIP_PREP (skip R1 build; R2 provision +
+    // R3 migrate still run).
+    const needsUpSh =
+      flags.sandbox !== undefined ||
+      flags.workspace !== undefined ||
+      flags.tunnel ||
+      flags.record !== undefined ||
+      flags.pull ||
+      flags['no-auto-pull'];
+
+    // ── FLIP 1: a BARE full-stack `up` is NATIVE-BY-DEFAULT. Expand the bare request
+    // to the FULL non-optional service set and route it through the native path
+    // (native prep → launch → seed) — the SAME path `--only` uses. Two exceptions
+    // both keep the up.sh wrapper for a bare invocation:
+    //   • a native-unsupported flag is present at slot 0 (sandbox/tunnel/workspace/
+    //     record/pull/no-auto-pull) — those combos still need the bash prep, so the
+    //     bare set is left empty and falls through to `runWrapped` below.
+    //   • (there is no slot-0 wrapper exception beyond that — plain `ss stack up` now
+    //     boots the full non-optional closure natively.)
+    // M7 BLOCKER-1: at slot > 0 the bare request is ALWAYS expanded + native (up.sh is
+    // hardcoded to slot 0 — project `soa`, base ports, STATE=/tmp/sds-synthetic — and
+    // would clobber the default stack); a native-unsupported flag there hard-errors in
+    // the `isOnly` block below rather than reaching `runWrapped`. The per-slot
+    // exclusion filter in `runNative` drops the literal-port / un-slottable services,
+    // so slot > 0 comes up as a BACKEND (+ saga-dash/coach) sub-stack.
+    if (!isOnly && (flags.slot > 0 || !needsUpSh)) {
       requested = Object.values(manifest.services)
         .filter((s) => !s.optional)
         .map((s) => s.id);
       isOnly = true;
     }
 
-    // ── NATIVE partial-stack (M4): --only with flags the native path can honour. ──
-    // Flags the native path does NOT yet implement (sandbox/tunnel overlays, the
-    // pull/prep/record bash prep) force a fall-back to the up.sh wrapper, which
-    // ONLY accepts a single service. A comma-list + such a flag is rejected.
+    // ── NATIVE (M4 partial-stack / FLIP 1 full-stack): the requested set boots the
+    // closure natively. Flags the native path can't honour yet force the up.sh
+    // wrapper, which ONLY accepts a single service — so a multi-service set + such a
+    // flag is rejected. ──
     if (isOnly) {
-      // --skip-prep is now NATIVE (M8): it threads into the native prep pass as
-      // SKIP_PREP (skip R1 build; R2 provision + R3 migrate still run), so it no
-      // longer forces the up.sh fallback.
-      const needsUpSh =
-        flags.sandbox !== undefined ||
-        flags.workspace !== undefined ||
-        flags.tunnel ||
-        flags.record !== undefined ||
-        flags.pull ||
-        flags['no-auto-pull'];
-
       if (!needsUpSh) {
         await this.runNative(flags, requested, withPlayback);
         return;
@@ -194,9 +239,12 @@ export default class StackUp extends BaseCommand {
       // reached at slot 0 (slot > 0 hard-errored just above).
     }
 
-    // ── WRAPPED full-stack (M1): thin wrapper over up.sh. UNCHANGED. Slot 0 only —
-    // slot > 0 can never reach here (bare → native above; --only + unsupported flag
-    // → hard-error above). ──
+    // ── WRAPPED (the up.sh escape): thin wrapper over up.sh. Reached only at slot 0
+    // and only for (a) a BARE invocation carrying a native-unsupported flag
+    // (sandbox/tunnel/workspace/record/pull/no-auto-pull → bare set left un-expanded
+    // above), or (b) a SINGLE-service --only + such a flag. `--legacy` is handled
+    // earlier (forces the wrapper unconditionally). slot > 0 can never reach here
+    // (bare → native above; --only + unsupported flag → hard-error above). ──
     await this.runWrapped(flags, requested);
   }
 
@@ -361,6 +409,19 @@ export default class StackUp extends BaseCommand {
     // warn+continue) rather than aborting — surface them so they're visible.
     for (const w of up.prep?.warnings ?? []) {
       this.log(`⚠ prep: ${w.repo} ${w.kind} failed (non-fatal, continued)`);
+    }
+
+    // AV GAP (#221): up.sh's bare `up` runs `connect_av_up` (livekit :7880 + coturn
+    // from qboard's compose, best-effort); the native path has no AV step yet, so a
+    // native bring-up that INCLUDES Connect boots it with no AV backend (degrades to
+    // CRDT-only) silently. Warn only when Connect is actually in the closure so the
+    // common backend/dash path stays quiet. `--legacy` never reaches here (wrapped
+    // path handles AV).
+    if (services.includes('connect-api') || services.includes('connect-web')) {
+      this.log(
+        '⚠ Connect AV (livekit :7880 / coturn) is not started by the native path yet — ' +
+          'video/audio sessions are unavailable (CRDT-only). Use `stack up --legacy` for AV, or see #221.',
+      );
     }
 
     // Report.

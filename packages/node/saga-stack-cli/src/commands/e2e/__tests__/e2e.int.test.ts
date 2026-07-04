@@ -176,8 +176,19 @@ describe('e2e run — native orchestration (stack lane)', () => {
     // roster needs sis+programs; +saga-dash+iam. No scheduling/sessions/ads-adm/content.
     expect(launches.map((s) => s.id)).toEqual(['iam-api', 'sis-api', 'programs-api', 'saga-dash']);
 
-    // reset delegated to up.sh, native roster seed ran.
-    expect(runs.some((r) => r.command.endsWith('up.sh') && r.args.includes('--reset'))).toBe(true);
+    // FLIP 3: the slot-0 reset is NATIVE now — it NEVER delegates to up.sh --reset.
+    // The closure DBs are truncated via docker-exec psql (preserving _prisma_migrations)
+    // and the native roster seed ran.
+    expect(runs.some((r) => r.command.endsWith('up.sh') && r.args.includes('--reset'))).toBe(false);
+    expect(
+      runs.some(
+        (r) =>
+          r.command === 'docker' &&
+          r.args.includes('psql') &&
+          r.args.includes('-c') &&
+          r.args[r.args.indexOf('-c') + 1].includes("tablename <> '_prisma_migrations'"),
+      ),
+    ).toBe(true);
     expect(runs.some((r) => r.args.includes('db:seed'))).toBe(true);
 
     // exactly one Playwright child, in the SPA appDir, with the resolved argv + date env.

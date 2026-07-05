@@ -1,8 +1,8 @@
 /**
  * `set list` / `set show` / `set check` (M13-A, plan §2.4) — in-process, every
- * seam faked: set store (canned), slot-activity probe (canned), git runner
- * (canned branches), fresh-check (pinned buildable/prebuilt). Real fs only for
- * mkdtemp worktree stand-ins.
+ * seam faked via the shared set-fakes helpers: set store (canned), slot-activity
+ * probe (canned), git runner (canned branches), fresh-check (pinned
+ * buildable/prebuilt). Real fs only for mkdtemp worktree stand-ins.
  */
 
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -10,57 +10,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  oneSetWithSagaDash,
+  spyGitRunner,
+  spyPrepFresh,
+  spySetStore,
+  spySlotActive,
+  twoSetsSharingCheckout,
+} from '../../../__tests__/helpers/set-fakes.js';
 import { BaseCommand } from '../../../base-command.js';
-import { parseWorktreeSetsFile } from '../../../core/set/index.js';
-import type { GitRunner, SetStore, SlotActiveProbe } from '../../../runtime/index.js';
 import SetCheck from '../check.js';
 import SetList from '../list.js';
 import SetShow from '../show.js';
-
-/** Pin the activity probe INACTIVE so no test ever consults docker/state dirs. */
-function spyInactiveProbe(): void {
-  const probe: SlotActiveProbe = { isActive: async () => false };
-  vi.spyOn(
-    BaseCommand.prototype as unknown as { getSlotActiveProbe: () => SlotActiveProbe },
-    'getSlotActiveProbe',
-  ).mockReturnValue(probe);
-}
 
 const PKG_ROOT = process.cwd();
 
 let config: Config;
 let dir: string;
 let logged: string[];
-
-function storeOf(data: unknown): SetStore {
-  return { path: () => '/canned/worktree-sets.json', load: () => parseWorktreeSetsFile(data) };
-}
-
-function spyStore(data: unknown): void {
-  vi.spyOn(
-    BaseCommand.prototype as unknown as { getSetStore: () => SetStore },
-    'getSetStore',
-  ).mockReturnValue(storeOf(data));
-}
-
-function spyGit(branches: Record<string, string>, opts: { porcelain?: string; nonCheckouts?: string[] } = {}): void {
-  const fake: Partial<GitRunner> = {
-    branchShowCurrent: async (repoPath: string) => branches[repoPath] ?? 'main',
-    statusPorcelain: async () => opts.porcelain ?? '',
-    revParseVerify: async (repoPath: string) => !(opts.nonCheckouts ?? []).includes(repoPath),
-  };
-  vi.spyOn(
-    BaseCommand.prototype as unknown as { getGitRunner: () => GitRunner },
-    'getGitRunner',
-  ).mockReturnValue(fake as GitRunner);
-}
-
-function spyFresh(prebuilt: boolean): void {
-  vi.spyOn(
-    BaseCommand.prototype as unknown as { getPrepFreshCheck: () => (root: string) => boolean },
-    'getPrepFreshCheck',
-  ).mockReturnValue(() => prebuilt);
-}
 
 beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
@@ -69,7 +36,8 @@ beforeEach(async () => {
   vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m) => {
     logged.push(String(m ?? ''));
   });
-  spyInactiveProbe();
+  // Pin the activity probe INACTIVE so no test ever consults docker/state dirs.
+  spySlotActive([]);
 });
 
 afterEach(() => {
@@ -79,18 +47,14 @@ afterEach(() => {
 
 describe('set list', () => {
   it('renders name/slot/ACTIVE/repos, ACTIVE derived live per slot', async () => {
-    spyStore({
+    spySetStore({
       version: 1,
       sets: {
         'journey-fix': { slot: 1, repos: { 'saga-dash': '/wt/dash-j' }, note: 'PR #345' },
         topology: { slot: 2, repos: { 'saga-dash': '/wt/dash-t', rostering: '/wt/rost-c' } },
       },
     });
-    const probe: SlotActiveProbe = { isActive: async (_state, project) => project === 'soa-s1' };
-    vi.spyOn(
-      SetList.prototype as unknown as { getSlotActiveProbe: () => SlotActiveProbe },
-      'getSlotActiveProbe',
-    ).mockReturnValue(probe);
+    spySlotActive(['soa-s1']);
 
     await SetList.run([], config);
     const out = logged.join('\n');
@@ -99,7 +63,7 @@ describe('set list', () => {
   });
 
   it('an empty store points at the sets file', async () => {
-    spyStore({ version: 1, sets: {} });
+    spySetStore({ version: 1, sets: {} });
     await SetList.run([], config);
     expect(logged.join('\n')).toMatch(/No worktree sets defined in \/canned\/worktree-sets\.json/);
   });
@@ -109,7 +73,7 @@ describe('set show', () => {
   it('shows live branch + dirty state + provenance per repo', async () => {
     const dash = join(dir, 'dash');
     mkdirSync(dash);
-    spyStore({
+    spySetStore({
       version: 1,
       sets: {
         x: {
@@ -121,7 +85,7 @@ describe('set show', () => {
         },
       },
     });
-    spyGit({ [dash]: 'feat/x' });
+    spyGitRunner({ branches: { [dash]: 'feat/x' } });
 
     await SetShow.run(['x'], config);
     const out = logged.join('\n');
@@ -131,15 +95,15 @@ describe('set show', () => {
   });
 
   it('unknown set name errors with the known names', async () => {
-    spyStore({ version: 1, sets: { x: { slot: 1, repos: {} } } });
+    spySetStore({ version: 1, sets: { x: { slot: 1, repos: {} } } });
     await expect(SetShow.run(['nope'], config)).rejects.toThrow(/unknown set 'nope'/);
   });
 
   it('an existing NON-git dir renders (not a git checkout), never a clean detached HEAD', async () => {
     const plainDir = join(dir, 'plain');
     mkdirSync(plainDir);
-    spyStore({ version: 1, sets: { x: { slot: 1, repos: { 'saga-dash': plainDir } } } });
-    spyGit({}, { nonCheckouts: [plainDir] });
+    spySetStore(oneSetWithSagaDash(plainDir));
+    spyGitRunner({ nonCheckouts: [plainDir] });
 
     await SetShow.run(['x'], config);
     const out = logged.join('\n');
@@ -152,18 +116,18 @@ describe('set check', () => {
   it('a clean pre-built set is OK (exit 0)', async () => {
     const dash = join(dir, 'dash');
     mkdirSync(dash);
-    spyStore({ version: 1, sets: { x: { slot: 1, repos: { 'saga-dash': dash } } } });
-    spyGit({ [dash]: 'feat/x' });
-    spyFresh(true);
+    spySetStore(oneSetWithSagaDash(dash));
+    spyGitRunner({ branches: { [dash]: 'feat/x' } });
+    spyPrepFresh(true);
 
     await expect(SetCheck.run(['x', '--dev', join(dir, 'dev')], config)).resolves.toBeUndefined();
     expect(logged.join('\n')).toMatch(/✓ x: OK/);
   });
 
   it('a missing path is a violation (exit 1)', async () => {
-    spyStore({ version: 1, sets: { x: { slot: 1, repos: { 'saga-dash': join(dir, 'nope') } } } });
-    spyGit({});
-    spyFresh(true);
+    spySetStore(oneSetWithSagaDash(join(dir, 'nope')));
+    spyGitRunner();
+    spyPrepFresh(true);
 
     await expect(SetCheck.run(['x', '--dev', join(dir, 'dev')], config)).rejects.toMatchObject({
       oclif: { exit: 1 },
@@ -174,12 +138,12 @@ describe('set check', () => {
   it('branch drift against createdFrom WARNS but never blocks', async () => {
     const dash = join(dir, 'dash');
     mkdirSync(dash);
-    spyStore({
+    spySetStore({
       version: 1,
       sets: { x: { slot: 1, repos: { 'saga-dash': { path: dash, createdBy: 'ss', createdFrom: 'feat/x' } } } },
     });
-    spyGit({ [dash]: 'feat/OTHER' });
-    spyFresh(true);
+    spyGitRunner({ branches: { [dash]: 'feat/OTHER' } });
+    spyPrepFresh(true);
 
     await expect(SetCheck.run(['x', '--dev', join(dir, 'dev')], config)).resolves.toBeUndefined();
     expect(logged.join('\n')).toMatch(/⚠ branch drift: @ feat\/OTHER, created from feat\/x/);
@@ -189,10 +153,10 @@ describe('set check', () => {
     const devRoot = join(dir, 'dev');
     const primaryDash = join(devRoot, 'saga-dash');
     mkdirSync(primaryDash, { recursive: true });
-    spyStore({ version: 1, sets: { x: { slot: 1, repos: { 'saga-dash': primaryDash } } } });
-    spyGit({ [primaryDash]: 'main' });
+    spySetStore(oneSetWithSagaDash(primaryDash));
+    spyGitRunner({ branches: { [primaryDash]: 'main' } });
 
-    spyFresh(false);
+    spyPrepFresh(false);
     await expect(SetCheck.run(['x', '--dev', devRoot], config)).rejects.toMatchObject({ oclif: { exit: 1 } });
     expect(logged.join('\n')).toMatch(/BUILDABLE entry points at the primary checkout/);
 
@@ -201,9 +165,9 @@ describe('set check', () => {
     vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m) => {
       logged.push(String(m ?? ''));
     });
-    spyStore({ version: 1, sets: { x: { slot: 1, repos: { 'saga-dash': primaryDash } } } });
-    spyGit({ [primaryDash]: 'main' });
-    spyFresh(true);
+    spySetStore(oneSetWithSagaDash(primaryDash));
+    spyGitRunner({ branches: { [primaryDash]: 'main' } });
+    spyPrepFresh(true);
     await expect(SetCheck.run(['x', '--dev', devRoot], config)).resolves.toBeUndefined();
     expect(logged.join('\n')).toMatch(/⚠ points at the primary checkout/);
   });
@@ -211,15 +175,9 @@ describe('set check', () => {
   it('two sets sharing one BUILDABLE checkout is a cross-set collision (exit 1)', async () => {
     const shared = join(dir, 'shared-rostering');
     mkdirSync(shared);
-    spyStore({
-      version: 1,
-      sets: {
-        a: { slot: 1, repos: { rostering: shared } },
-        b: { slot: 2, repos: { rostering: shared } },
-      },
-    });
-    spyGit({ [shared]: 'main' });
-    spyFresh(false);
+    spySetStore(twoSetsSharingCheckout(shared));
+    spyGitRunner({ branches: { [shared]: 'main' } });
+    spyPrepFresh(false);
 
     await expect(SetCheck.run(['a', '--dev', join(dir, 'dev')], config)).rejects.toMatchObject({
       oclif: { exit: 1 },
@@ -230,15 +188,9 @@ describe('set check', () => {
   it('--porcelain stays tab-separated and attributes a collision to its repo row', async () => {
     const shared = join(dir, 'shared-rostering');
     mkdirSync(shared);
-    spyStore({
-      version: 1,
-      sets: {
-        a: { slot: 1, repos: { rostering: shared } },
-        b: { slot: 2, repos: { rostering: shared } },
-      },
-    });
-    spyGit({ [shared]: 'main' });
-    spyFresh(false);
+    spySetStore(twoSetsSharingCheckout(shared));
+    spyGitRunner({ branches: { [shared]: 'main' } });
+    spyPrepFresh(false);
 
     await expect(SetCheck.run(['a', '--porcelain', '--dev', join(dir, 'dev')], config)).rejects.toMatchObject({
       oclif: { exit: 1 },
@@ -253,9 +205,9 @@ describe('set check', () => {
   it('an existing NON-git dir is a check violation (exit 1), not a green detached row', async () => {
     const plainDir = join(dir, 'plain');
     mkdirSync(plainDir);
-    spyStore({ version: 1, sets: { x: { slot: 1, repos: { 'saga-dash': plainDir } } } });
-    spyGit({}, { nonCheckouts: [plainDir] });
-    spyFresh(true);
+    spySetStore(oneSetWithSagaDash(plainDir));
+    spyGitRunner({ nonCheckouts: [plainDir] });
+    spyPrepFresh(true);
 
     await expect(SetCheck.run(['x', '--dev', join(dir, 'dev')], config)).rejects.toMatchObject({
       oclif: { exit: 1 },

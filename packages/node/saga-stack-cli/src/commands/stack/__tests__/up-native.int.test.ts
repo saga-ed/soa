@@ -24,20 +24,15 @@ import type {
   DashFs,
   GitRunner,
   JarWriter,
-  LaunchResult,
   LaunchSpec,
   MeshExec,
-  PgProbe,
-  PortProbe,
   PostOptions,
   PostResult,
-  RunResult,
-  Runner,
   ScriptInvocation,
-  ServiceLauncher,
-  StopResult,
   ViteClear,
 } from '../../../runtime/index.js';
+import { restoreEnv, saveEnv, type EnvSnapshot } from '../../../__tests__/helpers/env.js';
+import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import StackUp from '../up.js';
 
 const PKG_ROOT = process.cwd();
@@ -57,14 +52,34 @@ let fleetGenCalls: { localFleetPath: string; outPath: string; tunnelDomain: stri
 
 /** Install fakes for ALL native-path seams. `launchFail` ids answer health-down. */
 function installNativeSeams(launchFail: Set<string> = new Set()): void {
-  launches = [];
-  runs = [];
   posts = [];
   jarWrites = [];
   meshGated = [];
   dashCalls = [];
   recordUps = [];
   fleetGenCalls = [];
+
+  // Shared core battery (helpers/seams.ts): launcher/portProbe/runner-with-
+  // CREATE-DATABASE-tracker/stateful pgProbe/prepFresh/dbGenerateScan/
+  // repoDirCheck (+ silent meshExec/dashFs placeholders this suite RE-SPIES
+  // below with recording fakes). pidBase/prepFresh are EXPLICIT at this call
+  // site by design: pids at 2000+, and NEVER fresh (the fixed /fixed/dev paths
+  // don't exist) ⇒ the R1 prep pass runs.
+  const seams = installCoreSeams({ pidBase: 2000, prepFresh: false, launchFail });
+  launches = seams.launches;
+  runs = seams.runs;
+
+  // Stateful DB existence lives in the core battery: a DB is ABSENT until R2
+  // provision runs its `CREATE DATABASE <name>` psql, after which it EXISTS —
+  // modelling the real `up --reset` order (provision → reset): every DB probes
+  // absent at provision time (so provision CREATEs each), but exists by RESET
+  // time (so the R4 reset's existence probe truncates them rather than skipping
+  // — the live-run BUG 2). The playback DBs (meshProvisioned:false) are NOT
+  // created by R2 provision — their own services create them during launch — so
+  // they already EXIST by reset time. Pre-seed them present so the `--with
+  // playback --reset` truncate path is exercised (mesh-provisioned DBs are added
+  // by the core runner when provision runs their CREATE DATABASE).
+  for (const db of ['transcripts_local', 'insights_local', 'chat_local']) seams.provisioned.add(db);
 
   // Native `--login` seams: a fake devLogin POST (200 + canned Set-Cookies) + a jar
   // capture — so `up --login` mints the native cookie jar with NO real network/fs and
@@ -77,27 +92,12 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
   };
   const jar: JarWriter = { write: (path, contents) => jarWrites.push({ path, contents }) };
 
-  const launcher: ServiceLauncher = {
-    async launch(spec: LaunchSpec): Promise<LaunchResult> {
-      launches.push(spec);
-      return { id: spec.id, ok: !launchFail.has(spec.id), pid: 2000 + launches.length };
-    },
-    async stopServices(ids: string[]): Promise<StopResult[]> {
-      return ids.map((id) => ({ id, stopped: true }));
-    },
-  };
+  // RECORDING meshExec/dashFs — this suite asserts the readiness gating and the
+  // dash prelaunch hook calls, so these override the core battery's silent fakes.
   const meshExec: MeshExec = {
     async ready(container: string): Promise<boolean> {
       meshGated.push(container);
       return true;
-    },
-  };
-  const portProbe: PortProbe = {
-    async dockerHolder(): Promise<string | null> {
-      return null;
-    },
-    async listening(): Promise<boolean> {
-      return false;
     },
   };
   const dashFs: DashFs = {
@@ -108,46 +108,6 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     existsFile: () => false,
     remove: (p: string) => dashCalls.push(`remove:${p}`),
     write: (p: string) => dashCalls.push(`write:${p}`),
-  };
-  // Stateful DB existence: a DB is ABSENT until R2 provision runs its
-  // `CREATE DATABASE <name>` psql, after which it EXISTS. This models the real
-  // `up --reset` order (provision → reset): every DB probes absent at provision
-  // time (so provision CREATEs each), but exists by RESET time (so the R4 reset's
-  // existence probe truncates them rather than skipping — the live-run BUG 2).
-  // The playback DBs (meshProvisioned:false) are NOT created by R2 provision — their
-  // own services create them during launch — so they already EXIST by reset time.
-  // Pre-seed them present so the `--with playback --reset` truncate path is exercised
-  // (mesh-provisioned DBs are added below when provision runs their CREATE DATABASE).
-  const provisioned = new Set<string>(['transcripts_local', 'insights_local', 'chat_local']);
-  const runner: Runner = {
-    async run(spec: ScriptInvocation): Promise<RunResult> {
-      runs.push(spec);
-      const ci = spec.args.indexOf('-c');
-      if (ci >= 0) {
-        const m = /CREATE DATABASE (\w+)/.exec(spec.args[ci + 1] ?? '');
-        if (m) provisioned.add(m[1]);
-      }
-      return { code: 0 };
-    },
-  };
-  // M8 native prep pass: a fake pg probe so R2 provision + R3 migrate assert their
-  // PLAN with NO real docker/postgres. Each DB probes ABSENT (until provision CREATEs
-  // it) + table-empty, so provision CREATEs each and migrate takes the `empty →
-  // db:deploy` branch (migrate's branch consults hasMigrationsTable/publicTableCount,
-  // NOT databaseExists, so the stateful existence doesn't perturb it).
-  const pgProbe: PgProbe = {
-    async databaseExists(_c, db): Promise<boolean> {
-      return provisioned.has(db);
-    },
-    async hasMigrationsTable(): Promise<boolean> {
-      return false;
-    },
-    async publicTableCount(): Promise<number> {
-      return 0;
-    },
-    async scalar(): Promise<string> {
-      return '';
-    },
   };
 
   // M9 fakes: an all-up-to-date git seam (so auto-pull runs hermetically — no real git
@@ -166,16 +126,10 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
   };
 
   const proto = BaseCommand.prototype as unknown as {
-    getLauncher: () => ServiceLauncher;
     getMeshExec: () => MeshExec;
-    getPortProbe: () => PortProbe;
     getDashFs: () => DashFs;
-    getRunner: () => Runner;
-    getPgProbe: () => PgProbe;
     getGitRunner: () => GitRunner;
     getViteClear: () => ViteClear;
-    getPrepFreshCheck: () => (repoRoot: string) => boolean;
-    getRepoDirCheck: () => (dir: string) => boolean;
     getTunnelMoniker: () => (vendorTunnelSh: string) => Promise<string>;
     getTunnelFleetGen: () => (opts: {
       localFleetPath: string;
@@ -189,7 +143,6 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     getCookiePoster: () => CookiePoster;
     getJarWriter: () => JarWriter;
   };
-  vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
   // Native `up --login` seams (fake POST + jar capture) — never a real network/fs, never up.sh.
   vi.spyOn(proto, 'getCookiePoster').mockReturnValue(poster);
   vi.spyOn(proto, 'getJarWriter').mockReturnValue(jar);
@@ -206,19 +159,12 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     recordUps.push({ plan, ctx });
     return { ok: true, message: `✓ recording stack up (mode: ${plan.mode})` };
   });
+  // Re-spying the core battery's meshExec/dashFs returns the SAME spy —
+  // mockReturnValue swaps in the recording fakes without stacking.
   vi.spyOn(proto, 'getMeshExec').mockReturnValue(meshExec);
-  vi.spyOn(proto, 'getPortProbe').mockReturnValue(portProbe);
   vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
-  vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
-  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pgProbe);
   vi.spyOn(proto, 'getGitRunner').mockReturnValue(gitRunner);
   vi.spyOn(proto, 'getViteClear').mockReturnValue(viteClear);
-  // Never fresh in these tests (fixed /fixed/dev paths don't exist) ⇒ R1 prep runs.
-  vi.spyOn(proto, 'getPrepFreshCheck').mockReturnValue(() => false);
-  // The fake workspace paths (--dev /fixed/dev) don't exist on disk; default the
-  // repo-dir check to "present" so services aren't skipped. The skip-when-absent
-  // path is covered explicitly in stack-api.int.test.ts.
-  vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
 }
 
 beforeEach(async () => {
@@ -393,17 +339,13 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     'SAGA_MESH_CONNECT_MONGO_CONTAINER',
     'SAGA_MESH_SNAPSHOTS_DIR',
   ];
-  let savedEnv: Record<string, string | undefined>;
+  let savedEnv: EnvSnapshot;
 
   beforeEach(() => {
-    savedEnv = {};
-    for (const k of SLOT_ENV_KEYS) savedEnv[k] = process.env[k];
+    savedEnv = saveEnv(SLOT_ENV_KEYS);
   });
   afterEach(() => {
-    for (const k of SLOT_ENV_KEYS) {
-      if (savedEnv[k] === undefined) delete process.env[k];
-      else process.env[k] = savedEnv[k];
-    }
+    restoreEnv(savedEnv);
   });
 
   it('slot > 0 is a backend + saga-dash/coach frontend sub-stack: dash launches on its offset --port; literal-port backends + connect-web dropped', async () => {

@@ -17,6 +17,7 @@ import { resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
+import { restoreEnv, saveEnv } from '../../../__tests__/helpers/env.js';
 import StackReset from '../reset.js';
 import StackRestart from '../restart.js';
 import StackSeed from '../seed.js';
@@ -95,14 +96,13 @@ describe('M13-A: seed + snapshot are slot-aware now', () => {
   });
 
   it('stack snapshot list --slot 3 passes the guard and reads the slot snapshot root', async () => {
-    const saved = process.env.SAGA_MESH_SNAPSHOTS_DIR;
+    const saved = saveEnv(['SAGA_MESH_SNAPSHOTS_DIR']);
     try {
       await expect(SnapshotList.run(['--slot', '3', ...WS], config)).resolves.toBeUndefined();
       // applyInstanceEnv pointed the resolver at the per-slot root.
       expect(process.env.SAGA_MESH_SNAPSHOTS_DIR).toMatch(/snapshots-s3$/);
     } finally {
-      if (saved === undefined) delete process.env.SAGA_MESH_SNAPSHOTS_DIR;
-      else process.env.SAGA_MESH_SNAPSHOTS_DIR = saved;
+      restoreEnv(saved);
     }
   });
 });

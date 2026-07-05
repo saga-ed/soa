@@ -12,14 +12,15 @@
  * input is injected through `SnapshotRestore.prototype.localMigrationsFor`.
  */
 
-import { mkdtempSync, rmSync, writeFileSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../../base-command.js';
 import type { LocalMigrations, SnapshotManifest } from '../../../../core/snapshot/index.js';
 import type { SnapshotIO } from '../../../../runtime/index.js';
+import { useTempSnapshotsDir } from '../../../../__tests__/helpers/env.js';
+import { fakeSnapshotIO, type SnapshotIOCall } from '../../../../__tests__/helpers/snapshot-io.js';
 import SnapshotStore from '../store.js';
 import SnapshotRestore from '../restore.js';
 import SnapshotList from '../list.js';
@@ -29,55 +30,17 @@ import SnapshotDelete from '../delete.js';
 const PKG_ROOT = process.cwd();
 const CANNED_REV = 'mig_001';
 
-interface IOCall {
-  op: string;
-  db?: string;
-  container: string;
-  ownerRole?: string;
-  path?: string;
-}
-
 let config: Config;
 let out: string[];
-let ioCalls: IOCall[];
-let snapDir: string;
+const ioCalls: SnapshotIOCall[] = [];
+const snapDir = useTempSnapshotsDir('saga-snap-');
 
 /** Fake SnapshotIO: records calls; "dumps" write canned bytes so files are real. */
 function installSnapshotIO(opts: { pgRestoreOk?: boolean } = {}): void {
-  ioCalls = [];
-  const fake: SnapshotIO = {
-    async pgDump(db, container, ownerRole, outPath) {
-      ioCalls.push({ op: 'pgDump', db, container, ownerRole, path: outPath });
-      writeFileSync(outPath, `PGDUMP:${db}`);
-    },
-    async pgRestore(db, container, ownerRole, inPath) {
-      ioCalls.push({ op: 'pgRestore', db, container, ownerRole, path: inPath });
-    },
-    async mongoDump(container, dbName, outPath) {
-      ioCalls.push({ op: 'mongoDump', db: dbName, container, path: outPath });
-      writeFileSync(outPath, `MONGO:${dbName}`);
-    },
-    async mongoRestore(container, dbName, inPath) {
-      ioCalls.push({ op: 'mongoRestore', db: dbName, container, path: inPath });
-    },
-    async assertPgRunning(container) {
-      ioCalls.push({ op: 'assertPgRunning', container });
-    },
-    async assertMongoRunning(container) {
-      ioCalls.push({ op: 'assertMongoRunning', container });
-    },
-    async readSchemaRev(db, container) {
-      ioCalls.push({ op: 'readSchemaRev', db, container });
-      return CANNED_REV;
-    },
-    async redisFlushdb(container) {
-      ioCalls.push({ op: 'redisFlushdb', container });
-    },
-    async pgRestoreList(container, inPath) {
-      ioCalls.push({ op: 'pgRestoreList', container, path: inPath });
-      return opts.pgRestoreOk ?? true;
-    },
-  };
+  ioCalls.length = 0;
+  // schemaRev: CANNED_REV so the restore snapshot-ahead guard has a REAL rev to
+  // check against (this suite owns the hard-guard coverage).
+  const fake = fakeSnapshotIO({ ioCalls, schemaRev: CANNED_REV, pgRestoreOk: opts.pgRestoreOk });
   vi.spyOn(
     BaseCommand.prototype as unknown as { getSnapshotIO: () => SnapshotIO },
     'getSnapshotIO',
@@ -104,8 +67,6 @@ function dbsCalled(op: string): string[] {
 
 beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
-  snapDir = mkdtempSync(join(tmpdir(), 'saga-snap-'));
-  process.env.SAGA_MESH_SNAPSHOTS_DIR = snapDir;
   delete process.env.SEED_PROFILE;
   installSnapshotIO();
   installPassingMigrations();
@@ -120,8 +81,6 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(snapDir, { recursive: true, force: true });
-  delete process.env.SAGA_MESH_SNAPSHOTS_DIR;
   delete process.env.SEED_PROFILE;
 });
 
@@ -170,7 +129,7 @@ describe('stack snapshot store — manifest-driven, all 10 pg + connectv3 mongo'
     ).mockImplementation((profile) => {
       appliedSlot = profile.slot;
       for (const [k, v] of Object.entries(profile.containerEnv)) process.env[k] = v;
-      process.env.SAGA_MESH_SNAPSHOTS_DIR = join(snapDir, `s${profile.slot}`);
+      process.env.SAGA_MESH_SNAPSHOTS_DIR = join(snapDir(), `s${profile.slot}`);
     });
 
     await SnapshotStore.run(['--fixture-id', 'slotted', '--slot', '1'], config);
@@ -186,7 +145,7 @@ describe('stack snapshot store — manifest-driven, all 10 pg + connectv3 mongo'
     expect(pg).toContain('iam_local');
     expect(pg).toContain('coach_api');
     // And the dump landed in the slot's (redirected) snapshot root.
-    expect(process.env.SAGA_MESH_SNAPSHOTS_DIR).toBe(join(snapDir, 's1'));
+    expect(process.env.SAGA_MESH_SNAPSHOTS_DIR).toBe(join(snapDir(), 's1'));
   });
 
   it('--with playback adds transcripts/insights/chat', async () => {
@@ -214,7 +173,7 @@ describe('stack snapshot store — manifest-driven, all 10 pg + connectv3 mongo'
     expect(json).toMatchObject({ fixtureId: 'demo', profile: 'full', databases: 11 });
     expect(json.totalBytes).toBeGreaterThan(0);
     // manifest.json exists and parses
-    expect(statSync(join(snapDir, 'demo', 'manifest.json')).size).toBeGreaterThan(0);
+    expect(statSync(join(snapDir(), 'demo', 'manifest.json')).size).toBeGreaterThan(0);
   });
 
   it('refuses to overwrite an existing snapshot without --force', async () => {
@@ -226,7 +185,7 @@ describe('stack snapshot store — manifest-driven, all 10 pg + connectv3 mongo'
 describe('stack snapshot restore — restore-as-owner + guards', () => {
   async function store(extra: string[] = []): Promise<void> {
     await SnapshotStore.run(['--fixture-id', 'demo', ...extra], config);
-    ioCalls = []; // reset so restore assertions see only restore-phase calls
+    ioCalls.length = 0; // reset so restore assertions see only restore-phase calls
     out = []; // and so JSON assertions parse only the restore output
   }
 
@@ -262,10 +221,10 @@ describe('stack snapshot restore — restore-as-owner + guards', () => {
 
   it('PROFILE guard: cross-profile restore is refused, --force bypasses it', async () => {
     await SnapshotStore.run(['--fixture-id', 'demo', '--profile', 'roster'], config);
-    ioCalls = [];
+    ioCalls.length = 0;
     process.env.SEED_PROFILE = 'full';
     await expect(SnapshotRestore.run(['demo'], config)).rejects.toThrow(/profile/i);
-    ioCalls = [];
+    ioCalls.length = 0;
     await expect(SnapshotRestore.run(['demo', '--force'], config)).resolves.toBeUndefined();
     expect(dbsCalled('pgRestore').length).toBeGreaterThan(0);
   });
@@ -290,7 +249,7 @@ describe('stack snapshot restore — restore-as-owner + guards', () => {
 describe('stack snapshot list / validate / delete', () => {
   it('list surfaces the stored snapshot with its profile + DB count', async () => {
     await SnapshotStore.run(['--fixture-id', 'demo', '--profile', 'full'], config);
-    ioCalls = [];
+    ioCalls.length = 0;
     out = [];
     await SnapshotList.run(['--output-json'], config);
     const json = JSON.parse(out.join(''));
@@ -310,7 +269,7 @@ describe('stack snapshot list / validate / delete', () => {
 
   it('validate --deep runs pg_restore --list on each pg dump', async () => {
     await SnapshotStore.run(['--fixture-id', 'demo'], config);
-    ioCalls = [];
+    ioCalls.length = 0;
     await SnapshotValidate.run(['demo', '--deep'], config);
     expect(ioCalls.filter((c) => c.op === 'pgRestoreList')).toHaveLength(10); // pg dumps only
   });

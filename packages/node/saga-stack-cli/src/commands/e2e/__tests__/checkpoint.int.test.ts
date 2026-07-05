@@ -14,25 +14,13 @@
 import { resolve, join } from 'node:path';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { useTempSnapshotsDir } from '../../../__tests__/helpers/env.js';
+import { fakeSnapshotIO, type SnapshotIOCall } from '../../../__tests__/helpers/snapshot-io.js';
+import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import { Config } from '@oclif/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import type {
-  DashFs,
-  HealthProber,
-  LaunchResult,
-  LaunchSpec,
-  MeshExec,
-  PgProbe,
-  PortProbe,
-  ProbeResult,
-  RunResult,
-  Runner,
-  ScriptInvocation,
-  ServiceLauncher,
-  SnapshotIO,
-  StopResult,
-} from '../../../runtime/index.js';
+import type { LaunchSpec, ScriptInvocation, SnapshotIO } from '../../../runtime/index.js';
 import E2eRun from '../run.js';
 
 const PKG_ROOT = process.cwd();
@@ -43,90 +31,35 @@ const CKPT_ROSTER = 'flow-saga-dash-journey-s1-roster';
 const CKPT_PROGRAM = 'flow-saga-dash-journey-s2-program';
 
 let DASH_ROOT: string;
-let snapDir: string;
 let config: Config;
 let launches: LaunchSpec[];
 let runs: ScriptInvocation[];
-let ioCalls: { op: string; db?: string; path?: string }[];
+const ioCalls: SnapshotIOCall[] = [];
 let logged: string[];
 
-/** run.int.test.ts's seam recipe; `playwrightFail` fails children whose args include it. */
+// Hermetic per-test checkpoint root (real files land here — manifest + canned
+// dump bytes), never the developer's real ~/.saga-mesh/snapshots.
+const snapDir = useTempSnapshotsDir('saga-ckpt-');
+
+/**
+ * Compose the shared core-seam battery (helpers/seams.ts) + this suite's
+ * SnapshotIO fake (helpers/snapshot-io.ts) on top. pidBase/prepFresh are
+ * EXPLICIT at this call site by design: pids at 3000+, repos reported FRESH
+ * (R1 prep build skipped) — run.int.test.ts's recipe. `playwrightFail` fails
+ * Playwright children whose args include it (the RED-stage lever).
+ */
 function installSeams(playwrightFail?: string): void {
-  launches = [];
-  runs = [];
+  const seams = installCoreSeams({ pidBase: 3000, prepFresh: true, playwrightFail });
+  launches = seams.launches;
+  runs = seams.runs;
 
-  const launcher: ServiceLauncher = {
-    async launch(spec: LaunchSpec): Promise<LaunchResult> {
-      launches.push(spec);
-      return { id: spec.id, ok: true, pid: 3000 + launches.length };
-    },
-    async stopServices(ids: string[]): Promise<StopResult[]> {
-      return ids.map((id) => ({ id, stopped: true }));
-    },
-  };
-  const meshExec: MeshExec = { async ready(): Promise<boolean> { return true; } };
-  const portProbe: PortProbe = {
-    async dockerHolder(): Promise<string | null> { return null; },
-    async listening(): Promise<boolean> { return false; },
-  };
-  const dashFs: DashFs = { existsDir: () => true, existsFile: () => false, remove: () => {}, write: () => {} };
-  const prober: HealthProber = { async probe(): Promise<ProbeResult> { return { ok: true, status: 200 }; } };
-  const provisioned = new Set<string>();
-  const runner: Runner = {
-    async run(spec: ScriptInvocation): Promise<RunResult> {
-      runs.push(spec);
-      const ci = spec.args.indexOf('-c');
-      if (ci >= 0) {
-        const m = /CREATE DATABASE (\w+)/.exec(spec.args[ci + 1] ?? '');
-        if (m) provisioned.add(m[1]);
-      }
-      if (playwrightFail !== undefined && spec.args.includes('playwright') && spec.args.includes(playwrightFail)) {
-        return { code: 1 };
-      }
-      return { code: 0 };
-    },
-  };
-  const pgProbe: PgProbe = {
-    async databaseExists(_c, db): Promise<boolean> { return provisioned.has(db); },
-    async hasMigrationsTable(): Promise<boolean> { return false; },
-    async publicTableCount(): Promise<number> { return 0; },
-    async scalar(): Promise<string> { return ''; },
-  };
-  const snapshotIO: SnapshotIO = {
-    async pgDump(db, _c, _o, outPath) {
-      ioCalls.push({ op: 'pgDump', db, path: outPath });
-      writeFileSync(outPath, `PGDUMP:${db}`);
-    },
-    async pgRestore(db, _c, _o, inPath) {
-      ioCalls.push({ op: 'pgRestore', db, path: inPath });
-    },
-    async mongoDump(_c, db, outPath) {
-      ioCalls.push({ op: 'mongoDump', db, path: outPath });
-      writeFileSync(outPath, `MONGO:${db}`);
-    },
-    async mongoRestore(_c, db, inPath) {
-      ioCalls.push({ op: 'mongoRestore', db, path: inPath });
-    },
-    async assertPgRunning() { ioCalls.push({ op: 'assertPgRunning' }); },
-    async assertMongoRunning() { ioCalls.push({ op: 'assertMongoRunning' }); },
-    // null ⇒ the snapshot-ahead guard is inert (covered by snapshot.int.test.ts).
-    async readSchemaRev() { return null; },
-    async redisFlushdb() { ioCalls.push({ op: 'redisFlushdb' }); },
-    async pgRestoreList() { return true; },
-  };
-
-  const proto = BaseCommand.prototype as unknown as Record<string, () => unknown>;
-  vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
-  vi.spyOn(proto, 'getMeshExec').mockReturnValue(meshExec);
-  vi.spyOn(proto, 'getPortProbe').mockReturnValue(portProbe);
-  vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
-  vi.spyOn(proto, 'getProber').mockReturnValue(prober);
-  vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
-  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pgProbe);
-  vi.spyOn(proto, 'getPrepFreshCheck').mockReturnValue(() => true);
-  vi.spyOn(proto, 'getDbGenerateScan').mockReturnValue(() => []);
-  vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
-  vi.spyOn(proto as unknown as { getSnapshotIO: () => SnapshotIO }, 'getSnapshotIO').mockReturnValue(snapshotIO);
+  // schemaRev: null ⇒ the snapshot-ahead guard is inert (covered by
+  // snapshot.int.test.ts) — this suite owns the FLOW-level compat rules.
+  const snapshotIO: SnapshotIO = fakeSnapshotIO({ ioCalls, schemaRev: null });
+  vi.spyOn(
+    BaseCommand.prototype as unknown as { getSnapshotIO: () => SnapshotIO },
+    'getSnapshotIO',
+  ).mockReturnValue(snapshotIO);
 }
 
 function ws(): string[] {
@@ -138,11 +71,11 @@ function playwrightRuns(): ScriptInvocation[] {
 }
 
 function readCkptManifest(fixtureId: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(snapDir, fixtureId, 'manifest.json'), 'utf8')) as Record<string, unknown>;
+  return JSON.parse(readFileSync(join(snapDir(), fixtureId, 'manifest.json'), 'utf8')) as Record<string, unknown>;
 }
 
 function writeCkptManifest(fixtureId: string, m: Record<string, unknown>): void {
-  writeFileSync(join(snapDir, fixtureId, 'manifest.json'), JSON.stringify(m, null, 2) + '\n');
+  writeFileSync(join(snapDir(), fixtureId, 'manifest.json'), JSON.stringify(m, null, 2) + '\n');
 }
 
 /** Bake checkpoints for stages 1-2 (roster, program) — the shared setup for --from tests. */
@@ -159,9 +92,7 @@ afterAll(() => {
 
 beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
-  snapDir = mkdtempSync(join(tmpdir(), 'saga-ckpt-'));
-  process.env.SAGA_MESH_SNAPSHOTS_DIR = snapDir;
-  ioCalls = [];
+  ioCalls.length = 0;
   installSeams();
   logged = [];
   vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m?: string) => {
@@ -172,8 +103,6 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(snapDir, { recursive: true, force: true });
-  delete process.env.SAGA_MESH_SNAPSHOTS_DIR;
 });
 
 describe('--snapshot-stages (bake)', () => {
@@ -303,8 +232,8 @@ describe('--from (restore)', () => {
 
     // With SOME stages baked, the error names them.
     await bakeThroughProgram();
-    rmSync(join(snapDir, CKPT_PROGRAM), { recursive: true, force: true });
-    rmSync(join(snapDir, CKPT_ROSTER, 'manifest.json'), { force: true }); // roster unreadable ⇒ not listed
+    rmSync(join(snapDir(), CKPT_PROGRAM), { recursive: true, force: true });
+    rmSync(join(snapDir(), CKPT_ROSTER, 'manifest.json'), { force: true }); // roster unreadable ⇒ not listed
     await expect(
       E2eRun.run(['journey', '--from', 'program', '--headless', ...ws()], config),
     ).rejects.toThrow(/baked stages: \(none\)/);

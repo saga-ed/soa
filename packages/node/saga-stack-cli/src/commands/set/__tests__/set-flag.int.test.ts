@@ -2,17 +2,18 @@
  * Central --set guard + parse-choke-point injection (M13-A, plan §2-§3).
  *
  * Mirrors slot-guard.unit.test.ts: real command classes, in-process, the
- * set-store seam spied on the prototype. The injection itself is asserted
- * through a minimal probe command (slot/set-aware, records its parsed flags,
- * zero IO) — every real command reads the same parsed bag, so what the probe
- * sees is what up/status/e2e/… see.
+ * set-store seam spied on the prototype (shared set-fakes helpers). The
+ * injection itself is asserted through a minimal probe command (slot/set-aware,
+ * records its parsed flags, zero IO, NO preflight — makeProbeCommand) — every
+ * real command reads the same parsed bag, so what the probe sees is what
+ * up/status/e2e/… see.
  */
 
 import { resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeProbeCommand, spySetStore } from '../../../__tests__/helpers/set-fakes.js';
 import { BaseCommand } from '../../../base-command.js';
-import { parseWorktreeSetsFile } from '../../../core/set/index.js';
 import type { SetStore } from '../../../runtime/index.js';
 import StackRestart from '../../stack/restart.js';
 
@@ -21,38 +22,16 @@ const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
 const WS = ['--soa', SOA_ROOT, '--dev', '/fixed/dev'];
 
 /** Canned store: journey-fix@1, topology@2 (saga-dash + rostering pinned). */
-function cannedStore(): SetStore {
-  return {
-    path: () => '/canned/worktree-sets.json',
-    load: () =>
-      parseWorktreeSetsFile({
-        version: 1,
-        sets: {
-          'journey-fix': { slot: 1, repos: { 'saga-dash': '/set/dash-journey' } },
-          topology: { slot: 2, repos: { 'saga-dash': '/set/dash-topology', rostering: '/set/rostering-c' } },
-        },
-      }),
-  };
-}
+const CANNED_SETS = {
+  version: 1,
+  sets: {
+    'journey-fix': { slot: 1, repos: { 'saga-dash': '/set/dash-journey' } },
+    topology: { slot: 2, repos: { 'saga-dash': '/set/dash-topology', rostering: '/set/rostering-c' } },
+  },
+};
 
 /** Zero-IO probe: slot/set-aware, records the post-injection flags. */
-class SetProbe extends BaseCommand {
-  static flags = { ...BaseCommand.baseFlags };
-  static captured: Record<string, unknown> = {};
-
-  protected slotAware(): boolean {
-    return true;
-  }
-
-  protected setAware(): boolean {
-    return true;
-  }
-
-  async run(): Promise<void> {
-    const { flags } = await this.parse(SetProbe);
-    SetProbe.captured = flags as Record<string, unknown>;
-  }
-}
+const SetProbe = makeProbeCommand({ setAware: true, preflight: false });
 
 let config: Config;
 
@@ -60,10 +39,7 @@ beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
   SetProbe.captured = {};
   vi.spyOn(BaseCommand.prototype, 'log').mockImplementation(() => {});
-  vi.spyOn(
-    BaseCommand.prototype as unknown as { getSetStore: () => SetStore },
-    'getSetStore',
-  ).mockReturnValue(cannedStore());
+  spySetStore(CANNED_SETS);
 });
 
 afterEach(() => {

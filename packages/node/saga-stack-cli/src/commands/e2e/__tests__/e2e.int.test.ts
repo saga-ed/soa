@@ -22,21 +22,10 @@ import { join } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import type {
-  DashFs,
-  HealthProber,
-  LaunchResult,
-  LaunchSpec,
-  MeshExec,
-  PgProbe,
-  PortProbe,
-  ProbeResult,
-  RunResult,
-  Runner,
-  ScriptInvocation,
-  ServiceLauncher,
-  StopResult,
-} from '../../../runtime/index.js';
+import type { LaunchSpec, RunResult, Runner, ScriptInvocation } from '../../../runtime/index.js';
+import { useTempSnapshotsDir } from '../../../__tests__/helpers/env.js';
+import { pwArgv } from '../../../__tests__/helpers/pw.js';
+import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import E2eRun from '../run.js';
 import E2eList from '../list.js';
 import E2eConnect from '../connect.js';
@@ -51,77 +40,22 @@ let launches: LaunchSpec[];
 let runs: ScriptInvocation[];
 let logged: string[];
 let warned: string[];
-let snapDir: string;
 
-/** Install fakes for every native-path seam. `launchFail` ids answer health-down. */
+// Hermetic snapshot root: `e2e list` reads it for the M14-C checkpoint
+// annotation — never scan the developer's real ~/.saga-mesh/snapshots.
+useTempSnapshotsDir('saga-e2e-list-');
+
+/**
+ * Compose the shared core-seam battery (helpers/seams.ts). pidBase/prepFresh
+ * are EXPLICIT at this call site by design: pids at 2000+, and NEVER fresh
+ * (the fixed /fixed/dev paths don't exist) ⇒ the R1 prep build runs; repos
+ * reported present so no service is skipped. `launchFail` ids answer
+ * health-down.
+ */
 function installSeams(launchFail: Set<string> = new Set()): void {
-  launches = [];
-  runs = [];
-
-  const launcher: ServiceLauncher = {
-    async launch(spec: LaunchSpec): Promise<LaunchResult> {
-      launches.push(spec);
-      return { id: spec.id, ok: !launchFail.has(spec.id), pid: 2000 + launches.length };
-    },
-    async stopServices(ids: string[]): Promise<StopResult[]> {
-      return ids.map((id) => ({ id, stopped: true }));
-    },
-  };
-  const meshExec: MeshExec = { async ready(): Promise<boolean> { return true; } };
-  const portProbe: PortProbe = {
-    async dockerHolder(): Promise<string | null> { return null; },
-    async listening(): Promise<boolean> { return false; },
-  };
-  const dashFs: DashFs = {
-    existsDir: () => true,
-    existsFile: () => false,
-    remove: () => {},
-    write: () => {},
-  };
-  const prober: HealthProber = {
-    async probe(): Promise<ProbeResult> { return { ok: true, status: 200 }; },
-  };
-  // FLIP 3: the e2e's native prep pass now runs at EVERY slot (including slot 0), so
-  // `StackApi.up` runs R2 provision (CREATE DATABASE) + R3 migrate (pnpm db:deploy)
-  // through this Runner before launch+seed. Track the DBs provision CREATEs so the
-  // pgProbe below reports them present by RESET time (stateful — mirrors up-native).
-  const provisioned = new Set<string>();
-  const runner: Runner = {
-    async run(spec: ScriptInvocation): Promise<RunResult> {
-      runs.push(spec);
-      const ci = spec.args.indexOf('-c');
-      if (ci >= 0) {
-        const m = /CREATE DATABASE (\w+)/.exec(spec.args[ci + 1] ?? '');
-        if (m) provisioned.add(m[1]);
-      }
-      return { code: 0 };
-    },
-  };
-  // FLIP 3: a fake pg probe so slot 0's native prep (R2 provision + R3 migrate) is a
-  // hermetic no-op with NO real docker/postgres. Stateful existence (absent until
-  // provision CREATEs it) so provision CREATEs each closure DB and the reset then
-  // sees them present + truncates; table-empty so migrate takes the `empty → db:deploy`
-  // branch. Mirrors the up-native slot tests' stateful fake.
-  const pgProbe: PgProbe = {
-    async databaseExists(_c, db): Promise<boolean> { return provisioned.has(db); },
-    async hasMigrationsTable(): Promise<boolean> { return false; },
-    async publicTableCount(): Promise<number> { return 0; },
-    async scalar(): Promise<string> { return ''; },
-  };
-
-  const proto = BaseCommand.prototype as unknown as Record<string, () => unknown>;
-  vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
-  vi.spyOn(proto, 'getMeshExec').mockReturnValue(meshExec);
-  vi.spyOn(proto, 'getPortProbe').mockReturnValue(portProbe);
-  vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
-  vi.spyOn(proto, 'getProber').mockReturnValue(prober);
-  vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
-  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pgProbe);
-  // Never fresh (fixed /fixed/dev paths don't exist) ⇒ R1 prep build runs; repos
-  // reported present so no service is skipped.
-  vi.spyOn(proto, 'getPrepFreshCheck').mockReturnValue(() => false);
-  vi.spyOn(proto, 'getDbGenerateScan').mockReturnValue(() => []);
-  vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
+  const seams = installCoreSeams({ pidBase: 2000, prepFresh: false, launchFail });
+  launches = seams.launches;
+  runs = seams.runs;
 }
 
 /** Workspace flags: stub saga-dash (no flows.json → bundled fallback) + real soa. */
@@ -143,10 +77,6 @@ afterAll(() => {
 
 beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
-  // Hermetic snapshot root: `e2e list` reads it for the M14-C checkpoint
-  // annotation — never scan the developer's real ~/.saga-mesh/snapshots.
-  snapDir = mkdtempSync(join(tmpdir(), 'saga-e2e-list-'));
-  process.env.SAGA_MESH_SNAPSHOTS_DIR = snapDir;
   installSeams();
   logged = [];
   warned = [];
@@ -160,8 +90,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  rmSync(snapDir, { recursive: true, force: true });
-  delete process.env.SAGA_MESH_SNAPSHOTS_DIR;
   vi.restoreAllMocks();
 });
 
@@ -178,6 +106,9 @@ describe('e2e run — --dry-run (pure planner, touches no seam)', () => {
     expect(text).toContain('closure (4):');
     expect(text).toMatch(/PLAYWRIGHT_OCCURRENCE_DATE: \d{4}-\d{2}-\d{2}/);
     // journey is foreground ⇒ headed by default; pipeline excludes @interactive.
+    // GOLDEN ANCHOR (T5): this dry-run prose string stays fully literal on
+    // purpose — do NOT rebuild it with helpers/pw.ts's pwArgv, so a drift in
+    // the printed argv shape can never be masked by the builder drifting too.
     expect(text).toContain(
       'pnpm exec playwright test --config=playwright.stack.config.ts --project stage-4-pods --grep-invert @interactive --headed',
     );
@@ -235,16 +166,10 @@ describe('e2e run — native orchestration (stack lane)', () => {
     const pw = playwrightRuns();
     expect(pw).toHaveLength(1);
     expect(pw[0].cwd).toBe(join(DASH_ROOT, 'apps', 'web', 'dash'));
-    expect(pw[0].args).toEqual([
-      'exec',
-      'playwright',
-      'test',
-      '--config=playwright.stack.config.ts',
-      '--project',
-      'stage-1-roster',
-      '--grep-invert',
-      '@interactive',
-    ]);
+    // VARIANT argv (T5): differs from run.int's golden literal pin only in the
+    // project — built with the shared pwArgv (the literal shape protection
+    // lives in run.int.test.ts's happy-path anchor).
+    expect(pw[0].args).toEqual(pwArgv({ project: 'stage-1-roster', grepInvert: '@interactive' }));
     expect(pw[0].env?.PLAYWRIGHT_OCCURRENCE_DATE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(pw[0].stdio).toBe('inherit');
   });

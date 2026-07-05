@@ -23,21 +23,9 @@ import { tmpdir } from 'node:os';
 import { Config } from '@oclif/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import type {
-  DashFs,
-  HealthProber,
-  LaunchResult,
-  LaunchSpec,
-  MeshExec,
-  PgProbe,
-  PortProbe,
-  ProbeResult,
-  RunResult,
-  Runner,
-  ScriptInvocation,
-  ServiceLauncher,
-  StopResult,
-} from '../../../runtime/index.js';
+import type { LaunchSpec, RunResult, Runner, ScriptInvocation } from '../../../runtime/index.js';
+import { useTempSnapshotsDir } from '../../../__tests__/helpers/env.js';
+import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import E2eRun from '../run.js';
 
 const PKG_ROOT = process.cwd();
@@ -51,69 +39,25 @@ let runs: ScriptInvocation[];
 let logged: string[];
 let warned: string[];
 let launcherSpy: ReturnType<typeof vi.spyOn>;
-let snapDir: string;
 
-/** Install fakes for every native-path seam. Ids in `launchFail` answer health-down. */
+// Hermetic snapshot root: prerequisite flows construct a checkpoint store by
+// default (M14-C) — never read (or restore from!) the developer's real
+// ~/.saga-mesh/snapshots in a unit test.
+useTempSnapshotsDir('saga-run-snaps-');
+
+/**
+ * Compose the shared core-seam battery (helpers/seams.ts). pidBase/prepFresh
+ * are EXPLICIT at this call site by design: pids at 3000+, and repos reported
+ * FRESH so the R1 prep build is skipped (FLIP 3's provision/migrate/reset pass
+ * still runs at every slot through the shared Runner + stateful pgProbe).
+ * Ids in `launchFail` answer health-down. The launcher spy is captured — the
+ * M7 slot test asserts the state dir `getLauncher` was called with.
+ */
 function installSeams(launchFail: Set<string> = new Set()): void {
-  launches = [];
-  runs = [];
-
-  const launcher: ServiceLauncher = {
-    async launch(spec: LaunchSpec): Promise<LaunchResult> {
-      launches.push(spec);
-      return { id: spec.id, ok: !launchFail.has(spec.id), pid: 3000 + launches.length };
-    },
-    async stopServices(ids: string[]): Promise<StopResult[]> {
-      return ids.map((id) => ({ id, stopped: true }));
-    },
-  };
-  const meshExec: MeshExec = { async ready(): Promise<boolean> { return true; } };
-  const portProbe: PortProbe = {
-    async dockerHolder(): Promise<string | null> { return null; },
-    async listening(): Promise<boolean> { return false; },
-  };
-  const dashFs: DashFs = { existsDir: () => true, existsFile: () => false, remove: () => {}, write: () => {} };
-  const prober: HealthProber = { async probe(): Promise<ProbeResult> { return { ok: true, status: 200 }; } };
-  // FLIP 3: the native prep pass runs at EVERY slot (including slot 0) now, so
-  // `StackApi.up` runs R2 provision (CREATE DATABASE) + R3 migrate (pnpm db:deploy)
-  // through this Runner before launch+seed. Track the DBs provision CREATEs so the
-  // pgProbe reports them present by RESET time (stateful — mirrors up-native).
-  const provisioned = new Set<string>();
-  const runner: Runner = {
-    async run(spec: ScriptInvocation): Promise<RunResult> {
-      runs.push(spec);
-      const ci = spec.args.indexOf('-c');
-      if (ci >= 0) {
-        const m = /CREATE DATABASE (\w+)/.exec(spec.args[ci + 1] ?? '');
-        if (m) provisioned.add(m[1]);
-      }
-      return { code: 0 };
-    },
-  };
-
-  // FLIP 3 native-prep seams — mocked so the provision/migrate pass is a hermetic
-  // no-op with NO real docker/postgres at ANY slot (including slot 0, where prep is
-  // now wired). Stateful existence (absent until provision CREATEs it) so provision
-  // CREATEs each closure DB and reset then sees it present + truncates; table-empty
-  // so migrate takes the `empty → db:deploy` branch. Mirrors up-native's stateful fake.
-  const pgProbe: PgProbe = {
-    async databaseExists(_c, db): Promise<boolean> { return provisioned.has(db); },
-    async hasMigrationsTable(): Promise<boolean> { return false; },
-    async publicTableCount(): Promise<number> { return 0; },
-    async scalar(): Promise<string> { return ''; },
-  };
-
-  const proto = BaseCommand.prototype as unknown as Record<string, () => unknown>;
-  launcherSpy = vi.spyOn(proto, 'getLauncher').mockReturnValue(launcher);
-  vi.spyOn(proto, 'getMeshExec').mockReturnValue(meshExec);
-  vi.spyOn(proto, 'getPortProbe').mockReturnValue(portProbe);
-  vi.spyOn(proto, 'getDashFs').mockReturnValue(dashFs);
-  vi.spyOn(proto, 'getProber').mockReturnValue(prober);
-  vi.spyOn(proto, 'getRunner').mockReturnValue(runner);
-  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pgProbe);
-  vi.spyOn(proto, 'getPrepFreshCheck').mockReturnValue(() => true);
-  vi.spyOn(proto, 'getDbGenerateScan').mockReturnValue(() => []);
-  vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
+  const seams = installCoreSeams({ pidBase: 3000, prepFresh: true, launchFail, captureLauncherSpy: true });
+  launches = seams.launches;
+  runs = seams.runs;
+  launcherSpy = seams.launcherSpy!;
 }
 
 /** Workspace flags: stub saga-dash (no flows.json → bundled fallback) + real soa. */
@@ -135,11 +79,6 @@ afterAll(() => {
 
 beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
-  // Hermetic snapshot root: prerequisite flows construct a checkpoint store by
-  // default (M14-C) — never read (or restore from!) the developer's real
-  // ~/.saga-mesh/snapshots in a unit test.
-  snapDir = mkdtempSync(join(tmpdir(), 'saga-run-snaps-'));
-  process.env.SAGA_MESH_SNAPSHOTS_DIR = snapDir;
   installSeams();
   logged = [];
   warned = [];
@@ -154,8 +93,6 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  rmSync(snapDir, { recursive: true, force: true });
-  delete process.env.SAGA_MESH_SNAPSHOTS_DIR;
 });
 
 describe('e2e run — --dry-run plan (touches no seam)', () => {
@@ -174,6 +111,9 @@ describe('e2e run — --dry-run plan (touches no seam)', () => {
     expect(text).toContain('closure (4):');
     expect(text).toMatch(/PLAYWRIGHT_OCCURRENCE_DATE: \d{4}-\d{2}-\d{2}/);
     // --headless flips the foreground default off; terminal project is stage-4-pods.
+    // GOLDEN ANCHOR (T5): this dry-run prose string stays fully literal on
+    // purpose — do NOT rebuild it with helpers/pw.ts's pwArgv, so a drift in
+    // the printed argv shape can never be masked by the builder drifting too.
     expect(text).toContain(
       'pnpm exec playwright test --config=playwright.stack.config.ts --project stage-4-pods --grep-invert @interactive',
     );
@@ -225,6 +165,11 @@ describe('e2e run — native orchestration (stack lane)', () => {
     const pw = playwrightRuns();
     expect(pw).toHaveLength(1);
     expect(pw[0].cwd).toBe(join(DASH_ROOT, 'apps', 'web', 'dash'));
+    // GOLDEN ANCHOR (T5): the happy-path exact-array pin stays fully literal on
+    // purpose — do NOT rebuild it with helpers/pw.ts's pwArgv. It is the one
+    // assertion that protects the spawned argv SHAPE itself (order + every
+    // token); building it with the same helper the variants use would let a
+    // builder bug and an orchestrator bug cancel out.
     expect(pw[0].args).toEqual([
       'exec',
       'playwright',

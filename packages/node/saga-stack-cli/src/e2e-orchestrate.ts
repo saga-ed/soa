@@ -33,6 +33,7 @@
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { composeSeedPlan } from './core/seed/compose-seed-plan.js';
+import { seedStepLabel } from './core/seed/datasets.js';
 import { computeEnv, ENV_OCCURRENCE_DATE, ENV_TERM_END, ENV_TERM_START } from './core/flow/env.js';
 import { checkpointFixtureId } from './core/flow/checkpoint.js';
 import { bakeStageCheckpoint, FlowExecError, restoreCheckpoint } from './e2e-checkpoint-exec.js';
@@ -498,8 +499,9 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
       ? (() => {
           const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());
           return {
-            offline: plan.offline.map((s) => s.id),
-            online: plan.online.map((s) => s.id),
+            // #221 multi-seed: labels carry any stamped dataset (shared printer).
+            offline: plan.offline.map((s) => seedStepLabel(s)),
+            online: plan.online.map((s) => seedStepLabel(s)),
             skipped: plan.skipped.map((s) => ({ id: s.id, reason: s.reason })),
           };
         })()

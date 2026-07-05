@@ -16,7 +16,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ServiceId } from '../../manifest/index.js';
 import { composeSeedPlan } from '../compose-seed-plan.js';
-import type { SeedSelection } from '../types.js';
+import { SEED_DATASET_VAR, SeedDatasetError } from '../datasets.js';
+import type { SeedSelection, SeedStep } from '../types.js';
 
 const set = (...ids: ServiceId[]): Set<ServiceId> => new Set(ids);
 const ids = (steps: { id: string }[]): string[] => steps.map((s) => s.id);
@@ -167,5 +168,84 @@ describe('composeSeedPlan — per-system profile overrides (M5)', () => {
     const b = composeSeedPlan({ ...base, perSystem: [] }, active, set());
     expect(ids(a.offline)).toEqual(ids(b.offline));
     expect(ids(a.online)).toEqual(ids(b.online));
+  });
+});
+
+describe('composeSeedPlan — multi-seed datasets (#221)', () => {
+  const TRIAD_ACTIVE = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api');
+  const fullSel: SeedSelection = { profile: 'full', scenario: 'ab-topology' };
+  const varsOf = (s: SeedStep): Record<string, string> =>
+    s.env.kind === 'dotenv' ? {} : s.env.vars;
+
+  it("scenario stamps SEED_DATASET onto the triad's steps and ONLY those", () => {
+    const plan = composeSeedPlan(fullSel, TRIAD_ACTIVE, set());
+    const all = [...plan.offline, ...plan.online];
+
+    const stamped = all.filter((s) => varsOf(s)[SEED_DATASET_VAR] === 'ab-topology');
+    expect(stamped.map((s) => s.id).sort()).toEqual(['programs', 'scheduling', 'sessions']);
+
+    // Non-triad steps (iam pair) carry NO dataset var.
+    for (const s of all.filter((x) => !['programs', 'scheduling', 'sessions'].includes(x.id))) {
+      expect(varsOf(s)[SEED_DATASET_VAR]).toBeUndefined();
+    }
+  });
+
+  it('stamping CLONES — the frozen registry is untouched (a later plain compose is unstamped)', () => {
+    composeSeedPlan(fullSel, TRIAD_ACTIVE, set());
+    const plain = composeSeedPlan({ profile: 'full' }, TRIAD_ACTIVE, set());
+    for (const s of [...plain.offline, ...plain.online]) {
+      expect(varsOf(s)[SEED_DATASET_VAR]).toBeUndefined();
+    }
+  });
+
+  it('a per-system dataset stamps just that system (identity axis; step selection unchanged)', () => {
+    const sel: SeedSelection = {
+      profile: 'roster',
+      datasets: [{ system: 'sessions-api', dataset: 'alt' }],
+    };
+    const plan = composeSeedPlan(sel, set('iam-api', 'sessions-api'), set());
+    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions']); // same steps as plain roster
+    const sessions = plan.offline.find((s) => s.id === 'sessions');
+    expect(varsOf(sessions as SeedStep)[SEED_DATASET_VAR]).toBe('alt');
+  });
+
+  it('partition is unchanged by stamping (a stamped online step stays online)', () => {
+    const sel: SeedSelection = {
+      profile: 'full',
+      datasets: [{ system: 'content-api', dataset: 'qtf-alt' }],
+    };
+    const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api');
+    const plan = composeSeedPlan(sel, active, set());
+    const content = plan.online.find((s) => s.id === 'content');
+    expect(varsOf(content as SeedStep)[SEED_DATASET_VAR]).toBe('qtf-alt');
+  });
+
+  it('COHERENCE: an inactive triad member fails the whole scenario (never a half-applied triad)', () => {
+    // scheduling-api missing from the active set ⇒ its step drops as
+    // service-inactive ⇒ the coupled ab-topology dataset CANNOT apply coherently.
+    const active = set('iam-api', 'sessions-api', 'programs-api');
+    expect(() => composeSeedPlan(fullSel, active, set())).toThrow(SeedDatasetError);
+    expect(() => composeSeedPlan(fullSel, active, set())).toThrow(/scheduling-api \(service-inactive\)/);
+  });
+
+  it('COHERENCE: a snapshot-restored triad member fails the scenario too', () => {
+    expect(() => composeSeedPlan(fullSel, TRIAD_ACTIVE, set('programs-api'))).toThrow(
+      /programs-api \(service-restored\)/,
+    );
+  });
+
+  it('COHERENCE: a profile that never selects a mapped system explains the miss', () => {
+    // roster selects no programs/scheduling steps at all (they are full-only).
+    const sel: SeedSelection = { profile: 'roster', scenario: 'ab-topology' };
+    expect(() => composeSeedPlan(sel, TRIAD_ACTIVE, set())).toThrow(/no step selected/);
+  });
+
+  it('CONFLICT: --dataset naming a different dataset for a scenario system throws', () => {
+    const sel: SeedSelection = {
+      profile: 'full',
+      scenario: 'ab-topology',
+      datasets: [{ system: 'programs-api', dataset: 'other' }],
+    };
+    expect(() => composeSeedPlan(sel, TRIAD_ACTIVE, set())).toThrow(/conflicting datasets/);
   });
 });

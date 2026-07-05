@@ -50,7 +50,7 @@ Bring the synthetic dev stack up/down, seed, reset, verify, and log in.
   stack status     Show per-service health, probing manifest-derived endpoints.
   stack verify     Verify the stack: native health gate (+ --full data + source-posture).
   stack reset      Truncate the data DBs to an empty baseline + re-seed the dev user.
-  stack seed       Seed a running stack (--with playback|qtf add-ons).
+  stack seed       Seed a running stack (--with add-ons; --scenario/--dataset named datasets; --dry-run).
   stack snapshot   Store / restore / list / validate / delete native DB snapshots.
   stack overlay    Overlay your in-flight PRs onto a main-based stack.
   stack bootstrap  Stand the stack up on main (ensure repos → up → seed → verify).
@@ -232,7 +232,7 @@ slot-safe — it stops exactly the pids *this* stack recorded, never a host-glob
 |---|---|---|
 | `ss stack up [--only\|--with] [--slot N]` | Bring up a sub-stack (or full stack), native prep→migrate→launch→seed | [sub-stacks](./sub-stacks-and-bundles.md) · [slots](./slots.md) |
 | `ss stack status` / `verify [--full]` | Health (read-only) / gating health + data + posture | [verify](./verify.md) |
-| `ss stack seed [--with …]` / `reset` | Seed a running stack / truncate to an empty baseline + re-seed | [sub-stacks](./sub-stacks-and-bundles.md) |
+| `ss stack seed [--with …] [--scenario …]` / `reset` | Seed a running stack (add-ons + named datasets/scenarios) / truncate to an empty baseline + re-seed | [sub-stacks](./sub-stacks-and-bundles.md) |
 | `ss stack snapshot store\|restore\|list` | Save/restore a known-good DB state in seconds | [snapshots](./snapshots.md) |
 | `ss e2e run\|list\|connect` | Run/discover data-driven flows; open a live Connect session | [e2e](./e2e.md) |
 | `ss set list\|show\|check` + `--set <name>` | Named worktree sets: parallel dev contexts (repo map + slot) for `up`/`e2e run`/… | [worktree-sets](./worktree-sets.md) |

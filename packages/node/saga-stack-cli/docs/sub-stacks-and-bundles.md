@@ -73,6 +73,22 @@ ss stack seed                 # default roster
 ss stack seed --with playback # + the playback fixtures
 ```
 
+**Named datasets & scenarios** (multi-seed, #221): `profile` says *how much* to seed;
+a **dataset** names *which* fixture a system seeds (`SEED_DATASET=<name>` reaches that
+system's `db:seed`). A **scenario** is a named, coupled set of per-system datasets that
+must apply together — e.g. `ab-topology` stamps the programs/scheduling/sessions triad.
+A scenario that cannot apply coherently (a member inactive, restored, or not selected
+by the profile) is an **error**, never a silent partial seed.
+
+```bash
+ss stack seed full --scenario ab-topology            # coupled cross-system dataset
+ss stack seed full --dataset sessions-api=alt        # one system's named dataset
+ss stack seed full --scenario ab-topology --dry-run  # print the stamped plan, seed nothing
+```
+
+Flows can carry the same keys in their `flows.json` seed block
+(`"seed": { "profile": "full", "scenario": "ab-topology" }`).
+
 <details><summary>Seeds in place — profile + add-ons, offline steps first, then online</summary>
 
 ```

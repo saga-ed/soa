@@ -12,6 +12,7 @@
  */
 
 import type { DbId, ServiceId } from '../manifest/index.js';
+import type { SeedScenarioName, SystemSeedDataset } from './datasets.js';
 
 /**
  * Per-system seed override (plan §4.1 / §5, M5). Seeds ONE system's steps at a
@@ -130,4 +131,19 @@ export interface SeedSelection {
   only?: ServiceId[];
   /** Drop these step ids (`stack seed --exclude <id,…>`). */
   exclude?: string[];
+  /**
+   * Named cross-system SCENARIO (#221 multi-seed): expands to a coherent
+   * per-system dataset map (see `SEED_SCENARIOS`) so a coupled dataset (the
+   * scheduling/programs/sessions triad) cannot be half-selected. Merges with
+   * `datasets`; a conflicting entry for the same system is a compose error.
+   */
+  scenario?: SeedScenarioName;
+  /**
+   * Per-system named datasets (#221 multi-seed): the IDENTITY axis, orthogonal
+   * to `profile`/`perSystem` (quantity). Never changes WHICH steps are selected —
+   * each selected step whose service is named here is emitted as a compose-time
+   * clone with `SEED_DATASET=<name>` in its env, and the owning repo's single
+   * `db:seed` branches on it (the `SEED_DEMO_ONLY` house pattern).
+   */
+  datasets?: SystemSeedDataset[];
 }

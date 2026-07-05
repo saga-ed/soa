@@ -28,7 +28,7 @@ import { BaseCommand } from '../../../base-command.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
-import type { DbId, RepoKey as ManifestRepoKey, ServiceId } from '../../../core/manifest/index.js';
+import type { DbId, ServiceId } from '../../../core/manifest/index.js';
 import { restorePlan, snapshotManifestSchema } from '../../../core/snapshot/index.js';
 import type { LocalMigrations, SnapshotManifest } from '../../../core/snapshot/index.js';
 import {
@@ -38,9 +38,8 @@ import {
   readManifest,
   redisContainer,
   snapshotDir,
-  REPO_ENV_VAR,
 } from '../../../runtime/index.js';
-import type { RepoKey, ScriptContext } from '../../../runtime/index.js';
+import type { ScriptContext } from '../../../runtime/index.js';
 
 export default class SnapshotRestore extends BaseCommand {
   static description =

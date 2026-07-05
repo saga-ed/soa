@@ -26,7 +26,6 @@ import { deriveInstance } from '../core/derive-instance.js';
 import type { GitRunner } from './git.js';
 import { REPO_DEFAULT_DIR } from './scripts.js';
 import { REPO_ENV_VAR } from './repos.js';
-import type { RepoKey as ManifestRepoKey } from '../core/manifest/index.js';
 import type { SlotActiveProbe } from './slot-active.js';
 
 /** One repo entry's verdicts (also the `set check` JSON row). */
@@ -70,11 +69,6 @@ function safeRealpath(path: string): string | null {
   } catch {
     return null;
   }
-}
-
-/** The env-var key `REPO_DEFAULT_DIR` is keyed by, from a kebab set key. */
-function repoEnvKey(repo: SetRepoKey): ManifestRepoKey {
-  return REPO_ENV_VAR[repo] as ManifestRepoKey;
 }
 
 /** Evaluate one set against the store + live slots. */
@@ -125,7 +119,7 @@ export async function checkWorktreeSet(
 
     // Primary-checkout posture (tenet 4): shared repos must be clean,
     // pre-built, effectively read-only worktrees — never the hot primary.
-    const primary = safeRealpath(join(deps.devRoot, REPO_DEFAULT_DIR[repoEnvKey(repo)]));
+    const primary = safeRealpath(join(deps.devRoot, REPO_DEFAULT_DIR[REPO_ENV_VAR[repo]]));
     if (primary !== null && safeRealpath(entry.path) === primary) {
       if (check.prebuilt) {
         check.warnings.push('points at the primary checkout (pre-built, so running is safe — prefer a worktree)');

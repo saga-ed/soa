@@ -25,24 +25,25 @@
  * keys from `shared-flags.ts` (kebab-case); the env var names are up.sh's.
  */
 
-/** CLI-flag keys for the per-repo overrides — matches `repoFlags` in shared-flags.ts. */
-export type RepoKey =
-  | 'soa'
-  | 'rostering'
-  | 'program-hub'
-  | 'saga-dash'
-  | 'coach'
-  | 'sds'
-  | 'qboard'
-  | 'rtsm'
-  | 'fleek';
+import { SET_REPO_KEYS } from '../core/set/index.js';
+import type { SetRepoKey } from '../core/set/index.js';
+import type { RepoKey as ManifestRepoKey } from '../core/manifest/index.js';
+import type { ScriptContext } from './scripts.js';
+
+/**
+ * CLI-flag keys for the per-repo overrides — matches `repoFlags` in
+ * shared-flags.ts. M15: the kebab list is CANONICAL in core
+ * (`SET_REPO_KEYS`, which the set-file schema also validates against);
+ * this alias keeps the runtime-side name.
+ */
+export type RepoKey = SetRepoKey;
 
 /**
  * Map each `--<repo>` flag to the EXACT env var up.sh reads for that repo's
  * path. (Note `sds` → `SDS`, whose default checkout dir is
  * `student-data-system`, resolved by up.sh — not here.)
  */
-export const REPO_ENV_VAR: Record<RepoKey, string> = {
+export const REPO_ENV_VAR: Record<RepoKey, ManifestRepoKey> = {
   soa: 'SOA',
   rostering: 'ROSTERING',
   'program-hub': 'PROGRAM_HUB',
@@ -83,4 +84,34 @@ export function buildRepoEnv(overrides: RepoOverrides = {}): Record<string, stri
   }
 
   return env;
+}
+
+
+/**
+ * THE Shape-A builder (M15): kebab `--<repo>` flag pins + `--dev` → a
+ * `ScriptContext` keyed by the manifest env-var names. Every command-layer
+ * duplicate (status/verify/overlay/bootstrap, down's inline ctx, the e2e stack
+ * context, BaseCommand.scriptContextFromFlags) routes through here. Accepts an
+ * untyped bag (oclif parsed flags) — non-string values are ignored.
+ */
+export function repoContextFromFlags(flags: Record<string, unknown>): ScriptContext {
+  const repoRoots: Partial<Record<ManifestRepoKey, string>> = {};
+  for (const kebab of SET_REPO_KEYS) {
+    const value = flags[kebab];
+    if (typeof value === 'string' && value) repoRoots[REPO_ENV_VAR[kebab]] = value;
+  }
+  const dev = flags.dev;
+  return { dev: typeof dev === 'string' && dev ? dev : undefined, repoRoots };
+}
+
+/** The Shape-B input builder: the same flag bag → `RepoOverrides` for `buildRepoEnv`. */
+export function repoOverridesFromFlags(flags: Record<string, unknown>): RepoOverrides {
+  const overrides: RepoOverrides = {};
+  const dev = flags.dev;
+  if (typeof dev === 'string' && dev) overrides.dev = dev;
+  for (const kebab of SET_REPO_KEYS) {
+    const value = flags[kebab];
+    if (typeof value === 'string' && value) overrides[kebab] = value;
+  }
+  return overrides;
 }

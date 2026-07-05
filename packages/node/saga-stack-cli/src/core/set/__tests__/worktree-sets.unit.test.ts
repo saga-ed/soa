@@ -6,7 +6,6 @@
 
 import { describe, expect, it } from 'vitest';
 import {
-  SET_REPO_KEYS,
   applySetToFlags,
   emptyWorktreeSetsFile,
   nearestRepoKey,
@@ -14,7 +13,6 @@ import {
   resolveSet,
 } from '../worktree-sets.js';
 import type { SetInjectableFlags, WorktreeSet } from '../worktree-sets.js';
-import { REPO_ENV_VAR } from '../../../runtime/repos.js';
 
 const VALID = {
   version: 1,
@@ -79,11 +77,9 @@ describe('parseWorktreeSetsFile', () => {
   });
 });
 
-describe('SET_REPO_KEYS lockstep', () => {
-  it('matches the runtime REPO_ENV_VAR kebab keys exactly (core cannot import runtime)', () => {
-    expect([...SET_REPO_KEYS].sort()).toEqual(Object.keys(REPO_ENV_VAR).sort());
-  });
-
+describe('SET_REPO_KEYS', () => {
+  // M15: the lockstep-with-REPO_ENV_VAR test is retired — runtime/repos.ts now
+  // IMPORTS this list (single source of truth), so divergence is impossible.
   it('nearestRepoKey suggests the closest known key', () => {
     expect(nearestRepoKey('saga-dashh')).toBe('saga-dash');
     expect(nearestRepoKey('rosterin')).toBe('rostering');

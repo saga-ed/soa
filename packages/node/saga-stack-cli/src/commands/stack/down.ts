@@ -23,7 +23,7 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
-import { meshDown, resolveRepoRoot } from '../../runtime/index.js';
+import { meshDown, repoContextFromFlags, resolveRepoRoot } from '../../runtime/index.js';
 import type { MeshDownResult, ScriptContext, StopServiceResult } from '../../runtime/index.js';
 
 export default class StackDown extends BaseCommand {
@@ -102,10 +102,7 @@ export default class StackDown extends BaseCommand {
     flags: { dev: string; soa?: string },
     profile: InstanceProfile,
   ): Promise<MeshDownResult> {
-    const ctx: ScriptContext = {
-      dev: flags.dev,
-      repoRoots: flags.soa ? { SOA: flags.soa } : {},
-    };
+    const ctx: ScriptContext = repoContextFromFlags(flags as unknown as Record<string, unknown>);
     return meshDown({
       soaRoot: resolveRepoRoot('SOA', ctx),
       runner: this.getRunner(),

@@ -53,12 +53,13 @@ import type { Manifest, RepoKey, ServiceId } from './core/manifest/index.js';
 import { healthProbes } from './core/probe-plan.js';
 import type { Lane } from './core/manifest/index.js';
 import type { ScriptPlan } from './core/flag-map.js';
-import { makeStackApi } from './stack-api.js';
 import type { Runtime, StackApi } from './stack-api.js';
 import {
+  buildRepoEnv,
   loadFlowsFrom,
   REPO_DEFAULT_DIR,
-  REPO_ENV_VAR,
+  repoContextFromFlags,
+  repoOverridesFromFlags,
   resolveRepoRoot,
   resolveVendorScript,
 } from './runtime/index.js';
@@ -162,14 +163,8 @@ export function discoverFlowManifest(spaId: string, flags: FlagBag, env: EnvBag)
  * `$DEV`). Mirrors up.sh's repo-path precedence.
  */
 function overlayRepoEnv(env: EnvBag, flags: FlagBag): EnvBag {
-  const out: EnvBag = { ...env };
-  const dev = str(flags, 'dev');
-  if (dev) out.DEV = dev;
-  for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
-    const v = str(flags, kebab);
-    if (v) out[REPO_ENV_VAR[kebab]] = v;
-  }
-  return out;
+  // M15: buildRepoEnv is the ONE flags→env-var overlay (DEV + the repo pins).
+  return { ...env, ...buildRepoEnv(repoOverridesFromFlags(flags)) };
 }
 
 // ── runtime/context assembly (mirrors stack up's buildRuntime) ───────────────
@@ -230,12 +225,7 @@ export function buildStackContext(
   delegate: (plan: ScriptPlan) => Promise<number>,
   profile: InstanceProfile = deriveInstance({ slot: 0 }),
 ): { runtime: Runtime; repoRoots: Record<RepoKey, string> } {
-  const pinned: Partial<Record<RepoKey, string>> = {};
-  for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
-    const value = str(flags, kebab);
-    if (value) pinned[REPO_ENV_VAR[kebab] as RepoKey] = value;
-  }
-  const ctx: ScriptContext = { dev: str(flags, 'dev'), repoRoots: pinned };
+  const ctx: ScriptContext = repoContextFromFlags(flags);
 
   const repoRoots = {} as Record<RepoKey, string>;
   for (const repo of Object.keys(REPO_DEFAULT_DIR) as RepoKey[]) {

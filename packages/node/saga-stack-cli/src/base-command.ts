@@ -58,6 +58,8 @@ import {
   makeRealRunner,
   makeRealPrepLock,
   makeRealSetStore,
+  repoContextFromFlags,
+  repoOverridesFromFlags,
   makeRealSnapshotIO,
   makeRealViteClear,
   generateTunnelFleetConfig,
@@ -68,7 +70,6 @@ import {
   scriptCwd,
   stopServices,
   REPO_DEFAULT_DIR,
-  REPO_ENV_VAR,
 } from './runtime/index.js';
 import type {
   ConfirmSeam,
@@ -83,7 +84,6 @@ import type {
   PgProbe,
   PortProbe,
   RepoKey,
-  RepoOverrides,
   Runner,
   ScriptContext,
   SetStore,
@@ -596,12 +596,7 @@ export abstract class BaseCommand extends Command {
    * fleet-config generation).
    */
   protected scriptContextFromFlags(flags: WorkspaceFlags): ScriptContext {
-    const pinned: Partial<Record<ManifestRepoKey, string>> = {};
-    for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
-      const value = (flags as unknown as Record<string, string | undefined>)[kebab];
-      if (value) pinned[REPO_ENV_VAR[kebab] as ManifestRepoKey] = value;
-    }
-    return { dev: flags.dev, repoRoots: pinned };
+    return repoContextFromFlags(flags as Record<string, unknown>);
   }
 
   protected buildNativeRuntime(
@@ -721,17 +716,8 @@ export abstract class BaseCommand extends Command {
     // Build BOTH the per-repo override env (for the child process) and the
     // per-repo path-pin map (for locating the script), keyed by the manifest
     // env-var name. `--soa` lands in both because `REPO_ENV_VAR.soa === 'SOA'`.
-    const overrides: RepoOverrides = { dev: flags.dev };
-    const repoRoots: Partial<Record<ManifestRepoKey, string>> = {};
-    for (const repo of Object.keys(REPO_ENV_VAR) as RepoKey[]) {
-      const value = flags[repo];
-      if (value) {
-        overrides[repo] = value;
-        repoRoots[REPO_ENV_VAR[repo] as ManifestRepoKey] = value;
-      }
-    }
-
-    const ctx: ScriptContext = { dev: flags.dev, repoRoots };
+    const overrides = repoOverridesFromFlags(flags as Record<string, unknown>);
+    const ctx = repoContextFromFlags(flags as Record<string, unknown>);
     const command = resolveScript(plan.script, ctx);
     const cwd = scriptCwd(plan.script, ctx);
 
@@ -753,12 +739,7 @@ export abstract class BaseCommand extends Command {
    * up.sh/tunnel.sh/refresh-suite.sh read (`SOA`, `SAGA_DASH`, …).
    */
   protected buildRepoOverrideEnv(flags: WorkspaceFlags): Record<string, string> {
-    const overrides: RepoOverrides = { dev: flags.dev };
-    for (const repo of Object.keys(REPO_ENV_VAR) as RepoKey[]) {
-      const value = flags[repo];
-      if (value) overrides[repo] = value;
-    }
-    return buildRepoEnv(overrides);
+    return buildRepoEnv(repoOverridesFromFlags(flags as Record<string, unknown>));
   }
 
   /**

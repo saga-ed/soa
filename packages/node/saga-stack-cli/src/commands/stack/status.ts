@@ -37,7 +37,8 @@ import { deriveInstance } from '../../core/derive-instance.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { RepoKey, ServiceId } from '../../core/manifest/index.js';
-import { REPO_ENV_VAR, resolveRepoRoot } from '../../runtime/index.js';
+import { resolveRepoRoot } from '../../runtime/index.js';
+import { repoContextFromFlags } from '../../runtime/index.js';
 import type { ScriptContext } from '../../runtime/index.js';
 
 export default class StackStatus extends BaseCommand {
@@ -201,20 +202,9 @@ export interface NotClonedService {
   repoDir: string;
 }
 
-/**
- * Build the `ScriptContext` (dev root + per-repo path pins) from the parsed
- * workspace flags — the same `--dev` / `--<repo>` precedence `stack up`'s
- * `buildRuntime` uses, so status/verify resolve each repo dir identically.
- */
-export function repoContextFromFlags(flags: Record<string, unknown>): ScriptContext {
-  const pinned: Partial<Record<RepoKey, string>> = {};
-  for (const kebab of Object.keys(REPO_ENV_VAR) as (keyof typeof REPO_ENV_VAR)[]) {
-    const value = flags[kebab];
-    if (typeof value === 'string' && value) pinned[REPO_ENV_VAR[kebab] as RepoKey] = value;
-  }
-  const dev = typeof flags.dev === 'string' ? flags.dev : undefined;
-  return { dev, repoRoots: pinned };
-}
+// M15: the ScriptContext builder is now THE shared one in runtime/repos.ts —
+// re-exported so verify/overlay/bootstrap's existing imports keep working.
+export { repoContextFromFlags };
 
 /**
  * Partition a resolved service set by whether each service's sibling-repo checkout

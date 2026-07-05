@@ -29,9 +29,9 @@
 import { z } from 'zod';
 
 /**
- * The kebab CLI-flag repo keys a set file may use — MUST stay in lockstep with
- * `REPO_ENV_VAR` in `runtime/repos.ts` (core cannot import runtime, so the
- * list is duplicated here and pinned by a unit test against the runtime map).
+ * THE canonical kebab CLI-flag repo keys (M15): `runtime/repos.ts` imports
+ * this list (its `RepoKey` is an alias of `SetRepoKey`), so the set-file
+ * schema, the CLI flags, and the env-var mapping share one source of truth.
  */
 export const SET_REPO_KEYS = [
   'soa',

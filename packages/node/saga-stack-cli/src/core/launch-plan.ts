@@ -51,6 +51,9 @@ export interface LaunchTokens {
   IAM_PORT: string;
   /** sis-api port — up.sh `SIS_PORT` (3100). */
   SIS_PORT: string;
+  /** sessions-api port (3007) — ads-adm-api's SESSIONS_API_CLIENT_BASEURL (was a
+   *  literal `:3007` in up.sh; tokenized for M13 ads-adm slottability). */
+  SESSIONS_PORT: string;
   /** content-api port — up.sh `CONTENT_PORT` (3009; default :3010 collides with iam). */
   CONTENT_PORT: string;
   /** connect-api port — up.sh `CONNECT_API_PORT` (6106). */
@@ -117,6 +120,10 @@ export interface LaunchTokens {
   CONTENT_DB_URL: string;
   /** up.sh `COACH_DB_URL` — `postgresql://coach_api_app:dev-password-coach-api-app@localhost:5432/coach_api`. */
   COACH_DB_URL: string;
+  /** ads-adm DB URL — `postgresql://ads_adm:ads_adm@localhost:<pg>/ads_adm_local`
+   *  (was a LITERAL `@localhost:5432` in up.sh/the manifest; tokenized for M13
+   *  ads-adm slottability so the pg port offsets in lockstep with the slot mesh). */
+  ADS_ADM_DB_URL: string;
 
   // ── misc scalars ──
   /** up.sh `RECORDING_TOKEN` — shared fleek bearer (`local-dev-token`). */
@@ -523,6 +530,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     // ports (string form)
     IAM_PORT: String(ports['iam-api']),
     SIS_PORT: String(ports['sis-api']),
+    SESSIONS_PORT: String(ports['sessions-api']),
     CONTENT_PORT: String(ports['content-api']),
     CONNECT_API_PORT: String(ports['connect-api']),
     RTSM_PORT: String(ports['rtsm-api']),
@@ -555,6 +563,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     SESSIONS_DB_URL: pgUrl('sessions', pgPort, m),
     CONTENT_DB_URL: pgUrl('content', pgPort, m),
     COACH_DB_URL: pgUrl('coach_api', pgPort, m),
+    ADS_ADM_DB_URL: pgUrl('ads_adm_local', pgPort, m),
 
     // misc scalars (up.sh hardcodes these verbatim)
     RECORDING_TOKEN: 'local-dev-token',

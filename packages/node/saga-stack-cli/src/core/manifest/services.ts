@@ -236,7 +236,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     repo: 'SDS',
     subpath: 'apps/node/ads-adm-api',
     port: 5005,
-    portEnvVar: null,
+    // ads-adm-api reads its listen port via DotenvConfigManager +
+    // ExpressServerEnvSchema → EXPRESS_SERVER_* (verified in its
+    // inversify.config.ts / config/schemas.ts; the repo .env bakes
+    // EXPRESS_SERVER_PORT=5005 but dotenv never overrides real env, so the
+    // M13 listen-port injection wins at slot > 0 and is absent at slot 0).
+    portEnvVar: 'EXPRESS_SERVER_PORT',
     healthPath: '/health',
     databases: ['ads_adm_local', 'ledger_local'],
     dependsOn: ['iam-api', 'sessions-api'],
@@ -244,16 +249,20 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     mesh: ['postgres', 'rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
+      // Fully tokenized (ads-adm slottability): every cross-service/mesh URL
+      // resolves through the launch context, so a slot > 0 ads-adm-api dials
+      // ITS slot's sessions/iam/postgres/dash — never slot 0's. At slot 0
+      // the tokens expand to exactly the old literals (byte-identity holds).
       env: {
         ADS_ADM_SCHEDULE_PROVIDER: 'program-hub',
-        SESSIONS_API_CLIENT_BASEURL: 'http://localhost:3007',
-        IAM_API_CLIENT_BASEURL: 'http://localhost:3010/trpc',
+        SESSIONS_API_CLIENT_BASEURL: 'http://localhost:${SESSIONS_PORT}',
+        IAM_API_CLIENT_BASEURL: '${IAM_URL}/trpc',
         IAM_API_URL: '${IAM_URL}',
         JWT_ISSUER: 'https://iam.saga.org',
         SERVICE_TOKEN_SERVICESLUG: 'ads-adm-api',
-        ADS_ADM_DATABASE_URL: 'postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local',
-        DATABASE_URL: 'postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local',
-        CORS_ORIGIN: 'http://localhost:8900',
+        ADS_ADM_DATABASE_URL: '${ADS_ADM_DB_URL}',
+        DATABASE_URL: '${ADS_ADM_DB_URL}',
+        CORS_ORIGIN: '${DASH_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
       },
     },

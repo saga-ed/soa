@@ -22,7 +22,7 @@
  *
  * SLOT > 0 IS A BACKEND + saga-dash/coach FRONTEND SUB-STACK (connect excluded
  * pending tokenization). Slot > 0 brings up the backend mesh + services —
- * `iam/programs/scheduling/sessions/content/sis/rtsm/coach-api` + the mesh — PLUS
+ * `iam/programs/scheduling/sessions/content/sis/rtsm/coach-api/ads-adm-api` + the mesh — PLUS
  * the `saga-dash` and `coach-web` frontends, which now listen on their OFFSET port
  * (the launch seam appends `--port <base+offset>` to their `pnpm dev`; vite honours
  * the last `--port`, overriding the port baked into the repo dev script / vite
@@ -57,10 +57,15 @@ export const SLOT_PORT_STRIDE = 1000;
  *   they would still dial slot 0's ports (postgres :5432, sessions :3007, iam
  *   :3010, dash CORS :8900, EXPRESS_SERVER_PORT 6301-6303, livekit ws :7880) and
  *   silently corrupt / collide with the default stack:
- *     - `ads-adm-api`    — literal `@localhost:5432`, `:3007`, `:3010`, CORS `:8900`.
  *     - `connect-api`    — literal `SESSIONS_API_BASE_URL :3007` + livekit `ws :7880`;
  *                          would read/write slot 0's stateful sessions-api.
  *     - the playback trio — literal `POSTGRES_PORT '5432'` + `EXPRESS_SERVER_PORT`.
+ *
+ *   `ads-adm-api` is NO LONGER excluded: its launch env is fully tokenized
+ *   (`${ADS_ADM_DB_URL}` / `${SESSIONS_PORT}` / `${IAM_URL}` / `${DASH_URL}`)
+ *   and its listen port is env-driven (`portEnvVar: 'EXPRESS_SERVER_PORT'`,
+ *   injected by the M13 listen-port seam at offset slots), so it both LISTENS
+ *   on and DIALS its own slot's ports.
  *
  *   `connect-web` FRONTEND — depends on `connect-api` (a browser edge), which is
  *   excluded above for its un-tokenized literal ports. connect-web itself now has
@@ -82,7 +87,6 @@ export const SLOT_PORT_STRIDE = 1000;
  */
 export const SLOT_EXCLUDED_SERVICES: readonly ServiceId[] = [
   // literal-port backends (bypass the offset)
-  'ads-adm-api',
   'connect-api',
   'transcripts-api',
   'insights-api',

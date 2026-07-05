@@ -431,7 +431,7 @@ export default class StackUp extends BaseCommand {
 
     const fullClosure = computeClosure(manifest, requested, { withPlayback });
 
-    // Exclude the literal-port backends (ads-adm-api/connect-api/playback trio) AND
+    // Exclude the literal-port backends (connect-api/playback trio) AND
     // the browser frontends (saga-dash/connect-web/coach-web — no listen-port seam)
     // from a slot > 0 bring-up: they'd collide with / split-brain onto slot 0 (see
     // SLOT_EXCLUDED_SERVICES). So slot > 0 is a BACKEND sub-stack. Empty at slot 0,

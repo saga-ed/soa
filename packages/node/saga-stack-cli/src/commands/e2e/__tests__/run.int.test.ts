@@ -248,16 +248,18 @@ describe('e2e run — slot isolation (M7)', () => {
   }
 
   it('--slot 1 --dry-run: no hard-error (slotAware), OFFSET service URLs, excluded service dropped', async () => {
-    // The full journey closure includes ads-adm-api (attendance) — an excluded
-    // service at slot > 0. --slot 1 must be ACCEPTED (was a hard-error before slotAware).
+    // The full journey closure includes ads-adm-api (attendance) — SLOTTABLE
+    // now (tokenized env + EXPRESS_SERVER_PORT injection), so it STAYS in the
+    // slot's closure. --slot 1 must be ACCEPTED (was a hard-error before slotAware).
     await E2eRun.run(['journey', '--slot', '1', '--dry-run', '--output-json', ...ws()], config);
 
     const json = dryRunJson();
     const closure = json.closure as { services: string[] };
     const env = json.env as Record<string, string>;
 
-    // excluded literal-port service dropped from the slot's closure.
-    expect(closure.services).not.toContain('ads-adm-api');
+    // ads-adm-api is slottable — kept in the slot's closure; connect stays excluded.
+    expect(closure.services).toContain('ads-adm-api');
+    expect(closure.services).not.toContain('connect-api');
     expect(closure.services).toContain('iam-api');
     expect(closure.services).toContain('scheduling-api');
 
@@ -266,6 +268,7 @@ describe('e2e run — slot isolation (M7)', () => {
     expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:4010');
     expect(env.PLAYWRIGHT_SCHEDULING_URL).toBe('http://localhost:4008');
     expect(env.PLAYWRIGHT_SESSIONS_URL).toBe('http://localhost:4007');
+    expect(env.PLAYWRIGHT_ADS_ADM_URL).toBe('http://localhost:6005'); // 5005 + 1000
   });
 
   it('--slot 0 --dry-run: BASE service URLs, excluded service PRESENT (byte-identical)', async () => {
@@ -285,15 +288,36 @@ describe('e2e run — slot isolation (M7)', () => {
     expect(env.PLAYWRIGHT_SESSIONS_URL).toBe('http://localhost:3007');
   });
 
-  it('--slot 1 real run: launches EXCLUDE the literal-port service, Playwright env drives the OFFSET URLs, reset is native (not up.sh)', async () => {
+  it('--slot 1 real run: ads-adm-api LAUNCHES in-slot, verify probes OFFSET ports, Playwright env drives the OFFSET URLs, reset is native (not up.sh)', async () => {
+    // Record every health-probe URL: the e2e verify step must probe the SLOT's
+    // offset ports, never the manifest base ports (a base-port probe reads slot
+    // 0's services — false-PASS off a healthy slot 0 / false-FAIL when slot 0 is
+    // down, observed live at slot 2 with a green ads-adm-api on :7005).
+    const probed: string[] = [];
+    vi.spyOn(BaseCommand.prototype as never, 'getProber' as never).mockReturnValue({
+      async probe(url: string) {
+        probed.push(url);
+        return { ok: true, status: 200 };
+      },
+    } as never);
+
     await E2eRun.run(
       ['journey', '--through', 'attendance', '--headless', '--slot', '1', ...ws()],
       config,
     );
 
-    // ads-adm-api (required by the attendance stage) is EXCLUDED at slot 1 — never launched.
-    expect(launches.map((s) => s.id)).not.toContain('ads-adm-api');
-    // …but the slottable backends still come up on their offset ports.
+    // verify probed ads-adm-api (and iam) on the slot's OFFSET ports only.
+    expect(probed).toContain('http://localhost:6005/health'); // ads-adm 5005 + 1000
+    expect(probed).toContain('http://localhost:4010/health'); // iam 3010 + 1000
+    expect(probed.some((u) => u.includes(':5005') || u.includes(':3010'))).toBe(false);
+
+    // ads-adm-api (required by the attendance stage) is slottable — LAUNCHED at
+    // slot 1 on its offset port, told its listen port via EXPRESS_SERVER_PORT.
+    const adsAdm = launches.find((s) => s.id === 'ads-adm-api');
+    expect(adsAdm).toBeDefined();
+    expect(adsAdm?.healthUrl).toContain(':6005'); // 5005 + 1000, not slot 0's :5005
+    expect(adsAdm?.env.EXPRESS_SERVER_PORT).toBe('6005');
+    // …and the other slottable backends still come up on their offset ports.
     expect(launches.map((s) => s.id)).toContain('iam-api');
     const iam = launches.find((s) => s.id === 'iam-api');
     expect(iam?.healthUrl).toContain(':4010'); // offset launch, not :3010

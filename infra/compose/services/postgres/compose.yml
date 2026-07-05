@@ -44,4 +44,6 @@ services:
 
 volumes:
   postgres-data:
-    name: postgres-profile-${SEED_PROFILE:-small}
+    # no explicit name → compose auto-names it <project>_postgres-data, so each
+    # COMPOSE_PROJECT_NAME (soa, soa-s1, …) gets an ISOLATED volume (M7 multi-slot).
+    # SEED_PROFILE still selects the seed FILE (profile-<name>.sql), not the volume.

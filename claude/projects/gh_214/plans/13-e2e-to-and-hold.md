@@ -97,6 +97,34 @@ On **slot 1** (free; do NOT touch slot 0's stack or slot 2):
    acceptable headless), summary printed.
 3. `stack down --slot 1` when done.
 
+### 5.1 Live-validation divergences (recorded)
+
+Two realities surfaced during live validation on slot 1; both are pre-existing
+behavior my change composes with, not regressions:
+
+1. **The stage-0-coherence gate assumes the full mesh on the stack lane.** The
+   SPA's Playwright `stage-0-coherence` project (a dependency of every stage)
+   probes `scheduling-api` (:4008) and `sessions-api` (:4007) unconditionally on
+   the stack lane (`pinnedOrStack = LANE === 'stack' || …`). A partial-closure run
+   — `--to program` (window `[roster]`), or the identical `--through roster` —
+   does NOT bring those up, so stage-0-coherence fails unless the full stack is
+   already running. This is the existing N-of-M-vs-coherence interaction, NOT
+   caused by `--to` (`--to program` resolves to the same window as `--through
+   roster`). Plan §5 step 1's "runs roster green on a bare slot" only holds when
+   the full mesh is up. **The empty-window hold path (`--to <first stage>`,
+   `--from K --to K`) sidesteps this by running zero Playwright** — validated live.
+
+2. **`--hold`'s headful browser holds the window (and the TTY) until closed.**
+   The existing `openVendoredBrowser` seam runs the vendored `browser-login.mjs`,
+   which on a headful host keeps the Chromium window + its process alive until the
+   user closes it (`await new Promise(() => {})`); `--hold` awaits that seam, so the
+   command blocks until the window closes, THEN exits 0. On a headless host the
+   script exits 0 immediately (jar minted; browser best-effort). This is the SAME
+   behavior as `stack login --browser` and honors the plan's "existing seam / no
+   new seams" constraint — so plan §2 step 4's "exit 0, browser detached" is
+   literally true headless, while headful it holds the window open (the more useful
+   manual-testing posture). Left as-is; documented in the summary output.
+
 ## 6. Out of scope (recorded, not built)
 
 - `--to` sugar that auto-selects the freshest valid checkpoint without `--from`

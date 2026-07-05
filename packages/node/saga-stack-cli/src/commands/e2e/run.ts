@@ -217,10 +217,20 @@ export default class E2eRun extends BaseCommand {
     // M14: the checkpoint store (bake/--from) — constructed AFTER applyInstanceEnv
     // (above) so it targets the slot's snapshot root + containers, with the SHARED
     // ScriptContext so the schema-ahead guard honors --set-pinned repo paths.
-    const checkpoints =
-      flags['snapshot-stages'] || resolved.checkpoint !== undefined
-        ? this.getCheckpointStore(this.scriptContextFromFlags(flags))
-        : undefined;
+    const checkpointsActive = flags['snapshot-stages'] || resolved.checkpoint !== undefined;
+    const checkpoints = checkpointsActive
+      ? this.getCheckpointStore(this.scriptContextFromFlags(flags))
+      : undefined;
+
+    // M14 §2.3 (advisory, WARN-only): the SPA checkout's HEAD — stamped into
+    // bakes, drift-compared on restores. '' sha (not a git checkout) ⇒ omitted.
+    let spaHead: { sha: string; dirty: boolean } | undefined;
+    if (checkpointsActive) {
+      const spaRepoRoot = appCwd.slice(0, appCwd.length - resolved.spa.appDir.length - 1);
+      const git = this.getGitRunner();
+      const sha = await git.headSha(spaRepoRoot);
+      if (sha !== '') spaHead = { sha, dirty: (await git.statusPorcelain(spaRepoRoot)).trim() !== '' };
+    }
 
     try {
       const code = await executeResolvedFlow(
@@ -242,6 +252,7 @@ export default class E2eRun extends BaseCommand {
           passthrough,
           snapshotStages: flags['snapshot-stages'],
           fromStaleOk: flags['from-stale-ok'],
+          spaHead,
         },
       );
       if (code !== 0) this.exit(code);

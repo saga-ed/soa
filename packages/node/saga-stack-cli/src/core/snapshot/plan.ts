@@ -394,3 +394,34 @@ export function evaluateValidation(
 function joinPath(dir: string, file: string): string {
   return dir.endsWith('/') ? `${dir}${file}` : `${dir}/${file}`;
 }
+
+/**
+ * M14: the BEHIND-schema check for stage checkpoints. The generic restore
+ * guard above only refuses a snapshot AHEAD of the checkout (its rev unknown
+ * locally); a checkpoint baked BEFORE a migration landed passes it, restores a
+ * behind-schema DB, and the window's specs then run against code expecting the
+ * new schema — where a full replay would have migrated first. Checkpoints are
+ * replay substitutes, so they must sit AT the local migration head. Pure:
+ * returns one message per behind DB (empty ⇒ ok). DBs with a null rev
+ * (db-push / mongo) or with no locally-known migrations (missing sibling
+ * checkout) are skipped — indeterminate, not behind.
+ */
+export function checkpointBehindFailures(
+  snapshot: SnapshotManifest,
+  localMigrations: LocalMigrations,
+): string[] {
+  const out: string[] = [];
+  for (const entry of snapshot.databases) {
+    if (entry.schemaRev == null) continue;
+    const known = localMigrations[entry.db] ?? [];
+    if (known.length === 0) continue;
+    const head = known[known.length - 1];
+    if (entry.schemaRev !== head) {
+      out.push(
+        `${entry.db}: checkpoint schema is at ${entry.schemaRev} but the local migration head is ${head} — ` +
+          'the checkpoint pre-dates a migration; re-bake with --snapshot-stages',
+      );
+    }
+  }
+  return out;
+}

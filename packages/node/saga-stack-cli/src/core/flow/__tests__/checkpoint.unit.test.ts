@@ -134,6 +134,22 @@ describe('evaluateCheckpoint (§2.2)', () => {
     expect(evaluateCheckpoint(at, EXPECT, NOW).ok).toBe(true);
   });
 
+  it('an OLD occurrence date trips the cliff even with a fresh bakedAt (re-bake laundering)', () => {
+    const laundered = block({
+      dates: { occurrenceDate: '2026-06-01', termStart: '2026-06-01', termEnd: '2026-07-13' }, // 33d before NOW
+    });
+    const v = evaluateCheckpoint(laundered, EXPECT, NOW);
+    expect(v.ok).toBe(false);
+    expect(v.violations[0]).toMatch(/oldest of bakedAt\/occurrenceDate/);
+  });
+
+  it('a FUTURE occurrence date (weekday clamp) never ages the checkpoint', () => {
+    const clamped = block({
+      dates: { occurrenceDate: '2026-07-06', termStart: '2026-07-06', termEnd: '2026-08-17' }, // next Monday
+    });
+    expect(evaluateCheckpoint(clamped, EXPECT, NOW).ok).toBe(true);
+  });
+
   it('SPA HEAD drift is WARN-only (§2.3)', () => {
     const v = evaluateCheckpoint(
       block({ spaHead: { sha: 'aaaaaaaaaaaa', dirty: false } }),

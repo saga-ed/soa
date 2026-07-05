@@ -22,7 +22,12 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { manifest as defaultManifest } from '../core/manifest/index.js';
 import type { DbId, Manifest } from '../core/manifest/index.js';
-import { restorePlan, storePlan, CURRENT_SNAPSHOT_SCHEMA_VERSION } from '../core/snapshot/index.js';
+import {
+  checkpointBehindFailures,
+  restorePlan,
+  storePlan,
+  CURRENT_SNAPSHOT_SCHEMA_VERSION,
+} from '../core/snapshot/index.js';
 import type { SnapshotDbEntry, SnapshotFlowBlock, SnapshotManifest } from '../core/snapshot/index.js';
 import type { SnapshotIO } from './snapshot.js';
 import {
@@ -125,10 +130,14 @@ export function makeCheckpointStore(deps: {
         force: false,
         currentProfile: opts.currentProfile,
       });
-      if (!plan.ok) {
+      // M14: checkpoints are REPLAY substitutes, so unlike a generic snapshot
+      // restore they must also not be BEHIND the local migration head (a full
+      // replay would have migrated first; the generic guard only refuses AHEAD).
+      const behind = checkpointBehindFailures(snapshot, localMigrations);
+      if (!plan.ok || behind.length > 0) {
         throw new Error(
           `checkpoint '${snapshot.fixtureId}' cannot be restored:\n` +
-            plan.guardFailures.map((g) => `  ✗ ${g.message}`).join('\n') +
+            [...plan.guardFailures.map((g) => g.message), ...behind].map((msg) => `  ✗ ${msg}`).join('\n') +
             '\n  (re-bake with --snapshot-stages after updating the stack)',
         );
       }

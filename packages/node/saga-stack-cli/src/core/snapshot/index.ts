@@ -20,6 +20,7 @@ export {
 export type { SnapshotDbEntry, SnapshotFlowBlock, SnapshotManifest } from './manifest.js';
 
 export {
+  checkpointBehindFailures,
   evaluateValidation,
   restorePlan,
   storePlan,

@@ -189,6 +189,13 @@ describe('--snapshot-stages (bake)', () => {
     expect(pw[1]!.args).toContain('stage-2-program-creation');
     expect(pw[1]!.args).toContain('--no-deps');
 
+    // The date env is computed ONCE for the whole ladder — every stage spawn
+    // shares identical dates (an overnight bake must not split the clamp).
+    for (const key of ['PLAYWRIGHT_OCCURRENCE_DATE', 'PLAYWRIGHT_TERM_START', 'PLAYWRIGHT_TERM_END']) {
+      expect(pw[0]!.env?.[key]).toBeDefined();
+      expect(pw[1]!.env?.[key]).toBe(pw[0]!.env?.[key]);
+    }
+
     // Both checkpoints exist on disk with the M14 flow block.
     const roster = readCkptManifest(CKPT_ROSTER);
     const program = readCkptManifest(CKPT_PROGRAM);
@@ -197,9 +204,20 @@ describe('--snapshot-stages (bake)', () => {
     expect(rosterFlow.stageId).toBe('roster');
     expect(programFlow.stageId).toBe('program');
     expect(rosterFlow.prefixHash).not.toBe(programFlow.prefixHash); // prefix grows per stage
-    expect((rosterFlow.dates as Record<string, string>).occurrenceDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // The baked dates ARE the dates the green stage actually ran with.
+    expect(rosterFlow.dates).toEqual({
+      occurrenceDate: pw[0]!.env?.PLAYWRIGHT_OCCURRENCE_DATE,
+      termStart: pw[0]!.env?.PLAYWRIGHT_TERM_START,
+      termEnd: pw[0]!.env?.PLAYWRIGHT_TERM_END,
+    });
     // Dumps happened for the closure DBs (canned bytes are real files).
     expect(ioCalls.filter((c) => c.op === 'pgDump').length).toBeGreaterThan(0);
+  });
+
+  it('--snapshot-stages requires the stack lane', async () => {
+    await expect(
+      E2eRun.run(['journey', '--lane', 'sandbox', '--snapshot-stages', '--headless', ...ws()], config),
+    ).rejects.toThrow(/--snapshot-stages.*requires the stack lane/);
   });
 
   it('a RED stage bakes no checkpoint and stops the ladder', async () => {
@@ -214,13 +232,18 @@ describe('--from (restore)', () => {
   it('restores the predecessor checkpoint, runs ONLY the window with --no-deps, reuses the BAKED dates', async () => {
     await bakeThroughProgram();
 
-    // Tamper the baked occurrence date so date-reuse is distinguishable from
-    // a fresh clamp computing the same value.
+    // Tamper the baked dates to RECENT-but-distinct values so date-reuse is
+    // distinguishable from a fresh clamp (an ancient date would now trip the
+    // occurrence-age staleness cliff — by design).
+    const fmt = (d: Date): string =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const yesterday = fmt(new Date(Date.now() - 86_400_000));
+    const inSixWeeks = fmt(new Date(Date.now() + 41 * 86_400_000));
     const m = readCkptManifest(CKPT_ROSTER);
     (m.flow as Record<string, unknown>).dates = {
-      occurrenceDate: '2020-03-02',
-      termStart: '2020-03-02',
-      termEnd: '2020-04-13',
+      occurrenceDate: yesterday,
+      termStart: yesterday,
+      termEnd: inSixWeeks,
     };
     writeCkptManifest(CKPT_ROSTER, m);
 
@@ -241,15 +264,62 @@ describe('--from (restore)', () => {
     expect(pw[0]!.args).toContain('stage-2-program-creation');
     expect(pw[0]!.args).toContain('--no-deps');
 
-    // §2.2: the child env carries the BAKED dates, not today's clamp.
-    expect(pw[0]!.env?.PLAYWRIGHT_OCCURRENCE_DATE).toBe('2020-03-02');
-    expect(pw[0]!.env?.PLAYWRIGHT_TERM_START).toBe('2020-03-02');
+    // §2.2: the child env carries ALL THREE baked dates, not today's clamp.
+    expect(pw[0]!.env?.PLAYWRIGHT_OCCURRENCE_DATE).toBe(yesterday);
+    expect(pw[0]!.env?.PLAYWRIGHT_TERM_START).toBe(yesterday);
+    expect(pw[0]!.env?.PLAYWRIGHT_TERM_END).toBe(inSixWeeks);
   });
 
-  it('a missing checkpoint is a pointed error naming the bake command', async () => {
+  it('an ancient baked OCCURRENCE date is refused even with a fresh bakedAt (re-bake laundering)', async () => {
+    await bakeThroughProgram();
+    const m = readCkptManifest(CKPT_ROSTER);
+    (m.flow as Record<string, unknown>).dates = {
+      occurrenceDate: '2020-03-02',
+      termStart: '2020-03-02',
+      termEnd: '2020-04-13',
+    };
+    writeCkptManifest(CKPT_ROSTER, m); // bakedAt stays fresh — the dates alone must trip the cliff
+
+    await expect(
+      E2eRun.run(['journey', '--from', 'program', '--through', 'program', '--headless', ...ws()], config),
+    ).rejects.toThrow(/days old.*oldest of bakedAt\/occurrenceDate/);
+  });
+
+  it('a checkpoint that does not COVER the window databases is refused', async () => {
+    await bakeThroughProgram();
+    const m = readCkptManifest(CKPT_ROSTER);
+    m.databases = (m.databases as { db: string }[]).filter((d) => d.db !== 'programs');
+    writeCkptManifest(CKPT_ROSTER, m);
+
+    await expect(
+      E2eRun.run(['journey', '--from', 'program', '--through', 'program', '--headless', ...ws()], config),
+    ).rejects.toThrow(/does not cover the window's database\(s\): programs/);
+  });
+
+  it('a missing checkpoint is a pointed error listing what IS baked + the bake command', async () => {
     await expect(
       E2eRun.run(['journey', '--from', 'program', '--headless', ...ws()], config),
-    ).rejects.toThrow(/no checkpoint 'flow-saga-dash-journey-s1-roster'[\s\S]*--snapshot-stages/);
+    ).rejects.toThrow(/no checkpoint 'flow-saga-dash-journey-s1-roster'.*baked stages: \(none\)[\s\S]*--snapshot-stages/);
+
+    // With SOME stages baked, the error names them.
+    await bakeThroughProgram();
+    rmSync(join(snapDir, CKPT_PROGRAM), { recursive: true, force: true });
+    rmSync(join(snapDir, CKPT_ROSTER, 'manifest.json'), { force: true }); // roster unreadable ⇒ not listed
+    await expect(
+      E2eRun.run(['journey', '--from', 'program', '--headless', ...ws()], config),
+    ).rejects.toThrow(/baked stages: \(none\)/);
+  });
+
+  it('--dry-run --output-json carries the checkpoint + bake projections (machine shape)', async () => {
+    logged.length = 0;
+    await E2eRun.run(
+      ['journey', '--from', 'program', '--through', 'program', '--snapshot-stages', '--dry-run', '--headless', '--output-json', ...ws()],
+      config,
+    );
+    const jsonLine = logged.find((l) => l.trimStart().startsWith('{'));
+    const desc = JSON.parse(logged.slice(logged.indexOf(jsonLine as string)).join('\n')) as Record<string, unknown>;
+    expect(desc.checkpoint).toEqual({ fixtureId: CKPT_ROSTER, predecessor: 'roster' });
+    expect(desc.bakeCheckpoints).toEqual([CKPT_PROGRAM]);
   });
 
   it('a prefixHash mismatch (upstream stage edited) refuses with a re-bake hint', async () => {

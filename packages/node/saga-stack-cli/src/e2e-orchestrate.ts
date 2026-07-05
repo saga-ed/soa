@@ -613,6 +613,12 @@ export interface ExecOptions {
   snapshotStages?: boolean;
   /** M14 §2.2: downgrade the >7-day checkpoint staleness violation to a warning. */
   fromStaleOk?: boolean;
+  /**
+   * M14 §2.3 (advisory): the SPA checkout's HEAD at run time — stamped into
+   * bakes, compared (WARN-only) on restores. Absent when the SPA dir is not a
+   * git checkout (e.g. hermetic tests).
+   */
+  spaHead?: { sha: string; dirty: boolean };
 }
 
 /**
@@ -662,6 +668,14 @@ export async function executeResolvedFlow(
   if (resolved.checkpoint && opts.lane !== 'stack') {
     throw new FlowExecError('--from restores a LOCAL stack checkpoint — it requires the stack lane');
   }
+  if (opts.snapshotStages === true && opts.lane !== 'stack') {
+    throw new FlowExecError(
+      '--snapshot-stages bakes LOCAL stack checkpoints — it requires the stack lane (a deployed-lane run would dump unrelated local container state)',
+    );
+  }
+  if (opts.snapshotStages === true && !resolved.flow.progressive) {
+    throw new FlowExecError('--snapshot-stages requires a progressive flow (stage checkpoints are replay prefixes)');
+  }
 
   if (opts.lane === 'stack') {
     // 1. native bring-up.
@@ -676,7 +690,7 @@ export async function executeResolvedFlow(
     // 1..from-1. Gated on resolved.checkpoint (never on effectiveReset:
     // resolved.reset is already false for a --from window by construction).
     if (resolved.checkpoint) {
-      restoredDates = await restoreCheckpoint(resolved, deps, opts);
+      restoredDates = await restoreCheckpoint(resolved, deps, opts, services, m);
     }
 
     // 2b. reset + seed (coupled; skipped on --skip-reset or when a prerequisite built the state).
@@ -764,7 +778,7 @@ export async function executeResolvedFlow(
       return code;
     }
     if (opts.snapshotStages === true) {
-      await bakeStageCheckpoint(resolved, stage, services, env, deps, m);
+      await bakeStageCheckpoint(resolved, stage, services, env, deps, opts, m);
     }
   }
   return 0;
@@ -775,6 +789,8 @@ async function restoreCheckpoint(
   resolved: ResolvedFlow,
   deps: ExecDeps,
   opts: ExecOptions,
+  services: ServiceId[],
+  m: Manifest,
 ): Promise<SnapshotFlowBlock['dates']> {
   const cp = resolved.checkpoint as NonNullable<ResolvedFlow['checkpoint']>;
   if (deps.checkpoints === undefined) {
@@ -789,8 +805,12 @@ async function restoreCheckpoint(
   );
   const snapshot = deps.checkpoints.load(fixtureId);
   if (snapshot === null) {
+    // Plan §1.2: list the stages that ARE baked so the fix is self-evident.
+    const baked = resolved.flow.stages
+      .filter((s, i) => deps.checkpoints?.load(checkpointFixtureId(resolved.spa.id, resolved.flow.name, s, i + 1)))
+      .map((s) => s.id);
     throw new FlowExecError(
-      `no checkpoint '${fixtureId}' — bake one first:\n` +
+      `no checkpoint '${fixtureId}' — baked stages: ${baked.join(', ') || '(none)'}. Bake first:\n` +
         `  ss e2e run ${resolved.spa.id}/${resolved.flow.name} --snapshot-stages --headless`,
     );
   }
@@ -803,10 +823,27 @@ async function restoreCheckpoint(
       stageId: cp.predecessor.id,
       prefixHash: stagePrefixHash(resolved.flow, cp.producingStages),
       seedProfile: resolved.seedSelection?.profile,
+      currentSpaHead: opts.spaHead?.sha,
     },
     deps.now,
     opts.fromStaleOk === true,
   );
+
+  // The checkpoint must COVER the window's state: any DB a window stage needs
+  // that the bake never dumped would keep un-reset leftover rows (a full replay
+  // would have reset+seeded it). Bake wider (--through) or re-bake.
+  const dumped = new Set(snapshot.databases.map((d) => d.db));
+  const missing = [...new Set(services.flatMap((id) => m.services[id]?.databases ?? []))].filter(
+    (db) => !dumped.has(db),
+  );
+  if (missing.length > 0) {
+    verdict.violations.push(
+      `the checkpoint does not cover the window's database(s): ${missing.join(', ')} — ` +
+        'it was baked from a narrower closure; re-bake with a wider --through',
+    );
+    verdict.ok = false;
+  }
+
   for (const w of verdict.warnings) deps.log(`⚠ checkpoint: ${w}`);
   if (!verdict.ok) {
     throw new FlowExecError(
@@ -831,6 +868,7 @@ async function bakeStageCheckpoint(
   services: ServiceId[],
   env: Record<string, string>,
   deps: ExecDeps,
+  opts: ExecOptions,
   m: Manifest,
 ): Promise<void> {
   const checkpoints = deps.checkpoints as NonNullable<ExecDeps['checkpoints']>;
@@ -843,7 +881,9 @@ async function bakeStageCheckpoint(
 
   await checkpoints.bake({
     fixtureId,
-    profile: resolved.seedSelection?.profile ?? 'roster',
+    // No fabricated default: a seedless flow's checkpoint says so ('unseeded'
+    // never false-matches a real profile in the restore-time double guard).
+    profile: resolved.seedSelection?.profile ?? 'unseeded',
     dbs,
     flow: {
       spa: resolved.spa.id,
@@ -857,6 +897,7 @@ async function bakeStageCheckpoint(
         termStart: env[ENV_TERM_START] ?? '',
         termEnd: env[ENV_TERM_END] ?? '',
       },
+      ...(opts.spaHead !== undefined ? { spaHead: opts.spaHead } : {}),
       bakedAt: deps.now.toISOString(),
     },
   });

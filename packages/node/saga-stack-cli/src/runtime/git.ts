@@ -46,6 +46,8 @@ export interface GitRunner {
   statusPorcelain(repoPath: string): Promise<string>;
   /** `git branch --show-current` — the current branch, or `''` when detached / on error. */
   branchShowCurrent(repoPath: string): Promise<string>;
+  /** `git rev-parse HEAD` — the HEAD sha, or `''` when not a checkout / on error (M14 §2.3 advisory). */
+  headSha(repoPath: string): Promise<string>;
   /** origin/HEAD → default branch (`git symbolic-ref --short refs/remotes/origin/HEAD`, strip `origin/`); fallback `main`. */
   symbolicRefDefault(repoPath: string): Promise<string>;
   /** `git fetch -q origin` — true iff it exited 0 (network IO; a failure must NOT abort the caller). */
@@ -141,6 +143,9 @@ export function makeRealGitRunner(): GitRunner {
     },
     branchShowCurrent(repoPath: string): Promise<string> {
       return gitOut(repoPath, ['branch', '--show-current']);
+    },
+    headSha(repoPath: string): Promise<string> {
+      return gitOut(repoPath, ['rev-parse', 'HEAD']);
     },
     async symbolicRefDefault(repoPath: string): Promise<string> {
       const out = await gitOut(repoPath, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);

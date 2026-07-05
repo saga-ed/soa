@@ -128,13 +128,23 @@ export function evaluateCheckpoint(
     );
   }
 
+  // The cliff guards the DATES the state embeds, so it keys on BOTH timestamps:
+  // bakedAt alone is launderable — a `--from --snapshot-stages` re-bake stamps a
+  // fresh bakedAt while carrying the RESTORED (old) occurrence date forward, and
+  // it's the occurrence date the Monday-flake class actually breaks on.
   const bakedAt = Date.parse(block.bakedAt);
+  const occurredAt = Date.parse(block.dates.occurrenceDate);
   if (Number.isNaN(bakedAt)) {
     violations.push(`checkpoint has an unreadable bakedAt timestamp ('${block.bakedAt}')`);
   } else {
-    const ageDays = (now.getTime() - bakedAt) / 86_400_000;
+    const ageDays = Math.max(
+      (now.getTime() - bakedAt) / 86_400_000,
+      // A future-dated occurrence (the weekday clamp lands on next Monday) is
+      // fine — only a PAST drift ages the checkpoint.
+      Number.isNaN(occurredAt) ? 0 : (now.getTime() - occurredAt) / 86_400_000,
+    );
     if (ageDays > CHECKPOINT_MAX_AGE_DAYS) {
-      const msg = `checkpoint is ${Math.floor(ageDays)} days old (cliff ${CHECKPOINT_MAX_AGE_DAYS}d) — its baked dates likely no longer fit; re-bake with --snapshot-stages`;
+      const msg = `checkpoint is ${Math.floor(ageDays)} days old (cliff ${CHECKPOINT_MAX_AGE_DAYS}d, oldest of bakedAt/occurrenceDate) — its baked dates likely no longer fit; re-bake with --snapshot-stages`;
       if (staleOk) warnings.push(`${msg} (--from-stale-ok override)`);
       else violations.push(`${msg}, or pass --from-stale-ok`);
     }

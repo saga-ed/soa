@@ -31,6 +31,21 @@
 #
 # Env:
 #   SWITCHBOARD_API_URL       default: https://switchboard-api.wootdev.com
+#                             registry host — variant PUT goes here. Both
+#                             hostnames route to the same merged Lambda/target
+#                             group, but the ALB listener rules that let a bare
+#                             CI bearer token through (no OIDC) are HOST-scoped:
+#                             switchboard-api.wootdev.com has the bypass for
+#                             /api/v1/services/* PUT|DELETE; sandbox-api.wootdev.com
+#                             has the bypass for /api/v1/compositions/*/update
+#                             POST (added in hipponot/microservices#698 — until
+#                             that deploys, the update call gets an ALB 302, not
+#                             a real response, regardless of bearer token).
+#                             Using the wrong host for either call reaches the
+#                             OIDC catch-all instead, NOT the app.
+#   SANDBOX_API_URL           default: https://sandbox-api.wootdev.com
+#                             sandbox/composition host — composition GET and
+#                             the /update call go here.
 #   SWITCHBOARD_CI_API_KEY    bearer token for the registry PUT (registry-side
 #                             secret — see auth.py: registry routes and
 #                             sandbox/composition routes validate against
@@ -78,7 +93,8 @@ command -v jq >/dev/null 2>&1 || { err "apply-local.sh needs jq"; exit 1; }
 command -v curl >/dev/null 2>&1 || { err "apply-local.sh needs curl"; exit 1; }
 [[ -r "$WORKSPACE" ]] || { err "cannot read '$WORKSPACE'"; exit 1; }
 
-API_URL=${SWITCHBOARD_API_URL:-https://switchboard-api.wootdev.com}
+REGISTRY_API_URL=${SWITCHBOARD_API_URL:-https://switchboard-api.wootdev.com}
+SANDBOX_API_URL=${SANDBOX_API_URL:-https://sandbox-api.wootdev.com}
 
 # ── preflight: both bearer secrets present (two DIFFERENT keys — see auth.py) ──
 if [[ -z "${SWITCHBOARD_CI_API_KEY:-}" ]]; then
@@ -91,9 +107,9 @@ if [[ -z "${SANDBOX_CI_API_KEY:-}" ]]; then
 fi
 
 # ── fetch the composition's current service→variantId map ──────────────────
-say "fetching composition '$COMPOSITION' from $API_URL…"
+say "fetching composition '$COMPOSITION' from $SANDBOX_API_URL…"
 COMP_RESP="$(mktemp)"; trap 'rm -f "$COMP_RESP"' EXIT
-comp_status=$(curl -sS -o "$COMP_RESP" -w '%{http_code}' "$API_URL/api/v1/compositions/$COMPOSITION")
+comp_status=$(curl -sS -o "$COMP_RESP" -w '%{http_code}' "$SANDBOX_API_URL/api/v1/compositions/$COMPOSITION")
 if [[ "$comp_status" == "404" ]]; then
   err "composition '$COMPOSITION' not found — apply only updates an EXISTING composition, it does not create one"
   exit 1
@@ -137,7 +153,7 @@ while IFS= read -r svc; do
     '{gitRef: $gitRef, artifactRef: $artifactRef, registeredBy: "apply-local"}')
   reg_resp="$(mktemp)"
   reg_status=$(curl -sS -o "$reg_resp" -w '%{http_code}' \
-    -X PUT "$API_URL/api/v1/services/$svc/variants/$variant_id" \
+    -X PUT "$REGISTRY_API_URL/api/v1/services/$svc/variants/$variant_id" \
     -H "Authorization: Bearer $SWITCHBOARD_CI_API_KEY" \
     -H "Content-Type: application/json" \
     -d "$REG_PAYLOAD")
@@ -173,7 +189,7 @@ UPDATE_PAYLOAD=$(jq -nc --argjson services "$UPDATE_SERVICES" --argjson dbProfil
 say "dispatching update for $(jq -r '. | join(", ")' <<<"$UPDATE_SERVICES") on '$COMPOSITION'…"
 UPD_RESP="$(mktemp)"
 upd_status=$(curl -sS -o "$UPD_RESP" -w '%{http_code}' \
-  -X POST "$API_URL/api/v1/compositions/$COMPOSITION/update" \
+  -X POST "$SANDBOX_API_URL/api/v1/compositions/$COMPOSITION/update" \
   -H "Authorization: Bearer $SANDBOX_CI_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$UPDATE_PAYLOAD")

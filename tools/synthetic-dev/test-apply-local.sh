@@ -124,6 +124,15 @@ assert_contains "happy: PUT auth uses SWITCHBOARD_CI_API_KEY" "$calls" "Bearer r
 assert_contains "happy: POST update called" "$calls" "compositions/sandbox-foo/update"
 assert_contains "happy: POST auth uses SANDBOX_CI_API_KEY" "$calls" "Bearer sbx-key-abc"
 
+# host routing: PUT (registry) must hit switchboard-api, GET/POST (composition)
+# must hit sandbox-api -- these are DIFFERENT ALB-bypass-scoped hosts, not
+# interchangeable (see apply-local.sh's Env comment / hipponot/microservices#698)
+put_call="$(grep 'services/iam-api/variants' "$CALL_LOG")"
+get_call="$(grep 'compositions/sandbox-foo ' "$CALL_LOG" || grep -F 'compositions/sandbox-foo"' "$CALL_LOG" || true)"
+update_call="$(grep 'compositions/sandbox-foo/update' "$CALL_LOG")"
+assert_contains "happy: PUT goes to switchboard-api host" "$put_call" "switchboard-api.wootdev.com"
+assert_contains "happy: POST update goes to sandbox-api host" "$update_call" "sandbox-api.wootdev.com"
+
 # ordering: last PUT call must appear before the POST update call
 put_line=$(grep -n "PUT" "$CALL_LOG" | tail -1 | cut -d: -f1)
 post_line=$(grep -n "compositions/sandbox-foo/update" "$CALL_LOG" | cut -d: -f1)

@@ -801,7 +801,13 @@ export async function executeResolvedFlow(
     }
 
     // 3. verify (tolerate the SPA's own frontend service being red — branch posture / dev server).
-    const probes = healthProbes(m, services);
+    // deps.ports (launchContext.ports, offset-carrying) is REQUIRED here: without it
+    // the probes hit the manifest BASE ports, i.e. slot 0's services — a slot-N
+    // verify would false-PASS off a healthy slot-0 stack (cross-slot masking) and
+    // false-FAIL when slot 0's counterpart is down even though the slot's own
+    // service is green (observed: slot-2 ads-adm-api healthy on :7005, verify
+    // probing :5005). At slot 0 `ports` equals the base ports — byte-identical.
+    const probes = healthProbes(m, services, deps.ports);
     const verified = await deps.api.verify(probes, { tolerate: [resolved.spa.system] });
     if (!verified.passed) {
       const down = verified.rows.filter((r) => !r.ok && !r.tolerated).map((r) => r.id);

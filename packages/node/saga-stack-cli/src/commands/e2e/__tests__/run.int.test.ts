@@ -288,11 +288,28 @@ describe('e2e run — slot isolation (M7)', () => {
     expect(env.PLAYWRIGHT_SESSIONS_URL).toBe('http://localhost:3007');
   });
 
-  it('--slot 1 real run: ads-adm-api LAUNCHES in-slot, Playwright env drives the OFFSET URLs, reset is native (not up.sh)', async () => {
+  it('--slot 1 real run: ads-adm-api LAUNCHES in-slot, verify probes OFFSET ports, Playwright env drives the OFFSET URLs, reset is native (not up.sh)', async () => {
+    // Record every health-probe URL: the e2e verify step must probe the SLOT's
+    // offset ports, never the manifest base ports (a base-port probe reads slot
+    // 0's services — false-PASS off a healthy slot 0 / false-FAIL when slot 0 is
+    // down, observed live at slot 2 with a green ads-adm-api on :7005).
+    const probed: string[] = [];
+    vi.spyOn(BaseCommand.prototype as never, 'getProber' as never).mockReturnValue({
+      async probe(url: string) {
+        probed.push(url);
+        return { ok: true, status: 200 };
+      },
+    } as never);
+
     await E2eRun.run(
       ['journey', '--through', 'attendance', '--headless', '--slot', '1', ...ws()],
       config,
     );
+
+    // verify probed ads-adm-api (and iam) on the slot's OFFSET ports only.
+    expect(probed).toContain('http://localhost:6005/health'); // ads-adm 5005 + 1000
+    expect(probed).toContain('http://localhost:4010/health'); // iam 3010 + 1000
+    expect(probed.some((u) => u.includes(':5005') || u.includes(':3010'))).toBe(false);
 
     // ads-adm-api (required by the attendance stage) is slottable — LAUNCHED at
     // slot 1 on its offset port, told its listen port via EXPRESS_SERVER_PORT.

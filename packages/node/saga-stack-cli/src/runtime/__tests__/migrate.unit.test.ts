@@ -190,6 +190,26 @@ describe('migrateClosure — canonical order + the three-way branch (R3)', () =>
     // exactly ONE migrate ran, in the ads-adm-db package (ledger-db is NOT prep-migrated).
     expect(calls).toHaveLength(1);
     expect(calls[0].cwd).toBe('/dev/student-data-system/packages/node/ads-adm-db');
+    // The injected DATABASE_URL (ads-adm-db's prisma.config reads it FIRST, over
+    // the package .env's ADS_ADM_DATABASE_URL) is the base mesh URL at slot 0 —
+    // byte-identical to the .env value the pre-injection path relied on.
+    expect(calls[0].env.DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
+  });
+
+  it('ads_adm_local at slot > 0: injected DATABASE_URL carries the OFFSET mesh port (slottability)', async () => {
+    const { runner, calls } = fakeRunner();
+    await migrateClosure({
+      ...base,
+      pgContainer: 'soa-s2-postgres-1',
+      meshOffset: 2000,
+      dbs: ['ads_adm_local'] as DbId[],
+      runner,
+      probe: fakeProbe(),
+    });
+    // Without the injection the FIXED step ran with NO env, so ads-adm-db's own
+    // .env pointed prisma at slot 0's :5432 (observed live at slot 2 — the migrate
+    // landed cross-slot). 5432 + 2000 = 7432, the slot's OWN mesh pg.
+    expect(calls[0].env.DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:7432/ads_adm_local');
   });
 
   it('skips mongo (connectv3) and playback DBs (not mesh-provisioned)', async () => {

@@ -115,7 +115,17 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
   ads_adm_local: {
     name: 'ads_adm_local',
     engine: 'postgres',
-    migrate: { dir: 'packages/node/ads-adm-db', cmd: 'prisma migrate deploy' },
+    // ads-adm-db's prisma.config.ts reads `DATABASE_URL ?? ADS_ADM_DATABASE_URL`
+    // (its `import 'dotenv/config'` never overrides a pre-set var), and the
+    // package .env bakes the base-port localhost URL. Injecting DATABASE_URL
+    // (slot-offset-correct pgUrl) makes a slot > 0 migrate land on the SLOT's
+    // mesh pg instead of slot 0's :5432 (ads-adm slottability); at slot 0 the
+    // injected URL is byte-identical to the baked .env value.
+    migrate: {
+      dir: 'packages/node/ads-adm-db',
+      cmd: 'prisma migrate deploy',
+      migrateEnvVar: 'DATABASE_URL',
+    },
     ownerRole: 'ads_adm',
     ownerPw: 'ads_adm',
     resettable: true,

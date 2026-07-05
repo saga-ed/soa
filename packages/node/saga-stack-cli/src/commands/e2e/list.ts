@@ -61,26 +61,39 @@ export default class E2eList extends BaseCommand {
         const disco = discoverFlowManifest(spaId, flags, process.env);
         const m = disco.manifest;
 
-        /** M14-C per-stage checkpoint verdict: valid | needs-re-bake | none. */
+        /**
+         * M14-C per-stage checkpoint verdict: valid | needs-re-bake | none.
+         * MEMOIZED — each verdict costs a disk read (manifest load), and both
+         * the JSON projection and the text lines consult it per stage.
+         */
+        const ckptCache = new Map<string, 'valid' | 'stale' | null>();
         const ckpt = (f: (typeof m.flows)[number], i: number): 'valid' | 'stale' | null => {
-          if (!f.progressive) return null;
-          const stage = f.stages[i];
-          if (stage === undefined) return null;
-          const manifest = checkpoints.load(checkpointFixtureId(m.spa.id, f.name, stage, i + 1));
-          if (manifest === null) return null;
-          // seedProfile/spaHead deliberately omitted (WARN-only / unknowable here);
-          // identity + prefixHash + staleness give the honest listing verdict.
-          const verdict = evaluateCheckpoint(
-            manifest.flow,
-            {
-              spaId: m.spa.id,
-              flowName: f.name,
-              stageId: stage.id,
-              prefixHash: stagePrefixHash(f, f.stages.slice(0, i + 1)),
-            },
-            now,
-          );
-          return verdict.ok ? 'valid' : 'stale';
+          const key = `${f.name}#${i}`;
+          const hit = ckptCache.get(key);
+          if (hit !== undefined) return hit;
+          const compute = (): 'valid' | 'stale' | null => {
+            if (!f.progressive) return null;
+            const stage = f.stages[i];
+            if (stage === undefined) return null;
+            const manifest = checkpoints.load(checkpointFixtureId(m.spa.id, f.name, stage, i + 1));
+            if (manifest === null) return null;
+            // seedProfile/spaHead deliberately omitted (WARN-only / unknowable here);
+            // identity + prefixHash + staleness give the honest listing verdict.
+            const verdict = evaluateCheckpoint(
+              manifest.flow,
+              {
+                spaId: m.spa.id,
+                flowName: f.name,
+                stageId: stage.id,
+                prefixHash: stagePrefixHash(f, f.stages.slice(0, i + 1)),
+              },
+              now,
+            );
+            return verdict.ok ? 'valid' : 'stale';
+          };
+          const state = compute();
+          ckptCache.set(key, state);
+          return state;
         };
 
         spas.push({

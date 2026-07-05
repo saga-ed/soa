@@ -100,7 +100,6 @@ import type {
  */
 export type WorkspaceFlags = {
   dev?: string;
-  soa?: string;
 } & Partial<Record<RepoKey, string>>;
 
 /**

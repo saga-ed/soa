@@ -52,7 +52,6 @@ const VALID: SnapshotManifest = {
     },
   ],
   systems: ['iam-api', 'connect-api'],
-  flowId: 'flow-x',
 };
 
 describe('snapshot manifest — round-trip', () => {

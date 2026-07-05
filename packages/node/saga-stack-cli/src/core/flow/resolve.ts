@@ -52,7 +52,7 @@ export interface ResolvedFlow {
   spa: SpaDescriptor;
   /** The resolved flow definition. */
   flow: FlowDef;
-  /** Stages selected for this run (after `throughPhase` / `onlyStages`). */
+  /** Stages selected for this run (after `throughPhase` / `fromPhase`). */
   stages: StageDef[];
   /** Union of selected stages' `requiredSystems` ∪ `{ spa.system, iam-api }` (pre-closure). */
   requiredSystems: ServiceId[];
@@ -98,8 +98,6 @@ export interface ResolveFlowOptions {
   fromPhase?: string | number;
   /** Lane the run targets; validated against `flow.lanes`. Default `'stack'`. */
   lane?: Lane;
-  /** Run only these stage ids (STAGE_ONLY iteration); overrides `throughPhase`. */
-  onlyStages?: string[];
   /** Force headed/headless explicitly (else foreground flows default headed). */
   headed?: boolean;
   /** Keep `optional:true` playback services in the closure (else auto-detected). */
@@ -119,20 +117,6 @@ function stageMatches(stage: StageDef, token: string | number): boolean {
 /** Select the stages to run for this flow + options. */
 function selectStages(flow: FlowDef, opts: ResolveFlowOptions): StageDef[] {
   const { stages } = flow;
-
-  // STAGE_ONLY: an explicit subset (by id / project / phase), in flow order.
-  if (opts.onlyStages && opts.onlyStages.length > 0) {
-    const want = new Set(opts.onlyStages);
-    const sel = stages.filter((s) => want.has(s.id) || want.has(s.project));
-    if (sel.length === 0) {
-      throw new Error(
-        `flow '${flow.name}': no stages match onlyStages [${opts.onlyStages.join(', ')}] (have: ${stages
-          .map((s) => s.id)
-          .join(', ')})`,
-      );
-    }
-    return sel;
-  }
 
   // --through <phase>: progressive ⇒ 1..idx; non-progressive ⇒ the single match.
   if (opts.throughPhase !== undefined) {
@@ -211,9 +195,6 @@ export function resolveFlow(
   if (opts.fromPhase !== undefined) {
     if (!flow.progressive) {
       throw new Error(`flow '${flowName}': --from requires a progressive flow`);
-    }
-    if (opts.onlyStages && opts.onlyStages.length > 0) {
-      throw new Error(`flow '${flowName}': --from cannot combine with an explicit stage subset`);
     }
     if (flow.prerequisite) {
       throw new Error(

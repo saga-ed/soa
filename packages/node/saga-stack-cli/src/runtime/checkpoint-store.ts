@@ -119,7 +119,6 @@ export function makeCheckpointStore(deps: {
         createdAt: input.flow.bakedAt,
         databases,
         systems: plan.systems,
-        flowId: `${input.flow.spa}/${input.flow.flow}`,
         flow: input.flow,
       });
     },

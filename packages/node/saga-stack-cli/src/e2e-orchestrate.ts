@@ -493,7 +493,9 @@ export interface DescribeOptions {
  * Recurses the prerequisite. Touches NO seam, spawns nothing.
  */
 export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions): ResolvedFlowDescription {
-  const dateEnv = computeEnv(resolved.flow, opts.now);
+  // Computed ONCE; `env` below carries the same date keys (playwrightEnv wraps
+  // computeEnv), so occurrenceDate reads from it instead of recomputing.
+  const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports);
   const effectiveReset = resolved.reset && !opts.skipReset;
   // Drop the slot's excluded services (literal-port + connect frontends) from the
   // closure so the dry-run matches what a `--slot N` run actually brings up. Empty
@@ -533,8 +535,8 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
       project: resolved.playwright.project,
       argv: playwrightArgv(resolved, opts.passthrough),
     },
-    occurrenceDate: dateEnv[ENV_OCCURRENCE_DATE] ?? '',
-    env: playwrightEnv(resolved, opts.now, opts.lane, opts.ports),
+    occurrenceDate: env[ENV_OCCURRENCE_DATE] ?? '',
+    env,
     // The prerequisite always builds the end-state headless + owns its own reset;
     // it gets no user passthrough.
     prerequisite: resolved.prerequisite

@@ -371,11 +371,6 @@ export interface ResetOutcome {
 }
 
 /** Per-call `up` knobs (reserved; tunnel/tunnelDomain live on the `Runtime`). */
-export interface UpOpts {
-  /** Reserved for future per-call overrides. */
-  readonly _?: never;
-}
-
 /** Optional `verify` knobs. */
 export interface VerifyOpts {
   /** Tokens (service id OR repo name) whose down state does NOT fail the gate. */
@@ -401,7 +396,7 @@ export interface RestartOutcome {
 
 /** The in-process facade (plan §6.3) — M9 adds native `restart`. */
 export interface StackApi {
-  up(closureServices: ServiceId[], opts?: UpOpts): Promise<UpResult>;
+  up(closureServices: ServiceId[]): Promise<UpResult>;
   down(closureServices: ServiceId[]): Promise<DownResult>;
   restart(closureServices: ServiceId[]): Promise<RestartOutcome>;
   reset(closureServices: ServiceId[], opts?: ResetOpts): Promise<ResetOutcome>;
@@ -676,7 +671,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
   }
 
   return {
-    async up(services: ServiceId[], _opts: UpOpts = {}): Promise<UpResult> {
+    async up(services: ServiceId[]): Promise<UpResult> {
       // 0. AUTO-PULL (M9) — ff-only sibling sync BEFORE anything is built/migrated, so a
       // bare native `up` never runs a checkout silently behind origin (up.sh runs
       // `pull_repos` before mesh_up/prep). Warn-and-continue on every per-repo issue; a

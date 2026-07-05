@@ -82,12 +82,13 @@ export const repoFlags = {
  * corrupt a peer slot. Enforced in `BaseCommand.parse`, opted out per-command via
  * `slotAware()`. Slot 0 (the default) is unaffected everywhere.
  */
+// DELIBERATELY does not enumerate the slot-aware commands (the list drifted
+// twice — each command's `--help` is the source of truth).
 export const SLOT_UNSUPPORTED_COMMAND_MESSAGE =
-  'multi-slot (--slot > 0) is not supported for this command yet — the slot-aware set is ' +
-  "'stack up/status/verify/down/reset/seed/snapshot/login' and 'e2e run'. The rest " +
-  '(restart/overlay/bootstrap/tunnel) operate on shared checkouts, slot-0 state, or fixed ' +
-  'slot-0 ports and would cross slots; run them against slot 0 only. (A --set carrying ' +
-  'slot > 0 hits this same guard.)';
+  'multi-slot (--slot > 0) is not supported for this command — it operates on shared ' +
+  'checkouts, slot-0 state, or fixed slot-0 ports and would cross slots; run it against ' +
+  "slot 0 only. The slot-aware lifecycle commands accept --slot 1..9 (see each command's " +
+  '--help). (A --set carrying slot > 0 hits this same guard.)';
 
 /**
  * The error surfaced when `--set` is passed on a command that cannot thread a
@@ -97,10 +98,11 @@ export const SLOT_UNSUPPORTED_COMMAND_MESSAGE =
  * checkouts. Enforced in `BaseCommand.parse`, opted in per-command via
  * `setAware()`.
  */
+// DELIBERATELY does not enumerate the set-aware commands (see SLOT_… above).
 export const SET_UNSUPPORTED_COMMAND_MESSAGE =
-  '--set is not supported for this command — worktree sets thread repo paths + a slot ' +
-  "into 'stack up/status/verify/down/reset/seed/snapshot' and 'e2e run' (see `ss set list`). " +
-  'This command is slot-0 / primary-checkout only.';
+  '--set is not supported for this command — it is slot-0 / primary-checkout only. ' +
+  'Worktree sets thread repo paths + a slot into the slot-aware lifecycle commands ' +
+  "(see each command's --help, and `ss set list` for your sets).";
 
 export const baseFlags = {
   porcelain: Flags.boolean({

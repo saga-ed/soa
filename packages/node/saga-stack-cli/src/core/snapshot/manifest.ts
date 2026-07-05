@@ -10,7 +10,7 @@
  * snapshot-ahead guard; `null` for db-push / mongo DBs that have no migration
  * history), the on-disk dump filename, and its size. `systems` records which
  * services were FULLY captured (all their DBs) so a snapshot can feed the flow
- * layer; `flowId` ties a snapshot to the flow that produced it.
+ * layer.
  *
  * This is the SECOND (and last) place the CLI uses zod+JSON: like `flows.json`,
  * a snapshot manifest is an on-disk artifact written by one run and read by a
@@ -141,8 +141,6 @@ export const snapshotManifestSchema = z.object({
   databases: z.array(snapshotDbSchema),
   /** Services whose FULL db set was captured (feeds the flow layer). */
   systems: z.array(serviceIdSchema).optional(),
-  /** Flow that produced this snapshot, when stored by an e2e flow. */
-  flowId: z.string().optional(),
   /** M14: stage-checkpoint provenance (bake metadata `--from` validates). */
   flow: snapshotFlowBlockSchema.optional(),
 });

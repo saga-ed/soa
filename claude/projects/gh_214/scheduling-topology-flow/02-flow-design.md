@@ -321,10 +321,18 @@ Authored on saga-dash branch `flow/scheduling-topology-ab` (commit `71899699`).
       poll patterns from the journey; oracle from §2/§4). Typechecks + lints clean.
 - [x] Playwright `scheduling-topology` project wired in `playwright.stack.config.ts`
       (standalone, no dependencies; run targeted).
-- [ ] **Run report (handed off — author-only pass):** bring up scheduling-api + sessions-api +
-      programs-api (seeded `profile: roster`), run `--project scheduling-topology`, capture
-      green/red per §6 → back to #221 / saga-dash#226. Deferred to avoid colliding with the
-      concurrent M8 live DB validations on `gh_214`.
+- [x] **Run report — DONE, GREEN (2026-07-05):** ran `e2e run saga-dash/scheduling-topology
+      --set topo --headless` on the slot-1 sub-stack; `1 passed` twice. Full results,
+      realization table, and the three divergences from this design in **`03-run-results.md`**.
+      Headline: R1 is **green** (weekday `varies_by_day_type` mints 2 per-rotation slots), the
+      A/B switch realizes correctly — but the mint shape is **ANCHOR** (not sub-RRULE), the
+      sessions land in dayList's **`adhoc`** bucket (not `periods`), and the remint has a
+      residual schedule-visibility race the spec heals by **re-applying** the config. Fed to
+      #221 / saga-dash#226.
+
+> **Note on §2/§3b/§6 above:** written during design, they assumed the RRULE mint shape and a
+> `periods`-bucket read, and hypothesized R1 might be red. `03-run-results.md` supersedes those
+> assumptions with observed reality (ANCHOR shape, `adhoc` bucket, R1 green).
 
 ### Author-time notes carried into the run
 - **Participants:** pods created without students (a session composes per

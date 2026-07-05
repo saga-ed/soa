@@ -34,6 +34,19 @@ This is the concrete instance of the "author *new* flow scenarios" work.
 - `02-flow-design.md` — the concrete flow scenario + expected behavior + assertions. ✅ **done**; deliverables **authored** (§8).
 
 ## Status
+**✅ IMPLEMENTED + GREEN (2026-07-05).** The reveal run passed: the non-trivial A/B
+topology (2 pods, distinct per-weekday rotations) realizes CORRECTLY end-to-end and the
+spec now asserts that realization explicitly (slot ↔ pod membership, per-weekday A/B
+treatment switch, per-pod isolation, dates). See **`03-run-results.md`** for the green
+run, the concrete realization table, and three divergences from the original design:
+(1) the mint shape is **ANCHOR** (rrule='' + manual_addition occurrences), not sub-RRULE;
+(2) anchor sessions surface in dayList's **`adhoc`** bucket, not `periods`; (3) upsert-first
+ordering does **not** fully close the remint's schedule-visibility race — the spec
+**re-applies** the config until 2 slots land. All net-new reproductions for soa#221 /
+saga-dash#226. Contrary to the design's cautious "R1 may be red" hypothesis, the weekday
+`varies_by_day_type` path **works today**.
+
+### Historical (design phase)
 **Step 2 (flow design) drafted — awaiting review.** `02-flow-design.md` pins the locked
 scenario (weekday `varies_by_day_type`, Rotation A=Mon/Wed=`CONNECT`, B=Fri=`NON_TUTORED`,
 one pod in both) into a precise oracle table, the **API-built** build sequence (exact tRPC

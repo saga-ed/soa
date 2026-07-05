@@ -33,6 +33,7 @@
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { composeSeedPlan } from './core/seed/compose-seed-plan.js';
+import { seedStepLabel } from './core/seed/datasets.js';
 import { computeEnv, ENV_OCCURRENCE_DATE, ENV_TERM_END, ENV_TERM_START } from './core/flow/env.js';
 import { checkpointFixtureId } from './core/flow/checkpoint.js';
 import { bakeStageCheckpoint, FlowExecError, restoreCheckpoint } from './e2e-checkpoint-exec.js';
@@ -498,8 +499,9 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
       ? (() => {
           const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());
           return {
-            offline: plan.offline.map((s) => s.id),
-            online: plan.online.map((s) => s.id),
+            // #221 multi-seed: labels carry any stamped dataset (shared printer).
+            offline: plan.offline.map((s) => seedStepLabel(s)),
+            online: plan.online.map((s) => seedStepLabel(s)),
             skipped: plan.skipped.map((s) => ({ id: s.id, reason: s.reason })),
           };
         })()
@@ -767,6 +769,16 @@ export async function executeResolvedFlow(
       throw new FlowExecError(`native bring-up failed${up.failedAt ? ` at ${up.failedAt}` : ''}`);
     }
 
+    // #221 coach-deferral (d): honour `up`'s repo-absent skips downstream — the
+    // same seed-active-set pattern `stack up` uses. A skipped service (repo not
+    // cloned, or a hard dependent of one) must not be SEEDED (its steps would
+    // spawn-crash on the missing checkout dir) nor VERIFIED (probing a service
+    // that was never launched would redden the run the skip guard tried to keep
+    // green). Its steps degrade to `service-inactive` skip notes instead.
+    const upSkipped = new Set(up.skipped.map((s) => s.id));
+    const activeServices = services.filter((id) => !upSkipped.has(id));
+    for (const s of up.skipped) deps.log(`⚠ ${s.message}`);
+
     // 2a. M14 --from: restore the predecessor stage's checkpoint — the state
     // source replacing the reset+seed AND the Playwright replay of stages
     // 1..from-1. Gated on resolved.checkpoint (never on effectiveReset:
@@ -792,7 +804,7 @@ export async function executeResolvedFlow(
         throw new FlowExecError(`reset failed (native exit ${reset.code})`);
       }
       if (resolved.seedSelection) {
-        const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());
+        const plan = composeSeedPlan(resolved.seedSelection, new Set(activeServices), new Set<ServiceId>());
         const seeded = await deps.api.seed(plan);
         if (!seeded.ok) throw new FlowExecError(`seed failed at ${seeded.failed}`);
       }
@@ -807,7 +819,9 @@ export async function executeResolvedFlow(
     // false-FAIL when slot 0's counterpart is down even though the slot's own
     // service is green (observed: slot-2 ads-adm-api healthy on :7005, verify
     // probing :5005). At slot 0 `ports` equals the base ports — byte-identical.
-    const probes = healthProbes(m, services, deps.ports);
+    // activeServices (not services): up()-skipped repo-absent services must not
+    // be probed either (coach-deferral, #241) — the two fixes compose.
+    const probes = healthProbes(m, activeServices, deps.ports);
     const verified = await deps.api.verify(probes, { tolerate: [resolved.spa.system] });
     if (!verified.passed) {
       const down = verified.rows.filter((r) => !r.ok && !r.tolerated).map((r) => r.id);

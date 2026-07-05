@@ -139,3 +139,64 @@ describe('stack seed — native seed runner (FLIP 2)', () => {
     expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
   });
 });
+
+describe('stack seed — multi-seed datasets (#221)', () => {
+  it('full --scenario ab-topology: stamps SEED_DATASET onto the triad seed runs only', async () => {
+    await StackSeed.run(['full', '--scenario', 'ab-topology', '--output-json', ...WS], config);
+    expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+
+    // The triad's db:seed runs carry the stamped var…
+    const stamped = runs.filter((r) => r.env?.SEED_DATASET === 'ab-topology');
+    expect(stamped.length).toBe(3); // programs + scheduling + sessions
+    // …and the iam dev-user seed does NOT.
+    const devUser = runs.find((r) => r.args.some((a) => a.includes('seed-dev-user')));
+    expect(devUser?.env?.SEED_DATASET).toBeUndefined();
+    expect(seededJson().ok).toBe(true);
+  });
+
+  it('--dataset <system>=<name> stamps just that system', async () => {
+    await StackSeed.run(['--dataset', 'sessions-api=alt', '--output-json', ...WS], config);
+    const stamped = runs.filter((r) => r.env?.SEED_DATASET === 'alt');
+    expect(stamped.length).toBe(1); // the sessions step only (roster profile)
+  });
+
+  it('--dry-run: prints the composed labeled plan and runs NOTHING', async () => {
+    await StackSeed.run(['full', '--scenario', 'ab-topology', '--dry-run', '--output-json', ...WS], config);
+    expect(runs).toEqual([]); // no seed step spawned
+    const line = logged.find((l) => l.trim().startsWith('{'));
+    const j = JSON.parse(String(line)) as { dryRun: boolean; offline: string[]; scenario?: string };
+    expect(j.dryRun).toBe(true);
+    expect(j.scenario).toBe('ab-topology');
+    expect(j.offline).toContain('programs [SEED_DATASET=ab-topology]');
+    expect(j.offline).toContain('iam-dev-user'); // unstamped steps keep plain labels
+  });
+
+  it('rejects a malformed --dataset value', async () => {
+    await expect(StackSeed.run(['--dataset', 'sessions-api', ...WS], config)).rejects.toThrow(
+      /--dataset expects <system>=<name>/,
+    );
+    expect(runs).toEqual([]);
+  });
+
+  it('rejects an unknown --dataset service id, listing the known ids', async () => {
+    await expect(StackSeed.run(['--dataset', 'nope-api=x', ...WS], config)).rejects.toThrow(
+      /unknown service id 'nope-api'/,
+    );
+  });
+
+  it('COHERENCE at the command layer: roster --scenario ab-topology errors (triad not selected)', async () => {
+    // roster never selects programs/scheduling steps ⇒ the coupled scenario
+    // cannot apply coherently ⇒ surfaced as a command error, nothing seeded.
+    await expect(StackSeed.run(['--scenario', 'ab-topology', ...WS], config)).rejects.toThrow(
+      /cannot be applied coherently/,
+    );
+    expect(runs).toEqual([]);
+  });
+
+  it('CONFLICT: --scenario plus a different --dataset for the same system errors', async () => {
+    await expect(
+      StackSeed.run(['full', '--scenario', 'ab-topology', '--dataset', 'programs-api=other', ...WS], config),
+    ).rejects.toThrow(/conflicting datasets/);
+    expect(runs).toEqual([]);
+  });
+});

@@ -339,3 +339,61 @@ describe('StackApi — up() then seed() run the composed offline-THEN-online pla
     expect(demoPolls?.cwd).toBe('/dev/vendor'); // VENDORED seed-demo-polls.mjs dir (VENDOR_DIR token)
   });
 });
+
+describe('StackApi — up() transitively skips HARD dependents of a repo-absent service (#221 coach-deferral b)', () => {
+  it('PROGRAM_HUB absent: connect-api (url dep on sessions/content) is skipped; connect-web (browser deps) still launches', async () => {
+    const { runtime, fakes } = makeRuntime();
+    runtime.repoDirExists = (dir: string) => dir !== REPO_ROOTS.PROGRAM_HUB;
+    const api = makeStackApi(manifest, runtime);
+
+    // closure(connect-web) = connect-web + connect-api + rtsm-api + iam-api +
+    // sessions-api + content-api (+ their PROGRAM_HUB upstreams).
+    const closure = computeClosure(manifest, ['connect-web'] as ServiceId[]);
+    const res = await api.up(closure.services);
+
+    // Warn, never fail.
+    expect(res.ok).toBe(true);
+
+    // PROGRAM_HUB services are repo-absent skips; connect-api is a TRANSITIVE skip.
+    const skippedIds = res.skipped.map((s) => s.id);
+    expect(skippedIds).toContain('sessions-api');
+    expect(skippedIds).toContain('content-api');
+    expect(skippedIds).toContain('connect-api');
+
+    // The transitive skip attributes the missing upstream + the root-cause repo.
+    const connect = res.skipped.find((s) => s.id === 'connect-api');
+    expect(connect?.repo).toBe('PROGRAM_HUB');
+    expect(connect?.message).toMatch(/depends on (sessions|content)-api, which was skipped/);
+
+    // connect-web's deps are ALL `browser` edges — it must NOT be skipped.
+    expect(skippedIds).not.toContain('connect-web');
+    const launchedIds = fakes.launches.map((l) => l.id);
+    expect(launchedIds).toContain('connect-web');
+    expect(launchedIds).toContain('iam-api');
+    expect(launchedIds).toContain('rtsm-api');
+    expect(launchedIds).not.toContain('connect-api');
+  });
+
+  it('PROGRAM_HUB absent: ads-adm-api (s2s dep on sessions-api) is skipped across repos', async () => {
+    const { runtime, fakes } = makeRuntime();
+    runtime.repoDirExists = (dir: string) => dir !== REPO_ROOTS.PROGRAM_HUB;
+    const api = makeStackApi(manifest, runtime);
+
+    const res = await api.up(['iam-api', 'sessions-api', 'ads-adm-api'] as ServiceId[]);
+
+    expect(res.ok).toBe(true);
+    const ads = res.skipped.find((s) => s.id === 'ads-adm-api');
+    expect(ads).toBeDefined();
+    expect(ads?.message).toMatch(/depends on sessions-api, which was skipped/);
+    expect(ads?.repo).toBe('PROGRAM_HUB'); // root cause, not the SDS checkout (present)
+    expect(fakes.launches.map((l) => l.id)).toEqual(['iam-api']);
+  });
+
+  it('no propagation when every repo is present', async () => {
+    const { runtime } = makeRuntime();
+    runtime.repoDirExists = () => true;
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['iam-api', 'sessions-api', 'ads-adm-api'] as ServiceId[]);
+    expect(res.skipped).toEqual([]);
+  });
+});

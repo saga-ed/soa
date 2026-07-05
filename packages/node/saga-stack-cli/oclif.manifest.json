@@ -1934,6 +1934,29 @@
             "qtf"
           ],
           "type": "option"
+        },
+        "scenario": {
+          "description": "named cross-system dataset scenario (#221 multi-seed) — stamps SEED_DATASET onto every step of the scenario's coupled systems (e.g. ab-topology ⇒ programs/scheduling/sessions), so the coupled dataset is applied together or not at all.",
+          "name": "scenario",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "options": [
+            "ab-topology"
+          ],
+          "type": "option"
+        },
+        "dataset": {
+          "description": "per-system named dataset (#221 multi-seed), '<system>=<name>' — stamps SEED_DATASET=<name> onto that system's selected seed steps. Repeatable; merges with --scenario (a conflicting name for the same system errors).",
+          "name": "dataset",
+          "hasDynamicHelp": false,
+          "multiple": true,
+          "type": "option"
+        },
+        "dry-run": {
+          "description": "print the composed seed plan (with any stamped datasets) and exit without seeding.",
+          "name": "dry-run",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,

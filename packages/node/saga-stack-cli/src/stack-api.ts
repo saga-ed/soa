@@ -746,6 +746,41 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         }
       }
 
+      // 3b. transitively skip DEPENDENTS of a skipped service (#221 coach-deferral b):
+      // a present service whose HARD runtime dependency (url/s2s/event — NOT a
+      // frontend's `browser` fetch edge, which doesn't gate the process booting)
+      // was repo-absent-skipped would launch orphaned and crash/misbehave against a
+      // missing upstream — e.g. connect-api launching without a cloned rostering
+      // (iam-api). Skip it too (warn, same philosophy: a missing checkout never
+      // reddens the stack), attributing the root-cause absent repo. Fixpoint loop:
+      // skips propagate down chains (a → b → c).
+      let propagated = true;
+      while (propagated) {
+        propagated = false;
+        const skippedIds = new Map(skipped.map((s) => [s.id, s] as const));
+        const survivors: ServiceId[] = [];
+        for (const id of launchable) {
+          const def = getService(id, manifest);
+          const missing = def.dependsOn.find(
+            (dep) => skippedIds.has(dep) && def.depKinds[dep] !== 'browser',
+          );
+          if (missing === undefined) {
+            survivors.push(id);
+            continue;
+          }
+          const cause = skippedIds.get(missing)!;
+          skipped.push({
+            id,
+            repo: cause.repo,
+            repoDir: cause.repoDir,
+            message: `${id} skipped — depends on ${missing}, which was skipped (repo dir ${cause.repoDir} not present — ${cause.repo} repo not cloned)`,
+          });
+          propagated = true;
+        }
+        launchable.length = 0;
+        launchable.push(...survivors);
+      }
+
       // 3.5. NATIVE PREP PASS (M8) — between mesh-up and the launch waves, in order
       // R1 build → R2 provision → R3 migrate, so a fresh checkout/volume provisions +
       // migrates ITSELF instead of relying on a prior up.sh run. Runs ONLY when the

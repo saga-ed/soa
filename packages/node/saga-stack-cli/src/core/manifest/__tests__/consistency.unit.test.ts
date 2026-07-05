@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { serviceIdSchema } from '../../flow/types.js';
 import { buildSeedRegistry } from '../../seed/profiles.js';
+import { safeParseSnapshotManifest, snapshotDbSchema } from '../../snapshot/manifest.js';
 import { REPO_DEFAULT_DIR } from '../../../runtime/scripts.js';
 import { manifest } from '../index.js';
 import type { DbId, RepoKey, ServiceId } from '../index.js';
@@ -74,5 +75,33 @@ describe('manifest consistency — every edge resolves', () => {
     const env = manifest.services['iam-api'].launch.env;
     expect(env.SECURITY_RATELIMITMAXREQUESTS).toBe('1000000');
     expect(env.JWT_ACCESSTOKENTTLSECONDS).toBe('28800');
+  });
+});
+
+describe('manifest consistency — snapshot zod enums are EXHAUSTIVE (#221 coach-deferral c)', () => {
+  // Guards the same drift class as the flow-enum test, but for the SECOND
+  // hand-maintained enum pair (`snapshot/manifest.ts`): adding a service or DB to
+  // the manifest without extending the snapshot enums would make `snapshot store`
+  // output unparseable by `validate`/`restore`.
+  it('every manifest DbId parses as a snapshot manifest database entry', () => {
+    for (const [db, def] of Object.entries(manifest.databases)) {
+      const entry = {
+        db,
+        engine: def.engine,
+        ownerRole: def.ownerRole,
+        schemaRev: null,
+        file: `${db}.dump`,
+      };
+      const parsed = snapshotDbSchema.safeParse(entry);
+      expect(parsed.success, `DbId '${db}' missing from snapshot/manifest.ts DB_IDS`).toBe(true);
+    }
+  });
+
+  it('every manifest ServiceId parses in a snapshot manifest systems[] list', () => {
+    const base = { schemaVersion: 1, fixtureId: 'fx', profile: 'full', databases: [] };
+    for (const id of SERVICE_IDS) {
+      const parsed = safeParseSnapshotManifest({ ...base, systems: [id] });
+      expect(parsed.success, `ServiceId '${id}' missing from snapshot/manifest.ts SERVICE_IDS`).toBe(true);
+    }
   });
 });

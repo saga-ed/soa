@@ -96,6 +96,15 @@ export interface ResolveFlowOptions {
    * `--through` prefix. Matching the FIRST stage is a plain full run.
    */
   fromPhase?: string | number;
+  /**
+   * Plan 13: run UP TO but NOT INCLUDING this phase (same id/phase/project
+   * matching as `--through`) — an EXCLUSIVE window end that leaves the stack at
+   * `<phase>`'s entry state. Progressive flows only; mutually exclusive with
+   * `throughPhase`. Matching the FIRST stage yields an empty window (reset+seed
+   * baseline, zero Playwright); `fromPhase === toPhase` yields an empty window
+   * whose checkpoint is the target's predecessor (the "restore + hold" idiom).
+   */
+  toPhase?: string | number;
   /** Lane the run targets; validated against `flow.lanes`. Default `'stack'`. */
   lane?: Lane;
   /** Force headed/headless explicitly (else foreground flows default headed). */
@@ -131,6 +140,21 @@ function selectStages(flow: FlowDef, opts: ResolveFlowOptions): StageDef[] {
     return flow.progressive ? stages.slice(0, idx + 1) : [stages[idx] as StageDef];
   }
 
+  // --to <phase>: EXCLUSIVE window end — the stages BEFORE the match (progressive
+  // only; resolveFlow guards non-progressive + through/to exclusivity). Empty when
+  // the match is the FIRST stage (reset+seed baseline, zero Playwright).
+  if (opts.toPhase !== undefined) {
+    const idx = stages.findIndex((s) => stageMatches(s, opts.toPhase as string | number));
+    if (idx < 0) {
+      throw new Error(
+        `flow '${flow.name}': no stage matches --to '${opts.toPhase}' (have: ${stages
+          .map((s) => (s.phase !== undefined ? `${s.phase}:${s.id}` : s.id))
+          .join(', ')})`,
+      );
+    }
+    return stages.slice(0, idx);
+  }
+
   // Default: progressive ⇒ all stages (terminal = last); non-progressive ⇒ the last stage.
   return flow.progressive ? stages.slice() : [stages[stages.length - 1] as StageDef];
 }
@@ -152,9 +176,9 @@ function unionRequiredSystems(stages: StageDef[], spa: SpaDescriptor): ServiceId
 }
 
 /** Merge the terminal stage's seed over the flow seed (per-system override wins). */
-function effectiveSeed(flow: FlowDef, terminal: StageDef): SeedSelection | undefined {
+function effectiveSeed(flow: FlowDef, terminal: StageDef | undefined): SeedSelection | undefined {
   const base = flow.seed;
-  const override = terminal.seed;
+  const override = terminal?.seed;
   if (!base && !override) return undefined;
   return { ...(base ?? {}), ...(override ?? {}) } as SeedSelection;
 }
@@ -186,10 +210,28 @@ export function resolveFlow(
     );
   }
 
+  // Plan 13 --to guards: exclusive window end, progressive-only, not with --through.
+  // (The command layer also checks these so the message names the flag the user typed;
+  // the resolver guards defensively so a direct call can't silently pick one flag.)
+  if (opts.toPhase !== undefined) {
+    if (opts.throughPhase !== undefined) {
+      throw new Error(`flow '${flowName}': --to and --through are mutually exclusive`);
+    }
+    if (!flow.progressive) {
+      throw new Error(
+        `flow '${flowName}': --to requires a progressive flow (a single-stage flow has no interior state to stop before)`,
+      );
+    }
+  }
+
   const selected = selectStages(flow, opts);
 
-  // M14 --from: narrow the selected prefix to the from..through WINDOW and
-  // surface the predecessor whose checkpoint replaces the replay (plan 11 §1.2).
+  // M14 --from + Plan-13 --to: narrow to the [from, end) WINDOW over the FULL stage
+  // list. `end` is EXCLUSIVE — `--through` ends AFTER the match (end = throughIdx+1),
+  // `--to` ends BEFORE it (end = toIdx), default ends past the last stage. Indexing the
+  // full list (not `selected`) lets `--from K --to K` resolve to an EMPTY window whose
+  // checkpoint is K's predecessor — "restore, run nothing, hold".
+  const allStages = flow.stages;
   let stages = selected;
   let checkpoint: ResolvedFlow['checkpoint'];
   if (opts.fromPhase !== undefined) {
@@ -202,28 +244,45 @@ export function resolveFlow(
           `checkpoint the prerequisite flow ('${flow.prerequisite.flow}') instead`,
       );
     }
-    const fromIdx = selected.findIndex((s) => stageMatches(s, opts.fromPhase as string | number));
-    if (fromIdx < 0) {
+    // The window's exclusive end (selectStages already validated the through/to match).
+    const endExclusive =
+      opts.toPhase !== undefined
+        ? allStages.findIndex((s) => stageMatches(s, opts.toPhase as string | number))
+        : selected.length;
+    // `--to` admits from === end (an empty window); `--through`/default require a
+    // non-empty window (from must be a RUN stage), so their max from is end - 1.
+    const maxFrom = opts.toPhase !== undefined ? endExclusive : endExclusive - 1;
+    const fromIdx = allStages.findIndex((s) => stageMatches(s, opts.fromPhase as string | number));
+    if (fromIdx < 0 || fromIdx > maxFrom) {
+      const after =
+        opts.toPhase !== undefined
+          ? ' — --from must not come after --to'
+          : opts.throughPhase !== undefined
+            ? ' — --from must not come after --through'
+            : '';
       throw new Error(
         `flow '${flowName}': no stage matches --from '${opts.fromPhase}' within the selected ` +
-          `1..through prefix (have: ${selected
+          `window (have: ${allStages
+            .slice(0, maxFrom + 1)
             .map((s) => (s.phase !== undefined ? `${s.phase}:${s.id}` : s.id))
-            .join(', ')}) — --from must not come after --through`,
+            .join(', ')})${after}`,
       );
     }
+    stages = allStages.slice(fromIdx, endExclusive);
     if (fromIdx > 0) {
-      stages = selected.slice(fromIdx);
       checkpoint = {
-        predecessor: selected[fromIdx - 1] as StageDef,
+        predecessor: allStages[fromIdx - 1] as StageDef,
         predecessorPosition: fromIdx, // 1-based position of stages[fromIdx-1]
-        producingStages: selected.slice(0, fromIdx),
+        producingStages: allStages.slice(0, fromIdx),
       };
     }
     // fromIdx === 0 ⇒ the first stage: nothing to restore, plain run.
   }
 
-  // selectStages always returns ≥1 stage (schema enforces ≥1; selection keeps ≥1).
-  const terminal = stages[stages.length - 1] as StageDef;
+  // The window can be EMPTY (--to <first stage>, or --from K --to K): then there is
+  // no terminal stage — only the SPA + iam come up, the seed is the flow baseline,
+  // and no Playwright project is selected (the executor skips the spawn).
+  const terminal = stages[stages.length - 1] as StageDef | undefined;
 
   const requiredSystems = unionRequiredSystems(stages, manifest.spa);
   const seedSelection = effectiveSeed(flow, terminal);
@@ -270,7 +329,7 @@ export function resolveFlow(
 
   // Pipeline runs default-exclude @interactive (run-stack-e2e.sh); a run whose
   // terminal stage IS the tagged stage selects it explicitly, so don't invert.
-  const terminalTagged = (terminal.tags ?? []).includes('@interactive');
+  const terminalTagged = (terminal?.tags ?? []).includes('@interactive');
   const grepInvert = terminalTagged ? undefined : '@interactive';
 
   return {
@@ -284,7 +343,8 @@ export function resolveFlow(
     foreground,
     playwright: {
       config: manifest.spa.playwrightConfig,
-      project: terminal.project,
+      // Empty window ⇒ no terminal stage ⇒ no project (the executor skips Playwright).
+      project: terminal?.project ?? '',
       grepInvert,
       headed,
     },

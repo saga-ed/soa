@@ -781,7 +781,7 @@ export abstract class BaseCommand extends Command {
    */
   protected async openVendoredBrowser(
     flags: WorkspaceFlags,
-    ctx: { email: string; iamUrl: string; stateDir: string },
+    ctx: { email: string; iamUrl: string; stateDir: string; dashUrl?: string },
   ): Promise<void> {
     const script = resolveVendorScript('browser-login.mjs');
     const sagaDashDash = join(
@@ -806,7 +806,9 @@ export abstract class BaseCommand extends Command {
     }
     const env: Record<string, string> = {
       IAM_URL: ctx.iamUrl,
-      DASH_URL: process.env.LOGIN_DASH_URL || 'http://localhost:8900',
+      // Plan 13 --hold passes the run's RESOLVED (slot-offset) SPA URL so the held
+      // browser opens the slot's own dash; login's default keeps LOGIN_DASH_URL / :8900.
+      DASH_URL: ctx.dashUrl ?? (process.env.LOGIN_DASH_URL || 'http://localhost:8900'),
       LOGIN_EMAIL: ctx.email,
       PROFILE_DIR: join(ctx.stateDir, 'browser-profile'),
       SAGA_DASH_DASH: sagaDashDash,

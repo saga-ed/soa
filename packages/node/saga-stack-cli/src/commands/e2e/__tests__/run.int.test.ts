@@ -24,6 +24,7 @@ import { Config } from '@oclif/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import type { LaunchSpec, RunResult, Runner, ScriptInvocation } from '../../../runtime/index.js';
+import type { CookiePoster, JarWriter, PostOptions, PostResult } from '../../../runtime/index.js';
 import { useTempSnapshotsDir } from '../../../__tests__/helpers/env.js';
 import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import E2eRun from '../run.js';
@@ -68,6 +69,35 @@ function ws(): string[] {
 /** The Playwright child invocations the Runner recorded. */
 function playwrightRuns(): ScriptInvocation[] {
   return runs.filter((r) => r.command === 'pnpm' && r.args.includes('playwright'));
+}
+
+/** The vendored browser-login.mjs child invocation the Runner recorded (--hold). */
+function browserRuns(): ScriptInvocation[] {
+  return runs.filter((r) => r.command === 'node' && (r.args[0] ?? '').endsWith('browser-login.mjs'));
+}
+
+// --hold seams: the native-login cookie poster + jar writer (not part of the core
+// battery — spied here, mirroring login-native.int.test.ts).
+let posts: { url: string; opts: PostOptions }[];
+let jarWrites: { path: string; contents: string }[];
+const OK_COOKIES: PostResult = {
+  status: 200,
+  ok: true,
+  setCookies: ['iam_session=jwt.tok.sig; Path=/; HttpOnly', 'iam_refresh=refr; Path=/; HttpOnly'],
+};
+
+function installLoginSeams(result: PostResult = OK_COOKIES): void {
+  posts = [];
+  jarWrites = [];
+  const poster: CookiePoster = {
+    async post(url: string, opts: PostOptions): Promise<PostResult> {
+      posts.push({ url, opts });
+      return result;
+    },
+  };
+  const jar: JarWriter = { write: (path, contents) => jarWrites.push({ path, contents }) };
+  vi.spyOn(BaseCommand.prototype as never, 'getCookiePoster' as never).mockReturnValue(poster as never);
+  vi.spyOn(BaseCommand.prototype as never, 'getJarWriter' as never).mockReturnValue(jar as never);
 }
 
 beforeAll(() => {
@@ -337,5 +367,148 @@ describe('e2e run — slot isolation (M7)', () => {
     await E2eRun.run(['journey', '--through', 'pods', '--headless', '--slot', '1', ...ws()], config);
     // the launcher seam was built with the slot's isolated state dir (no --state-dir given).
     expect(launcherSpy).toHaveBeenCalledWith('/tmp/sds-synthetic-s1');
+  });
+});
+
+describe('e2e run — --to window (Plan 13)', () => {
+  /** Pull the emitted `--output-json` dry-run object out of the logged lines. */
+  function dryRunJson(): Record<string, unknown> {
+    const line = logged.find((l) => l.trim().startsWith('{'));
+    if (!line) throw new Error(`no JSON emitted; logged: ${logged.join('\\n')}`);
+    return JSON.parse(line) as Record<string, unknown>;
+  }
+
+  it('--dry-run: projects `to`/`hold` and stops the window BEFORE the target stage', async () => {
+    await E2eRun.run(['journey', '--to', 'pods', '--hold', '--headless', '--dry-run', ...ws()], config);
+    const text = logged.join('\n');
+    // pods is stage 4 → the window runs roster..enrollment (stops BEFORE pods).
+    expect(text).toContain('stages: roster -> program -> enrollment');
+    expect(text).toContain("to (exclusive): stop BEFORE 'pods'");
+    expect(text).toContain('hold: after green');
+  });
+
+  it('--dry-run --output-json: carries to + hold in the projection', async () => {
+    await E2eRun.run(['journey', '--to', 'pods', '--hold', '--dry-run', '--output-json', ...ws()], config);
+    const json = dryRunJson();
+    expect(json.to).toBe('pods');
+    expect(json.hold).toBe(true);
+    expect(json.stages).toEqual(['roster', 'program', 'enrollment']);
+  });
+
+  it('runs the window and spawns ONE Playwright child at the last-included stage', async () => {
+    await E2eRun.run(['journey', '--to', 'pods', '--headless', ...ws()], config);
+    const pw = playwrightRuns();
+    expect(pw).toHaveLength(1);
+    // the terminal project is enrollment (the last RUN stage), never pods.
+    expect(pw[0].args).toContain('stage-3-enrollment-periods');
+    expect(pw[0].args).not.toContain('stage-4-pods');
+  });
+
+  it('--to the FIRST stage is an empty window: reset+seed baseline, ZERO Playwright', async () => {
+    await E2eRun.run(['journey', '--to', 'roster', '--headless', ...ws()], config);
+    // no Playwright child at all — the stack is left at roster's entry state.
+    expect(playwrightRuns()).toHaveLength(0);
+    // the baseline still reset+seeded (flow-level roster seed).
+    expect(runs.some((r) => r.args.includes('db:seed'))).toBe(true);
+  });
+
+  it('rejects --to together with --through', async () => {
+    await expect(
+      E2eRun.run(['journey', '--to', 'pods', '--through', 'schedule', ...ws()], config),
+    ).rejects.toMatchObject({ message: expect.stringContaining('mutually exclusive') });
+  });
+
+  it('rejects --to on a non-progressive flow', async () => {
+    await expect(
+      E2eRun.run(['saga-dash/connect-session', '--to', 'interactive-connect', ...ws()], config),
+    ).rejects.toMatchObject({ message: expect.stringContaining('requires a progressive flow') });
+  });
+});
+
+describe('e2e run — --hold manual-testing handoff (Plan 13)', () => {
+  it('after a green window: mints the dev jar, opens the SPA browser, prints the held summary, exits 0', async () => {
+    installLoginSeams();
+    await E2eRun.run(['journey', '--to', 'program', '--hold', '--headless', ...ws()], config);
+
+    // window ran roster only (stops before program); then the hold epilogue fired.
+    const pw = playwrightRuns();
+    expect(pw).toHaveLength(1);
+    expect(pw[0].args).toContain('stage-1-roster');
+
+    // dev-persona jar minted at slot-0 iam, written to the state dir.
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe('http://localhost:3010/trpc/auth.devLogin');
+    expect(posts[0]?.opts.body).toBe('{"email":"dev@saga.org"}');
+    expect(jarWrites).toHaveLength(1);
+    expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');
+
+    // vendored browser opened at the SPA's slot-0 dash URL, logged in as dev.
+    const br = browserRuns();
+    expect(br).toHaveLength(1);
+    expect(br[0].env?.DASH_URL).toBe('http://localhost:8900');
+    expect(br[0].env?.IAM_URL).toBe('http://localhost:3010');
+    expect(br[0].env?.LOGIN_EMAIL).toBe('dev@saga.org');
+
+    // held summary printed at the boundary, with the teardown reminder.
+    const text = logged.join('\n');
+    expect(text).toContain('held for manual testing');
+    expect(text).toContain("entry of 'program'");
+    expect(text).toContain('ss stack down');
+  });
+
+  it('--slot 1 --hold: jar + browser target the slot OFFSET URLs, teardown names the slot', async () => {
+    installLoginSeams();
+    await E2eRun.run(['journey', '--to', 'program', '--hold', '--headless', '--slot', '1', ...ws()], config);
+
+    // jar minted against the slot-1 iam (:4010), written to the slot state dir.
+    expect(posts[0]?.url).toBe('http://localhost:4010/trpc/auth.devLogin');
+    expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic-s1/cookies.txt');
+
+    // the held browser opens the slot's OWN dash (:9900) + iam (:4010).
+    const br = browserRuns();
+    expect(br).toHaveLength(1);
+    expect(br[0].env?.DASH_URL).toBe('http://localhost:9900');
+    expect(br[0].env?.IAM_URL).toBe('http://localhost:4010');
+
+    expect(logged.join('\n')).toContain('ss stack down --slot 1');
+  });
+
+  it('empty window (--to <first stage>) --hold: no Playwright, still mints jar + holds', async () => {
+    installLoginSeams();
+    await E2eRun.run(['journey', '--to', 'roster', '--hold', '--headless', ...ws()], config);
+    expect(playwrightRuns()).toHaveLength(0);
+    expect(jarWrites).toHaveLength(1);
+    expect(browserRuns()).toHaveLength(1);
+    expect(logged.join('\n')).toContain("entry of 'roster'");
+  });
+
+  it('browserless host: the browser open is a WARN, the jar is minted, exit 0', async () => {
+    installLoginSeams();
+    // report the saga-dash dash app ABSENT so openVendoredBrowser warn-skips.
+    vi.spyOn(BaseCommand.prototype as never, 'getRepoDirCheck' as never).mockReturnValue(((dir: string) =>
+      !dir.endsWith('/dash')) as never);
+
+    await E2eRun.run(['journey', '--to', 'program', '--hold', '--headless', ...ws()], config);
+
+    // jar still minted; NO browser child spawned; a warn was surfaced.
+    expect(jarWrites).toHaveLength(1);
+    expect(browserRuns()).toHaveLength(0);
+    expect(warned.some((w) => w.includes('headful browser skipped'))).toBe(true);
+  });
+
+  it('a failed jar mint (non-200) WARNs and skips the browser, but does not fail the run', async () => {
+    installLoginSeams({ status: 401, ok: false, setCookies: [] });
+    await E2eRun.run(['journey', '--to', 'program', '--hold', '--headless', ...ws()], config);
+    // the run passed; the hold jar failed → warn, no browser.
+    expect(browserRuns()).toHaveLength(0);
+    expect(warned.some((w) => w.includes('session mint failed'))).toBe(true);
+  });
+
+  it('empty window WITHOUT --hold warns that it is pointless (from == to)', async () => {
+    // no baked checkpoint here, so the restore then errors — but the WARN fires first.
+    await expect(
+      E2eRun.run(['journey', '--from', 'schedule', '--to', 'schedule', '--headless', ...ws()], config),
+    ).rejects.toThrow();
+    expect(warned.some((w) => w.includes('empty window'))).toBe(true);
   });
 });

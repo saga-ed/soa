@@ -86,6 +86,40 @@ Measured live: `--from` turned a 45s bake-path run into **5.8s** (restore + one 
   otherwise. `--no-prereq-from-snapshot` forces the replay. (One delta vs the replay:
   the restore flushes redis; caches rebuild from the restored DBs.)
 
+## Manual testing at a stage boundary — `--to` + `--hold`
+
+Sometimes you don't want to *run* a stage — you want the stack left **right before**
+it, with a live logged-in browser, so you can drive that step by hand.
+
+- `--to <stage>` runs the flow **up to but NOT including** `<stage>` (an exclusive
+  window end — the mirror of `--through`, which is inclusive). It leaves the stack at
+  `<stage>`'s entry state. Same grammar as `--through`/`--from` (name, number, or
+  Playwright project); progressive flows only; mutually exclusive with `--through`.
+  `--to <first stage>` resets+seeds the baseline and runs zero Playwright.
+- `--hold` — after the window goes green, mint the dev-persona cookie jar (the same
+  native login `ss stack login` writes) and best-effort open a **logged-in** browser
+  at the SPA's slot-offset URL, print a held-state summary, and exit 0. Nothing holds
+  the TTY: the stack stays up after every run, and the browser is detached. On a
+  headless host the jar is still minted and the browser open degrades to a warning.
+
+```bash
+# run roster+program+enrollment, stop before pods, hand off a logged-in browser
+ss e2e run saga-dash/journey --to pods --hold --headless
+```
+
+The two flags are orthogonal — `--hold` works after any run (`--to`, `--through`, or a
+full run). Composed with checkpoints, the payoff is a state-restore in seconds:
+
+```bash
+# bake once, then: restore the pods-state checkpoint, run nothing, open a logged-in
+# browser at the schedule stage's doorstep in seconds.
+ss e2e run saga-dash/journey --from schedule --to schedule --hold --set topo
+```
+
+`--from K --to K` is a valid **empty window**: it restores K's predecessor checkpoint
+and runs nothing (pair it with `--hold`, or it does nothing observable). Teardown when
+done with `ss stack down [--set <name> | --slot N]`.
+
 ## Live interactive Connect session
 
 ```bash

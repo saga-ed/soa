@@ -235,12 +235,10 @@ SAGA_API_TARGET_COACH="${SAGA_API_TARGET_COACH:-https://staging.wootmath.com}"
 TRANSCRIPTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/transcripts_local"
 INSIGHTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/insights_local"
 CHAT_DB_URL="postgresql://postgres_admin:password123@localhost:5432/chat_local"
-# ledger-api (reports live-data campaign, phase 2) has NO app-role bootstrap SQL
-# yet — its checked-in .env still boots as the mesh MASTER (postgres_admin)
-# against ledger_local directly, unlike transcripts/insights/chat's dedicated
-# *_app roles. So ledger_local is create-if-missing (not role-provisioned) in
-# provision_playback_dbs(), and its launch line reuses master creds rather than
-# a per-service POSTGRES_USERNAME/PASSWORD. Port 6200 comes from ledger-api's
+# ledger-api now has a local-bootstrap.sql (student-data-system PR #228, the
+# owner/app/ro role-tiering pass) — ledger_local is role-provisioned in
+# provision_playback_dbs() same as the trio, and its launch line uses
+# ledger_api_app rather than master creds. Port 6200 comes from ledger-api's
 # checked-in .env (EXPRESS_SERVER_PORT), same convention as insights/transcripts/chat.
 LEDGER_DB_URL="postgresql://postgres_admin:password123@localhost:5432/ledger_local"
 DO_PLAYBACK=0                                               # --with-playback: add the 4 playback APIs
@@ -943,7 +941,7 @@ restore_stack(){
 # (master owns the migrated tables). The SDS *-db builds (db:generate + tsup)
 # already ran in prep() for every *-db package.
 provision_playback_dbs(){
-  say "provisioning playback DBs + roles (transcripts/insights/chat — bootstrap SQL on the mesh)…"
+  say "provisioning playback DBs + roles (transcripts/insights/chat/ledger — bootstrap SQL on the mesh)…"
   local app
   for app in transcripts insights chat; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d postgres -v ON_ERROR_STOP=1 \
@@ -953,13 +951,15 @@ provision_playback_dbs(){
       printf "\033[31m✗\033[0m %s-db bootstrap failed:\n" "$app"; tail -10 "$STATE/playback-bootstrap-$app.log" | sed 's/^/    /'; exit 1
     fi
   done
-  # ledger-api has no local-bootstrap.sql / app role yet (see LEDGER_DB_URL
-  # comment above) — just ensure ledger_local exists (create-if-missing, owned
-  # by master), same minimal pattern as sessions/content's mesh DBs.
-  if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -tAc \
-        "SELECT 1 FROM pg_database WHERE datname='ledger_local'" 2>/dev/null)" != 1 ]]; then
-    db_step "ledger_local db create" "$SOA" docker exec soa-postgres-1 \
-      psql -U postgres_admin -c "CREATE DATABASE ledger_local OWNER postgres_admin"
+  # ledger-api now has local-bootstrap.sql too (student-data-system PR #228) —
+  # same bootstrap-SQL dance as the trio, just called out separately because its
+  # role naming is ledger_api_{owner,app,ro}, not the {app}_{owner,app,ro}
+  # pattern the loop above's ok-message assumes.
+  if docker exec -i soa-postgres-1 psql -U postgres_admin -d postgres -v ON_ERROR_STOP=1 \
+       < "$SDS/packages/node/ledger-db/seed/local-bootstrap.sql" >"$STATE/playback-bootstrap-ledger.log" 2>&1; then
+    ok "db+role: ledger_local / ledger_api_app"
+  else
+    printf "\033[31m✗\033[0m ledger-db bootstrap failed:\n"; tail -10 "$STATE/playback-bootstrap-ledger.log" | sed 's/^/    /'; exit 1
   fi
   migrate_db "$SDS/packages/node/transcripts-db" transcripts_local "$TRANSCRIPTS_DB_URL"
   migrate_db "$SDS/packages/node/insights-db"    insights_local    "$INSIGHTS_DB_URL"
@@ -1587,12 +1587,12 @@ services_up(){
        POSTGRES_INSTANCENAME=ChatDB \
        EXPRESS_SERVER_PORT=6303 RABBITMQ_URL="$MESH_MQ" \
        AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env chat-api)
-    # ledger-api: no dedicated app role yet (see LEDGER_DB_URL comment above) —
-    # boots as the mesh MASTER against ledger_local, unlike the trio above.
+    # ledger-api now boots as ledger_api_app (student-data-system PR #228's
+    # local-bootstrap.sql), same as the trio above rather than mesh master.
     launch_if ledger-api 6200 "$SDS/apps/node/ledger-api" \
        NODE_ENV=development \
        POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=ledger_local \
-       POSTGRES_USERNAME=postgres_admin POSTGRES_PASSWORD=password123 \
+       POSTGRES_USERNAME=ledger_api_app POSTGRES_PASSWORD=ledger_api_app_local_pw \
        POSTGRES_INSTANCENAME=LedgerDB \
        EXPRESS_SERVER_PORT=6200 RABBITMQ_URL="$MESH_MQ" \
        AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env ledger-api)

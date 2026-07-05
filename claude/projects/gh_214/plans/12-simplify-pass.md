@@ -129,13 +129,17 @@ plan document rides #236; the work waits for the merge.
   unchanged.
 - T3 lands with the `prepFresh` fork made EXPLICIT (both values still exercised).
 
-## 6. Open questions for skelly
+## 6. Open questions — RESOLVED (skelly, 2026-07-05)
 
-1. **Comment diet appetite (P4)**: trim the seam-getter JSDoc + drop `up.sh` line
-   numbers (keeping rationale), or leave the archaeology in place? Plan recommends
-   trimming; it's ~300 lines of pure prose.
-2. **Assembler dedup (P3 last item)**: take the already-TODO'd
-   `buildNativeRuntime`/`buildStackContext` merge in M15-D, or defer to the next
-   feature that touches both? Plan recommends deferring unless M15-D is otherwise
-   cheap — it's the only item with real divergence risk.
-3. Confirm the sequencing call: M15 as a follow-up PR after #236 merges.
+1. **Comment diet (P4): TRIM BOTH** — dedupe the seam-getter JSDoc to one header
+   paragraph + one-liners, and keep each `up.sh` behavioral rationale while
+   dropping the unverifiable line numbers. Genuine contracts (e.g. the exit-code
+   note) stay verbatim. P4 is in M15-D scope.
+2. **Assembler dedup: DEFER** — leave the in-code TODO; do the merge as the
+   opening move of the next feature that touches both assemblers, so its
+   divergent tails are exercised by real feature tests, not a bare refactor.
+   M15-D ships without it.
+3. **Sequencing: OWN PR after #236 merges** — confirmed. This plan doc rides
+   #236; the M15 code work starts on a fresh branch off `gh_214` post-merge.
+
+No open questions remain; M15 is ready to implement (M15-A first) once #236 lands.

@@ -1,8 +1,8 @@
 /**
  * R3 — native migrate runner (M8 native prep pass — THE headline).
  *
- * A FAITHFUL port of up.sh's `migrate_db()` (up.sh:738-755, the three-way branch)
- * + the migrate chain (up.sh:1040-1073, canonical order). `profile-empty.sql`
+ * A FAITHFUL port of up.sh's `migrate_db()` (the three-way branch)
+ * + the migrate chain (canonical order). `profile-empty.sql`
  * leaves every app DB table-EMPTY, so without a migrate the fatal seed steps
  * (iam/sessions/programs/scheduling) run against an unmigrated schema and abort.
  * The manifest already carries complete `MigrateSpec` data, but NOTHING executed
@@ -35,7 +35,7 @@
  *     from the package's prisma.config.ts, exactly as up.sh's `( cd "$dir" && … )`.
  *
  * LEDGER (migrate-reset target): ledger_local is NOT a prep-migrate target —
- * up.sh's prep chain (up.sh:1041-1073) has no ledger step. profile-empty.sql
+ * up.sh's prep chain has no ledger step. profile-empty.sql
  * provisions it empty and its schema is (re)built by the R4 reset's migrate-reset
  * (drop + remigrate) against its own owning package, `packages/node/ledger-db`
  * (the VERIFIED schema owner — NOT ads-adm-db). R3 skips any `resetMode:'migrate-reset'`
@@ -210,7 +210,7 @@ export async function migrateClosure(ctx: MigrateContext): Promise<MigrateResult
     }
     if (def.resetMode === 'migrate-reset') {
       // ledger_local (resetMode:'migrate-reset') is NOT a prep-migrate target —
-      // up.sh's prep chain (up.sh:1041-1073) has NO ledger step. profile-empty.sql
+      // up.sh's prep chain has NO ledger step. profile-empty.sql
       // provisions it empty and its schema is (re)built by the R4 reset's
       // migrate-reset (drop + remigrate) against its OWN owning package (ledger-db).
       // Skipping it here keeps R3 faithful to up.sh now that ledger-db is a DISTINCT

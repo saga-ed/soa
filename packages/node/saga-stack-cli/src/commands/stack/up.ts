@@ -340,12 +340,7 @@ export default class StackUp extends BaseCommand {
     // the sandbox-hosted deps live in the CLOUD and are NOT launched locally. Surface the
     // resulting LAUNCH SET (+ which deps are hosted) so the dry-run reflects reality.
     const slotExcludedSet = new Set<ServiceId>(slotExcluded);
-    const sandboxDrop = new Set<ServiceId>();
-    if (prune.sandboxHybrid) {
-      const keep = new Set<ServiceId>(requested);
-      for (const id of closure.services) if (!keep.has(id)) sandboxDrop.add(id);
-    }
-    if (prune.sandboxServices) for (const id of prune.sandboxServices) sandboxDrop.add(id);
+    const sandboxDrop = sandboxDropSet(prune, requested, closure.services);
     const sandboxHosted = closure.services.filter((id) => sandboxDrop.has(id) && !slotExcludedSet.has(id));
     const launchSet = closure.services.filter((id) => !slotExcludedSet.has(id) && !sandboxDrop.has(id));
 
@@ -448,13 +443,7 @@ export default class StackUp extends BaseCommand {
     // only the run-set; a mode:sandbox dep pulled into the closure never boots locally).
     // The launched services' own mesh/DBs still come up (neededMesh/neededDbs run over
     // this pruned set); the excluded deps' don't. Plain `--only` closure is UNTOUCHED.
-    const sandboxDrop = new Set<ServiceId>();
-    if (prune.sandboxHybrid) {
-      // `--sandbox`: launch the requested run-set ALONE (subtract the pulled-in deps).
-      const keep = new Set<ServiceId>(requested);
-      for (const id of fullClosure.services) if (!keep.has(id)) sandboxDrop.add(id);
-    }
-    if (prune.sandboxServices) for (const id of prune.sandboxServices) sandboxDrop.add(id);
+    const sandboxDrop = sandboxDropSet(prune, requested, fullClosure.services);
 
     const services = fullClosure.services.filter((id) => !excluded.has(id) && !sandboxDrop.has(id));
     const droppedForSlot = fullClosure.services.filter((id) => excluded.has(id));
@@ -712,3 +701,24 @@ type OverlayFlags = NativeFlags & {
   tunnel: boolean;
   record?: string;
 };
+
+/**
+ * BLOCKER-1 (Phase 2): the sandbox/workspace LAUNCH prune, shared verbatim by
+ * the dry-run projection and the native run (M15 dedup — they must never
+ * drift, or the plan lies about what boots). `--sandbox` hybrid launches the
+ * requested run-set ALONE (subtract pulled-in deps); a workspace supplies an
+ * explicit sandbox-hosted service list. Plain `--only` closures are untouched.
+ */
+function sandboxDropSet(
+  prune: LaunchPrune,
+  requested: ServiceId[],
+  closureServices: ServiceId[],
+): Set<ServiceId> {
+  const sandboxDrop = new Set<ServiceId>();
+  if (prune.sandboxHybrid) {
+    const keep = new Set<ServiceId>(requested);
+    for (const id of closureServices) if (!keep.has(id)) sandboxDrop.add(id);
+  }
+  if (prune.sandboxServices) for (const id of prune.sandboxServices) sandboxDrop.add(id);
+  return sandboxDrop;
+}

@@ -1,7 +1,7 @@
 /**
  * Seed profiles + the canonical SeedStep registry (plan §4.1, saga-ed/soa#214).
  *
- * Sourced from up.sh's `seed_*` family (`~1610-1714`):
+ * Sourced from up.sh's `seed_*` family:
  *   seed_iam / seed_sessions / seed_programs / seed_content / seed_playback /
  *   seed_qtf_demo, plus the dev-user re-seed (`node dist/seed-dev-user.js`).
  *
@@ -108,14 +108,14 @@ const MESH_PG_PORT_TOKEN = '${MESH_PG_PORT}';
 const MONGO_CONTAINER_TOKEN = '${SAGA_MESH_CONNECT_MONGO_CONTAINER}';
 const PG_CONTAINER_TOKEN = '${SAGA_MESH_POSTGRES_CONTAINER}';
 
-/** The mesh superuser creds up.sh's playback `*_DB_URL` migrate as (up.sh:235-237). */
+/** The mesh superuser creds up.sh's playback `*_DB_URL` migrate as. */
 function playbackDbUrl(db: DatabaseDef): string {
   return `postgresql://postgres_admin:password123@${MESH_PG_HOST}:${MESH_PG_PORT_TOKEN}/${db.name}`;
 }
 
 /**
- * M8 R5 — a playback DB provisioning step (up.sh `provision_playback_dbs`,
- * up.sh:937-951). The `*-db` package's `seed/local-bootstrap.sql` creates the DB +
+ * M8 R5 — a playback DB provisioning step (up.sh `provision_playback_dbs`).
+ * The `*-db` package's `seed/local-bootstrap.sql` creates the DB +
  * least-privilege app role + grants, piped to the mesh postgres via stdin
  * (`docker exec -i <pg> psql < local-bootstrap.sql`); the tail step then migrates
  * it as MASTER (`postgres_admin`) with `pnpm db:deploy` (a freshly-bootstrapped DB
@@ -181,7 +181,7 @@ function postgresVarSet(db: DatabaseDef, instanceName: string): SeedEnv {
 
 /**
  * The FIXED synthetic-dev PII crypto keys up.sh writes into `$ROSTERING/.env.local`
- * (apply_fixes template, up.sh ~L405-406). The iam seeds REQUIRE these: both
+ * (apply_fixes template). The iam seeds REQUIRE these: both
  * `seed-dev-user.js` and iam's `db:seed` read `PII_CRYPTO_PIIDEKHEX` /
  * `PII_CRYPTO_PIIHMACKEYHEX` off `process.env` and THROW when absent. Deterministic
  * dev fixtures, NOT real secrets — safe as frozen core data (keeps this pure, no
@@ -249,7 +249,7 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       env: iamSeedEnv(m),
       requiresServiceUp: [],
       // Best-effort, matching up.sh: BOTH invocations tolerate failure — prep
-      // bootstrap (up.sh:1030) and reset re-seed (up.sh:1596) run it as
+      // bootstrap and reset re-seed run it as
       // `… node dist/seed-dev-user.js … || true`. It refuses to run until the iam
       // registry is seeded (needs `seed:registry` — which up.sh never runs), and
       // the canonical `dev@saga.org` user comes from `db:seed` (the `iam` step)
@@ -306,8 +306,8 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       failureMode: 'fatal',
     },
     // scheduling deterministic demo schedules/slots (db:seed, direct). main's
-    // seed_stack full runs seed_scheduling between programs and content (up.sh:1914,
-    // fatal — no `|| true`); added on main after gh_214 branched. Without it a native
+    // seed_stack full runs seed_scheduling between programs and content (fatal —
+    // no `|| true`); added on main after gh_214 branched. Without it a native
     // `--seed full` leaves scheduling unseeded → the Schedule step renders nothing.
     scheduling: {
       id: 'scheduling',
@@ -371,7 +371,7 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
     // coach progress store (Postgres) — coach-db `db:seed` (coach#155 local-snapshot),
     // DATABASE_URL forced to the mesh :5432 coach_api (== $COACH_DB_URL; coach-db's own
     // default is :5433). main runs it best-effort in seed_stack full after content
-    // (up.sh:1808-1816, `warn` on failure — coach may be absent / coach#155 unmerged).
+    // (`warn` on failure — coach may be absent / coach#155 unmerged).
     //
     // M8 R5: the curriculum mongoimport is now the 'coach-mongo' step below (was
     // OMITTED for lack of stdin redirect; `stdinFile` makes it expressible).
@@ -385,7 +385,7 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       requiresServiceUp: [], // direct pg db:seed — offline
       failureMode: 'warn',
     },
-    // M8 R5 — coach curriculum mongoimport (up.sh:1780-1798 seed_coach_mongo_only).
+    // M8 R5 — coach curriculum mongoimport (up.sh `seed_coach_mongo_only`).
     // TWO upserts into the mesh mongo: content_coach.json (single object) →
     // saga_local.content_coach, and content.json (array) → wmlms_local.content —
     // the dbs coach-api's launch_if points at. Curriculum is static committed
@@ -425,7 +425,7 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
         },
       ],
     },
-    // M8 R5 — playback DB provisioning (bootstrap SQL + migrate; up.sh:937-951),
+    // M8 R5 — playback DB provisioning (bootstrap SQL + migrate),
     // gated under `--with playback`. Precede the fixture seed steps below.
     'transcripts-provision': playbackProvisionStep(m, 'transcripts-provision', 'transcripts-api', 'transcripts_local'),
     'insights-provision': playbackProvisionStep(m, 'insights-provision', 'insights-api', 'insights_local'),

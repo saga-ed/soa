@@ -1,7 +1,7 @@
 /**
  * R4 — native reset runner (M8 native prep pass — flips `stack reset` native).
  *
- * A FAITHFUL port of up.sh's `reset_data()` (up.sh:1661-1698): a clean synthetic
+ * A FAITHFUL port of up.sh's `reset_data()`: a clean synthetic
  * baseline BEFORE seeding, so any `--seed` mode is reproducible regardless of prior
  * state (iam groups don't dedup — re-running the roster on a non-empty iam
  * duplicates it). Three destructive ops over the closure's DBs:
@@ -10,7 +10,7 @@
  *      postgres_admin -d <db> -v ON_ERROR_STOP=1 -c "<generic TRUNCATE DO block>"`.
  *      The DO block truncates EVERY public table EXCEPT `_prisma_migrations`, so the
  *      schema + applied-migration history survive and a reset never forces a
- *      re-migrate (up.sh:1663 verbatim). `RESTART IDENTITY CASCADE` clears sequences
+ *      re-migrate (verbatim from up.sh). `RESTART IDENTITY CASCADE` clears sequences
  *      + fk-linked rows — matching up.sh.
  *   2. postgres `resetMode:'migrate-reset'` DBs (ledger_local, decision 2026-06-30 —
  *      NOT in up.sh's truncate list) → `pnpm prisma migrate reset --force`
@@ -18,16 +18,16 @@
  *      not ads-adm-db's) with `DATABASE_URL` forced at the mesh (drop + remigrate to
  *      head; ledger-db configures no prisma seed hook, so reset never seeds).
  *   3. mongo (`connectv3`) → `docker exec <mongoContainer> mongosh --quiet --eval
- *      'db.getSiblingDB("connectv3").dropDatabase()'` (up.sh:1689) — collections
+ *      'db.getSiblingDB("connectv3").dropDatabase()'` — collections
  *      auto-recreate on first write, so a drop IS the empty baseline.
  *
- * The dev-user RE-SEED (up.sh:1695-1696) is NOT done here — the facade runs it
+ * The dev-user RE-SEED is NOT done here — the facade runs it
  * through the existing seed path (`iam-dev-user` SeedStep) after this returns, so
  * the seed env/dotenv handling lives in ONE place.
  *
  * GATING: playback DBs (`meshProvisioned:false` — transcripts/insights/chat) are
  * truncated ONLY under `--with playback`, so a bare reset leaves seeded playback
- * fixtures intact (up.sh:1666-1669, `DO_PLAYBACK`).
+ * fixtures intact (up.sh's `DO_PLAYBACK`).
  *
  * SLOT-AWARE: the psql/mongosh runs go `docker exec <container> …` against the
  * RESOLVED slot containers (`soa-s<N>-postgres-1` / `soa-s<N>-connect-mongo-1` at
@@ -103,7 +103,7 @@ export interface ResetResult {
 }
 
 /**
- * The generic per-DB TRUNCATE DO block — up.sh:1663 verbatim. Truncates every
+ * The generic per-DB TRUNCATE DO block — verbatim from up.sh. Truncates every
  * `public` table EXCEPT `_prisma_migrations` (so the schema + migration history
  * survive; a reset never forces a re-migrate). Exposed for tests + reporting.
  */

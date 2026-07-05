@@ -17,6 +17,18 @@
  *     env from the workspace flags) and hands it to the Runner, propagating the
  *     child exit code (read-only commands opt out via `propagateExit:false`).
  *
+ * ── THE SEAM-GETTER PATTERN ──
+ * Roughly two dozen protected `getX()` methods below are injectable SEAMS.
+ * Uniformly: production returns a real implementation (`makeRealX()`) that is
+ * THE single place its real side-effect happens (a spawned child, a network
+ * probe, a `docker exec`, an fs write), and every one is designed to be spied
+ * on the prototype (`BaseCommand.prototype.getX`) so a test can swap in a fake
+ * and assert the PLAN without the real effect. That prototype-spy-ability IS the
+ * test architecture: these getters MUST stay instance methods on the prototype
+ * (never inlined or hoisted to free functions) or the suite loses its seams. So
+ * each getter's own doc below states only WHAT it returns + its load-bearing
+ * side-effect; the spy mechanism is uniform and documented here, once.
+ *
  * Subclass flag sets MUST spread `...BaseCommand.baseFlags` so the shared
  * flags stay attached. Top-level error handling is delegated to oclif's
  * default handler — don't override it.
@@ -163,31 +175,28 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
-   * The injectable worktree-set store seam (M13-A). Production reads
-   * `$SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json`; tests spy this on
-   * the prototype to feed a canned store without fs — mirroring
-   * `getRunner`/`getGitRunner`/`getSnapshotIO`.
+   * The worktree-set store seam (M13-A). Production reads
+   * `$SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json`.
    */
   protected getSetStore(): SetStore {
     return makeRealSetStore();
   }
 
   /**
-   * The injectable slot-activity probe (M13-A `set list` ACTIVE column,
-   * M13-B up-time collision check). Derived LIVE from state-dir pid liveness +
-   * compose containers — no recorded active state. Tests spy this on the
-   * prototype to pin activity without fs/docker.
+   * The slot-activity probe (M13-A `set list` ACTIVE column, M13-B up-time
+   * collision check). Derived LIVE from state-dir pid liveness + compose
+   * containers — no recorded active state.
    */
   protected getSlotActiveProbe(): SlotActiveProbe {
     return makeSlotActiveProbe();
   }
 
   /**
-   * The injectable M14 stage-checkpoint store (`e2e run --snapshot-stages` /
-   * `--from`). Composes the SnapshotIO seam with the caller's ScriptContext
-   * (the schema-ahead guard's migration discovery — `--set` pins included).
-   * MUST be constructed after `applyInstanceEnv` so it targets the slot's
-   * snapshot root + containers. Tests spy this on the prototype.
+   * The M14 stage-checkpoint store (`e2e run --snapshot-stages` / `--from`).
+   * Composes the SnapshotIO seam with the caller's ScriptContext (the
+   * schema-ahead guard's migration discovery — `--set` pins included). MUST be
+   * constructed after `applyInstanceEnv` so it targets the slot's snapshot root
+   * + containers.
    */
   protected getCheckpointStore(ctx: ScriptContext): CheckpointStore {
     return makeCheckpointStore({ io: this.getSnapshotIO(), ctx });
@@ -315,252 +324,207 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
-   * The injectable process seam. Production launches real children; tests spy
-   * this on the prototype to record the `ScriptInvocation` without spawning.
+   * The process seam — production is the only place a real OS child is spawned
+   * for a `ScriptInvocation`.
    */
   protected getRunner(): Runner {
     return makeRealRunner();
   }
 
   /**
-   * The injectable HTTP health-probe seam (M2). Production returns a real
-   * short-timeout `fetch` prober (the only place a real network request is
-   * made); the native `stack status` / `stack verify` tests spy this on the
-   * prototype to return canned `ProbeResult`s without hitting the network or a
-   * running stack — mirroring how `getRunner` is mocked for the process seam.
-   * Provided here as a SEAM; the M2 build phase wires it into status/verify.
+   * The HTTP health-probe seam (M2) — production is a real short-timeout `fetch`
+   * prober (the only place a real network request is made for `stack status` /
+   * `stack verify`).
    */
   protected getProber(): HealthProber {
     return makeRealProber();
   }
 
   /**
-   * The injectable snapshot-IO seam (M3). Production returns
-   * `makeRealSnapshotIO()` — the only place `docker exec
-   * pg_dump/pg_restore/mongodump/mongorestore/psql/redis-cli` is launched; the
-   * `stack snapshot store|restore|list|validate` TESTS spy this on the prototype
-   * to return a fake that records the calls and yields canned bytes, so the
-   * snapshot logic is asserted WITHOUT a real container, DB, or dump file —
-   * mirroring how `getRunner`/`getProber` are mocked for the process/HTTP seams.
+   * The snapshot-IO seam (M3) — production is the only place `docker exec
+   * pg_dump/pg_restore/mongodump/mongorestore/psql/redis-cli` is launched (the
+   * `stack snapshot store|restore|list|validate` DB work).
    */
   protected getSnapshotIO(): SnapshotIO {
     return makeRealSnapshotIO();
   }
 
   /**
-   * The injectable native-launch seam (M4 — native partial-stack). Production
-   * returns `makeRealLauncher()` — the ONLY place a real `pnpm dev` child is
-   * spawned for the native `stack up --only` path (pid file written under
-   * `stateDir`, health-polled). The native partial-stack TESTS spy this on the
-   * prototype to return a fake `ServiceLauncher` that records each `LaunchSpec`
-   * and yields a canned result, so the topo-wave launch order + per-service env +
-   * health gating are asserted WITHOUT spawning a process — mirroring how
-   * `getRunner`/`getProber`/`getSnapshotIO` are mocked. `stateDir` comes from the
-   * `--state-dir` flag so pid/log files land where the rest of the stack expects.
+   * The native-launch seam (M4 — native partial-stack) — production is the ONLY
+   * place a real `pnpm dev` child is spawned for `stack up --only` (pid file
+   * under `stateDir`, health-polled). `stateDir` comes from the `--state-dir`
+   * flag so pid/log files land where the rest of the stack expects.
    */
   protected getLauncher(stateDir?: string): ServiceLauncher {
     return makeRealLauncher({ stateDir });
   }
 
   /**
-   * The injectable native slot-safe service-stopper seam (M7 Phase 3). Production
-   * returns the real `stopServices` (real fs enumeration of `<stateDir>/<id>.pid` +
-   * `process.kill`) — the ONLY place `down --slot N` reaches a slot's dev-server
-   * processes, and it reaches ONLY the pids recorded under the state dir it is given
-   * (never a host-global `pkill`). `stack down` at slot > 0 calls this against the
-   * slot's `profile.stateDir`; the TESTS spy it on the prototype (or drive the raw
-   * `stopServices` with a fake fs + fake killer) to assert the SIGTERM/SIGKILL
-   * targets are EXACTLY that slot's pids WITHOUT touching a real process — mirroring
-   * how `getRunner`/`getLauncher`/… are mocked.
+   * The slot-safe service-stopper seam (M7 Phase 3) — production is real
+   * `stopServices` (fs enumeration of `<stateDir>/<id>.pid` + `process.kill`). It
+   * reaches ONLY the pids recorded under the state dir it is given (never a
+   * host-global `pkill`), so `down --slot N` can't touch a peer slot's processes.
    */
   protected getServiceStopper(): ServiceStopper {
     return (stateDir: string) => stopServices(stateDir);
   }
 
   /**
-   * The injectable mesh-readiness seam (M4). Production returns
-   * `makeRealMeshExec()` — the only place `docker exec <container> …` runs for
-   * mesh readiness gating (pg_isready / redis-cli ping / rabbitmq-diagnostics /
-   * mongosh). Tests substitute a fake so the native `meshUp` readiness poll is
-   * asserted WITHOUT a real container.
+   * The mesh-readiness seam (M4) — production is the only place `docker exec
+   * <container> …` runs for mesh readiness gating (pg_isready / redis-cli ping /
+   * rabbitmq-diagnostics / mongosh).
    */
   protected getMeshExec(): MeshExec {
     return makeRealMeshExec();
   }
 
   /**
-   * The injectable host-port-probe seam (M4). Production returns
-   * `makeRealPortProbe()` — the only place `docker ps` / `ss` / `lsof` run for the
-   * mesh `check_ports` preflight. Tests substitute a fake so the conflict logic is
-   * asserted WITHOUT touching docker or the host socket table.
+   * The host-port-probe seam (M4) — production is the only place `docker ps` /
+   * `ss` / `lsof` run for the mesh `check_ports` preflight.
    */
   protected getPortProbe(): PortProbe {
     return makeRealPortProbe();
   }
 
   /**
-   * The injectable native-prep postgres-probe seam (M8 — R2 provision + R3
-   * migrate). Production returns `makeRealPgProbe()` — the only place the read-only
-   * `docker exec … psql -tAc` probes (pg_database existence / `_prisma_migrations`
-   * presence / public-table count) run for the native prep pass. The native `up`
-   * TESTS spy this on the prototype to return a fake that answers from a script, so
-   * the provision/migrate PLAN is asserted WITHOUT a real container or DB —
-   * mirroring how `getRunner`/`getMeshExec`/… are mocked.
+   * The native-prep postgres-probe seam (M8 — R2 provision + R3 migrate) —
+   * production is the only place the read-only `docker exec … psql -tAc` probes
+   * run (pg_database existence / `_prisma_migrations` presence / public-table
+   * count) for the native prep pass.
    */
   protected getPgProbe(): PgProbe {
     return makeRealPgProbe();
   }
 
   /**
-   * The injectable R1 fresh-repo predicate (M8 — native build/prep). A repo is
-   * "fresh" (prep skipped) only when it is BOTH installed AND built — MAJOR-D: a
+   * The R1 fresh-repo predicate (M8 — native build/prep). A repo is "fresh"
+   * (prep skipped) only when it is BOTH installed AND built — MAJOR-D: a
    * `node_modules`-only check treated an installed-but-unbuilt (or stale-`dist`-
-   * after-`git pull`) repo as fresh, skipped its build, and launched a service from
-   * a missing/stale `dist/` — the exact crash R1 exists to prevent. So this also
-   * requires built output: at least one `packages/node/*` or `apps/node/*` package
-   * has a `dist/` (a repo with no such node workspaces — e.g. saga-dash, a pure
-   * frontend that is install-only anyway — is fresh on `node_modules` alone).
-   * Injected so tests drive R1's fresh-skip WITHOUT touching the filesystem.
+   * after-`git pull`) repo as fresh, skipped its build, and launched a service
+   * from a missing/stale `dist/` (the exact crash R1 exists to prevent). So it
+   * also requires built output (at least one `packages/node/*` or `apps/node/*`
+   * package has a `dist/`); a repo with no node workspaces (saga-dash, a pure
+   * frontend that is install-only anyway) is fresh on `node_modules` alone.
    */
   protected getPrepFreshCheck(): (repoRoot: string) => boolean {
     return (repoRoot: string) => isRepoBuilt(repoRoot);
   }
 
   /**
-   * The injectable R1 `db:generate` scan seam (M8 — BLOCKER-B). Given a repo root,
-   * returns the repo-relative dirs of every `packages/node/*` package that DECLARES
-   * a `db:generate` script — a faithful port of up.sh's
-   * `for dbpkg in $SDS/packages/node/*; grep -q '"db:generate"'` loop (up.sh:1010-1013).
-   * R1 generates ALL of these before the whole-workspace `pnpm build`, so an
-   * ungenerated sibling `*-db` package (chat/insights/transcripts/ledger-db) can't
-   * fail the turbo build. Injected so tests drive R1's db:generate plan WITHOUT fs.
+   * The R1 `db:generate` scan seam (M8 — BLOCKER-B). Given a repo root, returns
+   * the repo-relative dirs of every `packages/node/*` package that DECLARES a
+   * `db:generate` script (a faithful port of up.sh's `packages/node/*` scan). R1
+   * generates ALL of these before the whole-workspace `pnpm build`, so an
+   * ungenerated sibling `*-db` package (chat/insights/transcripts/ledger-db)
+   * can't fail the turbo build.
    */
   protected getDbGenerateScan(): (repoRoot: string) => string[] {
     return (repoRoot: string) => scanDbGenerateDirs(repoRoot);
   }
 
   /**
-   * The injectable dash-config fs seam (M4 — the `sync-dash-local-defaults`
-   * prelaunch hook). Production returns `makeRealDashFs()` (the only place the
-   * dash `config.local.json` is written/removed for the hook); tests substitute a
-   * fake so the hook's mode-for-mode behaviour is asserted WITHOUT real fs IO.
+   * The dash-config fs seam (M4 — the `sync-dash-local-defaults` prelaunch hook)
+   * — production is the only place the dash `config.local.json` is
+   * written/removed for the hook.
    */
   protected getDashFs(): DashFs {
     return makeRealDashFs();
   }
 
   /**
-   * The injectable repo-dir existence check (M4 native partial-stack). Production
-   * returns a real `fs.existsSync` predicate — the native `stack up` path calls it
-   * per service to SKIP (warn, not fail) any service whose sibling-repo checkout is
-   * absent (e.g. the coach repo not cloned). Tests spy this on the prototype to
-   * drive the skip logic WITHOUT touching the filesystem — mirroring how
-   * `getLauncher`/`getMeshExec`/… are mocked. Default (real existsSync) would skip
-   * every service under a fake `--dev` path, so seam-mocking tests must stub it.
+   * The repo-dir existence check (M4 native partial-stack) — production is a real
+   * `fs.existsSync` predicate. The native `stack up` path calls it per service to
+   * SKIP (warn, not fail) any service whose sibling-repo checkout is absent (e.g.
+   * coach not cloned). NOTE: the real default skips every service under a fake
+   * `--dev` path, so seam-mocking tests MUST stub it.
    */
   protected getRepoDirCheck(): (dir: string) => boolean {
     return (dir: string) => existsSync(dir);
   }
 
   /**
-   * The injectable `--record` bring-up seam (Phase 2). Production returns
-   * `makeRealRecordUp()` — the only place the fleek recording docker-compose stack +
-   * CodeArtifact token fetch is shelled. The native `stack up --record` TESTS spy this
-   * on the prototype to assert the record PLAN (services/env) WITHOUT docker/aws —
-   * mirroring how `getLauncher`/`getRunner`/… are mocked.
+   * The `--record` bring-up seam (Phase 2) — production is the only place the
+   * fleek recording docker-compose stack + CodeArtifact token fetch is shelled.
    */
   protected getRecordUp(): RecordUp {
     return makeRealRecordUp();
   }
 
   /**
-   * The injectable `--tunnel` moniker resolver (Phase 2). Production runs the VENDORED
-   * `tunnel.sh moniker` (stdin/stderr on the TTY for the first-run prompt) and returns
-   * the captured moniker; the command composes `<moniker>.<VMS_BASE>` into the tunnel
-   * domain BEFORE building the launch env. Tests spy this on the prototype to return a
-   * fixed moniker WITHOUT spawning tunnel.sh.
+   * The `--tunnel` moniker resolver (Phase 2) — production runs the VENDORED
+   * `tunnel.sh moniker` (stdin/stderr on the TTY for the first-run prompt) and
+   * returns the captured moniker; the command composes `<moniker>.<VMS_BASE>` into
+   * the tunnel domain BEFORE building the launch env.
    */
   protected getTunnelMoniker(): (vendorTunnelSh: string) => Promise<string> {
     return resolveTunnelMoniker;
   }
 
   /**
-   * The injectable `--tunnel` rtsm fleet-config generator (Phase 2). Production returns
-   * `generateTunnelFleetConfig` — renders `<stateDir>/rtsm-fleet-tunnel.json` from the
-   * base `rtsm-fleet-local.json` with the node endpoint swapped to `rtsm.<domain>`, so
-   * rtsm-api's `tunnel_env` FLEET_CONFIG_PATH advertises a browser-reachable node (up.sh
-   * ~2170-2188). Best-effort: returns `null` when the base file can't be read/written.
-   * Tests spy this on the prototype to return a fixed path WITHOUT touching the fs.
+   * The `--tunnel` rtsm fleet-config generator (Phase 2) — production renders
+   * `<stateDir>/rtsm-fleet-tunnel.json` from the base `rtsm-fleet-local.json` with
+   * the node endpoint swapped to `rtsm.<domain>`, so rtsm-api's `tunnel_env`
+   * FLEET_CONFIG_PATH advertises a browser-reachable node. Best-effort: returns
+   * `null` when the base file can't be read/written.
    */
   protected getTunnelFleetGen(): typeof generateTunnelFleetConfig {
     return generateTunnelFleetConfig;
   }
 
   /**
-   * The injectable ff-only git seam (M9 — auto-pull). Production returns
-   * `makeRealGitRunner()` — the only place the read-only git probes + the single
-   * `merge --ff-only` run for the native sibling sync. The native `stack up` TESTS spy
-   * this on the prototype to drive the skip/ff decision WITHOUT a real repo/network —
-   * mirroring how `getRunner`/`getMeshExec`/… are mocked.
+   * The ff-only git seam (M9 — auto-pull) — production is the only place the
+   * read-only git probes + the single `merge --ff-only` run for the native
+   * sibling sync.
    */
   protected getGitRunner(): GitRunner {
     return makeRealGitRunner();
   }
 
   /**
-   * The injectable `gh` seam (M10 — overlay engine). Production returns
-   * `makeRealGhRunner()` — the only place `gh pr view` is spawned (per-repo cwd, to
-   * resolve a numeric PR token to its head branch). The native `stack overlay` TESTS
-   * spy this on the prototype to drive PR resolution WITHOUT a live `gh`/network —
-   * mirroring how `getGitRunner`/`getRunner`/… are mocked.
+   * The `gh` seam (M10 — overlay engine) — production is the only place `gh pr
+   * view` is spawned (per-repo cwd, to resolve a numeric PR token to its head
+   * branch).
    */
   protected getGhRunner(): GhRunner {
     return makeRealGhRunner();
   }
 
   /**
-   * The injectable overlay-file fs seam (M10). Production returns `makeRealOverlayFs()`
-   * — the only place `integration-suite.local.tsv` is read. The native `stack overlay
-   * list`/`apply` (file-driven) TESTS spy this on the prototype to feed canned tsv text
-   * WITHOUT touching the filesystem.
+   * The overlay-file fs seam (M10) — production is the only place
+   * `integration-suite.local.tsv` is read (the file-driven `stack overlay
+   * list`/`apply`).
    */
   protected getOverlayFs(): OverlayFs {
     return makeRealOverlayFs();
   }
 
   /**
-   * The injectable confirm seam (M11 — bootstrap ensure-repos). Production returns
-   * `makeRealConfirm()` (the only place the provisioning prompt reads `process.stdin`);
-   * the `stack bootstrap` TESTS spy this on the prototype to drive the TTY / y-n / no-tty
-   * branches WITHOUT a real terminal — mirroring how `getRunner`/`getGitRunner`/… are mocked.
+   * The confirm seam (M11 — bootstrap ensure-repos) — production is the only
+   * place the provisioning prompt reads `process.stdin`.
    */
   protected getConfirm(): ConfirmSeam {
     return makeRealConfirm();
   }
 
   /**
-   * The injectable cookie-capturing POST seam (M11 — native login). Production returns
-   * `makeRealCookiePoster()` — the only place the devLogin POST is made; the `stack login`
-   * TESTS spy this on the prototype to return canned `Set-Cookie`s WITHOUT a network.
+   * The cookie-capturing POST seam (M11 — native login) — production is the only
+   * place the devLogin POST is made.
    */
   protected getCookiePoster(): CookiePoster {
     return makeRealCookiePoster();
   }
 
   /**
-   * The injectable cookie-jar fs seam (M11 — native login). Production returns
-   * `makeRealJarWriter()` — the only place `<stateDir>/cookies.txt` is written; the
-   * `stack login` TESTS spy this on the prototype to capture the jar bytes WITHOUT fs IO.
+   * The cookie-jar fs seam (M11 — native login) — production is the only place
+   * `<stateDir>/cookies.txt` is written.
    */
   protected getJarWriter(): JarWriter {
     return makeRealJarWriter();
   }
 
   /**
-   * The injectable vite-cache-clear fs seam (M9 — native `restart`). Production returns
-   * `makeRealViteClear()` — the only place the `nuke_vite` `rm -rf` runs. The `stack
-   * restart` TESTS spy this on the prototype to assert the exact cache paths WITHOUT
-   * touching the filesystem.
+   * The vite-cache-clear fs seam (M9 — native `restart`) — production is the only
+   * place the `nuke_vite` `rm -rf` runs.
    */
   protected getViteClear(): ViteClear {
     return makeRealViteClear();
@@ -919,7 +883,7 @@ function isRepoBuilt(repoRoot: string): boolean {
 
 /**
  * BLOCKER-B: scan a repo's `packages/node/*` for every package DECLARING a
- * `db:generate` script, returning their repo-relative dirs (up.sh:1010-1013). A
+ * `db:generate` script, returning their repo-relative dirs (mirrors up.sh's scan loop). A
  * malformed/absent `package.json` is skipped; a missing workspace dir yields `[]`.
  */
 function scanDbGenerateDirs(repoRoot: string): string[] {

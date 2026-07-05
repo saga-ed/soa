@@ -1,7 +1,7 @@
 /**
  * R1 — native build/prep pass (M8 native prep pass).
  *
- * A FAITHFUL port of up.sh's `prep()` build loop (up.sh:992-1039): over the repos
+ * A FAITHFUL port of up.sh's `prep()` build loop: over the repos
  * of the closure services, run `pnpm install` (idempotent), a best-effort
  * workspace build, and `pnpm db:generate` for the `*-db` packages (which need a
  * generated Prisma client BEFORE their tsup build + runtime import). Without this,
@@ -18,19 +18,19 @@
  * `*-db` packages left the other siblings ungenerated → their build fails → abort.
  * So R1 generates EVERY package in each closure repo that DECLARES `db:generate`
  * (via the injected `dbGenerateScan` seam — a faithful port of up.sh's
- * `for dbpkg in $SDS/packages/node/*; grep -q '"db:generate"'` loop, up.sh:1010-1013),
+ * `for dbpkg in $SDS/packages/node/*; grep -q '"db:generate"'` loop),
  * not just the closure DBs' owners. Absent seam ⇒ fall back to the closure-derived
  * targets (unit tests that don't wire the scan).
  *
  * up.sh fidelity notes:
  *   - Per repo: `pnpm install` → `pnpm db:generate` (all `db:generate` pkgs) → `pnpm build`.
- *   - SAGA_DASH is install-ONLY (up.sh:1015-1019 installs vite but does NOT build —
+ *   - SAGA_DASH is install-ONLY (up.sh installs vite but does NOT build —
  *     it runs via `vite dev`); every other repo builds. This one "install-only"
  *     distinction isn't expressible from the manifest yet (see the report).
  *   - FATAL MAP (MAJOR-C): up.sh's `build_step` defaults NON-fatal (warn+continue)
  *     and is fatal only for QBOARD/RTSM/COACH (their services import workspace
- *     `dist/` at launch, up.sh:1026/1031/1039); ROSTERING/PROGRAM_HUB/SDS builds
- *     (up.sh:995/998/1014) and ALL `db:generate` (`|| true`) are NON-fatal. R1
+ *     `dist/` at launch); ROSTERING/PROGRAM_HUB/SDS builds
+ *     and ALL `db:generate` (`|| true`) are NON-fatal. R1
  *     mirrors this: a non-fatal build/db:generate failure is recorded as a WARNING
  *     and the pass continues; only a FATAL_BUILD_REPOS build (or any `pnpm install`,
  *     which up.sh's `pnpm_install` also aborts on) stops the pass.
@@ -43,7 +43,7 @@
  * (fresh-skip already no-ops a built tree), while R2/R3 stay idempotent.
  *
  * CODEARTIFACT (FLIP 4): `pnpm install` here recovers from an expired CodeArtifact
- * token exactly as up.sh's `pnpm_install` does (up.sh:677-694) — install runs with
+ * token exactly as up.sh's `pnpm_install` does — install runs with
  * `detectUnauthorized`, and on a 401 (`ERR_PNPM_FETCH_401` / `Unauthorized`) R1 runs
  * `pnpm co:login` (the workspace's token-refresh script) and RETRIES the install
  * ONCE. If it still fails, the ORIGINAL failing install step is surfaced (`failed`)
@@ -65,7 +65,7 @@ import type { Runner } from './exec.js';
 
 /**
  * Repos up.sh installs but does NOT build (they run a dev server, not `dist/`).
- * Only SAGA_DASH today (up.sh:1015-1019: `vite dev`, no prebuild). qboard/coach
+ * Only SAGA_DASH today (up.sh: `vite dev`, no prebuild). qboard/coach
  * DO build (their services import workspace `dist/` deps). See the report — this
  * isn't manifest-expressible yet.
  */
@@ -74,12 +74,12 @@ export const INSTALL_ONLY_REPOS: ReadonlySet<RepoKey> = new Set<RepoKey>(['SAGA_
 /**
  * Repos whose `pnpm build` failure is FATAL (aborts the pass) — their services
  * import workspace `dist/` at launch, so an unbuilt tree is a guaranteed crash
- * (up.sh: `build_step … 1`, up.sh:1026/1031/1039). Every other repo's build is
+ * (up.sh: `build_step … 1`). Every other repo's build is
  * NON-fatal (warn + continue), matching up.sh's default `build_step`.
  */
 export const FATAL_BUILD_REPOS: ReadonlySet<RepoKey> = new Set<RepoKey>(['QBOARD', 'RTSM', 'COACH']);
 
-/** up.sh's canonical prep order (up.sh:992-1039). Non-built repos (SOA/FLEEK) omitted. */
+/** up.sh's canonical prep order. Non-built repos (SOA/FLEEK) omitted. */
 const PREP_REPO_ORDER: readonly RepoKey[] = [
   'ROSTERING',
   'PROGRAM_HUB',
@@ -283,7 +283,7 @@ async function prepOneRepo(
   {
     // 1. install (idempotent) — FATAL (up.sh's `pnpm_install` aborts on failure).
     //    FLIP 4: on a CodeArtifact 401 (expired token), refresh via `pnpm co:login`
-    //    and retry the install ONCE (up.sh:677-694). A non-401 failure does NOT
+    //    and retry the install ONCE (mirrors up.sh's `pnpm_install`). A non-401 failure does NOT
     //    trigger the retry; if the retry still fails, the ORIGINAL install step is
     //    surfaced as `failed`.
     const installStep: PrepStep = { repo, kind: 'install', cwd: root, argv: ['install'] };

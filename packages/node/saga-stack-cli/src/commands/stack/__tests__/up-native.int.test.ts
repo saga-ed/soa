@@ -365,11 +365,13 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     const dash = launches.find((s) => s.id === 'saga-dash');
     expect(dash?.command).toBe('pnpm');
     expect(dash?.args).toEqual(['dev', '--port', '9900']); // 8900 + slot 1 offset
+    // … ads-adm-api is slottable now (tokenized env + EXPRESS_SERVER_PORT
+    // injection) and launches in-slot …
+    expect(ids).toContain('ads-adm-api');
     // … but the still-un-slottable services are dropped from the slot bring-up:
     // connect-web (depends on the un-tokenized connect-api) …
     expect(ids).not.toContain('connect-web');
     // … and the literal-port backends (bypass the offset).
-    expect(ids).not.toContain('ads-adm-api');
     expect(ids).not.toContain('connect-api');
     expect(ids).not.toContain('transcripts-api');
     expect(ids).not.toContain('insights-api');
@@ -419,9 +421,9 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     expect(ids).toContain('sessions-api');
     expect(ids).toContain('saga-dash'); // frontend now slottable via --port
     expect(ids).toContain('coach-web');
+    expect(ids).toContain('ads-adm-api'); // slottable (tokenized env + port injection)
     expect(ids).not.toContain('connect-api');
     expect(ids).not.toContain('connect-web');
-    expect(ids).not.toContain('ads-adm-api');
 
     // mesh came up under the slot project on offset ports (soa-s1, +1000).
     const makeUp = runs.find((r) => r.command === 'make');

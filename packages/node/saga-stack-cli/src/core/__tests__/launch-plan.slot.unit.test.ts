@@ -64,6 +64,7 @@ describe('defaultLaunchContext meshOffset — mesh connection strings offset in 
       ctx.tokens.SESSIONS_DB_URL,
       ctx.tokens.CONTENT_DB_URL,
       ctx.tokens.COACH_DB_URL,
+      ctx.tokens.ADS_ADM_DB_URL,
     ]) {
       expect(portOf(url)).toBe(pgBase + offset);
     }
@@ -130,5 +131,47 @@ describe('M13 listen-port fix — portEnvVar services are TOLD their offset port
     });
     const env = resolveLaunchEnv('iam-api', 'stack', ctx1);
     expect(env.PORT).toBe(String(manifest.services['iam-api'].port + 1000));
+  });
+});
+
+describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injection', () => {
+  const slotCtx = (slot: number) => {
+    const p = deriveInstance({ slot });
+    return defaultLaunchContext({
+      ...baseInputs,
+      portOverrides: p.portOverrides,
+      meshOffset: p.meshOffset,
+    });
+  };
+
+  it('slot 1: launch env carries EXPRESS_SERVER_PORT=<5005+1000> (listen-port seam)', () => {
+    const env = resolveLaunchEnv('ads-adm-api', 'stack', slotCtx(1));
+    expect(env.EXPRESS_SERVER_PORT).toBe(String(manifest.services['ads-adm-api'].port + 1000));
+  });
+
+  it('slot 2: every cross-service/mesh URL dials the SLOT (+2000), never slot 0', () => {
+    const env = resolveLaunchEnv('ads-adm-api', 'stack', slotCtx(2));
+    expect(env.EXPRESS_SERVER_PORT).toBe('7005'); // 5005 + 2000
+    expect(env.SESSIONS_API_CLIENT_BASEURL).toBe('http://localhost:5007'); // 3007 + 2000
+    expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:5010/trpc'); // 3010 + 2000
+    expect(env.IAM_API_URL).toBe('http://localhost:5010');
+    expect(env.CORS_ORIGIN).toBe('http://localhost:10900'); // dash 8900 + 2000
+    expect(portOf(env.DATABASE_URL)).toBe(getMesh('postgres').port + 2000);
+    expect(portOf(env.ADS_ADM_DATABASE_URL)).toBe(getMesh('postgres').port + 2000);
+    expect(portOf(env.RABBITMQ_URL)).toBe(getMesh('rabbitmq').port + 2000);
+    // no base-port literal survives anywhere in the resolved env.
+    for (const v of Object.values(env)) {
+      expect(v).not.toMatch(/localhost:(3007|3010|5432|5672|8900)\b/);
+    }
+  });
+
+  it('slot 0: byte-identical to the pre-tokenization literals (no injection)', () => {
+    const env = resolveLaunchEnv('ads-adm-api', 'stack', slotCtx(0));
+    expect(env.EXPRESS_SERVER_PORT).toBeUndefined(); // no offset ⇒ no injection
+    expect(env.SESSIONS_API_CLIENT_BASEURL).toBe('http://localhost:3007');
+    expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:3010/trpc');
+    expect(env.ADS_ADM_DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
+    expect(env.DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
+    expect(env.CORS_ORIGIN).toBe('http://localhost:8900');
   });
 });

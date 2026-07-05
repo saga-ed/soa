@@ -62,9 +62,11 @@ export const DASH_LOCAL_SERVICES: Readonly<Record<string, ServiceId>> = {
   // clients), so a slot's config.local.json MUST offset them too — else a slot > 0
   // dash keeps the base config.json ports (ads-adm 5005 / transcripts 6302 = SLOT
   // 0's services) and a stage-7 attendance WRITE silently corrupts slot 0's
-  // ads-adm projection. ads-adm-api is excluded from slot > 0 bring-up, so the
-  // offset port (6005 at slot 1) has nothing listening ⇒ the call fails LOUD
-  // (connection refused) instead of writing cross-slot — the corruption gate.
+  // ads-adm projection. ads-adm-api is SLOTTABLE now (tokenized env +
+  // EXPRESS_SERVER_PORT injection), so the offset port (6005 at slot 1) is the
+  // slot's OWN ads-adm-api; transcripts-api remains excluded at slot > 0, where
+  // its offset port has nothing listening ⇒ that call fails LOUD (connection
+  // refused) instead of writing cross-slot — the corruption gate.
   'ads-adm': 'ads-adm-api',
   'transcripts-api': 'transcripts-api',
 };

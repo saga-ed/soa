@@ -107,13 +107,12 @@ describe('literal-port service exclusion (plan §6)', () => {
     expect(slotExcludedServices(0)).toEqual([]);
   });
 
-  it('slot > 0 excludes the literal-port backends + connect-web, but NOT saga-dash/coach-web', () => {
+  it('slot > 0 excludes the literal-port backends + connect-web, but NOT saga-dash/coach-web/ads-adm-api', () => {
     const excluded = deriveInstance({ slot: 1 }).excludedServices;
     expect(excluded).toEqual([...SLOT_EXCLUDED_SERVICES]);
     expect(new Set(excluded)).toEqual(
       new Set([
         // literal-port backends (bypass the offset)
-        'ads-adm-api',
         'connect-api',
         'transcripts-api',
         'insights-api',
@@ -125,6 +124,9 @@ describe('literal-port service exclusion (plan §6)', () => {
     // saga-dash & coach-web listen on their offset port now (launch-seam --port).
     expect(excluded).not.toContain('saga-dash');
     expect(excluded).not.toContain('coach-web');
+    // ads-adm-api is slottable now: tokenized launch env + EXPRESS_SERVER_PORT
+    // listen-port injection (M13 seam) — no longer excluded.
+    expect(excluded).not.toContain('ads-adm-api');
     expect(slotExcludedServices(3)).toEqual([...SLOT_EXCLUDED_SERVICES]);
   });
 });

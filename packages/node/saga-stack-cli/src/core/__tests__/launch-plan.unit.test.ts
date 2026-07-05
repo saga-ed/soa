@@ -143,7 +143,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     });
   });
 
-  it('ads-adm-api (literal hardcoded deps, matching up.sh)', () => {
+  it('ads-adm-api (tokenized env resolves to exactly up.sh literals at base ports)', () => {
     expect(env('ads-adm-api')).toEqual({
       ADS_ADM_SCHEDULE_PROVIDER: 'program-hub',
       SESSIONS_API_CLIENT_BASEURL: 'http://localhost:3007',

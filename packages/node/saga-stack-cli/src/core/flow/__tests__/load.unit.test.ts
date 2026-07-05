@@ -107,3 +107,47 @@ describe('loadFlowManifest — injectable reader seam (no disk IO)', () => {
     );
   });
 });
+
+describe('parseFlowManifest — multi-seed scenario/datasets in seed blocks (#221)', () => {
+  type SeedBlock = Record<string, unknown>;
+  const withSeed = (seed: SeedBlock): string => {
+    const doc = JSON.parse(EXAMPLE_TEXT) as { flows: { seed?: SeedBlock }[] };
+    doc.flows[0].seed = seed;
+    return JSON.stringify(doc);
+  };
+
+  it('accepts a flow seed with a known scenario + per-system datasets', () => {
+    const m = parseFlowManifest(
+      withSeed({
+        profile: 'full',
+        scenario: 'ab-topology',
+        datasets: [{ system: 'content-api', dataset: 'qtf-demo' }],
+      }),
+    );
+    const journey = m.flows.find((f) => f.name === 'journey');
+    expect(journey?.seed?.scenario).toBe('ab-topology');
+    expect(journey?.seed?.datasets).toEqual([{ system: 'content-api', dataset: 'qtf-demo' }]);
+  });
+
+  it('rejects an unknown scenario name (closed enum)', () => {
+    expect(() => parseFlowManifest(withSeed({ profile: 'full', scenario: 'nope' }))).toThrow(
+      /failed schema validation/,
+    );
+  });
+
+  it('rejects a dataset entry with an unknown system id', () => {
+    expect(() =>
+      parseFlowManifest(
+        withSeed({ profile: 'full', datasets: [{ system: 'not-a-service', dataset: 'x' }] }),
+      ),
+    ).toThrow(/failed schema validation/);
+  });
+
+  it('rejects an empty dataset name (min(1))', () => {
+    expect(() =>
+      parseFlowManifest(
+        withSeed({ profile: 'full', datasets: [{ system: 'sessions-api', dataset: '' }] }),
+      ),
+    ).toThrow(/failed schema validation/);
+  });
+});

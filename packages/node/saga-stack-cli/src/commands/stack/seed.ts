@@ -15,8 +15,15 @@
  * it cannot drift from `--with`. A bundle with no seed add-on (`--with dash`/
  * `coach`/`connect`) is a harmless no-op here.
  *
+ * MULTI-SEED (#221): `--scenario <name>` applies a named cross-system dataset
+ * scenario (e.g. `ab-topology` stamps `SEED_DATASET=ab-topology` onto the
+ * programs/scheduling/sessions steps); a repeatable `--dataset <system>=<name>`
+ * names one system's dataset directly. `--dry-run` prints the composed plan
+ * (with any stamped datasets) without touching the stack.
+ *
  *   node bin/dev.js stack seed
  *   node bin/dev.js stack seed full --with playback
+ *   node bin/dev.js stack seed full --scenario ab-topology --dry-run
  */
 
 import { Args, Flags } from '@oclif/core';
@@ -27,8 +34,31 @@ import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import { composeSeedPlan } from '../../core/seed/compose-seed-plan.js';
-import type { SeedAddOn, SeedProfile, SeedSelection } from '../../core/seed/types.js';
+import { SEED_SCENARIO_NAMES, SeedDatasetError, seedStepLabel } from '../../core/seed/datasets.js';
+import type { SeedScenarioName, SystemSeedDataset } from '../../core/seed/datasets.js';
+import type { SeedAddOn, SeedPlan, SeedProfile, SeedSelection } from '../../core/seed/types.js';
 import { makeStackApi } from '../../stack-api.js';
+
+/** Parse repeatable `--dataset <system>=<name>` values (validated against the manifest). */
+export function parseDatasetFlags(
+  values: string[] | undefined,
+  fail: (msg: string) => never,
+): SystemSeedDataset[] | undefined {
+  if (!values || values.length === 0) return undefined;
+  const known = new Set(Object.keys(manifest.services));
+  return values.map((raw) => {
+    const eq = raw.indexOf('=');
+    const system = eq >= 0 ? raw.slice(0, eq) : '';
+    const dataset = eq >= 0 ? raw.slice(eq + 1) : '';
+    if (system === '' || dataset === '') {
+      fail(`--dataset expects <system>=<name>, got '${raw}'`);
+    }
+    if (!known.has(system)) {
+      fail(`--dataset: unknown service id '${system}'\nknown: ${[...known].join(', ')}`);
+    }
+    return { system: system as ServiceId, dataset };
+  });
+}
 
 export default class StackSeed extends BaseCommand {
   static description = 'Seed a running stack (native).';
@@ -53,6 +83,19 @@ export default class StackSeed extends BaseCommand {
       options: [...BUNDLE_NAMES],
       description:
         "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo. Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
+    }),
+    scenario: Flags.string({
+      options: [...SEED_SCENARIO_NAMES],
+      description:
+        'named cross-system dataset scenario (#221 multi-seed) — stamps SEED_DATASET onto every step of the scenario\'s coupled systems (e.g. ab-topology ⇒ programs/scheduling/sessions), so the coupled dataset is applied together or not at all.',
+    }),
+    dataset: Flags.string({
+      multiple: true,
+      description:
+        "per-system named dataset (#221 multi-seed), '<system>=<name>' — stamps SEED_DATASET=<name> onto that system's selected seed steps. Repeatable; merges with --scenario (a conflicting name for the same system errors).",
+    }),
+    'dry-run': Flags.boolean({
+      description: 'print the composed seed plan (with any stamped datasets) and exit without seeding.',
     }),
   };
 
@@ -103,8 +146,46 @@ export default class StackSeed extends BaseCommand {
       );
     }
 
-    const selection: SeedSelection = { profile, addOns };
-    const plan = composeSeedPlan(selection, active, new Set<ServiceId>());
+    // #221 multi-seed: scenario + per-system datasets (compose stamps SEED_DATASET
+    // onto clones of the selected steps and enforces scenario coherence).
+    const datasets = parseDatasetFlags(flags.dataset, (m) => this.error(m));
+    const selection: SeedSelection = {
+      profile,
+      addOns,
+      ...(flags.scenario ? { scenario: flags.scenario as SeedScenarioName } : {}),
+      ...(datasets ? { datasets } : {}),
+    };
+    let plan: SeedPlan;
+    try {
+      plan = composeSeedPlan(selection, active, new Set<ServiceId>());
+    } catch (err) {
+      if (err instanceof SeedDatasetError) this.error(err.message);
+      throw err;
+    }
+
+    if (flags['dry-run']) {
+      this.emit(
+        flags,
+        {
+          native: true,
+          dryRun: true,
+          profile,
+          addOns,
+          ...(flags.scenario ? { scenario: flags.scenario } : {}),
+          ...(datasets ? { datasets } : {}),
+          offline: plan.offline.map((s) => seedStepLabel(s)),
+          online: plan.online.map((s) => seedStepLabel(s)),
+          skipped: plan.skipped.map((s) => ({ id: s.id, reason: s.reason })),
+        },
+        [
+          `seed plan (dry-run, profile ${profile}${flags.scenario ? `, scenario ${flags.scenario}` : ''}):`,
+          `  offline: ${plan.offline.map((s) => seedStepLabel(s)).join(', ') || '(none)'}`,
+          `  online:  ${plan.online.map((s) => seedStepLabel(s)).join(', ') || '(none)'}`,
+          `  skipped: ${plan.skipped.map((s) => `${s.id} (${s.reason})`).join(', ') || '(none)'}`,
+        ],
+      );
+      return;
+    }
 
     const api = makeStackApi(manifest, this.buildNativeRuntime(flags, instance));
     const seeded = await api.seed(plan);

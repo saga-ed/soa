@@ -13,6 +13,7 @@
 
 import { z } from 'zod';
 import type { ServiceId } from '../manifest/index.js';
+import { SEED_SCENARIO_NAMES } from '../seed/datasets.js';
 import type { SeedSelection } from '../seed/index.js';
 
 /**
@@ -67,6 +68,13 @@ export const seedSelectionSchema = z.object({
   perSystem: z.array(z.object({ system: serviceIdSchema, profile: seedProfileSchema })).optional(),
   only: z.array(serviceIdSchema).optional(),
   exclude: z.array(z.string()).optional(),
+  // #221 multi-seed: named cross-system scenario + per-system dataset overrides
+  // (the IDENTITY axis — see core/seed/datasets.ts). Mirrored from the canonical
+  // `SeedSelection` in the SAME change (the compile guard below).
+  scenario: z.enum(SEED_SCENARIO_NAMES).optional(),
+  datasets: z
+    .array(z.object({ system: serviceIdSchema, dataset: z.string().min(1) }))
+    .optional(),
 });
 
 // Compile guard: the canonical SeedSelection must satisfy this schema's shape.

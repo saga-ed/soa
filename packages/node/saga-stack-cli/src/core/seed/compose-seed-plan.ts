@@ -18,13 +18,56 @@
  *   3. partition — split the survivors into `offline` / `online` by
  *      `requiresServiceUp` (online = deferred until those services are up).
  *
+ * MULTI-SEED (#221): a `scenario`/`datasets` selection resolves to a per-system
+ * dataset map (`resolveDatasetMap`). Each SURVIVING step whose service is in the
+ * map is emitted as a CLONE with `SEED_DATASET=<name>` added to its env vars —
+ * the ONLY place the frozen registry is ever varied per selection. After the
+ * gates, coherence is enforced: every mapped system must have contributed at
+ * least one stamped step, else the compose THROWS (`SeedDatasetError`) — a
+ * coupled scenario (the triad) must never be half-applied (multiseed-research §1).
+ *
  * PURE: no IO. Operates over the frozen registry derived from the manifest.
  */
 
 import type { ServiceId } from '../manifest/index.js';
+import { SEED_DATASET_VAR, SeedDatasetError, resolveDatasetMap } from './datasets.js';
 import { ADDON_STEPS, PROFILE_STEPS, SEED_RUN_ORDER, SEED_STEPS } from './profiles.js';
 import type { SeedStepId } from './profiles.js';
 import type { SeedPlan, SeedSelection, SeedStep, SkipNote } from './types.js';
+
+/**
+ * Clone `step` with `SEED_DATASET=<dataset>` stamped into its env var bag —
+ * recursively stamping any nested `optionalSteps` owned by a mapped service.
+ * The registry object itself is never mutated (it stays frozen); a `dotenv`
+ * env kind has no var bag to stamp, so a dataset on such a step is rejected.
+ */
+function stampDataset(step: SeedStep, datasetsBySystem: Map<ServiceId, string>): SeedStep {
+  const dataset = datasetsBySystem.get(step.service);
+  const optionalSteps = step.optionalSteps?.map((sub) => stampDataset(sub, datasetsBySystem));
+  if (dataset === undefined) {
+    return optionalSteps === undefined ? step : { ...step, optionalSteps };
+  }
+  if (step.env.kind === 'dotenv') {
+    throw new SeedDatasetError(
+      `seed step '${step.id}' (${step.service}) uses the dotenv env kind — a named dataset cannot be stamped onto it`,
+    );
+  }
+  return {
+    ...step,
+    env: { kind: step.env.kind, vars: { ...step.env.vars, [SEED_DATASET_VAR]: dataset } },
+    ...(optionalSteps === undefined ? {} : { optionalSteps }),
+  };
+}
+
+/** Collect every dataset-mapped system `step` (or a nested optionalStep) covers. */
+function recordStamped(
+  step: SeedStep,
+  datasetsBySystem: Map<ServiceId, string>,
+  stampedSystems: Set<ServiceId>,
+): void {
+  if (datasetsBySystem.has(step.service)) stampedSystems.add(step.service);
+  for (const sub of step.optionalSteps ?? []) recordStamped(sub, datasetsBySystem, stampedSystems);
+}
 
 export function composeSeedPlan(
   sel: SeedSelection,
@@ -47,6 +90,11 @@ export function composeSeedPlan(
 
   const onlyServices = sel.only ? new Set<ServiceId>(sel.only) : undefined;
   const excludeIds = sel.exclude ? new Set<string>(sel.exclude) : undefined;
+
+  // #221 multi-seed: scenario ∪ datasets → one per-system dataset map (throws
+  // SeedDatasetError on a conflicting/unknown selection).
+  const datasetsBySystem = resolveDatasetMap(sel);
+  const stampedSystems = new Set<ServiceId>();
 
   const offline: SeedStep[] = [];
   const online: SeedStep[] = [];
@@ -88,9 +136,32 @@ export function composeSeedPlan(
       continue;
     }
 
+    // #221 multi-seed: stamp the dataset onto a CLONE of the surviving step.
+    // Record every mapped system the emitted step reaches (incl. nested
+    // optionalSteps) so coherence sees a system stamped only via a sub-step.
+    const emitted = stampDataset(step, datasetsBySystem);
+    recordStamped(emitted, datasetsBySystem, stampedSystems);
+
     // Gate 3: partition offline vs online.
-    if (step.requiresServiceUp.length > 0) online.push(step);
-    else offline.push(step);
+    if (emitted.requiresServiceUp.length > 0) online.push(emitted);
+    else offline.push(emitted);
+  }
+
+  // #221 multi-seed coherence: every mapped system must have contributed at
+  // least one stamped step — a coupled scenario (the triad) half-applied is the
+  // one cross-system hazard this feature introduces, so it is an ERROR, never a
+  // silent partial seed. The skip notes explain WHY a system missed (inactive /
+  // restored); a system absent from them was simply never selected (profile too
+  // light, or narrowed out by only/exclude).
+  const unapplied = [...datasetsBySystem.keys()].filter((s) => !stampedSystems.has(s));
+  if (unapplied.length > 0) {
+    const why = unapplied.map((s) => {
+      const note = skipped.find((n) => n.service === s);
+      return `${s} (${note ? note.reason : 'no step selected — check profile/perSystem/only/exclude'})`;
+    });
+    throw new SeedDatasetError(
+      `dataset selection cannot be applied coherently — no seed step ran for: ${why.join('; ')}`,
+    );
   }
 
   return { offline, online, skipped };

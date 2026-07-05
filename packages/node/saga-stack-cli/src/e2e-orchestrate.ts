@@ -453,6 +453,8 @@ export interface ResolvedFlowDescription {
   checkpoint: { fixtureId: string; predecessor: string } | null;
   /** M14: the per-stage checkpoint fixtureIds a --snapshot-stages run bakes. */
   bakeCheckpoints: string[] | null;
+  /** M14-C: the prerequisite's terminal checkpoint an eligible run restores OPPORTUNISTICALLY (availability is a run-time question). */
+  prereqCheckpoint: { fixtureId: string; terminalStage: string } | null;
 }
 
 /** Options for the pure projection. */
@@ -554,8 +556,22 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
             ),
           )
         : null,
+    prereqCheckpoint: resolved.prerequisite
+      ? {
+          fixtureId: checkpointFixtureId(
+            resolved.spa.id,
+            resolved.prerequisite.flow.name,
+            resolved.prerequisite.stages[resolved.prerequisite.stages.length - 1] as StageDefLike,
+            resolved.prerequisite.stages.length,
+          ),
+          terminalStage: resolved.prerequisite.stages.at(-1)?.id ?? '',
+        }
+      : null,
   };
 }
+
+/** Structural alias for the stage arg `checkpointFixtureId` takes (pure projection use). */
+type StageDefLike = ResolvedFlow['stages'][number];
 
 // ── execution ─────────────────────────────────────────────────────────────────
 
@@ -619,6 +635,12 @@ export interface ExecOptions {
    * git checkout (e.g. hermetic tests).
    */
   spaHead?: { sha: string; dirty: boolean };
+  /**
+   * M14-C: restore the prerequisite's terminal-stage checkpoint instead of the
+   * full headless replay when a VALID one exists (fallback: replay). Default
+   * true at the command layer (`--no-prereq-from-snapshot` opts out).
+   */
+  prereqFromSnapshot?: boolean;
 }
 
 /**
@@ -642,19 +664,6 @@ export async function executeResolvedFlow(
 ): Promise<number> {
   const m = deps.manifest ?? serviceManifest;
 
-  // 0. Prerequisite first (e.g. connect-session ⇐ journey through 'schedule').
-  if (resolved.prerequisite) {
-    deps.log(`==> prerequisite: ${resolved.prerequisite.flow.name} (through '${resolved.prerequisite.stages.at(-1)?.id}', headless)`);
-    const preCode = await executeResolvedFlow(resolved.prerequisite, deps, {
-      lane: opts.lane,
-      skipReset: false,
-      passthrough: [],
-    });
-    if (preCode !== 0) {
-      throw new FlowExecError(`prerequisite flow '${resolved.prerequisite.flow.name}' failed (exit ${preCode})`);
-    }
-  }
-
   // Drop this slot's excluded services (literal-port + connect frontends that would
   // collide with slot 0) from the closure BEFORE up/reset/seed/verify. Empty set at
   // slot 0 ⇒ the full closure, byte-identical.
@@ -662,9 +671,66 @@ export async function executeResolvedFlow(
   const services = resolved.closure.services.filter((id) => !excluded.has(id));
   const slot = deps.slot ?? 0;
 
-  // M14: the baked date env a --from restore mandates for the Playwright child
-  // (§2.2 — restored data and running specs must agree on the dates).
+  // M14: the baked date env a --from (or prerequisite-checkpoint) restore
+  // mandates for the Playwright child (§2.2 — restored data and running specs
+  // must agree on the dates).
   let restoredDates: SnapshotFlowBlock['dates'] | undefined;
+
+  // 0. Prerequisite first (e.g. connect-session ⇐ journey through 'schedule').
+  // M14-C: OPPORTUNISTICALLY restore the prerequisite's terminal-stage
+  // checkpoint instead of the full headless replay — falling back to the
+  // replay when the checkpoint is absent/invalid (unlike --from, which
+  // hard-errors: the prerequisite path always has the replay as its source of
+  // truth). Runs in THIS frame so the checkpoint's baked dates reach THIS
+  // flow's Playwright env (they cannot cross the recursion boundary).
+  if (resolved.prerequisite) {
+    const prereq = resolved.prerequisite;
+    let restored = false;
+    if (opts.prereqFromSnapshot !== false && opts.lane === 'stack' && deps.checkpoints !== undefined) {
+      // The prerequisite's stages ARE the full producing prefix (1..through).
+      const prereqWithCheckpoint: ResolvedFlow = {
+        ...prereq,
+        checkpoint: {
+          predecessor: prereq.stages[prereq.stages.length - 1] as ResolvedFlow['stages'][number],
+          predecessorPosition: prereq.stages.length,
+          producingStages: prereq.stages,
+        },
+      };
+      const prereqServices = prereq.closure.services.filter((id) => !excluded.has(id));
+      try {
+        // Union bring-up BEFORE the restore: the replay path leaves the
+        // prerequisite's services running, and provision/migrate only cover the
+        // up() set — a prereq-closure DB dump must land in a provisioned DB.
+        const union = [...new Set<ServiceId>([...prereqServices, ...services])];
+        deps.log(`==> up: ${union.length} service(s) [${union.join(', ')}] (prerequisite union)`);
+        const up = await deps.api.up(union);
+        if (!up.ok) {
+          throw new FlowExecError(`native bring-up failed${up.failedAt ? ` at ${up.failedAt}` : ''}`);
+        }
+        restoredDates = await restoreCheckpoint(prereqWithCheckpoint, deps, opts, prereqServices, m);
+        deps.log(
+          `==> prerequisite: ${prereq.flow.name}@${prereq.stages.at(-1)?.id} restored from checkpoint (replay skipped)`,
+        );
+        restored = true;
+      } catch (err) {
+        if (!(err instanceof FlowExecError)) throw err;
+        // A failed BRING-UP would fail the replay too — don't retry it.
+        if (err.message.includes('bring-up failed')) throw err;
+        deps.log(`⚠ prerequisite checkpoint unavailable — falling back to full replay:\n${err.message}`);
+      }
+    }
+    if (!restored) {
+      deps.log(`==> prerequisite: ${prereq.flow.name} (through '${prereq.stages.at(-1)?.id}', headless)`);
+      const preCode = await executeResolvedFlow(prereq, deps, {
+        lane: opts.lane,
+        skipReset: false,
+        passthrough: [],
+      });
+      if (preCode !== 0) {
+        throw new FlowExecError(`prerequisite flow '${prereq.flow.name}' failed (exit ${preCode})`);
+      }
+    }
+  }
   if (resolved.checkpoint && opts.lane !== 'stack') {
     throw new FlowExecError('--from restores a LOCAL stack checkpoint — it requires the stack lane');
   }

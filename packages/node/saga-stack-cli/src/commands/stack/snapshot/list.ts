@@ -81,7 +81,11 @@ export default class SnapshotList extends BaseCommand {
       for (const e of entries) {
         const profile = e.manifest?.profile ?? '';
         const dbs = e.manifest?.databases.length ?? 0;
-        this.log(`${e.fixtureId}\t${profile}\t${dbs}\t${e.sizeBytes}\t${e.mtime.toISOString()}`);
+        // Field 6 (APPENDED, never inserted — fields 1-5 stay positional): the
+        // M14 checkpoint provenance `spa/flow@stage`, empty for plain snapshots.
+        const flow = e.manifest?.flow;
+        const flowRef = flow ? `${flow.spa}/${flow.flow}@${flow.stageId}` : '';
+        this.log(`${e.fixtureId}\t${profile}\t${dbs}\t${e.sizeBytes}\t${e.mtime.toISOString()}\t${flowRef}`);
       }
       return;
     }
@@ -105,6 +109,15 @@ export default class SnapshotList extends BaseCommand {
       this.log(
         row(e.fixtureId, profile, String(dbs), formatBytes(e.sizeBytes), friendlyDate(e.mtime)),
       );
+      // M14: a stage checkpoint's provenance as an indented sub-line (a column
+      // would misalign — checkpoint fixtureIds exceed the 28-char id cap).
+      const flow = e.manifest?.flow;
+      if (flow) {
+        const phase = flow.phase !== undefined ? ` (s${flow.phase})` : '';
+        this.log(
+          `        flow: ${flow.spa}/${flow.flow} @ ${flow.stageId}${phase} — baked ${flow.bakedAt.slice(0, 10)}, occurrence ${flow.dates.occurrenceDate}`,
+        );
+      }
       if (flags.verbose) {
         const dbW = clamp(Math.max(2, ...(e.manifest?.databases ?? []).map((d) => d.db.length)), 4, 22);
         for (const d of e.manifest?.databases ?? []) {

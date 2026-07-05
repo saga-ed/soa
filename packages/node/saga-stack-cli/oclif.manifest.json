@@ -120,6 +120,12 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "prereq-from-snapshot": {
+          "description": "M14-C: restore the journey@schedule checkpoint (when a valid one is baked) instead of replaying the whole journey headless — the big Connect-session accelerant. Falls back to the replay when absent/invalid; --reuse trumps this entirely.",
+          "name": "prereq-from-snapshot",
+          "allowNo": true,
+          "type": "boolean"
+        },
         "spa-path": {
           "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
           "name": "spa-path",
@@ -458,6 +464,12 @@
           "description": "M14: accept a checkpoint older than the 7-day staleness cliff (its baked dates may no longer fit the calendar — you're overriding that guard). Only meaningful with --from.",
           "name": "from-stale-ok",
           "allowNo": false,
+          "type": "boolean"
+        },
+        "prereq-from-snapshot": {
+          "description": "M14-C: satisfy a flow's prerequisite by RESTORING its terminal-stage checkpoint (when a valid one is baked) instead of the full headless replay; silently falls back to the replay when absent/invalid. NOTE the restore flushes redis (the replay leaves it warm). --no-prereq-from-snapshot forces the replay.",
+          "name": "prereq-from-snapshot",
+          "allowNo": true,
           "type": "boolean"
         },
         "spa-path": {

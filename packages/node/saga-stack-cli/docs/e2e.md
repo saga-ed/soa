@@ -57,6 +57,35 @@ ss e2e run saga-dash/journey --through sessions --headless
 - A clamped occurrence-date is injected so weekend runs don't flake.
 </details>
 
+## Stage checkpoints — skip the replay (M14)
+
+Working on stage 6 shouldn't cost a UI replay of stages 1–5 every iteration.
+**Bake** a DB checkpoint after each green stage, then **start mid-flow**:
+
+```bash
+ss e2e run saga-dash/journey --snapshot-stages --headless   # bake: ckpt after each stage
+ss e2e run saga-dash/journey --from sessions                # restore ckpt(schedule), run 6..N
+ss e2e run saga-dash/journey --from 6 --through 7           # windows compose with --through
+```
+
+Measured live: `--from` turned a 45s bake-path run into **5.8s** (restore + one stage).
+
+- Checkpoints are ordinary snapshots named `flow-<spa>-<flow>-s<N>-<stage>` in the
+  slot's snapshot root (so `--set`/`--slot` contexts keep separate checkpoints);
+  re-bakes overwrite. `ss stack snapshot list` shows their flow provenance;
+  `ss e2e list` marks baked stages with `[checkpoint]` (or `[checkpoint: re-bake]`).
+- A `--from` restore is **validated hard**: the producing stage definitions must be
+  unchanged (prefixHash), the checkpoint must cover the window's databases, sit AT
+  the local migration head (both directions), match the seed profile, and be ≤ 7 days
+  old by both bake time and its embedded occurrence date (`--from-stale-ok` overrides
+  the age cliff). The run **reuses the checkpoint's baked dates** so restored data and
+  specs agree; SPA-checkout drift since the bake is a warning.
+- **Prerequisites restore too**: a flow with `prerequisite` (connect-session ⇐
+  journey@schedule) restores the prerequisite's terminal checkpoint instead of the
+  full headless replay whenever a valid one is baked — falling back to the replay
+  otherwise. `--no-prereq-from-snapshot` forces the replay. (One delta vs the replay:
+  the restore flushes redis; caches rebuild from the restored DBs.)
+
 ## Live interactive Connect session
 
 ```bash

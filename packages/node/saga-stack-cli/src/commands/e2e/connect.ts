@@ -59,6 +59,12 @@ export default class E2eConnect extends BaseCommand {
       description: 'skip the journey-prerequisite rebuild + reset; run the live session against the current stack state',
       default: false,
     }),
+    'prereq-from-snapshot': Flags.boolean({
+      default: true,
+      allowNo: true,
+      description:
+        'M14-C: restore the journey@schedule checkpoint (when a valid one is baked) instead of replaying the whole journey headless — the big Connect-session accelerant. Falls back to the replay when absent/invalid; --reuse trumps this entirely.',
+    }),
     'spa-path': Flags.string({
       description: 'explicit path to a flows.json (file or dir) — highest-priority discovery override',
     }),
@@ -96,11 +102,24 @@ export default class E2eConnect extends BaseCommand {
     const { runtime } = buildStackContext(flags, seams, delegate);
     const api = makeStackApi(serviceManifest, runtime);
 
+    // M14-C: the checkpoint store so the journey prerequisite can be RESTORED
+    // instead of replayed (slot-0 command — no instance env needed; --reuse
+    // strips the prerequisite entirely, so nothing to restore there).
+    const checkpoints =
+      toRun.prerequisite !== undefined && flags['prereq-from-snapshot']
+        ? this.getCheckpointStore(this.scriptContextFromFlags(flags))
+        : undefined;
+
     try {
       const code = await executeResolvedFlow(
         toRun,
-        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l) },
-        { lane: 'stack', skipReset: flags.reuse, passthrough },
+        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), checkpoints },
+        {
+          lane: 'stack',
+          skipReset: flags.reuse,
+          passthrough,
+          prereqFromSnapshot: flags['prereq-from-snapshot'],
+        },
       );
       if (code !== 0) this.exit(code);
     } catch (err) {

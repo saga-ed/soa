@@ -61,5 +61,8 @@ restore refuses rather than silently loading a stale shape — the one blind spo
 - **`snapshot restore`** — you want a *specific captured* state back fast (a fixture, a repro).
 - **`reset` + `seed`** — you want a *fresh* deterministic baseline from the seed definitions.
 - **`up` (idempotent)** — you just want the stack running; it seeds if empty.
+- **e2e stage checkpoints** — mid-flow e2e state (`flow-<spa>-<flow>-s<N>-<stage>` fixtures,
+  baked by `e2e run --snapshot-stages`, restored by `--from`); `snapshot list` shows their
+  flow provenance as a sub-line. See [e2e → Stage checkpoints](./e2e.md#stage-checkpoints--skip-the-replay-m14).
 
 ← [verify](./verify.md) · [e2e →](./e2e.md)

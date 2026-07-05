@@ -376,3 +376,110 @@ describe('--from (restore)', () => {
     expect(launches).toHaveLength(0);
   });
 });
+
+describe('prerequisite-via-checkpoint (M14-C)', () => {
+  const CKPT_SCHEDULE = 'flow-saga-dash-journey-s5-schedule';
+
+  /** Bake journey through schedule (5 stages) so connect-session's prerequisite has a checkpoint. */
+  async function bakeThroughSchedule(): Promise<void> {
+    await E2eRun.run(['journey', '--through', 'schedule', '--snapshot-stages', '--headless', ...ws()], config);
+  }
+
+  it('restores the prerequisite terminal checkpoint instead of replaying — baked dates reach the PARENT env', async () => {
+    await bakeThroughSchedule();
+    expect(() => readCkptManifest(CKPT_SCHEDULE)).not.toThrow();
+
+    runs.length = 0;
+    ioCalls.length = 0;
+    logged.length = 0;
+    await E2eRun.run(['connect-session', '--headless', ...ws()], config);
+
+    const out = logged.join('\n');
+    expect(out).toContain(`==> restore: ${CKPT_SCHEDULE}`);
+    expect(out).toContain('restored from checkpoint (replay skipped)');
+    expect(out).not.toContain("==> prerequisite: journey (through 'schedule', headless)");
+
+    // Exactly ONE Playwright child (the connect room) — no journey replay spawn.
+    const pw = playwrightRuns();
+    expect(pw).toHaveLength(1);
+    expect(pw[0]!.args).toContain('interactive-connect');
+
+    // The PARENT spawn exports the checkpoint's baked dates (they crossed the
+    // frame because the restore ran in the parent, not the recursion).
+    const baked = (readCkptManifest(CKPT_SCHEDULE).flow as Record<string, unknown>).dates as Record<string, string>;
+    expect(pw[0]!.env?.PLAYWRIGHT_OCCURRENCE_DATE).toBe(baked.occurrenceDate);
+  });
+
+  it('falls back to the full replay when no checkpoint is baked (never hard-errors)', async () => {
+    await E2eRun.run(['connect-session', '--headless', ...ws()], config);
+    const out = logged.join('\n');
+    expect(out).toContain('falling back to full replay');
+    expect(out).toContain("==> prerequisite: journey (through 'schedule', headless)");
+    // Two Playwright children: the journey replay + the connect room.
+    expect(playwrightRuns()).toHaveLength(2);
+  });
+
+  it('--no-prereq-from-snapshot forces the replay even when a valid checkpoint exists', async () => {
+    await bakeThroughSchedule();
+    runs.length = 0;
+    logged.length = 0;
+    await E2eRun.run(['connect-session', '--no-prereq-from-snapshot', '--headless', ...ws()], config);
+    expect(logged.join('\n')).toContain("==> prerequisite: journey (through 'schedule', headless)");
+    expect(logged.join('\n')).not.toContain('restored from checkpoint');
+  });
+
+  it('an INVALID prerequisite checkpoint falls back with the violation surfaced as a warning', async () => {
+    await bakeThroughSchedule();
+    const m = readCkptManifest(CKPT_SCHEDULE);
+    (m.flow as Record<string, unknown>).prefixHash = 'deadbeef';
+    writeCkptManifest(CKPT_SCHEDULE, m);
+
+    runs.length = 0;
+    logged.length = 0;
+    await E2eRun.run(['connect-session', '--headless', ...ws()], config);
+    const out = logged.join('\n');
+    expect(out).toMatch(/falling back to full replay[\s\S]*prefixHash mismatch/);
+    expect(out).toContain("==> prerequisite: journey (through 'schedule', headless)");
+  });
+
+  it('dry-run shows the opportunistic prerequisite restore line', async () => {
+    logged.length = 0;
+    await E2eRun.run(['connect-session', '--dry-run', '--headless', ...ws()], config);
+    expect(logged.join('\n')).toMatch(/prerequisite: .*journey.*restore flow-saga-dash-journey-s5-schedule if baked/);
+  });
+});
+
+describe('list surfaces (M14-C)', () => {
+  it('e2e list marks baked stages [checkpoint] and stale ones [checkpoint: re-bake]', async () => {
+    await bakeThroughProgram();
+    // Stale-ify the program checkpoint (ancient occurrence date).
+    const m = readCkptManifest(CKPT_PROGRAM);
+    (m.flow as Record<string, unknown>).dates = {
+      occurrenceDate: '2020-03-02',
+      termStart: '2020-03-02',
+      termEnd: '2020-04-13',
+    };
+    writeCkptManifest(CKPT_PROGRAM, m);
+
+    logged.length = 0;
+    const { default: E2eList } = await import('../list.js');
+    await E2eList.run([...ws()], config);
+    const out = logged.join('\n');
+    expect(out).toMatch(/1\. roster.*\[checkpoint\]/);
+    expect(out).toMatch(/2\. program.*\[checkpoint: re-bake\]/);
+    expect(out).not.toMatch(/3\. enrollment.*checkpoint/); // never baked
+  });
+
+  it('snapshot list renders the checkpoint flow provenance (human sub-line + porcelain field 6)', async () => {
+    await bakeThroughProgram();
+    logged.length = 0;
+    const { default: SnapshotList } = await import('../../stack/snapshot/list.js');
+    await SnapshotList.run([...ws()], config);
+    expect(logged.join('\n')).toMatch(/flow: saga-dash\/journey @ roster \(s1\) — baked \d{4}-\d{2}-\d{2}, occurrence/);
+
+    logged.length = 0;
+    await SnapshotList.run(['--porcelain', ...ws()], config);
+    const row = logged.find((l) => l.startsWith(CKPT_PROGRAM));
+    expect(row?.split('\t')[5]).toBe('saga-dash/journey@program');
+  });
+});

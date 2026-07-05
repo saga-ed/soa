@@ -14,7 +14,8 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import { knownSpaIds } from '../../core/flow/index.js';
+import { deriveInstance } from '../../core/derive-instance.js';
+import { checkpointFixtureId, evaluateCheckpoint, knownSpaIds, stagePrefixHash } from '../../core/flow/index.js';
 import { discoverFlowManifest } from '../../e2e-orchestrate.js';
 
 export default class E2eList extends BaseCommand {
@@ -45,6 +46,13 @@ export default class E2eList extends BaseCommand {
   async run(): Promise<void> {
     const { flags } = await this.parse(E2eList);
 
+    // M14-C: annotate stages with baked-checkpoint freshness. The slot env
+    // seam must be applied FIRST — snapshotsRoot() reads $SAGA_MESH_* at call
+    // time, so a --set/--slot listing checks ITS slot's snapshot root.
+    this.applyInstanceEnv(deriveInstance({ slot: flags.slot }));
+    const checkpoints = this.getCheckpointStore(this.scriptContextFromFlags(flags));
+    const now = new Date(); // once — a listing must not straddle a midnight boundary
+
     const spas: Record<string, unknown>[] = [];
     const lines: string[] = [];
 
@@ -52,6 +60,29 @@ export default class E2eList extends BaseCommand {
       try {
         const disco = discoverFlowManifest(spaId, flags, process.env);
         const m = disco.manifest;
+
+        /** M14-C per-stage checkpoint verdict: valid | needs-re-bake | none. */
+        const ckpt = (f: (typeof m.flows)[number], i: number): 'valid' | 'stale' | null => {
+          if (!f.progressive) return null;
+          const stage = f.stages[i];
+          if (stage === undefined) return null;
+          const manifest = checkpoints.load(checkpointFixtureId(m.spa.id, f.name, stage, i + 1));
+          if (manifest === null) return null;
+          // seedProfile/spaHead deliberately omitted (WARN-only / unknowable here);
+          // identity + prefixHash + staleness give the honest listing verdict.
+          const verdict = evaluateCheckpoint(
+            manifest.flow,
+            {
+              spaId: m.spa.id,
+              flowName: f.name,
+              stageId: stage.id,
+              prefixHash: stagePrefixHash(f, f.stages.slice(0, i + 1)),
+            },
+            now,
+          );
+          return verdict.ok ? 'valid' : 'stale';
+        };
+
         spas.push({
           id: m.spa.id,
           system: m.spa.system,
@@ -65,7 +96,13 @@ export default class E2eList extends BaseCommand {
             foreground: f.foreground ?? false,
             av: f.av ?? false,
             prerequisite: f.prerequisite ?? null,
-            stages: f.stages.map((s) => ({ id: s.id, phase: s.phase ?? null, project: s.project, tags: s.tags ?? [] })),
+            stages: f.stages.map((s, i) => ({
+              id: s.id,
+              phase: s.phase ?? null,
+              project: s.project,
+              tags: s.tags ?? [],
+              checkpoint: ckpt(f, i),
+            })),
           })),
         });
 
@@ -76,10 +113,12 @@ export default class E2eList extends BaseCommand {
           const tags = [f.progressive ? 'progressive' : 'single', ...(f.foreground ? ['foreground'] : []), ...(f.av ? ['av'] : [])];
           lines.push(`  • ${f.name}  (${f.lanes.join('/')}; ${tags.join(', ')})`);
           if (f.prerequisite) lines.push(`      prerequisite: ${f.prerequisite.flow} through '${f.prerequisite.throughStage}'`);
-          for (const s of f.stages) {
+          for (const [i, s] of f.stages.entries()) {
             const phase = s.phase !== undefined ? `${s.phase}. ` : '— ';
             const stageTags = (s.tags ?? []).length ? `  [${(s.tags ?? []).join(', ')}]` : '';
-            lines.push(`      ${phase}${s.id}  (${s.project})${stageTags}`);
+            const state = ckpt(f, i);
+            const mark = state === 'valid' ? '  [checkpoint]' : state === 'stale' ? '  [checkpoint: re-bake]' : '';
+            lines.push(`      ${phase}${s.id}  (${s.project})${stageTags}${mark}`);
           }
         }
       } catch (err) {

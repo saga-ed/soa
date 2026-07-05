@@ -102,6 +102,12 @@ export default class E2eRun extends BaseCommand {
       description:
         "M14: accept a checkpoint older than the 7-day staleness cliff (its baked dates may no longer fit the calendar — you're overriding that guard). Only meaningful with --from.",
     }),
+    'prereq-from-snapshot': Flags.boolean({
+      default: true,
+      allowNo: true,
+      description:
+        "M14-C: satisfy a flow's prerequisite by RESTORING its terminal-stage checkpoint (when a valid one is baked) instead of the full headless replay; silently falls back to the replay when absent/invalid. NOTE the restore flushes redis (the replay leaves it warm). --no-prereq-from-snapshot forces the replay.",
+    }),
     'spa-path': Flags.string({
       description: 'explicit path to a flows.json (file or dir) — highest-priority discovery override',
     }),
@@ -217,7 +223,10 @@ export default class E2eRun extends BaseCommand {
     // M14: the checkpoint store (bake/--from) — constructed AFTER applyInstanceEnv
     // (above) so it targets the slot's snapshot root + containers, with the SHARED
     // ScriptContext so the schema-ahead guard honors --set-pinned repo paths.
-    const checkpointsActive = flags['snapshot-stages'] || resolved.checkpoint !== undefined;
+    const checkpointsActive =
+      flags['snapshot-stages'] ||
+      resolved.checkpoint !== undefined ||
+      (resolved.prerequisite !== undefined && flags['prereq-from-snapshot']);
     const checkpoints = checkpointsActive
       ? this.getCheckpointStore(this.scriptContextFromFlags(flags))
       : undefined;
@@ -253,6 +262,7 @@ export default class E2eRun extends BaseCommand {
           snapshotStages: flags['snapshot-stages'],
           fromStaleOk: flags['from-stale-ok'],
           spaHead,
+          prereqFromSnapshot: flags['prereq-from-snapshot'],
         },
       );
       if (code !== 0) this.exit(code);
@@ -292,7 +302,12 @@ function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
     );
   }
   if (d.prerequisite) {
-    lines.push(`prerequisite: ${d.prerequisite.spa}/${d.prerequisite.flow} (through ${d.prerequisite.stages.at(-1)}, headless)`);
+    lines.push(
+      `prerequisite: ${d.prerequisite.spa}/${d.prerequisite.flow} (through ${d.prerequisite.stages.at(-1)}, headless)` +
+        (d.prereqCheckpoint
+          ? ` — restore ${d.prereqCheckpoint.fixtureId} if baked (validated at run time; else full replay)`
+          : ''),
+    );
   }
   lines.push(
     `PLAYWRIGHT_OCCURRENCE_DATE: ${d.occurrenceDate}`,

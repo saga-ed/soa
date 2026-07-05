@@ -51,6 +51,7 @@ let launches: LaunchSpec[];
 let runs: ScriptInvocation[];
 let logged: string[];
 let warned: string[];
+let snapDir: string;
 
 /** Install fakes for every native-path seam. `launchFail` ids answer health-down. */
 function installSeams(launchFail: Set<string> = new Set()): void {
@@ -142,6 +143,10 @@ afterAll(() => {
 
 beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
+  // Hermetic snapshot root: `e2e list` reads it for the M14-C checkpoint
+  // annotation — never scan the developer's real ~/.saga-mesh/snapshots.
+  snapDir = mkdtempSync(join(tmpdir(), 'saga-e2e-list-'));
+  process.env.SAGA_MESH_SNAPSHOTS_DIR = snapDir;
   installSeams();
   logged = [];
   warned = [];
@@ -155,6 +160,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  rmSync(snapDir, { recursive: true, force: true });
+  delete process.env.SAGA_MESH_SNAPSHOTS_DIR;
   vi.restoreAllMocks();
 });
 

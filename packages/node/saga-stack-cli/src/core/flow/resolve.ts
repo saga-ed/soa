@@ -70,12 +70,32 @@ export interface ResolvedFlow {
   prerequisite?: ResolvedFlow;
   /** Flow-level extra env injected for every stage (from `flows.json` `flow.env`). */
   env?: Record<string, string>;
+  /**
+   * M14: set when resolved with `fromPhase` past the first stage — `stages` is
+   * then the from..through WINDOW, and the run restores `predecessor`'s
+   * checkpoint instead of replaying `producingStages` (plan 11 §1.2).
+   */
+  checkpoint?: {
+    /** The stage whose checkpoint supplies the starting state (`flow.stages[fromIdx-1]`). */
+    predecessor: StageDef;
+    /** 1-based position of the predecessor in the FULL stage list (fixtureId input). */
+    predecessorPosition: number;
+    /** The stages that PRODUCED the checkpointed state (`flow.stages[0..fromIdx)`) — the prefixHash input. */
+    producingStages: StageDef[];
+  };
 }
 
 /** Options narrowing which stages of a flow to resolve. */
 export interface ResolveFlowOptions {
   /** Resolve THROUGH this phase — matched against a stage's `id`, `phase`, or `project`. */
   throughPhase?: string | number;
+  /**
+   * M14: start AT this stage (same id/phase/project matching as `--through`) —
+   * the run restores the PREDECESSOR stage's checkpoint instead of replaying
+   * stages 1..from-1. Progressive flows only; must fall within the selected
+   * `--through` prefix. Matching the FIRST stage is a plain full run.
+   */
+  fromPhase?: string | number;
   /** Lane the run targets; validated against `flow.lanes`. Default `'stack'`. */
   lane?: Lane;
   /** Run only these stage ids (STAGE_ONLY iteration); overrides `throughPhase`. */
@@ -182,7 +202,45 @@ export function resolveFlow(
     );
   }
 
-  const stages = selectStages(flow, opts);
+  const selected = selectStages(flow, opts);
+
+  // M14 --from: narrow the selected prefix to the from..through WINDOW and
+  // surface the predecessor whose checkpoint replaces the replay (plan 11 §1.2).
+  let stages = selected;
+  let checkpoint: ResolvedFlow['checkpoint'];
+  if (opts.fromPhase !== undefined) {
+    if (!flow.progressive) {
+      throw new Error(`flow '${flowName}': --from requires a progressive flow`);
+    }
+    if (opts.onlyStages && opts.onlyStages.length > 0) {
+      throw new Error(`flow '${flowName}': --from cannot combine with an explicit stage subset`);
+    }
+    if (flow.prerequisite) {
+      throw new Error(
+        `flow '${flowName}': --from is not supported on a flow with a prerequisite — ` +
+          `checkpoint the prerequisite flow ('${flow.prerequisite.flow}') instead`,
+      );
+    }
+    const fromIdx = selected.findIndex((s) => stageMatches(s, opts.fromPhase as string | number));
+    if (fromIdx < 0) {
+      throw new Error(
+        `flow '${flowName}': no stage matches --from '${opts.fromPhase}' within the selected ` +
+          `1..through prefix (have: ${selected
+            .map((s) => (s.phase !== undefined ? `${s.phase}:${s.id}` : s.id))
+            .join(', ')}) — --from must not come after --through`,
+      );
+    }
+    if (fromIdx > 0) {
+      stages = selected.slice(fromIdx);
+      checkpoint = {
+        predecessor: selected[fromIdx - 1] as StageDef,
+        predecessorPosition: fromIdx, // 1-based position of stages[fromIdx-1]
+        producingStages: selected.slice(0, fromIdx),
+      };
+    }
+    // fromIdx === 0 ⇒ the first stage: nothing to restore, plain run.
+  }
+
   // selectStages always returns ≥1 stage (schema enforces ≥1; selection keeps ≥1).
   const terminal = stages[stages.length - 1] as StageDef;
 
@@ -222,8 +280,10 @@ export function resolveFlow(
   }
 
   // If a prerequisite builds the end-state, the main flow runs SKIP_RESET; else
-  // it resets+seeds itself when its seed asks for it.
-  const reset = prerequisite ? false : (seedSelection?.reset ?? false);
+  // it resets+seeds itself when its seed asks for it. A --from window NEVER
+  // resets — the checkpoint restore IS the state source (truncating here would
+  // wipe the very DBs the restore just filled).
+  const reset = prerequisite || checkpoint ? false : (seedSelection?.reset ?? false);
   const foreground = flow.foreground ?? false;
   const headed = opts.headed ?? foreground;
 
@@ -249,5 +309,6 @@ export function resolveFlow(
     },
     prerequisite,
     env: flow.env,
+    ...(checkpoint !== undefined ? { checkpoint } : {}),
   };
 }

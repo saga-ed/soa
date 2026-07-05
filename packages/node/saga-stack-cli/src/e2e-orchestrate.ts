@@ -33,7 +33,10 @@
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { composeSeedPlan } from './core/seed/compose-seed-plan.js';
-import { computeEnv, ENV_OCCURRENCE_DATE } from './core/flow/env.js';
+import { computeEnv, ENV_OCCURRENCE_DATE, ENV_TERM_END, ENV_TERM_START } from './core/flow/env.js';
+import { checkpointFixtureId, evaluateCheckpoint, stagePrefixHash } from './core/flow/checkpoint.js';
+import type { SnapshotFlowBlock } from './core/snapshot/index.js';
+import type { CheckpointStore } from './runtime/checkpoint-store.js';
 import {
   flowsCandidatePaths,
   knownSpaIds,
@@ -317,15 +320,26 @@ function joinPath(root: string, sub: string): string {
  * `--grep-invert @interactive` (pipeline runs exclude the interactive harness),
  * `--headed` (foreground flows), then any user passthrough (after `--`).
  */
-export function playwrightArgv(resolved: ResolvedFlow, passthrough: string[] = []): string[] {
+export function playwrightArgv(
+  resolved: ResolvedFlow,
+  passthrough: string[] = [],
+  /**
+   * M14 per-stage override (bake/--from spawns): target THIS project instead
+   * of the terminal, and (`noDeps`) break the config-side dependency chain so
+   * the spawn runs exactly one stage instead of replaying 1..N. Absent ⇒
+   * byte-identical to the pre-M14 argv.
+   */
+  stage?: { project: string; noDeps: boolean },
+): string[] {
   const argv = [
     'exec',
     'playwright',
     'test',
     `--config=${resolved.playwright.config}`,
     '--project',
-    resolved.playwright.project,
+    stage?.project ?? resolved.playwright.project,
   ];
+  if (stage?.noDeps) argv.push('--no-deps');
   if (resolved.playwright.grepInvert) argv.push('--grep-invert', resolved.playwright.grepInvert);
   if (resolved.playwright.headed) argv.push('--headed');
   argv.push(...passthrough);
@@ -390,6 +404,15 @@ export function playwrightEnv(
   now: Date,
   lane: Lane,
   ports?: Partial<Record<ServiceId, number>>,
+  /**
+   * M14 §2.2: the checkpoint's BAKED date env — a `--from` run must export the
+   * dates the restored state embeds, not today's clamp. Spread AFTER
+   * `computeEnv` (beats the clamp AND `flow.env` — at bake time computeEnv ran
+   * with the same flow.env, so what got baked is what a flow pin produced) but
+   * BEFORE the service URLs, so the slot offset still always wins for
+   * `PLAYWRIGHT_*_URL` keys.
+   */
+  dateOverrides?: Record<string, string>,
 ): Record<string, string> {
   // The date env (with `flow.env` merged LAST inside `computeEnv`) comes first, so
   // a flow's own env keeps winning for the occurrence-date clamp. Then, on the
@@ -401,6 +424,7 @@ export function playwrightEnv(
   // do NOT inject/override them.
   const env: Record<string, string> = {
     ...computeEnv(resolved.flow, now),
+    ...(dateOverrides ?? {}),
     ...(lane === 'stack' && ports ? serviceUrlEnv(ports) : {}),
   };
   if (lane !== 'stack') env.PLAYWRIGHT_LANE = lane;
@@ -425,6 +449,10 @@ export interface ResolvedFlowDescription {
   occurrenceDate: string;
   env: Record<string, string>;
   prerequisite: ResolvedFlowDescription | null;
+  /** M14: the checkpoint a --from run will restore (validated at run time, not here — pure). */
+  checkpoint: { fixtureId: string; predecessor: string } | null;
+  /** M14: the per-stage checkpoint fixtureIds a --snapshot-stages run bakes. */
+  bakeCheckpoints: string[] | null;
 }
 
 /** Options for the pure projection. */
@@ -435,6 +463,8 @@ export interface DescribeOptions {
   passthrough: string[];
   skipReset: boolean;
   manifest?: Manifest;
+  /** M14: project the per-stage bake fixtureIds (`--snapshot-stages` dry-run). */
+  snapshotStages?: boolean;
   /**
    * Resolved per-service stack ports (`launchContext.ports`, offset-carrying) —
    * threaded into the Playwright env so the dry-run shows the slot's OFFSET service
@@ -502,6 +532,28 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
     prerequisite: resolved.prerequisite
       ? describeResolved(resolved.prerequisite, { ...opts, passthrough: [], skipReset: false })
       : null,
+    checkpoint: resolved.checkpoint
+      ? {
+          fixtureId: checkpointFixtureId(
+            resolved.spa.id,
+            resolved.flow.name,
+            resolved.checkpoint.predecessor,
+            resolved.checkpoint.predecessorPosition,
+          ),
+          predecessor: resolved.checkpoint.predecessor.id,
+        }
+      : null,
+    bakeCheckpoints:
+      opts.snapshotStages === true
+        ? resolved.stages.map((s) =>
+            checkpointFixtureId(
+              resolved.spa.id,
+              resolved.flow.name,
+              s,
+              resolved.flow.stages.findIndex((f) => f.id === s.id) + 1,
+            ),
+          )
+        : null,
   };
 }
 
@@ -536,6 +588,13 @@ export interface ExecDeps {
    * Filtered out of the closure before up/reset/seed/verify. Empty at slot 0.
    */
   excluded?: Set<ServiceId>;
+  /**
+   * M14: the stage-checkpoint store (bake + restore). Constructed by the
+   * command AFTER `applyInstanceEnv` (so it targets the slot's snapshot root +
+   * containers). Absent ⇒ `--from`/`--snapshot-stages` paths are unavailable
+   * (the second caller, `e2e connect`, never sets it).
+   */
+  checkpoints?: CheckpointStore;
 }
 
 /** Per-run knobs. */
@@ -545,6 +604,15 @@ export interface ExecOptions {
   skipReset: boolean;
   /** Playwright passthrough args (after `--`); applied to THIS flow only, not the prerequisite. */
   passthrough: string[];
+  /**
+   * M14 bake mode: spawn Playwright once per stage (`--no-deps` past the
+   * first) and store a checkpoint after each green stage. Kept in OPTIONS so
+   * the prerequisite recursion (which passes deps down unchanged but rebuilds
+   * opts) never inherits it.
+   */
+  snapshotStages?: boolean;
+  /** M14 §2.2: downgrade the >7-day checkpoint staleness violation to a warning. */
+  fromStaleOk?: boolean;
 }
 
 /**
@@ -588,6 +656,13 @@ export async function executeResolvedFlow(
   const services = resolved.closure.services.filter((id) => !excluded.has(id));
   const slot = deps.slot ?? 0;
 
+  // M14: the baked date env a --from restore mandates for the Playwright child
+  // (§2.2 — restored data and running specs must agree on the dates).
+  let restoredDates: SnapshotFlowBlock['dates'] | undefined;
+  if (resolved.checkpoint && opts.lane !== 'stack') {
+    throw new FlowExecError('--from restores a LOCAL stack checkpoint — it requires the stack lane');
+  }
+
   if (opts.lane === 'stack') {
     // 1. native bring-up.
     deps.log(`==> up: ${services.length} service(s) [${services.join(', ')}]`);
@@ -596,7 +671,15 @@ export async function executeResolvedFlow(
       throw new FlowExecError(`native bring-up failed${up.failedAt ? ` at ${up.failedAt}` : ''}`);
     }
 
-    // 2. reset + seed (coupled; skipped on --skip-reset or when a prerequisite built the state).
+    // 2a. M14 --from: restore the predecessor stage's checkpoint — the state
+    // source replacing the reset+seed AND the Playwright replay of stages
+    // 1..from-1. Gated on resolved.checkpoint (never on effectiveReset:
+    // resolved.reset is already false for a --from window by construction).
+    if (resolved.checkpoint) {
+      restoredDates = await restoreCheckpoint(resolved, deps, opts);
+    }
+
+    // 2b. reset + seed (coupled; skipped on --skip-reset or when a prerequisite built the state).
     const effectiveReset = resolved.reset && !opts.skipReset;
     if (effectiveReset) {
       // FLIP 3: the e2e reset is NATIVE at EVERY slot now (M8 R4 — slot-aware via the
@@ -617,7 +700,7 @@ export async function executeResolvedFlow(
         const seeded = await deps.api.seed(plan);
         if (!seeded.ok) throw new FlowExecError(`seed failed at ${seeded.failed}`);
       }
-    } else {
+    } else if (!resolved.checkpoint) {
       deps.log('==> skip reset/seed (reuse current stack state)');
     }
 
@@ -632,17 +715,150 @@ export async function executeResolvedFlow(
     deps.log(`==> ${opts.lane} lane: no local stack to bring up; running Playwright against the deployed composition`);
   }
 
-  // 4. Playwright (foreground, stdio inherited). The clamped date env + the slot's
-  // offset service URLs are overlaid (so a slot's specs drive its OWN ports).
-  const argv = playwrightArgv(resolved, opts.passthrough);
-  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports);
-  deps.log(`==> playwright: ${resolved.flow.name} — pnpm ${argv.join(' ')} (cwd ${deps.appCwd})`);
-  const { code } = await deps.runner.run({
-    cwd: deps.appCwd,
-    command: 'pnpm',
-    args: argv,
-    env,
-    stdio: 'inherit',
+  // 4. Playwright (foreground, stdio inherited). The clamped date env (or the
+  // checkpoint's BAKED dates under --from) + the slot's offset service URLs are
+  // overlaid (so a slot's specs drive its OWN ports).
+  const dateOverrides = restoredDates
+    ? {
+        [ENV_OCCURRENCE_DATE]: restoredDates.occurrenceDate,
+        [ENV_TERM_START]: restoredDates.termStart,
+        [ENV_TERM_END]: restoredDates.termEnd,
+      }
+    : undefined;
+  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports, dateOverrides);
+
+  const spawn = async (stage?: { project: string; noDeps: boolean }): Promise<number> => {
+    const argv = playwrightArgv(resolved, opts.passthrough, stage);
+    deps.log(`==> playwright: ${resolved.flow.name} — pnpm ${argv.join(' ')} (cwd ${deps.appCwd})`);
+    const { code } = await deps.runner.run({
+      cwd: deps.appCwd,
+      command: 'pnpm',
+      args: argv,
+      env,
+      stdio: 'inherit',
+    });
+    return code;
+  };
+
+  // Default path: ONE spawn with the terminal project — Playwright's config-side
+  // dependency chain replays 1..N (byte-identical to pre-M14). The per-stage
+  // ladder exists ONLY for M14: baking needs a checkpoint between stages, and a
+  // --from window must NOT let the dependency chain replay the restored prefix.
+  const perStage = opts.snapshotStages === true || resolved.checkpoint !== undefined;
+  if (!perStage) return spawn();
+
+  if (opts.snapshotStages === true && deps.checkpoints === undefined) {
+    throw new FlowExecError('--snapshot-stages requires the checkpoint store (internal wiring error)');
+  }
+
+  for (const stage of resolved.stages) {
+    // The FIRST stage of the whole flow keeps its config dependencies — its only
+    // edge is the cheap coherence gate (e.g. stage-0-coherence), which a bake-
+    // from-scratch run should still pass through. Every later spawn breaks the
+    // chain (--no-deps) so earlier stages are never replayed.
+    const isFlowFirst = resolved.flow.stages[0]?.id === stage.id;
+    const code = await spawn({ project: stage.project, noDeps: !isFlowFirst });
+    if (code !== 0) {
+      // No checkpoint for a red stage — and stop the ladder (later checkpoints
+      // would capture state the failed stage never produced).
+      return code;
+    }
+    if (opts.snapshotStages === true) {
+      await bakeStageCheckpoint(resolved, stage, services, env, deps, m);
+    }
+  }
+  return 0;
+}
+
+/** M14 §1.2: load + validate + restore the predecessor checkpoint; returns its baked dates. */
+async function restoreCheckpoint(
+  resolved: ResolvedFlow,
+  deps: ExecDeps,
+  opts: ExecOptions,
+): Promise<SnapshotFlowBlock['dates']> {
+  const cp = resolved.checkpoint as NonNullable<ResolvedFlow['checkpoint']>;
+  if (deps.checkpoints === undefined) {
+    throw new FlowExecError('--from requires the checkpoint store (internal wiring error)');
+  }
+
+  const fixtureId = checkpointFixtureId(
+    resolved.spa.id,
+    resolved.flow.name,
+    cp.predecessor,
+    cp.predecessorPosition,
+  );
+  const snapshot = deps.checkpoints.load(fixtureId);
+  if (snapshot === null) {
+    throw new FlowExecError(
+      `no checkpoint '${fixtureId}' — bake one first:\n` +
+        `  ss e2e run ${resolved.spa.id}/${resolved.flow.name} --snapshot-stages --headless`,
+    );
+  }
+
+  const verdict = evaluateCheckpoint(
+    snapshot.flow,
+    {
+      spaId: resolved.spa.id,
+      flowName: resolved.flow.name,
+      stageId: cp.predecessor.id,
+      prefixHash: stagePrefixHash(resolved.flow, cp.producingStages),
+      seedProfile: resolved.seedSelection?.profile,
+    },
+    deps.now,
+    opts.fromStaleOk === true,
+  );
+  for (const w of verdict.warnings) deps.log(`⚠ checkpoint: ${w}`);
+  if (!verdict.ok) {
+    throw new FlowExecError(
+      `checkpoint '${fixtureId}' failed validation:\n` + verdict.violations.map((v) => `  ✗ ${v}`).join('\n'),
+    );
+  }
+
+  const flowBlock = snapshot.flow as SnapshotFlowBlock; // verdict.ok ⇒ present
+  deps.log(`==> restore: ${fixtureId} (baked ${flowBlock.bakedAt}, occurrence ${flowBlock.dates.occurrenceDate})`);
+  try {
+    await deps.checkpoints.restore(snapshot, { currentProfile: resolved.seedSelection?.profile });
+  } catch (err) {
+    throw new FlowExecError((err as Error).message);
+  }
+  return flowBlock.dates;
+}
+
+/** M14 §1.1: overwrite-store the checkpoint for a just-green stage. */
+async function bakeStageCheckpoint(
+  resolved: ResolvedFlow,
+  stage: ResolvedFlow['stages'][number],
+  services: ServiceId[],
+  env: Record<string, string>,
+  deps: ExecDeps,
+  m: Manifest,
+): Promise<void> {
+  const checkpoints = deps.checkpoints as NonNullable<ExecDeps['checkpoints']>;
+  const position = resolved.flow.stages.findIndex((s) => s.id === stage.id) + 1;
+  const fixtureId = checkpointFixtureId(resolved.spa.id, resolved.flow.name, stage, position);
+
+  // The bake scope is the SLOT-FILTERED closure's DB set (post-closure exclusion,
+  // same rule as `snapshot store --slot N`) — never dump DBs the slot never provisioned.
+  const dbs = [...new Set(services.flatMap((id) => m.services[id]?.databases ?? []))];
+
+  await checkpoints.bake({
+    fixtureId,
+    profile: resolved.seedSelection?.profile ?? 'roster',
+    dbs,
+    flow: {
+      spa: resolved.spa.id,
+      flow: resolved.flow.name,
+      stageId: stage.id,
+      ...(stage.phase !== undefined ? { phase: stage.phase } : {}),
+      prefixHash: stagePrefixHash(resolved.flow, resolved.flow.stages.slice(0, position)),
+      ...(resolved.seedSelection?.profile !== undefined ? { seedProfile: resolved.seedSelection.profile } : {}),
+      dates: {
+        occurrenceDate: env[ENV_OCCURRENCE_DATE] ?? '',
+        termStart: env[ENV_TERM_START] ?? '',
+        termEnd: env[ENV_TERM_END] ?? '',
+      },
+      bakedAt: deps.now.toISOString(),
+    },
   });
-  return code;
+  deps.log(`==> checkpoint: baked ${fixtureId}`);
 }

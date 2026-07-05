@@ -47,6 +47,15 @@ export {
 export { resolveFlow } from './resolve.js';
 export type { ResolvedFlow, ResolvedPlaywright, ResolveFlowOptions } from './resolve.js';
 
+// M14 stage checkpoints — pure identity + compatibility (plan 11 §1-§2).
+export {
+  CHECKPOINT_MAX_AGE_DAYS,
+  checkpointFixtureId,
+  evaluateCheckpoint,
+  stagePrefixHash,
+} from './checkpoint.js';
+export type { CheckpointExpectation, CheckpointVerdict } from './checkpoint.js';
+
 export { knownSpaIds, lookupSpa, SPA_REGISTRY } from './spa-registry.js';
 
 export {

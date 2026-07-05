@@ -441,6 +441,25 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "from": {
+          "description": "M14: start AT this stage (id / number / project — same matching as --through) by RESTORING the predecessor stage's checkpoint instead of replaying earlier Playwright stages. Bake checkpoints first with --snapshot-stages.",
+          "name": "from",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "snapshot-stages": {
+          "description": "M14: bake a DB checkpoint after each green stage (Playwright runs once per stage) so later runs can --from into the middle of the flow. Progressive flows only.",
+          "name": "snapshot-stages",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "from-stale-ok": {
+          "description": "M14: accept a checkpoint older than the 7-day staleness cliff (its baked dates may no longer fit the calendar — you're overriding that guard). Only meaningful with --from.",
+          "name": "from-stale-ok",
+          "allowNo": false,
+          "type": "boolean"
+        },
         "spa-path": {
           "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
           "name": "spa-path",

@@ -97,6 +97,38 @@ export const snapshotDbSchema = z.object({
   file: z.string().min(1),
 });
 
+/**
+ * M14 stage-checkpoint provenance (plan `11-e2e-stage-snapshots.md` §2). Set
+ * only on snapshots baked by `e2e run --snapshot-stages`; `--from` validates
+ * it before restoring. Additive optional block — old manifests parse fine,
+ * and an old CLI reading a new manifest just treats it as a plain snapshot
+ * (the schema-ahead migration guard still applies either way).
+ */
+export const snapshotFlowBlockSchema = z.object({
+  /** SPA + flow + stage this checkpoint captured the state AFTER. */
+  spa: z.string().min(1),
+  flow: z.string().min(1),
+  stageId: z.string().min(1),
+  /** `StageDef.phase` verbatim (the flow schema allows a number or a label). */
+  phase: z.union([z.number().int(), z.string()]).optional(),
+  /** Hash of the PRODUCING stage prefix (stages 1..this) + flow seed/env — §2.1. */
+  prefixHash: z.string().min(1),
+  /** The flow's effective seed profile at bake time. */
+  seedProfile: z.string().optional(),
+  /** The exact date env the baking run exported — a `--from` run REUSES these (§2.2). */
+  dates: z.object({
+    occurrenceDate: z.string().min(1),
+    termStart: z.string().min(1),
+    termEnd: z.string().min(1),
+  }),
+  /** Advisory (§2.3, WARN-only): the SPA checkout HEAD at bake time. */
+  spaHead: z.object({ sha: z.string(), dirty: z.boolean() }).optional(),
+  /** ISO timestamp of the bake — drives the staleness cliff (§2.2). */
+  bakedAt: z.string().min(1),
+});
+
+export type SnapshotFlowBlock = z.infer<typeof snapshotFlowBlockSchema>;
+
 /** The whole-snapshot manifest. */
 export const snapshotManifestSchema = z.object({
   schemaVersion: z.number().int().positive(),
@@ -111,6 +143,8 @@ export const snapshotManifestSchema = z.object({
   systems: z.array(serviceIdSchema).optional(),
   /** Flow that produced this snapshot, when stored by an e2e flow. */
   flowId: z.string().optional(),
+  /** M14: stage-checkpoint provenance (bake metadata `--from` validates). */
+  flow: snapshotFlowBlockSchema.optional(),
 });
 
 export type SnapshotDbEntry = z.infer<typeof snapshotDbSchema>;

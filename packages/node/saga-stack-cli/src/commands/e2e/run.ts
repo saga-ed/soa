@@ -85,6 +85,23 @@ export default class E2eRun extends BaseCommand {
       description: 'reuse the current stack state; skip the reset+seed before Playwright',
       default: false,
     }),
+    // NOTE: no oclif `exclusive`/`dependsOn` here — those treat DEFAULTED values
+    // as provided (a default:false boolean would demand --from on every run);
+    // the interactions are checked manually in run() like --headed/--headless.
+    from: Flags.string({
+      description:
+        "M14: start AT this stage (id / number / project — same matching as --through) by RESTORING the predecessor stage's checkpoint instead of replaying earlier Playwright stages. Bake checkpoints first with --snapshot-stages.",
+    }),
+    'snapshot-stages': Flags.boolean({
+      default: false,
+      description:
+        'M14: bake a DB checkpoint after each green stage (Playwright runs once per stage) so later runs can --from into the middle of the flow. Progressive flows only.',
+    }),
+    'from-stale-ok': Flags.boolean({
+      default: false,
+      description:
+        "M14: accept a checkpoint older than the 7-day staleness cliff (its baked dates may no longer fit the calendar — you're overriding that guard). Only meaningful with --from.",
+    }),
     'spa-path': Flags.string({
       description: 'explicit path to a flows.json (file or dir) — highest-priority discovery override',
     }),
@@ -109,6 +126,9 @@ export default class E2eRun extends BaseCommand {
 
     if (flags.headed && flags.headless) {
       this.error('--headed and --headless are mutually exclusive.');
+    }
+    if (flags.from !== undefined && flags['skip-reset']) {
+      this.error('--from and --skip-reset are mutually exclusive: the checkpoint restore IS the state source.');
     }
 
     // M13-B: the implicit set preflight (no-op without --set) — e2e run brings
@@ -138,6 +158,7 @@ export default class E2eRun extends BaseCommand {
     const headed = flags.headless ? false : flags.headed ? true : undefined;
     const resolved = resolveFlow(disco.manifest, flowName, {
       throughPhase: flags.through ?? flags.phase,
+      fromPhase: flags.from,
       lane,
       headed,
     });
@@ -162,6 +183,7 @@ export default class E2eRun extends BaseCommand {
         skipReset: flags['skip-reset'],
         ports: profile.portOverrides,
         excluded,
+        snapshotStages: flags['snapshot-stages'],
       });
       this.emit(flags, { dryRun: true, ...desc } as unknown as Record<string, unknown>, dryRunLines(desc));
       return;
@@ -192,6 +214,14 @@ export default class E2eRun extends BaseCommand {
     const { runtime } = buildStackContext(flags, seams, delegate, profile);
     const api = makeStackApi(serviceManifest, runtime);
 
+    // M14: the checkpoint store (bake/--from) — constructed AFTER applyInstanceEnv
+    // (above) so it targets the slot's snapshot root + containers, with the SHARED
+    // ScriptContext so the schema-ahead guard honors --set-pinned repo paths.
+    const checkpoints =
+      flags['snapshot-stages'] || resolved.checkpoint !== undefined
+        ? this.getCheckpointStore(this.scriptContextFromFlags(flags))
+        : undefined;
+
     try {
       const code = await executeResolvedFlow(
         resolved,
@@ -204,8 +234,15 @@ export default class E2eRun extends BaseCommand {
           slot: profile.slot,
           ports: runtime.launchContext.ports,
           excluded,
+          checkpoints,
         },
-        { lane, skipReset: flags['skip-reset'], passthrough },
+        {
+          lane,
+          skipReset: flags['skip-reset'],
+          passthrough,
+          snapshotStages: flags['snapshot-stages'],
+          fromStaleOk: flags['from-stale-ok'],
+        },
       );
       if (code !== 0) this.exit(code);
     } catch (err) {
@@ -229,8 +266,13 @@ function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
     `closure (${d.closure.services.length}): ${d.closure.services.join(', ')}`,
     `databases: ${d.closure.databases.join(', ') || '(none)'}`,
     `mesh: ${d.closure.mesh.join(', ') || '(none)'}`,
-    `reset+seed: ${d.reset ? 'yes' : 'no (reuse state)'}`,
+    d.checkpoint
+      ? `restore: ${d.checkpoint.fixtureId} (checkpoint after '${d.checkpoint.predecessor}'; validated at run time)`
+      : `reset+seed: ${d.reset ? 'yes' : 'no (reuse state)'}`,
   ];
+  if (d.bakeCheckpoints) {
+    lines.push(`bake (per green stage): ${d.bakeCheckpoints.join(', ')}`);
+  }
   if (d.seed) {
     lines.push(
       `  seed offline: ${d.seed.offline.join(', ') || '(none)'}`,

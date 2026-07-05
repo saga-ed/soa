@@ -29,8 +29,8 @@ import { dirname, join } from 'node:path';
 import { SET_UNSUPPORTED_COMMAND_MESSAGE, SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
 import { applySetToFlags, resolveSet } from './core/set/index.js';
 import type { SetInjectableFlags, WorktreeSet } from './core/set/index.js';
-import { checkWorktreeSet, makeSlotActiveProbe } from './runtime/index.js';
-import type { SlotActiveProbe } from './runtime/index.js';
+import { checkWorktreeSet, makeCheckpointStore, makeSlotActiveProbe } from './runtime/index.js';
+import type { CheckpointStore, SlotActiveProbe } from './runtime/index.js';
 import type { PullMode } from './core/auto-pull.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import type { RecordMode, ScriptPlan } from './core/flag-map.js';
@@ -181,6 +181,17 @@ export abstract class BaseCommand extends Command {
    */
   protected getSlotActiveProbe(): SlotActiveProbe {
     return makeSlotActiveProbe();
+  }
+
+  /**
+   * The injectable M14 stage-checkpoint store (`e2e run --snapshot-stages` /
+   * `--from`). Composes the SnapshotIO seam with the caller's ScriptContext
+   * (the schema-ahead guard's migration discovery — `--set` pins included).
+   * MUST be constructed after `applyInstanceEnv` so it targets the slot's
+   * snapshot root + containers. Tests spy this on the prototype.
+   */
+  protected getCheckpointStore(ctx: ScriptContext): CheckpointStore {
+    return makeCheckpointStore({ io: this.getSnapshotIO(), ctx });
   }
 
   /**

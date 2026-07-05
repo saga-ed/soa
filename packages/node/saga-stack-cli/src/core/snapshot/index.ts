@@ -14,9 +14,10 @@ export {
   safeParseSnapshotManifest,
   serializeSnapshotManifest,
   snapshotDbSchema,
+  snapshotFlowBlockSchema,
   snapshotManifestSchema,
 } from './manifest.js';
-export type { SnapshotDbEntry, SnapshotManifest } from './manifest.js';
+export type { SnapshotDbEntry, SnapshotFlowBlock, SnapshotManifest } from './manifest.js';
 
 export {
   evaluateValidation,

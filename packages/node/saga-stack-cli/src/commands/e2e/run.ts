@@ -190,6 +190,7 @@ export default class E2eRun extends BaseCommand {
         ports: profile.portOverrides,
         excluded,
         snapshotStages: flags['snapshot-stages'],
+        prereqFromSnapshot: flags['prereq-from-snapshot'],
       });
       this.emit(flags, { dryRun: true, ...desc } as unknown as Record<string, unknown>, dryRunLines(desc));
       return;

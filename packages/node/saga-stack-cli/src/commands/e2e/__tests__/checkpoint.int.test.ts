@@ -483,3 +483,14 @@ describe('list surfaces (M14-C)', () => {
     expect(row?.split('\t')[5]).toBe('saga-dash/journey@program');
   });
 });
+
+describe('M14-C review fixes', () => {
+  it('--no-prereq-from-snapshot --dry-run does NOT advertise a restore the run would never attempt', async () => {
+    logged.length = 0;
+    const { default: Run } = await import('../run.js');
+    await Run.run(['connect-session', '--no-prereq-from-snapshot', '--dry-run', '--headless', ...ws()], config);
+    const out = logged.join('\n');
+    expect(out).toContain('prerequisite:');
+    expect(out).not.toContain('restore flow-saga-dash-journey-s5-schedule');
+  });
+});

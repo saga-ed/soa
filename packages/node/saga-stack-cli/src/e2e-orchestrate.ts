@@ -468,6 +468,12 @@ export interface DescribeOptions {
   /** M14: project the per-stage bake fixtureIds (`--snapshot-stages` dry-run). */
   snapshotStages?: boolean;
   /**
+   * M14-C: whether the opportunistic prerequisite restore is ELIGIBLE
+   * (`--prereq-from-snapshot`, default true). The projection must not
+   * advertise a restore the run's gates would never attempt.
+   */
+  prereqFromSnapshot?: boolean;
+  /**
    * Resolved per-service stack ports (`launchContext.ports`, offset-carrying) —
    * threaded into the Playwright env so the dry-run shows the slot's OFFSET service
    * URLs. Absent (slot 0 caller may still pass the base map) ⇒ no service URLs.
@@ -556,7 +562,10 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
             ),
           )
         : null,
-    prereqCheckpoint: resolved.prerequisite
+    prereqCheckpoint: resolved.prerequisite &&
+      opts.prereqFromSnapshot !== false &&
+      opts.lane === 'stack' &&
+      resolved.prerequisite.prerequisite === undefined
       ? {
           fixtureId: checkpointFixtureId(
             resolved.spa.id,
@@ -686,7 +695,16 @@ export async function executeResolvedFlow(
   if (resolved.prerequisite) {
     const prereq = resolved.prerequisite;
     let restored = false;
-    if (opts.prereqFromSnapshot !== false && opts.lane === 'stack' && deps.checkpoints !== undefined) {
+    // NESTED chains (A ⇐ B ⇐ C) always REPLAY: restoring B's checkpoint would
+    // skip C's rebuild entirely (B's bake never dumped C-only DBs and the
+    // coverage guard sees only B's closure) — conservative until checkpoints
+    // learn transitive coverage.
+    if (
+      opts.prereqFromSnapshot !== false &&
+      opts.lane === 'stack' &&
+      deps.checkpoints !== undefined &&
+      prereq.prerequisite === undefined
+    ) {
       // The prerequisite's stages ARE the full producing prefix (1..through).
       const prereqWithCheckpoint: ResolvedFlow = {
         ...prereq,
@@ -725,6 +743,10 @@ export async function executeResolvedFlow(
         lane: opts.lane,
         skipReset: false,
         passthrough: [],
+        // The opt-out contract holds transitively: --no-prereq-from-snapshot
+        // forces the replay for NESTED prerequisites too (deps.checkpoints
+        // rides down unchanged, so the gate alone must carry the choice).
+        prereqFromSnapshot: opts.prereqFromSnapshot,
       });
       if (preCode !== 0) {
         throw new FlowExecError(`prerequisite flow '${prereq.flow.name}' failed (exit ${preCode})`);

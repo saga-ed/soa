@@ -66,3 +66,23 @@ restore refuses rather than silently loading a stale shape — the one blind spo
   flow provenance as a sub-line. See [e2e → Stage checkpoints](./e2e.md#stage-checkpoints--skip-the-replay-m14).
 
 ← [verify](./verify.md) · [e2e →](./e2e.md)
+
+## Porting legacy mesh-fixture fixtures (e.g. `iam-small`, soa#194)
+
+`mesh-fixture-cli` fixtures are authoring scripts (its `iam:*` verbs) plus a
+captured dump. `ss` deliberately does not re-implement the authoring verbs —
+the native recipe composes what already exists:
+
+1. Bring up just the scope: `ss stack up --only iam-api --reset`.
+2. Seed the canonical registry base (permissions/policies), then author the
+   fixture entities — today that is still the legacy script
+   (`packages/node/mesh-fixture-cli/fixtures/<name>/create.sh`), which works
+   fine against a native `ss` stack.
+3. Capture natively: `ss stack snapshot store <name> --only iam-api` — the
+   manifest records profile + schema revisions, and the restore guards
+   (profile-mismatch, snapshot-ahead) apply.
+4. Restore anywhere: `ss stack snapshot restore <name>` (slot-aware).
+
+When per-user roles/personas land (rostering#667), re-author on the same base
+and re-store — the snapshot supersedes the script as the distributable
+artifact.

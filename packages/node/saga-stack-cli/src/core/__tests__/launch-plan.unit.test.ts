@@ -173,7 +173,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       JANUS_REQUIRED: 'false',
       IAM_API_URL: 'http://localhost:3010',
       JWT_ISSUER: 'https://iam.saga.org',
-      ALLOWED_ORIGINS: 'http://localhost:6210',
+      // #222 port: dash joins the CORS allowlist; rtsm wired for private-convos.
+      ALLOWED_ORIGINS: 'http://localhost:6210,http://localhost:8900',
       SESSIONS_API_BASE_URL: 'http://localhost:3007',
       SAGA_API_TARGET: 'https://wootmath.com',
       CONTENT_API_URL: 'http://localhost:3009',
@@ -183,6 +184,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       LIVEKIT_API_SECRET: 'devsecret',
       RECORDING_SERVICE_TOKEN: 'local-dev-token',
       RECORDER_URL_TEMPLATE: 'http://127.0.0.1:7890',
+      RTSM_API_URL: 'http://localhost:6110',
       FLEEK_TOPOLOGY_JSON:
         '{"cityMap":{"_default":"ws://localhost:7880"},"nodes":{"local":{"url":"ws://localhost:7880"}}}',
     });

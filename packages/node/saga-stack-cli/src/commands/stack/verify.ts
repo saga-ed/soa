@@ -235,7 +235,7 @@ export default class StackVerify extends BaseCommand {
     this.log(cyan(bold('── service health ──')));
     for (const r of healthRows) {
       this.log(
-        `${r.ok ? green('✓') : red('✗')} ${r.id.padEnd(16)} ${dim(r.url)}  (${r.ok ? String(r.status ?? '') : red('down')})`,
+        `${r.ok ? green('✓') : red('✗')} ${r.id.padEnd(16)} ${dim(r.url)}  (${r.ok ? green(String(r.status ?? '')) : red('down')})`,
       );
     }
 
@@ -255,7 +255,7 @@ export default class StackVerify extends BaseCommand {
     };
     const data = assessData(readings);
     this.log(cyan(bold('── data ──')));
-    for (const c of data.checks) this.log(`${c.ok ? green('✓') : red('✗')} ${c.label}`);
+    for (const c of data.checks) this.log(`${c.ok ? green('✓') : red('✗')} ${dim(c.label)}`);
     for (const note of data.notes) this.log(dim(`· ${note}`));
 
     // 3. NATIVE source-posture (P1–P4) — STRICTLY WARN-ONLY (M12). Emits ✓/⚠/· lines but
@@ -324,8 +324,8 @@ export default class StackVerify extends BaseCommand {
 
 /** Render one posture line with verify.sh's ✓/⚠/· glyphs. */
 function renderPostureLine(l: PostureLine): string {
-  if (l.level === 'ok') return `${green('✓')} ${l.message}`;
-  if (l.level === 'warn') return `${yellow('⚠')} ${l.message}`;
+  if (l.level === 'ok') return `${green('✓')} ${dim(l.message)}`;
+  if (l.level === 'warn') return `${yellow('⚠')} ${dim(l.message)}`;
   return dim(`· ${l.message}`);
 }
 

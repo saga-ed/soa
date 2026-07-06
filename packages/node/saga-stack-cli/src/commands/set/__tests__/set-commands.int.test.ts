@@ -130,7 +130,7 @@ describe('set show — mainline currency', () => {
     spyGitRunner({ branches: { [dash]: 'feat/x' }, behindMain: { [dash]: 7 } });
 
     await SetShow.run(['x'], config);
-    expect(logged.join('\n')).toMatch(/\[⚠ behind origin\/main by 7 — merge up\]/);
+    expect(logged.join('\n')).toMatch(/\[⚠ behind origin\/main by 7 — merge up: git -C .*dash merge origin\/main\]/);
   });
 
   it('projects mainRef/includesMain/behindMain into --output-json', async () => {

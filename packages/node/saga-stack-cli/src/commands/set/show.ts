@@ -124,7 +124,7 @@ export default class SetShow extends BaseCommand {
           ? ''
           : r.includesMain
             ? `  [includes ${r.mainRef}]`
-            : `  [⚠ behind ${r.mainRef} by ${r.behindMain ?? '?'} — merge up]`;
+            : `  [⚠ behind ${r.mainRef} by ${r.behindMain ?? '?'} — merge up: git -C ${r.entry.path} merge ${r.mainRef}]`;
       this.log(
         `  ✓ ${r.repo.padEnd(12)} ${r.entry.path}  @ ${r.branch}${r.dirty ? ' (dirty)' : ' (clean)'}${provenance}${currency}`,
       );

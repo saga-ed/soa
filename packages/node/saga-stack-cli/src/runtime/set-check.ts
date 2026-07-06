@@ -117,6 +117,17 @@ export async function checkWorktreeSet(
       check.warnings.push(`branch drift: @ ${check.branch}, created from ${entry.createdFrom}`);
     }
 
+    // WARN-only mainline currency: --pull syncs a worktree's OWN branch, so a
+    // set can silently trail main; say so with the exact command (as-of the
+    // last fetch — the preflight adds no network).
+    const mainRef = `origin/${await deps.git.symbolicRefDefault(entry.path)}`;
+    if ((await deps.git.revParseVerify(entry.path, mainRef)) && !(await deps.git.isAncestorOfHead(entry.path, mainRef))) {
+      const behind = await deps.git.countBehindRef(entry.path, mainRef);
+      check.warnings.push(
+        `behind ${mainRef} by ${behind ?? '?'} — merge up: git -C ${entry.path} merge ${mainRef}`,
+      );
+    }
+
     // Primary-checkout posture (tenet 4): shared repos must be clean,
     // pre-built, effectively read-only worktrees — never the hot primary.
     const primary = safeRealpath(join(deps.devRoot, REPO_DEFAULT_DIR[REPO_ENV_VAR[repo]]));

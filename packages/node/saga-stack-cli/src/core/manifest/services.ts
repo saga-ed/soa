@@ -344,7 +344,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         JANUS_REQUIRED: 'false',
         IAM_API_URL: '${IAM_URL}',
         JWT_ISSUER: 'https://iam.saga.org',
-        ALLOWED_ORIGINS: '${CONNECT_WEB_URL}',
+        // #222 port: dash calls connect-api cross-origin (journey attendance /
+        // connect embeds) — without DASH_URL in the allowlist those are CORS-blocked.
+        ALLOWED_ORIGINS: '${CONNECT_WEB_URL},${DASH_URL}',
         SESSIONS_API_BASE_URL: 'http://localhost:3007',
         SAGA_API_TARGET: '${SAGA_API_TARGET}',
         CONTENT_API_URL: '${CONTENT_API_URL}',
@@ -352,6 +354,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         LIVEKIT_URL: 'ws://localhost:7880',
         LIVEKIT_API_KEY: 'devkey',
         LIVEKIT_API_SECRET: 'devsecret',
+        // #222 port: point the private-convos supervisor at the local rtsm so
+        // server-side dark-corner enforcement runs (otherwise connect-api logs
+        // "private-convos registry disabled" and private conversations aren't
+        // enforced). Tokenized (up.sh hardcoded :6110) so slots stay correct.
+        RTSM_API_URL: '${RTSM_URL}',
         RECORDING_SERVICE_TOKEN: '${RECORDING_TOKEN}',
         RECORDER_URL_TEMPLATE: 'http://127.0.0.1:${RECORDER_CONTROL_PORT}',
         FLEEK_TOPOLOGY_JSON:

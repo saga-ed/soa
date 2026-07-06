@@ -30,6 +30,7 @@
 import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
+import { bold, cyan, dim, green, red, yellow } from '../../color.js';
 import { BUNDLE_NAMES } from '../../core/bundles.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { SYNTH_DEV_DIR } from '../../core/flag-map.js';
@@ -231,9 +232,11 @@ export default class StackVerify extends BaseCommand {
       }),
     );
     const healthDown = healthRows.filter((r) => !r.ok);
-    this.log('── service health ──');
+    this.log(cyan(bold('── service health ──')));
     for (const r of healthRows) {
-      this.log(`${r.ok ? '✓' : '✗'} ${r.id.padEnd(16)} ${r.url}  (${r.status ?? 'down'})`);
+      this.log(
+        `${r.ok ? green('✓') : red('✗')} ${r.id.padEnd(16)} ${dim(r.url)}  (${r.ok ? green(String(r.status ?? '')) : red('down')})`,
+      );
     }
 
     // 2. native DATA checks (D1–D5). Reads as postgres_admin against the base mesh
@@ -251,21 +254,21 @@ export default class StackVerify extends BaseCommand {
       mongoReachable: await meshExec.ready(mongoContainer, mongo.readinessCmd),
     };
     const data = assessData(readings);
-    this.log('── data ──');
-    for (const c of data.checks) this.log(`${c.ok ? '✓' : '✗'} ${c.label}`);
-    for (const note of data.notes) this.log(`· ${note}`);
+    this.log(cyan(bold('── data ──')));
+    for (const c of data.checks) this.log(`${c.ok ? green('✓') : red('✗')} ${dim(c.label)}`);
+    for (const note of data.notes) this.log(dim(`· ${note}`));
 
     // 3. NATIVE source-posture (P1–P4) — STRICTLY WARN-ONLY (M12). Emits ✓/⚠/· lines but
     // NEVER contributes to the verdict. Skipped under --health-only (health + DATA only).
     let postureWarns = 0;
     if (!flags['health-only']) {
       const posture = await this.runPosture(flags);
-      this.log('── source posture ──');
+      this.log(cyan(bold('── source posture ──')));
       if (!posture.overlayPresent) {
-        this.log('· no local overlay — asserting every managed repo on origin/main');
+        this.log(dim('· no local overlay — asserting every managed repo on origin/main'));
       }
       for (const l of posture.result.posture) this.log(renderPostureLine(l));
-      this.log('── freshness (behind origin) ──');
+      this.log(cyan(bold('── freshness (behind origin) ──')));
       for (const l of posture.result.freshness) this.log(renderPostureLine(l));
       postureWarns = [...posture.result.posture, ...posture.result.freshness].filter(
         (l) => l.level === 'warn',
@@ -279,13 +282,13 @@ export default class StackVerify extends BaseCommand {
     const warnSuffix = postureWarns > 0 ? ` (${postureWarns} posture warning(s) — see ⚠ above)` : '';
     this.log(
       passed
-        ? `✓ verify --full: health + data green${warnSuffix}`
-        : `✗ verify --full: ${[
+        ? green(bold(`✓ verify --full: health + data green`)) + (warnSuffix ? yellow(warnSuffix) : '')
+        : red(bold(`✗ verify --full: ${[
             healthOk ? null : `${healthDown.length} service(s) down`,
             data.passed ? null : `${data.checks.filter((c) => !c.ok).length} data check(s) failed`,
           ]
             .filter(Boolean)
-            .join('; ')}${warnSuffix}`,
+            .join('; ')}`)) + (warnSuffix ? yellow(warnSuffix) : ''),
     );
     if (!passed) this.exit(1);
   }
@@ -321,8 +324,9 @@ export default class StackVerify extends BaseCommand {
 
 /** Render one posture line with verify.sh's ✓/⚠/· glyphs. */
 function renderPostureLine(l: PostureLine): string {
-  const glyph = l.level === 'ok' ? '✓' : l.level === 'warn' ? '⚠' : '·';
-  return `${glyph} ${l.message}`;
+  if (l.level === 'ok') return `${green('✓')} ${dim(l.message)}`;
+  if (l.level === 'warn') return `${yellow('⚠')} ${dim(l.message)}`;
+  return dim(`· ${l.message}`);
 }
 
 /** A rendered verify row. */

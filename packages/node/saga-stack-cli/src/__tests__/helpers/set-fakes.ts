@@ -50,12 +50,22 @@ export function spySetStore(data: unknown): void {
  * (default clean), and any path in `nonCheckouts` fails `revParseVerify`.
  */
 export function spyGitRunner(
-  opts: { branches?: Record<string, string>; porcelain?: string; nonCheckouts?: string[] } = {},
+  opts: {
+    branches?: Record<string, string>;
+    porcelain?: string;
+    nonCheckouts?: string[];
+    /** Per-path mainline currency (default: every checkout INCLUDES origin/main). */
+    behindMain?: Record<string, number>;
+  } = {},
 ): void {
   const fake: Partial<GitRunner> = {
     branchShowCurrent: async (repoPath: string) => opts.branches?.[repoPath] ?? 'main',
     statusPorcelain: async () => opts.porcelain ?? '',
     revParseVerify: async (repoPath: string) => !(opts.nonCheckouts ?? []).includes(repoPath),
+    symbolicRefDefault: async () => 'main',
+    fetch: async () => true,
+    isAncestorOfHead: async (repoPath: string) => (opts.behindMain?.[repoPath] ?? 0) === 0,
+    countBehindRef: async (repoPath: string) => opts.behindMain?.[repoPath] ?? 0,
   };
   vi.spyOn(
     BaseCommand.prototype as unknown as { getGitRunner: () => GitRunner },

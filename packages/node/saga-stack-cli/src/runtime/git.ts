@@ -62,6 +62,8 @@ export interface GitRunner {
   // ── M10 overlay-engine verbs (refresh-suite.sh refresh_repo / reset) ──
   /** `git rev-parse --verify --quiet <ref>` exited 0 — the ref exists (origin/<base>, origin/<b>, or local/integration). */
   revParseVerify(repoPath: string, ref: string): Promise<boolean>;
+  /** `git merge-base --is-ancestor <ancestor> HEAD` exited 0 — HEAD already contains <ancestor>. */
+  isAncestorOfHead(repoPath: string, ancestor: string): Promise<boolean>;
   /** `git checkout -B <branch> <startPoint>` — (re)create+switch to a branch at a start point (untracked files survive). */
   checkoutB(repoPath: string, branch: string, startPoint: string): Promise<boolean>;
   /** `git merge [--no-ff] [--no-edit] <ref>` — true iff it exited 0 (false ⇒ conflict, caller aborts). */
@@ -171,6 +173,9 @@ export function makeRealGitRunner(): GitRunner {
     // ── M10 overlay-engine verbs ──
     revParseVerify(repoPath: string, ref: string): Promise<boolean> {
       return gitOk(repoPath, ['rev-parse', '--verify', '--quiet', ref]);
+    },
+    isAncestorOfHead(repoPath: string, ancestor: string): Promise<boolean> {
+      return gitOk(repoPath, ['merge-base', '--is-ancestor', ancestor, 'HEAD']);
     },
     checkoutB(repoPath: string, branch: string, startPoint: string): Promise<boolean> {
       return gitOk(repoPath, ['checkout', '-B', branch, startPoint]);

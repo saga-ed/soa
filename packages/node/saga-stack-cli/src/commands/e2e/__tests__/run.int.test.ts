@@ -438,7 +438,7 @@ describe('e2e run — --hold manual-testing handoff (Plan 13)', () => {
     // dev-persona jar minted at slot-0 iam, written to the state dir.
     expect(posts).toHaveLength(1);
     expect(posts[0]?.url).toBe('http://localhost:3010/trpc/auth.devLogin');
-    expect(posts[0]?.opts.body).toBe('{"email":"dev@saga.org"}');
+    expect(posts[0]?.opts.body).toBe('{"identifier":"dev@saga.org","email":"dev@saga.org"}');
     expect(jarWrites).toHaveLength(1);
     expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');
 

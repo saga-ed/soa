@@ -90,7 +90,8 @@ describe('set show', () => {
     await SetShow.run(['x'], config);
     const out = logged.join('\n');
     expect(out).toMatch(/x — slot 1/);
-    expect(out).toMatch(/✓ saga-dash.*@ feat\/x \(clean\).*created from feat\/x/);
+    expect(out).toMatch(/✓ saga-dash\s+@ feat\/x\s+\(clean\)/);
+    expect(out).toMatch(/created from feat\/x/);
     expect(out).toMatch(/✗ rostering.*\(missing\)/);
   });
 
@@ -109,6 +110,41 @@ describe('set show', () => {
     const out = logged.join('\n');
     expect(out).toMatch(/✗ saga-dash.*\(not a git checkout\)/);
     expect(out).not.toMatch(/detached/);
+  });
+});
+
+describe('set show — mainline currency', () => {
+  it('reports [includes origin/main] when the worktree contains the main tip', async () => {
+    const dash = join(dir, 'dash');
+    mkdirSync(dash);
+    spySetStore(oneSetWithSagaDash(dash));
+    spyGitRunner({ branches: { [dash]: 'feat/x' } });
+
+    await SetShow.run(['x'], config);
+    expect(logged.join('\n')).toMatch(/\[includes origin\/main\]/);
+  });
+
+  it('warns with the behind count when the worktree lacks the main tip', async () => {
+    const dash = join(dir, 'dash');
+    mkdirSync(dash);
+    spySetStore(oneSetWithSagaDash(dash));
+    spyGitRunner({ branches: { [dash]: 'feat/x' }, behindMain: { [dash]: 7 } });
+
+    await SetShow.run(['x'], config);
+    const out2 = logged.join('\n');
+    expect(out2).toMatch(/\[⚠ behind origin\/main by 7\]/);
+    expect(out2).toMatch(/merge up: git -C .*dash merge origin\/main/);
+  });
+
+  it('projects mainRef/includesMain/behindMain into --output-json', async () => {
+    const dash = join(dir, 'dash');
+    mkdirSync(dash);
+    spySetStore(oneSetWithSagaDash(dash));
+    spyGitRunner({ behindMain: { [dash]: 3 } });
+
+    await SetShow.run(['x', '--output-json'], config);
+    const parsed = JSON.parse(logged.join('\n'));
+    expect(parsed.repos[0]).toMatchObject({ mainRef: 'origin/main', includesMain: false, behindMain: 3 });
   });
 });
 

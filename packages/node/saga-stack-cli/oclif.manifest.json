@@ -900,6 +900,12 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "fetch": {
+          "description": "git fetch each repo first so the mainline-currency report reflects the REMOTE tip (network); without it, currency is as-of the last fetch",
+          "name": "fetch",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,

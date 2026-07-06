@@ -412,4 +412,58 @@ describe('ExpressServer (integration)', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   });
+
+  it('skips its json parser when an upstream parser already consumed the body (program-hub#306)', async () => {
+    const container = new Container();
+    const mockLogger: ILogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    };
+
+    const port = getRandomPort();
+    const config = {
+      configType: 'EXPRESS_SERVER' as const,
+      port,
+      logLevel: 'info' as const,
+      name: 'Interop Test',
+    };
+
+    container.bind('ExpressServerConfig').toConstantValue(config);
+    container.bind('ILogger').toConstantValue(mockLogger);
+    container.bind(ExpressServer).toSelf();
+
+    const server = container.get(ExpressServer);
+    // Simulate an express-5 consumer: body-parser 2.x reads the stream and
+    // sets req.body, but never sets the body-parser 1.x req._body flag. An
+    // unguarded express.json() in init() then re-reads the consumed stream
+    // and 500s "stream is not readable".
+    server.getApp().use((req: Request, _res: Response, next: (err?: unknown) => void) => {
+      let raw = '';
+      req.setEncoding('utf8');
+      req.on('data', (chunk: string) => { raw += chunk; });
+      req.on('end', () => {
+        req.body = JSON.parse(raw);
+        next();
+      });
+    });
+    await server.init(container, [InheritedParamController]);
+    server.start();
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    try {
+      const resp = await fetch(`http://localhost:${port}/inherit/echo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msg: 'once' }),
+      });
+      expect(resp.status).toBe(200);
+      const data = await resp.json() as any;
+      expect(data.received).toBe('once');
+    } finally {
+      server.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  });
 });

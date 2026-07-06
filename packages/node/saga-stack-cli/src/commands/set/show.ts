@@ -12,7 +12,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { Args } from '@oclif/core';
+import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { resolveSet } from '../../core/set/index.js';
 import type { SetRepoEntry, SetRepoKey } from '../../core/set/index.js';
@@ -28,6 +28,11 @@ export default class SetShow extends BaseCommand {
 
   static flags = {
     ...BaseCommand.baseFlags,
+    fetch: Flags.boolean({
+      description:
+        'git fetch each repo first so the mainline-currency report reflects the REMOTE tip (network); without it, currency is as-of the last fetch',
+      default: false,
+    }),
   };
 
   async run(): Promise<void> {
@@ -43,17 +48,27 @@ export default class SetShow extends BaseCommand {
     const repos = await Promise.all(
       (Object.entries(set.repos) as [SetRepoKey, SetRepoEntry][]).map(async ([repo, entry]) => {
         if (!existsSync(entry.path)) {
-          return { repo, entry, exists: false, checkout: false, branch: null, dirty: null };
+          return { repo, entry, exists: false, checkout: false, branch: null, dirty: null, mainRef: null, includesMain: null, behindMain: null };
         }
         // branchShowCurrent folds ALL errors to '' — indistinguishable from a
         // real detached HEAD — so probe checkout-ness explicitly first: a dir
         // that is not a git checkout must not render as '@ (detached) (clean)'.
         if (!(await git.revParseVerify(entry.path, 'HEAD'))) {
-          return { repo, entry, exists: true, checkout: false, branch: null, dirty: null };
+          return { repo, entry, exists: true, checkout: false, branch: null, dirty: null, mainRef: null, includesMain: null, behindMain: null };
         }
         const branch = (await git.branchShowCurrent(entry.path)) || '(detached)';
         const dirty = (await git.statusPorcelain(entry.path)).trim() !== '';
-        return { repo, entry, exists: true, checkout: true, branch, dirty };
+        // Mainline currency (as-of last fetch unless --fetch): does this
+        // worktree already CONTAIN origin/<default>? If not, how far behind?
+        if (flags.fetch) await git.fetch(entry.path);
+        const mainRef = `origin/${await git.symbolicRefDefault(entry.path)}`;
+        let includesMain: boolean | null = null;
+        let behindMain: number | null = null;
+        if (await git.revParseVerify(entry.path, mainRef)) {
+          includesMain = await git.isAncestorOfHead(entry.path, mainRef);
+          behindMain = includesMain ? 0 : await git.countBehindRef(entry.path, mainRef); // null = could not compare
+        }
+        return { repo, entry, exists: true, checkout: true, branch, dirty, mainRef, includesMain, behindMain };
       }),
     );
 
@@ -71,6 +86,9 @@ export default class SetShow extends BaseCommand {
               checkout: r.checkout,
               branch: r.branch,
               dirty: r.dirty,
+              mainRef: r.mainRef,
+              includesMain: r.includesMain,
+              behindMain: r.behindMain,
               ...(r.entry.createdBy !== undefined ? { createdBy: r.entry.createdBy } : {}),
               ...(r.entry.createdFrom !== undefined ? { createdFrom: r.entry.createdFrom } : {}),
             })),
@@ -101,8 +119,14 @@ export default class SetShow extends BaseCommand {
         continue;
       }
       const provenance = r.entry.createdFrom !== undefined ? `  created from ${r.entry.createdFrom}` : '';
+      const currency =
+        r.includesMain === null
+          ? ''
+          : r.includesMain
+            ? `  [includes ${r.mainRef}]`
+            : `  [⚠ behind ${r.mainRef} by ${r.behindMain ?? '?'} — merge up]`;
       this.log(
-        `  ✓ ${r.repo.padEnd(12)} ${r.entry.path}  @ ${r.branch}${r.dirty ? ' (dirty)' : ' (clean)'}${provenance}`,
+        `  ✓ ${r.repo.padEnd(12)} ${r.entry.path}  @ ${r.branch}${r.dirty ? ' (dirty)' : ' (clean)'}${provenance}${currency}`,
       );
     }
   }

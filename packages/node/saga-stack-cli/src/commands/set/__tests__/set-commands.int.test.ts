@@ -112,6 +112,39 @@ describe('set show', () => {
   });
 });
 
+describe('set show — mainline currency', () => {
+  it('reports [includes origin/main] when the worktree contains the main tip', async () => {
+    const dash = join(dir, 'dash');
+    mkdirSync(dash);
+    spySetStore(oneSetWithSagaDash(dash));
+    spyGitRunner({ branches: { [dash]: 'feat/x' } });
+
+    await SetShow.run(['x'], config);
+    expect(logged.join('\n')).toMatch(/\[includes origin\/main\]/);
+  });
+
+  it('warns with the behind count when the worktree lacks the main tip', async () => {
+    const dash = join(dir, 'dash');
+    mkdirSync(dash);
+    spySetStore(oneSetWithSagaDash(dash));
+    spyGitRunner({ branches: { [dash]: 'feat/x' }, behindMain: { [dash]: 7 } });
+
+    await SetShow.run(['x'], config);
+    expect(logged.join('\n')).toMatch(/\[⚠ behind origin\/main by 7 — merge up\]/);
+  });
+
+  it('projects mainRef/includesMain/behindMain into --output-json', async () => {
+    const dash = join(dir, 'dash');
+    mkdirSync(dash);
+    spySetStore(oneSetWithSagaDash(dash));
+    spyGitRunner({ behindMain: { [dash]: 3 } });
+
+    await SetShow.run(['x', '--output-json'], config);
+    const parsed = JSON.parse(logged.join('\n'));
+    expect(parsed.repos[0]).toMatchObject({ mainRef: 'origin/main', includesMain: false, behindMain: 3 });
+  });
+});
+
 describe('set check', () => {
   it('a clean pre-built set is OK (exit 0)', async () => {
     const dash = join(dir, 'dash');

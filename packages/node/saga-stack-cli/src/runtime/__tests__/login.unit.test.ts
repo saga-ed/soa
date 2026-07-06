@@ -49,7 +49,7 @@ describe('nativeLogin', () => {
     // origin-checked POST at the devLogin endpoint
     expect(calls[0]?.url).toBe('http://localhost:3010/trpc/auth.devLogin');
     expect(calls[0]?.opts.origin).toBe('http://localhost:3010');
-    expect(calls[0]?.opts.body).toBe('{"email":"dev@saga.org"}');
+    expect(calls[0]?.opts.body).toBe('{"identifier":"dev@saga.org","email":"dev@saga.org"}');
     // jar written at the state-dir path, Netscape-formatted
     expect(writes).toHaveLength(1);
     expect(writes[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');

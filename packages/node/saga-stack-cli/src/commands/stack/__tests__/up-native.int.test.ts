@@ -231,7 +231,7 @@ describe('stack up --only — native partial-stack', () => {
     expect(posts).toHaveLength(1);
     expect(posts[0]?.url).toBe('http://localhost:3010/trpc/auth.devLogin');
     expect(posts[0]?.opts.origin).toBe('http://localhost:3010');
-    expect(posts[0]?.opts.body).toBe('{"email":"dev@saga.org"}');
+    expect(posts[0]?.opts.body).toBe('{"identifier":"dev@saga.org","email":"dev@saga.org"}');
     expect(jarWrites).toHaveLength(1);
     expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');
     expect(jarWrites[0]?.contents).toContain('iam_session\tjwt');

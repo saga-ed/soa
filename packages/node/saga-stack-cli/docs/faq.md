@@ -166,41 +166,6 @@ ss set check topo          # verdicts: prebuilt vs BUILDABLE, drift, collisions,
 which is meaningless for set worktrees (they're SUPPOSED to be on feature
 branches) — `set show`/`set check` ask the right questions for those.
 
-## Why does my PR show `skipping` entries in CI — is something failing?
-
-No. "Version and Publish Packages" and "Create Release Summary" only run on the
-release path (merges to main); on PR events they report `skipping`, which some
-views render with a neutral icon that reads like a failure at a glance. Check
-`gh pr checks <n>` — if nothing says `fail`, you're green.
-
-## A service fails bring-up with `ERR_MODULE_NOT_FOUND` — what happened?
-
-Its sibling repo was pulled but not rebuilt: the prep pass's fresh-skip treats
-`node_modules` + `dist` PRESENCE as fresh, so it won't rebuild after a pull
-changed dependencies. Fix: `pnpm install && pnpm build` in that repo.
-
-<details><summary>Real example</summary>
-
-```
-Error: native bring-up failed at ads-adm-api
-# /tmp/sds-synthetic/ads-adm-api.log:
-Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@saga-ed/soa-postgres'
-  imported from .../ads-adm-api/dist/chunk-2XELNIO7.js
-```
-
-student-data-system had been fast-forwarded that morning; its `dist` predated
-the dependency change. A lockfile-hash-aware freshness check is on the backlog.
-
-</details>
-
-## Why is journey stage 8 (attendance-personas) skipped?
-
-Deliberately, pending saga-dash#280: the SESSION measured-time overlay has no
-data source in a seeded journey (no real tutoring → no dosage telemetry), so
-its UI assertions can't pass yet. The persona/policy half is being revived as a
-partial unskip (live tests green, a tightly-scoped `test.skip` citing #280
-around only the measured-time assertions).
-
 ## Where does everything live?
 
 - CLI: `~/dev/soa/packages/node/saga-stack-cli` (`ss` on PATH)

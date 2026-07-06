@@ -28,6 +28,7 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import type { WorkspaceFlags } from '../../base-command.js';
 import { parseFlowRef, resolveFlow } from '../../core/flow/index.js';
+import { DEFAULT_LOGIN_USER } from '../../core/login.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
 import type { Lane } from '../../core/manifest/index.js';
@@ -67,6 +68,17 @@ export default class E2eRun extends BaseCommand {
     }),
     phase: Flags.string({
       description: 'alias of --through',
+    }),
+    // Plan 13: exclusive window END. No oclif `exclusive:` with --through — oclif
+    // treats DEFAULTED values as provided (M14 lesson); checked manually in run().
+    to: Flags.string({
+      description:
+        'Plan 13: run UP TO but NOT INCLUDING this phase/stage (name, number, or project) — leaves the stack at that stage\'s ENTRY state for manual testing. Progressive flows only; mutually exclusive with --through. Pair with --hold for a logged-in browser at the boundary.',
+    }),
+    hold: Flags.boolean({
+      default: false,
+      description:
+        'Plan 13: after the run goes green, mint the dev-persona cookie jar and open a logged-in browser at the SPA (slot-offset URL), print a held-state summary, and exit 0 — the stack stays up. Best-effort browser (a headless host warns, never errors).',
     }),
     lane: Flags.string({
       description: 'URL lane to target',
@@ -136,6 +148,12 @@ export default class E2eRun extends BaseCommand {
     if (flags.from !== undefined && flags['skip-reset']) {
       this.error('--from and --skip-reset are mutually exclusive: the checkpoint restore IS the state source.');
     }
+    // Plan 13: --to (stop BEFORE K) and --through (run THROUGH K) name opposite window
+    // ends — reject them together. Manual check (not oclif `exclusive:`): --through's
+    // alias is --phase, and oclif would treat a defaulted value as provided (M14 lesson).
+    if (flags.to !== undefined && (flags.through !== undefined || flags.phase !== undefined)) {
+      this.error('--to and --through are mutually exclusive: --to K stops BEFORE stage K; --through K runs THROUGH it.');
+    }
 
     // M13-B: the implicit set preflight (no-op without --set) — e2e run brings
     // the stack up itself, so it guards the same way `stack up --set` does.
@@ -164,10 +182,20 @@ export default class E2eRun extends BaseCommand {
     const headed = flags.headless ? false : flags.headed ? true : undefined;
     const resolved = resolveFlow(disco.manifest, flowName, {
       throughPhase: flags.through ?? flags.phase,
+      toPhase: flags.to,
       fromPhase: flags.from,
       lane,
       headed,
     });
+
+    // Plan 13: an EMPTY window from --from K --to K restores the checkpoint but runs
+    // no stage — pointless without --hold (nothing observes the restored state). Warn.
+    if (resolved.stages.length === 0 && resolved.checkpoint && !flags.hold && !flags['dry-run']) {
+      this.warn(
+        'empty window (--from == --to): the checkpoint is restored but no stage runs and no browser is held. ' +
+          'Add --hold to open a logged-in browser at the boundary, or widen the window.',
+      );
+    }
 
     const appCwd = resolveAppCwd(resolved.spa, flags, process.env);
     const now = new Date(); // the ONLY wall-clock read — fed into the pure clamp.
@@ -191,6 +219,8 @@ export default class E2eRun extends BaseCommand {
         excluded,
         snapshotStages: flags['snapshot-stages'],
         prereqFromSnapshot: flags['prereq-from-snapshot'],
+        to: flags.to,
+        hold: flags.hold,
       });
       this.emit(flags, { dryRun: true, ...desc } as unknown as Record<string, unknown>, dryRunLines(desc));
       return;
@@ -267,9 +297,94 @@ export default class E2eRun extends BaseCommand {
         },
       );
       if (code !== 0) this.exit(code);
+
+      // Plan 13 --hold: the window is green and the stack stays up — hand off a
+      // live, logged-in browser at the boundary for manual testing. Mint the
+      // dev-persona jar (M11 seam, slot-aware) + best-effort open the SPA at its
+      // slot-offset URL, print a held-state summary, exit 0. NOTHING holds the TTY.
+      if (flags.hold) {
+        await this.holdEpilogue(resolved, flags, {
+          slot: profile.slot,
+          stateDir,
+          spaPort: runtime.launchContext.ports[resolved.spa.system],
+          services: resolved.closure.services.filter((id) => !excluded.has(id)),
+          boundary: flags.to ?? flags.through ?? flags.phase,
+        });
+      }
     } catch (err) {
       if (err instanceof FlowExecError) this.error(err.message);
       throw err;
+    }
+  }
+
+  /**
+   * Plan 13 --hold epilogue: mint the dev-persona cookie jar (M11 `mintNativeLoginJar`,
+   * already slot-aware) and best-effort open the vendored browser at the SPA's RESOLVED
+   * slot-offset URL, then print a held-state summary and return (exit 0). No process
+   * holds the TTY — the stack stays up after every run and the browser is detached.
+   * The browser open is best-effort: a browserless/headless host warns, never errors
+   * (the jar is already minted). Mirrors `stack login --browser`'s best-effort posture.
+   */
+  private async holdEpilogue(
+    resolved: ReturnType<typeof resolveFlow>,
+    flags: WorkspaceFlags & { set?: string; to?: string; porcelain: boolean; 'output-json': boolean },
+    ctx: { slot: number; stateDir: string; spaPort?: number; services: string[]; boundary?: string },
+  ): Promise<void> {
+    const email = DEFAULT_LOGIN_USER;
+    const res = await this.mintNativeLoginJar({ email, slot: ctx.slot, stateDir: ctx.stateDir });
+    if (!res.ok) {
+      // A failed jar (no roster seed yet, iam down) is a WARN, not a crash — the run
+      // itself passed. Skip the browser (parity with login_user: browser after devLogin).
+      this.warn(
+        `--hold: session mint failed (HTTP ${res.status}) — the run passed but no logged-in jar was written. ` +
+          'A dev jar needs a rostered persona; run a window that seeds the roster (e.g. --to program).',
+      );
+      return;
+    }
+
+    const spaUrl = ctx.spaPort !== undefined ? `http://localhost:${ctx.spaPort}` : undefined;
+
+    // The boundary label: --to K holds at K's ENTRY; otherwise we held after the run.
+    const heldAt = flags.to
+      ? `entry of '${flags.to}'`
+      : ctx.boundary
+        ? `after '${ctx.boundary}'`
+        : 'the full flow';
+    const setNote = flags.set ? ` --set ${flags.set}` : ctx.slot > 0 ? ` --slot ${ctx.slot}` : '';
+
+    this.emit(
+      flags,
+      {
+        held: true,
+        flow: `${resolved.spa.id}/${resolved.flow.name}`,
+        heldAt,
+        slot: ctx.slot,
+        set: flags.set ?? null,
+        services: ctx.services,
+        jarPath: res.jarPath,
+        spaUrl: spaUrl ?? null,
+        email,
+      },
+      [
+        `✓ held for manual testing — ${resolved.spa.id}/${resolved.flow.name} at ${heldAt}`,
+        `  slot ${ctx.slot}${flags.set ? ` (set ${flags.set})` : ''} · services up (${ctx.services.length}): ${ctx.services.join(', ')}`,
+        `  logged-in as ${email} · cookie jar → ${res.jarPath}`,
+        spaUrl
+          ? `  opening a logged-in browser at ${spaUrl} (best-effort; a headless host warns)…`
+          : '  (no SPA port resolved — browser open skipped)',
+        `  teardown when done: ss stack down${setNote}`,
+      ],
+    );
+
+    // Best-effort browser at the SPA's slot-offset URL. iamUrl from the mint is
+    // slot-aware; dashUrl override points the vendored browser at the slot's dash.
+    if (spaUrl) {
+      await this.openVendoredBrowser(flags, {
+        email,
+        iamUrl: res.iamUrl,
+        stateDir: ctx.stateDir,
+        dashUrl: spaUrl,
+      });
     }
   }
 }
@@ -284,7 +399,7 @@ function parseRef(ref: string): { spaId: string; flowName: string } {
 function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
   const lines: string[] = [
     `dry-run: ${d.spa}/${d.flow} (lane ${d.lane}${d.headed ? ', headed' : ', headless'})`,
-    `stages: ${d.stages.join(' -> ')}`,
+    `stages: ${d.stages.length > 0 ? d.stages.join(' -> ') : '(none — empty window)'}`,
     `closure (${d.closure.services.length}): ${d.closure.services.join(', ')}`,
     `databases: ${d.closure.databases.join(', ') || '(none)'}`,
     `mesh: ${d.closure.mesh.join(', ') || '(none)'}`,
@@ -310,10 +425,16 @@ function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
           : ''),
     );
   }
+  if (d.to) {
+    lines.push(`to (exclusive): stop BEFORE '${d.to}' — leave the stack at its entry state`);
+  }
+  if (d.hold) {
+    lines.push('hold: after green, mint the dev cookie jar + open a logged-in browser (the stack stays up)');
+  }
   lines.push(
     `PLAYWRIGHT_OCCURRENCE_DATE: ${d.occurrenceDate}`,
     `playwright cwd: ${d.playwright.cwd}`,
-    `playwright: pnpm ${d.playwright.argv.join(' ')}`,
+    `playwright: ${d.playwright.argv.length > 0 ? `pnpm ${d.playwright.argv.join(' ')}` : '(none — empty window, no Playwright)'}`,
   );
   return lines;
 }

@@ -441,6 +441,10 @@ export interface ResolvedFlowDescription {
   occurrenceDate: string;
   env: Record<string, string>;
   prerequisite: ResolvedFlowDescription | null;
+  /** Plan 13: the raw `--to` token (echoed so the dry-run names the flag the user typed). Null when absent. */
+  to: string | null;
+  /** Plan 13: whether `--hold` was requested (post-run manual-testing handoff). */
+  hold: boolean;
   /** M14: the checkpoint a --from run will restore (validated at run time, not here — pure). */
   checkpoint: { fixtureId: string; predecessor: string } | null;
   /** M14: the per-stage checkpoint fixtureIds a --snapshot-stages run bakes. */
@@ -457,6 +461,10 @@ export interface DescribeOptions {
   passthrough: string[];
   skipReset: boolean;
   manifest?: Manifest;
+  /** Plan 13: the raw `--to` token, echoed into the projection so the dry-run names the flag. */
+  to?: string;
+  /** Plan 13: whether `--hold` was requested (surfaced in the projection). */
+  hold?: boolean;
   /** M14: project the per-stage bake fixtureIds (`--snapshot-stages` dry-run). */
   snapshotStages?: boolean;
   /**
@@ -526,14 +534,24 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
       cwd: opts.appCwd,
       config: resolved.playwright.config,
       project: resolved.playwright.project,
-      argv: playwrightArgv(resolved, opts.passthrough),
+      // Empty window (--to <first stage> / --from K --to K): no Playwright spawn.
+      argv: resolved.stages.length > 0 ? playwrightArgv(resolved, opts.passthrough) : [],
     },
+    to: opts.to ?? null,
+    hold: opts.hold ?? false,
     occurrenceDate: env[ENV_OCCURRENCE_DATE] ?? '',
     env,
     // The prerequisite always builds the end-state headless + owns its own reset;
     // it gets no user passthrough.
     prerequisite: resolved.prerequisite
-      ? describeResolved(resolved.prerequisite, { ...opts, passthrough: [], skipReset: false })
+      ? describeResolved(resolved.prerequisite, {
+          ...opts,
+          passthrough: [],
+          skipReset: false,
+          // --to/--hold apply to the MAIN flow only, never the prerequisite build.
+          to: undefined,
+          hold: false,
+        })
       : null,
     checkpoint: resolved.checkpoint
       ? {
@@ -829,6 +847,16 @@ export async function executeResolvedFlow(
     }
   } else {
     deps.log(`==> ${opts.lane} lane: no local stack to bring up; running Playwright against the deployed composition`);
+  }
+
+  // Plan 13 EMPTY window (--to <first stage>, or --from K --to K): the stack is now
+  // in the target stage's entry posture — a reset+seed baseline, or the predecessor
+  // checkpoint restored above. There is NO stage to drive, so skip Playwright and
+  // return green; the command's --hold epilogue (if any) mints the jar + opens the
+  // browser after this returns.
+  if (resolved.stages.length === 0) {
+    deps.log("==> no stages to run — window is empty (stack left at the target stage's entry state)");
+    return 0;
   }
 
   // 4. Playwright (foreground, stdio inherited). The clamped date env (or the

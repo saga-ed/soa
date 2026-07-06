@@ -417,6 +417,19 @@
           "multiple": false,
           "type": "option"
         },
+        "to": {
+          "description": "Plan 13: run UP TO but NOT INCLUDING this phase/stage (name, number, or project) — leaves the stack at that stage's ENTRY state for manual testing. Progressive flows only; mutually exclusive with --through. Pair with --hold for a logged-in browser at the boundary.",
+          "name": "to",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "hold": {
+          "description": "Plan 13: after the run goes green, mint the dev-persona cookie jar and open a logged-in browser at the SPA (slot-offset URL), print a held-state summary, and exit 0 — the stack stays up. Best-effort browser (a headless host warns, never errors).",
+          "name": "hold",
+          "allowNo": false,
+          "type": "boolean"
+        },
         "lane": {
           "description": "URL lane to target",
           "name": "lane",

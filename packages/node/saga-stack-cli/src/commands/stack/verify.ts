@@ -30,7 +30,7 @@
 import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import { bold, dim, green, red, yellow } from '../../color.js';
+import { bold, cyan, dim, green, red, yellow } from '../../color.js';
 import { BUNDLE_NAMES } from '../../core/bundles.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { SYNTH_DEV_DIR } from '../../core/flag-map.js';
@@ -232,7 +232,7 @@ export default class StackVerify extends BaseCommand {
       }),
     );
     const healthDown = healthRows.filter((r) => !r.ok);
-    this.log(dim('── service health ──'));
+    this.log(cyan(bold('── service health ──')));
     for (const r of healthRows) {
       this.log(
         `${r.ok ? green('✓') : red('✗')} ${r.id.padEnd(16)} ${dim(r.url)}  (${r.ok ? String(r.status ?? '') : red('down')})`,
@@ -254,7 +254,7 @@ export default class StackVerify extends BaseCommand {
       mongoReachable: await meshExec.ready(mongoContainer, mongo.readinessCmd),
     };
     const data = assessData(readings);
-    this.log(dim('── data ──'));
+    this.log(cyan(bold('── data ──')));
     for (const c of data.checks) this.log(`${c.ok ? green('✓') : red('✗')} ${c.label}`);
     for (const note of data.notes) this.log(dim(`· ${note}`));
 
@@ -263,12 +263,12 @@ export default class StackVerify extends BaseCommand {
     let postureWarns = 0;
     if (!flags['health-only']) {
       const posture = await this.runPosture(flags);
-      this.log(dim('── source posture ──'));
+      this.log(cyan(bold('── source posture ──')));
       if (!posture.overlayPresent) {
         this.log(dim('· no local overlay — asserting every managed repo on origin/main'));
       }
       for (const l of posture.result.posture) this.log(renderPostureLine(l));
-      this.log(dim('── freshness (behind origin) ──'));
+      this.log(cyan(bold('── freshness (behind origin) ──')));
       for (const l of posture.result.freshness) this.log(renderPostureLine(l));
       postureWarns = [...posture.result.posture, ...posture.result.freshness].filter(
         (l) => l.level === 'warn',

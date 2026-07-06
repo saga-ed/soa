@@ -21,6 +21,7 @@ export const red = wrap('31');
 export const yellow = wrap('33');
 export const dim = wrap('2');
 export const bold = wrap('1');
+export const cyan = wrap('36');
 
 /** Exposed for tests (asserting the gate, not the codes). */
 export function colorEnabled(): boolean {

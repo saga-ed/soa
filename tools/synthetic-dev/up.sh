@@ -1604,6 +1604,9 @@ services_up(){
   # (saga-platform). JANUS_REQUIRED=false = same literal-false bypass as the
   # other services. SAGA_API_TARGET is legacy poll content (unauthenticated
   # endpoint — see header). LiveKit creds match qboard's local container.
+  # RTSM_API_URL points the private-convos supervisor at the local rtsm (:6110)
+  # so server-side dark-corner enforcement runs — without it connect-api logs
+  # "private-convos registry disabled" and private conversations aren't enforced.
   launch_if connect-api "$CONNECT_API_PORT" "$QBOARD/apps/node/connectv3-api" \
      NODE_ENV=development \
      PORT="$CONNECT_API_PORT" \
@@ -1618,6 +1621,7 @@ services_up(){
      CONTENT_API_URL="$CONTENT_API_URL" \
      PUBLIC_API_URL="$CONNECT_API_URL" \
      LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret \
+     RTSM_API_URL="http://localhost:6110" \
      RECORDING_SERVICE_TOKEN="$RECORDING_TOKEN" \
      RECORDER_URL_TEMPLATE="http://127.0.0.1:$RECORDER_CONTROL_PORT" \
      FLEEK_TOPOLOGY_JSON='{"cityMap":{"_default":"ws://localhost:7880"},"nodes":{"local":{"url":"ws://localhost:7880"}}}' \

@@ -88,11 +88,11 @@
 #                                  the fleek repo cloned + AWS CLI (CodeArtifact token
 #                                  for the image builds). Composes with up/reset/seed.
 #   ./up.sh --with-playback      opt-in sds_93 playback APIs (transcripts :6302,
-#                                  insights :6301, chat :6303) — provisioned + launched
-#                                  against the mesh, fixture-seeded on `--seed full`
+#                                  insights :6301, chat :6303, ledger :6200) — provisioned +
+#                                  launched against the mesh, fixture-seeded on `--seed full`
 #                                  (slsid fixture-playback-001). Composes:
 #                                  `--with-playback --seed full`. Lets colleagues query
-#                                  non-empty transcripts/insights/chat without a real CU run.
+#                                  non-empty transcripts/insights/chat/ledger without a real CU run.
 #   ./up.sh --with-qtf-demo      opt-in: seed a sample QTF evaluation + observation
 #                                  notes (glow/grow/bookmark) onto an Ended demo
 #                                  session, so the Session Viewer's QTF/Notes panels
@@ -235,7 +235,13 @@ SAGA_API_TARGET_COACH="${SAGA_API_TARGET_COACH:-https://staging.wootmath.com}"
 TRANSCRIPTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/transcripts_local"
 INSIGHTS_DB_URL="postgresql://postgres_admin:password123@localhost:5432/insights_local"
 CHAT_DB_URL="postgresql://postgres_admin:password123@localhost:5432/chat_local"
-DO_PLAYBACK=0                                               # --with-playback: add the 3 playback APIs
+# ledger-api now has a local-bootstrap.sql (student-data-system PR #228, the
+# owner/app/ro role-tiering pass) — ledger_local is role-provisioned in
+# provision_playback_dbs() same as the trio, and its launch line uses
+# ledger_api_app rather than master creds. Port 6200 comes from ledger-api's
+# checked-in .env (EXPRESS_SERVER_PORT), same convention as insights/transcripts/chat.
+LEDGER_DB_URL="postgresql://postgres_admin:password123@localhost:5432/ledger_local"
+DO_PLAYBACK=0                                               # --with-playback: add the 4 playback APIs
 DO_QTF_DEMO=0                                               # --with-qtf-demo: seed a sample QTF eval + notes
 # Connect (qboard). Ports are the apps' own defaults (vite.config.ts / config.ts).
 # Its mongo is the mesh's soa-connect-mongo-1 (infra-compose services/connect-mongo),
@@ -935,7 +941,7 @@ restore_stack(){
 # (master owns the migrated tables). The SDS *-db builds (db:generate + tsup)
 # already ran in prep() for every *-db package.
 provision_playback_dbs(){
-  say "provisioning playback DBs + roles (transcripts/insights/chat — bootstrap SQL on the mesh)…"
+  say "provisioning playback DBs + roles (transcripts/insights/chat/ledger — bootstrap SQL on the mesh)…"
   local app
   for app in transcripts insights chat; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d postgres -v ON_ERROR_STOP=1 \
@@ -945,10 +951,21 @@ provision_playback_dbs(){
       printf "\033[31m✗\033[0m %s-db bootstrap failed:\n" "$app"; tail -10 "$STATE/playback-bootstrap-$app.log" | sed 's/^/    /'; exit 1
     fi
   done
+  # ledger-api now has local-bootstrap.sql too (student-data-system PR #228) —
+  # same bootstrap-SQL dance as the trio, just called out separately because its
+  # role naming is ledger_api_{owner,app,ro}, not the {app}_{owner,app,ro}
+  # pattern the loop above's ok-message assumes.
+  if docker exec -i soa-postgres-1 psql -U postgres_admin -d postgres -v ON_ERROR_STOP=1 \
+       < "$SDS/packages/node/ledger-db/seed/local-bootstrap.sql" >"$STATE/playback-bootstrap-ledger.log" 2>&1; then
+    ok "db+role: ledger_local / ledger_api_app"
+  else
+    printf "\033[31m✗\033[0m ledger-db bootstrap failed:\n"; tail -10 "$STATE/playback-bootstrap-ledger.log" | sed 's/^/    /'; exit 1
+  fi
   migrate_db "$SDS/packages/node/transcripts-db" transcripts_local "$TRANSCRIPTS_DB_URL"
   migrate_db "$SDS/packages/node/insights-db"    insights_local    "$INSIGHTS_DB_URL"
   migrate_db "$SDS/packages/node/chat-db"        chat_local        "$CHAT_DB_URL"
-  ok "playback DBs migrated (transcripts/insights/chat)"
+  migrate_db "$SDS/packages/node/ledger-db"      ledger_local      "$LEDGER_DB_URL"
+  ok "playback DBs migrated (transcripts/insights/chat/ledger)"
 }
 
 # --pull: fast-forward each sibling repo to its upstream before building. ff-ONLY,
@@ -1063,9 +1080,11 @@ prep(){
   # (not the pre-existing saga_user), so create the role too on existing volumes.
   if [[ "$(docker exec soa-postgres-1 psql -U postgres_admin -tAc \
         "SELECT 1 FROM pg_database WHERE datname='coach_api'" 2>/dev/null)" != 1 ]]; then
+    # Two separate -c flags on purpose: a single -c with both statements runs them
+    # in one implicit transaction, and CREATE DATABASE can't run inside a txn block.
     db_step "coach_api role+db create" "$SOA" docker exec soa-postgres-1 \
       psql -U postgres_admin \
-      -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coach_api_app') THEN CREATE ROLE coach_api_app LOGIN PASSWORD 'dev-password-coach-api-app'; END IF; END \$\$;" \
+      -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coach_api_app') THEN CREATE ROLE coach_api_app LOGIN PASSWORD 'dev-password-coach-api-app'; END IF; END \$\$" \
       -c "CREATE DATABASE coach_api OWNER coach_api_app"
   fi
   # coach's prisma schema lives in the coach-db PACKAGE (not the app); it has
@@ -1201,7 +1220,7 @@ parse_workspace(){ # file
   [[ ${#WS_RUN_SET[@]} -eq 0 ]] && warn "--workspace: no local services to run (all sandbox-hosted) — nothing will launch locally."
   # Pull in the playback stack if any playback API is in the run-set.
   local s; for s in "${WS_RUN_SET[@]}"; do
-    case "$s" in insights-api|transcripts-api|chat-api) DO_PLAYBACK=1 ;; esac
+    case "$s" in insights-api|transcripts-api|chat-api|ledger-api) DO_PLAYBACK=1 ;; esac
   done
   say "workspace: ${#WS_RUN_SET[@]} local service(s) [${WS_RUN_SET[*]}]; $(( ${#SVC_MODE[@]} - ${#WS_RUN_SET[@]} )) sandbox-hosted"
   # Routing signal when iam-api is sandbox-hosted. sis-api and programs-api both
@@ -1568,6 +1587,15 @@ services_up(){
        POSTGRES_INSTANCENAME=ChatDB \
        EXPRESS_SERVER_PORT=6303 RABBITMQ_URL="$MESH_MQ" \
        AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env chat-api)
+    # ledger-api now boots as ledger_api_app (student-data-system PR #228's
+    # local-bootstrap.sql), same as the trio above rather than mesh master.
+    launch_if ledger-api 6200 "$SDS/apps/node/ledger-api" \
+       NODE_ENV=development \
+       POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=ledger_local \
+       POSTGRES_USERNAME=ledger_api_app POSTGRES_PASSWORD=ledger_api_app_local_pw \
+       POSTGRES_INSTANCENAME=LedgerDB \
+       EXPRESS_SERVER_PORT=6200 RABBITMQ_URL="$MESH_MQ" \
+       AUTH_AUTHENABLED=false JANUS_REQUIRED=false $(tunnel_env ledger-api)
   fi
   # VITE_ADS_ADM_REAL=true: serve the ADS/ADM page (/adm) against the real
   # ads-adm-api (:5005) instead of the mock generators — the default for this
@@ -1679,7 +1707,7 @@ reset_data(){
   # ("schedule has shifted out from under this record"). Generic truncate keeps
   # _prisma_migrations, so the schema survives.
   local dbs=(iam_local iam_pii_local programs scheduling sessions content coach_api sis_db ads_adm_local)
-  [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local)
+  [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local ledger_local)
   for db in "${dbs[@]}"; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then
       ok "truncated $db"
@@ -1866,7 +1894,9 @@ seed_playback(){
       POSTGRES_HOST=localhost POSTGRES_PORT=5432 POSTGRES_DATABASE=chat_local \
       POSTGRES_USERNAME=chat_app POSTGRES_PASSWORD=chat_app_local_pw \
       POSTGRES_INSTANCENAME=ChatDB pnpm seed )
-  ok "playback seeded (transcripts/insights/chat)"
+  say "seeding ledger playback fixtures (ledger-db db:seed — no app-level seed wrapper exists yet)…"
+  ( cd "$SDS/packages/node/ledger-db" && env LEDGER_DATABASE_URL="$LEDGER_DB_URL" pnpm db:seed )
+  ok "playback seeded (transcripts/insights/chat/ledger)"
 }
 
 # sessions-api: a sample QTF evaluation + observation notes on an Ended demo
@@ -1973,7 +2003,22 @@ open_login_browser(){
   local email=$1
   [[ -f "$BROWSER_LOGIN" ]] || { printf "\033[33m⚠\033[0m %s missing — skipping browser auto-login (cookie jar is ready)\n" "$BROWSER_LOGIN"; return 0; }
   command -v node >/dev/null 2>&1 || { printf "\033[33m⚠\033[0m node not found — skipping browser auto-login (cookie jar is ready)\n"; return 0; }
-  [[ -d "$SAGA_DASH/apps/web/dash/node_modules/playwright" ]] || { printf "\033[33m⚠\033[0m playwright not installed in saga-dash — skipping browser auto-login. Run: (cd %s/apps/web/dash && pnpm install && pnpm exec playwright install chromium)\n" "$SAGA_DASH"; return 0; }
+  local dashdir="$SAGA_DASH/apps/web/dash"
+  [[ -d "$dashdir/node_modules/playwright" ]] || { printf "\033[33m⚠\033[0m playwright not installed in saga-dash — skipping browser auto-login. Run: (cd %s && pnpm install && pnpm exec playwright install chromium)\n" "$dashdir"; return 0; }
+  # Playwright downloads its browser binaries separately from the npm package,
+  # into ~/.cache/ms-playwright/chromium-<rev> where <rev> is pinned to the
+  # installed playwright version. A version bump (or a fresh cache) leaves the
+  # package present but that revision's binary missing — the exact "Executable
+  # doesn't exist at …/chromium-<rev>/…" launch failure. Detect it via
+  # Playwright's own executablePath() (revision-agnostic) and install on demand.
+  if ! ( cd "$dashdir" && node -e 'try{const{chromium}=require("playwright");process.exit(require("fs").existsSync(chromium.executablePath())?0:1)}catch{process.exit(1)}' ) 2>/dev/null; then
+    say "Chromium browser binary missing — installing (pnpm exec playwright install chromium)…"
+    if ! ( cd "$dashdir" && pnpm exec playwright install chromium ) >"$STATE/playwright-install.log" 2>&1; then
+      printf "\033[33m⚠\033[0m Chromium install failed — skipping browser auto-login (cookie jar is ready). Full log: %s\n" "$STATE/playwright-install.log"
+      return 0
+    fi
+    ok "Chromium browser installed"
+  fi
   if [[ -f "$STATE/browser-login.pid" ]]; then
     kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null || true; rm -f "$STATE/browser-login.pid"; sleep 1
   fi
@@ -1996,7 +2041,7 @@ open_login_browser(){
   printf "\033[33m⚠\033[0m Chromium still starting — watch %s\n" "$STATE/browser-login.log"
 }
 
-services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api content-api coach-api ads-adm-api insights-api transcripts-api chat-api saga-dash coach-web rtsm-api connect-api connect-web; do
+services_down(){ for n in iam-api sis-api programs-api scheduling-api sessions-api content-api coach-api ads-adm-api insights-api transcripts-api chat-api ledger-api saga-dash coach-web rtsm-api connect-api connect-web; do
   [[ -f "$STATE/$n.pid" ]] && { pkill -P "$(cat "$STATE/$n.pid")" 2>/dev/null||true; kill "$(cat "$STATE/$n.pid")" 2>/dev/null||true; rm -f "$STATE/$n.pid"; }
 done
 [[ -f "$STATE/browser-login.pid" ]] && { kill "$(cat "$STATE/browser-login.pid")" 2>/dev/null||true; rm -f "$STATE/browser-login.pid"; }
@@ -2007,7 +2052,7 @@ done
 pkill -f "tsup/dist/cli-default.js --watch" 2>/dev/null||true
 # tsup's --onSuccess \`node dist/main.js\` children are orphaned by the kill above
 # and keep holding their ports; reap whatever still listens on our known ports.
-for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 "$CONTENT_PORT" 3008 5005 6301 6302 6303 "$COACH_API_PORT" 8900 "$COACH_WEB_PORT" "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
+for _p in "$IAM_PORT" "$SIS_PORT" 3006 3007 "$CONTENT_PORT" 3008 5005 6200 6301 6302 6303 "$COACH_API_PORT" 8900 "$COACH_WEB_PORT" "$RTSM_PORT" "$CONNECT_API_PORT" "$CONNECT_WEB_PORT"; do fuser -k "$_p/tcp" 2>/dev/null||true; done
 ok "services down (mesh incl. connect-mongo + AV containers left up)"; }
 
 # Remove stale Vite optimize caches so the dash serves CURRENT source after a
@@ -2030,8 +2075,8 @@ status(){
     printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p$probe 2>/dev/null)"
   done
   # Playback APIs are opt-in (--with-playback) — only report when launched (pid file present).
-  if [[ -f "$STATE/transcripts-api.pid" || -f "$STATE/insights-api.pid" || -f "$STATE/chat-api.pid" ]]; then
-    for kv in insights-api:6301 transcripts-api:6302 chat-api:6303; do
+  if [[ -f "$STATE/transcripts-api.pid" || -f "$STATE/insights-api.pid" || -f "$STATE/chat-api.pid" || -f "$STATE/ledger-api.pid" ]]; then
+    for kv in insights-api:6301 transcripts-api:6302 chat-api:6303 ledger-api:6200; do
       n=${kv%:*}; p=${kv#*:}
       printf "  %-15s :%s → %s\n" "$n" "$p" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:$p/health 2>/dev/null)"
     done

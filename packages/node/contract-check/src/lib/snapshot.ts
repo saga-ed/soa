@@ -1,5 +1,4 @@
-import type { ZodTypeAny } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
+import { z } from 'zod';
 import type { PayloadDescriptor } from '@saga-ed/soa-event-envelope';
 
 const DEFAULT_ID_PREFIX = 'https://saga-ed.example.local/events/';
@@ -24,14 +23,15 @@ export function renderSnapshot(
     idPrefix: string = DEFAULT_ID_PREFIX,
 ): string {
     const filename = snapshotFilename(eventKey);
-    // Cast to ZodTypeAny: the PayloadDescriptor's `payloadSchema: z.ZodType<T>`
-    // with `T = unknown` triggers a "type instantiation is excessively deep"
-    // error inside zod-to-json-schema's internal generic recursion. We only
-    // need the structural conversion here, not type-level T preservation.
-    const schema = zodToJsonSchema(descriptor.payloadSchema as ZodTypeAny, {
-        target: 'jsonSchema7',
-        // Stable, deterministic output: no auto $ref deduplication.
-        $refStrategy: 'none',
+    // zod 4's native `z.toJSONSchema` replaces the `zod-to-json-schema` library,
+    // which introspects zod-3 internals (`._def`) and silently emits empty
+    // schemas under zod 4. `target: 'draft-7'` keeps the historical draft-07
+    // output; `io: 'input'` snapshots the wire (pre-parse) shape; `$refStrategy`
+    // has no analogue — native inlines by default, matching the prior
+    // `$refStrategy: 'none'` behaviour.
+    const schema = z.toJSONSchema(descriptor.payloadSchema as z.ZodType, {
+        target: 'draft-7',
+        io: 'input',
     });
     const annotated = {
         $schema: 'http://json-schema.org/draft-07/schema#',

@@ -58,7 +58,7 @@ describe('Project Schemas', () => {
 
             if (!result.success) {
                 expect(result.error.issues).toHaveLength(1);
-                expect(result.error.issues[0]?.code).toBe('invalid_enum_value');
+                expect(result.error.issues[0]?.code).toBe('invalid_value');
             }
         });
 

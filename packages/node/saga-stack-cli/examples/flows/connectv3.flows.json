@@ -1,0 +1,31 @@
+{
+  "$comment": "EXAMPLE / ONBOARDING TEMPLATE bundled with @saga-ed/saga-stack-cli (plan §5.3 'new-SPA onboarding'). This is the M6 proof that a SECOND SPA externalizes with ZERO new CLI logic: this file + one registry row in src/core/flow/spa-registry.ts are the ONLY additions. The flow/stage/project/spec names are PLAUSIBLE PLACEHOLDERS — there is no real connectv3 e2e suite yet; the REAL connectv3 flows.json lands in the qboard repo at apps/web/connectv3/e2e/flows.json as a follow-up. Validated by core/flow `flowManifestSchema` (zod).",
+  "schemaVersion": 1,
+  "spa": {
+    "id": "connectv3",
+    "system": "connect-web",
+    "repoEnvVar": "QBOARD",
+    "defaultRepoSubpath": "qboard",
+    "appDir": "apps/web/connectv3",
+    "e2eDir": "apps/web/connectv3/e2e",
+    "playwrightConfig": "playwright.config.ts"
+  },
+  "flows": [
+    {
+      "name": "connect-smoke",
+      "description": "TEMPLATE (no real suite yet): headless Connect smoke — boots the connectv3 SPA against a minimal Connect backend closure (connect-web → connect-api → rtsm/sessions) and asserts a tutor can open a room. Non-progressive, single stage, self-seeding.",
+      "lanes": ["stack", "sandbox"],
+      "progressive": false,
+      "seed": { "reset": true, "profile": "roster" },
+      "stages": [
+        {
+          "id": "smoke",
+          "phase": 1,
+          "project": "connect-smoke",
+          "spec": "smoke/connect-smoke.e2e.test.ts",
+          "requiredSystems": ["connect-web", "connect-api", "rtsm-api", "sessions-api"]
+        }
+      ]
+    }
+  ]
+}

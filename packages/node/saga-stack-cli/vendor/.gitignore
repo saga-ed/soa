@@ -1,0 +1,7 @@
+# Per-dev / transient state the vendored scripts write ALONGSIDE themselves
+# (SCRIPT_DIR = this dir): tunnel.sh's rendezvous moniker and any stray overlay
+# pin manifest. Ignored so they can't be committed OR swept into `npm pack`
+# (package.json `files` globs this whole dir). The vendored scripts + this
+# .gitignore itself still ship.
+.vms-moniker
+*.tsv

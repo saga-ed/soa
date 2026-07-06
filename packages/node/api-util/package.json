@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-api-util",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,7 +17,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "zod": "^4.2.1"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@saga-ed/soa-logger": "workspace:*",

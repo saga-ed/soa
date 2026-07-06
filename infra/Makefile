@@ -26,7 +26,9 @@ COMPOSE   := docker compose --env-file .env.defaults -f compose/projects/$(PROJE
 -include .env.defaults
 -include .env
 
-export COMPOSE_PROJECT_NAME := soa
+# ?= (not :=) so an env COMPOSE_PROJECT_NAME can override the project per-slot (soa-s1, …); still `soa` by default.
+# NOTE: no inline comment on the assignment line — trailing chars become part of the value ("soa   ") and docker compose rejects it.
+export COMPOSE_PROJECT_NAME ?= soa
 export SEED_PROFILE := $(PROFILE)
 
 .PHONY: up switch down reset status logs list-projects list-profiles \
@@ -182,10 +184,10 @@ redis-cli:
 ## Destroy ALL volumes and containers for a project. All profile data gone.
 clean-all:
 	$(COMPOSE) down -v
-	@echo "Removing all profile volumes for services in $(PROJECT) ..."
+	@echo "Removing legacy fixed-name volumes (pre-M7) for $(PROJECT) ..."
 	@docker volume ls --filter "name=-profile-" --format "{{.Name}}" | xargs -r docker volume rm 2>/dev/null || true
 	@docker volume rm redis-data 2>/dev/null || true
-	@docker volume rm rabbitmq-data 2>/dev/null || true
+	@docker volume rm rabbitmq-data connect-mongo-data 2>/dev/null || true   # legacy fixed-name sweep (per-project volumes handled by down -v above)
 	@echo ""
 	@echo "  All data destroyed for $(PROJECT)."
 

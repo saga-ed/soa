@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-pubsub-server",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -29,7 +29,7 @@
     "@trpc/server": "^11.0.0",
     "inversify": "^6.2.2",
     "reflect-metadata": "^0.2.2",
-    "zod": "3.25.67",
+    "zod": "^4.4.3",
     "uuid": "^11.1.0",
     "@saga-ed/soa-pubsub-core": "workspace:*",
     "@saga-ed/soa-api-core": "workspace:*",

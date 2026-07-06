@@ -1,0 +1,73 @@
+# Scheduling-topology flow — complex schedules → sessions (A/B treatment switches)
+
+A **second `flows.json` scenario** for saga-stack-cli: a backend-focused e2e flow that
+stands up **only `scheduling-api` + `sessions-api`** (the N-of-M sub-stack the CLI makes
+cheap), builds a **complex schedule** exercising **Kevin's scheduling-topology work —
+specifically A/B switches between different treatments** — and verifies **how sessions
+realize** in the presence of that schedule.
+
+This is the concrete instance of the "author *new* flow scenarios" work.
+
+## Tracking
+- **Parent effort:** saga-ed/soa **#214** — "OCLIF CLI for synthetic-dev" (saga-stack-cli).
+- **Work-item tracker:** saga-ed/soa **#221** — the saga-stack-cli ToDo/findings issue,
+  under the **"Flow content → author new scenarios"** line item. (The various bits of
+  CLI work are captured on #221; #214 is the umbrella.)
+
+## Approach (in order)
+1. **Comprehensive understanding FIRST** (this step). Develop a rigorous, code-grounded
+   understanding of: the scheduling domain model + topologies, what an "A/B switch
+   between treatments" is and how it's modeled (Kevin's work), how a schedule **projects
+   into sessions**, and the **observable surfaces** an e2e can assert against. Output:
+   `01-understanding.md`.
+2. **Flow design** — pick the concrete complex-schedule scenario(s) to exercise, the
+   expected realized-sessions (the oracle), and the assertion surface. Output:
+   `02-flow-design.md`.
+3. **Author** the `flows.json` entry + the spec(s)/stage(s), then run it via the CLI.
+
+## Contents
+- `README.md` — this file.
+- **`HANDOFF.md`** — self-contained prompt for a fresh agent to continue this effort
+  (design → seed → author → run). Decisions locked: purpose-built A/B seed (reveal
+  reality); `varies_by_day_type` weekday pattern first. **Read this to pick up the work.**
+- `01-understanding.md` — the synthesized understanding (from parallel code research). ✅ **done**
+- `02-flow-design.md` — the concrete flow scenario + expected behavior + assertions. ✅ **done**; deliverables **authored** (§8).
+
+## Status
+**✅ IMPLEMENTED + GREEN (2026-07-05).** The reveal run passed: the non-trivial A/B
+topology (2 pods, distinct per-weekday rotations) realizes CORRECTLY end-to-end and the
+spec now asserts that realization explicitly (slot ↔ pod membership, per-weekday A/B
+treatment switch, per-pod isolation, dates). See **`03-run-results.md`** for the green
+run, the concrete realization table, and three divergences from the original design:
+(1) the mint shape is **ANCHOR** (rrule='' + manual_addition occurrences), not sub-RRULE;
+(2) anchor sessions surface in dayList's **`adhoc`** bucket, not `periods`; (3) upsert-first
+ordering does **not** fully close the remint's schedule-visibility race — the spec
+**re-applies** the config until 2 slots land. All net-new reproductions for soa#221 /
+saga-dash#226. Contrary to the design's cautious "R1 may be red" hypothesis, the weekday
+`varies_by_day_type` path **works today**.
+
+### Historical (design phase)
+**Step 2 (flow design) drafted — awaiting review.** `02-flow-design.md` pins the locked
+scenario (weekday `varies_by_day_type`, Rotation A=Mon/Wed=`CONNECT`, B=Fri=`NON_TUTORED`,
+one pod in both) into a precise oracle table, the **API-built** build sequence (exact tRPC
+calls: `periods.update`/`setRotationConfig` → `schedules.upsert` → poll `slots.list` →
+`podAssignments.upsert` → assert `sessions.dayList`), the assertion surface, and a **reveal
+plan** (R1 "does the weekday variant mint 2 slot-scoped slots" is the hinge — green = net-new
+proof, red = a sharper restatement of saga-dash#226). Step 1 (understanding) remains the
+oracle: the multi-rotation slot-scoped A/B path is contract/engine-supported but **not seeded
+or tested end-to-end today** (VARIES modeling gap / saga-dash#226). Next: review `02` §7 open
+questions → build `flows.json` + spec → run + reveal.
+
+**Seed strategy resolved (2026-07-02):** `ss` has **no per-flow seed** — its `seed` block
+selects *which* services run their fixed `pnpm db:seed`, not *what data*. So this flow adds
+**no `seed.ts`**: it uses stock `profile: 'roster'` (which already seeds the empty-admin authz
+grant + `projection_readiness` warmth) and **self-seeds its scenario in the spec via tRPC**
+(program → period → pods → rotation config → schedule → pod assignments) — the journey /
+connect-smoke precedent, and the highest-fidelity way to exercise the emission→projection path
+we want to reveal. `02` §3 updated accordingly. Deliverables narrow to: `flows.json` + spec
+(no seed fixture). **Author-only scope this pass** — the reveal run is handed off (the
+scheduling stack must not collide with the concurrent M8 live DB validations on `gh_214`).
+
+**Authored (2026-07-02).** `flows.json` + spec + Playwright project live on saga-dash branch
+`flow/scheduling-topology-ab` (commit `71899699`); the spec typechecks + lints clean. Only the
+reveal run remains (handed off). Design/handoff detail + run notes in `02` §8.

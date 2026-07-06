@@ -14,6 +14,7 @@
 import { existsSync } from 'node:fs';
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
+import { bold, cyan, dim, green, red, yellow } from '../../color.js';
 import { resolveSet } from '../../core/set/index.js';
 import type { SetRepoEntry, SetRepoKey } from '../../core/set/index.js';
 
@@ -108,26 +109,34 @@ export default class SetShow extends BaseCommand {
       return;
     }
 
-    this.log(`${set.name} — slot ${set.slot}${set.note !== undefined ? `  (${set.note})` : ''}`);
+    this.log(
+      `${bold(`${set.name} — slot ${set.slot}`)}${set.note !== undefined ? dim(`  (${set.note})`) : ''}`,
+    );
     for (const r of repos) {
       if (!r.exists) {
-        this.log(`  ✗ ${r.repo.padEnd(12)} ${r.entry.path}  (missing)`);
+        this.log(`  ${red('✗')} ${bold(r.repo.padEnd(12))} ${dim(r.entry.path)}  ${red('(missing)')}`);
         continue;
       }
       if (!r.checkout) {
-        this.log(`  ✗ ${r.repo.padEnd(12)} ${r.entry.path}  (not a git checkout)`);
+        this.log(`  ${red('✗')} ${bold(r.repo.padEnd(12))} ${dim(r.entry.path)}  ${red('(not a git checkout)')}`);
         continue;
       }
-      const provenance = r.entry.createdFrom !== undefined ? `  created from ${r.entry.createdFrom}` : '';
+      // Row 1: identity + working-tree state + mainline currency (state at a glance).
+      const dirtiness = r.dirty ? yellow('(dirty)') : dim('(clean)');
       const currency =
         r.includesMain === null
           ? ''
           : r.includesMain
-            ? `  [includes ${r.mainRef}]`
-            : `  [⚠ behind ${r.mainRef} by ${r.behindMain ?? '?'} — merge up: git -C ${r.entry.path} merge ${r.mainRef}]`;
-      this.log(
-        `  ✓ ${r.repo.padEnd(12)} ${r.entry.path}  @ ${r.branch}${r.dirty ? ' (dirty)' : ' (clean)'}${provenance}${currency}`,
-      );
+            ? `  ${green(`[includes ${r.mainRef}]`)}`
+            : `  ${yellow(`[⚠ behind ${r.mainRef} by ${r.behindMain ?? '?'}]`)}`;
+      this.log(`  ${green('✓')} ${bold(r.repo.padEnd(12))} @ ${cyan(r.branch ?? '')}  ${dirtiness}${currency}`);
+      // Row 2: where it lives + provenance (reference detail, dimmed).
+      const provenance = r.entry.createdFrom !== undefined ? `   created from ${r.entry.createdFrom}` : '';
+      this.log(dim(`      ${r.entry.path}${provenance}`));
+      // Row 3 (only when action is needed): the copy-pasteable merge-up command.
+      if (r.includesMain === false) {
+        this.log(`      ${yellow('merge up:')} git -C ${r.entry.path} merge ${r.mainRef}`);
+      }
     }
   }
 }

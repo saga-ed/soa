@@ -90,7 +90,8 @@ describe('set show', () => {
     await SetShow.run(['x'], config);
     const out = logged.join('\n');
     expect(out).toMatch(/x — slot 1/);
-    expect(out).toMatch(/✓ saga-dash.*@ feat\/x \(clean\).*created from feat\/x/);
+    expect(out).toMatch(/✓ saga-dash\s+@ feat\/x\s+\(clean\)/);
+    expect(out).toMatch(/created from feat\/x/);
     expect(out).toMatch(/✗ rostering.*\(missing\)/);
   });
 
@@ -130,7 +131,9 @@ describe('set show — mainline currency', () => {
     spyGitRunner({ branches: { [dash]: 'feat/x' }, behindMain: { [dash]: 7 } });
 
     await SetShow.run(['x'], config);
-    expect(logged.join('\n')).toMatch(/\[⚠ behind origin\/main by 7 — merge up: git -C .*dash merge origin\/main\]/);
+    const out2 = logged.join('\n');
+    expect(out2).toMatch(/\[⚠ behind origin\/main by 7\]/);
+    expect(out2).toMatch(/merge up: git -C .*dash merge origin\/main/);
   });
 
   it('projects mainRef/includesMain/behindMain into --output-json', async () => {

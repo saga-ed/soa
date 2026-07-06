@@ -64,6 +64,8 @@ SERVICES=(
     "connect:6210"
     "connect-api:6106"
     "rtsm:6110"
+    "coach:8800"
+    "coach-api:6105"
 )
 
 say(){  printf "\033[34m→\033[0m %s\n" "$*" >&2; }
@@ -250,7 +252,7 @@ tunnel_status(){
     for entry in "${SERVICES[@]}"; do
         name=${entry%:*}; port=${entry#*:}
         code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-            "https://$name.$m.$VMS_BASE$( [[ "$name" == dash || "$name" == connect ]] && echo / || { [[ "$name" == connect-api ]] && echo /connectv3/v1/health || echo /health; })" 2>/dev/null)
+            "https://$name.$m.$VMS_BASE$( [[ "$name" == dash || "$name" == connect || "$name" == coach ]] && echo / || { [[ "$name" == connect-api ]] && echo /connectv3/v1/health || echo /health; })" 2>/dev/null)
         printf "  %-12s https://%s.%s.%s → %s\n" "$name" "$name" "$m" "$VMS_BASE" "$code" >&2
     done
 }

@@ -42,6 +42,7 @@ import { SET_UNSUPPORTED_COMMAND_MESSAGE, SLOT_UNSUPPORTED_COMMAND_MESSAGE, base
 import { applySetToFlags, resolveSet } from './core/set/index.js';
 import type { SetInjectableFlags, WorktreeSet } from './core/set/index.js';
 import { checkWorktreeSet, makeCheckpointStore, makeSlotActiveProbe } from './runtime/index.js';
+import { stampMatches, writeStamp } from './runtime/prep-stamp.js';
 import type { CheckpointStore, SlotActiveProbe } from './runtime/index.js';
 import type { PullMode } from './core/auto-pull.js';
 import type { InstanceProfile } from './core/derive-instance.js';
@@ -429,6 +430,16 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * soa#256: the R1 stamp writer — after prep builds+installs a repo to completion,
+   * record its current `{ headSha, lockHash }` at `node_modules/.saga-stack-prep-stamp`
+   * so the next run's fresh-check can tell a pulled-but-unbuilt tree from a current
+   * one. Injected (like `getPrepFreshCheck`) so the prep pass stays testable.
+   */
+  protected getPrepStampWriter(): (repoRoot: string) => void {
+    return (repoRoot: string) => writeStamp(repoRoot);
+  }
+
+  /**
    * The R1 `db:generate` scan seam (M8 — BLOCKER-B). Given a repo root, returns
    * the repo-relative dirs of every `packages/node/*` package that DECLARES a
    * `db:generate` script (a faithful port of up.sh's `packages/node/*` scan). R1
@@ -665,6 +676,7 @@ export abstract class BaseCommand extends Command {
       pgProbe: this.getPgProbe(),
       skipPrep: flags['skip-prep'],
       prepIsFresh: this.getPrepFreshCheck(),
+      prepWriteStamp: this.getPrepStampWriter(),
       prepDbGenerateScan: this.getDbGenerateScan(),
       // M13-B: realpath-keyed build lock — two `ss` invocations can never
       // prep-BUILD one checkout concurrently (fresh-skipped repos never lock).
@@ -899,14 +911,12 @@ export abstract class BaseCommand extends Command {
 const NODE_WORKSPACE_DIRS = ['packages/node', 'apps/node'] as const;
 
 /**
- * MAJOR-D: a repo is "built" iff `node_modules` is present AND at least one
- * `packages/node/*` / `apps/node/*` package has a `dist/`. A repo with NO node
- * workspaces (a pure frontend like saga-dash, which is install-only and produces no
- * `dist/`) counts as built once installed. Every `fs` error folds to "not built"
- * (⇒ prep runs), the safe default.
+ * MAJOR-D: a repo has its build ARTIFACTS present iff `node_modules` is present AND
+ * at least one `packages/node/*` / `apps/node/*` package has a `dist/`. A repo with
+ * NO node workspaces (a pure frontend like saga-dash, install-only, no `dist/`)
+ * counts once installed. Every `fs` error folds to "not present" (the safe default).
  */
-function isRepoBuilt(repoRoot: string): boolean {
-  const root = repoRoot.replace(/\/+$/, '');
+function hasBuildArtifacts(root: string): boolean {
   if (!existsSync(`${root}/node_modules`)) return false;
   let sawWorkspace = false;
   for (const ws of NODE_WORKSPACE_DIRS) {
@@ -924,6 +934,24 @@ function isRepoBuilt(repoRoot: string): boolean {
   }
   // No node workspaces at all ⇒ nothing to build; installed is enough (saga-dash).
   return !sawWorkspace;
+}
+
+/**
+ * The R1 fresh-skip predicate. A repo is "built" iff its artifacts are present
+ * (`hasBuildArtifacts`) AND — soa#256 — it is CURRENT: presence alone is
+ * stale-blind, so after `git pull` without a reinstall/rebuild the old check skipped
+ * prep and the stack served stale code. A git checkout is fresh only when its
+ * `node_modules/.saga-stack-prep-stamp` matches the repo's current HEAD + lockfile;
+ * a missing/mismatched/unreadable stamp ⇒ not fresh ⇒ prep re-runs (the same safe
+ * default the presence check already used). A NON-checkout (no `.git`) has no HEAD
+ * to drift against, so it falls back to presence-only — the pre-#256 behaviour,
+ * preserved for deployed/tarball trees that are never stamped.
+ */
+function isRepoBuilt(repoRoot: string): boolean {
+  const root = repoRoot.replace(/\/+$/, '');
+  if (!hasBuildArtifacts(root)) return false;
+  if (!existsSync(`${root}/.git`)) return true; // not a checkout ⇒ presence-only fallback
+  return stampMatches(root);
 }
 
 /**

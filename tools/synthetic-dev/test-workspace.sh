@@ -19,7 +19,7 @@ cat > "$WS" <<'JSON'
   "generatedBy": "https://switchboard.wootdev.com",
   "defaultPolicy": "main",
   "services": {
-    "programs-api": { "mode": "local-source", "kind": "api", "repo": "saga-ed/program-hub", "dbProfile": "canonical" },
+    "programs-api": { "mode": "local-source", "kind": "api", "repo": "saga-ed/program-hub", "dbProfile": "canonical", "sha": "abc1234" },
     "sis-api": { "mode": "local-source", "kind": "api", "repo": "saga-ed/rostering" },
     "iam-api": { "mode": "sandbox", "kind": "api", "sandboxName": "dev", "previewHeader": "x-saga-preview-iam-api" }
   }
@@ -32,7 +32,7 @@ err(){ echo "ERR: $*" >&2; }; warn(){ echo "WARN: $*" >&2; }; say(){ :; }; ok(){
 ONLY_SERVICE=""; SANDBOX_NAME=""; WORKSPACE_FILE=""; DO_PLAYBACK=0; IAM_SANDBOX=""
 # Repo-path vars the restore map interpolates (values irrelevant to the map's shape).
 ROSTERING="/r"; PROGRAM_HUB="/p"
-declare -A SVC_MODE=() SVC_SANDBOX=() SVC_DBPROFILE=() RESTORED_OK=()
+declare -A SVC_MODE=() SVC_SANDBOX=() SVC_DBPROFILE=() SVC_SHA=() RESTORED_OK=()
 declare -a WS_RUN_SET=()
 eval "$(sed -n '/^want_service(){/,/^}/p' "$UP")"
 eval "$(sed -n '/^parse_workspace(){/,/^}/p' "$UP")"
@@ -40,6 +40,7 @@ eval "$(sed -n '/^sandbox_env(){/,/^}/p' "$UP")"
 eval "$(sed -n '/^restore_source_for(){/,/^}/p' "$UP")"
 eval "$(sed -n '/^restore_dbs_for_service(){/,/^}/p' "$UP")"
 eval "$(sed -n '/^restored_db(){/,/^}/p' "$UP")"
+eval "$(sed -n '/^svc_repo_dir(){/,/^}/p' "$UP")"
 
 fail=0
 assert(){ if [[ "$2" == "$3" ]]; then echo "ok: $1"; else echo "FAIL: $1 — got '$2' want '$3'"; fail=1; fi; }
@@ -91,6 +92,17 @@ assert "ws: programs-api dbProfile"     "${SVC_DBPROFILE[programs-api]:-}" canon
 assert "ws: sis-api no dbProfile"        "${SVC_DBPROFILE[sis-api]:-}"      ""
 assert "ws: iam-api(sandbox) no dbProfile" "${SVC_DBPROFILE[iam-api]:-}"    ""
 
+# 3b''. sha parsing (programs-api carries one; sis-api and sandbox-mode iam-api don't)
+assert "ws: programs-api sha"           "${SVC_SHA[programs-api]:-}"       abc1234
+assert "ws: sis-api no sha"             "${SVC_SHA[sis-api]:-}"            ""
+assert "ws: iam-api(sandbox) no sha"    "${SVC_SHA[iam-api]:-}"            ""
+
+# 3b'''. svc_repo_dir: the 13-service → repo-var map checkout_workspace_shas uses.
+assert "repo_dir: iam-api"     "$(svc_repo_dir iam-api)"        "/r"
+assert "repo_dir: sis-api"     "$(svc_repo_dir sis-api)"        "/r"
+assert "repo_dir: programs-api" "$(svc_repo_dir programs-api)" "/p"
+assert "repo_dir: unknown svc is empty" "$(svc_repo_dir bogus-svc)" ""
+
 # 3b'. restored_db keys on ACTUAL restore success (RESTORED_OK), not the dbProfile
 # request — so a failed/not-yet-run restore still falls through to db:seed.
 RESTORED_OK=()
@@ -134,6 +146,46 @@ nonimam_warn="$( ( SVC_MODE=(); SVC_SANDBOX=(); WS_RUN_SET=(); IAM_SANDBOX=""; f
   printf '%s' '{"version":1,"services":{"sis-api":{"mode":"sandbox","sandboxName":"x"}}}' > "$f"
   parse_workspace "$f" 2>&1 >/dev/null; rm -f "$f" ) | grep -c 'dep-repoint is iam-only' || true )"
 assert "guard: non-iam sandbox warns" "$nonimam_warn" 1
+
+# 5. checkout_workspace_shas: real scratch git repos, no network.
+eval "$(sed -n '/^checkout_workspace_shas(){/,/^}/p' "$UP")"
+SCRATCH="$(mktemp -d)"; trap 'rm -f "$WS"; rm -rf "$SCRATCH"' EXIT
+git init -q "$SCRATCH/repo"
+git -C "$SCRATCH/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m one
+FIRST_SHA="$(git -C "$SCRATCH/repo" rev-parse HEAD)"
+git -C "$SCRATCH/repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m two
+SECOND_SHA="$(git -C "$SCRATCH/repo" rev-parse HEAD)"
+ROSTERING="$SCRATCH/repo"   # svc_repo_dir(iam-api) → $ROSTERING
+
+# 5a. checks out an older sha cleanly.
+SVC_SHA=([iam-api]="$FIRST_SHA")
+checkout_rc="$( (checkout_workspace_shas) >/dev/null 2>&1; echo $? )"
+assert "checkout: exits 0"         "$checkout_rc" 0
+checkout_workspace_shas >/dev/null 2>&1
+assert "checkout: HEAD moved"      "$(git -C "$SCRATCH/repo" rev-parse HEAD)" "$FIRST_SHA"
+
+# 5b. already-there sha is a no-op (still exits 0, HEAD unchanged).
+noop_rc="$( (checkout_workspace_shas) >/dev/null 2>&1; echo $? )"
+assert "checkout: no-op when already on sha" "$noop_rc" 0
+
+# 5c. dirty tree refuses to check out, even to a valid sha.
+echo dirty > "$SCRATCH/repo/untracked.txt"
+SVC_SHA=([iam-api]="$SECOND_SHA")
+dirty_rc="$( (checkout_workspace_shas) >/dev/null 2>&1; echo $? )"
+assert "checkout: dirty tree refused"  "$dirty_rc" 1
+assert "checkout: dirty tree HEAD unmoved" "$(git -C "$SCRATCH/repo" rev-parse HEAD)" "$FIRST_SHA"
+rm -f "$SCRATCH/repo/untracked.txt"
+
+# 5d. unknown sha fails loudly rather than launching on whatever's checked out.
+SVC_SHA=([iam-api]="0000000000000000000000000000000000dead")
+bogus_rc="$( (checkout_workspace_shas) >/dev/null 2>&1; echo $? )"
+assert "checkout: unknown sha fails" "$bogus_rc" 1
+
+# 5e. a service with no svc_repo_dir mapping fails loudly, not silently.
+SVC_SHA=([totally-unknown-svc]="$FIRST_SHA")
+unmapped_rc="$( (checkout_workspace_shas) >/dev/null 2>&1; echo $? )"
+assert "checkout: unmapped service fails" "$unmapped_rc" 1
+SVC_SHA=()
 
 [[ $fail == 0 ]] && echo "ALL PASS" || echo "SOME FAILED"
 exit $fail

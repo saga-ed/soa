@@ -64,7 +64,9 @@ export function buildDevLoginRequest(email: string, iamUrl: string): DevLoginReq
   return {
     url: `${iamUrl}${DEVLOGIN_PATH}`,
     origin: iamUrl,
-    body: JSON.stringify({ email }),
+    // rostering#756: devLogin takes `identifier` (uuid | email). Both keys are
+    // sent so the jar mints against pre- and post-#756 iam checkouts.
+    body: JSON.stringify({ identifier: email, email }),
     email,
   };
 }

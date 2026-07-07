@@ -23,8 +23,14 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
+import type { ServiceId } from '../../core/manifest/index.js';
 import { meshDown, repoContextFromFlags, resolveRepoRoot } from '../../runtime/index.js';
-import type { MeshDownResult, ScriptContext, StopServiceResult } from '../../runtime/index.js';
+import type {
+  MeshDownResult,
+  OrphanListener,
+  ScriptContext,
+  StopServiceResult,
+} from '../../runtime/index.js';
 
 export default class StackDown extends BaseCommand {
   static description =
@@ -79,6 +85,15 @@ export default class StackDown extends BaseCommand {
     const stopped = await stopper(stateDir);
     this.reportStopped(profile, stateDir, stopped);
 
+    // ── POST-DOWN ORPHAN AUDIT (saga-ed/soa#249). ──
+    // The group-kill above reaps every RECORDED pid's whole subtree, but a watch
+    // child orphaned by an older build (or a pidfile lost to a crashed up) survives
+    // invisibly — and then serves a STALE build to the next bring-up. Scan the
+    // slot's resolved service-port band for sockets still LISTENing and warn LOUD,
+    // naming pid + port + a paste-ready kill hint. Silent when clean; never fails
+    // the teardown.
+    await this.auditOrphans(profile);
+
     if (!flags.mesh) return;
 
     // ── --mesh: ALSO tear the mesh down (inverse of up.sh mesh_up's
@@ -108,6 +123,46 @@ export default class StackDown extends BaseCommand {
       runner: this.getRunner(),
       project: profile.slot === 0 ? undefined : profile.project,
     });
+  }
+
+  /**
+   * Post-down orphan audit (saga-ed/soa#249): scan the slot's RESOLVED
+   * service-port band — every service the slot's closure could launch (the
+   * profile's `portOverrides`, minus the slot's `excludedServices`) — for sockets
+   * still LISTENing after the teardown, and warn loudly per survivor with pid +
+   * port + a paste-ready kill hint. The scan runs through the injectable
+   * `OrphanScanner` seam (no raw exec here); any scanner failure degrades open
+   * (reports nothing), so the audit can never fail `down` itself.
+   */
+  private async auditOrphans(profile: InstanceProfile): Promise<void> {
+    const excluded = new Set<ServiceId>(profile.excludedServices);
+    const portToService = new Map<number, ServiceId>();
+    for (const [id, port] of Object.entries(profile.portOverrides) as [ServiceId, number][]) {
+      if (!excluded.has(id)) portToService.set(port, id);
+    }
+
+    const survivors = await this.getOrphanScanner().scan([...portToService.keys()]);
+    if (survivors.length === 0) return; // clean teardown — stay silent.
+
+    this.log(
+      `⚠ ORPHANS SURVIVED down — ${survivors.length} listener(s) still on slot ` +
+        `${profile.slot}'s service ports (likely watch children of an older build; ` +
+        'they will serve STALE code to the next up):',
+    );
+    for (const s of survivors) {
+      this.log(`⚠   ${this.describeOrphan(s, portToService.get(s.port))}`);
+    }
+  }
+
+  /** One survivor line: `port 4011 (programs-api): pid 873122 (node) — kill it:  kill -9 873122`. */
+  private describeOrphan(s: OrphanListener, service: ServiceId | undefined): string {
+    const who = service ?? 'unknown service';
+    const hint =
+      s.pid !== undefined
+        ? `kill it:  kill -9 ${s.pid}`
+        : `find it:  sudo lsof -iTCP:${s.port} -sTCP:LISTEN`;
+    const holder = s.pid !== undefined ? `pid ${s.pid}${s.command ? ` (${s.command})` : ''}` : 'holder not visible';
+    return `port ${s.port} (${who}): ${holder} — ${hint}`;
   }
 
   /**

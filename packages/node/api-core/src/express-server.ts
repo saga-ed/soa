@@ -77,7 +77,23 @@ export class ExpressServer {
     }
 
     this.app.use(cors(corsOptions));
-    this.app.use(express.json());
+    // Parse JSON bodies for routing-controllers' @Body() params — guarded so
+    // this layer never re-reads a body a consumer-mounted parser already
+    // consumed. express 5's parsers (body-parser 2.x) set req.body but not
+    // the req._body flag body-parser 1.x checks, so without the guard the
+    // express-4 json() here — and routing-controllers' route-scoped @Body()
+    // parsers — re-read the consumed stream and 500 every JSON POST with
+    // "stream is not readable" (saga-ed/program-hub#306). Marking req._body
+    // restores the 1.x contract for those route-scoped parsers too.
+    const jsonParser = express.json();
+    this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (req.body !== undefined) {
+        (req as { _body?: boolean })._body = true;
+        next();
+        return;
+      }
+      jsonParser(req, res, next);
+    });
 
     // Ensure routing-controllers uses Inversify for controller resolution
     useContainer(container);

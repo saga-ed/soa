@@ -48,7 +48,7 @@ describe('buildDevLoginRequest — origin-checked devLogin POST', () => {
     expect(req.url).toBe('http://localhost:3010/trpc/auth.devLogin');
     // Origin is iam's OWN origin — a wrong value is rejected by iam's origin-check.
     expect(req.origin).toBe(iamUrl);
-    expect(req.body).toBe('{"email":"teacher@saga.org"}');
+    expect(req.body).toBe('{"identifier":"teacher@saga.org","email":"teacher@saga.org"}');
     expect(req.email).toBe('teacher@saga.org');
   });
 

@@ -81,6 +81,15 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       MAIL_FRONTEND_BASE_URL: 'http://localhost:3010/demo',
       REDIS_HOST: 'localhost',
       REDIS_PORT: '6379', // slot 0 base — offset-aware (:7379 at slot 1), see launch-plan.slot test
+      // Slot-pinned DB URLs (gh_214 acceptance find): without these the SERVER inherits
+      // $ROSTERING/.env's literal :5432 and dials slot 0's postgres at slot > 0 while
+      // migrate/seed (slot-correct seedEnv) hit the slot mesh. At slot 0 these expand
+      // to the same literals .env baked, so byte-identity with up.sh holds.
+      DATABASE_URL: 'postgresql://iam:iam@localhost:5432/iam_local',
+      PII_DATABASE_URL: 'postgresql://iam_pii:iam_pii@localhost:5432/iam_pii_local',
+      // Slot-pinned broker URL (same find): iam's OutboxRelay otherwise inherits
+      // $ROSTERING/.env.local's literal :5672 and publishes iam.* to slot 0's rabbit.
+      RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       JANUS_REQUIRED: 'false', // main up.sh:1467 — without it iam 401s every local S2S/devLogin
       SECURITY_RATELIMITMAXREQUESTS: '1000000', // apply_fixes (up.sh:457) — no local rate-limit
       JWT_ACCESSTOKENTTLSECONDS: '28800', // apply_fixes (up.sh:465) — 8h TTL for long dev/e2e sessions
@@ -173,7 +182,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       JANUS_REQUIRED: 'false',
       IAM_API_URL: 'http://localhost:3010',
       JWT_ISSUER: 'https://iam.saga.org',
-      ALLOWED_ORIGINS: 'http://localhost:6210',
+      // #222 port: dash joins the CORS allowlist; rtsm wired for private-convos.
+      ALLOWED_ORIGINS: 'http://localhost:6210,http://localhost:8900',
       SESSIONS_API_BASE_URL: 'http://localhost:3007',
       SAGA_API_TARGET: 'https://wootmath.com',
       CONTENT_API_URL: 'http://localhost:3009',
@@ -183,6 +193,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       LIVEKIT_API_SECRET: 'devsecret',
       RECORDING_SERVICE_TOKEN: 'local-dev-token',
       RECORDER_URL_TEMPLATE: 'http://127.0.0.1:7890',
+      RTSM_API_URL: 'http://localhost:6110',
       FLEEK_TOPOLOGY_JSON:
         '{"cityMap":{"_default":"ws://localhost:7880"},"nodes":{"local":{"url":"ws://localhost:7880"}}}',
     });

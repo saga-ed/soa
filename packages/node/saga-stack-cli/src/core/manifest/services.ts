@@ -68,6 +68,22 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // slot 0's redis (ECONNREFUSED alone, or split-brain onto slot 0).
         REDIS_HOST: 'localhost',
         REDIS_PORT: '${REDIS_PORT}',
+        // iam-api's dotenv chain falls back to $ROSTERING/.env, which bakes
+        // LITERAL :5432 DATABASE_URL/PII_DATABASE_URL — so at slot > 0 the
+        // SERVER dialed slot 0's postgres while its migrate/seed steps (slot-
+        // correct seedEnv) hit the slot mesh: a split-brain that deterministic
+        // seed UUIDs masked (devLogin "worked" against slot 0's iam_local).
+        // dotenv never overrides real env, so injecting here wins at every slot
+        // and expands to the exact legacy literals at slot 0 (byte-identity).
+        DATABASE_URL: '${IAM_DB_URL}',
+        PII_DATABASE_URL: '${IAM_PII_DB_URL}',
+        // Same class, third instance: iam-api's OutboxRelay reads RABBITMQ_URL
+        // with a $ROSTERING/.env.local fallback baking LITERAL :5672 — so at
+        // slot > 0 iam.* events published to slot 0's broker while the slot's
+        // consumers (sessions-api iam-projection et al.) listen on the slot
+        // mesh. MESH_MQ expands to the same rabbitmq_admin URL at the slot's
+        // offset port (:5672 at slot 0 — byte-identity with .env.local holds).
+        RABBITMQ_URL: '${MESH_MQ}',
         // On a fresh clone iam-api/.env doesn't exist, so JANUS_REQUIRED fail-safes
         // to `required` → iam 401s every local S2S call + devLogin ({"realms":["janus"]}).
         // main's up.sh sets it (services_up ~1467, added after gh_214 branched); the CLI
@@ -344,7 +360,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         JANUS_REQUIRED: 'false',
         IAM_API_URL: '${IAM_URL}',
         JWT_ISSUER: 'https://iam.saga.org',
-        ALLOWED_ORIGINS: '${CONNECT_WEB_URL}',
+        // #222 port: dash calls connect-api cross-origin (journey attendance /
+        // connect embeds) — without DASH_URL in the allowlist those are CORS-blocked.
+        ALLOWED_ORIGINS: '${CONNECT_WEB_URL},${DASH_URL}',
         SESSIONS_API_BASE_URL: 'http://localhost:3007',
         SAGA_API_TARGET: '${SAGA_API_TARGET}',
         CONTENT_API_URL: '${CONTENT_API_URL}',
@@ -352,6 +370,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         LIVEKIT_URL: 'ws://localhost:7880',
         LIVEKIT_API_KEY: 'devkey',
         LIVEKIT_API_SECRET: 'devsecret',
+        // #222 port: point the private-convos supervisor at the local rtsm so
+        // server-side dark-corner enforcement runs (otherwise connect-api logs
+        // "private-convos registry disabled" and private conversations aren't
+        // enforced). Tokenized (up.sh hardcoded :6110) so slots stay correct.
+        RTSM_API_URL: '${RTSM_URL}',
         RECORDING_SERVICE_TOKEN: '${RECORDING_TOKEN}',
         RECORDER_URL_TEMPLATE: 'http://127.0.0.1:${RECORDER_CONTROL_PORT}',
         FLEEK_TOPOLOGY_JSON:

@@ -101,7 +101,7 @@ describe('stack login — native headless cookie jar', () => {
     expect(posts).toHaveLength(1);
     expect(posts[0]?.url).toBe('http://localhost:3010/trpc/auth.devLogin');
     expect(posts[0]?.opts.origin).toBe('http://localhost:3010');
-    expect(posts[0]?.opts.body).toBe('{"email":"dev@saga.org"}');
+    expect(posts[0]?.opts.body).toBe('{"identifier":"dev@saga.org","email":"dev@saga.org"}');
     // jar written to <stateDir>/cookies.txt with the captured cookies.
     expect(jarWrites).toHaveLength(1);
     expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');
@@ -115,7 +115,7 @@ describe('stack login — native headless cookie jar', () => {
     installPoster(OK_COOKIES);
     installJar();
     await StackLogin.run(['teacher@saga.org', ...WS], config);
-    expect(posts[0]?.opts.body).toBe('{"email":"teacher@saga.org"}');
+    expect(posts[0]?.opts.body).toBe('{"identifier":"teacher@saga.org","email":"teacher@saga.org"}');
   });
 
   it('LOGIN_IAM_URL (tunnel) overrides the localhost iam URL + Origin', async () => {
@@ -159,7 +159,7 @@ describe('stack login — native headless cookie jar', () => {
 
     // the native jar STILL ran (poster + jar), unlike the old up.sh-delegated flow.
     expect(posts).toHaveLength(1);
-    expect(posts[0]?.opts.body).toBe('{"email":"teacher@saga.org"}');
+    expect(posts[0]?.opts.body).toBe('{"identifier":"teacher@saga.org","email":"teacher@saga.org"}');
     expect(jarWrites).toHaveLength(1);
     expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic/cookies.txt');
 

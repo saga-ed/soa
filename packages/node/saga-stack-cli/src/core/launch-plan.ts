@@ -108,6 +108,16 @@ export interface LaunchTokens {
   MESH_MQ: string;
   /** up.sh `CONNECT_MONGO_URI` — `mongodb://localhost:27037/connectv3`. */
   CONNECT_MONGO_URI: string;
+  /** iam-api runtime DB URL — `postgresql://iam:iam@localhost:<pg>/iam_local`.
+   *  up.sh relied on `$ROSTERING/.env` carrying a literal `:5432` URL, and the
+   *  native launch env silently inherited that fallback: at slot N the iam-api
+   *  SERVER dialed slot 0's postgres while its migrations/seeds (slot-correct
+   *  seedEnv) went to the slot mesh — a split-brain masked by the deterministic
+   *  seed UUIDs. Tokenized so the launch env pins the same slot-offset URL the
+   *  seed layer derives (they share pgUrl, so they can never drift). */
+  IAM_DB_URL: string;
+  /** iam-api PII DB URL — `postgresql://iam_pii:iam_pii@localhost:<pg>/iam_pii_local` (see IAM_DB_URL). */
+  IAM_PII_DB_URL: string;
   /** up.sh `SIS_DB_URL`. */
   SIS_DB_URL: string;
   /** up.sh `PROGRAMS_DB_URL`. */
@@ -557,6 +567,8 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     // mesh broker + connection strings
     MESH_MQ: `amqp://rabbitmq_admin:password123@localhost:${mqPort}`,
     CONNECT_MONGO_URI: `mongodb://localhost:${mongoPort}/connectv3`,
+    IAM_DB_URL: pgUrl('iam_local', pgPort, m),
+    IAM_PII_DB_URL: pgUrl('iam_pii_local', pgPort, m),
     SIS_DB_URL: pgUrl('sis_db', pgPort, m),
     PROGRAMS_DB_URL: pgUrl('programs', pgPort, m),
     SCHEDULING_DB_URL: pgUrl('scheduling', pgPort, m),

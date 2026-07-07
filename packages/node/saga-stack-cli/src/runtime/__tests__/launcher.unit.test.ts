@@ -10,6 +10,13 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { makeRealLauncher, pidFilePath, stopServices } from '../launcher.js';
+
+// Mock node:child_process so the DEFAULT SpawnFn's options can be pinned (the
+// injectable `deps.spawn` seam sits ABOVE the `detached: true` flag, so only a
+// module mock can observe it). Every other test in this file injects its own
+// fake spawn, so the mock is inert there.
+const spawnMock = vi.hoisted(() => vi.fn());
+vi.mock('node:child_process', () => ({ spawn: spawnMock }));
 import type {
   ChildLike,
   LaunchResult,
@@ -158,6 +165,45 @@ describe('makeRealLauncher.launch', () => {
 
     const res = await launcher.launch(SPEC);
     expect(res).toEqual({ id: 'iam-api', ok: false });
+  });
+
+  it('DEFAULT spawn pins detached:true (own pgid — the group-kill contract, saga-ed/soa#249)', async () => {
+    // No `deps.spawn` ⇒ the default node:child_process wrapper runs (mocked above).
+    // `detached: true` is LOAD-BEARING: it makes the child a process-group LEADER
+    // whose pgid == the recorded pid, which is what lets `stopServices(stateDir)`
+    // reap the whole `pnpm dev → tsup --watch → node dist` subtree via kill(-pid).
+    spawnMock.mockReset();
+    spawnMock.mockReturnValue({ pid: 4242, unref: () => {}, on: () => {} });
+    const { prober } = seqProber([false, true]);
+    const writePid = vi.fn();
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      writePid,
+      openLog: () => 'ignore',
+      ensureDir: () => {},
+      sleep: async () => {},
+    });
+
+    const res = await launcher.launch(SPEC);
+
+    expect(res).toEqual({ id: 'iam-api', ok: true, pid: 4242 });
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const [command, args, opts] = spawnMock.mock.calls[0] as [
+      string,
+      string[],
+      { cwd: string; env: Record<string, string>; detached: boolean; stdio: unknown[] },
+    ];
+    expect(command).toBe('pnpm');
+    expect(args).toEqual(['dev']);
+    expect(opts.cwd).toBe('/repo/iam-api');
+    expect(opts.detached).toBe(true); // ← the pin: revert ⇒ this fails
+    expect(opts.stdio).toEqual(['ignore', 'ignore', 'ignore']);
+    // Parent env first, per-service launch env wins.
+    expect(opts.env.PORT).toBe('3010');
+    expect(opts.env.AUTH_DEVUSERID).toBe('beef');
+    // The pid recorded IS the group leader's pid (pid == pgid under detached).
+    expect(writePid).toHaveBeenCalledWith(pidFilePath(STATE, 'iam-api'), 4242);
   });
 });
 

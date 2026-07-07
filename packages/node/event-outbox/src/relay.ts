@@ -89,12 +89,21 @@ export class OutboxRelay {
     private channel: Channel | null = null;
     private timer: NodeJS.Timeout | null = null;
     private running = false;
+    private consecutiveFailures = 0;
+    private lastFailureMessage: string | null = null;
 
     constructor(private readonly opts: OutboxRelayOpts) {}
 
     async start(): Promise<void> {
-        this.channel = await this.opts.connectionManager.newChannel();
-        await this.channel.assertExchange(this.opts.exchange, 'topic', { durable: true });
+        // `running` flips on BEFORE the first channel acquisition so
+        // ensureChannel's stop-race guard can see a concurrent stop().
+        this.running = true;
+        try {
+            await this.ensureChannel();
+        } catch (err) {
+            this.running = false;
+            throw err;
+        }
         // Publishes use `persistent: true` for durability but do NOT wait for
         // publisher confirms — `@saga-ed/soa-rabbitmq` exposes only a plain
         // Channel today, not a ConfirmChannel. A broker crash between
@@ -102,9 +111,66 @@ export class OutboxRelay {
         // soa-rabbitmq with `newConfirmChannel()` to restore strict
         // at-least-once.
 
-        this.running = true;
         this.opts.logger.info(`[OutboxRelay] started (exchange=${this.opts.exchange})`);
         this.scheduleNext();
+    }
+
+    /**
+     * Return a live channel, creating one if the previous channel died.
+     * The ConnectionManager auto-reconnects the *connection* after a socket
+     * drop, but channels are not resurrected with it — without this, the
+     * relay would keep publishing into the dead channel from the old
+     * connection forever (one IllegalOperationError per tick until the task
+     * restarts, with outbox rows backing up the whole time).
+     */
+    private async ensureChannel(): Promise<Channel> {
+        if (this.channel) {
+            return this.channel;
+        }
+        // Covers the case where the manager's own post-'close' reconnect
+        // exhausted its retries — nothing else would retry the connection.
+        // Older soa-rabbitmq versions predate ensureConnected(); the relay
+        // then falls through to newChannel(), which fails descriptively on a
+        // dead connection and is retried next tick.
+        if (typeof this.opts.connectionManager.ensureConnected === 'function') {
+            await this.opts.connectionManager.ensureConnected();
+        }
+        const channel = await this.opts.connectionManager.newChannel();
+        // 'error' must have a listener (an unhandled EventEmitter 'error'
+        // crashes the process); the terminal signal is the 'close' that
+        // follows, where the channel is dropped for next-tick re-acquisition.
+        channel.on('error', (err: Error) => {
+            this.opts.logger.warn(`[OutboxRelay] channel error: ${err.message}`);
+        });
+        let closed = false;
+        channel.on('close', () => {
+            closed = true;
+            if (this.channel === channel) {
+                this.channel = null;
+                if (this.running) {
+                    this.opts.logger.warn(
+                        '[OutboxRelay] channel lost; re-acquiring on next poll',
+                    );
+                }
+            }
+        });
+        await channel.assertExchange(this.opts.exchange, 'topic', { durable: true });
+        this.channel = channel;
+        // Setup can race a channel death ('close' fired before the
+        // assignment above, so the listener's identity guard missed it) or
+        // a concurrent stop(). Either way this channel must not be cached.
+        if (closed || !this.running) {
+            this.channel = null;
+            void Promise.resolve()
+                .then(() => channel.close())
+                .catch(() => {});
+            throw new Error(
+                closed
+                    ? 'channel closed during setup'
+                    : 'relay stopped during channel setup',
+            );
+        }
+        return channel;
     }
 
     async stop(): Promise<void> {
@@ -135,7 +201,11 @@ export class OutboxRelay {
     private async tick(): Promise<void> {
         try {
             await this.drainBatch();
+            this.consecutiveFailures = 0;
+            this.lastFailureMessage = null;
         } catch (err) {
+            // A tick interrupted by stop() isn't a failure worth reporting.
+            if (!this.running) return;
             const e = err instanceof Error ? err : new Error(String(err));
             if (isFatalPgError(e)) {
                 // Configuration / permission errors aren't going to fix
@@ -154,15 +224,33 @@ export class OutboxRelay {
                 }
                 return;
             }
-            this.opts.logger.error('[OutboxRelay] poll failed', e);
+            // Throttle repeat failures: a persistent fault (broker outage,
+            // wedged channel) would otherwise emit a multi-line error log
+            // every poll tick until someone intervenes. Log each NEW error
+            // (first of a streak, or the failure mode changing mid-outage)
+            // immediately, then one heartbeat per ~60s of poll ticks.
+            this.consecutiveFailures++;
+            const ticksPerHeartbeat = Math.max(
+                1,
+                Math.round(60_000 / (this.opts.pollIntervalMs ?? 500)),
+            );
+            const newError = e.message !== this.lastFailureMessage;
+            this.lastFailureMessage = e.message;
+            if (newError || this.consecutiveFailures % ticksPerHeartbeat === 0) {
+                this.opts.logger.error(
+                    `[OutboxRelay] poll failed (${this.consecutiveFailures} consecutive)`,
+                    e,
+                );
+            }
         }
         this.scheduleNext();
     }
 
     private async drainBatch(): Promise<void> {
-        if (!this.channel) {
-            throw new Error('OutboxRelay not started');
-        }
+        // Re-acquire the channel BEFORE opening the pg transaction: broker
+        // recovery can take seconds-to-minutes and must not run while row
+        // locks are held. No-op when the channel is live.
+        const channel = await this.ensureChannel();
         const batchSize = this.opts.batchSize ?? 100;
         const client = await this.opts.pool.connect();
         let clientPoisoned = false;
@@ -195,7 +283,7 @@ export class OutboxRelay {
 
             const publishedIds: string[] = [];
             for (const row of result.rows) {
-                await this.publishRow(row);
+                await this.publishRow(channel, row);
                 publishedIds.push(row.event_id);
             }
 
@@ -229,11 +317,7 @@ export class OutboxRelay {
         }
     }
 
-    private async publishRow(row: OutboxRow): Promise<void> {
-        if (!this.channel) {
-            throw new Error('OutboxRelay channel missing');
-        }
-
+    private async publishRow(channel: Channel, row: OutboxRow): Promise<void> {
         // Restore the trace context the publisher captured at outbox-write
         // time so this PRODUCER span chains under the original request span,
         // and the consumer's CONSUMER span chains under this one. End-to-end
@@ -284,7 +368,7 @@ export class OutboxRelay {
                     ...(Object.keys(wireMeta).length > 0 ? { meta: wireMeta } : {}),
                 };
 
-                const ok = this.channel!.publish(
+                const ok = channel.publish(
                     this.opts.exchange,
                     row.event_type,
                     Buffer.from(JSON.stringify(message)),
@@ -302,7 +386,7 @@ export class OutboxRelay {
                     // relay because none of those events arrive until
                     // amqplib's heartbeat eventually closes the connection,
                     // and the row stays locked under FOR UPDATE SKIP LOCKED.
-                    const ch = this.channel!;
+                    const ch = channel;
                     const timeoutMs = this.opts.drainTimeoutMs ?? 30_000;
                     await new Promise<void>((resolve, reject) => {
                         const cleanup = (): void => {

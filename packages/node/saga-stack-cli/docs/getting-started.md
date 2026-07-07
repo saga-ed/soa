@@ -15,8 +15,11 @@ real output. For the detail behind each feature, follow the peer-doc links at th
 
 ## 1. Install
 
+Install workspace deps from the monorepo root (once), then build the CLI and put it on your PATH:
+
 ```bash
-cd ~/dev/soa/packages/node/saga-stack-cli && pnpm build && pnpm link --global
+cd ~/dev/soa && pnpm install
+cd packages/node/saga-stack-cli && pnpm build && pnpm link --global
 ```
 
 <details><summary>✓ <code>ss</code> and <code>saga-stack</code> are now on your PATH, runnable from any directory</summary>
@@ -25,6 +28,11 @@ cd ~/dev/soa/packages/node/saga-stack-cli && pnpm build && pnpm link --global
 $ ss --version
 @saga-ed/saga-stack-cli/0.0.1 linux-x64 node-v24.12.0
 ```
+
+`pnpm install` runs at the **monorepo root** — this is a pnpm workspace, so deps for the CLI (and
+every sibling package) resolve from there; it only needs re-running when dependencies change. In a
+VSCode / Claude Code shell `NODE_ENV=production` is set by default and silently skips
+devDependencies — prefix with `NODE_ENV=development pnpm install` there (see `claude/tooling/pnpm.md`).
 
 Re-run `pnpm build` after pulling CLI changes. No-build alternative (runs from `src` via
 tsx): `node <abs-path>/bin/dev.js …`. Every command supports `--output-json` and `--porcelain`
@@ -266,6 +274,178 @@ survive; use **[`cold-start`](./cold-start.md)** for a `down -v` data wipe). `do
 and slot-safe — it stops exactly the pids *this* stack recorded, never a host-global `pkill`, and
 **post-down it audits the slot's port band** and warns loudly about any watch child that survived
 (soa#249/#250), so a stale-build server can't linger and serve old code.
+</details>
+
+---
+
+## 8. Work in parallel — slots, worktree sets & stage checkpoints
+
+Everything above ran on **slot 0**, the shared baseline. One box hosts up to **10 isolated stacks**
+— slots `0`–`9` — each with its own docker project (`soa` / `soa-sN`), port band (offset `N×1000`),
+state dir (`/tmp/sds-synthetic[-sN]`) and snapshot store. Slot 0 is the team baseline; **slots 1–9
+are your parallel dev contexts.** (`cold-start`, `restart`, `overlay` and `up --tunnel/--sandbox`
+are **slot-0 only**; a slot >0 is a backend sub-stack — `connect-api`, the playback trio and
+`connect-web` don't boot there.)
+
+### 8a. Run a flow on slot 0 — current checkout vs latest main
+
+By default a flow runs against **whatever you have checked out** on slot 0:
+
+```bash
+ss e2e run saga-dash/journey --through sessions --headless      # your working trees, slot 0
+```
+
+To instead run against **latest `main` across every repo**, rebase the box to main first, then reuse
+that stack (`--skip-reset` keeps the seeded state):
+
+```bash
+ss stack bootstrap                                              # stand up on main (non-destructive): ensure repos → up → seed → verify
+ss e2e run saga-dash/journey --through sessions --skip-reset --headless
+```
+
+<details><summary>Why two commands: there is no <code>--main</code> flag — the baseline is a separate step</summary>
+
+`e2e run` has no `--main`/`--latest`/`--pull` flag; it runs against the checkout the repo paths
+resolve to. `bootstrap` stands the stack up **on main** non-destructively; for a **guaranteed-clean**
+main baseline use the destructive `ss stack cold-start` instead (docker `down -v` → repos to main →
+ff origin → clean build → up + seed). Then any `ss e2e run … --skip-reset` exercises that main-based
+stack. See **[integration.md](./integration.md)**.
+</details>
+
+### 8b. A feature branch on slot 1 — via a worktree set
+
+To run a branch **without disturbing slot 0**, put it in a git worktree and bind it to a slot with a
+**worktree set**. There's no `ss` worktree helper yet — create the worktree with plain git, then
+register the set (a hand-edited JSON map of repo→path, bound to a slot):
+
+```bash
+# 1. worktree + branch (plain git), then pre-install so the prep fresh-skip guard is happy
+git -C ~/dev/saga-dash worktree add ~/dev/worktrees/saga-dash-sched -b feat/sched-tweak
+( cd ~/dev/worktrees/saga-dash-sched && pnpm install )
+```
+
+Register it in `~/.saga-stack/worktree-sets.json` (or `$SAGA_STACK_SETS`) — the `slot` is part of
+the set (1–9; slot 0 is reserved for the baseline):
+
+```jsonc
+{ "version": 1, "sets": {
+    "feat-sched": { "slot": 1, "note": "scheduling tweak",
+                    "repos": { "saga-dash": "~/dev/worktrees/saga-dash-sched" } }
+} }
+```
+
+Validate, bring it up, and run a flow — all on slot 1, addressed by `--set` (which supplies the slot
+and pins the repo to your worktree; the rest of the closure comes from your default checkouts):
+
+```bash
+ss set check feat-sched                                         # preflight: paths, build posture, drift
+ss stack up --set feat-sched                                    # boots on slot 1 from the worktree
+ss e2e run --set feat-sched saga-dash/journey --through schedule --headless
+```
+
+<details><summary>Why a set, not <code>ss stack overlay</code> — overlay is a different tool</summary>
+
+`ss stack overlay` stacks **in-flight PR numbers** onto your **slot-0 primary checkouts** (managed
+repos: rostering, program-hub, saga-dash); it's slot-0-only and **skips any repo you've pinned to a
+worktree**. So "overlay a worktree onto slot 1" isn't a thing — the worktree **set** is the
+mechanism for running a branch on its own slot. `--set` plus a conflicting `--slot` is a hard error
+(the set owns its slot). See **[worktree-sets.md](./worktree-sets.md)** and
+**[integration.md](./integration.md)**.
+</details>
+
+### 8c. A second branch on slot 2 — a different worktree, a different flow
+
+Repeat with another worktree bound to **slot 2** — the two run fully isolated, side by side:
+
+```bash
+git -C ~/dev/saga-dash worktree add ~/dev/worktrees/saga-dash-conn -b feat/connect-polish
+( cd ~/dev/worktrees/saga-dash-conn && pnpm install )
+```
+
+Add a second set (unique slot — two sets can't share one):
+
+```jsonc
+"feat-conn": { "slot": 2, "note": "connect polish",
+               "repos": { "saga-dash": "~/dev/worktrees/saga-dash-conn" } }
+```
+
+```bash
+ss set check feat-conn
+ss stack up --set feat-conn
+ss e2e run --set feat-conn saga-dash/connect-session --headless   # a different flow, on slot 2
+```
+
+Slot 1 (`feat-sched`) and slot 2 (`feat-conn`) now hold independent stacks on different branches —
+different ports, DBs and pidfiles — so `journey` on slot 1 and `connect-session` on slot 2 never
+collide.
+
+### 8d. Snapshot a flow and resume from a later stage
+
+A progressive flow can **bake a DB checkpoint after each green stage**, so you can re-enter it
+partway instead of replaying from stage 1. Bake once with `--snapshot-stages`:
+
+```bash
+ss e2e run saga-dash/journey --snapshot-stages --headless      # checkpoint after every green stage
+```
+
+Then start from a later stage — `--from` restores the *predecessor* stage's checkpoint and runs the
+rest, so you iterate on stage 6 in seconds without re-driving 1–5:
+
+```bash
+ss e2e run saga-dash/journey --from sessions                   # restore stage-5 (schedule), run 6→end
+ss e2e run saga-dash/journey --from 6 --through 7              # or just a window: stages 6–7
+```
+
+<details><summary>How checkpoints relate to <code>ss stack snapshot</code></summary>
+
+Stage checkpoints are ordinary native snapshots named `flow-<spa>-<flow>-s<phase>-<stageId>`
+(e.g. `flow-saga-dash-journey-s5-schedule`), stored in the slot's snapshot root and listed by
+`ss stack snapshot list`. `--from` hard-validates the checkpoint (producing stages unchanged,
+migration head, matching seed profile, ≤7 days — override the age gate with `--from-stale-ok`) and
+**can't** be combined with `--skip-reset` (the restore *is* the state source). You must bake with
+`--snapshot-stages` before you can `--from`; there's no implicit mid-flow start.
+
+For hand-managed fixtures, the raw snapshot verbs work on any slot/set:
+
+```bash
+ss stack snapshot store --fixture-id my-baseline    # store (name is the --fixture-id FLAG)
+ss stack snapshot list                              # what's stored
+ss stack snapshot restore my-baseline               # restore (name is a positional here)
+```
+
+`store` takes `--fixture-id <name>`; `restore`/`validate`/`delete` take a bare positional. See
+**[snapshots.md](./snapshots.md)** and **[e2e.md](./e2e.md)**.
+</details>
+
+### 8e. See what's where — sets, branches, slot usage
+
+```bash
+ss set list                                                    # every set: name, slot, live?, repos
+```
+
+<details><summary>NAME · SLOT · ACTIVE (derived live) · REPOS — one row per set</summary>
+
+```
+NAME        SLOT  ACTIVE  REPOS
+────────────────────────────────────────────────
+feat-sched  1     ● up    saga-dash  (scheduling tweak)
+feat-conn   2     —       saga-dash  (connect polish)
+```
+
+`ACTIVE` is derived live (pidfiles under `/tmp/sds-synthetic-sN` + running `soa-sN` containers),
+never stored. Drill into one set for **branch, dirtiness and how far behind `main`** each worktree
+is:
+
+```bash
+ss set show feat-sched     # per-repo: branch, clean/dirty, path, provenance, [behind origin/main by N]
+ss set check feat-sched    # the preflight up/e2e runs first (exits non-zero on a violation)
+```
+
+**Slot usage:** there's no global "which slots are up" view — `ss set list`'s ACTIVE column covers
+only slots that have a **defined set**, and `ss stack status --slot N` probes **one** slot's health.
+A bare `ss stack up --slot 3` with no set records no provenance. Under the hood, occupancy = pidfiles
+in `/tmp/sds-synthetic[-sN]` + `docker ps` filtered by project `soa[-sN]`. See **[slots.md](./slots.md)**
+and **[worktree-sets.md](./worktree-sets.md)**.
 </details>
 
 ---

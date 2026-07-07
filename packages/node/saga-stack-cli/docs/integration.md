@@ -13,7 +13,7 @@ onto a clean main-based stack, across rostering / program-hub / saga-dash. All n
 
 ```bash
 ss stack overlay list                          # show your personal overlay file
-ss stack overlay apply --prs 165 --repos saga-dash
+ss stack overlay apply --prs 165 saga-dash
 ss stack overlay reset                         # back out to main
 ```
 

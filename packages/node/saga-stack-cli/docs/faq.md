@@ -117,6 +117,41 @@ per-flow authoring choice (connect's AV hold via `page.pause()`).
 
 </details>
 
+## How do I manually inspect a hermetic flow's world in the browser?
+
+Log in as the **browsable persona the flow itself seeds**, not as `dev@saga.org`:
+
+```bash
+# scheduling-topology (after a green run — stack still up):
+ss stack login ab-topology-admin@saga.org --slot 1 --browser
+```
+
+The pattern: a hermetic flow builds its world via API inside an isolated org
+(scheduling-topology uses the Empty Org), and the dash scopes program browsing
+to the **signed-in user's own districts** — there is no org switcher. The stock
+`dev@saga.org` only carries Seed District, so a hermetic flow's world is
+invisible to it (verified live 2026-07-07: even adding a bare
+`group_membership` for dev into the org did not surface it in dev's district
+context — a proper persona-carrying membership is what the flow seeds
+instead). So each such flow seeds ONE admin user
+INSIDE its org — fixed, documented email; org-admin persona with the full dash
+nav bundle — as part of its world-building stage, and asserts the login mint
+works so a broken viewer fails the flow loudly.
+
+`ss stack login <email>` accepts any seeded/flow-seeded email (it rides the
+same `auth.devLogin` the flow asserts); `--browser` opens an auto-logged-in
+Chromium against the slot's dash.
+
+Currently seeded flow viewers:
+
+| Flow | Browsable login | World |
+|---|---|---|
+| `saga-dash/scheduling-topology` | `ab-topology-admin@saga.org` | Empty Org → "AB Topology …" program (A/B sessions next Mon/Wed/Fri) |
+
+(The journey flow needs no special viewer — it builds its world in Seed
+District, which `dev@saga.org` already carries; `--hold` opens that browser
+for you.)
+
 ## How do I pull the latest main into slot 0 and the worktree slots?
 
 ```bash

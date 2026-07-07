@@ -83,6 +83,21 @@ Self-seeds from the stock roster profile (no prerequisite). The single stage
 configures a 2-rotation topology through the API and asserts the realized
 sessions day-by-day.
 
+**Manually inspect the world it built** — the flow seeds a browsable admin
+inside its (otherwise invisible) Empty Org world, so after a green run:
+
+```bash
+ss stack login ab-topology-admin@saga.org --slot <N> --browser
+# → auto-logged-in Chromium; pick "Empty Org" — the AB Topology program's
+#   A/B sessions land on next week's Mon/Wed/Fri.
+```
+
+Don't reach for `dev@saga.org` here — the dash scopes program browsing to the
+signed-in user's own districts (no org switcher), and dev@ only carries Seed
+District, so the flow's world is invisible to it. See
+[the FAQ entry](./faq.md#how-do-i-manually-inspect-a-hermetic-flows-world-in-the-browser)
+for the general pattern.
+
 ### 4. connect-session — manual/AV only
 
 ```bash

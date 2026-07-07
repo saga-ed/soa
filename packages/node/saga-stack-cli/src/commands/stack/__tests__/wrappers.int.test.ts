@@ -24,7 +24,12 @@ import { resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import type { RunResult, ScriptInvocation, StopServiceResult } from '../../../runtime/index.js';
+import type {
+  OrphanListener,
+  RunResult,
+  ScriptInvocation,
+  StopServiceResult,
+} from '../../../runtime/index.js';
 import StackUp from '../up.js';
 import StackDown from '../down.js';
 import StackOverlay from '../overlay.js';
@@ -77,6 +82,37 @@ function installFakeStopper(result: StopServiceResult[]): { stopCalls: string[] 
   return { stopCalls };
 }
 
+/**
+ * Install a fake post-down orphan scanner on the BaseCommand prototype
+ * (saga-ed/soa#249). Records the port band each audit scanned and returns the
+ * canned survivors — so no real `ss`/`lsof` ever runs under test.
+ */
+function installFakeScanner(survivors: OrphanListener[]): { scanCalls: number[][] } {
+  const scanCalls: number[][] = [];
+  vi.spyOn(
+    BaseCommand.prototype as unknown as { getOrphanScanner: () => unknown },
+    'getOrphanScanner',
+  ).mockReturnValue({
+    async scan(ports: number[]): Promise<OrphanListener[]> {
+      scanCalls.push(ports);
+      return survivors;
+    },
+  });
+  return { scanCalls };
+}
+
+/** Capture (and suppress) every `this.log` line — the audit warnings assert on these. */
+function captureLog(): string[] {
+  const out: string[] = [];
+  vi.spyOn(
+    BaseCommand.prototype as unknown as { log: (msg?: string) => void },
+    'log',
+  ).mockImplementation((msg?: string) => {
+    out.push(String(msg ?? ''));
+  });
+  return out;
+}
+
 beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
   installFakeRunner(0);
@@ -125,6 +161,13 @@ describe('stack up — FULLY NATIVE (Phase 2: --sandbox/--tunnel/--record/--work
 
 describe('stack down — native slot-safe teardown at every slot (no up.sh)', () => {
   const INFRA_DIR = resolve(SOA_ROOT, 'infra');
+
+  // Every down run performs the post-down orphan audit (saga-ed/soa#249); fake
+  // it CLEAN by default so no real `ss`/`lsof` runs. The survivor cases below
+  // re-spy with canned survivors (re-vi.spyOn replaces the fake cleanly).
+  beforeEach(() => {
+    installFakeScanner([]);
+  });
 
   it('slot 0 (bare) stops services NATIVELY against /tmp/sds-synthetic (never up.sh)', async () => {
     const { stopCalls } = installFakeStopper([{ id: 'iam-api', pid: 200, outcome: 'term' }]);
@@ -206,6 +249,53 @@ describe('stack down — native slot-safe teardown at every slot (no up.sh)', ()
     expect(calls[0].cwd).toBe(INFRA_DIR);
     expect(calls[0].args).toEqual(['down', 'COMPOSE_PROJECT_NAME=soa-s1', 'PROJECT=saga-mesh']);
     expect(calls[0].env).toEqual({ COMPOSE_PROJECT_NAME: 'soa-s1' });
+  });
+
+  // ── post-down orphan audit (saga-ed/soa#249) ──
+
+  it('post-down audit scans the slot band and warns LOUD per survivor (pid + port + kill hint)', async () => {
+    installFakeStopper([{ id: 'programs-api', pid: 200, outcome: 'term' }]);
+    const { scanCalls } = installFakeScanner([
+      { port: 4006, pid: 873122, command: 'node' }, // the issue's exact scenario: orphaned watch child
+      { port: 4010 }, // survivor whose holder isn't visible
+    ]);
+    const out = captureLog();
+
+    await StackDown.run(['--slot', '1', ...WS], config);
+
+    // The audited band is slot 1's RESOLVED service ports (base + 1000) for every
+    // service the slot's closure could launch: programs-api 3006→4006 and iam-api
+    // 3010→4010 in; the slot-excluded connect-api/connect-web (7106/7210) OUT.
+    expect(scanCalls).toHaveLength(1);
+    expect(scanCalls[0]).toContain(4006);
+    expect(scanCalls[0]).toContain(4010);
+    expect(scanCalls[0]).not.toContain(7106);
+    expect(scanCalls[0]).not.toContain(7210);
+
+    const warnings = out.filter((l) => l.startsWith('⚠'));
+    expect(warnings).toHaveLength(3); // 1 header + 2 survivors
+    expect(warnings[0]).toContain('ORPHANS SURVIVED down — 2 listener(s)');
+    expect(warnings[1]).toContain(
+      'port 4006 (programs-api): pid 873122 (node) — kill it:  kill -9 873122',
+    );
+    expect(warnings[2]).toContain(
+      'port 4010 (iam-api): holder not visible — find it:  sudo lsof -iTCP:4010 -sTCP:LISTEN',
+    );
+  });
+
+  it('post-down audit is SILENT when the band is clean (slot 0 scans base ports)', async () => {
+    installFakeStopper([{ id: 'iam-api', pid: 200, outcome: 'term' }]);
+    const { scanCalls } = installFakeScanner([]);
+    const out = captureLog();
+
+    await StackDown.run([...WS], config);
+
+    // The audit RAN — against slot 0's base ports (offset 0; nothing excluded at slot 0).
+    expect(scanCalls).toHaveLength(1);
+    expect(scanCalls[0]).toContain(3006); // programs-api base
+    expect(scanCalls[0]).toContain(6106); // connect-api included at slot 0
+    // …but stayed silent: no orphan warning lines.
+    expect(out.some((l) => l.includes('ORPHAN'))).toBe(false);
   });
 });
 

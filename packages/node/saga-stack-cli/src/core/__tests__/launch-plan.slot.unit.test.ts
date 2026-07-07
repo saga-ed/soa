@@ -58,6 +58,11 @@ describe('defaultLaunchContext meshOffset — mesh connection strings offset in 
 
   it('offsets every *_DB_URL (postgres port)', () => {
     for (const url of [
+      // IAM_DB_URL / IAM_PII_DB_URL: the iam-api SERVER's runtime URLs (gh_214
+      // acceptance find — without launch-env injection iam-api inherited
+      // $ROSTERING/.env's :5432 and dialed slot 0's postgres at slot > 0).
+      ctx.tokens.IAM_DB_URL,
+      ctx.tokens.IAM_PII_DB_URL,
       ctx.tokens.SIS_DB_URL,
       ctx.tokens.PROGRAMS_DB_URL,
       ctx.tokens.SCHEDULING_DB_URL,

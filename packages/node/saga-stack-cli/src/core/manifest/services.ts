@@ -68,6 +68,22 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // slot 0's redis (ECONNREFUSED alone, or split-brain onto slot 0).
         REDIS_HOST: 'localhost',
         REDIS_PORT: '${REDIS_PORT}',
+        // iam-api's dotenv chain falls back to $ROSTERING/.env, which bakes
+        // LITERAL :5432 DATABASE_URL/PII_DATABASE_URL — so at slot > 0 the
+        // SERVER dialed slot 0's postgres while its migrate/seed steps (slot-
+        // correct seedEnv) hit the slot mesh: a split-brain that deterministic
+        // seed UUIDs masked (devLogin "worked" against slot 0's iam_local).
+        // dotenv never overrides real env, so injecting here wins at every slot
+        // and expands to the exact legacy literals at slot 0 (byte-identity).
+        DATABASE_URL: '${IAM_DB_URL}',
+        PII_DATABASE_URL: '${IAM_PII_DB_URL}',
+        // Same class, third instance: iam-api's OutboxRelay reads RABBITMQ_URL
+        // with a $ROSTERING/.env.local fallback baking LITERAL :5672 — so at
+        // slot > 0 iam.* events published to slot 0's broker while the slot's
+        // consumers (sessions-api iam-projection et al.) listen on the slot
+        // mesh. MESH_MQ expands to the same rabbitmq_admin URL at the slot's
+        // offset port (:5672 at slot 0 — byte-identity with .env.local holds).
+        RABBITMQ_URL: '${MESH_MQ}',
         // On a fresh clone iam-api/.env doesn't exist, so JANUS_REQUIRED fail-safes
         // to `required` → iam 401s every local S2S call + devLogin ({"realms":["janus"]}).
         // main's up.sh sets it (services_up ~1467, added after gh_214 branched); the CLI

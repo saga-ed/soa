@@ -189,6 +189,7 @@ export interface StackSeams {
    */
   pgProbe?: PgProbe;
   prepIsFresh?: (repoRoot: string) => boolean;
+  prepWriteStamp?: (repoRoot: string) => void;
   prepDbGenerateScan?: (repoRoot: string) => string[];
   repoDirExists?: (dir: string) => boolean;
   skipPrep?: boolean;
@@ -270,6 +271,7 @@ export function buildStackContext(
     pgProbe: seams.pgProbe,
     skipPrep: seams.skipPrep,
     prepIsFresh: seams.prepIsFresh,
+    prepWriteStamp: seams.prepWriteStamp,
     prepDbGenerateScan: seams.prepDbGenerateScan,
     repoDirExists: seams.repoDirExists,
     // M7 slot > 0 ONLY: namespace the mesh (`soa-s<N>`) + carry the offset so the slot's

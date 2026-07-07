@@ -134,6 +134,12 @@ export interface Runtime {
   skipPrep?: boolean;
   /** R1 fresh-skip predicate: is a repo root already built (`node_modules` + `dist`)? */
   prepIsFresh?: (repoRoot: string) => boolean;
+  /**
+   * soa#256: R1 stamp writer — after a repo builds+installs to completion, record
+   * its `{ headSha, lockHash }` so the next fresh-check can reject a pulled-but-
+   * unbuilt tree. Absent ⇒ no stamp written (unit-test default).
+   */
+  prepWriteStamp?: (repoRoot: string) => void;
   /** M13-B: realpath-keyed per-repo build lock — held ⇒ prep fails fast (plan §4 layer 2). */
   prepLock?: PrepRepoLock;
   /**
@@ -806,6 +812,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
           runner,
           skipPrep: runtime.skipPrep,
           isFresh: runtime.prepIsFresh,
+          writeStamp: runtime.prepWriteStamp,
           dbGenerateScan: runtime.prepDbGenerateScan,
           lock: runtime.prepLock,
           manifest,

@@ -33,13 +33,53 @@ for scripting, and `--help` at every level.
 
 ---
 
-## 2. See what's there
+## 2. Start from a clean slate (cold start)
+
+Running a tutorial or a demo? Reset the box to the team's **known-good baseline** first, so nothing
+from yesterday leaks into the session. **Preview it first — `cold-start` is destructive** (it drops
+the local mesh DB volumes):
+
+```bash
+ss stack cold-start --dry-run
+```
+
+<details><summary>Six phases, all previewed, <b>nothing changed</b>: docker wipe → ensure repos → repos to main → clean build → ensure .env → up + verify</summary>
+
+```
+▶ cold-start DRY RUN — nothing will be changed:
+    docker: down -v the 'soa' mesh (containers + volumes)
+    repos:  7 siblings → clone-if-missing, switch to main, ff to origin
+    build:  rm -rf dist → rebuilt by up
+    env:    scaffold missing .env from .env.example
+    up:     up --reset --seed roster → verify
+▶ 1/6 docker wipe … ▶ 2/6 ensure repos … ▶ 3/6 repos → main …
+▶ 4/6 clean build … ▶ 5/6 ensure .env … ▶ 6/6 up + verify (SKIPPED — dry run)
+✓ cold-start dry run complete — no changes made.
+```
+
+Happy with the plan? Drop `--dry-run` to run it for real — it **prompts once** before it destroys
+anything (or `--yes` to skip the prompt for CI/agents):
+
+```bash
+ss stack cold-start            # scoped mesh wipe + full clean rebuild + up + verify
+```
+
+It forces every repo back onto `main` (a repo with **uncommitted changes is left as-is**, never
+reset), rebuilds from clean, scaffolds any missing `.env` from its `.env.example`, then stands the
+stack up and verifies it. Add `--all-docker` to also `docker system prune` the host, `--reinstall`
+to wipe `node_modules`, `--seed full` for the full dataset. See **[cold-start.md](./cold-start.md)**
+for every phase, flag, and safety note.
+</details>
+
+---
+
+## 3. See what's there
 
 ```bash
 ss stack --help
 ```
 
-<details><summary>The <code>stack</code> topic: up · down · status · verify · reset · seed · snapshot · overlay · bootstrap · login · restart · tunnel · bundle</summary>
+<details><summary>The <code>stack</code> topic: cold-start · up · down · status · verify · reset · seed · snapshot · overlay · bootstrap · login · restart · tunnel · bundle</summary>
 
 ```
 Bring the synthetic dev stack up/down, seed, reset, verify, and log in.
@@ -54,6 +94,7 @@ Bring the synthetic dev stack up/down, seed, reset, verify, and log in.
   stack snapshot   Store / restore / list / validate / delete native DB snapshots.
   stack overlay    Overlay your in-flight PRs onto a main-based stack.
   stack bootstrap  Stand the stack up on main (ensure repos → up → seed → verify).
+  stack cold-start Clean slate: docker wipe (down -v) → repos to main → clean build → .env → up → verify.
   stack login      Log in a persona against the running stack (native cookie jar; --browser for headful).
   ...
 ```
@@ -61,7 +102,7 @@ Bring the synthetic dev stack up/down, seed, reset, verify, and log in.
 
 ---
 
-## 3. Bring up a sub-stack
+## 4. Bring up a sub-stack
 
 You rarely need all ~14 services. `--only` boots the **minimal dependency closure** — just
 what you name plus what it needs. Dry-run first to see the plan:
@@ -111,7 +152,7 @@ for `--with` bundles (`dash`/`connect`/`coach`/`playback`/`qtf`) and how the clo
 
 ---
 
-## 4. Check health
+## 5. Check health
 
 ```bash
 ss stack status
@@ -163,7 +204,7 @@ down service or missing data does. See **[verify.md](./verify.md)**.
 
 ---
 
-## 5. Run an end-to-end flow
+## 6. Run an end-to-end flow
 
 E2e scenarios are **data** (`flows.json`), not scripts. Dry-run to see the plan:
 
@@ -207,7 +248,7 @@ authoring flows, `e2e list`, and `e2e connect` (live interactive Connect session
 
 ---
 
-## 6. Tear it down
+## 7. Tear it down
 
 ```bash
 ss stack down
@@ -220,8 +261,11 @@ slot 0: stopped 4 service(s) from /tmp/sds-synthetic (native kill-by-pidfile —
 stopped: iam-api, programs-api, scheduling-api, sessions-api
 ```
 
-Add `--mesh` to also tear down postgres/redis/rabbitmq/mongo. `down` is fully native and
-slot-safe — it stops exactly the pids *this* stack recorded, never a host-global `pkill`.
+Add `--mesh` to also tear down postgres/redis/rabbitmq/mongo (containers only — the volumes
+survive; use **[`cold-start`](./cold-start.md)** for a `down -v` data wipe). `down` is fully native
+and slot-safe — it stops exactly the pids *this* stack recorded, never a host-global `pkill`, and
+**post-down it audits the slot's port band** and warns loudly about any watch child that survived
+(soa#249/#250), so a stale-build server can't linger and serve old code.
 </details>
 
 ---
@@ -237,6 +281,7 @@ slot-safe — it stops exactly the pids *this* stack recorded, never a host-glob
 | `ss e2e run\|list\|connect` | Run/discover data-driven flows; open a live Connect session | [e2e](./e2e.md) |
 | `ss set list\|show\|check` + `--set <name>` | Named worktree sets: parallel dev contexts (repo map + slot) for `up`/`e2e run`/… | [worktree-sets](./worktree-sets.md) |
 | `ss stack overlay\|bootstrap\|login\|tunnel` | Integration workflows (in-flight PRs, one-command bring-up, personas, sharing) | [integration](./integration.md) |
+| `ss stack cold-start [--dry-run] [--all-docker]` | Clean slate: docker wipe (`down -v`) → repos to main → clean build → `.env` → up → verify (destructive; slot-0) | [cold-start](./cold-start.md) |
 | `ss stack down [--mesh] [--slot N]` | Stop the stack natively | [slots](./slots.md) |
 
 ---
@@ -249,7 +294,10 @@ slot-safe — it stops exactly the pids *this* stack recorded, never a host-glob
 - **[verify.md](./verify.md)** — the health / data / source-posture checks (and what fails vs warns)
 - **[snapshots.md](./snapshots.md)** — store/restore DB fixtures instead of re-seeding
 - **[e2e.md](./e2e.md)** — flows-as-data, `e2e run`/`list`/`connect`
+- **[e2e-flows.md](./e2e-flows.md)** — the browsable flow worlds (hermetic-flow viewer)
 - **[integration.md](./integration.md)** — `overlay` (in-flight PRs), `bootstrap`, `login`, `tunnel`
+- **[cold-start.md](./cold-start.md)** — `cold-start`: the destructive clean-slate baseline (docker wipe → repos to main → clean build → `.env` → up)
+- **[faq.md](./faq.md)** — "How do I…?" with real output under disclosure triangles
 
 For architecture and the design history, see the package [README](../README.md) and
 `soa/claude/projects/gh_214/`.

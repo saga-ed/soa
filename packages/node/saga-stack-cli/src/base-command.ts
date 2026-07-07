@@ -75,6 +75,9 @@ import {
   repoOverridesFromFlags,
   makeRealSnapshotIO,
   makeRealViteClear,
+  makeRealDockerWipe,
+  makeRealBuildCleaner,
+  makeRealEnvFs,
   generateTunnelFleetConfig,
   resolveRepoRoot,
   resolveTunnelMoniker,
@@ -105,6 +108,9 @@ import type {
   ServiceStopper,
   SnapshotIO,
   ViteClear,
+  DockerWipe,
+  BuildCleaner,
+  EnvFs,
 } from './runtime/index.js';
 
 /**
@@ -540,6 +546,31 @@ export abstract class BaseCommand extends Command {
    */
   protected getViteClear(): ViteClear {
     return makeRealViteClear();
+  }
+
+  /**
+   * The docker-wipe seam (cold-start) — production is the only place a destructive `docker
+   * compose … down -v` (mesh containers + volumes) or `docker system prune` (`--all-docker`)
+   * runs. Injected so the wipe argv + ordering are asserted with no real docker.
+   */
+  protected getDockerWipe(): DockerWipe {
+    return makeRealDockerWipe();
+  }
+
+  /**
+   * The build-clean seam (cold-start) — production is the only place a real `rm -rf` of a repo's
+   * `dist/` (and, under `--reinstall`, `node_modules`) runs to force a clean rebuild.
+   */
+  protected getBuildCleaner(): BuildCleaner {
+    return makeRealBuildCleaner();
+  }
+
+  /**
+   * The env-fs seam (cold-start) — production is the only place the `.env.example` discovery walk
+   * + the `.env.example` → `.env` copy touch the disk.
+   */
+  protected getEnvFs(): EnvFs {
+    return makeRealEnvFs();
   }
 
   /**

@@ -140,6 +140,12 @@ export interface Runtime {
    * unbuilt tree. Absent ⇒ no stamp written (unit-test default).
    */
   prepWriteStamp?: (repoRoot: string) => void;
+  /**
+   * soa#260: R1 build-failure repair seam — wipe `node_modules` + reinstall/rebuild once
+   * when a build fails on the stale-`.bin`-shim corruption a plain reprep can't fix
+   * (program-hub#335). Absent ⇒ no escalation (unit-test default).
+   */
+  prepRepairDeps?: (repoRoot: string) => boolean | Promise<boolean>;
   /** M13-B: realpath-keyed per-repo build lock — held ⇒ prep fails fast (plan §4 layer 2). */
   prepLock?: PrepRepoLock;
   /**
@@ -813,6 +819,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
           skipPrep: runtime.skipPrep,
           isFresh: runtime.prepIsFresh,
           writeStamp: runtime.prepWriteStamp,
+          repairStaleDeps: runtime.prepRepairDeps,
           dbGenerateScan: runtime.prepDbGenerateScan,
           lock: runtime.prepLock,
           manifest,

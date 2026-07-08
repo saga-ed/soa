@@ -244,6 +244,7 @@ export default class E2eRun extends BaseCommand {
       pgProbe: this.getPgProbe(),
       prepIsFresh: this.getPrepFreshCheck(),
       prepWriteStamp: this.getPrepStampWriter(),
+      prepRepairDeps: this.getPrepDepRepairer(),
       prepDbGenerateScan: this.getDbGenerateScan(),
       repoDirExists: this.getRepoDirCheck(),
     };

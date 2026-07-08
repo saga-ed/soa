@@ -25,6 +25,8 @@
     "co:whoami": "npm whoami --registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/"
   },
   "devDependencies": {
+    "edge-tts": "1.0.1",
+    "playwright": "1.61.1",
     "prettier": "^3.5.3",
     "syncpack": "14.0.0-alpha.16",
     "turbo": "^2.5.4",

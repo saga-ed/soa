@@ -35,19 +35,23 @@ they're not repeated here.
 ## Prerequisites
 
 - Node 20+, `ffmpeg` + `ffprobe` on PATH (`apt install ffmpeg`).
-- Playwright installed somewhere resolvable — this tool has no `package.json` of its own
-  (no build step, ESM, Node-native, matching `tools/integration-walkthrough`'s convention).
-  Run it with a `node_modules/playwright` on the module resolution path, e.g. from a
-  workspace package that already depends on `@playwright/test`, or `pnpm add -w -D playwright`
-  at the soa root.
+- `playwright` (root devDependency, already added — `pnpm install` at the soa root picks
+  it up like any other workspace dep).
 - `saga-stack-cli` (`ss`) installed and on PATH — see
   `packages/node/saga-stack-cli/README.md` § Install.
-- An OpenAI API key for narration. **Do not** put one in a local `.env` — the dev key lives
-  in Secrets Manager (`openai-dev-apikey-W3MunH`, us-west-2, account 531314149529).
-  `lib/narrate.mjs` fetches it automatically via
-  `aws secretsmanager get-secret-value --profile saga-dev` (override the profile with
-  `WALKTHROUGH_AWS_PROFILE`, or set `OPENAI_API_KEY` directly to bypass Secrets Manager
-  entirely — e.g. for a throwaway personal key while iterating).
+- An OpenAI API key for narration (the default `TTS_ENGINE=openai`). **Do not** put one in
+  a local `.env` — the dev key lives in Secrets Manager (`openai-dev-apikey-W3MunH`,
+  us-west-2, account 531314149529). `lib/narrate.mjs` fetches it automatically via
+  `aws secretsmanager get-secret-value --profile saga-dev` — **Observer-tier profiles
+  (`saga`, `saga-dev`) are denied `GetSecretValue` on this ARN**; set
+  `WALKTHROUGH_AWS_PROFILE` to a profile with access, or set `OPENAI_API_KEY` directly to
+  bypass Secrets Manager entirely (e.g. a throwaway personal key while iterating).
+- For a **free/zero-credential iteration tier**, prefer `SKIP_NARRATE=1` (silent render —
+  proves out action timing/selectors without any TTS call) over `TTS_ENGINE=edge`. The
+  `edge` engine (unofficial `edge-tts` npm wrapper around Microsoft's read-aloud API) is
+  wired in but **known broken as of 2026-07**: its hardcoded auth token returns 403
+  (Microsoft rotates/blocks it periodically — out of our control). Kept as a pluggable
+  option in case it's patched upstream; don't rely on it today.
 
 ## Running an existing walkthrough
 
@@ -63,8 +67,8 @@ export WALKTHROUGH_LOGIN_EMAIL=empty@saga.org
 node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash/program-creation
 
 # Iterate cheaply:
-SKIP_NARRATE=1 node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash/program-creation  # re-record only
-SKIP_RECORD=1  node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash/program-creation  # re-stitch only
+SKIP_NARRATE=1 node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash/program-creation  # silent render — no TTS call, action-timed slots only
+SKIP_RECORD=1  node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash/program-creation  # re-stitch only (reuses last recorded video)
 FORCE=1        node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash/program-creation  # force re-synth all narration
 ```
 

@@ -80,6 +80,7 @@ export async function record(steps, adapter, outDir) {
 
   const browser = await chromium.launch();
   const context = await browser.newContext({
+    baseURL: adapter.baseUrl,
     viewport: VIEWPORT,
     storageState,
     recordVideo: { dir: videoDir, size: VIEWPORT },

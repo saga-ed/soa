@@ -15,6 +15,7 @@
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -47,9 +48,27 @@ function buildSrt(steps, slots) {
 }
 
 /**
+ * Generate `targetSeconds` of silence at `outPath` — used when a step has no narration
+ * chunk (SKIP_NARRATE=1 runs), so the audio track still spans the full recorded video.
+ */
+async function silenceOfLength(targetSeconds, outPath) {
+  await execFileAsync('ffmpeg', [
+    '-y',
+    '-f', 'lavfi',
+    '-i', 'anullsrc=r=48000:cl=stereo',
+    '-t', `${Math.max(targetSeconds, 0.1)}`,
+    outPath,
+  ]);
+}
+
+/**
  * Pad `mp3Path` with trailing silence to reach `targetSeconds`, writing `outPath`.
  */
 async function padToSlot(mp3Path, targetSeconds, outPath) {
+  if (!existsSync(mp3Path)) {
+    await silenceOfLength(targetSeconds, outPath);
+    return;
+  }
   await execFileAsync('ffmpeg', [
     '-y',
     '-i', mp3Path,

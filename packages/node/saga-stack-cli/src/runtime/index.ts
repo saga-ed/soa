@@ -38,6 +38,7 @@ export * from './ensure-repos.js';
 export * from './repos-to-main.js';
 export * from './docker-wipe.js';
 export * from './build-clean.js';
+export * from './host-reinstall.js';
 export * from './env-ensure.js';
 export * from './http-post.js';
 export * from './login.js';

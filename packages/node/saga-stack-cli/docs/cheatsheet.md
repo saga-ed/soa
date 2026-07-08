@@ -7,7 +7,24 @@ on almost everything, `--output-json`/`--porcelain` for scripting, `--help` at e
 
 ---
 
-## Stack is down? Start here
+## Start here
+
+Nothing works / a fresh box / something's corrupt? Reset **slot 0** to the team's known-good
+baseline first. This is **destructive** — it `docker down -v`'s the mesh (drops local DB volumes),
+wipes `node_modules`, forces every repo to `main`, does a clean rebuild, then brings the stack up
+and verifies it. `--reinstall` is the fix for stale-dep / build corruption; `--yes` skips the prompt:
+
+```bash
+ss stack cold-start --reinstall --yes
+```
+
+On a repo with **uncommitted changes** cold-start leaves it as-is (never resets it). Want to preview
+the six phases without touching anything? Run `ss stack cold-start --dry-run`. See
+[cold-start](./cold-start.md).
+
+---
+
+## Stack is down?
 
 Bring the stack up on **slot 0**, confirm it's healthy, then run the full `journey` flow **in the
 background**, leaving a **logged-in browser held open** at the end. Run them as separate commands —
@@ -37,8 +54,8 @@ ss e2e run saga-dash/journey --headless --hold &
 > Prefer to watch the whole thing run headed instead? Drop `--headless` and the trailing `&`, and run
 > it in the foreground: `ss e2e run saga-dash/journey --hold`.
 
-Want a **guaranteed-clean** main baseline first (destructive — docker `down -v`)? Prefix with
-`ss stack cold-start --yes`. See [cold-start](./cold-start.md).
+If `up` never goes green, don't chase it here — reset to the clean baseline with
+[**Start here**](#start-here) above (`ss stack cold-start --reinstall --yes`), then come back.
 
 ---
 

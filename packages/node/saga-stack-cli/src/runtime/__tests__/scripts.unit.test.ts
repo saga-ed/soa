@@ -8,12 +8,21 @@
  * here for both SOA (synthetic-dev) and SAGA_DASH (e2e). No process is spawned.
  */
 
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ScriptLocator } from '../../core/flag-map.js';
 import { resolveDevRoot, resolveRepoRoot, resolveScript, scriptCwd } from '../scripts.js';
 
 const ENV_KEYS = ['DEV', 'SOA', 'SAGA_DASH', 'HOME'] as const;
 let saved: Record<string, string | undefined>;
+
+// The real soa checkout root, derived from THIS test file's own location — NOT from
+// $SOA/$HOME, which resolve to a non-existent `$HOME/dev/soa` under CI (where the checkout
+// lives at `/home/runner/work/soa/soa`), making the existence-guard assertion below fail on
+// every PR. `up.sh` is git-tracked at `tools/synthetic-dev/up.sh`, so a location-derived root
+// is deterministic in every environment. From `src/runtime/__tests__` the repo root is 6 up.
+const SOA_CHECKOUT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', '..', '..');
 
 beforeEach(() => {
   saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -77,10 +86,11 @@ describe('scriptCwd', () => {
 
 describe('resolveScript', () => {
   it('returns the absolute path when the script exists', () => {
-    // Point at the real soa checkout (read-only; the script is NOT executed).
-    const soa = saved.SOA ?? `${saved.HOME ?? ''}/dev/soa`;
-    const path = resolveScript(UP, { repoRoots: { SOA: soa } });
-    expect(path).toBe(`${soa}/tools/synthetic-dev/up.sh`);
+    // Point at the real soa checkout (read-only; the script is NOT executed). Derive the
+    // root from this file's location (SOA_CHECKOUT) so it holds in CI too, where $SOA/$HOME
+    // resolve elsewhere — see the SOA_CHECKOUT note above.
+    const path = resolveScript(UP, { repoRoots: { SOA: SOA_CHECKOUT } });
+    expect(path).toBe(join(SOA_CHECKOUT, UP.relPath));
   });
 
   it('throws a pointed error (naming the relPath + repo) when the script is missing', () => {

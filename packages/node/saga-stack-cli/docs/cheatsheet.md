@@ -15,7 +15,9 @@ visible in your terminal:
 
 ```bash
 ss stack up --slot 0
+```
 
+```bash
 ss e2e run saga-dash/journey --headless --hold &
 ```
 

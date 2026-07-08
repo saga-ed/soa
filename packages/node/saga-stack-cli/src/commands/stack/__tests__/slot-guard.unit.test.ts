@@ -84,9 +84,10 @@ describe('M13-A: seed + snapshot are slot-aware now', () => {
     await StackSeed.run(['--slot', '2', ...WS], config);
     const warn = logged.find((l) => l.includes('excluding literal-port'));
     expect(warn).toBeDefined();
-    // The dropped set is exactly the excluded intersection — connect-api is
-    // excluded at slot>0, iam-api never is (an inverted filter would flip this).
-    expect(warn).toMatch(/connect-api/);
+    // The dropped set is exactly the excluded services that intersect the seed set —
+    // connect-web is excluded at slot>0, iam-api never is (an inverted filter would
+    // flip this). (connect-api is NO LONGER excluded as of soa#271, so it won't appear.)
+    expect(warn).toMatch(/connect-web/);
     expect(warn).not.toMatch(/iam-api/);
   });
 

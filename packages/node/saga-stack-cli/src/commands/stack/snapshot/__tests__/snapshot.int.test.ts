@@ -135,11 +135,11 @@ describe('stack snapshot store — manifest-driven, all 10 pg + connectv3 mongo'
     await SnapshotStore.run(['--fixture-id', 'slotted', '--slot', '1'], config);
     expect(appliedSlot).toBe(1);
     const pg = dbsCalled('pgDump');
-    // The slot-excluded literal-port services' DBs are never provisioned in
-    // soa-s1 and must not be dumped (post-closure filtering — a closure edge
-    // like connect-web's -> connect-api would defeat a requested-set pre-filter).
-    expect(dbsCalled('mongoDump')).toEqual([]); // connect-api (connectv3) is excluded
-    // …while the slottable backends' DBs still are — including ads-adm-api's
+    // connect-api is slottable now (soa#271), so it IS provisioned in soa-s1 and its
+    // connectv3 mongo IS part of the slot's default-closure dump. The still-excluded
+    // services (playback trio — pg DBs; connect-web — no DB) stay dropped.
+    expect(dbsCalled('mongoDump')).toEqual(['connectv3']); // connect-api slottable
+    // …and the slottable backends' pg DBs are dumped too — including ads-adm-api's
     // (slottable since the tokenized-env + EXPRESS_SERVER_PORT change):
     expect(pg).toContain('ads_adm_local');
     expect(pg).toContain('ledger_local');

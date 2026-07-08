@@ -107,17 +107,16 @@ describe('literal-port service exclusion (plan §6)', () => {
     expect(slotExcludedServices(0)).toEqual([]);
   });
 
-  it('slot > 0 excludes the literal-port backends + connect-web, but NOT saga-dash/coach-web/ads-adm-api', () => {
+  it('slot > 0 excludes the literal-port backends + connect-web, but NOT saga-dash/coach-web/ads-adm-api/connect-api', () => {
     const excluded = deriveInstance({ slot: 1 }).excludedServices;
     expect(excluded).toEqual([...SLOT_EXCLUDED_SERVICES]);
     expect(new Set(excluded)).toEqual(
       new Set([
         // literal-port backends (bypass the offset)
-        'connect-api',
         'transcripts-api',
         'insights-api',
         'chat-api',
-        // connect-web — excluded pending connect-api port tokenization
+        // connect-web — excluded pending per-slot AV/livekit (single-node ws:7880)
         'connect-web',
       ]),
     );
@@ -127,6 +126,9 @@ describe('literal-port service exclusion (plan §6)', () => {
     // ads-adm-api is slottable now: tokenized launch env + EXPRESS_SERVER_PORT
     // listen-port injection (M13 seam) — no longer excluded.
     expect(excluded).not.toContain('ads-adm-api');
+    // connect-api is slottable now (soa#271): SESSIONS_API_BASE_URL tokenized to
+    // ${SESSIONS_PORT}; its AV literals stay slot-0 but AV bring-up is slot-0-gated.
+    expect(excluded).not.toContain('connect-api');
     expect(slotExcludedServices(3)).toEqual([...SLOT_EXCLUDED_SERVICES]);
   });
 });

@@ -363,7 +363,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // #222 port: dash calls connect-api cross-origin (journey attendance /
         // connect embeds) — without DASH_URL in the allowlist those are CORS-blocked.
         ALLOWED_ORIGINS: '${CONNECT_WEB_URL},${DASH_URL}',
-        SESSIONS_API_BASE_URL: 'http://localhost:3007',
+        // soa#271: tokenize the sessions dial so connect-api reaches the SLOT's
+        // sessions-api (byte-identical :3007 at slot 0, :5007 at slot 2). This is
+        // the one cross-slot literal that made connect-api un-slottable; the
+        // remaining literals (livekit/FLEEK ws:7880) are AV and stay slot-0-pinned.
+        SESSIONS_API_BASE_URL: 'http://localhost:${SESSIONS_PORT}',
         SAGA_API_TARGET: '${SAGA_API_TARGET}',
         CONTENT_API_URL: '${CONTENT_API_URL}',
         PUBLIC_API_URL: '${CONNECT_API_URL}',

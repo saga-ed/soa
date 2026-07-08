@@ -264,12 +264,13 @@ describe('stack down — native slot-safe teardown at every slot (no up.sh)', ()
     await StackDown.run(['--slot', '1', ...WS], config);
 
     // The audited band is slot 1's RESOLVED service ports (base + 1000) for every
-    // service the slot's closure could launch: programs-api 3006→4006 and iam-api
-    // 3010→4010 in; the slot-excluded connect-api/connect-web (7106/7210) OUT.
+    // service the slot's closure could launch: programs-api 3006→4006, iam-api
+    // 3010→4010, and connect-api 6106→7106 (slottable as of soa#271) IN; the
+    // still-excluded connect-web (7210) OUT.
     expect(scanCalls).toHaveLength(1);
     expect(scanCalls[0]).toContain(4006);
     expect(scanCalls[0]).toContain(4010);
-    expect(scanCalls[0]).not.toContain(7106);
+    expect(scanCalls[0]).toContain(7106);
     expect(scanCalls[0]).not.toContain(7210);
 
     const warnings = out.filter((l) => l.startsWith('⚠'));

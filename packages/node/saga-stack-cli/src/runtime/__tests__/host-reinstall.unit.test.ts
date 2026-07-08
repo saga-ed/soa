@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { RunResult, Runner, ScriptInvocation } from '../exec.js';
-import { reinstallHostRepo } from '../host-reinstall.js';
+import { HOST_CLI_PACKAGE, rebuildHostCli, reinstallHostRepo } from '../host-reinstall.js';
 
 const ROOT = '/dev/soa';
 
@@ -79,5 +79,34 @@ describe('reinstallHostRepo — inline host-repo pnpm install', () => {
     });
     expect(notified401).toHaveLength(1);
     expect(notified401[0]).toMatch(/co:login/);
+  });
+});
+
+describe('rebuildHostCli — inline host-CLI dist rebuild', () => {
+  it('runs `turbo run build --filter=<cli>` in the host root and reports ok', async () => {
+    const { runner, calls } = scriptedRunner([{ code: 0 }]);
+
+    const result = await rebuildHostCli(ROOT, { runner });
+
+    expect(result).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      cwd: ROOT,
+      command: 'pnpm',
+      args: ['turbo', 'run', 'build', `--filter=${HOST_CLI_PACKAGE}`],
+    });
+  });
+
+  it('reports not-ok when the build exits non-zero', async () => {
+    const { runner, calls } = scriptedRunner([{ code: 1 }]);
+
+    const result = await rebuildHostCli(ROOT, { runner });
+
+    expect(result).toEqual({ ok: false });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('targets the saga-stack-cli package (the dist the ss binary loads)', () => {
+    expect(HOST_CLI_PACKAGE).toBe('@saga-ed/saga-stack-cli');
   });
 });

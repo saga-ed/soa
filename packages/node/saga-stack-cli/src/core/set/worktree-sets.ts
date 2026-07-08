@@ -182,6 +182,72 @@ export function parseWorktreeSetsFile(data: unknown): WorktreeSetsFile {
   return { version: WORKTREE_SETS_VERSION, sets };
 }
 
+/** The on-disk JSON shape (sets keyed by name, `name` field dropped, entries object-or-string). */
+export interface WorktreeSetsFileOnDisk {
+  version: typeof WORKTREE_SETS_VERSION;
+  sets: Record<string, { slot: number; repos: Record<string, SetRepoEntry | string>; note?: string }>;
+}
+
+/**
+ * Serialize a validated in-memory file back to the on-disk JSON shape (M13-C `set
+ * create`/`rm` write path). The inverse of `parseWorktreeSetsFile`: sets are keyed by
+ * name (the `name` field is dropped), and a repo entry is emitted as a BARE STRING when
+ * it carries no provenance (matching hand-authored files) or as `{path, createdBy?,
+ * createdFrom?}` when `ss set create` stamped it. Paths are written VERBATIM (a `~` the
+ * caller stored stays portable — the store re-expands it on load).
+ */
+export function serializeWorktreeSetsFile(file: WorktreeSetsFile): WorktreeSetsFileOnDisk {
+  const sets: WorktreeSetsFileOnDisk['sets'] = {};
+  for (const [name, set] of Object.entries(file.sets)) {
+    const repos: Record<string, SetRepoEntry | string> = {};
+    for (const key of Object.keys(set.repos) as SetRepoKey[]) {
+      const e = set.repos[key];
+      if (e === undefined) continue;
+      repos[key] =
+        e.createdBy !== undefined || e.createdFrom !== undefined
+          ? {
+              path: e.path,
+              ...(e.createdBy !== undefined ? { createdBy: e.createdBy } : {}),
+              ...(e.createdFrom !== undefined ? { createdFrom: e.createdFrom } : {}),
+            }
+          : e.path;
+    }
+    sets[name] = { slot: set.slot, repos, ...(set.note !== undefined ? { note: set.note } : {}) };
+  }
+  return { version: WORKTREE_SETS_VERSION, sets };
+}
+
+/**
+ * Return a NEW file with `set` added. Throws the pointed user-facing error when the name
+ * is already taken or the slot is already owned by another set (the same one-set-per-slot
+ * invariant `parseWorktreeSetsFile` enforces, checked here BEFORE any fs write).
+ */
+export function withSetAdded(file: WorktreeSetsFile, set: WorktreeSet): WorktreeSetsFile {
+  if (file.sets[set.name] !== undefined) {
+    throw new Error(`worktree-sets: a set named '${set.name}' already exists — pick another name or \`ss set rm ${set.name}\` first.`);
+  }
+  for (const [name, existing] of Object.entries(file.sets)) {
+    if (existing.slot === set.slot) {
+      throw new Error(`worktree-sets: slot ${set.slot} is already owned by set '${name}' — slots are one-per-set; pick another (1..9).`);
+    }
+  }
+  return { version: file.version, sets: { ...file.sets, [set.name]: set } };
+}
+
+/** Return a NEW file with set `name` removed, plus the removed set. Throws if unknown. */
+export function withSetRemoved(file: WorktreeSetsFile, name: string): { file: WorktreeSetsFile; removed: WorktreeSet } {
+  const removed = file.sets[name];
+  if (removed === undefined) {
+    const names = Object.keys(file.sets);
+    throw new Error(
+      `worktree-sets: unknown set '${name}'.` + (names.length ? ` Known sets: ${names.join(', ')}.` : ' No sets are defined.'),
+    );
+  }
+  const sets = { ...file.sets };
+  delete sets[name];
+  return { file: { version: file.version, sets }, removed };
+}
+
 /**
  * Resolve a `--set <name>` against the store. Throws the user-facing
  * unknown-set error (listing the known names) so the caller can pass it

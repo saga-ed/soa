@@ -1,26 +1,28 @@
 /**
- * `host-reinstall` — restore the HOST repo's `node_modules` INLINE during a
- * `cold-start --reinstall`, before anything relies on it again (soa#cold-start).
+ * `host-reinstall` — restore the HOST repo's own runtime (`node_modules` AND
+ * `dist`) INLINE during a `cold-start`, before anything relies on it (soa#cold-start).
  *
- * THE BUG THIS CLOSES: cold-start's clean-build phase does `rm -rf node_modules`
- * in every repo under `--reinstall`, then DEFERS the reinstall to the later
- * `up`/prep pass. That is fine for the sibling repos — but the repo that hosts
- * the running `ss` binary (soa) keeps `@oclif/core` and the rest of the CLI's
- * OWN runtime under `soa/node_modules/.pnpm`. Deleting it mid-run means: if the
- * subsequent `up`/prep fails BEFORE it reinstalls soa (e.g. a wedged prep lock),
- * the store stays empty and EVERY later `ss` invocation dies at load with
- * `ERR_MODULE_NOT_FOUND: @oclif/core` — the tool has bricked its own runtime and
- * cannot run the step that would fix it. The manual escape was a bare
- * `pnpm install`; this automates it.
+ * THE BUG THIS CLOSES: cold-start's clean-build phase `rm -rf`s each repo's `dist`
+ * (always) and `node_modules` (under `--reinstall`), then DEFERS the rebuild/reinstall
+ * to the later `up`/prep pass. That is fine for the sibling SERVICE repos — but soa,
+ * which hosts the running `ss` binary, is NOT a service in the up-closure, so phase 6
+ * never touches it. And soa is exactly where the CLI's own runtime lives:
+ *   - `@oclif/core` + the rest of the dep tree under `soa/node_modules/.pnpm`, and
+ *   - the compiled command files under `soa/packages/node/saga-stack-cli/dist/commands/**`.
+ * Wiping either and not restoring it bricks EVERY later `ss` invocation —
+ * `ERR_MODULE_NOT_FOUND: @oclif/core` (missing node_modules) or
+ * `MODULE_NOT_FOUND: …/dist/commands/stack/<cmd>.js` (missing dist) — even after a
+ * fully GREEN cold-start. The manual escape was `pnpm install` + a rebuild; this
+ * automates both.
  *
- * So cold-start calls `reinstallHostRepo(soaRoot, …)` the instant the clean phase
- * removes the host repo's `node_modules`, restoring `ss` regardless of whether
- * the later `up` succeeds. The install mirrors prep's own `pnpm install`
- * (`src/runtime/prep.ts`): a CodeArtifact 401 (expired token) triggers a single
- * `pnpm co:login` refresh + retry.
+ * So cold-start calls, the instant the clean phase removes soa's runtime:
+ *   - `reinstallHostRepo(soaRoot, …)` under `--reinstall` — `pnpm install`, mirroring
+ *     prep's own recovery (a CodeArtifact 401 triggers a `pnpm co:login` refresh + retry).
+ *   - `rebuildHostCli(soaRoot, …)` always — `turbo run build` for the CLI package, since
+ *     the clean removes soa's `dist` even without `--reinstall`.
  *
  * IO-only: the real spawning lives behind the injected `Runner` seam (`exec.ts`),
- * so this is unit-tested with a fake runner (no real `pnpm`).
+ * so both are unit-tested with a fake runner (no real `pnpm`/`turbo`).
  */
 
 import type { Runner } from './exec.js';
@@ -74,4 +76,39 @@ export async function reinstallHostRepo(
   }
 
   return { ok: result.code === 0, reloggedIn };
+}
+
+/** The workspace name of the ss CLI package — the `dist/` the running binary loads. */
+export const HOST_CLI_PACKAGE = '@saga-ed/saga-stack-cli';
+
+/** The outcome of a host-CLI rebuild. */
+export interface RebuildHostCliResult {
+  /** True iff the `turbo run build` exited 0. */
+  ok: boolean;
+}
+
+/**
+ * Rebuild the host CLI package's `dist/` — a `turbo run build --filter=<HOST_CLI_PACKAGE>`
+ * in the host repo root.
+ *
+ * THE SECOND HALF of the cold-start self-brick (the first is `reinstallHostRepo`): the clean
+ * phase `rm -rf`s every `<pkg>/dist` under soa — INCLUDING the saga-stack-cli
+ * `dist/commands/**` the running `ss` binary discovers its commands from — and it does so
+ * EVEN WITHOUT `--reinstall`. Phase 6's up/prep only builds the SERVICE repos in the
+ * up-closure, never soa itself, so nothing restores that `dist/`. Without an inline rebuild the
+ * next `ss` command dies with `MODULE_NOT_FOUND: …/dist/commands/stack/<cmd>.js` — even after a
+ * fully green cold-start. turbo restores the CLI (and any build-time deps) from the graph.
+ *
+ * IO-only: the spawn goes through the injected `Runner` seam, so this is unit-tested with a
+ * fake runner (no real turbo/tsc).
+ */
+export async function rebuildHostCli(root: string, deps: HostReinstallDeps): Promise<RebuildHostCliResult> {
+  const result = await deps.runner.run({
+    cwd: root,
+    command: 'pnpm',
+    args: ['turbo', 'run', 'build', `--filter=${HOST_CLI_PACKAGE}`],
+    env: {},
+    stdio: 'inherit',
+  });
+  return { ok: result.code === 0 };
 }

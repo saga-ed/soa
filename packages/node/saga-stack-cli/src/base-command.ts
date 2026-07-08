@@ -97,6 +97,7 @@ import type {
   GitRunner,
   HealthProber,
   JarWriter,
+  LockHolder,
   MeshExec,
   OrphanScanner,
   OverlayFs,
@@ -137,6 +138,12 @@ export type NativeRuntimeFlags = WorkspaceFlags & {
   pull?: boolean;
   /** M9 auto-pull: `--no-auto-pull` ⇒ opt out. Undefined for commands that don't declare it. */
   'no-auto-pull'?: boolean;
+  /**
+   * `--yes`: non-interactive. Among other uses, auto-reclaims an abandoned (STOPPED)
+   * prep lock — killing the stopped holder — instead of prompting. Undefined for
+   * commands that don't declare it (⇒ prompt on a TTY, fail fast otherwise).
+   */
+  yes?: boolean;
 };
 
 /**
@@ -547,6 +554,27 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * Decide whether to reclaim a prep lock whose holder is STOPPED/abandoned (soa#266
+   * follow-up). `--yes` ⇒ auto-kill the stopped holder and reclaim (CI / agents);
+   * otherwise prompt on a TTY; with neither, refuse (fail fast — the lock then surfaces
+   * a STOPPED-tagged message telling the user how to reclaim). Only ever called for a
+   * genuinely stopped holder — a running holder is never offered here.
+   */
+  protected async reclaimStoppedPrepLock(flags: NativeRuntimeFlags, holder: LockHolder): Promise<boolean> {
+    const who = `pid ${holder.pid} (slot ${holder.slot}) building ${holder.root} since ${holder.at}`;
+    if (flags.yes) {
+      this.log(`⚠ prep lock held by a STOPPED/abandoned ${who} — killing it and reclaiming (--yes).`);
+      return true;
+    }
+    const confirm = this.getConfirm();
+    if (!confirm.isTTY()) return false;
+    return confirm.prompt(
+      `\n  The prep lock for ${holder.root} is held by a STOPPED pid ${holder.pid} (since ${holder.at}) — ` +
+        `it is suspended and can never finish.\n  Kill it and reclaim the lock? [y/N] `,
+    );
+  }
+
+  /**
    * The cookie-capturing POST seam (M11 — native login) — production is the only
    * place the devLogin POST is made.
    */
@@ -692,7 +720,11 @@ export abstract class BaseCommand extends Command {
       prepDbGenerateScan: this.getDbGenerateScan(),
       // M13-B: realpath-keyed build lock — two `ss` invocations can never
       // prep-BUILD one checkout concurrently (fresh-skipped repos never lock).
-      prepLock: makeRealPrepLock(profile.slot),
+      // soa#266 follow-up: an abandoned (STOPPED) holder is reclaimed per the
+      // command's --yes/TTY policy instead of wedging every future bring-up.
+      prepLock: makeRealPrepLock(profile.slot, {
+        reclaimStopped: (holder) => this.reclaimStoppedPrepLock(flags, holder),
+      }),
       repoDirExists: this.getRepoDirCheck(),
       // M9: the ff-only sibling sync (up.sh `pull_repos`) + its mode, the vite-cache
       // clear (native `restart`), and best-effort Connect AV (slot-0 + connect-in-closure,

@@ -1,0 +1,7 @@
+# Generated per-walkthrough artifacts — steps.mjs is the only thing worth committing.
+walkthroughs/**/chunks/
+walkthroughs/**/chunks-padded/
+walkthroughs/**/chunks-meta.json
+walkthroughs/**/durations.json
+walkthroughs/**/slots.json
+walkthroughs/**/video/

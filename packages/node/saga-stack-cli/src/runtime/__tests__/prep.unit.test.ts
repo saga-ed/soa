@@ -134,7 +134,7 @@ describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => 
       runner,
       isFresh: (root) => root === '/dev/rostering', // rostering fresh ⇒ must NOT acquire
       lock: {
-        acquire(root) {
+        async acquire(root) {
           acquired.push(root);
           if (root === '/dev/program-hub') {
             return { ok: false, holder: 'pid 123 (slot 2) has been building /dev/program-hub since T' };
@@ -158,7 +158,7 @@ describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => 
       dbs: [] as DbId[],
       repoRoots: REPO_ROOTS,
       runner,
-      lock: { acquire: (root) => ({ ok: true, release: () => released.push(root) }) },
+      lock: { acquire: async (root) => ({ ok: true, release: () => released.push(root) }) },
     });
     expect(res.ok).toBe(true);
     expect(released).toEqual(['/dev/rostering']);

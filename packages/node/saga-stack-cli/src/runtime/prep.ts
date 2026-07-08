@@ -148,7 +148,7 @@ export interface PrepContext {
 
 /** M13-B: the injectable per-repo build lock (production: `makeRealPrepLock`). */
 export interface PrepRepoLock {
-  acquire(repoRoot: string): { ok: true; release: () => void } | { ok: false; holder: string };
+  acquire(repoRoot: string): Promise<{ ok: true; release: () => void } | { ok: false; holder: string }>;
 }
 
 /** One prep step in the executed plan (for reporting + test assertions). */
@@ -265,7 +265,7 @@ export async function prepClosure(ctx: PrepContext): Promise<PrepResult> {
     // M13-B: exclusive realpath-keyed build lock — a held lock fails FAST with
     // who-holds-it (two invocations building one checkout is the race the
     // whole guard family exists to prevent; plan §4 layer 2).
-    const lock = ctx.lock?.acquire(root) ?? { ok: true as const, release: () => {} };
+    const lock = (await ctx.lock?.acquire(root)) ?? { ok: true as const, release: () => {} };
     if (!lock.ok) {
       const step: PrepStep = { repo, kind: 'lock', cwd: root, argv: [], detail: lock.holder };
       steps.push(step);

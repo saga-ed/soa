@@ -2998,6 +2998,13 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "yes": {
+          "char": "y",
+          "description": "non-interactive: if a prep lock is held by a STOPPED/abandoned holder (e.g. a suspended `ss stack up`), kill it and reclaim the lock without prompting (CI / agents).",
+          "name": "yes",
+          "allowNo": false,
+          "type": "boolean"
+        },
         "allow-primary": {
           "description": "M13-B escape hatch: let a --set entry point a BUILDABLE repo at the primary $DEV checkout (prep will build your live working copy — tenet 4 says use a clean worktree; the preflight normally refuses).",
           "name": "allow-primary",

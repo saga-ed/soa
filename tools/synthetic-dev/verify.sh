@@ -28,7 +28,7 @@ DEV=${DEV:-$HOME/dev}
 # PRs merged); without an overlay entry, on main. soa + student-data-system are
 # always on main — except a soa overlay-manifest row, which pins soa itself
 # (testing a synthetic-dev/infra tooling PR end-to-end; see the posture loop).
-MANAGED_REPOS="rostering program-hub saga-dash qboard rtsm"
+MANAGED_REPOS="rostering program-hub saga-dash coach qboard rtsm"
 ALWAYS_MAIN_REPOS="soa student-data-system"
 
 pass=0; fail=0; warn=0
@@ -59,6 +59,10 @@ probe saga-dash      8900 /
 probe rtsm-api       6110 /health
 probe connect-api    6106 /connectv3/v1/health
 probe connect-web    6210 /
+# coach-api mounts /health at the app ROOT (not under /coach/v1 — see up.sh
+# probe_path); coach-web is a vite SPA answering on /.
+probe coach-api      6105 /health
+probe coach-web      8800 /
 # Recording stack is OPT-IN (./up.sh --record) — assert it only when its
 # containers are actually up; otherwise note it without failing.
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx fleek-recorder; then

@@ -638,22 +638,64 @@ export default class StackUp extends BaseCommand {
 
   /** Print a structured failure when the native bring-up did not reach all-healthy. */
   private logUpFailure(up: Awaited<ReturnType<StackApi['up']>>): void {
-    if (up.mesh.conflicts.length > 0) {
-      this.log('mesh preflight FAILED — host port conflicts:');
-      for (const c of up.mesh.conflicts) this.log(`  ✗ ${c.message}`);
-      return;
-    }
-    if (!up.mesh.makeOk) {
-      this.log('mesh bring-up FAILED (`make up` exited non-zero)');
-      return;
-    }
-    const downUnits = up.mesh.units.filter((u) => !u.ok).map((u) => u.id);
-    if (downUnits.length > 0) {
-      this.log(`mesh units never became ready: ${downUnits.join(', ')}`);
-      return;
-    }
-    this.log(`service launch FAILED at ${up.failedAt ?? '(unknown)'} — it never became healthy`);
+    for (const line of describeUpFailure(up)) this.log(line);
   }
+}
+
+/**
+ * Structural subset of the up-result that {@link describeUpFailure} reads — the full
+ * `Awaited<ReturnType<StackApi['up']>>` is assignable to it (literal ids widen to string).
+ */
+export interface UpFailureView {
+  mesh: {
+    conflicts: readonly { readonly message: string }[];
+    makeOk: boolean;
+    units: readonly { readonly id: string; readonly ok: boolean }[];
+  };
+  prep?: { ok: boolean; failed?: { repo: string; kind: string; argv: readonly string[]; detail?: string } };
+  provision?: { ok: boolean; failed?: string };
+  migrate?: { ok: boolean; failed?: string };
+  failedAt?: string;
+}
+
+/**
+ * Map a failed bring-up to the human failure lines. Pure (no IO) so the branch logic is
+ * unit-testable. The order mirrors `StackApi.up()`'s phases: mesh → native prep pass
+ * (R1 build/install → R2 provision → R3 migrate) → launch waves. The prep/provision/migrate
+ * phases return `ok:false` with NO `failedAt`, so before this fix any failure there fell
+ * through to the launch line and misreported as `service launch FAILED at (unknown)` (soa
+ * cheatsheet diagnosis). Now each phase names the real culprit — the failing repo/step or DB.
+ */
+export function describeUpFailure(up: UpFailureView): string[] {
+  if (up.mesh.conflicts.length > 0) {
+    return ['mesh preflight FAILED — host port conflicts:', ...up.mesh.conflicts.map((c) => `  ✗ ${c.message}`)];
+  }
+  if (!up.mesh.makeOk) {
+    return ['mesh bring-up FAILED (`make up` exited non-zero)'];
+  }
+  const downUnits = up.mesh.units.filter((u) => !u.ok).map((u) => u.id);
+  if (downUnits.length > 0) {
+    return [`mesh units never became ready: ${downUnits.join(', ')}`];
+  }
+  if (up.prep && !up.prep.ok) {
+    const f = up.prep.failed;
+    return [
+      f
+        ? `prep FAILED — \`pnpm ${f.argv.join(' ')}\` in ${f.repo}${f.detail ? ` (${f.detail})` : ''} exited non-zero — see the streamed output above`
+        : 'prep FAILED — a build/install step exited non-zero; see the streamed output above',
+    ];
+  }
+  if (up.provision && !up.provision.ok) {
+    return [
+      `DB provision FAILED${up.provision.failed ? ` on ${up.provision.failed}` : ''} — role/database create exited non-zero; see the streamed output above`,
+    ];
+  }
+  if (up.migrate && !up.migrate.ok) {
+    return [
+      `migrate FAILED${up.migrate.failed ? ` on ${up.migrate.failed}` : ''} — \`prisma migrate\` exited non-zero; see the streamed output above`,
+    ];
+  }
+  return [`service launch FAILED at ${up.failedAt ?? '(unknown)'} — it never became healthy`];
 }
 
 // Local flag shapes (subset of the parsed StackUp flags each path reads).

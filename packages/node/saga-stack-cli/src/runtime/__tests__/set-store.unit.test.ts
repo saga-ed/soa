@@ -4,10 +4,11 @@
  * normalization (~ expansion, relative-against-file-dir resolution).
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { withSetAdded } from '../../core/set/index.js';
 import { makeRealSetStore, normalizeSetPath, setsFilePath } from '../set-store.js';
 
 let dir: string;
@@ -86,5 +87,43 @@ describe('makeRealSetStore().load', () => {
     );
     const store = makeRealSetStore({ SAGA_STACK_SETS: file }, '/home/u');
     expect(() => store.load()).toThrow(/both declare slot 1/);
+  });
+});
+
+describe('makeRealSetStore().save + loadRaw (M13-C write path)', () => {
+  it('save writes JSON that load reads back; load expands ~, loadRaw keeps it verbatim', () => {
+    const file = join(dir, 'sets.json');
+    const store = makeRealSetStore({ SAGA_STACK_SETS: file }, '/home/u');
+    store.save(
+      withSetAdded(store.loadRaw(), {
+        name: 'sched',
+        slot: 1,
+        repos: { 'saga-dash': { path: '~/wt/dash', createdBy: 'ss', createdFrom: 'feat/x' } },
+      }),
+    );
+    expect(store.load().sets.sched!.repos['saga-dash']!.path).toBe('/home/u/wt/dash'); // expanded
+    expect(store.loadRaw().sets.sched!.repos['saga-dash']).toEqual({
+      path: '~/wt/dash',
+      createdBy: 'ss',
+      createdFrom: 'feat/x',
+    }); // verbatim
+  });
+
+  it('save creates the parent dir when absent (~/.saga-stack)', () => {
+    const file = join(dir, 'nested', 'deep', 'sets.json');
+    const store = makeRealSetStore({ SAGA_STACK_SETS: file }, '/home/u');
+    store.save(withSetAdded(store.loadRaw(), { name: 'a', slot: 2, repos: { rostering: { path: '/wt/r' } } }));
+    expect(store.load().sets.a!.slot).toBe(2);
+  });
+
+  it('a mutating round-trip preserves other sets’ verbatim ~ paths (loadRaw → save)', () => {
+    const file = join(dir, 'sets.json');
+    writeFileSync(file, JSON.stringify({ version: 1, sets: { keep: { slot: 5, repos: { rostering: '~/wt/keep' } } } }));
+    const store = makeRealSetStore({ SAGA_STACK_SETS: file }, '/home/u');
+    store.save(
+      withSetAdded(store.loadRaw(), { name: 'new', slot: 6, repos: { 'saga-dash': { path: '~/wt/new', createdBy: 'ss' } } }),
+    );
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as { sets: Record<string, { repos: Record<string, unknown> }> };
+    expect(raw.sets.keep!.repos.rostering).toBe('~/wt/keep'); // NOT rewritten to absolute
   });
 });

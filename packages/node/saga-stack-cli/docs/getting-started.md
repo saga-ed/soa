@@ -328,27 +328,33 @@ stack. See **[integration.md](./integration.md)**.
 ### 8b. A feature branch on slot 1 — via a worktree set
 
 To run a branch **without disturbing slot 0**, put it in a git worktree and bind it to a slot with a
-**worktree set**. There's no `ss` worktree helper yet — create the worktree with plain git, then
-register the set (a hand-edited JSON map of repo→path, bound to a slot):
+**worktree set**. `ss set create` is the one-command concierge — it does the `git worktree add` (new
+branch here), `pnpm install`s the worktree so the prep fresh-skip guard is happy, and records the set
+in `~/.saga-stack/worktree-sets.json` with provenance (`createdBy: ss`), bound to the slot:
 
 ```bash
-# 1. worktree + branch (plain git), then pre-install so the prep fresh-skip guard is happy
+ss set create feat-sched --slot 1 --repo saga-dash \
+  --path ~/dev/worktrees/saga-dash-sched --branch feat/sched-tweak
+```
+
+<details><summary>What it did — and the manual equivalent</summary>
+
+`--branch` is created if new, **attached** if it already exists; `--base <ref>` sets the start point
+(default: the primary checkout's HEAD). Skip the install with `--no-install`. The slot is part of the
+set (1–9; slot 0 is the baseline). Equivalent by hand (still fully supported — the file is
+hand-editable, and `$SAGA_STACK_SETS` overrides its location):
+
+```bash
 git -C ~/dev/saga-dash worktree add ~/dev/worktrees/saga-dash-sched -b feat/sched-tweak
 ( cd ~/dev/worktrees/saga-dash-sched && pnpm install )
+# then add to ~/.saga-stack/worktree-sets.json:
+#   { "version": 1, "sets": { "feat-sched": { "slot": 1,
+#       "repos": { "saga-dash": "~/dev/worktrees/saga-dash-sched" } } } }
 ```
+</details>
 
-Register it in `~/.saga-stack/worktree-sets.json` (or `$SAGA_STACK_SETS`) — the `slot` is part of
-the set (1–9; slot 0 is reserved for the baseline):
-
-```jsonc
-{ "version": 1, "sets": {
-    "feat-sched": { "slot": 1, "note": "scheduling tweak",
-                    "repos": { "saga-dash": "~/dev/worktrees/saga-dash-sched" } }
-} }
-```
-
-Validate, bring it up, and run a flow — all on slot 1, addressed by `--set` (which supplies the slot
-and pins the repo to your worktree; the rest of the closure comes from your default checkouts):
+Bring it up and run a flow — all on slot 1, addressed by `--set` (which supplies the slot and pins
+the repo to your worktree; the rest of the closure comes from your default checkouts):
 
 ```bash
 ss set check feat-sched                                         # preflight: paths, build posture, drift
@@ -368,25 +374,19 @@ mechanism for running a branch on its own slot. `--set` plus a conflicting `--sl
 
 ### 8c. A second branch on slot 2 — a different worktree, a different flow
 
-Repeat with another worktree bound to **slot 2** — the two run fully isolated, side by side:
+Repeat with another worktree bound to **slot 2** (unique slot — two sets can't share one):
 
 ```bash
-git -C ~/dev/saga-dash worktree add ~/dev/worktrees/saga-dash-conn -b feat/connect-polish
-( cd ~/dev/worktrees/saga-dash-conn && pnpm install )
-```
-
-Add a second set (unique slot — two sets can't share one):
-
-```jsonc
-"feat-conn": { "slot": 2, "note": "connect polish",
-               "repos": { "saga-dash": "~/dev/worktrees/saga-dash-conn" } }
-```
-
-```bash
+ss set create feat-conn --slot 2 --repo saga-dash \
+  --path ~/dev/worktrees/saga-dash-conn --branch feat/connect-polish
 ss set check feat-conn
 ss stack up --set feat-conn
 ss e2e run --set feat-conn saga-dash/connect-session --headless   # a different flow, on slot 2
 ```
+
+Tear a set down when you're done — `ss set rm feat-conn` drops the set (worktrees left on disk), or
+`ss set rm feat-conn --and-worktrees --yes` also `git worktree remove`s the worktrees `ss` created
+(a hand-recorded checkout is never touched).
 
 Slot 1 (`feat-sched`) and slot 2 (`feat-conn`) now hold independent stacks on different branches —
 different ports, DBs and pidfiles — so `journey` on slot 1 and `connect-session` on slot 2 never
@@ -472,7 +472,7 @@ and **[worktree-sets.md](./worktree-sets.md)**.
 | `ss stack seed [--with …] [--scenario …]` / `reset` | Seed a running stack (add-ons + named datasets/scenarios) / truncate to an empty baseline + re-seed | [sub-stacks](./sub-stacks-and-bundles.md) |
 | `ss stack snapshot store\|restore\|list` | Save/restore a known-good DB state in seconds | [snapshots](./snapshots.md) |
 | `ss e2e run\|list\|connect` | Run/discover data-driven flows; open a live Connect session | [e2e](./e2e.md) |
-| `ss set list\|show\|check` + `--set <name>` | Named worktree sets: parallel dev contexts (repo map + slot) for `up`/`e2e run`/… | [worktree-sets](./worktree-sets.md) |
+| `ss set create\|rm\|list\|show\|check` + `--set <name>` | Named worktree sets: create/tear-down a worktree+branch+slot binding, then run `up`/`e2e run`/… against it | [worktree-sets](./worktree-sets.md) |
 | `ss stack overlay\|bootstrap\|login\|tunnel` | Integration workflows (in-flight PRs, one-command bring-up, personas, sharing) | [integration](./integration.md) |
 | `ss stack cold-start [--dry-run] [--all-docker]` | Clean slate: docker wipe (`down -v`) → repos to main → clean build → `.env` → up → verify (destructive; slot-0) | [cold-start](./cold-start.md) |
 | `ss stack down [--mesh] [--slot N]` | Stop the stack natively | [slots](./slots.md) |

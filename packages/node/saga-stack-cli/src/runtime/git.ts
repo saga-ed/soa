@@ -113,6 +113,31 @@ export interface GitRunner {
    * non-zero exit folds to false ⇒ the caller aborts with a clear message).
    */
   clone(url: string, dir: string): Promise<boolean>;
+
+  // ── M13-C worktree verbs (`ss set create` / `set rm --and-worktrees`) ──
+  /**
+   * `git -C <repo> worktree add [-b <branch>] <path> [<startPoint>]` — create a linked
+   * worktree. `opts.newBranch` uses `-b <ref>` (git fails if the branch already exists);
+   * otherwise `<ref>` is an existing branch/commit to check out. Returns `{ok, stderr}` so
+   * the command can surface git's reason (path exists, branch checked out elsewhere, …).
+   */
+  worktreeAdd(
+    repoPath: string,
+    worktreePath: string,
+    ref: string,
+    opts?: { newBranch?: boolean; startPoint?: string },
+  ): Promise<GitTryResult>;
+  /**
+   * `git -C <repo> worktree remove [--force] <path>` — remove a linked worktree. Returns
+   * `{ok, stderr}`; without `--force`, git refuses a dirty/locked worktree (surfaced).
+   */
+  worktreeRemove(repoPath: string, worktreePath: string, opts?: { force?: boolean }): Promise<GitTryResult>;
+}
+
+/** A git verb that reports success + git's stderr (for a pointed user-facing failure). */
+export interface GitTryResult {
+  ok: boolean;
+  stderr: string;
 }
 
 /** Run `git -C <repoPath> …args`; resolve trimmed stdout (`''` on any error). NEVER throws. */
@@ -129,6 +154,15 @@ function gitOk(repoPath: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
     execFile('git', ['-C', repoPath, ...args], { encoding: 'utf8' }, (err) => {
       resolve(!err);
+    });
+  });
+}
+
+/** Run `git -C <repoPath> …args`; resolve `{ok, stderr}` (git's reason on failure). NEVER throws. */
+function gitTry(repoPath: string, args: string[]): Promise<GitTryResult> {
+  return new Promise((resolve) => {
+    execFile('git', ['-C', repoPath, ...args], { encoding: 'utf8' }, (err, _stdout, stderr) => {
+      resolve({ ok: !err, stderr: (stderr ?? '').toString().trim() });
     });
   });
 }
@@ -225,6 +259,29 @@ export function makeRealGitRunner(): GitRunner {
         child.on('error', () => resolve(false));
         child.on('close', (code) => resolve(code === 0));
       });
+    },
+
+    // ── M13-C worktree verbs ──
+    worktreeAdd(
+      repoPath: string,
+      worktreePath: string,
+      ref: string,
+      opts: { newBranch?: boolean; startPoint?: string } = {},
+    ): Promise<GitTryResult> {
+      const args = ['worktree', 'add'];
+      if (opts.newBranch) {
+        args.push('-b', ref, worktreePath);
+        if (opts.startPoint !== undefined && opts.startPoint !== '') args.push(opts.startPoint);
+      } else {
+        args.push(worktreePath, ref);
+      }
+      return gitTry(repoPath, args);
+    },
+    worktreeRemove(repoPath: string, worktreePath: string, opts: { force?: boolean } = {}): Promise<GitTryResult> {
+      const args = ['worktree', 'remove'];
+      if (opts.force) args.push('--force');
+      args.push(worktreePath);
+      return gitTry(repoPath, args);
     },
   };
 }

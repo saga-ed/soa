@@ -89,17 +89,19 @@ This exact scenario is validated live (see PR soa#236): parallel feature context
 with its own flows, interpretable against a clean-main control.
 
 ```bash
-# worktrees (ss records paths in the MVP; `set create` lands in M13-C)
-git -C ~/dev/saga-dash worktree add ~/dev/worktrees/saga-dash-a feat/x
-git -C ~/dev/saga-dash worktree add ~/dev/worktrees/saga-dash-b flow/topology
-(cd ~/dev/worktrees/saga-dash-a && pnpm install)     # pre-build ⇒ fresh-skip
-(cd ~/dev/worktrees/saga-dash-b && pnpm install)
-# …author each worktree's apps/web/dash/e2e/flows.json, define sets a@1 b@2, then:
+# ss set create (M13-C) does the worktree add + pnpm install + records the set:
+ss set create a --slot 1 --repo saga-dash --path ~/dev/worktrees/saga-dash-a --branch feat/x
+ss set create b --slot 2 --repo saga-dash --path ~/dev/worktrees/saga-dash-b --branch flow/topology
+# …author each worktree's apps/web/dash/e2e/flows.json, then:
 
 ss e2e run saga-dash/journey --through schedule      # baseline: main, slot 0
 ss e2e run --set a saga-dash/my-flow-a &             # concurrently…
 ss e2e run --set b saga-dash/my-flow-b &             # …on slots 1 and 2
 ```
+
+Tear a set down with `ss set rm <name>` (drops the set) or `ss set rm <name> --and-worktrees --yes`
+(also `git worktree remove`s the worktrees `ss` created — `createdBy: ss`; hand-recorded paths are
+never touched). The set file stays hand-editable, and `$SAGA_STACK_SETS` overrides its location.
 
 Each run's Playwright output shows its own worktree (spec paths + flow/stage lists come
 from that worktree's `flows.json`); containers/volumes/state/DBs stay disjoint per slot.
@@ -114,8 +116,8 @@ from that worktree's `flows.json`); containers/volumes/state/DBs stay disjoint p
   building is what the guard refuses).
 - ACTIVE in `ss set list` is **derived live** (state-dir pids + compose containers) —
   there is no recorded state to go stale.
-- Fast-follows: `ss set create --from-branches` / `rm --and-worktrees` (M13-C), an
-  `e2e run --baseline` clean-main preflight (M13-D). Plan of record:
+- `ss set create` / `set rm [--and-worktrees]` (M13-C) are now shipped (above). Remaining
+  fast-follow: an `e2e run --baseline` clean-main preflight (M13-D). Plan of record:
   `soa/claude/projects/gh_214/plans/10-m13-worktree-sets.md`.
 
 ← [Slots](./slots.md) · [e2e](./e2e.md)

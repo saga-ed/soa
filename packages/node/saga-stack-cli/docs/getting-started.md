@@ -337,7 +337,7 @@ ss set create feat-sched --slot 1 --repo saga-dash \
   --path ~/dev/worktrees/saga-dash-sched --branch feat/sched-tweak
 ```
 
-<details><summary>What it did — and the manual equivalent</summary>
+<details><summary>Configuration details — flags &amp; the manual equivalent</summary>
 
 `--branch` is created if new, **attached** if it already exists; `--base <ref>` sets the start point
 (default: the primary checkout's HEAD). Skip the install with `--no-install`. The slot is part of the
@@ -384,9 +384,15 @@ ss stack up --set feat-conn
 ss e2e run --set feat-conn saga-dash/connect-session --headless   # a different flow, on slot 2
 ```
 
-Tear a set down when you're done — `ss set rm feat-conn` drops the set (worktrees left on disk), or
-`ss set rm feat-conn --and-worktrees --yes` also `git worktree remove`s the worktrees `ss` created
-(a hand-recorded checkout is never touched).
+Tear a set down when you're done:
+
+```bash
+ss set rm feat-conn                          # drop the set (worktrees left on disk)
+ss set rm feat-conn --and-worktrees --yes    # also git-worktree-remove the ss-created worktree(s)
+```
+
+`--and-worktrees` removes **only** the worktrees `ss` created (`createdBy: ss`) — a hand-recorded
+checkout is never touched.
 
 Slot 1 (`feat-sched`) and slot 2 (`feat-conn`) now hold independent stacks on different branches —
 different ports, DBs and pidfiles — so `journey` on slot 1 and `connect-session` on slot 2 never

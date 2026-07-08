@@ -12,11 +12,13 @@
  *   3. REPOS → MAIN  — switch every clean repo back to its default branch + fast-forward to origin.
  *                      A repo with uncommitted TRACKED changes is LEFT AS-IS (never discarded).
  *   4. CLEAN BUILD   — `rm -rf` each repo's `dist/` (defeats prep's fresh-skip) so `up` rebuilds;
- *                      `--reinstall` also removes `node_modules` for a full `pnpm install`. Because
- *                      that wipes the HOST repo's (soa) `node_modules` — where the running `ss`
- *                      binary's own @oclif/core lives — soa is reinstalled INLINE right here, so a
- *                      later prep failure can't brick `ss` (ERR_MODULE_NOT_FOUND); siblings reinstall
- *                      in step 6's up/prep.
+ *                      `--reinstall` also removes `node_modules` for a full `pnpm install`. This
+ *                      wipes the HOST repo's (soa) OWN runtime — the `dist/commands/**` and (under
+ *                      `--reinstall`) the `node_modules/@oclif/core` the running `ss` loads from —
+ *                      and step 6's up only builds the SERVICE repos, never soa. So soa is restored
+ *                      INLINE right here: reinstall (under `--reinstall`) + a CLI rebuild (always),
+ *                      or the next `ss` command dies with MODULE_NOT_FOUND even after a green run.
+ *                      Siblings still reinstall/rebuild in step 6's up/prep.
  *   5. ENSURE .ENV   — copy each `.env.example` → `.env` where the `.env` is missing (never
  *                      overwrites), so a fresh clone has the dotenv files the services expect.
  *   6. UP + VERIFY   — `up --reset --seed <profile>` (fresh mesh → provision → migrate → seed) then
@@ -44,8 +46,10 @@ import {
   bootstrapRepos,
   composeDownVArgs,
   distScanRoots,
+  HOST_CLI_PACKAGE,
   ensureEnv,
   ensureReposNative,
+  rebuildHostCli,
   reinstallHostRepo,
   reinstallTargets,
   reposToMain,
@@ -114,7 +118,7 @@ export default class StackColdStart extends BaseCommand {
     this.log(dry ? '▶ cold-start DRY RUN — nothing will be changed:' : '▶ cold-start plan:');
     this.log(`    docker: down -v the '${profile.project}' mesh (containers + volumes)${flags['all-docker'] ? ' + system prune -af --volumes' : ''}`);
     this.log(`    repos:  ${repos.length} siblings → clone-if-missing, switch to main, ff to origin`);
-    this.log(`    build:  rm -rf dist${flags.reinstall ? ' + node_modules (soa reinstalled inline)' : ''}${flags['skip-clean'] ? ' (SKIPPED)' : ''} → rebuilt by up`);
+    this.log(`    build:  rm -rf dist${flags.reinstall ? ' + node_modules' : ''}${flags['skip-clean'] ? ' (SKIPPED)' : ''} → rebuilt by up (soa CLI restored inline)`);
     this.log(`    env:    scaffold missing .env from .env.example`);
     this.log(`    up:     up --reset --seed ${flags.seed} → verify`);
 
@@ -244,6 +248,29 @@ export default class StackColdStart extends BaseCommand {
           this.log('  ✓ soa node_modules reinstalled — ss runtime restored');
         });
       }
+
+      // The clean phase also `rm -rf`'d soa's `dist/` — including the saga-stack-cli
+      // `dist/commands/**` the RUNNING `ss` binary discovers its commands from. Phase 6's up
+      // only builds the SERVICE repos (never soa), so rebuild the host CLI INLINE now or the
+      // next `ss` command dies with MODULE_NOT_FOUND — even after a green cold-start. Runs even
+      // WITHOUT --reinstall (dist is always removed). See runtime/host-reinstall.ts#rebuildHostCli.
+      await this.step('4/6 host rebuild — turbo build the ss CLI in soa (restore dist before up)', async () => {
+        if (dry) {
+          this.log(`    would run: pnpm turbo run build --filter=${HOST_CLI_PACKAGE} in ${soaRoot}`);
+          return;
+        }
+        const result = await rebuildHostCli(soaRoot, {
+          runner: this.getRunner(),
+          notify: (m) => this.log(m),
+        });
+        if (!result.ok) {
+          this.error(
+            'host CLI `turbo build` failed — resolve the error above, then re-run ' +
+              '(the ss binary needs its own dist/ to continue).',
+          );
+        }
+        this.log('  ✓ soa saga-stack-cli dist rebuilt — ss commands restored');
+      });
     }
 
     // ── STEP 5: ensure .env ──

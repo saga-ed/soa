@@ -64,6 +64,7 @@ import {
   repoOverridesFromFlags,
   resolveRepoRoot,
   resolveVendorScript,
+  generateSlotFleetConfig,
 } from './runtime/index.js';
 import type {
   DashFs,
@@ -239,6 +240,24 @@ export function buildStackContext(
   // rtsm-api's non-tunnel FLEET_CONFIG_PATH reads `${VENDOR_DIR}/rtsm-fleet-local.json`;
   // point VENDOR_DIR at the CLI's VENDORED copy (Phase-2 DECOUPLING), NOT tools/synthetic-dev.
   const vendorDir = dirname(resolveVendorScript('rtsm-fleet-local.json'));
+  // soa#271: at slot > 0, generate a per-slot rtsm fleet (browser-visible endpoint =
+  // the SLOT's rtsm host) and route it via RTSM_FLEET_PATH, so connect-web's browser
+  // CRDT/realtime reaches THIS slot's rtsm, not slot 0's. `e2e run` assembles the
+  // runtime HERE (not via BaseCommand.buildRuntime — the flagged duplication), so the
+  // generation must be mirrored. Best-effort: a null keeps the vendored fleet.
+  let rtsmFleetPath: string | undefined;
+  if (profile.slot > 0) {
+    const rtsmPort = profile.portOverrides['rtsm-api'];
+    const stateDir = (flags['state-dir'] as string | undefined) ?? profile.stateDir;
+    if (rtsmPort !== undefined) {
+      rtsmFleetPath =
+        generateSlotFleetConfig({
+          localFleetPath: resolveVendorScript('rtsm-fleet-local.json'),
+          outPath: `${stateDir}/rtsm-fleet-s${profile.slot}.json`,
+          endpoint: `localhost:${rtsmPort}`,
+        }) ?? undefined;
+    }
+  }
   // Thread the slot's port-override map + mesh offset (byte-identical base context
   // at slot 0 — `deriveInstance` guarantees slot-0 overrides resolve the defaults).
   const launchContext = defaultLaunchContext({
@@ -248,6 +267,7 @@ export function buildStackContext(
     meshOffset: profile.meshOffset,
     pinoLevel: process.env.PINO_LOGGER_LEVEL,
     pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
+    rtsmFleetPath,
   });
 
   const runtime: Runtime = {

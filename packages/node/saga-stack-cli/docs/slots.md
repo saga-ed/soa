@@ -64,7 +64,7 @@ stopped: iam-api, scheduling-api, sessions-api
 
 - `--slot N` works on `up` / `status` / `verify` / `down` / `reset` / `seed` / `snapshot` / `e2e run`.
 - Slot ceiling is **9** (slot 10 would collide the rabbitmq-management port with slot 0).
-- Slot > 0 is a backend sub-stack today; `connect` is excluded pending literal-port tokenization.
+- Slot > 0 is a backend + saga-dash/coach + `connect-api` sub-stack today; only `connect-web` stays excluded (pending per-slot AV — a real Connect room needs single-node livekit `ws:7880`, which is slot-0 only).
 - Cloud/tunnel modes (`--sandbox`/`--tunnel`) are slot-0 only (they front fixed ports).
 - Want a slot to also mean *different source*? Name a repo→worktree map bound to a slot —
   a **[worktree set](./worktree-sets.md)** — and drive everything with `--set <name>`.

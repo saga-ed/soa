@@ -297,8 +297,9 @@ Everything above ran on **slot 0**, the shared baseline. One box hosts up to **1
 — slots `0`–`9` — each with its own docker project (`soa` / `soa-sN`), port band (offset `N×1000`),
 state dir (`/tmp/sds-synthetic[-sN]`) and snapshot store. Slot 0 is the team baseline; **slots 1–9
 are your parallel dev contexts.** (`cold-start`, `restart`, `overlay` and `up --tunnel/--sandbox`
-are **slot-0 only**; a slot >0 is a backend sub-stack — `connect-api`, the playback trio and
-`connect-web` don't boot there.)
+are **slot-0 only**; a slot >0 is a backend + `connect-api` sub-stack (connect-api boots there
+as of soa#271) — only the playback trio and `connect-web` don't (playback carries literal ports;
+connect-web needs slot-0-only single-node livekit AV).)
 
 ### 8a. Run a flow on slot 0 — current checkout vs latest main
 

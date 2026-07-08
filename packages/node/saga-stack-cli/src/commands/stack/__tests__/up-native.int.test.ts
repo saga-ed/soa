@@ -368,10 +368,10 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     // … ads-adm-api is slottable now (tokenized env + EXPRESS_SERVER_PORT
     // injection) and launches in-slot …
     expect(ids).toContain('ads-adm-api');
-    // … connect-api is slottable now (soa#271) but is NOT in THIS closure: saga-dash's
-    // only edge to it is via connect-web (a browser edge), which doesn't pull connect-api
-    // into the launch set. It launches in-slot only when explicitly in the closure — see
-    // the bare full-stack --slot 1 test below (non-optional set includes connect-api).
+    // … connect-api is slottable now (soa#271) but is NOT in THIS closure: nothing in
+    // `--only saga-dash --with playback` reaches connect-api (saga-dash has no connect-*
+    // dependency edge at all). It launches in-slot only when it's actually in the
+    // closure — see the bare full-stack --slot 1 test below (non-optional set includes it).
     expect(ids).not.toContain('connect-api');
     // … and the still-un-slottable services are dropped from the slot bring-up:
     // connect-web (a real Connect room needs slot-0-only livekit) …

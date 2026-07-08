@@ -437,11 +437,12 @@ export default class StackUp extends BaseCommand {
 
     const fullClosure = computeClosure(manifest, requested, { withPlayback });
 
-    // Exclude the literal-port backends (connect-api/playback trio) AND
-    // the browser frontends (saga-dash/connect-web/coach-web — no listen-port seam)
-    // from a slot > 0 bring-up: they'd collide with / split-brain onto slot 0 (see
-    // SLOT_EXCLUDED_SERVICES). So slot > 0 is a BACKEND sub-stack. Empty at slot 0,
-    // so slot 0 is unchanged.
+    // Exclude the still-un-slottable services from a slot > 0 bring-up: the
+    // literal-port playback trio (transcripts/insights/chat) and the connect-web
+    // frontend (a real Connect room needs slot-0-only single-node livekit). They'd
+    // collide with / split-brain onto slot 0 (see SLOT_EXCLUDED_SERVICES). connect-api
+    // and the saga-dash/coach frontends are NOT excluded (slottable as of soa#271 /
+    // the M13 listen-port seam). Empty at slot 0, so slot 0 is unchanged.
     const excluded = new Set(profile.excludedServices);
 
     // BLOCKER-1 (Phase 2): the sandbox-hosted deps live in the CLOUD — subtract them

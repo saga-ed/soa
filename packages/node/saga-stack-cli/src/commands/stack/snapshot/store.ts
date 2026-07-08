@@ -103,8 +103,8 @@ export default class SnapshotStore extends BaseCommand {
     // nonexistent DBs and fail. Scope the DEFAULT set to the non-excluded
     // closure. The exclusion MUST apply POST-closure (like `up`/`reset`):
     // filtering the requested set first is defeated by closure edges pulling
-    // an excluded service back in (e.g. connect-web's edge → connect-api),
-    // and it applies AFTER the --with union so `--with playback --slot N`
+    // an excluded service back in (a dependency edge from a non-excluded service
+    // into an excluded one), and it applies AFTER the --with union so `--with playback --slot N`
     // degrades gracefully rather than dumping absent playback DBs.
     const withPlayback = effectiveWithPlayback(flags.with);
     const excluded = new Set<ServiceId>(instance.excludedServices);

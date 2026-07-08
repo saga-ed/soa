@@ -9,20 +9,25 @@ on almost everything, `--output-json`/`--porcelain` for scripting, `--help` at e
 
 ## Stack is down? Start here
 
-Bring the stack up on **slot 0**, then run the full `journey` flow **in the background**, leaving a
-**logged-in browser held open** at the end. Run them as two separate commands — the output stays
-visible in your terminal:
+Bring the stack up on **slot 0**, confirm it's healthy, then run the full `journey` flow **in the
+background**, leaving a **logged-in browser held open** at the end. Run them as separate commands —
+the output stays visible in your terminal:
 
 ```bash
 ss stack up --slot 0
 ```
 
 ```bash
+ss stack verify --full
+```
+
+```bash
 ss e2e run saga-dash/journey --headless --hold &
 ```
 
-- `ss stack up --slot 0` stands up the baseline stack (prep → migrate → launch → seed). Wait for it
-  to go green before you start the flow.
+- `ss stack up --slot 0` stands up the baseline stack (prep → migrate → launch → seed).
+- `ss stack verify --full` gates on the whole stack — health + data (D1–D5) + source posture — and
+  exits non-zero if a required service is down or data is missing. Wait for it to pass before the flow.
 - The trailing `&` backgrounds the flow so your terminal is free while it drives Playwright (~30s);
   its output still prints inline (not redirected). Bring it back to the foreground any time with `fg`.
 - `--headless` runs the flow without popping browsers per stage; **`--hold`** then mints the

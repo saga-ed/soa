@@ -10,23 +10,25 @@ on almost everything, `--output-json`/`--porcelain` for scripting, `--help` at e
 ## Stack is down? Start here
 
 Bring the stack up on **slot 0**, then run the full `journey` flow **in the background**, leaving a
-**logged-in browser held open** at the end:
+**logged-in browser held open** at the end. Run them as two separate commands — the output stays
+visible in your terminal:
 
 ```bash
-ss stack up --slot 0 && \
-  nohup ss e2e run saga-dash/journey --headless --hold >/tmp/ss-journey.log 2>&1 &
+ss stack up --slot 0
+
+ss e2e run saga-dash/journey --headless --hold &
 ```
 
-- `ss stack up --slot 0` stands up the baseline stack (prep → migrate → launch → seed) and must go
-  green before the flow runs — that's the `&&`.
-- `nohup … &` detaches the flow so your terminal is free while it drives Playwright (~30s); tail it
-  with `tail -f /tmp/ss-journey.log`.
+- `ss stack up --slot 0` stands up the baseline stack (prep → migrate → launch → seed). Wait for it
+  to go green before you start the flow.
+- The trailing `&` backgrounds the flow so your terminal is free while it drives Playwright (~30s);
+  its output still prints inline (not redirected). Bring it back to the foreground any time with `fg`.
 - `--headless` runs the flow without popping browsers per stage; **`--hold`** then mints the
   dev-persona cookie jar and opens **one logged-in browser** at saga-dash's slot-0 URL and exits 0.
   The stack stays up.
 
-> Prefer to watch the whole thing run headed instead? Drop `--headless` (and `nohup … &`) and run it
-> in the foreground: `ss e2e run saga-dash/journey --hold`.
+> Prefer to watch the whole thing run headed instead? Drop `--headless` and the trailing `&`, and run
+> it in the foreground: `ss e2e run saga-dash/journey --hold`.
 
 Want a **guaranteed-clean** main baseline first (destructive — docker `down -v`)? Prefix with
 `ss stack cold-start --yes`. See [cold-start](./cold-start.md).

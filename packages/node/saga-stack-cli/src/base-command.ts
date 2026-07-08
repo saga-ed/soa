@@ -81,6 +81,7 @@ import {
   makeRealBuildCleaner,
   makeRealEnvFs,
   generateTunnelFleetConfig,
+  generateSlotFleetConfig,
   resolveRepoRoot,
   resolveTunnelMoniker,
   resolveScript,
@@ -518,6 +519,12 @@ export abstract class BaseCommand extends Command {
     return generateTunnelFleetConfig;
   }
 
+  /** The per-slot rtsm-fleet generator seam (soa#271 — endpoint swapped to the slot's
+   *  rtsm host). Production shells the real writer; tests inject a fake. */
+  protected getSlotFleetGen(): typeof generateSlotFleetConfig {
+    return generateSlotFleetConfig;
+  }
+
   /**
    * The ff-only git seam (M9 — auto-pull) — production is the only place the
    * read-only git probes + the single `merge --ff-only` run for the native
@@ -683,6 +690,26 @@ export abstract class BaseCommand extends Command {
 
     const stateDir = flags['state-dir'] ?? profile.stateDir;
 
+    // soa#271: at slot > 0 (non-tunnel), generate a per-slot rtsm fleet whose
+    // browser-visible node endpoint is the SLOT's rtsm host (`localhost:<6110+offset>`),
+    // and route it via RTSM_FLEET_PATH. Without it a slot's Connect browser discovers the
+    // vendored :6110 endpoint and its CRDT/realtime socket split-brains onto slot 0's
+    // rtsm. This is the ONE seam every bring-up path shares (`stack up` AND `e2e run`
+    // build the runtime here). Best-effort: a null (unreadable base) keeps the vendored
+    // fleet. `--tunnel` (slot-0-only) has its own fleet override via the tunnel overlay.
+    let rtsmFleetPath: string | undefined;
+    if (profile.slot > 0 && !overlays.tunnel) {
+      const rtsmPort = profile.portOverrides['rtsm-api'];
+      if (rtsmPort !== undefined) {
+        rtsmFleetPath =
+          this.getSlotFleetGen()({
+            localFleetPath: resolveVendorScript('rtsm-fleet-local.json'),
+            outPath: `${stateDir}/rtsm-fleet-s${profile.slot}.json`,
+            endpoint: `localhost:${rtsmPort}`,
+          }) ?? undefined;
+      }
+    }
+
     const launchContext = defaultLaunchContext({
       repoRoots,
       vendorDir,
@@ -694,6 +721,7 @@ export abstract class BaseCommand extends Command {
       // for a plain `up` (and for `reset`, which never passes overlays) ⇒ base env only.
       sandbox: overlays.sandbox,
       tunnel: overlays.tunnel,
+      rtsmFleetPath,
     });
 
     return {

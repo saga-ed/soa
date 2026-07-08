@@ -435,11 +435,15 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         EXPRESS_SERVER_PORT: '${RTSM_PORT}',
-        // Non-tunnel FLEET_CONFIG_PATH → the CLI's VENDORED single-node fleet
-        // (`vendor/rtsm-fleet-local.json`), resolved via the `VENDOR_DIR` launch token
-        // (Phase-2 DECOUPLING) — NOT a soa checkout's `tools/synthetic-dev`. The
-        // `--tunnel` case overrides this with the generated rtsm-fleet-tunnel.json.
-        FLEET_CONFIG_PATH: '${VENDOR_DIR}/rtsm-fleet-local.json',
+        // FLEET_CONFIG_PATH → the fleet file whose `nodes.local.endpoint` is the
+        // BROWSER-visible rtsm host. `${RTSM_FLEET_PATH}` resolves to the CLI's VENDORED
+        // single-node fleet (`vendor/rtsm-fleet-local.json`, endpoint :6110) at slot 0 —
+        // byte-identical to the old `${VENDOR_DIR}/...` — and to a GENERATED per-slot
+        // file (endpoint `localhost:<6110+offset>`) at slot > 0 (soa#271), so a slot's
+        // browser CRDT/realtime socket reaches the SLOT's own rtsm, not slot 0's (the
+        // realtime plane is stateful and does NOT share). The `--tunnel` case overrides
+        // this with the generated rtsm-fleet-tunnel.json.
+        FLEET_CONFIG_PATH: '${RTSM_FLEET_PATH}',
         FLEET_NODE_NAME: 'local',
       },
     },

@@ -213,3 +213,19 @@ describe('connect-api slottability — sessions dial tokenized (soa#271); AV lit
     expect(env.LIVEKIT_URL).toBe('ws://localhost:7880');
   });
 });
+
+describe('rtsm-api per-slot fleet (soa#271) — browser CRDT reaches the SLOT rtsm, not slot 0', () => {
+  it('slot 0 / no override: FLEET_CONFIG_PATH is the vendored fleet (byte-identical)', () => {
+    const env = resolveLaunchEnv('rtsm-api', 'stack', defaultLaunchContext(baseInputs));
+    expect(env.FLEET_CONFIG_PATH).toBe('/w/vendor/rtsm-fleet-local.json');
+  });
+
+  it('slot > 0: FLEET_CONFIG_PATH is the injected per-slot fleet file (endpoint = slot rtsm host)', () => {
+    // `up` at slot > 0 generates <stateDir>/rtsm-fleet-s2.json with endpoint
+    // localhost:8110 and threads its path in as rtsmFleetPath; the manifest's
+    // ${RTSM_FLEET_PATH} then resolves to it (not the :6110 vendored fleet).
+    const ctx = defaultLaunchContext({ ...baseInputs, rtsmFleetPath: '/tmp/sds-synthetic-s2/rtsm-fleet-s2.json' });
+    const env = resolveLaunchEnv('rtsm-api', 'stack', ctx);
+    expect(env.FLEET_CONFIG_PATH).toBe('/tmp/sds-synthetic-s2/rtsm-fleet-s2.json');
+  });
+});

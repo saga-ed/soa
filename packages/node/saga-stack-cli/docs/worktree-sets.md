@@ -108,8 +108,9 @@ from that worktree's `flows.json`); containers/volumes/state/DBs stay disjoint p
 
 ## Notes
 
-- Sets inherit every slot caveat: **backend + saga-dash/coach contexts** (`connect` stays
-  on slot 0 pending literal-port tokenization), slot ceiling 9, `--tunnel`/`--sandbox`
+- Sets inherit every slot caveat: **backend + saga-dash/coach + full Connect contexts**
+  (`connect-api` + `connect-web` are slottable as of soa#271, sharing the one slot-0 livekit;
+  only the literal-port playback trio stays on slot 0), slot ceiling 9, `--tunnel`/`--sandbox`
   slot-0 only.
 - A set doesn't have to pin every repo — unpinned repos fall through to env/`$DEV`
   primaries. Sharing primaries is fine when they're **pre-built** (running is safe;

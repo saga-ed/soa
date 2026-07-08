@@ -385,24 +385,14 @@ describe('stack verify --full — FULLY NATIVE: health + DATA + posture, NOTHING
 });
 
 describe('stack verify --slot N — backend + saga-dash/coach gate on offset ports (M7 Phase 2)', () => {
-  // Still excluded at slot > 0 (non-optional): connect-web (a real Connect room needs
-  // slot-0-only livekit). connect-api is NO LONGER excluded (soa#271: sessions dial
-  // tokenized), nor are saga-dash/coach-web (offset --port) or ads-adm-api (tokenized
-  // env + EXPRESS_SERVER_PORT listen-port injection).
-  // No NON-optional service is excluded at slot>0 anymore — only the literal-port
-  // playback trio, which is optional (pulled by --with playback), so it's not in the
-  // default probe set at all.
-  const EXCLUDED = [] as const;
-
+  // No NON-optional service is excluded at slot>0 anymore (soa#271): connect-api AND
+  // connect-web are slottable (sessions dial tokenized; shared slot-0 livekit + per-slot
+  // rtsm fleet), as are saga-dash/coach-web (offset --port) and ads-adm-api. Only the
+  // literal-port playback trio stays excluded, and it's optional (pulled by --with
+  // playback), so it's not in the default probe set at all.
   it('slot > 0 gates every non-optional service — backends + connect-api/connect-web + saga-dash/coach — on offset ports', async () => {
     await StackVerify.run(['--slot', '1', ...WS], config);
     const profile = deriveInstance({ slot: 1 });
-
-    // nothing non-optional is excluded now (playback trio is optional).
-    for (const id of EXCLUDED) {
-      const url = `http://localhost:${profile.portOverrides[id]}${manifest.services[id].healthPath}`;
-      expect(probed).not.toContain(url);
-    }
 
     // the backend services ARE probed, on the +1000 offset port.
     const iamUrl = `http://localhost:${profile.portOverrides['iam-api']}${manifest.services['iam-api'].healthPath}`;

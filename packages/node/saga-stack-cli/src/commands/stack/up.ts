@@ -435,14 +435,18 @@ export default class StackUp extends BaseCommand {
     // below. At slot 0 the profile is the byte-identical no-offset default.
     const profile = deriveInstance({ slot: flags.slot });
 
+    // NB: the per-slot rtsm fleet (soa#271 — so a slot's Connect browser CRDT reaches
+    // THIS slot's rtsm, not slot 0's) is generated in `buildRuntime`, the seam BOTH
+    // `stack up` and `e2e run` share; it need not be repeated here.
+
     const fullClosure = computeClosure(manifest, requested, { withPlayback });
 
-    // Exclude the still-un-slottable services from a slot > 0 bring-up: the
-    // literal-port playback trio (transcripts/insights/chat) and the connect-web
-    // frontend (a real Connect room needs slot-0-only single-node livekit). They'd
-    // collide with / split-brain onto slot 0 (see SLOT_EXCLUDED_SERVICES). connect-api
-    // and the saga-dash/coach frontends are NOT excluded (slottable as of soa#271 /
-    // the M13 listen-port seam). Empty at slot 0, so slot 0 is unchanged.
+    // Exclude the still-un-slottable services from a slot > 0 bring-up: only the
+    // literal-port playback trio (transcripts/insights/chat) carries literal cross-slot
+    // ports that would collide with slot 0 (see SLOT_EXCLUDED_SERVICES). connect-api,
+    // connect-web and the saga-dash/coach frontends are all slottable now (soa#271 /
+    // the M13 listen-port seam; connect-web shares the one slot-0 livekit + dials its
+    // own slot's rtsm via the per-slot fleet above). Empty at slot 0, so slot 0 is unchanged.
     const excluded = new Set(profile.excludedServices);
 
     // BLOCKER-1 (Phase 2): the sandbox-hosted deps live in the CLOUD — subtract them
@@ -456,7 +460,7 @@ export default class StackUp extends BaseCommand {
     const droppedForSlot = fullClosure.services.filter((id) => excluded.has(id));
     if (droppedForSlot.length > 0) {
       this.log(
-        `⚠ slot ${profile.slot}: backend sub-stack — excluding literal-port + frontend ` +
+        `⚠ slot ${profile.slot}: backend sub-stack — excluding literal-port ` +
           `service(s) that would collide with slot 0: ${droppedForSlot.join(', ')}`,
       );
     }

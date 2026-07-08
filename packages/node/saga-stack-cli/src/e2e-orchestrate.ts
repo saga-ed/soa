@@ -490,7 +490,7 @@ export interface DescribeOptions {
   ports?: Partial<Record<ServiceId, number>>;
   /**
    * Services excluded from THIS slot's closure (`profile.excludedServices`) — the
-   * literal-port backends + the connect-web frontend that would collide with slot 0. Empty at slot 0.
+   * literal-port playback-trio backends that would collide with slot 0. Empty at slot 0.
    */
   excluded?: Set<ServiceId>;
 }
@@ -506,7 +506,7 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
   // computeEnv), so occurrenceDate reads from it instead of recomputing.
   const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports);
   const effectiveReset = resolved.reset && !opts.skipReset;
-  // Drop the slot's excluded services (literal-port backends + the connect-web frontend) from the
+  // Drop the slot's excluded services (literal-port playback-trio backends) from the
   // closure so the dry-run matches what a `--slot N` run actually brings up. Empty
   // set at slot 0 ⇒ the full closure, byte-identical.
   const excluded = opts.excluded ?? new Set<ServiceId>();
@@ -696,7 +696,7 @@ export async function executeResolvedFlow(
 ): Promise<number> {
   const m = deps.manifest ?? serviceManifest;
 
-  // Drop this slot's excluded services (literal-port backends + the connect-web frontend that would
+  // Drop this slot's excluded services (literal-port playback-trio backends that would
   // collide with slot 0) from the closure BEFORE up/reset/seed/verify. Empty set at
   // slot 0 ⇒ the full closure, byte-identical.
   const excluded = deps.excluded ?? new Set<ServiceId>();

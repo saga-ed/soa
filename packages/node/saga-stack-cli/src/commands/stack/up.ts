@@ -114,6 +114,12 @@ export default class StackUp extends BaseCommand {
         'skip the R1 install+build prep pass (NATIVE); R2 DB provision + R3 migrate still run (both idempotent).',
       default: false,
     }),
+    yes: Flags.boolean({
+      char: 'y',
+      description:
+        'non-interactive: if a prep lock is held by a STOPPED/abandoned holder (e.g. a suspended `ss stack up`), kill it and reclaim the lock without prompting (CI / agents).',
+      default: false,
+    }),
     'allow-primary': Flags.boolean({
       description:
         "M13-B escape hatch: let a --set entry point a BUILDABLE repo at the primary $DEV checkout (prep will build your live working copy — tenet 4 says use a clean worktree; the preflight normally refuses).",

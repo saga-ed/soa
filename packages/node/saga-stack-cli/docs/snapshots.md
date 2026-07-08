@@ -11,7 +11,7 @@ supersedes the old `mesh-fixture-cli` (now deprecated).
 Bring your stack to the state you want, then:
 
 ```bash
-ss stack snapshot store my-baseline
+ss stack snapshot store --fixture-id my-baseline
 ```
 
 <details><summary>✓ dumps every closure DB (pg) + connectv3 (mongo) into a named fixture</summary>
@@ -78,7 +78,7 @@ the native recipe composes what already exists:
    fixture entities — today that is still the legacy script
    (`packages/node/mesh-fixture-cli/fixtures/<name>/create.sh`), which works
    fine against a native `ss` stack.
-3. Capture natively: `ss stack snapshot store <name> --only iam-api` — the
+3. Capture natively: `ss stack snapshot store --fixture-id <name> --only iam-api` — the
    manifest records profile + schema revisions, and the restore guards
    (profile-mismatch, snapshot-ahead) apply.
 4. Restore anywhere: `ss stack snapshot restore <name>` (slot-aware).

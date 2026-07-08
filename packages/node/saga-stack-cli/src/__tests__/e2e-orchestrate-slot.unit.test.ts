@@ -126,6 +126,8 @@ describe('serviceUrlEnv / playwrightEnv — offset Playwright service URLs', () 
     expect(env.PLAYWRIGHT_SESSIONS_URL).toBe('http://localhost:4007');
     expect(env.PLAYWRIGHT_PROGRAMS_URL).toBe('http://localhost:4006');
     expect(env.PLAYWRIGHT_SIS_URL).toBe('http://localhost:4100');
+    // soa#271: connect-api ingress is slottable now — its URL carries the offset too.
+    expect(env.PLAYWRIGHT_CONNECT_API_URL).toBe('http://localhost:7106'); // 6106 + 1000
   });
 
   it('slot 0 ports ⇒ the base URLs (behaviour-identical to lane.ts defaults)', () => {
@@ -134,6 +136,7 @@ describe('serviceUrlEnv / playwrightEnv — offset Playwright service URLs', () 
     expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:3010');
     expect(env.PLAYWRIGHT_SCHEDULING_URL).toBe('http://localhost:3008');
     expect(env.PLAYWRIGHT_SESSIONS_URL).toBe('http://localhost:3007');
+    expect(env.PLAYWRIGHT_CONNECT_API_URL).toBe('http://localhost:6106'); // base = lane.ts default
   });
 
   const flow = { name: 'journey', env: undefined } as unknown as ResolvedFlow['flow'];

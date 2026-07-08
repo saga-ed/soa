@@ -362,6 +362,11 @@ export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = O
   PLAYWRIGHT_SESSIONS_URL: 'sessions-api',
   PLAYWRIGHT_ADS_ADM_URL: 'ads-adm-api',
   PLAYWRIGHT_CONNECT_URL: 'connect-web',
+  // soa#271 Phase B: the connect-api INGRESS base (telemetry producer, :6106) — distinct
+  // from PLAYWRIGHT_CONNECT_URL (connect-web browser origin, :6210). Carries the slot
+  // offset onto the ingress so a slotted telemetry-dosage run pings the SLOT's connect-api.
+  // Consumed by saga-dash e2e/fixtures/lane.ts `CONNECT_API_URL`.
+  PLAYWRIGHT_CONNECT_API_URL: 'connect-api',
 });
 
 /**

@@ -334,6 +334,17 @@ export function playwrightArgv(
   if (stage?.noDeps) argv.push('--no-deps');
   if (resolved.playwright.grepInvert) argv.push('--grep-invert', resolved.playwright.grepInvert);
   if (resolved.playwright.headed) argv.push('--headed');
+  // Scope the run to the terminal stage's own spec — else Playwright's testMatch
+  // sweeps every spec in the SPA's e2e dir (found running coach-web/dashboard: it
+  // also executed unrelated nav/timer specs). Gated to the single-spawn path only
+  // (no `stage` override): `resolved.playwright.spec` is the TERMINAL stage's spec,
+  // so pushing it during a bake/--from per-stage spawn (`stage.project` overridden
+  // to a non-terminal project) would filter that stage's own project to a spec it
+  // doesn't contain, running zero tests. Progressive flows' per-stage `project`s are
+  // already testMatch-scoped to their own spec by the SPA's Playwright config, so
+  // they don't need this — it's specifically for single-project SPAs like coach-web
+  // where one `chromium` project matches every spec in the dir.
+  if (!stage && resolved.playwright.spec) argv.push(resolved.playwright.spec);
   argv.push(...passthrough);
   return argv;
 }
@@ -345,12 +356,16 @@ export function playwrightArgv(
  * URL as `process.env.PLAYWRIGHT_<X>_URL ?? http://localhost:<base port>`, and the
  * Playwright config's `baseURL` is `PLAYWRIGHT_BASE_URL ?? http://localhost:8900`.
  * By injecting each key from `launchContext.ports[svc]` (= manifest base + slot
- * offset), a slot-1 journey drives saga-dash on :9900 and hits iam :4010 /
- * scheduling :4008 / sessions :4007 / … instead of slot 0's base ports. Keyed to
- * the exact env vars `lane.ts` consumes today (nothing invented).
+ * offset), a slot-1 journey drives the SPA frontend on its offset port and hits
+ * iam :4010 / scheduling :4008 / sessions :4007 / … instead of slot 0's base
+ * ports. Keyed to the exact env vars `lane.ts` consumes today (nothing invented).
+ *
+ * `PLAYWRIGHT_BASE_URL` has no fixed `ServiceId` here — it must resolve to
+ * WHICHEVER SPA's flow is running (`resolved.spa.system`), not always saga-dash.
+ * `serviceUrlEnv`/`playwrightEnv` take that id as a param and default to
+ * `'saga-dash'` only when the caller has no spa context (back-compat).
  */
 export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = Object.freeze({
-  PLAYWRIGHT_BASE_URL: 'saga-dash', // the dash frontend origin (Playwright `baseURL`)
   PLAYWRIGHT_IAM_URL: 'iam-api',
   PLAYWRIGHT_SIS_URL: 'sis-api',
   PLAYWRIGHT_PROGRAMS_URL: 'programs-api',
@@ -360,6 +375,9 @@ export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = O
   PLAYWRIGHT_CONNECT_URL: 'connect-web',
 });
 
+/** `PLAYWRIGHT_BASE_URL`'s `ServiceId` when no SPA context is available (back-compat). */
+const DEFAULT_BASE_URL_SERVICE: ServiceId = 'saga-dash';
+
 /**
  * Build the stack-lane service-URL env from RESOLVED ports (each = manifest base +
  * slot offset). At slot 0 the ports are the base ports, so this yields the SAME
@@ -367,9 +385,18 @@ export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = O
  * carries the `N * 1000` offset. Derived from `launchContext.ports` — never a
  * hardcoded port — so a re-banded/remapped service slots for free. A service with
  * no resolved port is omitted rather than emitting `localhost:undefined`.
+ *
+ * `baseUrlService` picks WHICH service backs `PLAYWRIGHT_BASE_URL` — the running
+ * flow's own SPA frontend (`resolved.spa.system`), defaulting to saga-dash when
+ * the caller has none.
  */
-export function serviceUrlEnv(ports: Partial<Record<ServiceId, number>>): Record<string, string> {
+export function serviceUrlEnv(
+  ports: Partial<Record<ServiceId, number>>,
+  baseUrlService: ServiceId = DEFAULT_BASE_URL_SERVICE,
+): Record<string, string> {
   const env: Record<string, string> = {};
+  const basePort = ports[baseUrlService];
+  if (basePort !== undefined) env.PLAYWRIGHT_BASE_URL = `http://localhost:${basePort}`;
   for (const [key, svc] of Object.entries(PLAYWRIGHT_SERVICE_URL_ENV)) {
     const port = ports[svc];
     if (port !== undefined) env[key] = `http://localhost:${port}`;
@@ -390,6 +417,11 @@ export function serviceUrlEnv(ports: Partial<Record<ServiceId, number>>): Record
  * service URLs are the lane's own hostnames (resolved in `lane.ts`), NOT localhost,
  * so we do NOT inject them. `now` is supplied by the command (`new Date()`); this
  * never reads the clock.
+ *
+ * `PLAYWRIGHT_BASE_URL` is derived from `resolved.spa.system` — the flow's OWN
+ * SPA frontend — not hardcoded to saga-dash, else a non-dash flow's Playwright
+ * run navigates to saga-dash's port and 500s (found running coach-web's
+ * `dashboard` flow: it opened `:8900`, saga-dash's port, instead of coach-web's).
  */
 export function playwrightEnv(
   resolved: ResolvedFlow,
@@ -417,7 +449,7 @@ export function playwrightEnv(
   const env: Record<string, string> = {
     ...computeEnv(resolved.flow, now),
     ...(dateOverrides ?? {}),
-    ...(lane === 'stack' && ports ? serviceUrlEnv(ports) : {}),
+    ...(lane === 'stack' && ports ? serviceUrlEnv(ports, resolved.spa?.system) : {}),
   };
   if (lane !== 'stack') env.PLAYWRIGHT_LANE = lane;
   return env;

@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveInstance } from '../core/derive-instance.js';
 import {
   buildStackContext,
+  playwrightArgv,
   playwrightEnv,
   serviceUrlEnv,
   type StackSeams,
@@ -154,6 +155,16 @@ describe('serviceUrlEnv / playwrightEnv — offset Playwright service URLs', () 
     expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:3010');
   });
 
+  it('a non-dash SPA (coach-web) gets ITS OWN port for PLAYWRIGHT_BASE_URL, not saga-dash\'s (regression: coach-web/dashboard opened :8900 and 500\'d before this fix)', () => {
+    const coachResolved = {
+      flow,
+      spa: { id: 'coach-web', system: 'coach-web' },
+    } as unknown as ResolvedFlow;
+    const env = playwrightEnv(coachResolved, now, 'stack', p0);
+    expect(env.PLAYWRIGHT_BASE_URL).toBe('http://localhost:8800'); // coach-web, NOT :8900 (saga-dash)
+    expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:3010');
+  });
+
   it('playwrightEnv on a DEPLOYED lane does NOT inject localhost URLs (lane.ts owns the hostnames)', () => {
     const env = playwrightEnv(resolved, now, 'sandbox', p1);
     expect(env.PLAYWRIGHT_BASE_URL).toBeUndefined();
@@ -187,5 +198,51 @@ describe('serviceUrlEnv / playwrightEnv — offset Playwright service URLs', () 
     expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:4010');
     // ...while flow.env keeps winning for the date env.
     expect(env.PLAYWRIGHT_OCCURRENCE_DATE).toBe('2026-01-05');
+  });
+});
+
+describe('playwrightArgv — spec scoping (single-spawn only, never on a stage override)', () => {
+  const specResolved = {
+    playwright: {
+      config: 'playwright.config.ts',
+      project: 'chromium',
+      headed: false,
+      spec: 'dashboard/dashboard-authenticated.e2e.smoke.test.ts',
+    },
+  } as unknown as ResolvedFlow;
+
+  it('the single-spawn path (no stage override) pushes the terminal spec — scopes a single-project SPA to just that spec', () => {
+    const argv = playwrightArgv(specResolved);
+    expect(argv).toEqual([
+      'exec',
+      'playwright',
+      'test',
+      '--config=playwright.config.ts',
+      '--project',
+      'chromium',
+      'dashboard/dashboard-authenticated.e2e.smoke.test.ts',
+    ]);
+  });
+
+  it('a stage override (bake/--from per-stage spawn) does NOT push the terminal spec (regression guard: pushing it would filter a non-terminal stage.project to a spec it does not contain, running zero tests)', () => {
+    const argv = playwrightArgv(specResolved, [], { project: 'stage-2-program', noDeps: true });
+    expect(argv).toEqual([
+      'exec',
+      'playwright',
+      'test',
+      '--config=playwright.config.ts',
+      '--project',
+      'stage-2-program',
+      '--no-deps',
+    ]);
+    expect(argv).not.toContain('dashboard/dashboard-authenticated.e2e.smoke.test.ts');
+  });
+
+  it('a flow with no spec (progressive saga-dash flows omit it) never pushes an extra positional arg', () => {
+    const noSpecResolved = {
+      playwright: { config: 'playwright.stack.config.ts', project: 'stage-4-pods', headed: false },
+    } as unknown as ResolvedFlow;
+    const argv = playwrightArgv(noSpecResolved);
+    expect(argv).toEqual(['exec', 'playwright', 'test', '--config=playwright.stack.config.ts', '--project', 'stage-4-pods']);
   });
 });

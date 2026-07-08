@@ -428,7 +428,7 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     expect(ids).toContain('coach-web');
     expect(ids).toContain('ads-adm-api'); // slottable (tokenized env + port injection)
     expect(ids).toContain('connect-api'); // slottable now (soa#271: sessions dial tokenized)
-    expect(ids).not.toContain('connect-web');
+    expect(ids).toContain('connect-web'); // slottable now (soa#271: offset --port + SHARED slot-0 livekit)
 
     // mesh came up under the slot project on offset ports (soa-s1, +1000).
     const makeUp = runs.find((r) => r.command === 'make');

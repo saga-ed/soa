@@ -107,17 +107,15 @@ describe('literal-port service exclusion (plan §6)', () => {
     expect(slotExcludedServices(0)).toEqual([]);
   });
 
-  it('slot > 0 excludes the literal-port backends + connect-web, but NOT saga-dash/coach-web/ads-adm-api/connect-api', () => {
+  it('slot > 0 excludes ONLY the literal-port playback trio, NOT saga-dash/coach-web/ads-adm-api/connect-api/connect-web', () => {
     const excluded = deriveInstance({ slot: 1 }).excludedServices;
     expect(excluded).toEqual([...SLOT_EXCLUDED_SERVICES]);
     expect(new Set(excluded)).toEqual(
       new Set([
-        // literal-port backends (bypass the offset)
+        // literal-port backends (bypass the offset) — the ONLY remaining exclusions
         'transcripts-api',
         'insights-api',
         'chat-api',
-        // connect-web — excluded pending per-slot AV/livekit (single-node ws:7880)
-        'connect-web',
       ]),
     );
     // saga-dash & coach-web listen on their offset port now (launch-seam --port).
@@ -129,6 +127,9 @@ describe('literal-port service exclusion (plan §6)', () => {
     // connect-api is slottable now (soa#271): SESSIONS_API_BASE_URL tokenized to
     // ${SESSIONS_PORT}; its AV literals stay slot-0 but AV bring-up is slot-0-gated.
     expect(excluded).not.toContain('connect-api');
+    // connect-web is slottable now too (soa#271): offset --port + browser-edge backends;
+    // AV is SHARED (a slot>0 Connect session opens its own rooms on the one slot-0 livekit).
+    expect(excluded).not.toContain('connect-web');
     expect(slotExcludedServices(3)).toEqual([...SLOT_EXCLUDED_SERVICES]);
   });
 });

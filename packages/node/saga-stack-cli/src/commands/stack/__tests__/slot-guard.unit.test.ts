@@ -81,13 +81,16 @@ describe('M13-A: seed + snapshot are slot-aware now', () => {
   });
 
   it('seed at slot > 0 SUBTRACTS the slot-excluded services (and says so)', async () => {
-    await StackSeed.run(['--slot', '2', ...WS], config);
+    // --with playback so the still-excluded literal-port trio is IN the closure and
+    // gets dropped (a bare seed drops nothing now: connect-api/connect-web are
+    // slottable as of soa#271, and the trio is optional/absent without --with).
+    await StackSeed.run(['--slot', '2', '--with', 'playback', ...WS], config);
     const warn = logged.find((l) => l.includes('excluding literal-port'));
     expect(warn).toBeDefined();
     // The dropped set is exactly the excluded services that intersect the seed set —
-    // connect-web is excluded at slot>0, iam-api never is (an inverted filter would
-    // flip this). (connect-api is NO LONGER excluded as of soa#271, so it won't appear.)
-    expect(warn).toMatch(/connect-web/);
+    // transcripts-api (a literal-port trio member) is excluded at slot>0, iam-api never
+    // is (an inverted filter would flip this).
+    expect(warn).toMatch(/transcripts-api/);
     expect(warn).not.toMatch(/iam-api/);
   });
 

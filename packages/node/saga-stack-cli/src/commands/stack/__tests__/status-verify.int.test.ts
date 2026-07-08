@@ -389,14 +389,16 @@ describe('stack verify --slot N — backend + saga-dash/coach gate on offset por
   // slot-0-only livekit). connect-api is NO LONGER excluded (soa#271: sessions dial
   // tokenized), nor are saga-dash/coach-web (offset --port) or ads-adm-api (tokenized
   // env + EXPRESS_SERVER_PORT listen-port injection).
-  const EXCLUDED = ['connect-web'] as const;
+  // No NON-optional service is excluded at slot>0 anymore — only the literal-port
+  // playback trio, which is optional (pulled by --with playback), so it's not in the
+  // default probe set at all.
+  const EXCLUDED = [] as const;
 
-  it('slot > 0 excludes only connect-web; gates the backends + connect-api + saga-dash/coach on offset ports', async () => {
+  it('slot > 0 gates every non-optional service — backends + connect-api/connect-web + saga-dash/coach — on offset ports', async () => {
     await StackVerify.run(['--slot', '1', ...WS], config);
     const profile = deriveInstance({ slot: 1 });
 
-    // the excluded services (literal-port backends + connect-web) are NOT gated — at
-    // slot > 0 they aren't brought up, so gating them would always read down.
+    // nothing non-optional is excluded now (playback trio is optional).
     for (const id of EXCLUDED) {
       const url = `http://localhost:${profile.portOverrides[id]}${manifest.services[id].healthPath}`;
       expect(probed).not.toContain(url);
@@ -407,16 +409,16 @@ describe('stack verify --slot N — backend + saga-dash/coach gate on offset por
     expect(probed).toContain(iamUrl);
     expect(iamUrl).toContain(`:${manifest.services['iam-api'].port + 1000}`);
 
-    // the saga-dash + coach-web frontends ARE gated now, on their offset ports —
-    // and so are ads-adm-api and connect-api (slottable: gated on their own slot's port).
-    for (const id of ['saga-dash', 'coach-web', 'ads-adm-api', 'connect-api'] as const) {
+    // every frontend + slottable backend is gated now on its offset port —
+    // saga-dash/coach-web/connect-web frontends + ads-adm-api + connect-api.
+    for (const id of ['saga-dash', 'coach-web', 'connect-web', 'ads-adm-api', 'connect-api'] as const) {
       const url = `http://localhost:${profile.portOverrides[id]}${manifest.services[id].healthPath}`;
       expect(probed).toContain(url);
       expect(url).toContain(`:${manifest.services[id].port + 1000}`);
     }
 
-    // exactly the slottable set: 13 non-optional minus the 1 still-excluded (connect-web) = 12.
-    expect(probed).toHaveLength(12);
+    // the full non-optional set is slottable now: all 13 are probed.
+    expect(probed).toHaveLength(13);
   });
 
   it('slot 0 verify is byte-identical: probes every non-optional service on base ports', async () => {

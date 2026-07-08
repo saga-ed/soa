@@ -20,19 +20,20 @@
  * own default) — deterministic per host, no filesystem touch — which the fixed
  * `{ slot }` signature requires. `src/core/**` never imports `src/runtime/**`.
  *
- * SLOT > 0 IS A BACKEND + saga-dash/coach FRONTEND + connect-api SUB-STACK. Slot > 0
- * brings up the backend mesh + services —
+ * SLOT > 0 IS A BACKEND + FRONTEND SUB-STACK (Connect included). Slot > 0 brings up the
+ * backend mesh + services —
  * `iam/programs/scheduling/sessions/content/sis/rtsm/coach-api/ads-adm-api/connect-api`
- * + the mesh — PLUS the `saga-dash` and `coach-web` frontends, which now listen on
- * their OFFSET port (the launch seam appends `--port <base+offset>` to their `pnpm
- * dev`; vite honours the last `--port`, overriding the port baked into the repo dev
- * script / vite config). `connect-api` is now slottable too (soa#271): its one
- * cross-slot literal, `SESSIONS_API_BASE_URL`, is tokenized (`${SESSIONS_PORT}`), so
- * it dials the slot's own sessions-api. What STAYS EXCLUDED (`SLOT_EXCLUDED_SERVICES`):
- * the playback trio (literal postgres/EXPRESS_SERVER_PORT) and `connect-web` — the
- * latter because a real Connect room needs AV (single-node livekit `ws://…:7880`
- * can't be offset), which is slot-0-only. saga-dash/coach frontend→backend edges are
- * `browser` and don't pull the excluded services, so their closures are slottable.
+ * + the mesh — PLUS the `saga-dash`, `coach-web` and `connect-web` frontends, which
+ * listen on their OFFSET port (the launch seam appends `--port <base+offset>` to their
+ * `pnpm dev`; vite honours the last `--port`, overriding the port baked into the repo
+ * dev script / vite config). `connect-api` is slottable (soa#271): its one cross-slot
+ * literal, `SESSIONS_API_BASE_URL`, is tokenized (`${SESSIONS_PORT}`), so it dials the
+ * slot's own sessions-api; its livekit literal is fine because AV is SHARED (below).
+ * What STAYS EXCLUDED (`SLOT_EXCLUDED_SERVICES`): only the playback trio (literal
+ * postgres/EXPRESS_SERVER_PORT). AV (livekit/coturn) is a single shared slot-0 media
+ * server — a slot>0 Connect session opens its own rooms on it (keyed by session id, no
+ * collision), so Connect is fully slottable without slotted AV. frontend→backend edges
+ * are `browser` and don't pull the excluded playback trio, so closures are slottable.
  *
  * The port-override map is derived GENERICALLY over `manifest.services` (never a
  * hand-maintained table), so any future service slots for free. After computing,
@@ -72,14 +73,16 @@ export const SLOT_PORT_STRIDE = 1000;
  *   gated to slot 0 (`startConnectAv` requires `slot === 0`), so connect-api never
  *   opens a slot>0 livekit connection through the stack path.
  *
- *   `connect-web` FRONTEND — stays EXCLUDED. It has a listen-port seam (the launch
- *   layer appends `--port` for any `isFrontend` service at an offset slot) and its
- *   backend `connect-api` is now slottable, but a real Connect room requires AV
- *   (single-node livekit `ws://…:7880` bypasses the offset → slot-0-only). FOLLOW-UP:
- *   make livekit/coturn per-slot (or add an AV-connected-gate test hook), then drop
- *   `connect-web` from this list too.
+ *   `connect-web` FRONTEND is NO LONGER excluded either (soa#271): it listens on its
+ *   offset port (the `isFrontend` `--port` seam) and reaches its now-slottable backends
+ *   (`connect-api`/`rtsm-api`/`iam-api`) over browser edges. A real Connect room needs
+ *   AV, but livekit is a MEDIA server keyed by room/session id: a slot>0 Connect session
+ *   opens its OWN rooms on the SINGLE shared `ws://localhost:7880` livekit with no
+ *   cross-slot collision, so AV is SHARED (not slotted). The AV bring-up stays
+ *   slot-0-gated (`startConnectAv` requires `slot === 0`); a slot>0 stack reuses slot 0's
+ *   already-running livekit/coturn.
  *
- * The OTHER two frontends — `saga-dash` and `coach-web` — are NO LONGER excluded:
+ * The frontends — `saga-dash`, `coach-web`, `connect-web` — are NOT excluded:
  * they listen on their offset port via the launch-seam `--port` append, and their
  * backend deps (iam/programs/scheduling/sessions/content/sis, coach-api) all run at
  * slot > 0. Their frontend→backend edges are `browser`, so they don't pull the
@@ -95,10 +98,10 @@ export const SLOT_EXCLUDED_SERVICES: readonly ServiceId[] = [
   'transcripts-api',
   'insights-api',
   'chat-api',
-  // connect-web frontend — excluded pending per-slot AV/livekit (a real Connect room
-  // needs single-node livekit ws:7880, which can't be offset; connect-api backend is
-  // slottable as of soa#271). FOLLOW-UP: per-slot livekit → drop connect-web too.
-  'connect-web',
+  // connect-web is NO LONGER excluded (soa#271): it listens on its offset port
+  // (isFrontend --port seam) and reaches its slottable backends over browser edges;
+  // AV is SHARED, not slotted — a slot>0 Connect session opens its own rooms on the
+  // single slot-0 livekit (ws:7880), keyed by session id, with no cross-slot collision.
 ];
 
 /**

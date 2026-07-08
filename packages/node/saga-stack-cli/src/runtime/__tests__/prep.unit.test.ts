@@ -378,3 +378,89 @@ describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => 
     expect(res.steps.some((s) => s.repo === 'COACH' && s.kind === 'build')).toBe(true);
   });
 });
+
+describe('prepClosure — soa#256 freshness stamp writing', () => {
+  /** Capture the roots the injected stamp writer is called for. */
+  function captureStamps(): { writeStamp: (root: string) => void; stamped: string[] } {
+    const stamped: string[] = [];
+    return { writeStamp: (root) => stamped.push(root), stamped };
+  }
+
+  it('stamps each repo that built+installed to completion (after its build)', async () => {
+    const { runner } = fakeRunner();
+    const { writeStamp, stamped } = captureStamps();
+    const res = await prepClosure({
+      services: ['iam-api', 'programs-api'] as ServiceId[],
+      dbs: ['iam_local'] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp,
+    });
+    expect(res.ok).toBe(true);
+    expect(stamped).toEqual(['/dev/rostering', '/dev/program-hub']);
+    // the stamp is written AFTER the repo's build step, per repo.
+    const rosteringBuildIdx = res.steps.findIndex((s) => s.repo === 'ROSTERING' && s.kind === 'build');
+    expect(rosteringBuildIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  it('stamps an install-only repo (saga-dash) after its successful install', async () => {
+    const { runner } = fakeRunner();
+    const { writeStamp, stamped } = captureStamps();
+    const res = await prepClosure({
+      services: ['saga-dash'] as ServiceId[],
+      dbs: [],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp,
+    });
+    expect(res.ok).toBe(true);
+    expect(stamped).toEqual(['/dev/saga-dash']);
+  });
+
+  it('does NOT stamp a repo whose build FAILED fatally (COACH aborts before stamping)', async () => {
+    const { runner } = runnerFailingWhen((s) => s.cwd === '/dev/coach' && s.args[0] === 'build');
+    const { writeStamp, stamped } = captureStamps();
+    const res = await prepClosure({
+      services: ['coach-api'] as ServiceId[],
+      dbs: ['coach_api'] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp,
+    });
+    expect(res.ok).toBe(false);
+    expect(stamped).toEqual([]);
+  });
+
+  it('does NOT stamp a repo whose build FAILED non-fatally (SDS warns, no stamp ⇒ repreps next run)', async () => {
+    const { runner } = runnerFailingWhen((s) => s.cwd === '/dev/student-data-system' && s.args[0] === 'build');
+    const { writeStamp, stamped } = captureStamps();
+    const res = await prepClosure({
+      services: ['ads-adm-api'] as ServiceId[],
+      dbs: ['ads_adm_local'] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp,
+    });
+    expect(res.ok).toBe(true); // non-fatal — the pass continues
+    expect(res.warnings.map((w) => `${w.repo}:${w.kind}`)).toEqual(['SDS:build']);
+    expect(stamped).toEqual([]); // …but a failed build is NOT stamped
+  });
+
+  it('does NOT stamp a fresh-skipped repo (no build ran ⇒ its existing stamp stands)', async () => {
+    const { runner } = fakeRunner();
+    const { writeStamp, stamped } = captureStamps();
+    await prepClosure({
+      services: ['iam-api', 'programs-api'] as ServiceId[],
+      dbs: ['iam_local'] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: (root) => root === '/dev/rostering', // rostering fresh-skips
+      writeStamp,
+    });
+    expect(stamped).toEqual(['/dev/program-hub']); // rostering skipped ⇒ not re-stamped
+  });
+});

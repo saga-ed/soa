@@ -109,6 +109,15 @@ export interface PrepContext {
    */
   isFresh?: (repoRoot: string) => boolean;
   /**
+   * soa#256 seam: write a repo's freshness stamp (`{ headSha, lockHash }` at
+   * `node_modules/.saga-stack-prep-stamp`) after it builds+installs to completion,
+   * so the next run's `isFresh` can reject a pulled-but-unbuilt tree instead of
+   * fresh-skipping it. Called ONLY for a repo whose build succeeded (a fatally- OR
+   * non-fatally-failed build writes NO stamp ⇒ it repreps next run). Absent ⇒ no
+   * stamp written (unit-test default).
+   */
+  writeStamp?: (repoRoot: string) => void;
+  /**
    * BLOCKER-B seam: given a repo root, the repo-relative dirs of EVERY package that
    * DECLARES a `db:generate` script (up.sh scans `packages/node/*` for
    * `grep -q '"db:generate"'`). These are generated before the whole-workspace
@@ -331,6 +340,7 @@ async function prepOneRepo(
     // 3. build — SAGA_DASH is install-only (vite dev, no prebuild). MAJOR-C: FATAL
     //    only for QBOARD/RTSM/COACH (dist-importing services); ROSTERING/PROGRAM_HUB/
     //    SDS builds are NON-fatal (warn + continue).
+    let buildFailed = false;
     if (!INSTALL_ONLY_REPOS.has(repo)) {
       const build: PrepStep = { repo, kind: 'build', cwd: root, argv: ['build'] };
       if (!(await run(build))) {
@@ -338,8 +348,15 @@ async function prepOneRepo(
           return build;
         }
         warnings.push(build);
+        buildFailed = true;
       }
     }
+
+    // 4. soa#256: stamp the repo iff it built+installed to COMPLETION — install
+    //    succeeded (we reached here) and the build (if any) succeeded. A non-fatal
+    //    build failure writes NO stamp, so next run repreps instead of fresh-skipping
+    //    a broken build. (A FATAL build already returned above, before this.)
+    if (!buildFailed) ctx.writeStamp?.(root);
   }
 
   return null;

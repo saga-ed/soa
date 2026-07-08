@@ -464,3 +464,80 @@ describe('prepClosure — soa#256 freshness stamp writing', () => {
     expect(stamped).toEqual(['/dev/program-hub']); // rostering skipped ⇒ not re-stamped
   });
 });
+
+describe('prepClosure — soa#260 build-failure repair escalation', () => {
+  it('a build failure the repair seam heals ⇒ wipe→reinstall→rebuild, recovered, stamped, no warning', async () => {
+    let repaired = false;
+    const runner: Runner = {
+      async run(spec): Promise<RunResult> {
+        const isBuild = spec.args[0] === 'build';
+        return { code: isBuild && !repaired ? 1 : 0 }; // build fails until the repair wipe runs
+      },
+    };
+    const stamped: string[] = [];
+    const res = await prepClosure({
+      services: ['iam-api'] as ServiceId[], // ROSTERING — non-fatal build
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp: (r) => stamped.push(r),
+      repairStaleDeps: () => {
+        repaired = true;
+        return true;
+      },
+    });
+    expect(res.ok).toBe(true);
+    expect(res.warnings).toHaveLength(0); // healed ⇒ nothing surfaced as a warning
+    expect(stamped).toContain('/dev/rostering'); // recovered ⇒ stamped
+    expect(res.steps.map((s) => s.kind)).toEqual(['install', 'build', 'repair', 'install', 'build']);
+  });
+
+  it('a build failure with NO repairable signature ⇒ normal non-fatal warning, no wipe, not stamped', async () => {
+    const { runner } = runnerFailingWhen((s) => s.args[0] === 'build');
+    const stamped: string[] = [];
+    let asked = 0;
+    const res = await prepClosure({
+      services: ['iam-api'] as ServiceId[],
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp: (r) => stamped.push(r),
+      repairStaleDeps: () => {
+        asked++;
+        return false; // no corruption signature ⇒ do not escalate
+      },
+    });
+    expect(res.ok).toBe(true);
+    expect(asked).toBe(1); // consulted once, found nothing repairable
+    expect(res.warnings.map((w) => w.kind)).toEqual(['build']); // normal non-fatal warning
+    expect(stamped).not.toContain('/dev/rostering'); // failed build ⇒ no stamp
+    expect(res.steps.filter((s) => s.kind === 'repair')).toHaveLength(0); // no wipe
+    expect(res.steps.filter((s) => s.kind === 'install')).toHaveLength(1); // no reinstall
+  });
+
+  it('repair heals a FATAL-build repo ⇒ the pass no longer aborts', async () => {
+    let repaired = false;
+    const runner: Runner = {
+      async run(spec): Promise<RunResult> {
+        const failCoachBuild = spec.args[0] === 'build' && spec.cwd === '/dev/coach' && !repaired;
+        return { code: failCoachBuild ? 1 : 0 };
+      },
+    };
+    const res = await prepClosure({
+      services: ['coach-api'] as ServiceId[], // COACH — fatal build (would abort pre-#260)
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      repairStaleDeps: (r) => {
+        if (r !== '/dev/coach') return false;
+        repaired = true;
+        return true;
+      },
+    });
+    expect(res.ok).toBe(true); // escalation runs BEFORE the fatal return → healed
+    expect(res.failed).toBeUndefined();
+  });
+});

@@ -43,6 +43,7 @@ import { applySetToFlags, resolveSet } from './core/set/index.js';
 import type { SetInjectableFlags, WorktreeSet } from './core/set/index.js';
 import { checkWorktreeSet, makeCheckpointStore, makeSlotActiveProbe } from './runtime/index.js';
 import { stampMatches, writeStamp } from './runtime/prep-stamp.js';
+import { repairStaleDeps } from './runtime/prep-repair.js';
 import type { CheckpointStore, SlotActiveProbe } from './runtime/index.js';
 import type { PullMode } from './core/auto-pull.js';
 import type { InstanceProfile } from './core/derive-instance.js';
@@ -440,6 +441,16 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * soa#260: the R1 prep repair seam — on a build failure, if the repo carries the
+   * stale-`.bin`-shim corruption a plain reprep can't fix (program-hub#335), wipe its
+   * `node_modules` and return true so prep reinstalls + rebuilds once. Injected (like
+   * `getPrepStampWriter`) so the escalation stays unit-testable with a fake.
+   */
+  protected getPrepDepRepairer(): (repoRoot: string) => boolean {
+    return (repoRoot: string) => repairStaleDeps(repoRoot);
+  }
+
+  /**
    * The R1 `db:generate` scan seam (M8 — BLOCKER-B). Given a repo root, returns
    * the repo-relative dirs of every `packages/node/*` package that DECLARES a
    * `db:generate` script (a faithful port of up.sh's `packages/node/*` scan). R1
@@ -677,6 +688,7 @@ export abstract class BaseCommand extends Command {
       skipPrep: flags['skip-prep'],
       prepIsFresh: this.getPrepFreshCheck(),
       prepWriteStamp: this.getPrepStampWriter(),
+      prepRepairDeps: this.getPrepDepRepairer(),
       prepDbGenerateScan: this.getDbGenerateScan(),
       // M13-B: realpath-keyed build lock — two `ss` invocations can never
       // prep-BUILD one checkout concurrently (fresh-skipped repos never lock).

@@ -184,26 +184,39 @@ ss stack status
 closure with `ss stack status --only scheduling-api,sessions-api` to see just what you brought up.
 </details>
 
-For a gating check (exits non-zero if a required service is down) plus deep data + git-posture
-checks, use `verify`:
+For a **gating** check (exits non-zero if a required service is down), use `verify`. Scope it to
+your sub-stack's closure with `--only` — the gate then passes on just what you launched:
 
 ```bash
-ss stack verify --full --only scheduling-api,sessions-api
+ss stack verify --only scheduling-api,sessions-api
 ```
 
-<details><summary>✓ native health gate + data checks (D1–D5) + source-posture — all warn-only for posture</summary>
+<details><summary>✓ native health gate scoped to the closure — exits 0 only if every required service is up</summary>
 
 ```
-── service health ──
 ✓ iam-api          http://localhost:3010/health  (200)
 ✓ programs-api     http://localhost:3006/health  (200)
 ✓ scheduling-api   http://localhost:3008/health  (200)
 ✓ sessions-api     http://localhost:3007/health  (200)
+verify: PASS — 4/4 required services up
+```
+
+Add **`--full`** for the deep **data (D1–D5)** + **source-posture** checks — but note `--full`
+checks the **whole** stack and **ignores `--only`** (it warns if you pass both), so run it against a
+full `ss stack up`, not a sub-stack (on a partial stack it fails on the services you never launched):
+
+```bash
+ss stack verify --full        # full stack: health gate + data + git-posture
+```
+
+```
+── service health ──
+✓ iam-api … ✓ sis-api … ✓ programs-api … ✓ scheduling-api … ✓ sessions-api …
 ── data ──
-✓ iam_local seeded, sis_db migrated, connect-mongo reachable …
+✓ iam roster seeded — users=248   ✓ sis_db migrated   ✓ connect-mongo reachable (:27037)
 ── source posture ──
-· soa on gh_214 (not main) — leaving overlay/feature branch as-is
-✓ verify: health + data green (N posture warning(s))
+· soa on a feature branch (not main) — leaving overlay/feature branch as-is
+✓ verify --full: health + data green (N posture warning(s))
 ```
 
 Posture warnings (wrong branch, behind origin, unmerged pin) **never** fail verify — only a

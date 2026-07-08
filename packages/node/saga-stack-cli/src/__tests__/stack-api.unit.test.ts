@@ -424,7 +424,7 @@ describe('StackApi.seed — offline then online via the Runner', () => {
     const res = await api.seed(plan);
 
     expect(res.ok).toBe(true);
-    expect(res.ran.offline).toEqual(['iam-dev-user', 'iam', 'sessions']);
+    expect(res.ran.offline).toEqual(['iam-registry', 'iam-dev-user', 'iam', 'sessions']);
     expect(res.ran.online).toEqual([]);
     // iam steps run under the iam-db package in PROGRAM_HUB? No — iam-api repo. Assert cwd is resolved (absolute).
     const iamRun = fakes.runs.find((r) => r.args.includes('db:seed') && r.cwd.includes('iam-db'));
@@ -451,7 +451,7 @@ describe('StackApi.seed — offline then online via the Runner', () => {
 
     expect(res.ok).toBe(false);
     expect(res.failed).toBe('iam');
-    expect(res.ran.offline).toEqual(['iam-dev-user']); // ran before the fatal step
+    expect(res.ran.offline).toEqual(['iam-registry', 'iam-dev-user']); // ran before the fatal step
   });
 
   it('a WARN step whose runner THROWS (ENOENT) degrades to a warning, not an unhandled rejection', async () => {
@@ -477,7 +477,7 @@ describe('StackApi.seed — offline then online via the Runner', () => {
     const res = await api.seed(plan); // must resolve, not throw
     expect(res.ok).toBe(true);
     // the throwing warn step is still recorded, and the run continued past it.
-    expect(res.ran.offline).toEqual(['iam-dev-user', 'iam', 'sessions']);
+    expect(res.ran.offline).toEqual(['iam-registry', 'iam-dev-user', 'iam', 'sessions']);
   });
 
   it('a FATAL step whose runner THROWS (ENOENT) aborts the run (ok:false)', async () => {

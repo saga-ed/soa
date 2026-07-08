@@ -24,11 +24,11 @@ const ids = (steps: { id: string }[]): string[] => steps.map((s) => s.id);
 
 describe('composeSeedPlan — gate 1: partial-stack drop', () => {
   it('drops steps whose owning service is not in the active closure', () => {
-    const sel: SeedSelection = { profile: 'full' }; // iam-dev-user, iam, sessions, programs, scheduling, content, coach-pg
+    const sel: SeedSelection = { profile: 'full' }; // iam-registry, iam-dev-user, iam, sessions, programs, scheduling, content, coach-pg
     const plan = composeSeedPlan(sel, set('iam-api'), set());
 
     // Only iam-api's steps survive (and they're offline — no requiresServiceUp).
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam']);
+    expect(ids(plan.offline)).toEqual(['iam-registry', 'iam-dev-user', 'iam']);
     expect(plan.online).toEqual([]);
 
     // sessions / programs / scheduling / content / coach-pg + coach-mongo dropped as
@@ -41,13 +41,14 @@ describe('composeSeedPlan — gate 1: partial-stack drop', () => {
 });
 
 describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () => {
-  const sel: SeedSelection = { profile: 'roster' }; // iam-dev-user, iam, sessions
+  const sel: SeedSelection = { profile: 'roster' }; // iam-registry, iam-dev-user, iam, sessions
   const active = set('iam-api', 'sessions-api');
 
   it('drops a fully-restored service\'s steps; keeps the rest', () => {
     const plan = composeSeedPlan(sel, active, set('iam-api'));
     expect(ids(plan.offline)).toEqual(['sessions']); // sessions-api not restored ⇒ kept
     expect(plan.skipped.filter((s) => s.reason === 'service-restored').map((s) => s.id)).toEqual([
+      'iam-registry',
       'iam-dev-user',
       'iam',
     ]);
@@ -55,7 +56,7 @@ describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () =
 
   it('keeps all steps when nothing is restored', () => {
     const plan = composeSeedPlan(sel, active, set());
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions']);
+    expect(ids(plan.offline)).toEqual(['iam-registry', 'iam-dev-user', 'iam', 'sessions']);
     expect(plan.skipped).toEqual([]);
   });
 
@@ -90,6 +91,7 @@ describe('composeSeedPlan — gate 3: offline / online partition', () => {
     // scheduling + coach-pg + coach-mongo (db:seed / docker-exec, no requiresServiceUp)
     // stay offline. coach-pg + coach-mongo trail content in the canonical run order.
     expect(ids(plan.offline)).toEqual([
+      'iam-registry',
       'iam-dev-user',
       'iam',
       'sessions',
@@ -101,6 +103,27 @@ describe('composeSeedPlan — gate 3: offline / online partition', () => {
     expect(ids(plan.online)).toEqual(['qtf-demo', 'content']);
     expect(plan.skipped).toEqual([]);
   });
+});
+
+describe('composeSeedPlan — iam-registry precedes iam-dev-user (soa#253)', () => {
+  // The registry (Permission/Policy catalog) is an OFFLINE step that iam-dev-user's
+  // dev-admin grant depends on. composeSeedPlan appends offline steps in
+  // SEED_RUN_ORDER position, so iam-registry must land in the OFFLINE batch strictly
+  // before iam-dev-user — deterministically, for every iam-seeding profile.
+  for (const profile of ['roster', 'full'] as const) {
+    it(`${profile}: emits iam-registry before iam-dev-user in the offline batch`, () => {
+      const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api', 'coach-api');
+      const plan = composeSeedPlan({ profile }, active, set());
+      const offlineIds = ids(plan.offline);
+      const reg = offlineIds.indexOf('iam-registry');
+      const dev = offlineIds.indexOf('iam-dev-user');
+      expect(reg).toBeGreaterThanOrEqual(0);
+      expect(dev).toBeGreaterThanOrEqual(0);
+      expect(reg).toBeLessThan(dev);
+      // and it is offline (never deferred online).
+      expect(ids(plan.online)).not.toContain('iam-registry');
+    });
+  }
 });
 
 describe('composeSeedPlan — service with no seed steps', () => {
@@ -121,6 +144,7 @@ describe('composeSeedPlan — selection refinements', () => {
     // M8 R5: each playback DB is provisioned (bootstrap SQL + migrate) BEFORE its
     // fixture seed, so the provision steps precede transcripts/insights/chat.
     expect(ids(plan.offline)).toEqual([
+      'iam-registry',
       'iam-dev-user',
       'iam',
       'sessions',
@@ -136,29 +160,29 @@ describe('composeSeedPlan — selection refinements', () => {
   it('exclude drops a step by id without recording a skip note', () => {
     const sel: SeedSelection = { profile: 'roster', exclude: ['sessions'] };
     const plan = composeSeedPlan(sel, set('iam-api', 'sessions-api'), set());
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam']);
+    expect(ids(plan.offline)).toEqual(['iam-registry', 'iam-dev-user', 'iam']);
     expect(plan.skipped).toEqual([]); // excluded ≠ skipped (never requested)
   });
 });
 
 describe('composeSeedPlan — per-system profile overrides (M5)', () => {
   it('unions ONLY the named system’s steps at the heavier profile onto a roster base', () => {
-    // base roster = {iam-dev-user, iam, sessions}; override seeds programs-api at
-    // full (adds `programs`) WITHOUT pulling content-api in (the rest stay roster).
+    // base roster = {iam-registry, iam-dev-user, iam, sessions}; override seeds
+    // programs-api at full (adds `programs`) WITHOUT pulling content-api in (rest stay roster).
     const sel: SeedSelection = { profile: 'roster', perSystem: [{ system: 'programs-api', profile: 'full' }] };
     const active = set('iam-api', 'sessions-api', 'programs-api', 'content-api');
     const plan = composeSeedPlan(sel, active, set());
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions', 'programs']);
+    expect(ids(plan.offline)).toEqual(['iam-registry', 'iam-dev-user', 'iam', 'sessions', 'programs']);
     // content (the other full-only step) is NOT seeded — heterogeneous profiles.
     expect(ids(plan.offline)).not.toContain('content');
   });
 
   it('is a no-op when the override profile adds nothing new for that system', () => {
-    // iam-api already contributes iam-dev-user + iam at roster; overriding it to
-    // full adds no iam-api steps (full’s extra steps belong to other services).
+    // iam-api already contributes iam-registry + iam-dev-user + iam at roster; overriding
+    // it to full adds no iam-api steps (full’s extra steps belong to other services).
     const sel: SeedSelection = { profile: 'roster', perSystem: [{ system: 'iam-api', profile: 'full' }] };
     const plan = composeSeedPlan(sel, set('iam-api', 'sessions-api'), set());
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions']);
+    expect(ids(plan.offline)).toEqual(['iam-registry', 'iam-dev-user', 'iam', 'sessions']);
   });
 
   it('absent perSystem ⇒ identical to the M4 single-profile shape', () => {
@@ -184,7 +208,7 @@ describe('composeSeedPlan — multi-seed datasets (#221)', () => {
     const stamped = all.filter((s) => varsOf(s)[SEED_DATASET_VAR] === 'ab-topology');
     expect(stamped.map((s) => s.id).sort()).toEqual(['programs', 'scheduling', 'sessions']);
 
-    // Non-triad steps (iam pair) carry NO dataset var.
+    // Non-triad steps (the iam trio: iam-registry/iam-dev-user/iam) carry NO dataset var.
     for (const s of all.filter((x) => !['programs', 'scheduling', 'sessions'].includes(x.id))) {
       expect(varsOf(s)[SEED_DATASET_VAR]).toBeUndefined();
     }
@@ -204,7 +228,7 @@ describe('composeSeedPlan — multi-seed datasets (#221)', () => {
       datasets: [{ system: 'sessions-api', dataset: 'alt' }],
     };
     const plan = composeSeedPlan(sel, set('iam-api', 'sessions-api'), set());
-    expect(ids(plan.offline)).toEqual(['iam-dev-user', 'iam', 'sessions']); // same steps as plain roster
+    expect(ids(plan.offline)).toEqual(['iam-registry', 'iam-dev-user', 'iam', 'sessions']); // same steps as plain roster
     const sessions = plan.offline.find((s) => s.id === 'sessions');
     expect(varsOf(sessions as SeedStep)[SEED_DATASET_VAR]).toBe('alt');
   });

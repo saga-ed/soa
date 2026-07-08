@@ -195,11 +195,45 @@ describe('stamp read / write / compare', () => {
     expect(readStamp(root)).toBeNull();
   });
 
-  it('a non-checkout stamps { headSha: \'\', lockHash } and still round-trips', () => {
+  it('an unresolvable HEAD (headSha \'\') never self-matches ⇒ not fresh (soa#256 guard)', () => {
+    // writeStamp still records headSha:'' when HEAD is unresolvable, but stampMatches must
+    // REFUSE to treat an empty current HEAD as fresh — otherwise a stored '' would blindly
+    // self-match and the HEAD dimension would go dark. In production stampMatches is reached
+    // only for a checkout (isRepoBuilt short-circuits a true non-checkout to fresh before
+    // consulting it), so this guards the exotic/corrupt-`.git` case where HEAD won't resolve.
     put('pnpm-lock.yaml', 'lock\n');
     mkdirSync(join(root, 'node_modules'), { recursive: true });
     writeStamp(root);
     expect(readStamp(root)?.headSha).toBe('');
-    expect(stampMatches(root)).toBe(true);
+    expect(stampMatches(root)).toBe(false);
+  });
+
+  it('worktree round-trip: stamp then advance the branch ref ⇒ flips true→false (soa#256)', () => {
+    // A linked worktree (`.git` is a FILE) — the parallel-dev layout the fix must protect.
+    // Bake a stamp, then advance the shared branch ref (a pull/ff) and assert it goes stale.
+    // Also asserts the stamp records a REAL sha (not ''), catching a regression where
+    // worktree stamping silently writes headSha='' and then always self-matches.
+    const commonDir = join(root, '.git');
+    const wtGitDir = join(commonDir, 'worktrees', 'wt1');
+    mkdirSync(wtGitDir, { recursive: true });
+    const wtRoot = mkdtempSync(join(tmpdir(), 'prep-stamp-wtrt-'));
+    try {
+      writeFileSync(join(wtRoot, '.git'), `gitdir: ${wtGitDir}\n`);
+      writeFileSync(join(wtGitDir, 'HEAD'), 'ref: refs/heads/feature\n');
+      writeFileSync(join(wtGitDir, 'commondir'), '../..\n'); // → <root>/.git
+      mkdirSync(join(commonDir, 'refs', 'heads'), { recursive: true });
+      writeFileSync(join(commonDir, 'refs', 'heads', 'feature'), `${SHA_A}\n`);
+      writeFileSync(join(wtRoot, 'pnpm-lock.yaml'), 'lock\n');
+      mkdirSync(join(wtRoot, 'node_modules'), { recursive: true });
+
+      writeStamp(wtRoot);
+      expect(readStamp(wtRoot)?.headSha).toBe(SHA_A); // resolved a real sha, not ''
+      expect(stampMatches(wtRoot)).toBe(true);
+
+      writeFileSync(join(commonDir, 'refs', 'heads', 'feature'), `${SHA_B}\n`); // ff advanced HEAD
+      expect(stampMatches(wtRoot)).toBe(false);
+    } finally {
+      rmSync(wtRoot, { recursive: true, force: true });
+    }
   });
 });

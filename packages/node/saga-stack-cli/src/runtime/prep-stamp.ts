@@ -155,12 +155,19 @@ export function readStamp(repoRoot: string): PrepFreshness | null {
 /**
  * True iff a stamp exists at the repo root AND its `{ headSha, lockHash }` equals
  * the repo's freshly-computed values. Missing / unparseable / any-field mismatch ⇒
- * false (⇒ not fresh ⇒ prep re-runs). Never throws — the safe #256 default.
+ * false (⇒ not fresh ⇒ prep re-runs). An UNRESOLVABLE current HEAD (`headSha === ''`)
+ * also ⇒ false, so a stored empty sha can never self-match (`'' === ''`) and leave the
+ * HEAD dimension stale-blind — an exotic/corrupt `.git` layout forces a reprep instead.
+ * Never throws — the safe #256 default.
  */
 export function stampMatches(repoRoot: string): boolean {
   const stamp = readStamp(repoRoot);
   if (!stamp) return false;
   const cur = computeFreshness(repoRoot);
+  // This fn is only consulted for real checkouts (isRepoBuilt short-circuits a
+  // non-checkout on the `.git`-absent branch), so an empty current HEAD here means a
+  // `.git` layout we could not read — fold to not-fresh rather than let '' self-match.
+  if (cur.headSha === '') return false;
   return stamp.headSha === cur.headSha && stamp.lockHash === cur.lockHash;
 }
 

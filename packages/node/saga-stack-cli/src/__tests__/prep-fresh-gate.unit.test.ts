@@ -102,4 +102,26 @@ describe('isRepoBuilt — presence + soa#256 staleness gate', () => {
     writeStamp(root);
     expect(isRepoBuilt(root)).toBe(true); // stamped ⇒ fresh
   });
+
+  it('linked worktree (`.git` is a FILE) drives the gate end-to-end ⇒ stamp then ff ⇒ not fresh', () => {
+    // buildNodeRepo() always makes `.git` a DIRECTORY, so production isRepoBuilt is never
+    // exercised against the worktree layout the parallel-dev feature depends on. Build a
+    // worktree-shaped repo and drive the real predicate through it, then advance HEAD.
+    mkdirSync(join(root, 'node_modules'), { recursive: true });
+    mkdirSync(join(root, 'packages', 'node', 'foo', 'dist'), { recursive: true });
+    put('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+    const commonDir = join(root, '.gitcommon');
+    const wtGitDir = join(commonDir, 'worktrees', 'wt1');
+    mkdirSync(join(commonDir, 'refs', 'heads'), { recursive: true });
+    mkdirSync(wtGitDir, { recursive: true });
+    put('.git', `gitdir: ${wtGitDir}\n`); // `.git` is a FILE, not a directory
+    writeFileSync(join(wtGitDir, 'HEAD'), 'ref: refs/heads/feature\n');
+    writeFileSync(join(wtGitDir, 'commondir'), `${commonDir}\n`);
+    writeFileSync(join(commonDir, 'refs', 'heads', 'feature'), `${SHA_A}\n`);
+
+    writeStamp(root);
+    expect(isRepoBuilt(root)).toBe(true); // stamped worktree at its current HEAD ⇒ fresh
+    writeFileSync(join(commonDir, 'refs', 'heads', 'feature'), `${SHA_B}\n`); // ff advanced HEAD
+    expect(isRepoBuilt(root)).toBe(false); // moved HEAD ⇒ stale ⇒ reprep
+  });
 });

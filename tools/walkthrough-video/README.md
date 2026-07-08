@@ -78,6 +78,44 @@ persona — omit it to log in as `ss`'s own default (`dev@saga.org`).
 Output lands at `walkthroughs/<app>/<feature>/video/walkthrough.mp4` (+ `-vp9.webm` sidecar,
 `.srt`).
 
+## Recording against a deployed sandbox composition
+
+`adapters/saga-dash.mjs` has a second lane for recording against an already-deployed
+switchboard sandbox composition instead of a local stack — useful when a walkthrough
+needs data/services only a sandbox has, or you don't want to stand up a local stack.
+No local stack is brought up or torn down; the composition must already exist.
+
+```bash
+export WALKTHROUGH_LANE=sandbox
+export WALKTHROUGH_DASH_URL=https://dash.wootdev.com     # defaults to this if unset
+export WALKTHROUGH_IAM_URL=https://iam.wootdev.com       # defaults to this if unset
+export JANUS_SESSION=<janus_session cookie value>        # from an interactive JumpCloud
+                                                          # gate login — copy from devtools;
+                                                          # required unless the composition
+                                                          # was deployed Janus-off (unsupported
+                                                          # by this adapter today)
+export WALKTHROUGH_PREVIEW_PINS="iam-api=sandbox-<name>,sis-api=sandbox-<name>,programs-api=sandbox-<name>,..."
+export WALKTHROUGH_LOGIN_EMAIL=empty@saga.org            # must be seeded in that composition
+
+node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash/program-creation
+```
+
+This mirrors saga-dash's own sandbox e2e lane (`apps/web/dash/e2e/run-stack-e2e.sh
+--sandbox`, `PLAYWRIGHT_PREVIEW_PINS`) — same `x-saga-preview-<svc>` cookie-pinning
+mechanism, same real `auth.login` (not `devLogin`, which is forbidden on deployed
+iam-api), same Janus perimeter cookie. `WALKTHROUGH_PREVIEW_PINS` uses the identical
+`svc=variant,svc=variant` format as saga-dash's `PLAYWRIGHT_PREVIEW_PINS` — if you
+copied a composition string from switchboard (`svc:variant,svc:variant,...,_default:main`,
+often URL-encoded), translate it: swap `:` for `=`, drop the `_default:...` entry (not a
+real pin — services you don't pin just aren't listed, and fall through to `main` on
+their own), and URL-decode if needed.
+
+**Known constraint**: recording a walkthrough that mutates state (e.g.
+`program-creation`, which creates a program) against a shared sandbox composition means
+a second recording will start from different UI state unless the composition/persona
+resets between runs. Prefer a read-only walkthrough for a composition you don't control,
+or confirm reset behavior first.
+
 ## Authoring a new walkthrough
 
 1. **If the app has no adapter yet**, add `adapters/<app>.mjs` exporting

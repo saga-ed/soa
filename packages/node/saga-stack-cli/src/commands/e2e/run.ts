@@ -243,6 +243,8 @@ export default class E2eRun extends BaseCommand {
       // runs R2 provision + R3 migrate before launch+seed regardless of slot).
       pgProbe: this.getPgProbe(),
       prepIsFresh: this.getPrepFreshCheck(),
+      prepWriteStamp: this.getPrepStampWriter(),
+      prepRepairDeps: this.getPrepDepRepairer(),
       prepDbGenerateScan: this.getDbGenerateScan(),
       repoDirExists: this.getRepoDirCheck(),
     };

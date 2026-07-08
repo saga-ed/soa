@@ -109,6 +109,25 @@ export interface PrepContext {
    */
   isFresh?: (repoRoot: string) => boolean;
   /**
+   * soa#256 seam: write a repo's freshness stamp (`{ headSha, lockHash }` at
+   * `node_modules/.saga-stack-prep-stamp`) after it builds+installs to completion,
+   * so the next run's `isFresh` can reject a pulled-but-unbuilt tree instead of
+   * fresh-skipping it. Called ONLY for a repo whose build succeeded (a fatally- OR
+   * non-fatally-failed build writes NO stamp ⇒ it repreps next run). Absent ⇒ no
+   * stamp written (unit-test default).
+   */
+  writeStamp?: (repoRoot: string) => void;
+  /**
+   * soa#260 seam: on a build failure, if the repo carries the repairable corruption
+   * signature a plain reprep can't fix (a stale `.bin` shim → a deleted
+   * `.pnpm/<pkg>@<ver>`, program-hub#335), wipe its `node_modules` and return true so
+   * prep reinstalls + rebuilds ONCE. Returns false when there is nothing repairable ⇒
+   * prep applies its normal fatal/non-fatal build handling. Gated on the signature so a
+   * genuine compile error never triggers a (useless, minutes-long) wipe. Absent ⇒ no
+   * escalation (the pre-#260 behaviour; unit-test default).
+   */
+  repairStaleDeps?: (repoRoot: string) => boolean | Promise<boolean>;
+  /**
    * BLOCKER-B seam: given a repo root, the repo-relative dirs of EVERY package that
    * DECLARES a `db:generate` script (up.sh scans `packages/node/*` for
    * `grep -q '"db:generate"'`). These are generated before the whole-workspace
@@ -135,7 +154,7 @@ export interface PrepRepoLock {
 /** One prep step in the executed plan (for reporting + test assertions). */
 export interface PrepStep {
   repo: RepoKey;
-  kind: 'install' | 'db:generate' | 'build' | 'co:login' | 'lock';
+  kind: 'install' | 'db:generate' | 'build' | 'co:login' | 'lock' | 'repair';
   cwd: string;
   /** argv AFTER `pnpm` (e.g. `['install']`, `['db:generate']`, `['build']`, `['co:login']`). */
   argv: string[];
@@ -331,16 +350,51 @@ async function prepOneRepo(
     // 3. build — SAGA_DASH is install-only (vite dev, no prebuild). MAJOR-C: FATAL
     //    only for QBOARD/RTSM/COACH (dist-importing services); ROSTERING/PROGRAM_HUB/
     //    SDS builds are NON-fatal (warn + continue).
+    let buildFailed = false;
     if (!INSTALL_ONLY_REPOS.has(repo)) {
       const build: PrepStep = { repo, kind: 'build', cwd: root, argv: ['build'] };
       if (!(await run(build))) {
-        if (FATAL_BUILD_REPOS.has(repo)) {
-          return build;
+        // soa#260: a build failure can be `node_modules` corruption a plain reprep can't
+        // fix (a stale `.bin` shim → a `.pnpm/<pkg>@<ver>` the store no longer has). If
+        // the repair seam detects+wipes it, reinstall + rebuild ONCE before falling back
+        // to the normal fatal/non-fatal handling.
+        if (!(await tryRepairAndRebuild(ctx, repo, root, run, steps))) {
+          if (FATAL_BUILD_REPOS.has(repo)) {
+            return build;
+          }
+          warnings.push(build);
+          buildFailed = true;
         }
-        warnings.push(build);
       }
     }
+
+    // 4. soa#256: stamp the repo iff it built+installed to COMPLETION — install
+    //    succeeded (we reached here) and the build (if any) succeeded. A non-fatal
+    //    build failure writes NO stamp, so next run repreps instead of fresh-skipping
+    //    a broken build. (A FATAL build already returned above, before this.)
+    if (!buildFailed) ctx.writeStamp?.(root);
   }
 
   return null;
+}
+
+/**
+ * soa#260: escalate a build failure that carries the repairable corruption signature.
+ * If `repairStaleDeps` detects+wipes it (returns true), record the repair step and
+ * reinstall + rebuild ONCE; returns true iff the rebuild then SUCCEEDS. No seam / no
+ * signature / a failed reinstall ⇒ false, so the caller applies its normal fatal or
+ * non-fatal build handling. Gated on the seam's signature check so a genuine compile
+ * error never triggers a wipe.
+ */
+async function tryRepairAndRebuild(
+  ctx: PrepContext,
+  repo: RepoKey,
+  root: string,
+  run: (step: PrepStep) => Promise<boolean>,
+  steps: PrepStep[],
+): Promise<boolean> {
+  if ((await ctx.repairStaleDeps?.(root)) !== true) return false;
+  steps.push({ repo, kind: 'repair', cwd: root, argv: ['rm -rf node_modules'] });
+  if (!(await run({ repo, kind: 'install', cwd: root, argv: ['install'] }))) return false;
+  return run({ repo, kind: 'build', cwd: root, argv: ['build'] });
 }

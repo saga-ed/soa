@@ -17,6 +17,7 @@ import type { SeedAddOn, SeedEnv, SeedProfile, SeedStep } from './types.js';
 
 /** The canonical seed-step ids (superset of `SeedStepRef` — incl. `scheduling`/`coach-pg`). */
 export type SeedStepId =
+  | 'iam-registry' //         soa#253: iam seed:registry (Permission/Policy catalog) — MUST precede iam-dev-user
   | 'iam-dev-user'
   | 'iam'
   | 'sessions'
@@ -35,10 +36,12 @@ export type SeedStepId =
 
 /** Profile → the seed-step ids it contributes (plan §4.1). */
 export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>> = {
-  roster: ['iam-dev-user', 'iam', 'sessions'],
+  // soa#253: `iam-registry` FIRST — the Permission/Policy catalog that iam-dev-user's
+  // dev-admin grant depends on (registry-gated view_rosters_tab/view_sessions_tab).
+  roster: ['iam-registry', 'iam-dev-user', 'iam', 'sessions'],
   // M8 R5: coach-mongo (curriculum) is now expressible (stdinFile) — un-gated so
   // native `--seed full` seeds BOTH coach stores (mongo curriculum + pg progress).
-  full: ['iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content', 'coach-pg', 'coach-mongo'],
+  full: ['iam-registry', 'iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content', 'coach-pg', 'coach-mongo'],
 };
 
 /** Add-on → the seed-step ids it contributes (plan §4.1). */
@@ -64,6 +67,11 @@ export const ADDON_STEPS: Readonly<Record<SeedAddOn, readonly SeedStepId[]>> = {
  * `composeSeedPlan` walks this order so the emitted plan is deterministic.
  */
 export const SEED_RUN_ORDER: readonly SeedStepId[] = [
+  // soa#253: iam-registry is OFFLINE (direct DB, requiresServiceUp:[]) and a hard
+  // prerequisite of iam-dev-user's grant — it MUST lead the order. composeSeedPlan
+  // walks this array and appends offline steps in-order, so its position here (not
+  // requiresServiceUp) is what guarantees it precedes iam-dev-user in the plan.
+  'iam-registry',
   'iam-dev-user',
   'iam',
   'sessions',
@@ -237,6 +245,29 @@ function playbackStep(m: Manifest, id: SeedStepId, service: ServiceId, dbId: DbI
  */
 export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, SeedStep> {
   return {
+    // soa#253 — iam seed:registry (`node dist/seed-registry.js`), the iam
+    // Permission/Policy catalog. Rostering added registry-gated nav-tab permissions
+    // (view_rosters_tab/view_sessions_tab, session perms …a005-000000000053/054/055);
+    // without this catalog seed-dev-user REFUSES the dev-admin grant and journey
+    // /roster 500s. It MUST run before iam-dev-user (which reads the catalog to
+    // provision the grant). OFFLINE (direct DB — requiresServiceUp:[]) and FATAL:
+    // the registry is a hard prerequisite (unlike iam-dev-user, which is warn).
+    // Native reset truncates the Permission/Policy catalog, so a one-off manual
+    // seed:registry is wiped every reset — the profile must own it. seed-registry.js
+    // UPSERTS (rostering side), so re-running it every reset is idempotent/safe.
+    // Same env as iam/iam-dev-user (iamSeedEnv): provides DATABASE_URL for iam_local
+    // (a slot-correct `${MESH_PG_PORT}` token) + PII vars; seed-registry.js needs only
+    // DATABASE_URL, but the iamSeedEnv superset is safe and keeps the iam steps uniform.
+    'iam-registry': {
+      id: 'iam-registry',
+      service: 'iam-api',
+      databases: ['iam_local'],
+      cwd: 'packages/node/iam-db',
+      command: ['node', 'dist/seed-registry.js'],
+      env: iamSeedEnv(m),
+      requiresServiceUp: [],
+      failureMode: 'fatal',
+    },
     // dev-user bootstrap (auth user dev@example.org / DEV_USER_UUID f0000004-…beef).
     // Runs `node dist/seed-dev-user.js` from the iam-db package with the repo dotenv
     // loaded (PII keys), matching up.sh's reset re-seed + prep bootstrap.

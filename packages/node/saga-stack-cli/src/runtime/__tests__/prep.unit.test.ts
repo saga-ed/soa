@@ -378,3 +378,166 @@ describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => 
     expect(res.steps.some((s) => s.repo === 'COACH' && s.kind === 'build')).toBe(true);
   });
 });
+
+describe('prepClosure — soa#256 freshness stamp writing', () => {
+  /** Capture the roots the injected stamp writer is called for. */
+  function captureStamps(): { writeStamp: (root: string) => void; stamped: string[] } {
+    const stamped: string[] = [];
+    return { writeStamp: (root) => stamped.push(root), stamped };
+  }
+
+  it('stamps each repo that built+installed to completion (after its build)', async () => {
+    const { runner } = fakeRunner();
+    const { writeStamp, stamped } = captureStamps();
+    const res = await prepClosure({
+      services: ['iam-api', 'programs-api'] as ServiceId[],
+      dbs: ['iam_local'] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp,
+    });
+    expect(res.ok).toBe(true);
+    expect(stamped).toEqual(['/dev/rostering', '/dev/program-hub']);
+    // the stamp is written AFTER the repo's build step, per repo.
+    const rosteringBuildIdx = res.steps.findIndex((s) => s.repo === 'ROSTERING' && s.kind === 'build');
+    expect(rosteringBuildIdx).toBeGreaterThanOrEqual(0);
+  });
+
+  it('stamps an install-only repo (saga-dash) after its successful install', async () => {
+    const { runner } = fakeRunner();
+    const { writeStamp, stamped } = captureStamps();
+    const res = await prepClosure({
+      services: ['saga-dash'] as ServiceId[],
+      dbs: [],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp,
+    });
+    expect(res.ok).toBe(true);
+    expect(stamped).toEqual(['/dev/saga-dash']);
+  });
+
+  it('does NOT stamp a repo whose build FAILED fatally (COACH aborts before stamping)', async () => {
+    const { runner } = runnerFailingWhen((s) => s.cwd === '/dev/coach' && s.args[0] === 'build');
+    const { writeStamp, stamped } = captureStamps();
+    const res = await prepClosure({
+      services: ['coach-api'] as ServiceId[],
+      dbs: ['coach_api'] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp,
+    });
+    expect(res.ok).toBe(false);
+    expect(stamped).toEqual([]);
+  });
+
+  it('does NOT stamp a repo whose build FAILED non-fatally (SDS warns, no stamp ⇒ repreps next run)', async () => {
+    const { runner } = runnerFailingWhen((s) => s.cwd === '/dev/student-data-system' && s.args[0] === 'build');
+    const { writeStamp, stamped } = captureStamps();
+    const res = await prepClosure({
+      services: ['ads-adm-api'] as ServiceId[],
+      dbs: ['ads_adm_local'] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp,
+    });
+    expect(res.ok).toBe(true); // non-fatal — the pass continues
+    expect(res.warnings.map((w) => `${w.repo}:${w.kind}`)).toEqual(['SDS:build']);
+    expect(stamped).toEqual([]); // …but a failed build is NOT stamped
+  });
+
+  it('does NOT stamp a fresh-skipped repo (no build ran ⇒ its existing stamp stands)', async () => {
+    const { runner } = fakeRunner();
+    const { writeStamp, stamped } = captureStamps();
+    await prepClosure({
+      services: ['iam-api', 'programs-api'] as ServiceId[],
+      dbs: ['iam_local'] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: (root) => root === '/dev/rostering', // rostering fresh-skips
+      writeStamp,
+    });
+    expect(stamped).toEqual(['/dev/program-hub']); // rostering skipped ⇒ not re-stamped
+  });
+});
+
+describe('prepClosure — soa#260 build-failure repair escalation', () => {
+  it('a build failure the repair seam heals ⇒ wipe→reinstall→rebuild, recovered, stamped, no warning', async () => {
+    let repaired = false;
+    const runner: Runner = {
+      async run(spec): Promise<RunResult> {
+        const isBuild = spec.args[0] === 'build';
+        return { code: isBuild && !repaired ? 1 : 0 }; // build fails until the repair wipe runs
+      },
+    };
+    const stamped: string[] = [];
+    const res = await prepClosure({
+      services: ['iam-api'] as ServiceId[], // ROSTERING — non-fatal build
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp: (r) => stamped.push(r),
+      repairStaleDeps: () => {
+        repaired = true;
+        return true;
+      },
+    });
+    expect(res.ok).toBe(true);
+    expect(res.warnings).toHaveLength(0); // healed ⇒ nothing surfaced as a warning
+    expect(stamped).toContain('/dev/rostering'); // recovered ⇒ stamped
+    expect(res.steps.map((s) => s.kind)).toEqual(['install', 'build', 'repair', 'install', 'build']);
+  });
+
+  it('a build failure with NO repairable signature ⇒ normal non-fatal warning, no wipe, not stamped', async () => {
+    const { runner } = runnerFailingWhen((s) => s.args[0] === 'build');
+    const stamped: string[] = [];
+    let asked = 0;
+    const res = await prepClosure({
+      services: ['iam-api'] as ServiceId[],
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      writeStamp: (r) => stamped.push(r),
+      repairStaleDeps: () => {
+        asked++;
+        return false; // no corruption signature ⇒ do not escalate
+      },
+    });
+    expect(res.ok).toBe(true);
+    expect(asked).toBe(1); // consulted once, found nothing repairable
+    expect(res.warnings.map((w) => w.kind)).toEqual(['build']); // normal non-fatal warning
+    expect(stamped).not.toContain('/dev/rostering'); // failed build ⇒ no stamp
+    expect(res.steps.filter((s) => s.kind === 'repair')).toHaveLength(0); // no wipe
+    expect(res.steps.filter((s) => s.kind === 'install')).toHaveLength(1); // no reinstall
+  });
+
+  it('repair heals a FATAL-build repo ⇒ the pass no longer aborts', async () => {
+    let repaired = false;
+    const runner: Runner = {
+      async run(spec): Promise<RunResult> {
+        const failCoachBuild = spec.args[0] === 'build' && spec.cwd === '/dev/coach' && !repaired;
+        return { code: failCoachBuild ? 1 : 0 };
+      },
+    };
+    const res = await prepClosure({
+      services: ['coach-api'] as ServiceId[], // COACH — fatal build (would abort pre-#260)
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+      repairStaleDeps: (r) => {
+        if (r !== '/dev/coach') return false;
+        repaired = true;
+        return true;
+      },
+    });
+    expect(res.ok).toBe(true); // escalation runs BEFORE the fatal return → healed
+    expect(res.failed).toBeUndefined();
+  });
+});

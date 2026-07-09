@@ -56,6 +56,25 @@ restore refuses rather than silently loading a stale shape — the one blind spo
 `db:seed` doesn't have. Restore-as-owner means row-level ownership/grants survive the round-trip.
 </details>
 
+## Known issue: restore races DB-polling services
+
+Restores run `pg_restore --clean --if-exists` **with services left running** — that's the
+speed premise, and it applies to e2e `--from` checkpoint restores too. Anything polling the
+DB on a tight loop can catch a table mid drop→recreate: program-hub's OutboxRelay polls
+~500ms, and a tick landing in that window gets 42P01
+(`relation "outbox_event" does not exist`); its fatal-error path throws an unhandled
+rejection and the **service process dies**. Observed live 2026-07-09 on programs-api;
+intermittent — an immediate retry of the same run restored green 2/2 in seconds.
+
+Recovery is one command — relaunch the dead service:
+
+```bash
+ss stack up --only programs-api --skip-prep
+```
+
+The coverage guard, by contrast, behaves well: restoring beyond the baked closure fails
+fast with a `re-bake with a wider --through` error instead of half-restoring.
+
 ## When to use which
 
 - **`snapshot restore`** — you want a *specific captured* state back fast (a fixture, a repro).

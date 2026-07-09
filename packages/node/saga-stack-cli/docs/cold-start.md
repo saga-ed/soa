@@ -91,6 +91,12 @@ Expect this to take several minutes (reinstall + rebuild of every repo).
   and `--all-docker` are how you opt into the destruction. `--dry-run` is always safe.
 - **Your uncommitted work is protected.** Phase 3 never switches or resets a repo with tracked
   local changes — it reports `skipped-dirty` and moves on. Commit/stash first if you want it on main.
+- **Lockfile drift: repos are ff'd, never installed.** Phase 3 fast-forwards each sibling to
+  main but cold-start **never runs `pnpm install`** — if a repo's lockfile changed since its
+  last install, phase 4's rebuild can fail or ship stale deps. Before a cold start, pre-switch
+  drifted siblings to main and `pnpm install` them (or just pass `--reinstall`). Observed
+  2026-07-09: rostering + program-hub had small lockfile drift; pre-installing both made the
+  whole cold-start + full journey run green first try (13/13 services, 26/27 journey in 1.0m).
 - **`.env` scaffolding covers templates only.** Phase 5 can only copy a `.env.example` that a repo
   actually ships. A service whose `.env` is gitignored **with no committed example** (e.g. some
   `apps/node/*-api/.env`) is **not** created — those you still provision by hand the first time.

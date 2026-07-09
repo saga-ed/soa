@@ -50,3 +50,4 @@ export * from './set-check.js';
 export * from './lock.js';
 export * from './checkpoint-store.js';
 export * from './trace-preserve.js';
+export * from './foreign-procs.js';

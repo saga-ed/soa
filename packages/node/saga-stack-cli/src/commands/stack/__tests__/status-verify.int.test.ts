@@ -22,6 +22,7 @@ import { deriveInstance } from '../../../core/derive-instance.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { HealthProber, ProbeResult } from '../../../runtime/health.js';
 import type {
+  ForeignProcs,
   GhRunner,
   GitRunner,
   MeshExec,
@@ -31,6 +32,7 @@ import type {
   ScriptInvocation,
   SlotActiveProbe,
 } from '../../../runtime/index.js';
+import type { ForeignProc } from '../../../core/foreign-procs.js';
 import StackStatus from '../status.js';
 import StackVerify from '../verify.js';
 
@@ -61,6 +63,26 @@ function installProber(downUrls: string[] = []): void {
   vi.spyOn(
     BaseCommand.prototype as unknown as { getProber: () => HealthProber },
     'getProber',
+  ).mockReturnValue(fake);
+}
+
+/**
+ * Fake the foreign-process seam. `find` returns the canned findings; `reap` is
+ * never expected on the verify path (warn-only). Defaults to none, so the real
+ * lsof/ss/ps never run in a unit test.
+ */
+function installForeign(findings: ForeignProc[] = []): void {
+  const fake: ForeignProcs = {
+    async find() {
+      return findings;
+    },
+    async reap(f) {
+      return f.map((x) => ({ ...x, killed: true }));
+    },
+  };
+  vi.spyOn(
+    BaseCommand.prototype as unknown as { getForeignProcs: () => ForeignProcs },
+    'getForeignProcs',
   ).mockReturnValue(fake);
 }
 
@@ -149,6 +171,7 @@ beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
   installProber();
   installRunner(0);
+  installForeign(); // default: no foreign processes (real lsof/ps never runs in tests)
   // The fake workspace paths (--dev /fixed/dev) don't exist on disk; default the
   // repo-dir check to "present" so every service is probed. The not-cloned path is
   // covered explicitly below.
@@ -290,6 +313,50 @@ describe('stack verify — native health gate', () => {
   it('--with coach: a service outside the bundle closure being down does NOT fail', async () => {
     installProber([DASH_URL, CONTENT_URL]); // both outside the coach closure
     await expect(StackVerify.run(['--with', 'coach', ...WS], config)).resolves.toBeUndefined();
+  });
+});
+
+describe('stack verify — FOREIGN process flag (warn-only, never flips the gate)', () => {
+  const FOREIGN_IAM: ForeignProc = {
+    id: 'iam-api',
+    port: 3010,
+    pid: 3537029,
+    pgid: 576078,
+    command: 'node dist/main.js',
+  };
+
+  it('all services up + a foreign holder → still PASSES, with a ⚠ FOREIGN line', async () => {
+    installForeign([FOREIGN_IAM]); // iam-api :3010 held by a non-ss process
+    await expect(StackVerify.run([...WS], config)).resolves.toBeUndefined(); // warn-only ⇒ no exit(1)
+    const text = out.join('\n');
+    expect(text).toContain('FOREIGN');
+    expect(text).toContain('iam-api');
+    expect(text).toContain('cold-start'); // the remediation hint
+  });
+
+  it('porcelain emits `<id>=foreign` and keeps passed=true', async () => {
+    installForeign([FOREIGN_IAM]);
+    await StackVerify.run(['--porcelain', ...WS], config);
+    const lines = out.join('\n');
+    expect(lines).toContain('iam-api=foreign');
+    expect(lines).toContain('passed=true');
+  });
+
+  it('--output-json carries the foreign list + count', async () => {
+    installForeign([FOREIGN_IAM]);
+    await expect(StackVerify.run(['--output-json', ...WS], config)).resolves.toBeUndefined();
+    const json = JSON.parse(out.join(''));
+    expect(json.passed).toBe(true);
+    expect(json.summary.foreign).toBe(1);
+    expect(json.foreign).toEqual([
+      { id: 'iam-api', port: 3010, pid: 3537029, command: 'node dist/main.js' },
+    ]);
+  });
+
+  it('a DOWN service still fails the gate even though a foreign flag is warn-only', async () => {
+    installProber([SIS_URL]); // sis genuinely down
+    installForeign([FOREIGN_IAM]); // foreign flag present but must not change the verdict
+    await expect(StackVerify.run([...WS], config)).rejects.toMatchObject({ oclif: { exit: 1 } });
   });
 });
 

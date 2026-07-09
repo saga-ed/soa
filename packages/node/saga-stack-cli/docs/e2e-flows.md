@@ -101,10 +101,22 @@ for the general pattern.
 ### 4. connect-session — manual/AV only
 
 ```bash
-ss e2e connect              # builds journey@schedule state, then opens the
-                            # headed interactive room (holds via page.pause)
+ss e2e connect              # RESTORES the journey@schedule checkpoint (when baked),
+                            # else replays journey headless, then opens the headed
+                            # interactive room (holds via page.pause)
 ss e2e connect --reuse      # skip the state rebuild; use the current stack
+ss e2e connect --refresh-snapshot   # re-bake journey@schedule FRESH, then open the room
 ```
+
+`ss e2e connect` restores the `flow-saga-dash-journey-s5-schedule` checkpoint
+instead of replaying journey 1..5 headless — the big accelerant — falling back to
+the full replay when nothing is baked (`--no-prereq-from-snapshot` forces the
+replay). Bake it once with `ss e2e run saga-dash/journey --through schedule
+--snapshot-stages --headless`, or let `--refresh-snapshot` do it inline: it bakes
+the journey checkpoints fresh (headless, `--snapshot-stages`) **then** opens the
+room — the one-command reseed for when the checkpoint has gone stale (>7 days) or
+the journey stages changed. `--refresh-snapshot` requires the default
+`--prereq-from-snapshot` and is mutually exclusive with `--reuse`.
 
 Needs a real mic/cam and your terminal (the AV hold owns the TTY). There is no
 headless version — by design.

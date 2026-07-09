@@ -8,10 +8,13 @@
  *   video/walkthrough.webm
  *
  * Outputs:
- *   video/walkthrough.mp4          — H.264 + AAC, muxed
+ *   video/walkthrough.mp4          — H.264 + AAC + mov_text soft-subtitle track, muxed
  *   video/walkthrough-vp9.webm     — VP9 + Opus sidecar (avoids the GStreamer/Totem
- *                                    H.264 playback trap on some Linux desktops)
- *   video/walkthrough.srt          — subtitles from cumulative slot timestamps
+ *                                    H.264 playback trap on some Linux desktops; webm
+ *                                    doesn't support mov_text, so this one carries no
+ *                                    subtitle track — use the .srt sidecar with it)
+ *   video/walkthrough.srt          — subtitles from cumulative slot timestamps, also
+ *                                    muxed into walkthrough.mp4 as a selectable track
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -92,15 +95,18 @@ async function concatAudio(paddedPaths, listPath, outPath) {
   ]);
 }
 
-async function muxMp4(videoPath, audioPath, outPath) {
+async function muxMp4(videoPath, audioPath, srtPath, outPath) {
   await execFileAsync('ffmpeg', [
     '-y',
     '-i', videoPath,
     '-i', audioPath,
+    '-i', srtPath,
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
     '-c:a', 'aac',
     '-b:a', '192k',
+    '-c:s', 'mov_text',
+    '-metadata:s:s:0', 'language=eng',
     '-shortest',
     outPath,
   ]);
@@ -155,14 +161,14 @@ export async function stitch(steps, outDir) {
   const fullAudioPath = path.join(outDir, 'video', 'walkthrough.audio.mp3');
   await concatAudio(paddedPaths, concatListPath, fullAudioPath);
 
+  const srtPath = path.join(videoDir, 'walkthrough.srt');
+  await writeFile(srtPath, buildSrt(steps, slots));
+
   const webmPath = path.join(videoDir, 'walkthrough.webm');
   const mp4Path = path.join(videoDir, 'walkthrough.mp4');
   const vp9Path = path.join(videoDir, 'walkthrough-vp9.webm');
-  await muxMp4(webmPath, fullAudioPath, mp4Path);
+  await muxMp4(webmPath, fullAudioPath, srtPath, mp4Path);
   await muxVp9Sidecar(webmPath, fullAudioPath, vp9Path);
-
-  const srtPath = path.join(videoDir, 'walkthrough.srt');
-  await writeFile(srtPath, buildSrt(steps, slots));
 
   return { mp4Path, vp9Path, srtPath };
 }

@@ -60,6 +60,7 @@ pnpm typecheck      # Type check
 - See `apps/node/claude/testing.md` for Node.js testing patterns (DI, controller loading)
 - See `packages/CLAUDE.md` for package details
 - See `docs/cross-repo-linking-summary.md` for cross-repo package linking (development workflow)
+- See `tools/walkthrough-video/CLAUDE.md` for generating narrated demo videos of any saga-soa frontend
 
 ---
 

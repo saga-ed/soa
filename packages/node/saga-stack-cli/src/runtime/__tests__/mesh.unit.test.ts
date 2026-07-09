@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { manifest } from '../../core/manifest/index.js';
 import type { RunResult, Runner, ScriptInvocation } from '../exec.js';
-import { meshDownArgs, meshMakeArgs, meshUp } from '../mesh.js';
+import { meshDownArgs, meshExecArgs, meshMakeArgs, meshUp } from '../mesh.js';
 import type { MeshExec } from '../mesh.js';
 import type { PortProbe } from '../preflight.js';
 
@@ -29,16 +29,22 @@ function fakeRunner(code = 0): { runner: Runner; calls: ScriptInvocation[] } {
   return { runner, calls };
 }
 
-/** A readiness exec where `ready[container]` decides; default ready. */
-function fakeExec(ready: Record<string, boolean> = {}): { exec: MeshExec; calls: string[] } {
+/** A readiness exec where `ready[container]` decides; default ready. Records each call's (container, shell). */
+function fakeExec(ready: Record<string, boolean> = {}): {
+  exec: MeshExec;
+  calls: string[];
+  shellCalls: Array<{ container: string; shell: boolean | undefined }>;
+} {
   const calls: string[] = [];
+  const shellCalls: Array<{ container: string; shell: boolean | undefined }> = [];
   const exec: MeshExec = {
-    async ready(container) {
+    async ready(container, _readinessCmd, shell) {
       calls.push(container);
+      shellCalls.push({ container, shell });
       return ready[container] ?? true;
     },
   };
-  return { exec, calls };
+  return { exec, calls, shellCalls };
 }
 
 const FREE_PROBE: PortProbe = {
@@ -106,6 +112,27 @@ describe('meshDownArgs', () => {
   });
 });
 
+describe('meshExecArgs', () => {
+  it('default/shell:true wraps the readinessCmd in sh -c (needed for quoted commands like mongosh --eval)', () => {
+    expect(meshExecArgs('soa-connect-mongo-1', "mongosh --eval 'db.runCommand({ping:1}).ok'")).toEqual([
+      'exec',
+      'soa-connect-mongo-1',
+      'sh',
+      '-c',
+      "mongosh --eval 'db.runCommand({ping:1}).ok'",
+    ]);
+  });
+
+  it('shell:false execs the whitespace-split argv directly (openfga has no sh)', () => {
+    expect(meshExecArgs('soa-openfga-1', '/usr/local/bin/grpc_health_probe -addr=:8081', false)).toEqual([
+      'exec',
+      'soa-openfga-1',
+      '/usr/local/bin/grpc_health_probe',
+      '-addr=:8081',
+    ]);
+  });
+});
+
 describe('meshUp', () => {
   it('runs make up in <soa>/infra with the seed-dir env, then gates readiness', async () => {
     const { runner, calls } = fakeRunner(0);
@@ -126,6 +153,55 @@ describe('meshUp', () => {
     expect(calls[0].env).toEqual({ EXTRA_POSTGRES_SEED_DIR: '../../projects/saga-mesh/seed' });
     expect(res.units.map((u) => u.id)).toEqual(['postgres', 'rabbitmq']);
     expect(res.units.every((u) => u.ok)).toBe(true);
+  });
+
+  it('units including openfga: sets COMPOSE_PROFILES to the compose profile NAME (authz), not the unit id', async () => {
+    const { runner, calls } = fakeRunner(0);
+    const { exec } = fakeExec();
+    await meshUp({
+      soaRoot: SOA,
+      runner,
+      exec,
+      portProbe: FREE_PROBE,
+      units: ['postgres', 'openfga'],
+    });
+
+    expect(calls[0].env).toEqual({
+      EXTRA_POSTGRES_SEED_DIR: '../../projects/saga-mesh/seed',
+      COMPOSE_PROFILES: 'authz',
+    });
+  });
+
+  it('units without openfga: omits COMPOSE_PROFILES entirely', async () => {
+    const { runner, calls } = fakeRunner(0);
+    const { exec } = fakeExec();
+    await meshUp({
+      soaRoot: SOA,
+      runner,
+      exec,
+      portProbe: FREE_PROBE,
+      units: ['postgres', 'rabbitmq'],
+    });
+
+    expect(calls[0].env).toEqual({ EXTRA_POSTGRES_SEED_DIR: '../../projects/saga-mesh/seed' });
+    expect(calls[0].env).not.toHaveProperty('COMPOSE_PROFILES');
+  });
+
+  it("openfga's readiness gate is probed with shell:false (its unit.shell); other units default to shell:true", async () => {
+    const { runner } = fakeRunner(0);
+    const { exec, shellCalls } = fakeExec();
+    await meshUp({
+      soaRoot: SOA,
+      runner,
+      exec,
+      portProbe: FREE_PROBE,
+      units: ['postgres', 'openfga'],
+    });
+
+    expect(shellCalls).toEqual([
+      { container: 'soa-postgres-1', shell: undefined },
+      { container: 'soa-openfga-1', shell: false },
+    ]);
   });
 
   it('aborts before make up when the preflight finds a conflict', async () => {

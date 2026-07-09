@@ -12,6 +12,12 @@ services:
   openfga_migrate:
     image: openfga/openfga:latest
     command: migrate
+    # Opt-in: only started when the `authz` compose profile is active
+    # (COMPOSE_PROFILES=authz), so an unconditional `include:` of this fragment
+    # doesn't start OpenFGA on every mesh `up`. Both services here carry the same
+    # profile — gating only one would leave the `service_completed_successfully`
+    # dependency below pointed at a service that never starts.
+    profiles: ["authz"]
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
       OPENFGA_DATASTORE_URI: postgres://${POSTGRES_USER:-postgres_admin}:${POSTGRES_PASSWORD:-password123}@postgres:5432/openfga?sslmode=disable
@@ -23,6 +29,7 @@ services:
   openfga:
     image: openfga/openfga:latest
     command: run
+    profiles: ["authz"]
     environment:
       OPENFGA_DATASTORE_ENGINE: postgres
       OPENFGA_DATASTORE_URI: postgres://${POSTGRES_USER:-postgres_admin}:${POSTGRES_PASSWORD:-password123}@postgres:5432/openfga?sslmode=disable

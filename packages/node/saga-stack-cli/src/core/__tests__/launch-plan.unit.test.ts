@@ -93,6 +93,12 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       JANUS_REQUIRED: 'false', // main up.sh:1467 — without it iam 401s every local S2S/devLogin
       SECURITY_RATELIMITMAXREQUESTS: '1000000', // apply_fixes (up.sh:457) — no local rate-limit
       JWT_ACCESSTOKENTTLSECONDS: '28800', // apply_fixes (up.sh:465) — 8h TTL for long dev/e2e sessions
+      // authz bundle (opt-in, --with authz): always present on iam-api's launch
+      // env, but FGA_ENABLED only flips 'true' when the bundle is selected —
+      // absent selection here, so fail-closed defaults.
+      FGA_ENABLED: 'false',
+      FGA_API_URL: 'http://localhost:8080',
+      FGA_STORE_ID: '',
     });
   });
 

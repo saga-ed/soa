@@ -41,4 +41,20 @@ export const MESH: Readonly<Record<MeshId, MeshDef>> = {
     readinessCmd: "mongosh --eval 'db.runCommand({ping:1}).ok'",
     timeoutSec: 20,
   },
+  openfga: {
+    id: 'openfga',
+    container: 'soa-openfga-1',
+    port: 8080, // HTTP API
+    mgmtPort: 8081, // gRPC (used for the health probe, not an HTTP mgmt UI)
+    readinessCmd: '/usr/local/bin/grpc_health_probe -addr=:8081',
+    // openfga/openfga is a distroless-style image with no `sh` — `docker exec
+    // ... sh -c '<cmd>'` fails with "sh: executable file not found" before the
+    // probe even runs. shell:false execs the probe binary directly.
+    shell: false,
+    // Only brought up when the `authz` bundle is selected (--with authz); the
+    // one-shot `openfga_migrate` sidecar (infra/compose/services/openfga/compose.yml)
+    // isn't modeled as its own MeshId — compose's own service_completed_successfully
+    // dependency already gates `openfga`'s start on it.
+    timeoutSec: 30,
+  },
 };

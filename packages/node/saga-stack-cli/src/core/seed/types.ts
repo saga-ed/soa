@@ -30,7 +30,7 @@ export interface SystemSeedOverride {
 export type SeedProfile = 'roster' | 'full';
 
 /** Orthogonal add-ons layered on top of a profile (plan §4.1). */
-export type SeedAddOn = 'playback' | 'qtf';
+export type SeedAddOn = 'playback' | 'qtf' | 'authz';
 
 /**
  * How a seed step's environment is supplied.

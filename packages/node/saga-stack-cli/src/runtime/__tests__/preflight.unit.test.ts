@@ -30,7 +30,7 @@ function fakeProbe(docker: Record<number, string>, native: number[] = []): PortP
 }
 
 describe('meshPortSpecs / meshOwnedContainers', () => {
-  it('derives the 5 mesh host ports from the manifest (incl. rabbitmq-mgmt + connect-mongo)', () => {
+  it('derives the mesh host ports from the manifest (incl. rabbitmq-mgmt + connect-mongo + openfga)', () => {
     const specs = meshPortSpecs(manifest);
     expect(specs).toEqual([
       { port: 5432, name: 'postgres' },
@@ -38,6 +38,8 @@ describe('meshPortSpecs / meshOwnedContainers', () => {
       { port: 5672, name: 'rabbitmq' },
       { port: 15672, name: 'rabbitmq-mgmt' },
       { port: 27037, name: 'connect-mongo' },
+      { port: 8080, name: 'openfga' },
+      { port: 8081, name: 'openfga-mgmt' },
     ]);
   });
 
@@ -54,6 +56,8 @@ describe('meshPortSpecs / meshOwnedContainers', () => {
       { port: 6672, name: 'rabbitmq' },
       { port: 16672, name: 'rabbitmq-mgmt' },
       { port: 28037, name: 'connect-mongo' },
+      { port: 9080, name: 'openfga' },
+      { port: 9081, name: 'openfga-mgmt' },
     ]);
     // offset 0 is byte-identical to the default.
     expect(meshPortSpecs(manifest, 0)).toEqual(meshPortSpecs(manifest));

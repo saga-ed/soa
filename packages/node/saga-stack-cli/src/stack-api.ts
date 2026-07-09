@@ -365,6 +365,8 @@ export interface DownResult {
 export interface ResetOpts {
   /** Also reset the opt-in playback DBs (transcripts/insights/chat). */
   withPlayback?: boolean;
+  /** Also reset the opt-in authz DBs (openfga/authz_sync_local). */
+  withAuthz?: boolean;
 }
 
 /** The outcome of a native `reset` (M8 R4). */
@@ -1023,6 +1025,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         repoRoots: launchContext.repoRoots,
         meshOffset: runtime.meshOffset,
         withPlayback: opts.withPlayback,
+        withAuthz: opts.withAuthz,
         runner,
         // R2/R3 probe seam: SKIP (don't truncate/migrate-reset) a pg DB that a partial
         // `up` never provisioned (e.g. coach_api) — matches up.sh's reset_data tolerance,

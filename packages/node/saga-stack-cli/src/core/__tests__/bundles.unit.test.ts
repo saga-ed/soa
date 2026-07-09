@@ -25,8 +25,8 @@ const throwFail = (msg: string): never => {
 };
 
 describe('bundle registry', () => {
-  it('exposes the five bundle names in registry order', () => {
-    expect(BUNDLE_NAMES).toEqual(['dash', 'connect', 'coach', 'playback', 'qtf']);
+  it('exposes the six bundle names in registry order', () => {
+    expect(BUNDLE_NAMES).toEqual(['dash', 'connect', 'coach', 'playback', 'qtf', 'authz']);
   });
 
   it('every bundle carries a non-empty description', () => {
@@ -41,10 +41,11 @@ describe('bundle registry', () => {
     expect(SERVICE_BUNDLES.coach).toEqual(['coach-api', 'coach-web']);
     expect(SERVICE_BUNDLES.playback).toEqual(['transcripts-api', 'insights-api', 'chat-api']);
     expect(SERVICE_BUNDLES.qtf).toEqual([]);
+    expect(SERVICE_BUNDLES.authz).toEqual(['authz-sync']);
   });
 
   it('derives BUNDLE_SEED_ADDONS only for the seed-bearing bundles', () => {
-    expect(BUNDLE_SEED_ADDONS).toEqual({ playback: 'playback', qtf: 'qtf' });
+    expect(BUNDLE_SEED_ADDONS).toEqual({ playback: 'playback', qtf: 'qtf', authz: 'authz' });
   });
 });
 

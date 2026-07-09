@@ -58,10 +58,20 @@ function ownerServiceOf(m: Manifest): Map<DbId, ServiceId> {
   return owner;
 }
 
-/** A db is "playback" when its owning service is `optional:true` (transcripts/insights/chat). */
+/**
+ * A db is "optional" when its owning service is `optional:true` — the playback
+ * trio (owned by transcripts-api/insights-api/chat-api) or authz_sync_local/
+ * openfga (owned by authz-sync). Name kept for the playback-only pre-authz
+ * history; despite the name it is ownership-generic (`svcId ? optional : false`).
+ */
 function isPlaybackDb(db: DbId, m: Manifest, owner: Map<DbId, ServiceId>): boolean {
   const svcId = owner.get(db);
   return svcId ? m.services[svcId].optional : false;
+}
+
+/** Whether an optional db's owning service is specifically `authz-sync` (vs. playback). */
+function isAuthzDb(db: DbId, owner: Map<DbId, ServiceId>): boolean {
+  return owner.get(db) === 'authz-sync';
 }
 
 /**
@@ -110,6 +120,8 @@ export interface StorePlanOptions {
   only?: DbId[];
   /** Include the optional playback trio (transcripts/insights/chat). Ignored when `only` is set. */
   withPlayback?: boolean;
+  /** Include the optional authz DBs (openfga/authz_sync_local). Ignored when `only` is set. */
+  withAuthz?: boolean;
 }
 
 export interface StorePlan {
@@ -124,10 +136,10 @@ export interface StorePlan {
 /**
  * Decide which databases to dump for a `store`.
  *
- * Default set = ALL manifest DBs except those owned by optional (playback)
- * services — i.e. the 10 pg app DBs + `connectv3` mongo. `--with-playback` adds
- * the 3 playback DBs. `only` (a resolved closure db set) overrides both and
- * scopes the dump precisely.
+ * Default set = ALL manifest DBs except those owned by optional (playback or
+ * authz) services — i.e. the 10 pg app DBs + `connectv3` mongo. `--with playback`
+ * adds the 3 playback DBs; `--with authz` adds openfga/authz_sync_local. `only`
+ * (a resolved closure db set) overrides both and scopes the dump precisely.
  */
 export function storePlan(m: Manifest, opts: StorePlanOptions): StorePlan {
   const owner = ownerServiceOf(m);
@@ -136,7 +148,9 @@ export function storePlan(m: Manifest, opts: StorePlanOptions): StorePlan {
   const onlySet = opts.only ? new Set<DbId>(opts.only) : undefined;
   const selected = allDbIds.filter((db) => {
     if (onlySet) return onlySet.has(db);
-    if (isPlaybackDb(db, m, owner)) return opts.withPlayback ?? false;
+    if (isPlaybackDb(db, m, owner)) {
+      return isAuthzDb(db, owner) ? (opts.withAuthz ?? false) : (opts.withPlayback ?? false);
+    }
     return true;
   });
 

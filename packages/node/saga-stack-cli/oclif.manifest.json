@@ -6,7 +6,8 @@
       "description": "Open a live interactive Connect session: 1 tutor + 2 students (in-process; builds the journey prerequisite, then a headed Connect room).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --reuse -- --debug"
+        "<%= config.bin %> <%= command.id %> --reuse -- --debug",
+        "<%= config.bin %> <%= command.id %> --fake-media"
       ],
       "flags": {
         "porcelain": {
@@ -132,6 +133,12 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "fake-media": {
+          "description": "swap real mic/cam capture for Chromium's synthetic camera (moving test pattern) + mic (beep) and auto-accept the getUserMedia prompt — for a machine with no camera or where v4l2loopback won't build. Sets FAKE_MEDIA=1 on the headed interactive-connect run (mirrors connect-session.sh --fake-media); the journey prerequisite is unaffected.",
+          "name": "fake-media",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,

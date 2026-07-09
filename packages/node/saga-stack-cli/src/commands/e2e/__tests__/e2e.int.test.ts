@@ -245,4 +245,23 @@ describe('e2e connect — foreground connect-session entry', () => {
     expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
     expect(runs.some((r) => r.args.includes('db:seed'))).toBe(false);
   });
+
+  it('--fake-media: pins FAKE_MEDIA=1 on the headed interactive-connect run ONLY, not the journey prerequisite', async () => {
+    await E2eConnect.run(['--fake-media', ...ws()], config);
+    const pw = playwrightRuns();
+    expect(pw).toHaveLength(2);
+    // journey prerequisite (a separate ResolvedFlow) must NOT get FAKE_MEDIA.
+    expect(pw[0].args).toContain('stage-5-schedule');
+    expect(pw[0].env?.FAKE_MEDIA).toBeUndefined();
+    // the headed live session does.
+    expect(pw[1].args).toContain('interactive-connect');
+    expect(pw[1].env?.FAKE_MEDIA).toBe('1');
+  });
+
+  it('bare (no --fake-media): interactive-connect runs with real media (no FAKE_MEDIA)', async () => {
+    await E2eConnect.run([...ws()], config);
+    const pw = playwrightRuns();
+    expect(pw[1].args).toContain('interactive-connect');
+    expect(pw[1].env?.FAKE_MEDIA).toBeUndefined();
+  });
 });

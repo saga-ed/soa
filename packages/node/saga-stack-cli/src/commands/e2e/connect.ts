@@ -14,12 +14,18 @@
  * against the CURRENT stack state (mirrors connect-session.sh `--reuse`). Anything
  * after `--` passes straight through to Playwright.
  *
+ * `--fake-media` pins `FAKE_MEDIA=1` onto the headed interactive-connect run so
+ * Chromium uses its synthetic camera/mic instead of real capture (mirrors
+ * connect-session.sh `--fake-media`) — for a box with no camera or where
+ * v4l2loopback won't build. The headless journey prerequisite is unaffected.
+ *
  * SCOPE (plan §7.2 "M5"): the orchestration + headed run land here; AV-device /
  * post-session inspect polish is explicitly DEFERRED — the foreground hold is the
  * Playwright `page.pause()` in the spec, unchanged.
  *
  *   node bin/dev.js e2e connect
  *   node bin/dev.js e2e connect --reuse -- --debug
+ *   node bin/dev.js e2e connect --fake-media
  */
 
 import { Flags } from '@oclif/core';
@@ -48,6 +54,7 @@ export default class E2eConnect extends BaseCommand {
   static examples = [
     '<%= config.bin %> <%= command.id %>',
     '<%= config.bin %> <%= command.id %> --reuse -- --debug',
+    '<%= config.bin %> <%= command.id %> --fake-media',
   ];
 
   // Allow trailing playwright passthrough args (after `--`).
@@ -68,6 +75,11 @@ export default class E2eConnect extends BaseCommand {
     'spa-path': Flags.string({
       description: 'explicit path to a flows.json (file or dir) — highest-priority discovery override',
     }),
+    'fake-media': Flags.boolean({
+      default: false,
+      description:
+        "swap real mic/cam capture for Chromium's synthetic camera (moving test pattern) + mic (beep) and auto-accept the getUserMedia prompt — for a machine with no camera or where v4l2loopback won't build. Sets FAKE_MEDIA=1 on the headed interactive-connect run (mirrors connect-session.sh --fake-media); the journey prerequisite is unaffected.",
+    }),
   };
 
   async run(): Promise<void> {
@@ -84,7 +96,13 @@ export default class E2eConnect extends BaseCommand {
     // Foreground + headed by default (the flow is `foreground:true`); --reuse drops
     // the prerequisite + reset entirely, exactly like connect-session.sh.
     const resolved = resolveFlow(disco.manifest, CONNECT_FLOW, { lane: 'stack' });
-    const toRun = flags.reuse ? { ...resolved, prerequisite: undefined } : resolved;
+    const base = flags.reuse ? { ...resolved, prerequisite: undefined } : resolved;
+    // --fake-media pins FAKE_MEDIA=1 into THIS flow's env (merged last by
+    // computeEnv), so it reaches only the connect-session stage (headed
+    // interactive-connect) — not the journey prerequisite, a separate ResolvedFlow.
+    const toRun = flags['fake-media']
+      ? { ...base, flow: { ...base.flow, env: { ...base.flow.env, FAKE_MEDIA: '1' } } }
+      : base;
 
     const appCwd = resolveAppCwd(resolved.spa, flags, process.env);
     const now = new Date();

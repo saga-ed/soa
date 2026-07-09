@@ -39,7 +39,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -189,7 +189,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -328,7 +328,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -559,7 +559,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -696,7 +696,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -881,7 +881,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1018,7 +1018,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1172,7 +1172,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1310,7 +1310,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1467,7 +1467,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1640,7 +1640,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1784,7 +1784,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1935,7 +1935,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2101,7 +2101,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2246,7 +2246,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2387,7 +2387,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2557,7 +2557,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2725,7 +2725,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2864,7 +2864,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3110,7 +3110,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3225,6 +3225,12 @@
           "name": "full",
           "allowNo": false,
           "type": "boolean"
+        },
+        "all-slots": {
+          "description": "report EVERY active slot (0..9) instead of a single --slot. A slot is active when its state dir holds a live service pid or its soa-s<N> compose project has running containers (the `ss set list` ACTIVE probe). Each slot gets its own health section (offset ports); with --full each also gets its own DATA section read against THAT slot’s soa-s<N> mesh, and the shared source-posture runs ONCE. Cannot be combined with --slot N>0 or --set (those target one slot). --only/--with are ignored.",
+          "name": "all-slots",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -3282,7 +3288,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3419,7 +3425,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3552,7 +3558,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3698,7 +3704,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3850,7 +3856,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -4032,7 +4038,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/spaul/dev",
+          "default": "/home/skelly/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"

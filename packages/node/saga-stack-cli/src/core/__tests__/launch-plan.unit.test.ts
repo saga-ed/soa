@@ -174,7 +174,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   });
 
   it('saga-dash', () => {
-    expect(env('saga-dash')).toEqual({ VITE_ADS_ADM_REAL: 'true', VITE_SESSION_MEASURED: 'true' });
+    expect(env('saga-dash')).toEqual({
+      VITE_ADS_ADM_REAL: 'true',
+      VITE_SESSION_MEASURED: 'true',
+      VITE_ENABLE_OVERRIDES: 'true',
+    });
   });
 
   it('connect-api (incl. RABBITMQ_URL — main up.sh:1614)', () => {

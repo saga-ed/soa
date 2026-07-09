@@ -94,6 +94,24 @@
           "tags": ["@interactive"]
         }
       ]
+    },
+    {
+      "name": "connect-add-student",
+      "description": "Add a student to a RUNNING Connect session with no refresh for the room (qboard#145): an admin adds student 2 via the real Edit-tutor-&-students modal; the student's /sessions/now card appears on its own via the 20s poll (#328), then they join and tile into the tutor's multi-view grid (#296). Builds the journey end-state through 'schedule' first. Runs headless with fake media under `ss e2e run`; connect-add-student.sh sets INTERACTIVE_HOLD=1 to hold the windows open for a human.",
+      "lanes": ["stack"],
+      "progressive": false,
+      "av": true,
+      "prerequisite": { "flow": "journey", "throughStage": "schedule" },
+      "env": { "FAKE_MEDIA": "1" },
+      "stages": [
+        {
+          "id": "interactive-add-student",
+          "project": "interactive-add-student",
+          "spec": "interactive/connect-add-student.e2e.test.ts",
+          "requiredSystems": ["connect-web", "connect-api", "rtsm-api", "sessions-api", "programs-api", "iam-api", "saga-dash"],
+          "tags": ["@interactive"]
+        }
+      ]
     }
   ]
 }

@@ -1701,6 +1701,9 @@ services_up(){
   # (saga-platform). JANUS_REQUIRED=false = same literal-false bypass as the
   # other services. SAGA_API_TARGET is legacy poll content (unauthenticated
   # endpoint — see header). LiveKit creds match qboard's local container.
+  # RTSM_API_URL points the private-convos supervisor at the local rtsm (:6110)
+  # so server-side dark-corner enforcement runs — without it connect-api logs
+  # "private-convos registry disabled" and private conversations aren't enforced.
   launch_if connect-api "$CONNECT_API_PORT" "$QBOARD/apps/node/connectv3-api" \
      NODE_ENV=development \
      PORT="$CONNECT_API_PORT" \
@@ -1708,13 +1711,14 @@ services_up(){
      NODE_ENV=development \
      AUTH_ENABLED=true JANUS_REQUIRED=false \
      IAM_API_URL="$IAM_URL" JWT_ISSUER="https://iam.saga.org" \
-     ALLOWED_ORIGINS="$CONNECT_WEB_URL" \
+     ALLOWED_ORIGINS="$CONNECT_WEB_URL,$DASH_URL" \
      SESSIONS_API_BASE_URL="http://localhost:3007" \
      RABBITMQ_URL="$MESH_MQ" \
      SAGA_API_TARGET="$SAGA_API_TARGET" \
      CONTENT_API_URL="$CONTENT_API_URL" \
      PUBLIC_API_URL="$CONNECT_API_URL" \
      LIVEKIT_URL="ws://localhost:7880" LIVEKIT_API_KEY=devkey LIVEKIT_API_SECRET=devsecret \
+     RTSM_API_URL="http://localhost:6110" \
      RECORDING_SERVICE_TOKEN="$RECORDING_TOKEN" \
      RECORDER_URL_TEMPLATE="http://127.0.0.1:$RECORDER_CONTROL_PORT" \
      FLEEK_TOPOLOGY_JSON='{"cityMap":{"_default":"ws://localhost:7880"},"nodes":{"local":{"url":"ws://localhost:7880"}}}' \
@@ -1852,10 +1856,32 @@ seed_scheduling(){
 # DB. Cold-start immune by design: no relay/consumers needed, so the read
 # gate ("projection sessions-api.authz-projection is warming" → 408 → connect
 # /my-sessions 500s) opens even on the event-less db:seed lane.
+# SEED_DEMO_ONLY=1 is REQUIRED here: unlike programs/scheduling (whose default
+# seed still includes the demo data), sessions-api's default db:seed is the
+# CANONICAL projection bake (program-hub#325) and the two paths are mutually
+# exclusive — a plain db:seed leaves the demo spine (pods/memberships/session
+# states) unseeded, so nothing composes and Connect /my-sessions comes up empty.
+# The env var rides pnpm db:seed (build + run) because db:seed:demo alone skips
+# the seed-bundle build step.
 seed_sessions(){
-  say "seeding sessions projections (db:seed — Connect demo, direct projections + readiness)…"
+  # Guard: the demo lane must NEVER layer on top of a CANONICAL bake — the two
+  # use different iam_row_id schemes and double-seeding corrupts the authz
+  # graph with no error at seed time (program-hub#325). Demo program ids all
+  # live in the fixed a1b2c3d4-0001-4000-8000-* namespace (@saga-ed/
+  # demo-seed-ids, pinned by its unit test); any other id in program_projection
+  # means canonical residue (e.g. a DB seeded during the pre-#325 drift
+  # window). A fresh/absent DB (psql fails) counts as no residue.
+  local canon
+  canon=$(docker exec soa-postgres-1 psql -U postgres_admin -d sessions -tAc \
+    "SELECT count(*) FROM program_projection WHERE id NOT LIKE 'a1b2c3d4-0001-4000-8000-%'" 2>/dev/null || echo 0)
+  if [[ "${canon:-0}" -gt 0 ]]; then
+    err "sessions DB holds a CANONICAL seed ($canon non-demo program rows) — demo over canonical double-seeds the authz graph"
+    err "re-run with --reset to rebuild the sessions DB before demo-seeding"
+    return 1
+  fi
+  say "seeding sessions projections (db:seed demo lane — Connect demo, direct projections + readiness)…"
   ( cd "$PROGRAM_HUB/apps/node/sessions-api" \
-      && env DATABASE_URL="$SESSIONS_DB_URL" pnpm db:seed )
+      && env DATABASE_URL="$SESSIONS_DB_URL" SEED_DEMO_ONLY=1 pnpm db:seed )
   ok "sessions projections seeded (demo programs render + authorize)"
 }
 

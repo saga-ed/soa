@@ -95,7 +95,7 @@ export default class E2eTraces extends BaseCommand {
           stages: r.stages.map((s) => ({ stage: s.stageId, traces: s.traces })),
         })),
       },
-      [`preserved e2e runs — ${runsRoot}`, ...tracesListingLines(runs, appCwdOf)],
+      [`# preserved e2e runs — ${runsRoot}`, ...tracesListingLines(runs, appCwdOf)],
     );
 
     if (flags.open) {

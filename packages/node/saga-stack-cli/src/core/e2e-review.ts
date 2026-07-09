@@ -108,35 +108,36 @@ export function isArtifactFile(name: string): boolean {
 const REVIEW_LINES_PER_STAGE = 8;
 
 /**
- * The end-of-run "review this run" block: the preserved root plus one
- * PASTE-READY `show-trace` line per preserved trace (capped per stage —
- * beyond the cap it points at the stage dir). `show-trace` must run where
- * Playwright is installed, so every line carries the `cd <appCwd> &&` prefix.
+ * The end-of-run "review this run" block. EVERY line is paste-safe: either a
+ * COMPLETE runnable command (`cd <appCwd> && pnpm exec playwright …` —
+ * show-trace/show-report must run where Playwright is installed) or a `#`
+ * shell comment — never a bare path (pasting one earns "Permission denied",
+ * the observed reviewer papercut).
  */
 export function reviewBlockLines(record: PreservedRunRecord, appCwd: string): string[] {
   const lines: string[] = [
-    `── review this run ─ ${record.spaId}/${record.flowName}`,
-    `   preserved: ${record.root}`,
+    `# ── review this run ─ ${record.spaId}/${record.flowName}`,
+    `# preserved: ${record.root}`,
   ];
   for (const report of record.reports) {
-    lines.push(`   whole-run report (all scenarios, named steps, embedded traces):`);
-    lines.push(`     cd ${appCwd} && pnpm exec playwright show-report ${report}`);
+    lines.push(`# whole-run report (all scenarios, named steps, embedded traces):`);
+    lines.push(`cd ${appCwd} && pnpm exec playwright show-report ${report}`);
   }
   for (const group of record.groups) {
     const traces = group.artifacts.filter((a) => a.file.endsWith('.zip'));
     const extras = group.artifacts.length - traces.length;
-    lines.push(`   stage ${group.stageId} — ${traces.length} trace(s)${extras > 0 ? ` + ${extras} other artifact(s)` : ''}:`);
+    lines.push(`# stage ${group.stageId} — ${traces.length} trace(s)${extras > 0 ? ` + ${extras} other artifact(s)` : ''}:`);
     for (const t of traces.slice(0, REVIEW_LINES_PER_STAGE)) {
-      lines.push(`     cd ${appCwd} && pnpm exec playwright show-trace ${t.absPath}`);
+      lines.push(`cd ${appCwd} && pnpm exec playwright show-trace ${t.absPath}`);
     }
     if (traces.length > REVIEW_LINES_PER_STAGE) {
-      lines.push(`     … ${traces.length - REVIEW_LINES_PER_STAGE} more under ${record.root}/${group.stageId}/`);
+      lines.push(`ls ${record.root}/${group.stageId}/  # … ${traces.length - REVIEW_LINES_PER_STAGE} more trace(s)`);
     }
     if (traces.length === 0 && group.artifacts.length > 0) {
-      lines.push(`     (no trace.zip — screenshots/error context only; see ${record.root}/${group.stageId}/)`);
+      lines.push(`ls ${record.root}/${group.stageId}/  # no trace.zip — screenshots/error context only`);
     }
   }
-  lines.push(`   list preserved runs any time: ss e2e traces`);
+  lines.push(`ss e2e traces  # list preserved runs any time`);
   return lines;
 }
 
@@ -161,28 +162,30 @@ export function tracesListingLines(
   appCwdOf: (spaId: string) => string | null,
 ): string[] {
   if (runs.length === 0) {
-    return ['no preserved e2e runs found — produce one with: ss e2e run <flow> --capture (or any failing run)'];
+    return ['# no preserved e2e runs found — produce one with: ss e2e run <flow> --capture (or any failing run)'];
   }
+  // Paste-safety contract (same as the review block): every line is either a
+  // complete runnable command or a `#` comment — never a bare path.
   const lines: string[] = [];
   for (const run of runs) {
     const total = run.stages.reduce((n, s) => n + s.traces.length, 0);
     lines.push(
-      `${run.runId}  ${run.spaId}/${run.flowName}  (${total} trace(s)${run.reports.length > 0 ? `, ${run.reports.length} report(s)` : ''})`,
+      `# ${run.runId}  ${run.spaId}/${run.flowName}  (${total} trace(s)${run.reports.length > 0 ? `, ${run.reports.length} report(s)` : ''})`,
     );
     const appCwd = appCwdOf(run.spaId);
     for (const report of run.reports) {
       lines.push(
         appCwd === null
-          ? `    [report] ${report}  (spa repo not resolved — run show-report from a playwright install)`
-          : `    [report] cd ${appCwd} && pnpm exec playwright show-report ${report}`,
+          ? `# ${report}  (report; spa repo not resolved — run show-report from a playwright install)`
+          : `cd ${appCwd} && pnpm exec playwright show-report ${report}  # report`,
       );
     }
     for (const stage of run.stages) {
       for (const t of stage.traces) {
         lines.push(
           appCwd === null
-            ? `    [${stage.stageId}] ${t}  (spa repo not resolved — run show-trace from a playwright install)`
-            : `    [${stage.stageId}] cd ${appCwd} && pnpm exec playwright show-trace ${t}`,
+            ? `# ${t}  (${stage.stageId}; spa repo not resolved — run show-trace from a playwright install)`
+            : `cd ${appCwd} && pnpm exec playwright show-trace ${t}  # ${stage.stageId}`,
         );
       }
     }

@@ -681,761 +681,6 @@
         "traces.js"
       ]
     },
-    "set:check": {
-      "aliases": [],
-      "args": {
-        "name": {
-          "description": "set name (see `set list`)",
-          "name": "name",
-          "required": true
-        }
-      },
-      "description": "Validate a worktree set: paths, buildable-vs-prebuilt, branch drift (warn), primary-checkout posture, cross-set build collisions. Exit 1 on violations.",
-      "examples": [
-        "<%= config.bin %> <%= command.id %> journey-fix"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "name": "slot",
-          "default": 0,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "name": "set",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "noCacheDefault": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "set:check",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "set",
-        "check.js"
-      ]
-    },
-    "set:create": {
-      "aliases": [],
-      "args": {
-        "name": {
-          "description": "set name (must be unused)",
-          "name": "name",
-          "required": true
-        }
-      },
-      "description": "Create a worktree set: git worktree add (new/existing branch) off the primary checkout, pnpm install, and record it in the sets file (createdBy: ss). Single repo per call.",
-      "examples": [
-        "<%= config.bin %> <%= command.id %> sched --slot 1 --repo saga-dash --path ~/dev/worktrees/saga-dash-sched --branch feat/sched",
-        "<%= config.bin %> <%= command.id %> topo --slot 2 --repo saga-dash --path ~/dev/worktrees/saga-dash-topo --branch flow/topology --no-install"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "slot the set binds (1..9; slot 0 is the primary-checkout baseline)",
-          "name": "slot",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "name": "set",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "noCacheDefault": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "repo": {
-          "description": "repo to make a worktree for",
-          "name": "repo",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "options": [
-            "soa",
-            "rostering",
-            "program-hub",
-            "saga-dash",
-            "coach",
-            "sds",
-            "qboard",
-            "rtsm",
-            "fleek"
-          ],
-          "type": "option"
-        },
-        "path": {
-          "description": "worktree checkout path (recorded verbatim; `~` stays portable)",
-          "name": "path",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "branch": {
-          "description": "branch to check out — created if new, attached if it exists (default: the set name)",
-          "name": "branch",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "base": {
-          "description": "start point for a NEW branch (default: the primary checkout HEAD, e.g. main)",
-          "name": "base",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "note": {
-          "description": "optional note stored on the set",
-          "name": "note",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "install": {
-          "description": "pnpm install in the new worktree so `--set` up/e2e fresh-skip (use --no-install to skip)",
-          "name": "install",
-          "allowNo": true,
-          "type": "boolean"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "set:create",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "set",
-        "create.js"
-      ]
-    },
-    "set:list": {
-      "aliases": [],
-      "args": {},
-      "description": "List the worktree sets (name, slot, live ACTIVE state, repos) from the sets file (read-only).",
-      "examples": [
-        "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --output-json"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "name": "slot",
-          "default": 0,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "name": "set",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "noCacheDefault": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "set:list",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "set",
-        "list.js"
-      ]
-    },
-    "set:rm": {
-      "aliases": [],
-      "args": {
-        "name": {
-          "description": "set name (see `set list`)",
-          "name": "name",
-          "required": true
-        }
-      },
-      "description": "Remove a worktree set from the sets file. --and-worktrees also `git worktree remove`s the ss-created worktrees (createdBy: ss); hand-recorded paths are never touched.",
-      "examples": [
-        "<%= config.bin %> <%= command.id %> sched",
-        "<%= config.bin %> <%= command.id %> sched --and-worktrees --yes"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "name": "slot",
-          "default": 0,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "name": "set",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "noCacheDefault": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "and-worktrees": {
-          "description": "also `git worktree remove` the worktrees ss created (createdBy: ss); requires --yes",
-          "name": "and-worktrees",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "force": {
-          "description": "pass --force to `git worktree remove` (a dirty/locked worktree)",
-          "name": "force",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "yes": {
-          "description": "confirm the destructive --and-worktrees removal (required with it)",
-          "name": "yes",
-          "allowNo": false,
-          "type": "boolean"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "set:rm",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "set",
-        "rm.js"
-      ]
-    },
-    "set:show": {
-      "aliases": [],
-      "args": {
-        "name": {
-          "description": "set name (see `set list`)",
-          "name": "name",
-          "required": true
-        }
-      },
-      "description": "Show one worktree set: slot, repos, and each repo’s live branch + dirty state (read-only).",
-      "examples": [
-        "<%= config.bin %> <%= command.id %> journey-fix"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "name": "slot",
-          "default": 0,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "name": "set",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "noCacheDefault": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fetch": {
-          "description": "git fetch each repo first so the mainline-currency report reflects the REMOTE tip (network); without it, currency is as-of the last fetch",
-          "name": "fetch",
-          "allowNo": false,
-          "type": "boolean"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "set:show",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "set",
-        "show.js"
-      ]
-    },
     "stack:bootstrap": {
       "aliases": [],
       "args": {},
@@ -3413,6 +2658,761 @@
         "commands",
         "stack",
         "verify.js"
+      ]
+    },
+    "set:check": {
+      "aliases": [],
+      "args": {
+        "name": {
+          "description": "set name (see `set list`)",
+          "name": "name",
+          "required": true
+        }
+      },
+      "description": "Validate a worktree set: paths, buildable-vs-prebuilt, branch drift (warn), primary-checkout posture, cross-set build collisions. Exit 1 on violations.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> journey-fix"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "set:check",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "set",
+        "check.js"
+      ]
+    },
+    "set:create": {
+      "aliases": [],
+      "args": {
+        "name": {
+          "description": "set name (must be unused)",
+          "name": "name",
+          "required": true
+        }
+      },
+      "description": "Create a worktree set: git worktree add (new/existing branch) off the primary checkout, pnpm install, and record it in the sets file (createdBy: ss). Single repo per call.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> sched --slot 1 --repo saga-dash --path ~/dev/worktrees/saga-dash-sched --branch feat/sched",
+        "<%= config.bin %> <%= command.id %> topo --slot 2 --repo saga-dash --path ~/dev/worktrees/saga-dash-topo --branch flow/topology --no-install"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "slot the set binds (1..9; slot 0 is the primary-checkout baseline)",
+          "name": "slot",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "repo": {
+          "description": "repo to make a worktree for",
+          "name": "repo",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "options": [
+            "soa",
+            "rostering",
+            "program-hub",
+            "saga-dash",
+            "coach",
+            "sds",
+            "qboard",
+            "rtsm",
+            "fleek"
+          ],
+          "type": "option"
+        },
+        "path": {
+          "description": "worktree checkout path (recorded verbatim; `~` stays portable)",
+          "name": "path",
+          "required": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "branch": {
+          "description": "branch to check out — created if new, attached if it exists (default: the set name)",
+          "name": "branch",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "base": {
+          "description": "start point for a NEW branch (default: the primary checkout HEAD, e.g. main)",
+          "name": "base",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "note": {
+          "description": "optional note stored on the set",
+          "name": "note",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "install": {
+          "description": "pnpm install in the new worktree so `--set` up/e2e fresh-skip (use --no-install to skip)",
+          "name": "install",
+          "allowNo": true,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "set:create",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "set",
+        "create.js"
+      ]
+    },
+    "set:list": {
+      "aliases": [],
+      "args": {},
+      "description": "List the worktree sets (name, slot, live ACTIVE state, repos) from the sets file (read-only).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --output-json"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "set:list",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "set",
+        "list.js"
+      ]
+    },
+    "set:rm": {
+      "aliases": [],
+      "args": {
+        "name": {
+          "description": "set name (see `set list`)",
+          "name": "name",
+          "required": true
+        }
+      },
+      "description": "Remove a worktree set from the sets file. --and-worktrees also `git worktree remove`s the ss-created worktrees (createdBy: ss); hand-recorded paths are never touched.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> sched",
+        "<%= config.bin %> <%= command.id %> sched --and-worktrees --yes"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "and-worktrees": {
+          "description": "also `git worktree remove` the worktrees ss created (createdBy: ss); requires --yes",
+          "name": "and-worktrees",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "force": {
+          "description": "pass --force to `git worktree remove` (a dirty/locked worktree)",
+          "name": "force",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "yes": {
+          "description": "confirm the destructive --and-worktrees removal (required with it)",
+          "name": "yes",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "set:rm",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "set",
+        "rm.js"
+      ]
+    },
+    "set:show": {
+      "aliases": [],
+      "args": {
+        "name": {
+          "description": "set name (see `set list`)",
+          "name": "name",
+          "required": true
+        }
+      },
+      "description": "Show one worktree set: slot, repos, and each repo’s live branch + dirty state (read-only).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> journey-fix"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fetch": {
+          "description": "git fetch each repo first so the mainline-currency report reflects the REMOTE tip (network); without it, currency is as-of the last fetch",
+          "name": "fetch",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "set:show",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "set",
+        "show.js"
       ]
     },
     "stack:bundle:list": {

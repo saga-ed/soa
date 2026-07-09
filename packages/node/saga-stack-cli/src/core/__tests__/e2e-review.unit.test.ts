@@ -89,23 +89,29 @@ const record: PreservedRunRecord = {
 };
 
 describe('reviewBlockLines', () => {
-  it('prints the preserved root + a paste-ready cd-prefixed show-trace line per trace', () => {
+  it('prints a paste-ready cd-prefixed show-trace line per trace (report line first)', () => {
     const lines = reviewBlockLines(record, '/repo/apps/web/dash');
     expect(lines[0]).toContain('saga-dash/periods-ordering');
-    expect(lines).toContain(`   preserved: ${record.root}`);
+    expect(lines).toContain(`# preserved: ${record.root}`);
     expect(lines).toContain(
-      '     cd /repo/apps/web/dash && pnpm exec playwright show-trace /state/…/ordering/d1/trace.zip',
+      'cd /repo/apps/web/dash && pnpm exec playwright show-trace /state/…/ordering/d1/trace.zip',
     );
     // The whole-run HTML report leads the block with a show-report line.
     expect(lines).toContain(
-      '     cd /repo/apps/web/dash && pnpm exec playwright show-report ' +
+      'cd /repo/apps/web/dash && pnpm exec playwright show-report ' +
         '/state/e2e-runs/2026-07-09_14-05-03/saga-dash/periods-ordering/playwright-report',
     );
     // A group with artifacts but no trace says so instead of printing nothing.
     expect(lines.some((l) => l.includes('no trace.zip — screenshots/error context only'))).toBe(true);
   });
 
-  it('caps the per-stage lines and points at the stage dir beyond the cap', () => {
+  it('every line is paste-safe: a runnable command or a # comment — never a bare path', () => {
+    for (const l of reviewBlockLines(record, '/repo/apps/web/dash')) {
+      expect(l.trim()).toMatch(/^(#|cd |ls |ss )/);
+    }
+  });
+
+  it('caps the per-stage lines and points at the stage dir beyond the cap (runnably)', () => {
     const many: PreservedRunRecord = {
       ...record,
       groups: [
@@ -121,7 +127,7 @@ describe('reviewBlockLines', () => {
     };
     const lines = reviewBlockLines(many, '/repo');
     expect(lines.filter((l) => l.includes('show-trace'))).toHaveLength(8);
-    expect(lines.some((l) => l.includes('… 2 more under'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('ls ') && l.includes('# … 2 more trace(s)'))).toBe(true);
   });
 });
 
@@ -147,12 +153,14 @@ describe('tracesListingLines', () => {
     expect(tracesListingLines([], () => null)[0]).toContain('--capture');
   });
 
-  it('prints cd-prefixed lines for resolvable SPAs and a bare-path note otherwise', () => {
+  it('prints command-first lines (stage tag as a trailing comment); unresolved SPAs comment out', () => {
     const lines = tracesListingLines(listing, (spa) => (spa === 'saga-dash' ? '/repo/apps/web/dash' : null));
     expect(lines[0]).toContain('2026-07-09_15-00-00  saga-dash/periods-ordering  (1 trace(s), 1 report(s))');
-    expect(lines[1]).toBe('    [report] cd /repo/apps/web/dash && pnpm exec playwright show-report /runs/a/playwright-report');
-    expect(lines[2]).toBe('    [ordering] cd /repo/apps/web/dash && pnpm exec playwright show-trace /runs/a/trace.zip');
+    expect(lines[1]).toBe('cd /repo/apps/web/dash && pnpm exec playwright show-report /runs/a/playwright-report  # report');
+    expect(lines[2]).toBe('cd /repo/apps/web/dash && pnpm exec playwright show-trace /runs/a/trace.zip  # ordering');
     expect(lines.some((l) => l.includes('spa repo not resolved'))).toBe(true);
+    // Paste-safety: every line is a runnable command or a # comment.
+    for (const l of lines) expect(l.trim()).toMatch(/^(#|cd )/);
   });
 });
 

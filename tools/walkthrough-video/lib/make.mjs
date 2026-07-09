@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { narrateAll } from './narrate.mjs';
 import { record } from './record.mjs';
 import { stitch } from './stitch.mjs';
+import { loadScript } from './script.mjs';
 
 const TOOL_ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -41,8 +42,11 @@ async function main() {
   const walkthroughDir = path.join(TOOL_ROOT, 'walkthroughs', app, feature);
   const outDir = walkthroughDir;
 
-  const { STEPS } = await import(path.join(walkthroughDir, 'steps.mjs'));
+  const { STEPS: jsSteps } = await import(path.join(walkthroughDir, 'steps.mjs'));
   const { default: adapter } = await import(path.join(TOOL_ROOT, 'adapters', `${app}.mjs`));
+
+  const scriptPath = path.join(walkthroughDir, 'script.md');
+  const STEPS = await loadScript(scriptPath, jsSteps);
 
   if (process.env.SKIP_NARRATE !== '1') {
     console.log(`[narrate] ${STEPS.length} steps…`);

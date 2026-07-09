@@ -18,13 +18,22 @@ still applies, just with the engine centralized.
 ```
 adapters/<app>.mjs                 →  baseUrl + getStorageState()  (per-app, ~30 lines)
 walkthroughs/<app>/<feature>/
-  steps.mjs                        →  narration + Playwright actions  (per-feature, the real work)
+  steps.mjs                        →  Playwright actions, keyed by step id  (per-feature)
+  script.md                        →  narration + tailSlack, keyed by the same step id
 
-lib/narrate.mjs   (OpenAI TTS, content-hash cached)  ─┐
-lib/record.mjs    (Playwright + cursor overlay)       ├─  app-agnostic engine, written once
-lib/stitch.mjs    (ffmpeg mux + SRT)                  │
-lib/make.mjs      (orchestrator)                     ─┘
+lib/script.mjs    (parses script.md, merges onto steps.mjs by id) ─┐
+lib/narrate.mjs   (OpenAI TTS, content-hash cached)                │
+lib/record.mjs    (Playwright + cursor overlay)                    ├─  app-agnostic engine
+lib/stitch.mjs    (ffmpeg mux + SRT)                                │
+lib/make.mjs      (orchestrator: loads both files, merges, runs)  ─┘
 ```
+
+Narration/timing (`script.md`) and Playwright actions (`steps.mjs`) are deliberately
+split: prose is easy to iterate on in markdown, while actions need arbitrary
+Playwright power that a markdown DSL can't express cleanly. `make.mjs` loads both and
+merges them by step id before handing the combined `STEPS` array to narrate/record/
+stitch — those three files are unchanged by this split, they still just see
+`{id, narration, tailSlack, action}`.
 
 Sync model: `slot[N] = max(actionDuration[N], narrationDuration[N]) + tailSlack[N]`.
 `record.mjs` waits that long before step N+1; `stitch.mjs` pads each narration chunk with
@@ -140,7 +149,8 @@ or confirm reset behavior first.
    writes, and converts it. If your app doesn't use `saga-stack-cli`'s login, or doesn't
    need cookies at all, write whatever fits — the contract is just that return shape.
 
-2. **Write `walkthroughs/<app>/<feature>/steps.mjs`**:
+2. **Write `walkthroughs/<app>/<feature>/steps.mjs`** — one entry per step, `id` +
+   `action` only (no narration here):
 
    ```js
    import { smoothClick } from '../../../lib/record.mjs';
@@ -148,24 +158,42 @@ or confirm reset behavior first.
    export const STEPS = [
      {
        id: '00-intro',
-       narration: 'Welcome to the X feature walkthrough...',
        action: async (page) => {
          await page.goto('/feature');
          await page.waitForSelector('.feature-shell', { timeout: 15000 });
        },
-       tailSlack: 600,
      },
      // ...
      {
        id: '99-outro',
-       narration: 'That is the X feature. Thanks for watching.',
        action: async (page) => { await page.waitForTimeout(500); },
-       tailSlack: 1500,
      },
    ];
    ```
 
-3. Run it per the recipe above.
+3. **Write the paired `walkthroughs/<app>/<feature>/script.md`** — one `## <id>`
+   heading per step (must match `steps.mjs`'s `id` exactly), narration prose as the
+   body, and an optional trailing `tailSlack: <ms>` line:
+
+   ```md
+   ## 00-intro
+
+   Welcome to the X feature walkthrough...
+
+   tailSlack: 600
+
+   ## 99-outro
+
+   That is the X feature. Thanks for watching.
+
+   tailSlack: 1500
+   ```
+
+   `make.mjs` loads both files and merges them by id — `lib/script.mjs` throws if a
+   step id exists in one file but not the other, so a stale script or stale
+   `steps.mjs` fails loudly instead of silently dropping a step.
+
+4. Run it per the recipe above.
 
 ### Authoring tips (from the original doc — still apply)
 

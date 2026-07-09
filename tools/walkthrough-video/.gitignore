@@ -1,4 +1,4 @@
-# Generated per-walkthrough artifacts — steps.mjs is the only thing worth committing.
+# Generated per-walkthrough artifacts — steps.mjs and script.md are the only things worth committing.
 walkthroughs/**/chunks/
 walkthroughs/**/chunks-padded/
 walkthroughs/**/chunks-meta.json

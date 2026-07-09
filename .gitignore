@@ -23,6 +23,11 @@ coverage
 # Turbo
 .turbo
 
+# Git worktrees (parallel development)
+/worktrees/
+.worktrees/
+.claude/worktrees/
+
 # Vercel
 .vercel
 

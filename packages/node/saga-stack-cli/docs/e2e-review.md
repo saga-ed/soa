@@ -91,19 +91,43 @@ prerequisite):
 Every line is paste-ready; the `cd` prefix matters because `show-trace` must
 run where Playwright is installed (the SPA's app dir).
 
+### The whole-run HTML report
+
+A `--capture` run also emits Playwright's HTML reporter locally (the SPA
+stack config adds `html` + `json` under `PLAYWRIGHT_CAPTURE=all`, `open:
+'never'`), giving ONE browsable page for the entire run — every scenario,
+its named `test.step` phases, and embedded trace links. The report dir is
+preserved beside the stage dirs:
+
+```
+<runsRoot>/<runId>/<spa>/<flow>/playwright-report[-N]/
+```
+
+One report per SPAWN (the default path = one report for the whole run; the
+per-stage ladder yields one per stage spawn, numerically suffixed). The
+review block leads with its paste-ready line:
+
+```
+cd <spa app dir> && pnpm exec playwright show-report <preserved dir>
+```
+
+The machine-readable `results.json` sibling lands in the SPA app dir (not
+preserved yet — read it right after a run for pass/fail counts).
+
 ### `ss e2e traces [--flow <spa>/<flow>] [--open]`
 
-Lists preserved runs newest-first with their show-trace commands. `--open`
-launches the viewer on the newest preserved trace (best-effort: a headless
-host warns, never errors). Slot-aware like the run command.
+Lists preserved runs newest-first — whole-run reports first, then per-stage
+show-trace commands. `--open` PREFERS the newest preserved HTML report
+(`show-report`) and falls back to the newest trace (`show-trace`);
+best-effort either way (a headless host warns, never errors). Slot-aware
+like the run command.
 
 ## Deferred (explicitly)
 
 - **Milestone capture profile** — a middle profile between light and heavy
   keyed on `test.step()` density; waits until more flows adopt steps.
-- **`ss e2e review`** — an HTML-report variant (Playwright's HTML reporter
-  bundles all stages into one browsable page); the per-trace viewer covers
-  the need today.
+- **Preserving `results.json`** — the json summary stays in the SPA app dir
+  for now; preserve it alongside the report if a consumer appears.
 - **Retention/pruning** — `e2e-runs/` grows by ~10-40 MB per captured run;
   manual cleanup for now (`rm -rf <stateDir>/e2e-runs/<runId>`), a `--prune`
   knob when it hurts.

@@ -659,7 +659,7 @@
           "type": "option"
         },
         "open": {
-          "description": "launch `playwright show-trace` on the newest preserved trace (best-effort; a headless host warns)",
+          "description": "open the newest preserved run: PREFERS the whole-run HTML report (`playwright show-report`) when one exists, else falls back to the newest trace (`show-trace`). Best-effort; a headless host warns.",
           "name": "open",
           "allowNo": false,
           "type": "boolean"

@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isArtifactFile,
+  newestReport,
   newestTrace,
   OTHER_STAGE_BUCKET,
   reviewBlockLines,
@@ -71,6 +72,7 @@ const record: PreservedRunRecord = {
   spaId: 'saga-dash',
   flowName: 'periods-ordering',
   root: '/state/e2e-runs/2026-07-09_14-05-03/saga-dash/periods-ordering',
+  reports: ['/state/e2e-runs/2026-07-09_14-05-03/saga-dash/periods-ordering/playwright-report'],
   groups: [
     {
       stageId: 'ordering',
@@ -93,6 +95,11 @@ describe('reviewBlockLines', () => {
     expect(lines).toContain(`   preserved: ${record.root}`);
     expect(lines).toContain(
       '     cd /repo/apps/web/dash && pnpm exec playwright show-trace /state/…/ordering/d1/trace.zip',
+    );
+    // The whole-run HTML report leads the block with a show-report line.
+    expect(lines).toContain(
+      '     cd /repo/apps/web/dash && pnpm exec playwright show-report ' +
+        '/state/e2e-runs/2026-07-09_14-05-03/saga-dash/periods-ordering/playwright-report',
     );
     // A group with artifacts but no trace says so instead of printing nothing.
     expect(lines.some((l) => l.includes('no trace.zip — screenshots/error context only'))).toBe(true);
@@ -124,12 +131,14 @@ const listing: PreservedRunListing[] = [
     spaId: 'saga-dash',
     flowName: 'periods-ordering',
     stages: [{ stageId: 'ordering', traces: ['/runs/a/trace.zip'] }],
+    reports: ['/runs/a/playwright-report'],
   },
   {
     runId: '2026-07-09_09-00-00',
     spaId: 'unknown-spa',
     flowName: 'journey',
     stages: [{ stageId: 'roster', traces: ['/runs/b/trace.zip'] }],
+    reports: [],
   },
 ];
 
@@ -140,9 +149,21 @@ describe('tracesListingLines', () => {
 
   it('prints cd-prefixed lines for resolvable SPAs and a bare-path note otherwise', () => {
     const lines = tracesListingLines(listing, (spa) => (spa === 'saga-dash' ? '/repo/apps/web/dash' : null));
-    expect(lines[0]).toContain('2026-07-09_15-00-00  saga-dash/periods-ordering  (1 trace(s))');
-    expect(lines[1]).toBe('    [ordering] cd /repo/apps/web/dash && pnpm exec playwright show-trace /runs/a/trace.zip');
+    expect(lines[0]).toContain('2026-07-09_15-00-00  saga-dash/periods-ordering  (1 trace(s), 1 report(s))');
+    expect(lines[1]).toBe('    [report] cd /repo/apps/web/dash && pnpm exec playwright show-report /runs/a/playwright-report');
+    expect(lines[2]).toBe('    [ordering] cd /repo/apps/web/dash && pnpm exec playwright show-trace /runs/a/trace.zip');
     expect(lines.some((l) => l.includes('spa repo not resolved'))).toBe(true);
+  });
+});
+
+describe('newestReport', () => {
+  it('prefers the newest run that preserved a whole-run report', () => {
+    expect(newestReport(listing)).toEqual({ spaId: 'saga-dash', report: '/runs/a/playwright-report' });
+  });
+
+  it('returns null when no run preserved one (--open falls back to show-trace)', () => {
+    expect(newestReport([listing[1]])).toBeNull();
+    expect(newestReport([])).toBeNull();
   });
 });
 

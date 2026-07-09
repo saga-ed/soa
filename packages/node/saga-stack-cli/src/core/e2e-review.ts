@@ -42,6 +42,14 @@ export interface PreservedRunRecord {
   /** Absolute root the artifacts were preserved under (`<runsRoot>/<runId>/<spa>/<flow>`). */
   root: string;
   groups: PreservedStageGroup[];
+  /**
+   * Preserved Playwright HTML report dirs (absolute) — ONE per spawn that
+   * emitted `playwright-report/` (capture runs do; see the SPA stack config's
+   * PLAYWRIGHT_CAPTURE reporter block). The default single-spawn path yields
+   * one whole-run report; the per-stage ladder yields one per stage spawn
+   * (suffixed to avoid collisions).
+   */
+  reports: string[];
 }
 
 /** Bucket id for trace dirs whose project is not one of the flow's stages. */
@@ -110,6 +118,10 @@ export function reviewBlockLines(record: PreservedRunRecord, appCwd: string): st
     `── review this run ─ ${record.spaId}/${record.flowName}`,
     `   preserved: ${record.root}`,
   ];
+  for (const report of record.reports) {
+    lines.push(`   whole-run report (all scenarios, named steps, embedded traces):`);
+    lines.push(`     cd ${appCwd} && pnpm exec playwright show-report ${report}`);
+  }
   for (const group of record.groups) {
     const traces = group.artifacts.filter((a) => a.file.endsWith('.zip'));
     const extras = group.artifacts.length - traces.length;
@@ -135,6 +147,8 @@ export interface PreservedRunListing {
   flowName: string;
   /** Absolute per-stage trace paths, in stage order as found. */
   stages: { stageId: string; traces: string[] }[];
+  /** Preserved whole-run HTML report dirs (absolute). */
+  reports: string[];
 }
 
 /**
@@ -152,8 +166,17 @@ export function tracesListingLines(
   const lines: string[] = [];
   for (const run of runs) {
     const total = run.stages.reduce((n, s) => n + s.traces.length, 0);
-    lines.push(`${run.runId}  ${run.spaId}/${run.flowName}  (${total} trace(s))`);
+    lines.push(
+      `${run.runId}  ${run.spaId}/${run.flowName}  (${total} trace(s)${run.reports.length > 0 ? `, ${run.reports.length} report(s)` : ''})`,
+    );
     const appCwd = appCwdOf(run.spaId);
+    for (const report of run.reports) {
+      lines.push(
+        appCwd === null
+          ? `    [report] ${report}  (spa repo not resolved — run show-report from a playwright install)`
+          : `    [report] cd ${appCwd} && pnpm exec playwright show-report ${report}`,
+      );
+    }
     for (const stage of run.stages) {
       for (const t of stage.traces) {
         lines.push(
@@ -167,7 +190,20 @@ export function tracesListingLines(
   return lines;
 }
 
-/** The newest trace zip across a listing (what `e2e traces --open` opens). Null when none. */
+/**
+ * The newest preserved HTML report across a listing — `e2e traces --open`
+ * PREFERS this over a single trace (one browsable page for the whole run).
+ * Null when no run preserved a report.
+ */
+export function newestReport(runs: readonly PreservedRunListing[]): { spaId: string; report: string } | null {
+  for (const run of runs) {
+    const [first] = run.reports;
+    if (first !== undefined) return { spaId: run.spaId, report: first };
+  }
+  return null;
+}
+
+/** The newest trace zip across a listing (the `--open` fallback when no report exists). Null when none. */
 export function newestTrace(runs: readonly PreservedRunListing[]): { spaId: string; trace: string } | null {
   // Listings arrive newest-first; take the first run that actually has a trace.
   for (const run of runs) {

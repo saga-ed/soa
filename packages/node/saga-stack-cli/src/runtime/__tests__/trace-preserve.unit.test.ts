@@ -10,8 +10,14 @@ import { preserveSpawnArtifacts, listPreservedRuns } from '../trace-preserve.js'
 import type { PreserveFs } from '../trace-preserve.js';
 
 /** An in-memory PreserveFs over a `{dir: files[]}` map + copy log. */
-function fakeFs(tree: Record<string, string[]>): { fs: PreserveFs; copies: Array<[string, string]>; mkdirs: string[] } {
+function fakeFs(tree: Record<string, string[]>): {
+  fs: PreserveFs;
+  copies: Array<[string, string]>;
+  dirCopies: Array<[string, string]>;
+  mkdirs: string[];
+} {
   const copies: Array<[string, string]> = [];
+  const dirCopies: Array<[string, string]> = [];
   const mkdirs: string[] = [];
   const dirs = new Set(Object.keys(tree));
   const fs: PreserveFs = {
@@ -28,8 +34,9 @@ function fakeFs(tree: Record<string, string[]>): { fs: PreserveFs; copies: Array
       if (src.includes('unreadable')) throw new Error('EACCES');
       copies.push([src, dest]);
     },
+    copyDir: (src, dest) => dirCopies.push([src, dest]),
   };
-  return { fs, copies, mkdirs };
+  return { fs, copies, dirCopies, mkdirs };
 }
 
 const FRAME = {
@@ -57,6 +64,22 @@ describe('preserveSpawnArtifacts', () => {
     // noise.txt never copied; the coherence gate lands in _other.
     expect(copies.some(([src]) => src.endsWith('noise.txt'))).toBe(false);
     expect(copies.some(([, dest]) => dest.includes('/_other/'))).toBe(true);
+    // no playwright-report/ in this tree -> no report preserved.
+    expect(record.reports).toEqual([]);
+  });
+
+  it('preserves the whole-run HTML report beside the stage dirs (suffixing on collision)', () => {
+    const { fs, dirCopies } = fakeFs({
+      '/repo/apps/web/dash/playwright-report': ['index.html'],
+      '/repo/apps/web/dash/playwright-report/data': ['a.zip'],
+      // a previous spawn of the same run already preserved one:
+      '/state/e2e-runs/r1/saga-dash/periods-ordering/playwright-report': ['index.html'],
+    });
+    const record = preserveSpawnArtifacts(FRAME, { runsRoot: '/state/e2e-runs', runId: 'r1', fs });
+    expect(record.reports).toEqual(['/state/e2e-runs/r1/saga-dash/periods-ordering/playwright-report-2']);
+    expect(dirCopies).toEqual([
+      ['/repo/apps/web/dash/playwright-report', '/state/e2e-runs/r1/saga-dash/periods-ordering/playwright-report-2'],
+    ]);
   });
 
   it('returns empty groups when test-results is missing or artifact-free (green non-capture run)', () => {
@@ -91,10 +114,11 @@ describe('preserveSpawnArtifacts', () => {
 });
 
 describe('listPreservedRuns', () => {
-  it('scans the tree back newest-first and keeps only trace zips', () => {
+  it('scans the tree back newest-first, keeping trace zips and whole-run reports', () => {
     const { fs } = fakeFs({
       '/state/e2e-runs/2026-07-09_09-00-00/saga-dash/journey/roster/d1': ['trace.zip', 'video.webm'],
       '/state/e2e-runs/2026-07-09_15-00-00/saga-dash/periods-ordering/ordering/d2': ['trace.zip'],
+      '/state/e2e-runs/2026-07-09_15-00-00/saga-dash/periods-ordering/playwright-report': ['index.html'],
     });
     const runs = listPreservedRuns('/state/e2e-runs', fs);
     expect(runs.map((r) => r.runId)).toEqual(['2026-07-09_15-00-00', '2026-07-09_09-00-00']);
@@ -104,7 +128,11 @@ describe('listPreservedRuns', () => {
         traces: ['/state/e2e-runs/2026-07-09_15-00-00/saga-dash/periods-ordering/ordering/d2/trace.zip'],
       },
     ]);
+    expect(runs[0].reports).toEqual([
+      '/state/e2e-runs/2026-07-09_15-00-00/saga-dash/periods-ordering/playwright-report',
+    ]);
     expect(runs[1].spaId).toBe('saga-dash');
+    expect(runs[1].reports).toEqual([]);
     expect(runs[1].stages[0].traces.every((t) => t.endsWith('.zip'))).toBe(true);
   });
 

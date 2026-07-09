@@ -18,7 +18,7 @@
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
-import { newestTrace, tracesListingLines } from '../../core/e2e-review.js';
+import { newestReport, newestTrace, tracesListingLines } from '../../core/e2e-review.js';
 import { lookupSpa, parseFlowRef } from '../../core/flow/index.js';
 import { listPreservedRuns } from '../../runtime/index.js';
 import { resolveAppCwd } from '../../e2e-orchestrate.js';
@@ -40,7 +40,9 @@ export default class E2eTraces extends BaseCommand {
     }),
     open: Flags.boolean({
       default: false,
-      description: 'launch `playwright show-trace` on the newest preserved trace (best-effort; a headless host warns)',
+      description:
+        'open the newest preserved run: PREFERS the whole-run HTML report (`playwright show-report`) when one ' +
+        'exists, else falls back to the newest trace (`show-trace`). Best-effort; a headless host warns.',
     }),
   };
 
@@ -89,6 +91,7 @@ export default class E2eTraces extends BaseCommand {
           runId: r.runId,
           spa: r.spaId,
           flow: r.flowName,
+          reports: r.reports,
           stages: r.stages.map((s) => ({ stage: s.stageId, traces: s.traces })),
         })),
       },
@@ -96,26 +99,36 @@ export default class E2eTraces extends BaseCommand {
     );
 
     if (flags.open) {
-      const newest = newestTrace(runs);
-      if (newest === null) {
-        this.warn('--open: no preserved trace to open.');
+      // PREFER the whole-run HTML report (one browsable page: all scenarios,
+      // named steps, embedded trace links); fall back to the newest trace.
+      const report = newestReport(runs);
+      const target = report
+        ? { spaId: report.spaId, path: report.report, subcommand: 'show-report' }
+        : ((): { spaId: string; path: string; subcommand: string } | null => {
+            const t = newestTrace(runs);
+            return t ? { spaId: t.spaId, path: t.trace, subcommand: 'show-trace' } : null;
+          })();
+      if (target === null) {
+        this.warn('--open: no preserved report or trace to open.');
         return;
       }
-      const cwd = appCwdOf(newest.spaId);
+      const cwd = appCwdOf(target.spaId);
       if (cwd === null) {
-        this.warn(`--open: cannot resolve a playwright install for spa '${newest.spaId}' — open it manually.`);
+        this.warn(`--open: cannot resolve a playwright install for spa '${target.spaId}' — open it manually.`);
         return;
       }
-      this.log(`opening ${newest.trace} (close the viewer to return)…`);
+      this.log(`opening ${target.path} via ${target.subcommand} (close the viewer to return)…`);
       const { code } = await this.getRunner().run({
         cwd,
         command: 'pnpm',
-        args: ['exec', 'playwright', 'show-trace', newest.trace],
+        args: ['exec', 'playwright', target.subcommand, target.path],
         env: {},
         stdio: 'inherit',
       });
       if (code !== 0) {
-        this.warn(`--open: show-trace exited ${code} (headless host? open the trace on a machine with a display).`);
+        this.warn(
+          `--open: ${target.subcommand} exited ${code} (headless host? open it on a machine with a display).`,
+        );
       }
     }
   }

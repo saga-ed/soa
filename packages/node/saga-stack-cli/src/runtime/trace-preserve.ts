@@ -12,7 +12,7 @@
  * `DashFs`).
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   isArtifactFile,
@@ -35,6 +35,8 @@ export interface PreserveFs {
   listFiles(dir: string): string[];
   mkdirp(dir: string): void;
   copy(src: string, dest: string): void;
+  /** Recursive directory copy (the HTML report dir). */
+  copyDir(src: string, dest: string): void;
 }
 
 /** The production fs seam. */
@@ -55,6 +57,7 @@ export function makeRealPreserveFs(): PreserveFs {
     listFiles: (dir) => entries(dir, false),
     mkdirp: (dir) => mkdirSync(dir, { recursive: true }),
     copy: (src, dest) => copyFileSync(src, dest),
+    copyDir: (src, dest) => cpSync(src, dest, { recursive: true }),
   };
 }
 
@@ -82,7 +85,30 @@ export function preserveSpawnArtifacts(
   const warn = ctx.warn ?? ((): void => {});
   const resultsDir = join(frame.appCwd, 'test-results');
   const root = join(ctx.runsRoot, ctx.runId, frame.spaId, frame.flowName);
-  const record: PreservedRunRecord = { spaId: frame.spaId, flowName: frame.flowName, root, groups: [] };
+  const record: PreservedRunRecord = {
+    spaId: frame.spaId,
+    flowName: frame.flowName,
+    root,
+    groups: [],
+    reports: [],
+  };
+
+  // The whole-run HTML report (capture runs emit playwright-report/ — see the
+  // SPA stack config's PLAYWRIGHT_CAPTURE reporter block). ONE per spawn; the
+  // per-stage ladder's later spawns get a numeric suffix instead of clobbering.
+  const reportSrc = join(frame.appCwd, 'playwright-report');
+  if (fs.listFiles(reportSrc).includes('index.html')) {
+    let reportDest = join(root, 'playwright-report');
+    for (let n = 2; fs.existsDir(reportDest); n++) reportDest = join(root, `playwright-report-${n}`);
+    try {
+      fs.mkdirp(root);
+      fs.copyDir(reportSrc, reportDest);
+      record.reports.push(reportDest);
+    } catch (err) {
+      warn(`⚠ trace-preserve: could not copy the HTML report: ${(err as Error).message}`);
+    }
+  }
+
   if (!fs.existsDir(resultsDir)) return record;
 
   const byStage = new Map<string, PreservedStageGroup>();
@@ -125,16 +151,24 @@ export function listPreservedRuns(runsRoot: string, fs: PreserveFs = makeRealPre
       for (const flowName of fs.listDirs(join(runsRoot, runId, spaId))) {
         const flowDir = join(runsRoot, runId, spaId, flowName);
         const stages: PreservedRunListing['stages'] = [];
-        for (const stageId of fs.listDirs(flowDir)) {
+        const reports: string[] = [];
+        for (const entry of fs.listDirs(flowDir)) {
+          // Whole-run HTML reports live beside the stage dirs.
+          if (entry.startsWith('playwright-report')) {
+            if (fs.listFiles(join(flowDir, entry)).includes('index.html')) {
+              reports.push(join(flowDir, entry));
+            }
+            continue;
+          }
           const traces: string[] = [];
-          for (const dirName of fs.listDirs(join(flowDir, stageId))) {
-            for (const file of fs.listFiles(join(flowDir, stageId, dirName))) {
-              if (file.endsWith('.zip')) traces.push(join(flowDir, stageId, dirName, file));
+          for (const dirName of fs.listDirs(join(flowDir, entry))) {
+            for (const file of fs.listFiles(join(flowDir, entry, dirName))) {
+              if (file.endsWith('.zip')) traces.push(join(flowDir, entry, dirName, file));
             }
           }
-          if (traces.length > 0) stages.push({ stageId, traces });
+          if (traces.length > 0) stages.push({ stageId: entry, traces });
         }
-        runs.push({ runId, spaId, flowName, stages });
+        runs.push({ runId, spaId, flowName, stages, reports });
       }
     }
   }

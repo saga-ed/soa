@@ -50,6 +50,24 @@ import type { Manifest, ServiceId } from './manifest/index.js';
 export const SLOT_PORT_STRIDE = 1000;
 
 /**
+ * Every `process.env` key an `InstanceProfile` may set via `applyInstanceEnv`
+ * (the five `SAGA_MESH_*_CONTAINER` overrides from `containerEnvFor` + the
+ * snapshot root). This is the RESTORE set for scoping ONE slot's env inside a
+ * multi-slot sweep (`verify --all-slots`): slot 0 carries an EMPTY container env,
+ * so applying it does not clear a prior slot's keys — the caller must snapshot +
+ * delete this fixed list, apply the profile, then restore. Keep in lock-step with
+ * `containerEnvFor` + `applyInstanceEnv`.
+ */
+export const INSTANCE_ENV_KEYS = [
+  'SAGA_MESH_POSTGRES_CONTAINER',
+  'SAGA_MESH_REDIS_CONTAINER',
+  'SAGA_MESH_RABBITMQ_CONTAINER',
+  'SAGA_MESH_MONGO_CONTAINER',
+  'SAGA_MESH_CONNECT_MONGO_CONTAINER',
+  'SAGA_MESH_SNAPSHOTS_DIR',
+] as const;
+
+/**
  * Services EXCLUDED from a slot > 0 bring-up (plan §6 collision matrix). All
  * would CLOBBER or SPLIT-BRAIN onto slot 0:
  *

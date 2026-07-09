@@ -32,13 +32,14 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { bold, cyan, dim, green, red, yellow } from '../../color.js';
 import { BUNDLE_NAMES } from '../../core/bundles.js';
-import { deriveInstance } from '../../core/derive-instance.js';
+import { INSTANCE_ENV_KEYS, deriveInstance } from '../../core/derive-instance.js';
+import type { InstanceProfile } from '../../core/derive-instance.js';
 import { SYNTH_DEV_DIR } from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { getMesh, manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import { DATA_SQL, assessData } from '../../core/verify-data.js';
-import type { DataReadings } from '../../core/verify-data.js';
+import type { DataAssessment, DataReadings } from '../../core/verify-data.js';
 import { parseOverlayTsv } from '../../core/overlay-tsv.js';
 import type { PostureLine } from '../../core/verify-posture.js';
 import { assessPosture, meshContainer, resolveOverlayRepo, resolveRepoRoot } from '../../runtime/index.js';
@@ -83,6 +84,11 @@ export default class StackVerify extends BaseCommand {
         'run the CANONICAL complete check FULLY NATIVELY: native health gate + native DATA (D1–D5) + native source-posture (P1–P4). --health-only skips the posture/freshness pass.',
       default: false,
     }),
+    'all-slots': Flags.boolean({
+      description:
+        'report EVERY active slot (0..9) instead of a single --slot. A slot is active when its state dir holds a live service pid or its soa-s<N> compose project has running containers (the `ss set list` ACTIVE probe). Each slot gets its own health section (offset ports); with --full each also gets its own DATA section read against THAT slot’s soa-s<N> mesh, and the shared source-posture runs ONCE. Cannot be combined with --slot N>0 or --set (those target one slot). --only/--with are ignored.',
+      default: false,
+    }),
   };
 
   /** M7 Phase 2: the native health gate probes a slot's offset ports at slot > 0. */
@@ -97,6 +103,18 @@ export default class StackVerify extends BaseCommand {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(StackVerify);
+
+    // ── --all-slots: report EVERY active slot (0..9), not a single --slot. ──
+    if (flags['all-slots']) {
+      if (flags.set) {
+        this.error('--all-slots enumerates every active slot; drop --set (a set is bound to one slot).');
+      }
+      if (flags.slot > 0) {
+        this.error('--all-slots enumerates every active slot; drop --slot (it targets one slot).');
+      }
+      await this.runAllSlots(flags);
+      return;
+    }
 
     // ── --full: FULLY NATIVE — native health + native DATA (D1–D5) + native posture. ──
     // M12: the source-posture (P1–P4) checks are now NATIVE too (warn-only), so `stack
@@ -241,19 +259,7 @@ export default class StackVerify extends BaseCommand {
 
     // 2. native DATA checks (D1–D5). Reads as postgres_admin against the base mesh
     // containers (documented divergence from verify.sh's `-U iam` — same rows).
-    const pg = this.getPgProbe();
-    const meshExec = this.getMeshExec();
-    const pgContainer = meshContainer(getMesh('postgres', manifest));
-    const mongo = getMesh('connect-mongo', manifest);
-    const mongoContainer = meshContainer(mongo);
-    const readings: DataReadings = {
-      usersRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.users),
-      devIdRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.devId),
-      adminPersonasRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.adminPersonas),
-      sisMigrated: await pg.hasMigrationsTable(pgContainer, 'sis_db'),
-      mongoReachable: await meshExec.ready(mongoContainer, mongo.readinessCmd),
-    };
-    const data = assessData(readings);
+    const data = await this.readSlotData();
     this.log(cyan(bold('── data ──')));
     for (const c of data.checks) this.log(`${c.ok ? green('✓') : red('✗')} ${dim(c.label)}`);
     for (const note of data.notes) this.log(dim(`· ${note}`));
@@ -291,6 +297,222 @@ export default class StackVerify extends BaseCommand {
             .join('; ')}`)) + (warnSuffix ? yellow(warnSuffix) : ''),
     );
     if (!passed) this.exit(1);
+  }
+
+  /**
+   * `--all-slots`: report EVERY active slot (0..9) instead of a single `--slot`. A
+   * slot is ACTIVE per the shared `SlotActiveProbe` (a live service pid under its
+   * state dir OR a running `soa`/`soa-s<N>` compose project — the same probe `ss set
+   * list` uses). Each active slot gets its own health gate on its offset ports; under
+   * `--full` each ALSO gets its own DATA gate read against THAT slot's `soa-s<N>` mesh
+   * (via `withSlotEnv`), and the SHARED source-posture runs ONCE (warn-only). Exit 1
+   * iff any active slot's health (+ data) is red — posture never flips the verdict.
+   */
+  private async runAllSlots(flags: AllSlotsFlags): Promise<void> {
+    if (flags.only || (flags.with && flags.with.length > 0)) {
+      this.warn('--only/--with are ignored with --all-slots (each active slot is verified over its full required set).');
+    }
+
+    const probe = this.getSlotActiveProbe();
+    const profiles = Array.from({ length: 10 }, (_, slot) => deriveInstance({ slot }));
+    const activity = await Promise.all(
+      profiles.map(async (p) => ({ profile: p, active: await probe.isActive(p.stateDir, p.project) })),
+    );
+    const active = activity.filter((a) => a.active).map((a) => a.profile);
+
+    if (active.length === 0) {
+      if (flags['output-json']) {
+        this.log(JSON.stringify({ slots: [], activeSlots: [], passed: true }, null, 2));
+      } else if (flags.porcelain) {
+        this.log('activeSlots=');
+        this.log('passed=true');
+      } else {
+        this.log(
+          yellow('verify --all-slots: no active slots — none have a live service pid or a running soa[-s<N>] project.'),
+        );
+      }
+      return; // nothing up ⇒ nothing to fail ⇒ exit 0.
+    }
+
+    // Gathered SEQUENTIALLY: the --full DATA read mutates process.env (per-slot mesh
+    // container selection via withSlotEnv), so slots must not overlap.
+    const reports: SlotReport[] = [];
+    for (const profile of active) reports.push(await this.checkSlot(flags, profile));
+
+    // Source posture is a property of the SHARED checkouts, not any one slot — run it
+    // ONCE (warn-only, --full only, skipped under --health-only), like single-slot --full.
+    let posture: Awaited<ReturnType<StackVerify['runPosture']>> | undefined;
+    let postureWarns = 0;
+    if (flags.full && !flags['health-only']) {
+      posture = await this.runPosture(flags);
+      postureWarns = [...posture.result.posture, ...posture.result.freshness].filter(
+        (l) => l.level === 'warn',
+      ).length;
+    }
+
+    const passed = reports.every((r) => r.passed);
+
+    if (flags['output-json']) {
+      this.log(
+        JSON.stringify(
+          {
+            slots: reports.map((r) => ({
+              slot: r.slot,
+              project: r.project,
+              services: r.rows.map((row) => ({ id: row.id, url: row.url, ok: row.ok, status: row.status ?? null })),
+              notCloned: r.notCloned.map((n) => ({ id: n.id, repo: n.repo, repoDir: n.repoDir })),
+              data: r.data ? { checks: r.data.checks, notes: r.data.notes, passed: r.data.passed } : null,
+              summary: { total: r.rows.length, up: r.up, down: r.rows.length - r.up },
+              passed: r.passed,
+            })),
+            posture: posture
+              ? {
+                  overlayPresent: posture.overlayPresent,
+                  warnings: postureWarns,
+                  posture: posture.result.posture,
+                  freshness: posture.result.freshness,
+                }
+              : null,
+            activeSlots: active.map((p) => p.slot),
+            passed,
+          },
+          null,
+          2,
+        ),
+      );
+    } else if (flags.porcelain) {
+      for (const r of reports) {
+        for (const row of r.rows) this.log(`s${r.slot}.${row.id}=${row.ok ? 'up' : 'down'}`);
+        for (const n of r.notCloned) this.log(`s${r.slot}.${n.id}=not-cloned`);
+        if (r.data) for (const c of r.data.checks) this.log(`s${r.slot}.${c.id}=${c.ok ? 'ok' : 'fail'}`);
+        this.log(`s${r.slot}.passed=${r.passed}`);
+      }
+      this.log(`activeSlots=${active.map((p) => p.slot).join(',')}`);
+      this.log(`passed=${passed}`);
+    } else {
+      for (const r of reports) {
+        this.log(
+          cyan(bold(`── slot ${r.slot} (${r.project}) — ${r.passed ? green('green') : red('red')} — ${r.up}/${r.rows.length} up ──`)),
+        );
+        for (const row of r.rows) this.log(formatRow(row));
+        for (const n of r.notCloned) {
+          this.log(`⚠ ${n.id.padEnd(16)} ${n.repoDir}  (not cloned: ${n.repo} repo not present)`);
+        }
+        if (r.data) {
+          for (const c of r.data.checks) this.log(`  ${c.ok ? green('✓') : red('✗')} ${dim(c.label)}`);
+          for (const note of r.data.notes) this.log(dim(`  · ${note}`));
+        }
+      }
+      if (posture) {
+        this.log(cyan(bold('── source posture (shared checkouts) ──')));
+        if (!posture.overlayPresent) {
+          this.log(dim('· no local overlay — asserting every managed repo on origin/main'));
+        }
+        for (const l of posture.result.posture) this.log(renderPostureLine(l));
+        this.log(cyan(bold('── freshness (behind origin) ──')));
+        for (const l of posture.result.freshness) this.log(renderPostureLine(l));
+      }
+      const failed = reports.filter((r) => !r.passed);
+      const warnSuffix = postureWarns > 0 ? yellow(` (${postureWarns} posture warning(s) — see ⚠ above)`) : '';
+      this.log(
+        passed
+          ? green(bold(`✓ verify --all-slots: ${reports.length}/${reports.length} active slot(s) green`)) + warnSuffix
+          : red(
+              bold(
+                `✗ verify --all-slots: ${failed.length}/${reports.length} active slot(s) failing — slot(s) ${failed
+                  .map((r) => r.slot)
+                  .join(', ')}`,
+              ),
+            ) + warnSuffix,
+      );
+    }
+
+    if (!passed) this.exit(1);
+  }
+
+  /**
+   * Health-gate one slot: probe its full required (non-optional) service set on that
+   * slot's offset ports, dropping the slot's excluded literal-port services at slot > 0
+   * (they aren't brought up there). A service whose sibling repo isn't cloned is reported
+   * not-cloned, not failed — matching `stack up`'s skip guard.
+   */
+  private async probeSlotHealth(
+    flags: AllSlotsFlags,
+    profile: InstanceProfile,
+  ): Promise<{ rows: VerifyRow[]; notCloned: ReturnType<typeof partitionByRepoPresence>['notCloned'] }> {
+    const excluded = new Set(profile.excludedServices);
+    let ids = Object.values(manifest.services)
+      .filter((s) => !s.optional)
+      .map((s) => s.id);
+    if (profile.slot > 0) ids = ids.filter((id) => !excluded.has(id));
+
+    const ctx = repoContextFromFlags(flags as unknown as Record<string, unknown>);
+    const { probe, notCloned } = partitionByRepoPresence(ids, ctx, this.getRepoDirCheck());
+    const probes = healthProbes(manifest, probe, profile.portOverrides);
+    const prober = this.getProber();
+    const rows = await Promise.all(
+      probes.map(async (p): Promise<VerifyRow> => {
+        const r = await prober.probe(p.url);
+        return { id: p.id, url: p.url, ok: r.ok, status: r.status, tolerated: false };
+      }),
+    );
+    return { rows, notCloned };
+  }
+
+  /** Health (+ DATA under --full) for one slot, folded into a pass/fail `SlotReport`. */
+  private async checkSlot(flags: AllSlotsFlags, profile: InstanceProfile): Promise<SlotReport> {
+    const { rows, notCloned } = await this.probeSlotHealth(flags, profile);
+    const up = rows.filter((r) => r.ok).length;
+    const data = flags.full ? await this.withSlotEnv(profile, () => this.readSlotData()) : undefined;
+    const passed = up === rows.length && (!data || data.passed);
+    return { slot: profile.slot, project: profile.project, rows, notCloned, data, up, passed };
+  }
+
+  /**
+   * Gather + assess the native DATA checks (D1–D5) against the mesh containers CURRENTLY
+   * selected by `process.env` (`SAGA_MESH_*_CONTAINER`). At slot 0 those resolve to the base
+   * `soa-*` containers; under `--all-slots` the caller wraps this in `withSlotEnv` so it hits
+   * that slot's `soa-s<N>-*` mesh. IO-only (the pg/mesh seams); the pure verdict is `assessData`.
+   */
+  private async readSlotData(): Promise<DataAssessment> {
+    const pg = this.getPgProbe();
+    const meshExec = this.getMeshExec();
+    const pgContainer = meshContainer(getMesh('postgres', manifest));
+    const mongo = getMesh('connect-mongo', manifest);
+    const mongoContainer = meshContainer(mongo);
+    const readings: DataReadings = {
+      usersRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.users),
+      devIdRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.devId),
+      adminPersonasRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.adminPersonas),
+      sisMigrated: await pg.hasMigrationsTable(pgContainer, 'sis_db'),
+      mongoReachable: await meshExec.ready(mongoContainer, mongo.readinessCmd),
+    };
+    return assessData(readings);
+  }
+
+  /**
+   * Run `fn` with ONLY this slot's mesh/snapshot env applied, restoring the prior values
+   * afterwards — so an all-slots sweep reads each slot's OWN `soa-s<N>-*` containers without
+   * leaking one slot's `SAGA_MESH_*_CONTAINER` into the next. Slot 0 carries an empty
+   * container env, so `applyInstanceEnv` alone would NOT clear a prior slot's keys; we
+   * snapshot + delete the fixed `INSTANCE_ENV_KEYS` set first, then restore in a `finally`.
+   */
+  private async withSlotEnv<T>(profile: InstanceProfile, fn: () => Promise<T>): Promise<T> {
+    const saved = new Map<string, string | undefined>();
+    for (const k of INSTANCE_ENV_KEYS) {
+      saved.set(k, process.env[k]);
+      delete process.env[k];
+    }
+    this.applyInstanceEnv(profile);
+    try {
+      return await fn();
+    } finally {
+      for (const k of INSTANCE_ENV_KEYS) {
+        const v = saved.get(k);
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   }
 
   /**
@@ -336,6 +558,32 @@ interface VerifyRow {
   ok: boolean;
   status?: number;
   tolerated: boolean;
+}
+
+/** The subset of parsed verify flags the `--all-slots` path reads. */
+interface AllSlotsFlags {
+  full: boolean;
+  'health-only': boolean;
+  'output-json': boolean;
+  porcelain: boolean;
+  only?: string;
+  with?: string[];
+  dev: string;
+  soa?: string;
+  slot: number;
+  set?: string;
+}
+
+/** One active slot's folded health (+ optional DATA) verdict. */
+interface SlotReport {
+  slot: number;
+  project: string;
+  rows: VerifyRow[];
+  notCloned: ReturnType<typeof partitionByRepoPresence>['notCloned'];
+  data?: DataAssessment;
+  /** Count of health rows that answered up. */
+  up: number;
+  passed: boolean;
 }
 
 /** Human line, with a `(tolerated)` annotation for a down-but-tolerated service. */

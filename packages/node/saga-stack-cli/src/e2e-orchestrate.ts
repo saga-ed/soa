@@ -64,6 +64,7 @@ import {
   repoOverridesFromFlags,
   resolveRepoRoot,
   resolveVendorScript,
+  generateSlotFleetConfig,
 } from './runtime/index.js';
 import type {
   DashFs,
@@ -239,6 +240,24 @@ export function buildStackContext(
   // rtsm-api's non-tunnel FLEET_CONFIG_PATH reads `${VENDOR_DIR}/rtsm-fleet-local.json`;
   // point VENDOR_DIR at the CLI's VENDORED copy (Phase-2 DECOUPLING), NOT tools/synthetic-dev.
   const vendorDir = dirname(resolveVendorScript('rtsm-fleet-local.json'));
+  // soa#271: at slot > 0, generate a per-slot rtsm fleet (browser-visible endpoint =
+  // the SLOT's rtsm host) and route it via RTSM_FLEET_PATH, so connect-web's browser
+  // CRDT/realtime reaches THIS slot's rtsm, not slot 0's. `e2e run` assembles the
+  // runtime HERE (not via BaseCommand.buildRuntime — the flagged duplication), so the
+  // generation must be mirrored. Best-effort: a null keeps the vendored fleet.
+  let rtsmFleetPath: string | undefined;
+  if (profile.slot > 0) {
+    const rtsmPort = profile.portOverrides['rtsm-api'];
+    const stateDir = (flags['state-dir'] as string | undefined) ?? profile.stateDir;
+    if (rtsmPort !== undefined) {
+      rtsmFleetPath =
+        generateSlotFleetConfig({
+          localFleetPath: resolveVendorScript('rtsm-fleet-local.json'),
+          outPath: `${stateDir}/rtsm-fleet-s${profile.slot}.json`,
+          endpoint: `localhost:${rtsmPort}`,
+        }) ?? undefined;
+    }
+  }
   // Thread the slot's port-override map + mesh offset (byte-identical base context
   // at slot 0 — `deriveInstance` guarantees slot-0 overrides resolve the defaults).
   const launchContext = defaultLaunchContext({
@@ -248,6 +267,7 @@ export function buildStackContext(
     meshOffset: profile.meshOffset,
     pinoLevel: process.env.PINO_LOGGER_LEVEL,
     pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
+    rtsmFleetPath,
   });
 
   const runtime: Runtime = {
@@ -362,6 +382,11 @@ export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = O
   PLAYWRIGHT_SESSIONS_URL: 'sessions-api',
   PLAYWRIGHT_ADS_ADM_URL: 'ads-adm-api',
   PLAYWRIGHT_CONNECT_URL: 'connect-web',
+  // soa#271 Phase B: the connect-api INGRESS base (telemetry producer, :6106) — distinct
+  // from PLAYWRIGHT_CONNECT_URL (connect-web browser origin, :6210). Carries the slot
+  // offset onto the ingress so a slotted telemetry-dosage run pings the SLOT's connect-api.
+  // Consumed by saga-dash e2e/fixtures/lane.ts `CONNECT_API_URL`.
+  PLAYWRIGHT_CONNECT_API_URL: 'connect-api',
 });
 
 /**
@@ -485,7 +510,7 @@ export interface DescribeOptions {
   ports?: Partial<Record<ServiceId, number>>;
   /**
    * Services excluded from THIS slot's closure (`profile.excludedServices`) — the
-   * literal-port + connect frontends that would collide with slot 0. Empty at slot 0.
+   * literal-port playback-trio backends that would collide with slot 0. Empty at slot 0.
    */
   excluded?: Set<ServiceId>;
 }
@@ -501,7 +526,7 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
   // computeEnv), so occurrenceDate reads from it instead of recomputing.
   const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports);
   const effectiveReset = resolved.reset && !opts.skipReset;
-  // Drop the slot's excluded services (literal-port + connect frontends) from the
+  // Drop the slot's excluded services (literal-port playback-trio backends) from the
   // closure so the dry-run matches what a `--slot N` run actually brings up. Empty
   // set at slot 0 ⇒ the full closure, byte-identical.
   const excluded = opts.excluded ?? new Set<ServiceId>();
@@ -691,7 +716,7 @@ export async function executeResolvedFlow(
 ): Promise<number> {
   const m = deps.manifest ?? serviceManifest;
 
-  // Drop this slot's excluded services (literal-port + connect frontends that would
+  // Drop this slot's excluded services (literal-port playback-trio backends that would
   // collide with slot 0) from the closure BEFORE up/reset/seed/verify. Empty set at
   // slot 0 ⇒ the full closure, byte-identical.
   const excluded = deps.excluded ?? new Set<ServiceId>();

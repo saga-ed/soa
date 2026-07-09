@@ -143,6 +143,11 @@ export interface LaunchTokens {
   /** The CLI's VENDORED-scripts dir — holds `rtsm-fleet-local.json` (rtsm's non-tunnel
    *  `FLEET_CONFIG_PATH`). Replaces up.sh's `$SCRIPT_DIR`/synthetic-dev tool dir. */
   VENDOR_DIR: string;
+  /** rtsm-api `FLEET_CONFIG_PATH` — the fleet file whose `nodes.local.endpoint` the
+   *  browser discovers. The vendored `${VENDOR_DIR}/rtsm-fleet-local.json` (endpoint
+   *  :6110) at slot 0; a GENERATED per-slot file (endpoint `localhost:<6110+offset>`)
+   *  at slot > 0 so a slot's realtime/CRDT socket reaches the SLOT's rtsm (soa#271). */
+  RTSM_FLEET_PATH: string;
 
   // ── global launch env (up.sh services_up `export`s these ONCE, ~1384-1385, so
   //    every `pnpm dev` child inherits them; soa-logger/soa-config validate them
@@ -469,6 +474,10 @@ export interface LaunchContextInputs {
    *  passes `dirname(resolveVendorScript('rtsm-fleet-local.json'))`. Replaces up.sh's
    *  `$SCRIPT_DIR`/synthetic-dev tool dir for rtsm's non-tunnel FLEET_CONFIG_PATH. */
   vendorDir: string;
+  /** Absolute path to a GENERATED per-slot rtsm fleet file (endpoint swapped to the
+   *  slot's rtsm port). Absent ⇒ `RTSM_FLEET_PATH` defaults to the vendored file
+   *  (slot 0, byte-identical). Set by `up` at slot > 0 (soa#271). */
+  rtsmFleetPath?: string;
   /** `SAGA_API_TARGET` override (up.sh honours `$SAGA_API_TARGET`; default https://wootmath.com). */
   sagaApiTarget?: string;
   /** Per-service port overrides (e.g. a `check_ports` remap); defaults to the manifest port. */
@@ -581,6 +590,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     RECORDING_TOKEN: 'local-dev-token',
     DEV_USER_UUID: 'f0000004-0000-4000-8000-00000000beef',
     VENDOR_DIR: inputs.vendorDir,
+    RTSM_FLEET_PATH: inputs.rtsmFleetPath ?? `${inputs.vendorDir}/rtsm-fleet-local.json`,
 
     // global launch env (up.sh `:-` defaults; runtime may pass ambient overrides)
     PINO_LOGGER_LEVEL: inputs.pinoLevel ?? 'info',

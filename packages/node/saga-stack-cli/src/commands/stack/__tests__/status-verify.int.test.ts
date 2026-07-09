@@ -385,38 +385,30 @@ describe('stack verify --full — FULLY NATIVE: health + DATA + posture, NOTHING
 });
 
 describe('stack verify --slot N — backend + saga-dash/coach gate on offset ports (M7 Phase 2)', () => {
-  // Still excluded at slot > 0 (non-optional): the literal-port connect-api +
-  // connect-web (depends on it). saga-dash/coach-web are NO LONGER excluded —
-  // they listen on their offset port now — and neither is ads-adm-api
-  // (tokenized env + EXPRESS_SERVER_PORT listen-port injection).
-  const EXCLUDED = ['connect-api', 'connect-web'] as const;
-
-  it('slot > 0 excludes only the un-slottable backends + connect-web; gates saga-dash/coach on offset ports', async () => {
+  // No NON-optional service is excluded at slot>0 anymore (soa#271): connect-api AND
+  // connect-web are slottable (sessions dial tokenized; shared slot-0 livekit + per-slot
+  // rtsm fleet), as are saga-dash/coach-web (offset --port) and ads-adm-api. Only the
+  // literal-port playback trio stays excluded, and it's optional (pulled by --with
+  // playback), so it's not in the default probe set at all.
+  it('slot > 0 gates every non-optional service — backends + connect-api/connect-web + saga-dash/coach — on offset ports', async () => {
     await StackVerify.run(['--slot', '1', ...WS], config);
     const profile = deriveInstance({ slot: 1 });
-
-    // the excluded services (literal-port backends + connect-web) are NOT gated — at
-    // slot > 0 they aren't brought up, so gating them would always read down.
-    for (const id of EXCLUDED) {
-      const url = `http://localhost:${profile.portOverrides[id]}${manifest.services[id].healthPath}`;
-      expect(probed).not.toContain(url);
-    }
 
     // the backend services ARE probed, on the +1000 offset port.
     const iamUrl = `http://localhost:${profile.portOverrides['iam-api']}${manifest.services['iam-api'].healthPath}`;
     expect(probed).toContain(iamUrl);
     expect(iamUrl).toContain(`:${manifest.services['iam-api'].port + 1000}`);
 
-    // the saga-dash + coach-web frontends ARE gated now, on their offset ports —
-    // and so is ads-adm-api (slottable: gated on :6005, its own slot's port).
-    for (const id of ['saga-dash', 'coach-web', 'ads-adm-api'] as const) {
+    // every frontend + slottable backend is gated now on its offset port —
+    // saga-dash/coach-web/connect-web frontends + ads-adm-api + connect-api.
+    for (const id of ['saga-dash', 'coach-web', 'connect-web', 'ads-adm-api', 'connect-api'] as const) {
       const url = `http://localhost:${profile.portOverrides[id]}${manifest.services[id].healthPath}`;
       expect(probed).toContain(url);
       expect(url).toContain(`:${manifest.services[id].port + 1000}`);
     }
 
-    // exactly the slottable set: 13 non-optional minus the 2 still-excluded = 11.
-    expect(probed).toHaveLength(11);
+    // the full non-optional set is slottable now: all 13 are probed.
+    expect(probed).toHaveLength(13);
   });
 
   it('slot 0 verify is byte-identical: probes every non-optional service on base ports', async () => {

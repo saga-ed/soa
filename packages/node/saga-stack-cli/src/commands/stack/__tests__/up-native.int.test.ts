@@ -368,11 +368,15 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     // … ads-adm-api is slottable now (tokenized env + EXPRESS_SERVER_PORT
     // injection) and launches in-slot …
     expect(ids).toContain('ads-adm-api');
-    // … but the still-un-slottable services are dropped from the slot bring-up:
-    // connect-web (depends on the un-tokenized connect-api) …
+    // … connect-api is slottable now (soa#271) but is NOT in THIS closure: nothing in
+    // `--only saga-dash --with playback` reaches connect-api (saga-dash has no connect-*
+    // dependency edge at all). It launches in-slot only when it's actually in the
+    // closure — see the bare full-stack --slot 1 test below (non-optional set includes it).
+    expect(ids).not.toContain('connect-api');
+    // … and the still-un-slottable services are dropped from the slot bring-up:
+    // connect-web (a real Connect room needs slot-0-only livekit) …
     expect(ids).not.toContain('connect-web');
     // … and the literal-port backends (bypass the offset).
-    expect(ids).not.toContain('connect-api');
     expect(ids).not.toContain('transcripts-api');
     expect(ids).not.toContain('insights-api');
     expect(ids).not.toContain('chat-api');
@@ -413,8 +417,9 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     // never resolved/ran the up.sh wrapper.
     expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
 
-    // launched natively — the backend set + saga-dash/coach frontends present, the
-    // still-un-slottable services (literal-port backends + connect) are not.
+    // launched natively — the backend set + saga-dash/coach frontends + connect-api
+    // present; the still-un-slottable services (literal-port backends + connect-web)
+    // are not.
     const ids = launches.map((s) => s.id);
     expect(ids.length).toBeGreaterThan(0);
     expect(ids).toContain('iam-api');
@@ -422,8 +427,8 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     expect(ids).toContain('saga-dash'); // frontend now slottable via --port
     expect(ids).toContain('coach-web');
     expect(ids).toContain('ads-adm-api'); // slottable (tokenized env + port injection)
-    expect(ids).not.toContain('connect-api');
-    expect(ids).not.toContain('connect-web');
+    expect(ids).toContain('connect-api'); // slottable now (soa#271: sessions dial tokenized)
+    expect(ids).toContain('connect-web'); // slottable now (soa#271: offset --port + SHARED slot-0 livekit)
 
     // mesh came up under the slot project on offset ports (soa-s1, +1000).
     const makeUp = runs.find((r) => r.command === 'make');

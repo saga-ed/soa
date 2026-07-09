@@ -180,3 +180,52 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     expect(env.CORS_ORIGIN).toBe('http://localhost:8900');
   });
 });
+
+describe('connect-api slottability — sessions dial tokenized (soa#271); AV literals stay slot-0', () => {
+  const slotCtx = (slot: number) => {
+    const p = deriveInstance({ slot });
+    return defaultLaunchContext({
+      ...baseInputs,
+      portOverrides: p.portOverrides,
+      meshOffset: p.meshOffset,
+    });
+  };
+
+  it('slot 2: listens on 8106 and dials the SLOT sessions-api (:5007), never slot 0 (:3007)', () => {
+    const env = resolveLaunchEnv('connect-api', 'stack', slotCtx(2));
+    expect(env.PORT).toBe(String(manifest.services['connect-api'].port + 2000)); // 6106 + 2000
+    expect(env.SESSIONS_API_BASE_URL).toBe('http://localhost:5007'); // 3007 + 2000 — the fix
+    expect(env.SESSIONS_API_BASE_URL).not.toContain(':3007');
+    expect(portOf(env.RABBITMQ_URL)).toBe(getMesh('rabbitmq').port + 2000); // shared broker with ads-adm-api
+    // no stateful slot-0 base-port literal survives. NOTE: livekit/FLEEK ws:7880
+    // stays literal BY DESIGN (AV is slot-0-gated), so 7880 is intentionally absent here.
+    for (const v of Object.values(env)) {
+      expect(v).not.toMatch(/localhost:(3007|3010|5432|5672|8900)\b/);
+    }
+    // the AV literal is deliberately preserved (not tokenized) — proves scope.
+    expect(env.LIVEKIT_URL).toBe('ws://localhost:7880');
+  });
+
+  it('slot 0: byte-identical — sessions dial stays :3007', () => {
+    const env = resolveLaunchEnv('connect-api', 'stack', slotCtx(0));
+    expect(env.PORT).toBe(String(manifest.services['connect-api'].port)); // 6106
+    expect(env.SESSIONS_API_BASE_URL).toBe('http://localhost:3007');
+    expect(env.LIVEKIT_URL).toBe('ws://localhost:7880');
+  });
+});
+
+describe('rtsm-api per-slot fleet (soa#271) — browser CRDT reaches the SLOT rtsm, not slot 0', () => {
+  it('slot 0 / no override: FLEET_CONFIG_PATH is the vendored fleet (byte-identical)', () => {
+    const env = resolveLaunchEnv('rtsm-api', 'stack', defaultLaunchContext(baseInputs));
+    expect(env.FLEET_CONFIG_PATH).toBe('/w/vendor/rtsm-fleet-local.json');
+  });
+
+  it('slot > 0: FLEET_CONFIG_PATH is the injected per-slot fleet file (endpoint = slot rtsm host)', () => {
+    // `up` at slot > 0 generates <stateDir>/rtsm-fleet-s2.json with endpoint
+    // localhost:8110 and threads its path in as rtsmFleetPath; the manifest's
+    // ${RTSM_FLEET_PATH} then resolves to it (not the :6110 vendored fleet).
+    const ctx = defaultLaunchContext({ ...baseInputs, rtsmFleetPath: '/tmp/sds-synthetic-s2/rtsm-fleet-s2.json' });
+    const env = resolveLaunchEnv('rtsm-api', 'stack', ctx);
+    expect(env.FLEET_CONFIG_PATH).toBe('/tmp/sds-synthetic-s2/rtsm-fleet-s2.json');
+  });
+});

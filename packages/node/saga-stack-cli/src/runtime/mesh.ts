@@ -52,8 +52,14 @@ import type { PortConflict, PortProbe } from './preflight.js';
  * no per-service filter (confirmed in `infra/Makefile`) — profiles are the only
  * way to keep it out of every OTHER `stack up`'s footprint without touching the
  * shared Makefile that every project's mesh depends on.
+ *
+ * Keyed by mesh unit id, valued by the compose `profiles:` name that unit's
+ * service definition actually carries (`../services/openfga/compose.yml` uses
+ * `profiles: ["authz"]`, NOT `["openfga"]` — the unit id and the compose
+ * profile name are independent strings, so this map, not the unit id itself,
+ * is what `COMPOSE_PROFILES` must be built from).
  */
-const PROFILE_GATED_MESH: ReadonlySet<MeshId> = new Set<MeshId>(['openfga']);
+const PROFILE_GATED_MESH: ReadonlyMap<MeshId, string> = new Map<MeshId, string>([['openfga', 'authz']]);
 
 /** Strip a `meshPortSpecs` mgmt-port suffix (`'<id>-mgmt'` → `'<id>'`) back to its unit id. */
 function baseUnitId(specName: string): string {
@@ -66,7 +72,7 @@ function baseUnitId(specName: string): string {
  * (`docker exec <container> sh -c '<readinessCmd>'`); a fake answers from a script.
  */
 export interface MeshExec {
-  ready(container: string, readinessCmd: string): Promise<boolean>;
+  ready(container: string, readinessCmd: string, shell?: boolean): Promise<boolean>;
 }
 
 /** Inputs to a native mesh bring-up. */
@@ -235,7 +241,7 @@ export async function meshUp(ctx: MeshContext): Promise<MeshResult> {
   // units the caller's closure needs, so a plain `stack up` (no --with authz)
   // neither preflights their ports nor starts their containers.
   const activeGatedIds = gatedIds.filter((id) => PROFILE_GATED_MESH.has(id));
-  const composeProfiles = activeGatedIds.join(',');
+  const composeProfiles = [...new Set(activeGatedIds.map((id) => PROFILE_GATED_MESH.get(id)))].join(',');
 
   // 1. check_ports preflight (unless the caller already did it) — probe the SLOT's
   // offset ports, and treat the slot's own `soa-s<N>-*` containers as owned (via
@@ -283,7 +289,7 @@ export async function meshUp(ctx: MeshContext): Promise<MeshResult> {
   for (const id of gatedIds) {
     const unit = getMesh(id, m);
     const container = meshContainer(unit);
-    const ready = await pollReady(exec, container, unit.readinessCmd, unit.timeoutSec, ctx.sleep);
+    const ready = await pollReady(exec, container, unit.readinessCmd, unit.shell, unit.timeoutSec, ctx.sleep);
     units.push({ id, container, ok: ready });
     if (!ready) allReady = false;
   }
@@ -296,15 +302,28 @@ async function pollReady(
   exec: MeshExec,
   container: string,
   readinessCmd: string,
+  shell: boolean | undefined,
   timeoutSec: number,
   sleep: (ms: number) => Promise<void> = (ms): Promise<void> =>
     new Promise((r) => setTimeout(r, ms)),
 ): Promise<boolean> {
   for (let attempt = 0; attempt < timeoutSec; attempt += 1) {
-    if (await exec.ready(container, readinessCmd)) return true;
+    if (await exec.ready(container, readinessCmd, shell)) return true;
     await sleep(1000);
   }
   return false;
+}
+
+/**
+ * Pure argv builder for the readiness `docker exec`, split out so the
+ * shell-vs-direct branch is testable without a real docker/child_process.
+ * `shell: false` (openfga's distroless image, no `sh`) execs the
+ * whitespace-split readinessCmd directly — only safe for a command with no
+ * shell metacharacters, which is why it's opt-in per mesh unit, not the
+ * default.
+ */
+export function meshExecArgs(container: string, readinessCmd: string, shell = true): string[] {
+  return shell ? ['exec', container, 'sh', '-c', readinessCmd] : ['exec', container, ...readinessCmd.split(' ')];
 }
 
 /**
@@ -316,9 +335,9 @@ async function pollReady(
  */
 export function makeRealMeshExec(): MeshExec {
   return {
-    ready(container: string, readinessCmd: string): Promise<boolean> {
+    ready(container: string, readinessCmd: string, shell = true): Promise<boolean> {
       return new Promise((resolve) => {
-        execFile('docker', ['exec', container, 'sh', '-c', readinessCmd], (err) => {
+        execFile('docker', meshExecArgs(container, readinessCmd, shell), (err) => {
           resolve(!err);
         });
       });

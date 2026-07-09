@@ -171,6 +171,13 @@ export interface MeshDef {
   mgmtPort?: number;
   /** Shell command that returns 0 when the unit is ready. */
   readinessCmd: string;
+  /**
+   * Run `readinessCmd` via `sh -c` (default true). Set false for a unit whose
+   * image has no `sh` (e.g. openfga's distroless image) — the command is then
+   * split on whitespace and exec'd directly, so it must carry no shell
+   * metacharacters (quoting, pipes, `&&`) to use this.
+   */
+  shell?: boolean;
   /** Max seconds to wait for readiness. */
   timeoutSec: number;
 }

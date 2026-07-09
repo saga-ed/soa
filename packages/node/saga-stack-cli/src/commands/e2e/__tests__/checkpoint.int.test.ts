@@ -22,6 +22,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { BaseCommand } from '../../../base-command.js';
 import type { LaunchSpec, ScriptInvocation, SnapshotIO } from '../../../runtime/index.js';
 import E2eRun from '../run.js';
+import E2eConnect from '../connect.js';
 
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
@@ -29,6 +30,7 @@ const DEV_ROOT = '/fixed/dev';
 
 const CKPT_ROSTER = 'flow-saga-dash-journey-s1-roster';
 const CKPT_PROGRAM = 'flow-saga-dash-journey-s2-program';
+const CKPT_SCHEDULE = 'flow-saga-dash-journey-s5-schedule';
 
 let DASH_ROOT: string;
 let config: Config;
@@ -410,6 +412,45 @@ describe('list surfaces (M14-C)', () => {
     await SnapshotList.run(['--porcelain', ...ws()], config);
     const row = logged.find((l) => l.startsWith(CKPT_PROGRAM));
     expect(row?.split('\t')[5]).toBe('saga-dash/journey@program');
+  });
+});
+
+describe('e2e connect --refresh-snapshot (bake the prerequisite fresh, then restore it)', () => {
+  it('bakes journey 1..schedule (one spawn per stage), restores the fresh checkpoint, then opens interactive-connect headed', async () => {
+    await E2eConnect.run(['--refresh-snapshot', ...ws()], config);
+
+    const pw = playwrightRuns();
+    // 5 bake spawns (journey stages 1..5, headless) + 1 live interactive-connect.
+    expect(pw).toHaveLength(6);
+    // The bake ladder: stage-1 keeps its config deps, stages 2..5 break the chain.
+    expect(pw[0]!.args).toContain('stage-1-roster');
+    expect(pw[4]!.args).toContain('stage-5-schedule');
+    expect(pw[4]!.args).not.toContain('--headed');
+    // The live session is LAST, headed, and the prerequisite was RESTORED (not
+    // replayed) — so there is exactly one stage-5-schedule spawn (the bake's).
+    expect(pw[5]!.args).toContain('interactive-connect');
+    expect(pw[5]!.args).toContain('--headed');
+    expect(pw.filter((r) => r.args.includes('stage-5-schedule'))).toHaveLength(1);
+
+    const out = logged.join('\n');
+    expect(out).toContain('refresh-snapshot: baking journey@schedule');
+    expect(out).toContain('restored from checkpoint (replay skipped)');
+
+    // The freshly baked terminal checkpoint is on disk with the right provenance.
+    const schedule = readCkptManifest(CKPT_SCHEDULE);
+    expect((schedule.flow as Record<string, unknown>).stageId).toBe('schedule');
+  });
+
+  it('--refresh-snapshot --reuse is rejected (reuse strips the prerequisite there is nothing to bake)', async () => {
+    await expect(E2eConnect.run(['--refresh-snapshot', '--reuse', ...ws()], config)).rejects.toThrow(
+      /mutually exclusive/,
+    );
+  });
+
+  it('--refresh-snapshot --no-prereq-from-snapshot is rejected (it would bake but never restore)', async () => {
+    await expect(
+      E2eConnect.run(['--refresh-snapshot', '--no-prereq-from-snapshot', ...ws()], config),
+    ).rejects.toThrow(/needs --prereq-from-snapshot/);
   });
 });
 

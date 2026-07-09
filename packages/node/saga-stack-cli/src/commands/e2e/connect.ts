@@ -23,9 +23,18 @@
  * post-session inspect polish is explicitly DEFERRED — the foreground hold is the
  * Playwright `page.pause()` in the spec, unchanged.
  *
+ * `--refresh-snapshot` bakes the journey prerequisite checkpoints FRESH (a headless
+ * replay through `schedule` with `--snapshot-stages`, i.e. `e2e run
+ * saga-dash/journey --through schedule --snapshot-stages --headless`) BEFORE opening
+ * the room, then the normal run restores that just-made checkpoint. It's the
+ * one-command reseed for when the baked journey@schedule has gone stale (>7d cliff)
+ * or the journey stages changed. Requires the default `--prereq-from-snapshot` (it
+ * bakes so that path can restore); mutually exclusive with `--reuse`.
+ *
  *   node bin/dev.js e2e connect
  *   node bin/dev.js e2e connect --reuse -- --debug
  *   node bin/dev.js e2e connect --fake-media
+ *   node bin/dev.js e2e connect --refresh-snapshot
  */
 
 import { Flags } from '@oclif/core';
@@ -55,6 +64,7 @@ export default class E2eConnect extends BaseCommand {
     '<%= config.bin %> <%= command.id %>',
     '<%= config.bin %> <%= command.id %> --reuse -- --debug',
     '<%= config.bin %> <%= command.id %> --fake-media',
+    '<%= config.bin %> <%= command.id %> --refresh-snapshot',
   ];
 
   // Allow trailing playwright passthrough args (after `--`).
@@ -72,6 +82,11 @@ export default class E2eConnect extends BaseCommand {
       description:
         'M14-C: restore the journey@schedule checkpoint (when a valid one is baked) instead of replaying the whole journey headless — the big Connect-session accelerant. Falls back to the replay when absent/invalid; --reuse trumps this entirely.',
     }),
+    'refresh-snapshot': Flags.boolean({
+      default: false,
+      description:
+        'bake the journey prerequisite checkpoints FRESH (headless replay through `schedule`, --snapshot-stages) BEFORE opening the room, then restore that just-made checkpoint — a one-command reseed for when the baked state has gone stale (>7d) or the journey changed. Deterministic fixtureIds ⇒ the bake overwrites. Requires --prereq-from-snapshot (the default); mutually exclusive with --reuse.',
+    }),
     'spa-path': Flags.string({
       description: 'explicit path to a flows.json (file or dir) — highest-priority discovery override',
     }),
@@ -85,6 +100,19 @@ export default class E2eConnect extends BaseCommand {
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(E2eConnect);
     const passthrough = (argv as string[]).filter((a) => a !== CONNECT_FLOW);
+
+    // --refresh-snapshot bakes the journey prerequisite fresh, then restores it.
+    // --reuse strips the prerequisite entirely (nothing to bake); --no-prereq-from-snapshot
+    // would bake but never restore. Reject both up front (manual, not oclif `exclusive:`,
+    // which treats a defaulted value as provided — the M14 lesson).
+    if (flags['refresh-snapshot']) {
+      if (flags.reuse) {
+        this.error('--refresh-snapshot and --reuse are mutually exclusive: --reuse skips the prerequisite entirely, so there is nothing to bake.');
+      }
+      if (!flags['prereq-from-snapshot']) {
+        this.error('--refresh-snapshot needs --prereq-from-snapshot (the default): it bakes the journey checkpoint so the live session can restore it. Drop --no-prereq-from-snapshot.');
+      }
+    }
 
     const disco = discoverFlowManifest(CONNECT_SPA, flags, process.env);
     if (disco.usedBundledExample) {
@@ -122,11 +150,43 @@ export default class E2eConnect extends BaseCommand {
 
     // M14-C: the checkpoint store so the journey prerequisite can be RESTORED
     // instead of replayed (slot-0 command — no instance env needed; --reuse
-    // strips the prerequisite entirely, so nothing to restore there).
+    // strips the prerequisite entirely, so nothing to restore there). Also
+    // needed for --refresh-snapshot's fresh bake of the same prerequisite.
     const checkpoints =
-      toRun.prerequisite !== undefined && flags['prereq-from-snapshot']
+      toRun.prerequisite !== undefined && (flags['prereq-from-snapshot'] || flags['refresh-snapshot'])
         ? this.getCheckpointStore(this.scriptContextFromFlags(flags))
         : undefined;
+
+    // --refresh-snapshot: bake the prerequisite's stage checkpoints FRESH before the
+    // live session — a headless full replay of journey 1..schedule with --snapshot-stages,
+    // exactly `ss e2e run saga-dash/journey --through schedule --snapshot-stages --headless`.
+    // Deterministic fixtureIds ⇒ the bake OVERWRITES any stale checkpoint; the main run
+    // below then restores the just-made journey@schedule (prereq-from-snapshot path).
+    if (flags['refresh-snapshot'] && toRun.prerequisite !== undefined) {
+      const prereq = toRun.prerequisite;
+      // M14 §2.3 (advisory): stamp the SPA checkout HEAD into the bake so a later
+      // restore can WARN on drift. '' sha (not a git checkout) ⇒ omitted.
+      let spaHead: { sha: string; dirty: boolean } | undefined;
+      const spaRepoRoot = appCwd.slice(0, appCwd.length - resolved.spa.appDir.length - 1);
+      const git = this.getGitRunner();
+      const sha = await git.headSha(spaRepoRoot);
+      if (sha !== '') spaHead = { sha, dirty: (await git.statusPorcelain(spaRepoRoot)).trim() !== '' };
+
+      this.log(
+        `==> refresh-snapshot: baking ${prereq.flow.name}@${prereq.stages.at(-1)?.id} checkpoints (headless replay, --snapshot-stages)…`,
+      );
+      try {
+        const bakeCode = await executeResolvedFlow(
+          prereq,
+          { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), checkpoints },
+          { lane: 'stack', skipReset: false, passthrough: [], snapshotStages: true, prereqFromSnapshot: false, spaHead },
+        );
+        if (bakeCode !== 0) this.error(`--refresh-snapshot: prerequisite bake failed (exit ${bakeCode}).`);
+      } catch (err) {
+        if (err instanceof FlowExecError) this.error(`--refresh-snapshot: ${err.message}`);
+        throw err;
+      }
+    }
 
     try {
       const code = await executeResolvedFlow(

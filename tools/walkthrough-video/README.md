@@ -43,9 +43,12 @@ they're not repeated here.
   a local `.env` — the dev key lives in Secrets Manager (`openai-dev-apikey-W3MunH`,
   us-west-2, account 531314149529). `lib/narrate.mjs` fetches it automatically via
   `aws secretsmanager get-secret-value --profile saga-dev` — **Observer-tier profiles
-  (`saga`, `saga-dev`) are denied `GetSecretValue` on this ARN**; set
-  `WALKTHROUGH_AWS_PROFILE` to a profile with access, or set `OPENAI_API_KEY` directly to
-  bypass Secrets Manager entirely (e.g. a throwaway personal key while iterating).
+  (`saga`, `saga-dev`) are denied `GetSecretValue` on this ARN** by design. For routine
+  iteration, set `OPENAI_API_KEY` directly to bypass Secrets Manager entirely (e.g. a
+  throwaway personal key) rather than reaching for an elevated profile. `WALKTHROUGH_AWS_PROFILE`
+  does let you point at a profile with access (e.g. `saga-admin-{dev,prod}`), but that's
+  break-glass — reserve it for an official narrated render, not day-to-day authoring, per
+  the tier-ladder norms in the repo owner's global CLAUDE.md.
 - For a **free/zero-credential iteration tier**, prefer `SKIP_NARRATE=1` (silent render —
   proves out action timing/selectors without any TTS call) over `TTS_ENGINE=edge`. The
   `edge` engine (unofficial `edge-tts` npm wrapper around Microsoft's read-aloud API) is
@@ -76,7 +79,19 @@ FORCE=1        node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash
 persona — omit it to log in as `ss`'s own default (`dev@saga.org`).
 
 Output lands at `walkthroughs/<app>/<feature>/video/walkthrough.mp4` (+ `-vp9.webm` sidecar,
-`.srt`).
+`.srt`). The `.srt` is also muxed into the MP4 itself as a selectable soft-subtitle track
+(`mov_text`) — captions work whether or not the `.srt` sidecar travels with the file. The
+`-vp9.webm` sidecar has no embedded captions (the container doesn't support `mov_text`);
+pair it with the `.srt` sidecar if you distribute that variant.
+
+**Mutating walkthroughs need a reset between runs.** A script like `program-creation` has
+a precondition (here: zero programs in the org) that its own first action changes. Run it
+twice against the same persona without resetting in between and the second recording drives
+whatever page the app lands on now — not the one the script expects — with no error, just a
+silently wrong video. Before re-recording a mutating walkthrough: `ss stack reset && ss stack seed`,
+or switch to a not-yet-used persona. This applies on the local stack same as the sandbox lane
+(see the "Known constraint" note below) — a persona is "clean" only until the first successful
+run through it.
 
 ## Recording against a deployed sandbox composition
 
@@ -185,9 +200,9 @@ Not built in this pass, but straightforward given the engine/data split:
 
 - A new `adapters/<app>.mjs` + `walkthroughs/<app>/<feature>/steps.mjs` is all a new
   app/feature needs — no engine changes.
-- Multi-voice narration, a background music bed, burned-in captions, multiple output
-  resolutions — see the original doc's "Extending the pipeline" section for the shape of
-  each; none are implemented here yet.
+- Multi-voice narration, a background music bed, burned-in (as opposed to the current
+  soft/selectable) captions, multiple output resolutions — see the original doc's
+  "Extending the pipeline" section for the shape of each; none are implemented here yet.
 - Folding this into `saga-stack-cli` proper as `ss demo record <spa>/<feature>`, once this
   standalone tool has proven itself on a few real walkthroughs.
 - Push-button cloud rendering (Fargate + headless Chromium) — viable, not designed here;

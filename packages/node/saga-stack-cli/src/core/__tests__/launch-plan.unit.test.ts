@@ -168,7 +168,13 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   });
 
   it('saga-dash', () => {
-    expect(env('saga-dash')).toEqual({ VITE_ADS_ADM_REAL: 'true', VITE_SESSION_MEASURED: 'true' });
+    // VITE_ENABLE_OVERRIDES added in soa#271 LAYER 3 (dc1e85d) — the ?mode=session
+    // dev override gate; services.ts sets it unconditionally on the stack dash.
+    expect(env('saga-dash')).toEqual({
+      VITE_ADS_ADM_REAL: 'true',
+      VITE_SESSION_MEASURED: 'true',
+      VITE_ENABLE_OVERRIDES: 'true',
+    });
   });
 
   it('connect-api (incl. RABBITMQ_URL — main up.sh:1614)', () => {

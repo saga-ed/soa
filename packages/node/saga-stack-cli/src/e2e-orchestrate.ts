@@ -434,6 +434,13 @@ export function playwrightEnv(
    * `PLAYWRIGHT_*_URL` keys.
    */
   dateOverrides?: Record<string, string>,
+  /**
+   * Exploratory-review capture (`e2e run --capture`, docs/e2e-review.md):
+   * inject `PLAYWRIGHT_CAPTURE=all`, the knob the SPA's stack config already
+   * honours (per-action trace + video on EVERY test, not just retried
+   * failures). Omitted (default) ⇒ the env is byte-identical to today.
+   */
+  capture?: boolean,
 ): Record<string, string> {
   // The date env (with `flow.env` merged LAST inside `computeEnv`) comes first, so
   // a flow's own env keeps winning for the occurrence-date clamp. Then, on the
@@ -447,6 +454,7 @@ export function playwrightEnv(
     ...computeEnv(resolved.flow, now),
     ...(dateOverrides ?? {}),
     ...(lane === 'stack' && ports ? serviceUrlEnv(ports) : {}),
+    ...(capture === true ? { PLAYWRIGHT_CAPTURE: 'all' } : {}),
   };
   if (lane !== 'stack') env.PLAYWRIGHT_LANE = lane;
   return env;
@@ -513,6 +521,8 @@ export interface DescribeOptions {
    * literal-port playback-trio backends that would collide with slot 0. Empty at slot 0.
    */
   excluded?: Set<ServiceId>;
+  /** Exploratory-review capture (`--capture`) — surfaces PLAYWRIGHT_CAPTURE in the projected env. */
+  capture?: boolean;
 }
 
 /**
@@ -524,7 +534,7 @@ export interface DescribeOptions {
 export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions): ResolvedFlowDescription {
   // Computed ONCE; `env` below carries the same date keys (playwrightEnv wraps
   // computeEnv), so occurrenceDate reads from it instead of recomputing.
-  const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports);
+  const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports, undefined, opts.capture);
   const effectiveReset = resolved.reset && !opts.skipReset;
   // Drop the slot's excluded services (literal-port playback-trio backends) from the
   // closure so the dry-run matches what a `--slot N` run actually brings up. Empty
@@ -577,9 +587,10 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
           ...opts,
           passthrough: [],
           skipReset: false,
-          // --to/--hold apply to the MAIN flow only, never the prerequisite build.
+          // --to/--hold/--capture apply to the MAIN flow only, never the prerequisite build.
           to: undefined,
           hold: false,
+          capture: undefined,
         })
       : null,
     checkpoint: resolved.checkpoint
@@ -663,6 +674,23 @@ export interface ExecDeps {
    * (the second caller, `e2e connect`, never sets it).
    */
   checkpoints?: CheckpointStore;
+  /**
+   * Exploratory-review preservation hook (docs/e2e-review.md): called after
+   * EVERY Playwright spawn that warrants preservation — every spawn of a
+   * `--capture` run, and any RED spawn regardless (whatever artifacts exist:
+   * retry traces, failure screenshots, error context). Playwright wipes
+   * test-results/ at the next run's start, so this must fire per spawn (the
+   * per-stage ladder and a prerequisite's replay each wipe the previous
+   * spawn's artifacts). Rides down the prerequisite recursion via `deps`, so
+   * a red prerequisite replay is preserved too. Absent ⇒ no preservation
+   * (the second caller, `e2e connect`, never sets it).
+   */
+  preserveTraces?: (frame: {
+    appCwd: string;
+    spaId: string;
+    flowName: string;
+    stages: readonly { id: string; project: string }[];
+  }) => void | Promise<void>;
 }
 
 /** Per-run knobs. */
@@ -693,6 +721,14 @@ export interface ExecOptions {
    * true at the command layer (`--no-prereq-from-snapshot` opts out).
    */
   prereqFromSnapshot?: boolean;
+  /**
+   * Exploratory-review capture (`--capture`): inject `PLAYWRIGHT_CAPTURE=all`
+   * into the Playwright child and preserve EVERY spawn's artifacts (not just
+   * red ones). Kept in OPTIONS so the prerequisite recursion (which rebuilds
+   * opts) never inherits it — a prerequisite is a build step, not the thing
+   * under review; its red spawns are still preserved via the deps hook.
+   */
+  capture?: boolean;
 }
 
 /**
@@ -898,7 +934,7 @@ export async function executeResolvedFlow(
         [ENV_TERM_END]: restoredDates.termEnd,
       }
     : undefined;
-  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports, dateOverrides);
+  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports, dateOverrides, opts.capture);
 
   const spawn = async (stage?: { project: string; noDeps: boolean }): Promise<number> => {
     const argv = playwrightArgv(resolved, opts.passthrough, stage);
@@ -913,12 +949,31 @@ export async function executeResolvedFlow(
     return code;
   };
 
+  // Exploratory-review preservation (docs/e2e-review.md): after EVERY spawn a
+  // --capture run made, and after any RED spawn regardless (the failure
+  // artifacts Playwright would wipe at the next run's start). Must run per
+  // spawn — the per-stage ladder and any later spawn wipe test-results/.
+  const preserveAfter = async (code: number): Promise<void> => {
+    if (deps.preserveTraces === undefined) return;
+    if (opts.capture !== true && code === 0) return;
+    await deps.preserveTraces({
+      appCwd: deps.appCwd,
+      spaId: resolved.spa.id,
+      flowName: resolved.flow.name,
+      stages: resolved.stages.map((s) => ({ id: s.id, project: s.project })),
+    });
+  };
+
   // Default path: ONE spawn with the terminal project — Playwright's config-side
   // dependency chain replays 1..N (byte-identical to pre-M14). The per-stage
   // ladder exists ONLY for M14: baking needs a checkpoint between stages, and a
   // --from window must NOT let the dependency chain replay the restored prefix.
   const perStage = opts.snapshotStages === true || resolved.checkpoint !== undefined;
-  if (!perStage) return spawn();
+  if (!perStage) {
+    const code = await spawn();
+    await preserveAfter(code);
+    return code;
+  }
 
   if (opts.snapshotStages === true && deps.checkpoints === undefined) {
     throw new FlowExecError('--snapshot-stages requires the checkpoint store (internal wiring error)');
@@ -931,6 +986,7 @@ export async function executeResolvedFlow(
     // chain (--no-deps) so earlier stages are never replayed.
     const isFlowFirst = resolved.flow.stages[0]?.id === stage.id;
     const code = await spawn({ project: stage.project, noDeps: !isFlowFirst });
+    await preserveAfter(code);
     if (code !== 0) {
       // No checkpoint for a red stage — and stop the ladder (later checkpoints
       // would capture state the failed stage never produced).

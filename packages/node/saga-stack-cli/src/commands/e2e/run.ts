@@ -33,6 +33,9 @@ import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
 import type { Lane } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
+import { reviewBlockLines, runIdFrom } from '../../core/e2e-review.js';
+import type { PreservedRunRecord } from '../../core/e2e-review.js';
+import { preserveSpawnArtifacts } from '../../runtime/index.js';
 import { makeStackApi } from '../../stack-api.js';
 import {
   buildStackContext,
@@ -54,6 +57,7 @@ export default class E2eRun extends BaseCommand {
     '<%= config.bin %> <%= command.id %> journey --through pods --dry-run',
     '<%= config.bin %> <%= command.id %> saga-dash/journey --through 2 --headless',
     '<%= config.bin %> <%= command.id %> journey --skip-reset -- --debug',
+    '<%= config.bin %> <%= command.id %> saga-dash/periods-ordering --capture --headless',
   ];
 
   // One required positional ([<spa>/]<flow>) + trailing playwright passthrough (after `--`).
@@ -126,6 +130,13 @@ export default class E2eRun extends BaseCommand {
     'dry-run': Flags.boolean({
       description: 'plan only: print the resolved flow + closure + seed plan + playwright argv + occurrence date; touch nothing',
       default: false,
+    }),
+    capture: Flags.boolean({
+      default: false,
+      description:
+        'exploratory-review capture: run Playwright with PLAYWRIGHT_CAPTURE=all (per-action trace + video on every ' +
+        'test) and PRESERVE the artifacts under <stateDir>/e2e-runs/<runId>/ (Playwright wipes test-results/ at the ' +
+        "next run's start). A FAILED stage's artifacts are preserved even without this flag. Review with `e2e traces`.",
     }),
   };
 
@@ -221,6 +232,7 @@ export default class E2eRun extends BaseCommand {
         prereqFromSnapshot: flags['prereq-from-snapshot'],
         to: flags.to,
         hold: flags.hold,
+        capture: flags.capture,
       });
       this.emit(flags, { dryRun: true, ...desc } as unknown as Record<string, unknown>, dryRunLines(desc));
       return;
@@ -274,6 +286,29 @@ export default class E2eRun extends BaseCommand {
       if (sha !== '') spaHead = { sha, dirty: (await git.statusPorcelain(spaRepoRoot)).trim() !== '' };
     }
 
+    // Exploratory-review preservation (docs/e2e-review.md): copy each spawn's
+    // artifacts out of the SPA's test-results/ (which Playwright wipes at the
+    // next run's start) into <stateDir>/e2e-runs/<runId>/…. Fires on every
+    // spawn of a --capture run and on any RED spawn regardless; the review
+    // block below prints the paste-ready show-trace lines.
+    const runsRoot = `${stateDir}/e2e-runs`;
+    const runId = runIdFrom(now);
+    const preserved: PreservedRunRecord[] = [];
+    const preserveTraces = (frame: {
+      appCwd: string;
+      spaId: string;
+      flowName: string;
+      stages: readonly { id: string; project: string }[];
+    }): void => {
+      const record = preserveSpawnArtifacts(frame, { runsRoot, runId, warn: (l) => this.warn(l) });
+      if (record.groups.length > 0) preserved.push(record);
+    };
+    const printReviewBlock = (): void => {
+      for (const record of preserved) {
+        for (const line of reviewBlockLines(record, appCwd)) this.log(line);
+      }
+    };
+
     try {
       const code = await executeResolvedFlow(
         resolved,
@@ -287,6 +322,7 @@ export default class E2eRun extends BaseCommand {
           ports: runtime.launchContext.ports,
           excluded,
           checkpoints,
+          preserveTraces,
         },
         {
           lane,
@@ -296,8 +332,10 @@ export default class E2eRun extends BaseCommand {
           fromStaleOk: flags['from-stale-ok'],
           spaHead,
           prereqFromSnapshot: flags['prereq-from-snapshot'],
+          capture: flags.capture,
         },
       );
+      printReviewBlock();
       if (code !== 0) this.exit(code);
 
       // Plan 13 --hold: the window is green and the stack stays up — hand off a
@@ -314,6 +352,10 @@ export default class E2eRun extends BaseCommand {
         });
       }
     } catch (err) {
+      // A red PREREQUISITE surfaces as FlowExecError after its spawn's
+      // artifacts were already preserved — print the review block so the
+      // reviewer gets the failure traces before the error exits.
+      printReviewBlock();
       if (err instanceof FlowExecError) this.error(err.message);
       throw err;
     }
@@ -432,6 +474,9 @@ function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
   }
   if (d.hold) {
     lines.push('hold: after green, mint the dev cookie jar + open a logged-in browser (the stack stays up)');
+  }
+  if (d.env.PLAYWRIGHT_CAPTURE === 'all') {
+    lines.push('capture: PLAYWRIGHT_CAPTURE=all (per-action trace + video; artifacts preserved under <stateDir>/e2e-runs)');
   }
   lines.push(
     `PLAYWRIGHT_OCCURRENCE_DATE: ${d.occurrenceDate}`,

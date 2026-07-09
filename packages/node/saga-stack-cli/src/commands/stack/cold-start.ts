@@ -57,8 +57,14 @@ import {
   systemPruneArgs,
 } from '../../runtime/index.js';
 import { deriveInstance } from '../../core/derive-instance.js';
+import { manifest } from '../../core/manifest/index.js';
 import StackUp from './up.js';
 import StackVerify from './verify.js';
+
+/** Clip a command string for a single-line reap note. */
+function clipCmd(s: string): string {
+  return s.length > 60 ? `${s.slice(0, 57)}…` : s;
+}
 
 export default class StackColdStart extends BaseCommand {
   static description =
@@ -117,6 +123,7 @@ export default class StackColdStart extends BaseCommand {
     // ── plan header + single destructive confirm ──
     this.log(dry ? '▶ cold-start DRY RUN — nothing will be changed:' : '▶ cold-start plan:');
     this.log(`    docker: down -v the '${profile.project}' mesh (containers + volumes)${flags['all-docker'] ? ' + system prune -af --volumes' : ''}`);
+    this.log(`    reap:   foreign listeners on stack ports (processes ss didn't launch) — killed before up`);
     this.log(`    repos:  ${repos.length} siblings → clone-if-missing, switch to main, ff to origin`);
     this.log(`    build:  rm -rf dist${flags.reinstall ? ' + node_modules' : ''}${flags['skip-clean'] ? ' (SKIPPED)' : ''} → rebuilt by up (soa CLI restored inline)`);
     this.log(`    env:    scaffold missing .env from .env.example`);
@@ -136,16 +143,42 @@ export default class StackColdStart extends BaseCommand {
 
     // ── STEP 1: docker wipe ──
     await this.step('1/6 docker wipe — down -v the mesh (drop containers + data volumes)', async () => {
+      const stateDir = flags['state-dir'] ?? profile.stateDir;
+      // FOREIGN listeners: a process ss did NOT launch that holds a stack port
+      // (classically a stale `up.sh`/`--tunnel` `tsup --watch` supervisor that
+      // outlived its shell). `stopServices` below reaps only ss's OWN pidfiles, so
+      // a foreign holder survives it and would keep its stale env (e.g. a tunnel
+      // AUTH_SESSIONCOOKIEDOMAIN) alive across the `up` in step 6. cold-start is
+      // the sledgehammer, so blow them away here — under the single up-front
+      // confirm, with a loud per-process note (killing an out-of-band process is a
+      // surprise otherwise). Scanned BEFORE stopServices so the ownership read
+      // (pidfiles) is intact.
+      const foreign = await this.getForeignProcs().find({ manifest, stateDir });
+
       if (dry) {
+        for (const f of foreign) {
+          this.log(`    would REAP foreign ${f.id.padEnd(16)} :${f.port} pid ${f.pid} (pgid ${f.pgid})  ${clipCmd(f.command)}`);
+        }
         this.log(`    would run (in ${soaRoot}/infra): docker ${composeDownVArgs(profile.project).join(' ')}`);
         if (flags['all-docker']) this.log(`    would run: docker ${systemPruneArgs().join(' ')}`);
         return;
       }
       // Stop this slot's own dev-server pids first (best-effort) so no watch child keeps a port.
       try {
-        await this.getServiceStopper()(flags['state-dir'] ?? profile.stateDir);
+        await this.getServiceStopper()(stateDir);
       } catch {
         // best-effort — the compose down + orphan removal is what actually frees the mesh.
+      }
+      if (foreign.length > 0) {
+        this.log(`⚠ reaping ${foreign.length} FOREIGN process(es) on stack ports — NOT launched by ss (a stale up.sh/--tunnel leftover?):`);
+        for (const f of foreign) {
+          this.log(`    ${f.id.padEnd(16)} :${f.port} pid ${f.pid} (pgid ${f.pgid})  ${clipCmd(f.command)}`);
+        }
+        const reaped = await this.getForeignProcs().reap(foreign);
+        const survived = reaped.filter((r) => !r.killed);
+        if (survived.length > 0) {
+          this.log(`⚠ ${survived.length} could not be killed (gone already, or not permitted): ${survived.map((s) => `${s.id}(pid ${s.pid})`).join(', ')}`);
+        }
       }
       const wipe = this.getDockerWipe();
       const down = await wipe.composeDownVolumes({ soaRoot, project: profile.project });

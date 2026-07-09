@@ -38,6 +38,7 @@ import { SYNTH_DEV_DIR } from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
 import { getMesh, manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
+import type { ForeignProc } from '../../core/foreign-procs.js';
 import { DATA_SQL, assessData } from '../../core/verify-data.js';
 import type { DataAssessment, DataReadings } from '../../core/verify-data.js';
 import { parseOverlayTsv } from '../../core/overlay-tsv.js';
@@ -166,6 +167,12 @@ export default class StackVerify extends BaseCommand {
     const up = rows.filter((r) => r.ok).length;
     const passed = failures.length === 0;
 
+    // WARN-ONLY foreign scan: a required port held by a process ss didn't launch
+    // is why a health probe can go misleadingly green (a `✓ 200` served by a
+    // stale up.sh/--tunnel leftover ss can neither manage nor restart). Surface
+    // it; NEVER let it flip the exit code — `stack cold-start` is what reaps them.
+    const foreign = await this.findForeign(probe, profile);
+
     if (flags['output-json']) {
       this.log(
         JSON.stringify(
@@ -178,7 +185,14 @@ export default class StackVerify extends BaseCommand {
               tolerated: r.tolerated,
             })),
             notCloned: notCloned.map((n) => ({ id: n.id, repo: n.repo, repoDir: n.repoDir })),
-            summary: { total: rows.length, up, failed: failures.length, notCloned: notCloned.length },
+            foreign: foreign.map((f) => ({ id: f.id, port: f.port, pid: f.pid, command: f.command })),
+            summary: {
+              total: rows.length,
+              up,
+              failed: failures.length,
+              notCloned: notCloned.length,
+              foreign: foreign.length,
+            },
             passed,
           },
           null,
@@ -190,23 +204,40 @@ export default class StackVerify extends BaseCommand {
         this.log(`${r.id}=${r.ok ? 'up' : r.tolerated ? 'down-tolerated' : 'down'}`);
       }
       for (const n of notCloned) this.log(`${n.id}=not-cloned`);
+      for (const f of foreign) this.log(`${f.id}=foreign`);
       this.log(`passed=${passed}`);
     } else {
       for (const r of rows) this.log(formatRow(r));
       for (const n of notCloned) {
         this.log(`⚠ ${n.id.padEnd(16)} ${n.repoDir}  (not cloned: ${n.repo} repo not present)`);
       }
+      for (const f of foreign) this.log(formatForeign(f));
       this.log(
         passed
           ? `verify: PASS — ${up}/${rows.length} required services up` +
-              (notCloned.length ? ` (${notCloned.length} not cloned)` : '')
+              (notCloned.length ? ` (${notCloned.length} not cloned)` : '') +
+              (foreign.length ? yellow(` — ⚠ ${foreign.length} FOREIGN (not ss-managed)`) : '')
           : `verify: FAIL — ${failures.length} required service(s) down: ${failures.map((f) => f.id).join(', ')}`,
       );
     }
 
     // Native health gate is the exit code: non-zero iff a non-tolerated required
-    // service is down. (--full runs the DATA gate + delegates posture above.)
+    // service is down. FOREIGN findings are warn-only and never flip this.
     if (!passed) this.exit(1);
+  }
+
+  /**
+   * Resolve which of `ids` have a stack port held by a process ss did NOT launch
+   * (ownership by pgid vs the slot's pidfiles — see `core/foreign-procs`). Pure
+   * data; the caller renders it. Warn-only everywhere it's used.
+   */
+  private findForeign(ids: ServiceId[], profile: InstanceProfile): Promise<ForeignProc[]> {
+    return this.getForeignProcs().find({
+      manifest,
+      services: ids,
+      stateDir: profile.stateDir,
+      portOverrides: profile.portOverrides,
+    });
   }
 
   /**
@@ -255,6 +286,10 @@ export default class StackVerify extends BaseCommand {
       this.log(
         `${r.ok ? green('✓') : red('✗')} ${r.id.padEnd(16)} ${dim(r.url)}  (${r.ok ? green(String(r.status ?? '')) : red('down')})`,
       );
+    }
+    // WARN-ONLY foreign scan (never flips --full's health+data verdict). Slot-0 only.
+    for (const f of await this.findForeign(ids, deriveInstance({ slot: flags.slot }))) {
+      this.log(formatForeign(f));
     }
 
     // 2. native DATA checks (D1–D5). Reads as postgres_admin against the base mesh
@@ -591,6 +626,14 @@ function formatRow(r: VerifyRow): string {
   const mark = r.ok ? '✓' : r.tolerated ? '⚠' : '✗';
   const code = r.status !== undefined ? `(${r.status})` : r.tolerated ? '(down, tolerated)' : '(down)';
   return `${mark} ${r.id.padEnd(16)} ${r.url}  ${code}`;
+}
+
+/** Warn line for a stack port held by a process ss did not launch. */
+function formatForeign(f: ForeignProc): string {
+  return yellow(
+    `⚠ ${f.id.padEnd(16)} :${f.port} held by a FOREIGN process (pid ${f.pid}) — not ss-managed; ` +
+      'a stale up.sh/--tunnel leftover? `ss stack cold-start` reaps it',
+  );
 }
 
 /**

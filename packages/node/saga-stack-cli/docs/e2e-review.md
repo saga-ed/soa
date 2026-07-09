@@ -41,6 +41,40 @@ then the hypotheses) — a guard that asserts one confident cause misdiagnoses.
 That convention lives in the SPA repos' support kits; the CLI's own review
 output sticks to facts (paths, counts, exit codes).
 
+## Choose your technique
+
+Five ways to look at a flow, cheapest first. All compose with `--slot N`
+and `--set <name>`.
+
+| Need | Technique |
+|---|---|
+| Watch it happen | `ss e2e run <flow> --headed` |
+| Step through / breakpoints | `PWDEBUG=1 ss e2e run <flow> -- --debug` (Playwright Inspector) or `-- --ui` (UI mode) |
+| Poke a built world by hand | `--to <stage> --hold` (stop at a stage's ENTRY) · plain `--hold` (after green) · `ss stack login <email> --browser` |
+| Iterate fast on one stage | `--snapshot-stages` once, then `--from <stage>` (restore, skip the replay) |
+| Review after the fact | `--capture`, then `ss e2e traces --open` (whole-run report) / `show-trace` per scenario |
+
+**Step-through, worked example** (SethPaul's coach-web pattern):
+
+```bash
+PWDEBUG=1 node bin/run.js e2e run coach-web/module-playback --coach=~/dev/coach -- --debug
+```
+
+- Everything after `--` is verbatim Playwright passthrough — `--debug` opens
+  the Inspector paused at the first action; `--ui` opens UI mode instead.
+  The CLI appends passthrough AFTER its own flags, so yours win.
+- The parent environment RIDES INTO the Playwright child (the Runner spawns
+  with `{ ...process.env, ...overlay }`), so `PWDEBUG=1`, `DEBUG=pw:api`,
+  etc. propagate untouched; the CLI's overlay only pins the clamped dates,
+  the slot service URLs, and `PLAYWRIGHT_CAPTURE`.
+- Pair with `--skip-reset` while stepping repeatedly — the world survives
+  between attempts (`ss e2e run <flow> --skip-reset -- --debug`).
+
+Pause-at-a-world and fast-iteration mechanics live in
+[e2e-flows.md](e2e-flows.md) ("Pausing for manual testing", "Fast iteration
+with snapshot data"); the rest of THIS doc covers the after-the-fact review
+path.
+
 ## What shipped (v1)
 
 ### `ss e2e run <flow> --capture`

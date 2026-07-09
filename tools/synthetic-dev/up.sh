@@ -2069,7 +2069,7 @@ login_user(){
   code=$(curl -s -o "$STATE/devlogin.json" -w '%{http_code}' --max-time 10 \
     -X POST "$iam_url/trpc/auth.devLogin" \
     -H 'Content-Type: application/json' -H "Origin: $iam_url" \
-    -c "$COOKIE_JAR" -d "{\"email\":\"$email\"}" 2>/dev/null) || code=000
+    -c "$COOKIE_JAR" -d "{\"identifier\":\"$email\"}" 2>/dev/null) || code=000
   if [[ "$code" != 200 ]]; then
     printf "\033[31m✗\033[0m devLogin failed (HTTP %s) for '%s'.\n" "$code" "$email"
     if [[ "$email" == "$DEFAULT_LOGIN_USER" ]]; then

@@ -80,6 +80,7 @@ import {
   makeRealDockerWipe,
   makeRealBuildCleaner,
   makeRealEnvFs,
+  makeRealForeignProcs,
   generateTunnelFleetConfig,
   generateSlotFleetConfig,
   resolveRepoRoot,
@@ -115,6 +116,7 @@ import type {
   DockerWipe,
   BuildCleaner,
   EnvFs,
+  ForeignProcs,
 } from './runtime/index.js';
 
 /**
@@ -420,6 +422,17 @@ export abstract class BaseCommand extends Command {
    */
   protected getPortProbe(): PortProbe {
     return makeRealPortProbe();
+  }
+
+  /**
+   * The foreign-process seam (saga-ed/soa#foreign-guardrail) — production is the
+   * only place `lsof`/`ss`/`ps` run to answer "is this stack port held by a
+   * process ss did NOT launch?" (ownership by pgid vs the slot's pidfiles), plus
+   * the group-SIGKILL to reap one. `stack verify` uses `find` (warn-only); `stack
+   * cold-start` uses `find` + `reap`. See `runtime/foreign-procs`.
+   */
+  protected getForeignProcs(): ForeignProcs {
+    return makeRealForeignProcs();
   }
 
   /**

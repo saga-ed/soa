@@ -81,6 +81,7 @@ import {
   makeRealBuildCleaner,
   makeRealEnvFs,
   makeRealForeignProcs,
+  makeRealLivekitCredsFetch,
   generateTunnelFleetConfig,
   generateSlotFleetConfig,
   resolveRepoRoot,
@@ -117,6 +118,7 @@ import type {
   BuildCleaner,
   EnvFs,
   ForeignProcs,
+  LivekitCredsFetch,
 } from './runtime/index.js';
 
 /**
@@ -527,6 +529,18 @@ export abstract class BaseCommand extends Command {
    */
   protected getTunnelMoniker(): (vendorTunnelSh: string) => Promise<string> {
     return resolveTunnelMoniker;
+  }
+
+  /**
+   * The `--tunnel` LiveKit-creds resolver (fidelity port) — production runs the
+   * VENDORED `tunnel.sh aws-profile` then `aws secretsmanager get-secret-value`
+   * for `qboard/fleek/livekit-creds`, so connect-api signs AV join tokens with the
+   * REAL fleek-cluster key. Best-effort: no aws / no access ⇒ null, and the caller
+   * leaves the creds unset (connect-api falls back to the dev key). See
+   * `runtime/livekit-creds`.
+   */
+  protected getLivekitCredsFetch(): LivekitCredsFetch {
+    return makeRealLivekitCredsFetch();
   }
 
   /**

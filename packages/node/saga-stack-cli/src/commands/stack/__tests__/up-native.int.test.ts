@@ -25,6 +25,7 @@ import type {
   GitRunner,
   JarWriter,
   LaunchSpec,
+  LivekitCredsFetch,
   MeshExec,
   PostOptions,
   PostResult,
@@ -142,10 +143,14 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
     ) => Promise<{ ok: boolean; message: string }>;
     getCookiePoster: () => CookiePoster;
     getJarWriter: () => JarWriter;
+    getLivekitCredsFetch: () => LivekitCredsFetch;
   };
   // Native `up --login` seams (fake POST + jar capture) — never a real network/fs, never up.sh.
   vi.spyOn(proto, 'getCookiePoster').mockReturnValue(poster);
   vi.spyOn(proto, 'getJarWriter').mockReturnValue(jar);
+  // --tunnel AV creds: default to "unavailable" so no real `aws`/`tunnel.sh` spawns;
+  // the creds-resolved path overrides this per-test.
+  vi.spyOn(proto, 'getLivekitCredsFetch').mockReturnValue(async () => null);
   // Phase 2: a fixed moniker (never spawn tunnel.sh) + a recording seam that records
   // the resolved RecordPlan (never touches docker/aws).
   vi.spyOn(proto, 'getTunnelMoniker').mockReturnValue(async () => 'testmoniker');
@@ -490,6 +495,27 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     const tun = runs.find((r) => r.command.endsWith('tunnel.sh'));
     expect(tun?.args).toEqual(['up']);
     expect(tun?.command).toContain('vendor');
+  });
+
+  it('--tunnel with fleek creds resolved → connect-api signs AV with the CLUSTER key', async () => {
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getLivekitCredsFetch: () => LivekitCredsFetch },
+      'getLivekitCredsFetch',
+    ).mockReturnValue(async () => ({ apiKey: 'fleekKey', apiSecret: 'fleekSecret' }));
+    await StackUp.run(['--tunnel', ...WS], config);
+    const capi = launches.find((s) => s.id === 'connect-api');
+    expect(capi?.env.LIVEKIT_API_KEY).toBe('fleekKey');
+    expect(capi?.env.LIVEKIT_API_SECRET).toBe('fleekSecret');
+  });
+
+  it('--tunnel with NO creds available → connect-api keeps its base dev key (override does not fire)', async () => {
+    // default seam returns null (see installNativeSeams) — the best-effort miss.
+    await StackUp.run(['--tunnel', ...WS], config);
+    const capi = launches.find((s) => s.id === 'connect-api');
+    // The tunnel LiveKit override did NOT fire, so connect-api keeps its base dev
+    // key — which the real fleek cluster rejects, so AV fails (the documented miss).
+    expect(capi?.env.LIVEKIT_API_KEY).toBe('devkey');
+    expect(capi?.env.LIVEKIT_API_KEY).not.toBe('fleekKey');
   });
 
   it('--slot 10 is rejected at the flag layer (rabbitmq-mgmt collision ceiling)', async () => {

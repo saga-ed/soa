@@ -319,6 +319,26 @@ export default class StackUp extends BaseCommand {
         tunnelDomain: domain,
       });
       if (rtsmFleetPath) overlays.tunnel.rtsmFleetPath = rtsmFleetPath;
+
+      // AV creds: best-effort fetch the fleek dev-cluster LiveKit key/secret from
+      // Secrets Manager (up.sh's `qboard/fleek/livekit-creds` pull) so connect-api
+      // signs join tokens with the REAL cluster key. Absent (no aws / no SSO / no
+      // access) ⇒ leave them unset: connect-api falls back to the dev key and
+      // cluster AV fails LOUD (the warn below), never a silent unreachable-localhost
+      // fallback. The launch-plan plumbing forwards lkKey/lkSecret →
+      // TUNNEL_LK_KEY/SECRET → connect-api LIVEKIT_API_KEY/SECRET.
+      const lk = await this.getLivekitCredsFetch()(resolveVendorScript('tunnel.sh'));
+      if (lk) {
+        overlays.tunnel.lkKey = lk.apiKey;
+        overlays.tunnel.lkSecret = lk.apiSecret;
+        this.log('✓ tunnel AV: fleek dev-cluster LiveKit creds resolved (qboard/fleek/livekit-creds)');
+      } else {
+        this.warn(
+          'tunnel AV: could not fetch qboard/fleek/livekit-creds — connect-api still points at the fleek ' +
+            'cluster but signs tokens with the dev key, so the cluster rejects them and AV fails. Run `aws sso ' +
+            'login` (with the tunnel AWS profile) and re-up for working cluster AV.',
+        );
+      }
     }
 
     if (flags.record !== undefined) {

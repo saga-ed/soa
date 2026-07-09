@@ -32,8 +32,33 @@ This is the concrete instance of the "author *new* flow scenarios" work.
   reality); `varies_by_day_type` weekday pattern first. **Read this to pick up the work.**
 - `01-understanding.md` — the synthesized understanding (from parallel code research). ✅ **done**
 - `02-flow-design.md` — the concrete flow scenario + expected behavior + assertions. ✅ **done**; deliverables **authored** (§8).
+- `02b-split-flow-design.md` — **New flow #2**: the `split_period` (intra-day A/B) oracle +
+  build sequence + assertions. 📝 **drafted — awaiting review** (see below).
 
 ## Status
+**📝 split_period flow (New flow #2) — design drafted (2026-07-08).**
+`02b-split-flow-design.md` pins the intra-day split oracle: one period 15:00–16:00, MWF,
+Rotation 1=`First Half`=slotA (CONNECT via podX/podY), Rotation 2=`Second Half`=slotB
+(NON_TUTORED via podX/podZ); podX gets **2 cards/meeting-day** (distinct slotId +
+`intendedStart/End`), podY first-half-only, podZ second-half-only. Unlike the weekday case
+this is **GREEN, not a reveal-reality bet** — `splitWindow` + the `split_period` upsert
+branch are implemented and unit-proven (`schedules.service.test.ts:663`). saga-dash impl
+branch `flow/scheduling-topology-split`. Spec + `flows.json` + Playwright project authored;
+reveal run pending (pairing). **Awaiting design review before/with authoring.**
+
+**🎯 New flow #3 (`topology-split-daytype`) — THE TARGET, authored (2026-07-08).** `02b` §10.
+`split_period` on a **VARIES_BY_DAY_TYPE (block) schedule** — the shape **Jenny validated
+manually** ("an A/B rotating block schedule with split periods") and the one Sean asked to
+capture. **The first e2e anywhere to exercise a `VARIES_BY_DAY_TYPE` *schedule*** (the journey
+and both sibling topology specs are `SAME_EVERY_WEEK`), and the guard on the historical
+"split period on a day-type schedule minted zero slots" regression. A Day block 09:00–10:00
+painted Mon/Wed, B Day block 13:00–14:00 painted Fri; the marquee assertion is that the SAME
+slot realizes 09:00–09:30 on A-days and 13:00–13:30 on B-days (per-date
+`occurrence_time_override`, not the slot row). Reveal run pending.
+
+---
+
+**✅ New flow #1 (weekday A/B) — IMPLEMENTED + GREEN (2026-07-05).** The reveal run passed: the non-trivial A/B
 **✅ IMPLEMENTED + GREEN (2026-07-05).** The reveal run passed: the non-trivial A/B
 topology (2 pods, distinct per-weekday rotations) realizes CORRECTLY end-to-end and the
 spec now asserts that realization explicitly (slot ↔ pod membership, per-weekday A/B

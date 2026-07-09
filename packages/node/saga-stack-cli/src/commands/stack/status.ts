@@ -30,6 +30,7 @@ import { BaseCommand } from '../../base-command.js';
 import {
   BUNDLE_NAMES,
   combineRequested,
+  effectiveWithAuthz,
   effectiveWithPlayback,
 } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
@@ -164,8 +165,8 @@ function formatRow(r: StatusRow): string {
 /**
  * Turn the `--only`/`--with` flags into the ordered service-id list to probe.
  * The requested set is `parseOnly(only) ∪ expandBundles(with)`; `--with playback`
- * (the only bundle of optional services) sets `withPlayback` so those ids survive
- * the closure's optional filter.
+ * sets `withPlayback` and `--with authz` sets `withAuthz` so their optional
+ * service ids survive the closure's optional filter.
  *  - EMPTY requested (no `--only`, no `--with`) ⇒ every NON-optional service.
  *  - else ⇒ the dependency closure of the requested set (launch order).
  * `fail` renders a friendly oclif error and does not return. Shared by
@@ -192,6 +193,7 @@ export function resolveServiceSet(
 
   return computeClosure(manifest, requested, {
     withPlayback: effectiveWithPlayback(withBundles),
+    withAuthz: effectiveWithAuthz(withBundles),
   }).services;
 }
 

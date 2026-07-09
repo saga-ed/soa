@@ -39,7 +39,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -189,7 +189,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -328,7 +328,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -559,7 +559,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -696,7 +696,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -881,7 +881,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1018,7 +1018,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1172,7 +1172,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1310,7 +1310,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1467,7 +1467,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1640,7 +1640,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1784,7 +1784,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1935,7 +1935,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2101,7 +2101,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2177,7 +2177,7 @@
           "type": "option"
         },
         "with": {
-          "description": "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. Only `--with playback` changes the set (it also truncates the opt-in playback DBs — transcripts, insights, chat = the old --with-playback); every other bundle's DBs are already reset by default. Repeatable: --with playback.",
+          "description": "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. `--with playback` also truncates the opt-in playback DBs (transcripts, insights, chat = the old --with-playback); `--with authz` also truncates the opt-in authz DBs (openfga, authz_sync_local); every other bundle's DBs are already reset by default. Repeatable: --with playback --with authz.",
           "name": "with",
           "hasDynamicHelp": false,
           "multiple": true,
@@ -2186,7 +2186,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         }
@@ -2245,7 +2246,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2386,7 +2387,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2462,7 +2463,7 @@
           "type": "option"
         },
         "with": {
-          "description": "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo. Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
+          "description": "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf --with authz. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo; `--with authz` runs the fga-bootstrap step (OpenFGA store/model bootstrap). Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
           "name": "with",
           "hasDynamicHelp": false,
           "multiple": true,
@@ -2471,7 +2472,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         },
@@ -2555,7 +2557,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2647,7 +2649,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         }
@@ -2722,7 +2725,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2861,7 +2864,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2953,7 +2956,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         },
@@ -3106,7 +3110,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3198,7 +3202,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         },
@@ -3277,7 +3282,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3414,7 +3419,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3547,7 +3552,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3693,7 +3698,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3845,7 +3850,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3953,7 +3958,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         },
@@ -4026,7 +4032,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/darnellm/dev",
+          "default": "/home/spaul/dev",
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"

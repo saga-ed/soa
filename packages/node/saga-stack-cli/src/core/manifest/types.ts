@@ -28,10 +28,11 @@ export type ServiceId =
   | 'coach-web' //       coach-web (:8800) — SvelteKit SPA (reaches iam THROUGH coach-api)
   | 'transcripts-api' // optional: true (--with-playback)
   | 'insights-api' //    optional: true (--with-playback)
-  | 'chat-api'; //       optional: true (--with-playback)
+  | 'chat-api' //        optional: true (--with-playback)
+  | 'authz-sync'; //     optional: true (--with authz) — RabbitMQ-only OpenFGA tuple projector
 
 /** Mesh infra units, started as a single `make up PROFILE=empty`. */
-export type MeshId = 'postgres' | 'redis' | 'rabbitmq' | 'connect-mongo';
+export type MeshId = 'postgres' | 'redis' | 'rabbitmq' | 'connect-mongo' | 'openfga';
 
 /** Sibling-repo env-var keys (mirror up.sh:173-181). `repoRoot = $<key> ?? $DEV/<default>`. */
 export type RepoKey =
@@ -72,7 +73,9 @@ export type DbId =
   | 'transcripts_local'
   | 'insights_local'
   | 'chat_local'
-  | 'connectv3';
+  | 'connectv3'
+  | 'openfga'
+  | 'authz_sync_local';
 
 /** Canonical SeedStep ids (see §4). Referenced by `ServiceDef.seed`. */
 export type SeedStepRef =
@@ -84,7 +87,8 @@ export type SeedStepRef =
   | 'content'
   | 'transcripts'
   | 'insights'
-  | 'chat';
+  | 'chat'
+  | 'fga-bootstrap';
 
 /** How a DB's schema is applied. `dir` is repo-relative to the OWNING service's repo. */
 export interface MigrateSpec {

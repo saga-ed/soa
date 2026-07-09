@@ -8,16 +8,18 @@
  * through the existing seed path. Slot-aware — targets the slot's postgres/
  * connect-mongo containers.
  *
- * The only opt-in axis is the playback trio (transcripts/insights/chat) — only
- * `--with playback` truncates them, reproducing the old `--with-playback` boolean.
+ * The opt-in axes are the playback trio (transcripts/insights/chat) and the
+ * authz DBs (openfga/authz_sync_local) — only `--with playback`/`--with authz`
+ * truncate them, reproducing the old `--with-playback` boolean.
  *
  *   node bin/dev.js stack reset
  *   node bin/dev.js stack reset --with playback
+ *   node bin/dev.js stack reset --with authz
  */
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import { BUNDLE_NAMES, effectiveWithPlayback } from '../../core/bundles.js';
+import { BUNDLE_NAMES, effectiveWithAuthz, effectiveWithPlayback } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest } from '../../core/manifest/index.js';
@@ -39,7 +41,7 @@ export default class StackReset extends BaseCommand {
       multiple: true,
       options: [...BUNDLE_NAMES],
       description:
-        "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. Only `--with playback` changes the set (it also truncates the opt-in playback DBs — transcripts, insights, chat = the old --with-playback); every other bundle's DBs are already reset by default. Repeatable: --with playback.",
+        "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. `--with playback` also truncates the opt-in playback DBs (transcripts, insights, chat = the old --with-playback); `--with authz` also truncates the opt-in authz DBs (openfga, authz_sync_local); every other bundle's DBs are already reset by default. Repeatable: --with playback --with authz.",
     }),
   };
 
@@ -56,6 +58,7 @@ export default class StackReset extends BaseCommand {
   async run(): Promise<void> {
     const { flags } = await this.parse(StackReset);
     const withPlayback = effectiveWithPlayback(flags.with);
+    const withAuthz = effectiveWithAuthz(flags.with);
 
     const profile = deriveInstance({ slot: flags.slot });
     const api = makeStackApi(manifest, this.buildNativeRuntime(flags, profile));
@@ -67,11 +70,11 @@ export default class StackReset extends BaseCommand {
       .filter((s) => !s.optional)
       .map((s) => s.id);
     const excluded = new Set(profile.excludedServices);
-    const services = computeClosure(manifest, requested, { withPlayback }).services.filter(
+    const services = computeClosure(manifest, requested, { withPlayback, withAuthz }).services.filter(
       (id) => !excluded.has(id),
     );
 
-    const res = await api.reset(services, { withPlayback });
+    const res = await api.reset(services, { withPlayback, withAuthz });
 
     const truncated = res.native?.dbs.filter((d) => d.action === 'truncated').map((d) => d.db) ?? [];
     const migrateReset = res.native?.dbs.filter((d) => d.action === 'migrate-reset').map((d) => d.db) ?? [];

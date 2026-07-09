@@ -28,7 +28,13 @@
 
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import { BUNDLE_NAMES, combineRequested, effectiveWithPlayback, seedAddOnsFor } from '../../core/bundles.js';
+import {
+  BUNDLE_NAMES,
+  combineRequested,
+  effectiveWithAuthz,
+  effectiveWithPlayback,
+  seedAddOnsFor,
+} from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest } from '../../core/manifest/index.js';
@@ -82,7 +88,7 @@ export default class StackSeed extends BaseCommand {
       multiple: true,
       options: [...BUNDLE_NAMES],
       description:
-        "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo. Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
+        "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf --with authz. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo; `--with authz` runs the fga-bootstrap step (OpenFGA store/model bootstrap). Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
     }),
     scenario: Flags.string({
       options: [...SEED_SCENARIO_NAMES],
@@ -126,6 +132,7 @@ export default class StackSeed extends BaseCommand {
     // instead of being dropped as service-inactive. There is no prep/mesh/launch —
     // the services are assumed already up.
     const withPlayback = effectiveWithPlayback(flags.with);
+    const withAuthz = effectiveWithAuthz(flags.with);
     const fullNonOptional = (Object.values(manifest.services) as { id: ServiceId; optional: boolean }[])
       .filter((s) => !s.optional)
       .map((s) => s.id);
@@ -136,7 +143,7 @@ export default class StackSeed extends BaseCommand {
     // subtract them from the active set exactly like `reset` does, so their
     // seed steps degrade to service-inactive skips instead of failing.
     const excluded = new Set(instance.excludedServices);
-    const closureServices = computeClosure(manifest, requested, { withPlayback }).services;
+    const closureServices = computeClosure(manifest, requested, { withPlayback, withAuthz }).services;
     const active = new Set(closureServices.filter((id) => !excluded.has(id)));
     const droppedForSlot = closureServices.filter((id) => excluded.has(id));
     if (droppedForSlot.length > 0) {

@@ -78,6 +78,8 @@ export interface LaunchTokens {
    * is byte-identical to that default; :7379 at slot 1 targets the slot's redis.
    */
   REDIS_PORT: string;
+  /** authz-sync port — opt-in service (`--with authz`), no up.sh precedent (new). */
+  AUTHZ_SYNC_PORT: string;
 
   // ── lane base URLs (local/stack lane: http://localhost:<port>) ──
   /** up.sh `IAM_URL`. */
@@ -134,6 +136,8 @@ export interface LaunchTokens {
    *  (was a LITERAL `@localhost:5432` in up.sh/the manifest; tokenized for M13
    *  ads-adm slottability so the pg port offsets in lockstep with the slot mesh). */
   ADS_ADM_DB_URL: string;
+  /** authz-sync dedup-table DB URL — `postgresql://authz_sync:authz_sync@localhost:<pg>/authz_sync_local`. */
+  AUTHZ_SYNC_DB_URL: string;
 
   // ── misc scalars ──
   /** up.sh `RECORDING_TOKEN` — shared fleek bearer (`local-dev-token`). */
@@ -148,6 +152,26 @@ export interface LaunchTokens {
    *  :6110) at slot 0; a GENERATED per-slot file (endpoint `localhost:<6110+offset>`)
    *  at slot > 0 so a slot's realtime/CRDT socket reaches the SLOT's rtsm (soa#271). */
   RTSM_FLEET_PATH: string;
+
+  // ── OpenFGA authz (opt-in — `--with authz`; new, no up.sh precedent) ──
+  /**
+   * iam-api's `FGA_ENABLED` — `'true'` only when the `authz` bundle was
+   * selected (`effectiveWithAuthz`), else `'false'`. Keeps the OpenFGA footprint
+   * off every default `stack up` (opt-in design decision).
+   */
+  FGA_ENABLED: string;
+  /** OpenFGA HTTP API — `http://localhost:8080` (single-slot only; no meshOffset
+   *  port-shifting support for openfga in this pass). Feeds both iam-api's
+   *  `FGA_API_URL` and authz-sync's `OPENFGA_API_URL`. */
+  OPENFGA_API_URL: string;
+  /**
+   * The bootstrapped OpenFGA store id, or `''` before the `fga-bootstrap` seed
+   * step has ever run on this machine (cold start — see base-command.ts's
+   * store-id file read). An empty value makes iam-api's `FgaClientService`
+   * constructor guard treat FGA as disabled (fail closed, not a crash); NOT a
+   * missing-token error like other tokens, since '' is expected on run 1.
+   */
+  OPENFGA_STORE_ID: string;
 
   // ── global launch env (up.sh services_up `export`s these ONCE, ~1384-1385, so
   //    every `pnpm dev` child inherits them; soa-logger/soa-config validate them
@@ -506,6 +530,19 @@ export interface LaunchContextInputs {
   pinoLevel?: string;
   /** up.sh `${PINO_LOGGER_ISEXPRESSCONTEXT:-true}` — ambient override, else `true`. */
   pinoIsExpressContext?: string;
+  /**
+   * Whether the `authz` bundle was selected (`effectiveWithAuthz(flags.with)`) —
+   * drives `FGA_ENABLED`. Default `false` (opt-in design decision — every
+   * default `stack up` keeps FGA off).
+   */
+  withAuthz?: boolean;
+  /**
+   * The bootstrapped OpenFGA store id, read synchronously from the fixed
+   * store-id file (or `SAGA_STACK_OPENFGA_STORE_ID` env override) by the
+   * runtime BEFORE calling `defaultLaunchContext` — same seam as `--tunnel`'s
+   * `resolveOverlays()`. Absent/`''` ⇒ cold start (see `OPENFGA_STORE_ID`).
+   */
+  openfgaStoreId?: string;
 }
 
 /** `postgresql://<owner>:<pw>@localhost:<meshPgPort>/<dbname>` — derived from the manifest DatabaseDef. */
@@ -559,6 +596,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     COACH_WEB_PORT: String(ports['coach-web']),
     CONNECT_MONGO_PORT: String(mongoPort),
     REDIS_PORT: String(redisPort),
+    AUTHZ_SYNC_PORT: String(ports['authz-sync']),
 
     // lane base URLs (local/stack lane)
     IAM_URL: `http://localhost:${ports['iam-api']}`,
@@ -585,12 +623,18 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     CONTENT_DB_URL: pgUrl('content', pgPort, m),
     COACH_DB_URL: pgUrl('coach_api', pgPort, m),
     ADS_ADM_DB_URL: pgUrl('ads_adm_local', pgPort, m),
+    AUTHZ_SYNC_DB_URL: pgUrl('authz_sync_local', pgPort, m),
 
     // misc scalars (up.sh hardcodes these verbatim)
     RECORDING_TOKEN: 'local-dev-token',
     DEV_USER_UUID: 'f0000004-0000-4000-8000-00000000beef',
     VENDOR_DIR: inputs.vendorDir,
     RTSM_FLEET_PATH: inputs.rtsmFleetPath ?? `${inputs.vendorDir}/rtsm-fleet-local.json`,
+
+    // OpenFGA authz (opt-in — see LaunchTokens' FGA_ENABLED/OPENFGA_* docs)
+    FGA_ENABLED: inputs.withAuthz ? 'true' : 'false',
+    OPENFGA_API_URL: 'http://localhost:8080',
+    OPENFGA_STORE_ID: inputs.openfgaStoreId ?? '',
 
     // global launch env (up.sh `:-` defaults; runtime may pass ambient overrides)
     PINO_LOGGER_LEVEL: inputs.pinoLevel ?? 'info',

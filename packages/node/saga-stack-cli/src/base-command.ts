@@ -164,6 +164,14 @@ export type NativeOverlays = {
   recordUp?: RecordUp;
   /** Per-user recordings dir override (up.sh `$FLEEK_REC_DIR`). */
   recordingsDir?: string;
+  /**
+   * `--with authz` ⇒ the OpenFGA authz overlay: `withAuthz: true` (drives
+   * `FGA_ENABLED`) plus the bootstrapped store id, if one exists on this machine
+   * yet (see `resolveOpenfgaStoreId`). Absent for every command that doesn't
+   * select the `authz` bundle, so its runtime is byte-identical to before this
+   * feature existed.
+   */
+  authz?: { withAuthz: boolean; storeId?: string };
 };
 
 export abstract class BaseCommand extends Command {
@@ -509,6 +517,28 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * Read the OpenFGA store id the `fga-bootstrap` seed step (rostering's
+   * `scripts/fga/bootstrap.mjs --out-file`) wrote on a PRIOR `stack up --with authz`
+   * run. `SAGA_STACK_OPENFGA_STORE_ID` takes precedence (manual escape hatch for a
+   * live first-run experience without waiting for run 2). Swallows a missing file /
+   * unparsable JSON / missing `storeId` field — a cold-start machine has no file
+   * yet, and that is the EXPECTED first-run state, not an error (see
+   * `LaunchTokens.OPENFGA_STORE_ID`'s fail-closed contract), so this returns
+   * `undefined` rather than throwing.
+   */
+  protected readOpenfgaStoreId(rosteringRoot: string): string | undefined {
+    const envOverride = process.env.SAGA_STACK_OPENFGA_STORE_ID;
+    if (envOverride) return envOverride;
+    const path = join(rosteringRoot, '.saga-mesh/openfga-store.json');
+    try {
+      const raw = JSON.parse(readFileSync(path, 'utf8')) as { storeId?: unknown };
+      return typeof raw.storeId === 'string' && raw.storeId ? raw.storeId : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * The `--tunnel` rtsm fleet-config generator (Phase 2) — production renders
    * `<stateDir>/rtsm-fleet-tunnel.json` from the base `rtsm-fleet-local.json` with
    * the node endpoint swapped to `rtsm.<domain>`, so rtsm-api's `tunnel_env`
@@ -683,6 +713,16 @@ export abstract class BaseCommand extends Command {
     // checkout's `tools/synthetic-dev`. (The `--tunnel` case overrides it in `up.ts`.)
     const vendorDir = dirname(resolveVendorScript('rtsm-fleet-local.json'));
 
+    // `--with authz`: read the OpenFGA store id the `fga-bootstrap` seed step wrote on
+    // a PRIOR run (same seam as --tunnel's resolveOverlays() — synchronous IO BEFORE
+    // building the launch env, since resolveLaunchEnv/defaultLaunchContext are pure).
+    // Absent on a cold-start first run (no file yet) ⇒ '' downstream (fail closed,
+    // not a crash — see LaunchTokens.OPENFGA_STORE_ID). Only bother reading when the
+    // authz bundle is actually selected.
+    const authzOverlay = overlays.authz?.withAuthz
+      ? { withAuthz: true, storeId: overlays.authz.storeId ?? this.readOpenfgaStoreId(repoRoots.ROSTERING) }
+      : undefined;
+
     // M7: the ONE slot-injection site — apply the slot's env seam so the mesh
     // resolver, preflight owned-container set, and snapshot store target
     // `soa-s<N>-<unit>-1`. No-op at slot 0.
@@ -722,6 +762,8 @@ export abstract class BaseCommand extends Command {
       sandbox: overlays.sandbox,
       tunnel: overlays.tunnel,
       rtsmFleetPath,
+      withAuthz: authzOverlay?.withAuthz,
+      openfgaStoreId: authzOverlay?.storeId,
     });
 
     return {

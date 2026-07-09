@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
-import { BUNDLE_NAMES, combineRequested, effectiveWithPlayback } from '../../../core/bundles.js';
+import { BUNDLE_NAMES, combineRequested, effectiveWithAuthz, effectiveWithPlayback } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { DbId, ServiceId } from '../../../core/manifest/index.js';
@@ -107,12 +107,14 @@ export default class SnapshotStore extends BaseCommand {
     // into an excluded one), and it applies AFTER the --with union so `--with playback --slot N`
     // degrades gracefully rather than dumping absent playback DBs.
     const withPlayback = effectiveWithPlayback(flags.with);
+    const withAuthz = effectiveWithAuthz(flags.with);
     const excluded = new Set<ServiceId>(instance.excludedServices);
     let only: DbId[] | undefined;
     if (flags.only) {
       only = closureDatabases(
         combineRequested(flags.only, flags.with, (m) => this.error(m)),
         withPlayback,
+        withAuthz,
         (m) => this.error(m),
       );
     } else if (instance.slot > 0) {
@@ -121,7 +123,7 @@ export default class SnapshotStore extends BaseCommand {
         .map((s) => s.id);
       const bundleServices = combineRequested(undefined, flags.with, (m) => this.error(m));
       const requested = [...new Set<ServiceId>([...fullNonOptional, ...bundleServices])];
-      const kept = computeClosure(manifest, requested, { withPlayback }).services.filter(
+      const kept = computeClosure(manifest, requested, { withPlayback, withAuthz }).services.filter(
         (id) => !excluded.has(id),
       );
       only = [...new Set<DbId>(kept.flatMap((id) => manifest.services[id].databases))];
@@ -132,6 +134,7 @@ export default class SnapshotStore extends BaseCommand {
       profile: flags.profile,
       only,
       withPlayback,
+      withAuthz,
     });
 
     const io = this.getSnapshotIO();
@@ -207,11 +210,13 @@ export default class SnapshotStore extends BaseCommand {
  * Resolve a requested service set (`--only <svc,…>` ∪ `--with <bundle>` services,
  * already combined by `combineRequested`) to its closure's DB set (`DbId[]`).
  * Mirrors `status`'s `resolveServiceSet`: unknown ids fail with a friendly oclif
- * error. `withPlayback` keeps any optional (playback) services in the closure.
+ * error. `withPlayback`/`withAuthz` keep their respective optional services in
+ * the closure.
  */
 export function closureDatabases(
   requested: ServiceId[],
   withPlayback: boolean,
+  withAuthz: boolean,
   fail: (msg: string) => never,
 ): DbId[] {
   const known = new Set(Object.keys(manifest.services));
@@ -220,5 +225,5 @@ export function closureDatabases(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  return computeClosure(manifest, requested, { withPlayback }).databases;
+  return computeClosure(manifest, requested, { withPlayback, withAuthz }).databases;
 }

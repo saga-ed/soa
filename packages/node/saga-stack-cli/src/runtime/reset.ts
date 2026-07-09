@@ -64,6 +64,8 @@ export interface ResetContext {
   meshOffset?: number;
   /** Include the opt-in playback DBs (transcripts/insights/chat) in the truncate set. */
   withPlayback?: boolean;
+  /** Include the opt-in authz DBs (openfga/authz_sync_local) in the truncate set. */
+  withAuthz?: boolean;
   /** Process seam — the `docker exec …` / `pnpm prisma …` statements run through it. */
   runner: Runner;
   /**
@@ -175,10 +177,17 @@ export async function resetClosure(ctx: ResetContext): Promise<ResetResult> {
       continue;
     }
 
-    // Playback DBs (meshProvisioned:false) only under --with playback (up.sh DO_PLAYBACK).
-    if (!def.meshProvisioned && !ctx.withPlayback) {
-      results.push({ db: id, action: 'skipped', ok: true, reason: 'playback DB (needs --with playback)' });
-      continue;
+    // meshProvisioned:false DBs are opt-in, each gated by its OWN bundle flag —
+    // playback trio under --with playback (up.sh DO_PLAYBACK), openfga/authz_sync_local
+    // under --with authz. Never a blanket OR of both flags (would cross-admit).
+    if (!def.meshProvisioned) {
+      const isAuthzDb = id === 'openfga' || id === 'authz_sync_local';
+      const admitted = isAuthzDb ? ctx.withAuthz : ctx.withPlayback;
+      if (!admitted) {
+        const reason = isAuthzDb ? 'authz DB (needs --with authz)' : 'playback DB (needs --with playback)';
+        results.push({ db: id, action: 'skipped', ok: true, reason });
+        continue;
+      }
     }
 
     // Existence probe (R2/R3 seam): a pg DB a partial `up` never provisioned (e.g.

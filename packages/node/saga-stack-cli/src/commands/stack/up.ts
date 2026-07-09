@@ -42,6 +42,7 @@ import type { NativeOverlays, WorkspaceFlags } from '../../base-command.js';
 import {
   BUNDLE_NAMES,
   combineRequested,
+  effectiveWithAuthz,
   effectiveWithPlayback,
   seedAddOnsFor,
 } from '../../core/bundles.js';
@@ -175,11 +176,14 @@ export default class StackUp extends BaseCommand {
       : combineRequested(flags.only, flags.with, (m) => this.error(m));
     let isOnly = requested.length > 0 || ws !== undefined;
     const withPlayback = ws ? ws.playback : effectiveWithPlayback(flags.with);
+    // Workspace files carry no authz axis (mirrors playback's `ws.playback`, but
+    // `--with authz` is a `--only`/`--with` concept only, not modeled in workspace JSON).
+    const withAuthz = ws ? false : effectiveWithAuthz(flags.with);
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the
     // launch path applies (BLOCKER-1) so the dry-run reflects what actually launches. ──
     if (flags['dry-run']) {
-      this.runDryRun(flags, requested, isOnly, withPlayback, {
+      this.runDryRun(flags, requested, isOnly, withPlayback, withAuthz, {
         sandboxHybrid: flags.sandbox !== undefined,
         sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
         sandboxName: ws?.iamSandbox ?? flags.sandbox,
@@ -229,8 +233,8 @@ export default class StackUp extends BaseCommand {
     //  - `--sandbox <name>` accompanies `--only`: launch the run-set ALONE (subtract the
     //    deps the closure pulled in — iam-api et al. live at the cloud sandbox).
     //  - `--workspace`: subtract EVERY mode:sandbox service id (`ws.sandboxServices`).
-    const overlays = await this.resolveOverlays(flags, sandboxName);
-    await this.runNative(flags, requested, withPlayback, overlays, {
+    const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz);
+    await this.runNative(flags, requested, withPlayback, withAuthz, overlays, {
       sandboxHybrid: flags.sandbox !== undefined,
       sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
       sandboxName,
@@ -271,8 +275,19 @@ export default class StackUp extends BaseCommand {
    * and the `--record` seam. IO (moniker resolution) happens here, behind the
    * `getTunnelMoniker` seam so unit tests inject a fixed moniker.
    */
-  private async resolveOverlays(flags: OverlayFlags, sandboxName?: string): Promise<NativeOverlays> {
+  private async resolveOverlays(
+    flags: OverlayFlags,
+    sandboxName?: string,
+    withAuthz?: boolean,
+  ): Promise<NativeOverlays> {
     const overlays: NativeOverlays = {};
+
+    // `--with authz`: hand the flag down as data (the store-id FILE READ itself
+    // stays in base-command.ts's buildNativeRuntime, the ONE place repoRoots is
+    // resolved — see readOpenfgaStoreId). Absent ⇒ base env only (opt-in).
+    if (withAuthz) {
+      overlays.authz = { withAuthz: true };
+    }
 
     if (sandboxName !== undefined) {
       // up.sh SANDBOX_BASE default (dev fleet); env-overridable like up.sh.
@@ -320,6 +335,7 @@ export default class StackUp extends BaseCommand {
     requested: ServiceId[],
     isOnly: boolean,
     withPlayback: boolean,
+    withAuthz: boolean,
     prune: LaunchPrune = {},
   ): void {
     const resolvedRequest: ServiceId[] = isOnly
@@ -334,7 +350,7 @@ export default class StackUp extends BaseCommand {
       this.error(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
     }
 
-    const closure = computeClosure(manifest, resolvedRequest, { withPlayback });
+    const closure = computeClosure(manifest, resolvedRequest, { withPlayback, withAuthz });
 
     // M7: at slot > 0 the bring-up would EXCLUDE the literal-port services; surface
     // that in the preview so the dry-run matches what a real `--slot N` up launches.
@@ -416,6 +432,7 @@ export default class StackUp extends BaseCommand {
     flags: NativeFlags,
     requested: ServiceId[],
     withPlayback: boolean,
+    withAuthz: boolean,
     overlays: NativeOverlays = {},
     prune: LaunchPrune = {},
   ): Promise<void> {
@@ -439,7 +456,7 @@ export default class StackUp extends BaseCommand {
     // THIS slot's rtsm, not slot 0's) is generated in `buildRuntime`, the seam BOTH
     // `stack up` and `e2e run` share; it need not be repeated here.
 
-    const fullClosure = computeClosure(manifest, requested, { withPlayback });
+    const fullClosure = computeClosure(manifest, requested, { withPlayback, withAuthz });
 
     // Exclude the still-un-slottable services from a slot > 0 bring-up: only the
     // literal-port playback trio (transcripts/insights/chat) carries literal cross-slot
@@ -502,11 +519,12 @@ export default class StackUp extends BaseCommand {
 
     // 2. (optional) reset — NATIVE (M8 R4). Truncates the closure's DBs to an empty
     // baseline; the native seed below then applies the SELECTED profile/add-ons on top
-    // (idempotent upserts). `withPlayback` MUST be threaded so `--with playback --reset`
-    // also truncates the playback trio (transcripts/insights/chat) — matching both
+    // (idempotent upserts). `withPlayback`/`withAuthz` MUST be threaded so
+    // `--with playback --reset` / `--with authz --reset` also truncate their opt-in
+    // DBs (playback trio / openfga+authz_sync_local) — matching both
     // `up.sh --reset --with-playback` and the dedicated `stack reset --with playback`.
     if (flags.reset) {
-      const reset = await api.reset(services, { withPlayback });
+      const reset = await api.reset(services, { withPlayback, withAuthz });
       if (reset.code !== 0) this.exit(reset.code);
     }
 

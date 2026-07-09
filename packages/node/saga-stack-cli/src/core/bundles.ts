@@ -17,10 +17,10 @@
 import type { ServiceId } from './manifest/index.js';
 
 /** The named features a `--with` value may select (services, a seed add-on, or both). */
-export type BundleName = 'dash' | 'connect' | 'coach' | 'playback' | 'qtf';
+export type BundleName = 'dash' | 'connect' | 'coach' | 'playback' | 'qtf' | 'authz';
 
 /** A seed add-on a bundle may layer onto the composed seed plan. */
-export type BundleSeedAddOn = 'playback' | 'qtf';
+export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz';
 
 /** One bundle: the services it contributes to the closure, its optional seed add-on, and a one-line blurb. */
 export interface BundleDef {
@@ -61,6 +61,15 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
     services: [],
     seedAddOn: 'qtf',
     description: 'Seed-only: QTF observation-notes demo on an Ended session (no extra services).',
+  },
+  authz: {
+    services: ['authz-sync'],
+    seedAddOn: 'authz',
+    description:
+      'OpenFGA authz stack: brings up the openfga mesh unit, flips iam-api FGA_ENABLED=true, ' +
+      'runs the fga-bootstrap seed step (model + canonical tuples), and starts the authz-sync ' +
+      'RabbitMQ consumer. First run bootstraps a fresh store (FGA checks fail closed); rerun ' +
+      '`stack up --with authz` once more to pick up the persisted store id.',
   },
 };
 
@@ -149,6 +158,19 @@ export function combineRequested(
  */
 export function effectiveWithPlayback(withBundles: string[] | undefined): boolean {
   return (withBundles ?? []).includes('playback');
+}
+
+/**
+ * Whether the closure should keep the `optional:true` `authz-sync` service AND
+ * iam-api should get FGA_ENABLED=true + the openfga mesh unit: true iff the
+ * `authz` bundle was requested via `--with`. Same shape as
+ * `effectiveWithPlayback` — `computeClosure` drops `authz-sync` unless this is
+ * set, and `defaultLaunchContext`/`resolveLaunchEnv` use it to gate iam-api's
+ * FGA_ENABLED token and the `openfga` mesh unit's inclusion, keeping the
+ * OpenFGA footprint opt-in rather than part of every default `stack up`. PURE.
+ */
+export function effectiveWithAuthz(withBundles: string[] | undefined): boolean {
+  return (withBundles ?? []).includes('authz');
 }
 
 /**

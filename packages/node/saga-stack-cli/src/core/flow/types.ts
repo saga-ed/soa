@@ -38,6 +38,7 @@ const SERVICE_IDS = [
   'transcripts-api',
   'insights-api',
   'chat-api',
+  'authz-sync',
 ] as const;
 
 // Compile guard: every literal above must be a real ServiceId (catches typos /
@@ -51,7 +52,7 @@ export const serviceIdSchema = z.enum(SERVICE_IDS);
 export const flowLaneSchema = z.enum(['stack', 'sandbox', 'tunnel']);
 
 const seedProfileSchema = z.enum(['roster', 'full']);
-const seedAddOnSchema = z.enum(['playback', 'qtf']);
+const seedAddOnSchema = z.enum(['playback', 'qtf', 'authz']);
 
 /**
  * Seed selection authored inline in a flow/stage. Structurally compatible with

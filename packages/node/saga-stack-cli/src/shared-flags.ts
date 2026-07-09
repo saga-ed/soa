@@ -22,8 +22,12 @@
 
 import { Flags } from '@oclif/core';
 
-/** Default sibling-repo workspace root: `$DEV ?? $HOME/dev`. */
-const defaultDevDir = process.env.DEV ?? `${process.env.HOME ?? ''}/dev`;
+/** Default sibling-repo workspace root: `$DEV ?? $HOME/dev`.
+ * Resolved as a function (not a bare string) so the value is computed per-user
+ * at runtime instead of being frozen at `oclif manifest` time — otherwise the
+ * builder's absolute `$HOME/dev` gets baked into the committed/shipped
+ * `oclif.manifest.json`. Paired with `noCacheDefault` on the flag below. */
+const defaultDevDir = async () => process.env.DEV ?? `${process.env.HOME ?? ''}/dev`;
 
 /**
  * Per-repo path-override flags. Each maps a `RepoKey` to a CLI flag that
@@ -137,6 +141,11 @@ export const baseFlags = {
   dev: Flags.string({
     description: 'sibling-repo workspace root (where the saga repos are checked out)',
     default: defaultDevDir,
+    // Keep the resolved absolute path OUT of oclif.manifest.json — `oclif manifest`
+    // passes respectNoCacheDefault, so this omits the default from the generated
+    // (committed + shipped) manifest. It still resolves at runtime via defaultDevDir.
+    noCacheDefault: true,
+    defaultHelp: '$DEV, or $HOME/dev',
   }),
   'state-dir': Flags.string({
     description:

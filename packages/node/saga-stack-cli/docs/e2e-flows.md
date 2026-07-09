@@ -4,6 +4,9 @@ Everything here uses the `ss` CLI (already on your PATH; `node bin/dev.js` from
 `~/dev/soa/packages/node/saga-stack-cli` is the equivalent if it isn't). Every
 command is copy-pasteable. Nothing here requires up.sh.
 
+**Reviewing what a run did** (per-action traces, preserved artifacts,
+`--capture` / `ss e2e traces`): [e2e-review.md](e2e-review.md).
+
 **See what exists at any moment:**
 
 ```bash

@@ -49,3 +49,4 @@ export * from './slot-active.js';
 export * from './set-check.js';
 export * from './lock.js';
 export * from './checkpoint-store.js';
+export * from './trace-preserve.js';

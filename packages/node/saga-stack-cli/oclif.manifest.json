@@ -6,7 +6,8 @@
       "description": "Open a live interactive Connect session: 1 tutor + 2 students (in-process; builds the journey prerequisite, then a headed Connect room).",
       "examples": [
         "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --reuse -- --debug"
+        "<%= config.bin %> <%= command.id %> --reuse -- --debug",
+        "<%= config.bin %> <%= command.id %> --fake-media"
       ],
       "flags": {
         "porcelain": {
@@ -39,7 +40,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -132,6 +133,12 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "fake-media": {
+          "description": "swap real mic/cam capture for Chromium's synthetic camera (moving test pattern) + mic (beep) and auto-accept the getUserMedia prompt — for a machine with no camera or where v4l2loopback won't build. Sets FAKE_MEDIA=1 on the headed interactive-connect run (mirrors connect-session.sh --fake-media); the journey prerequisite is unaffected.",
+          "name": "fake-media",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -189,7 +196,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -328,7 +335,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -559,7 +566,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -696,7 +703,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -881,7 +888,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1018,7 +1025,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1172,7 +1179,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1310,7 +1317,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1467,7 +1474,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1640,7 +1647,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1784,7 +1791,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -1935,7 +1942,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2101,7 +2108,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2177,7 +2184,7 @@
           "type": "option"
         },
         "with": {
-          "description": "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. Only `--with playback` changes the set (it also truncates the opt-in playback DBs — transcripts, insights, chat = the old --with-playback); every other bundle's DBs are already reset by default. Repeatable: --with playback.",
+          "description": "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. `--with playback` also truncates the opt-in playback DBs (transcripts, insights, chat = the old --with-playback); `--with authz` also truncates the opt-in authz DBs (openfga, authz_sync_local); every other bundle's DBs are already reset by default. Repeatable: --with playback --with authz.",
           "name": "with",
           "hasDynamicHelp": false,
           "multiple": true,
@@ -2186,7 +2193,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         }
@@ -2245,7 +2253,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2386,7 +2394,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2462,7 +2470,7 @@
           "type": "option"
         },
         "with": {
-          "description": "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo. Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
+          "description": "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf --with authz. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo; `--with authz` runs the fga-bootstrap step (OpenFGA store/model bootstrap). Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
           "name": "with",
           "hasDynamicHelp": false,
           "multiple": true,
@@ -2471,7 +2479,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         },
@@ -2555,7 +2564,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2647,7 +2656,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         }
@@ -2722,7 +2732,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2861,7 +2871,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -2953,7 +2963,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         },
@@ -3106,7 +3117,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3198,7 +3209,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         },
@@ -3218,6 +3230,12 @@
         "full": {
           "description": "run the CANONICAL complete check FULLY NATIVELY: native health gate + native DATA (D1–D5) + native source-posture (P1–P4). --health-only skips the posture/freshness pass.",
           "name": "full",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "all-slots": {
+          "description": "report EVERY active slot (0..9) instead of a single --slot. A slot is active when its state dir holds a live service pid or its soa-s<N> compose project has running containers (the `ss set list` ACTIVE probe). Each slot gets its own health section (offset ports); with --full each also gets its own DATA section read against THAT slot’s soa-s<N> mesh, and the shared source-posture runs ONCE. Cannot be combined with --slot N>0 or --set (those target one slot). --only/--with are ignored.",
+          "name": "all-slots",
           "allowNo": false,
           "type": "boolean"
         }
@@ -3277,7 +3295,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3414,7 +3432,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3547,7 +3565,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3693,7 +3711,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3845,7 +3863,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
@@ -3953,7 +3971,8 @@
             "connect",
             "coach",
             "playback",
-            "qtf"
+            "qtf",
+            "authz"
           ],
           "type": "option"
         },
@@ -4026,7 +4045,7 @@
         "dev": {
           "description": "sibling-repo workspace root (where the saga repos are checked out)",
           "name": "dev",
-          "default": "/home/skelly/dev",
+          "noCacheDefault": true,
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"

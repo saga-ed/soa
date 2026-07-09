@@ -192,4 +192,32 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     resetMode: 'truncate', // n/a for mongo; reset path uses dropDatabase, not TRUNCATE
     meshProvisioned: false, // n/a (mongo)
   },
+  openfga: {
+    name: 'openfga',
+    engine: 'postgres',
+    // Schema owned by the openfga_migrate sidecar (infra/compose/services/openfga/
+    // compose.yml), not prisma — nothing for the CLI's migrate step to run.
+    migrate: null,
+    ownerRole: 'postgres_admin',
+    ownerPw: 'password123',
+    resettable: true,
+    resetMode: 'truncate',
+    // NOT part of default mesh-up (opt-in decision) — provisioned only when the
+    // `authz` bundle is selected, same pattern as the playback trio's `withPlayback`
+    // gate (runtime/reset.ts's `!def.meshProvisioned && !ctx.withAuthz` check).
+    meshProvisioned: false,
+  },
+  authz_sync_local: {
+    name: 'authz_sync_local',
+    engine: 'postgres',
+    // @saga-ed/soa-event-consumer's dedup table self-migrates via
+    // `CREATE TABLE IF NOT EXISTS consumed_events` at connect time — no prisma step.
+    migrate: null,
+    ownerRole: 'authz_sync',
+    ownerPw: 'authz_sync',
+    resettable: true,
+    resetMode: 'truncate',
+    // NOT part of default mesh-up — see the `openfga` entry above.
+    meshProvisioned: false,
+  },
 };

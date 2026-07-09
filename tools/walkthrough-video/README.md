@@ -18,13 +18,22 @@ still applies, just with the engine centralized.
 ```
 adapters/<app>.mjs                 →  baseUrl + getStorageState()  (per-app, ~30 lines)
 walkthroughs/<app>/<feature>/
-  steps.mjs                        →  narration + Playwright actions  (per-feature, the real work)
+  steps.mjs                        →  Playwright actions, keyed by step id  (per-feature)
+  script.md                        →  narration + tailSlack, keyed by the same step id
 
-lib/narrate.mjs   (OpenAI TTS, content-hash cached)  ─┐
-lib/record.mjs    (Playwright + cursor overlay)       ├─  app-agnostic engine, written once
-lib/stitch.mjs    (ffmpeg mux + SRT)                  │
-lib/make.mjs      (orchestrator)                     ─┘
+lib/script.mjs    (parses script.md, merges onto steps.mjs by id) ─┐
+lib/narrate.mjs   (OpenAI TTS, content-hash cached)                │
+lib/record.mjs    (Playwright + cursor overlay)                    ├─  app-agnostic engine
+lib/stitch.mjs    (ffmpeg mux + SRT)                                │
+lib/make.mjs      (orchestrator: loads both files, merges, runs)  ─┘
 ```
+
+Narration/timing (`script.md`) and Playwright actions (`steps.mjs`) are deliberately
+split: prose is easy to iterate on in markdown, while actions need arbitrary
+Playwright power that a markdown DSL can't express cleanly. `make.mjs` loads both and
+merges them by step id before handing the combined `STEPS` array to narrate/record/
+stitch — those three files are unchanged by this split, they still just see
+`{id, narration, tailSlack, action}`.
 
 Sync model: `slot[N] = max(actionDuration[N], narrationDuration[N]) + tailSlack[N]`.
 `record.mjs` waits that long before step N+1; `stitch.mjs` pads each narration chunk with
@@ -43,9 +52,12 @@ they're not repeated here.
   a local `.env` — the dev key lives in Secrets Manager (`openai-dev-apikey-W3MunH`,
   us-west-2, account 531314149529). `lib/narrate.mjs` fetches it automatically via
   `aws secretsmanager get-secret-value --profile saga-dev` — **Observer-tier profiles
-  (`saga`, `saga-dev`) are denied `GetSecretValue` on this ARN**; set
-  `WALKTHROUGH_AWS_PROFILE` to a profile with access, or set `OPENAI_API_KEY` directly to
-  bypass Secrets Manager entirely (e.g. a throwaway personal key while iterating).
+  (`saga`, `saga-dev`) are denied `GetSecretValue` on this ARN** by design. For routine
+  iteration, set `OPENAI_API_KEY` directly to bypass Secrets Manager entirely (e.g. a
+  throwaway personal key) rather than reaching for an elevated profile. `WALKTHROUGH_AWS_PROFILE`
+  does let you point at a profile with access (e.g. `saga-admin-{dev,prod}`), but that's
+  break-glass — reserve it for an official narrated render, not day-to-day authoring, per
+  the tier-ladder norms in the repo owner's global CLAUDE.md.
 - For a **free/zero-credential iteration tier**, prefer `SKIP_NARRATE=1` (silent render —
   proves out action timing/selectors without any TTS call) over `TTS_ENGINE=edge`. The
   `edge` engine (unofficial `edge-tts` npm wrapper around Microsoft's read-aloud API) is
@@ -76,7 +88,57 @@ FORCE=1        node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash
 persona — omit it to log in as `ss`'s own default (`dev@saga.org`).
 
 Output lands at `walkthroughs/<app>/<feature>/video/walkthrough.mp4` (+ `-vp9.webm` sidecar,
-`.srt`).
+`.srt`). The `.srt` is also muxed into the MP4 itself as a selectable soft-subtitle track
+(`mov_text`) — captions work whether or not the `.srt` sidecar travels with the file. The
+`-vp9.webm` sidecar has no embedded captions (the container doesn't support `mov_text`);
+pair it with the `.srt` sidecar if you distribute that variant.
+
+**Mutating walkthroughs need a reset between runs.** A script like `program-creation` has
+a precondition (here: zero programs in the org) that its own first action changes. Run it
+twice against the same persona without resetting in between and the second recording drives
+whatever page the app lands on now — not the one the script expects — with no error, just a
+silently wrong video. Before re-recording a mutating walkthrough: `ss stack reset && ss stack seed`,
+or switch to a not-yet-used persona. This applies on the local stack same as the sandbox lane
+(see the "Known constraint" note below) — a persona is "clean" only until the first successful
+run through it.
+
+## Recording against a deployed sandbox composition
+
+`adapters/saga-dash.mjs` has a second lane for recording against an already-deployed
+switchboard sandbox composition instead of a local stack — useful when a walkthrough
+needs data/services only a sandbox has, or you don't want to stand up a local stack.
+No local stack is brought up or torn down; the composition must already exist.
+
+```bash
+export WALKTHROUGH_LANE=sandbox
+export WALKTHROUGH_DASH_URL=https://dash.wootdev.com     # defaults to this if unset
+export WALKTHROUGH_IAM_URL=https://iam.wootdev.com       # defaults to this if unset
+export JANUS_SESSION=<janus_session cookie value>        # from an interactive JumpCloud
+                                                          # gate login — copy from devtools;
+                                                          # required unless the composition
+                                                          # was deployed Janus-off (unsupported
+                                                          # by this adapter today)
+export WALKTHROUGH_PREVIEW_PINS="iam-api=sandbox-<name>,sis-api=sandbox-<name>,programs-api=sandbox-<name>,..."
+export WALKTHROUGH_LOGIN_EMAIL=empty@saga.org            # must be seeded in that composition
+
+node tools/walkthrough-video/lib/make.mjs --walkthrough saga-dash/program-creation
+```
+
+This mirrors saga-dash's own sandbox e2e lane (`apps/web/dash/e2e/run-stack-e2e.sh
+--sandbox`, `PLAYWRIGHT_PREVIEW_PINS`) — same `x-saga-preview-<svc>` cookie-pinning
+mechanism, same real `auth.login` (not `devLogin`, which is forbidden on deployed
+iam-api), same Janus perimeter cookie. `WALKTHROUGH_PREVIEW_PINS` uses the identical
+`svc=variant,svc=variant` format as saga-dash's `PLAYWRIGHT_PREVIEW_PINS` — if you
+copied a composition string from switchboard (`svc:variant,svc:variant,...,_default:main`,
+often URL-encoded), translate it: swap `:` for `=`, drop the `_default:...` entry (not a
+real pin — services you don't pin just aren't listed, and fall through to `main` on
+their own), and URL-decode if needed.
+
+**Known constraint**: recording a walkthrough that mutates state (e.g.
+`program-creation`, which creates a program) against a shared sandbox composition means
+a second recording will start from different UI state unless the composition/persona
+resets between runs. Prefer a read-only walkthrough for a composition you don't control,
+or confirm reset behavior first.
 
 ## Authoring a new walkthrough
 
@@ -87,7 +149,8 @@ Output lands at `walkthroughs/<app>/<feature>/video/walkthrough.mp4` (+ `-vp9.we
    writes, and converts it. If your app doesn't use `saga-stack-cli`'s login, or doesn't
    need cookies at all, write whatever fits — the contract is just that return shape.
 
-2. **Write `walkthroughs/<app>/<feature>/steps.mjs`**:
+2. **Write `walkthroughs/<app>/<feature>/steps.mjs`** — one entry per step, `id` +
+   `action` only (no narration here):
 
    ```js
    import { smoothClick } from '../../../lib/record.mjs';
@@ -95,24 +158,42 @@ Output lands at `walkthroughs/<app>/<feature>/video/walkthrough.mp4` (+ `-vp9.we
    export const STEPS = [
      {
        id: '00-intro',
-       narration: 'Welcome to the X feature walkthrough...',
        action: async (page) => {
          await page.goto('/feature');
          await page.waitForSelector('.feature-shell', { timeout: 15000 });
        },
-       tailSlack: 600,
      },
      // ...
      {
        id: '99-outro',
-       narration: 'That is the X feature. Thanks for watching.',
        action: async (page) => { await page.waitForTimeout(500); },
-       tailSlack: 1500,
      },
    ];
    ```
 
-3. Run it per the recipe above.
+3. **Write the paired `walkthroughs/<app>/<feature>/script.md`** — one `## <id>`
+   heading per step (must match `steps.mjs`'s `id` exactly), narration prose as the
+   body, and an optional trailing `tailSlack: <ms>` line:
+
+   ```md
+   ## 00-intro
+
+   Welcome to the X feature walkthrough...
+
+   tailSlack: 600
+
+   ## 99-outro
+
+   That is the X feature. Thanks for watching.
+
+   tailSlack: 1500
+   ```
+
+   `make.mjs` loads both files and merges them by id — `lib/script.mjs` throws if a
+   step id exists in one file but not the other, so a stale script or stale
+   `steps.mjs` fails loudly instead of silently dropping a step.
+
+4. Run it per the recipe above.
 
 ### Authoring tips (from the original doc — still apply)
 
@@ -147,9 +228,9 @@ Not built in this pass, but straightforward given the engine/data split:
 
 - A new `adapters/<app>.mjs` + `walkthroughs/<app>/<feature>/steps.mjs` is all a new
   app/feature needs — no engine changes.
-- Multi-voice narration, a background music bed, burned-in captions, multiple output
-  resolutions — see the original doc's "Extending the pipeline" section for the shape of
-  each; none are implemented here yet.
+- Multi-voice narration, a background music bed, burned-in (as opposed to the current
+  soft/selectable) captions, multiple output resolutions — see the original doc's
+  "Extending the pipeline" section for the shape of each; none are implemented here yet.
 - Folding this into `saga-stack-cli` proper as `ss demo record <spa>/<feature>`, once this
   standalone tool has proven itself on a few real walkthroughs.
 - Push-button cloud rendering (Fargate + headless Chromium) — viable, not designed here;

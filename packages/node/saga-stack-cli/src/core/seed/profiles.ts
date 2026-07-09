@@ -32,7 +32,8 @@ export type SeedStepId =
   | 'chat-provision'
   | 'transcripts'
   | 'insights'
-  | 'chat';
+  | 'chat'
+  | 'fga-bootstrap'; //        --with authz: OpenFGA store bootstrap + tuple seed
 
 /** Profile → the seed-step ids it contributes (plan §4.1). */
 export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>> = {
@@ -58,6 +59,12 @@ export const ADDON_STEPS: Readonly<Record<SeedAddOn, readonly SeedStepId[]>> = {
     'chat',
   ],
   qtf: ['qtf-demo'],
+  // `--with authz`: OpenFGA store bootstrap (idempotent by-name reuse) + the
+  // canonical-tuples seed. OFFLINE (direct HTTP to the openfga mesh unit,
+  // requiresServiceUp:[]) and warn-only — a cold-start bootstrap failure must
+  // never redden the whole `stack up` (FGA fails closed regardless; see
+  // LaunchTokens.OPENFGA_STORE_ID).
+  authz: ['fga-bootstrap'],
 };
 
 /**
@@ -88,6 +95,7 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
   'transcripts',
   'insights',
   'chat',
+  'fga-bootstrap',
 ];
 
 // ── connection derivation (from the manifest's DatabaseDef) ──────────────────
@@ -465,6 +473,39 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
     transcripts: playbackStep(m, 'transcripts', 'transcripts-api', 'transcripts_local'),
     insights: playbackStep(m, 'insights', 'insights-api', 'insights_local'),
     chat: playbackStep(m, 'chat', 'chat-api', 'chat_local'),
+    // --with authz: bootstrap (or reuse, by name) the OpenFGA store, load the
+    // model, and seed canonical-tuples.json. `service: 'iam-api'` (not
+    // 'authz-sync') because iam-api is the one guaranteed to be in every
+    // closure — the step would otherwise be dropped as service-inactive on a
+    // `--only <svc>` selection that doesn't happen to include authz-sync too,
+    // even though `--with authz` always brings iam-api along (every closure
+    // does). `--out-file` writes the store id where base-command.ts's
+    // `readOpenfgaStoreId` reads it on the NEXT `stack up --with authz` (this
+    // run's launch env, already built by the time seed runs, still resolves
+    // OPENFGA_STORE_ID to '' — see launch-plan.ts). `scripts/fga` is
+    // rostering-root-relative, same convention as the iam-db steps' cwd.
+    'fga-bootstrap': {
+      id: 'fga-bootstrap',
+      service: 'iam-api',
+      databases: [],
+      cwd: 'scripts/fga',
+      command: [
+        'node',
+        'bootstrap.mjs',
+        '--store-name',
+        'saga-mesh-dev',
+        '--reuse',
+        '--tuples',
+        'canonical-tuples.json',
+        '--out-file',
+        '../../.saga-mesh/openfga-store.json',
+      ],
+      env: { kind: 'inline', vars: { OPENFGA_API_URL: '${OPENFGA_API_URL}' } },
+      requiresServiceUp: [],
+      // Opt-in path — a bootstrap hiccup (e.g. openfga not yet ready) must
+      // never redden the whole `stack up`; FGA fails closed regardless.
+      failureMode: 'warn',
+    },
   };
 }
 

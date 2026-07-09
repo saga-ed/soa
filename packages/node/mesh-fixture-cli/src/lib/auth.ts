@@ -2,7 +2,8 @@
  * auth — dev-login flow against iam-api.
  *
  * iam-api with AUTH_AUTHENABLED=false exposes `auth.devLogin` which takes
- * { email } and returns a session cookie (`iam_session` or legacy
+ * an `identifier` (uuid | email; rostering#756) and returns a session cookie
+ * (`iam_session` or legacy
  * `iam_dev_session`). We issue a single login per CLI invocation and reuse
  * the cookie across all downstream tRPC calls.
  *
@@ -28,7 +29,9 @@ export async function devLogin(iamUrl: string, email: string): Promise<DevLoginR
   const res = await fetch(new URL('/trpc/auth.devLogin', iamUrl).toString(), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email }),
+    // rostering#756: devLogin takes `identifier` (uuid | email). Send both keys
+    // so login works against pre- and post-#756 iam checkouts (extra key is stripped).
+    body: JSON.stringify({ identifier: email, email }),
   });
   const rawBody = await res.text();
   if (!res.ok) {

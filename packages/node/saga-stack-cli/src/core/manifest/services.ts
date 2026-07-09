@@ -96,8 +96,23 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // iam-api/.env (the dotfile writes are superseded — plan §2.4).
         SECURITY_RATELIMITMAXREQUESTS: '1000000',
         JWT_ACCESSTOKENTTLSECONDS: '28800',
+        // OpenFGA authz — opt-in via `--with authz` (core/bundles.ts's `authz`
+        // bundle). FGA_ENABLED resolves to 'false' when the bundle isn't selected
+        // (launch-plan.ts), so this is a no-op on every default `stack up`. When
+        // selected, FGA_STORE_ID resolves from the fga-bootstrap seed step's
+        // out-file on run 2+ (see base-command.ts) — '' on a cold-start first run,
+        // which FgaClientService's constructor guard treats as disabled (fail
+        // closed, not a crash).
+        FGA_ENABLED: '${FGA_ENABLED}',
+        FGA_API_URL: '${OPENFGA_API_URL}',
+        FGA_STORE_ID: '${OPENFGA_STORE_ID}',
       },
     },
+    // 'fga-bootstrap' (ADDON_STEPS.authz, core/seed/profiles.ts) is NOT listed here —
+    // this field only ever lists a service's PROFILE_STEPS-driven ids (mirrors how
+    // transcripts-api's own `seed: ['transcripts']` omits its add-on
+    // 'transcripts-provision' step too); add-on steps are selected via
+    // ADDON_STEPS, not this field.
     seed: ['iam-dev-user', 'iam'],
     lane: lanes(3010, 'iam'),
     tunnelSlug: 'iam',
@@ -618,6 +633,53 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     seed: ['chat'],
     lane: lanes(6303, 'chat'),
     tunnelSlug: 'chat',
+    isFrontend: false,
+    optional: true,
+  },
+  'authz-sync': {
+    id: 'authz-sync',
+    repo: 'ROSTERING',
+    subpath: 'apps/node/authz-sync',
+    // NOT 3110 — that collides mod 1000 with rtsm-api's 6110 (6110 = 3110 + 3000),
+    // which the M7 slot-offset scheme (offset = slot*1000) turns into a real port
+    // collision at slot 3 (and every 3 slots after). 3111 is clear of every other
+    // manifest port's `% 1000` value across slots 0..8 (derive-instance's
+    // no-collision property test enumerates this).
+    port: 3111,
+    portEnvVar: 'PORT',
+    healthPath: '/health',
+    // `openfga` here (not just authz_sync_local) is deliberate: it's the ONLY
+    // service that owns it, so `isPlaybackDb`/`isAuthzDb` (core/snapshot/plan.ts)
+    // and the `!def.meshProvisioned` reset gate (runtime/reset.ts) correctly treat
+    // the store as authz-opt-in too — it has no app schema of its own to migrate
+    // (owned by the openfga_migrate compose sidecar), so it rides along on
+    // authz-sync's ownership rather than needing its own ServiceDef.
+    databases: ['authz_sync_local', 'openfga'],
+    // Consumer-only (RabbitMQ iam.* events), not a url dependency — same shape as
+    // sessions-api's async projection deps. iam-api itself has no hard dependency
+    // ON authz-sync (nothing calls it); this edge only orders launch (mesh/DB
+    // prep before the consumer starts) and would otherwise be unreachable from
+    // iam-api's own dependsOn (authz-sync has none).
+    dependsOn: [],
+    depKinds: {},
+    // openfga comes up ONLY when this optional service is in the closure (--with
+    // authz) — mesh is a union over the closure's services (closure.ts), so
+    // iam-api's own (unconditional) mesh membership need not list it: mesh units
+    // start before any service launches regardless of which service pulled them in.
+    mesh: ['postgres', 'rabbitmq', 'openfga'],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        PORT: '${AUTHZ_SYNC_PORT}',
+        RABBITMQ_URL: '${MESH_MQ}',
+        DATABASE_URL: '${AUTHZ_SYNC_DB_URL}',
+        OPENFGA_API_URL: '${OPENFGA_API_URL}',
+        OPENFGA_STORE_ID: '${OPENFGA_STORE_ID}',
+      },
+    },
+    seed: [],
+    lane: lanes(3111, 'authz-sync'),
+    tunnelSlug: 'authz-sync',
     isFrontend: false,
     optional: true,
   },

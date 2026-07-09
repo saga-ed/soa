@@ -20,6 +20,12 @@
  * ONLY when `opts.withPlayback` is set. Nothing in the graph `dependsOn` them,
  * so this gate is the only thing that admits them, and a requested playback
  * service is dropped (not launched) unless `--with-playback` is passed.
+ *
+ * `authz-sync` (`optional:true`) is the same shape, gated by `opts.withAuthz`
+ * instead. Each optional service maps to its OWN opt-in flag (see
+ * `admitsOptional` below) — a bare `withPlayback || withAuthz` OR would let
+ * either flag admit BOTH families (e.g. `--only transcripts-api --with authz`
+ * would wrongly resolve transcripts-api), so the gate dispatches per service id.
  */
 
 import { launchOrder } from './launch-order.js';
@@ -39,6 +45,8 @@ export interface Closure {
 export interface ClosureOpts {
   /** Keep `optional:true` playback services (transcripts/insights/chat). */
   withPlayback?: boolean;
+  /** Keep the `optional:true` `authz-sync` service. */
+  withAuthz?: boolean;
   /**
    * Whether to traverse `depKind: 'browser'` edges (default `true`).
    *
@@ -64,7 +72,14 @@ export function computeClosure(
   opts: ClosureOpts = {},
 ): Closure {
   const withPlayback = opts.withPlayback ?? false;
+  const withAuthz = opts.withAuthz ?? false;
   const followBrowserEdges = opts.followBrowserEdges ?? true;
+
+  // Each optional service is admitted by its OWN flag — never a blanket OR of
+  // every opt-in flag, which would cross-admit (e.g. `--with authz` alone must
+  // not also resolve the playback trio).
+  const admitsOptional = (id: ServiceId): boolean =>
+    id === 'authz-sync' ? withAuthz : withPlayback;
 
   const inClosure = new Set<ServiceId>();
   const reasons = new Map<ServiceId, string[]>();
@@ -90,7 +105,7 @@ export function computeClosure(
   for (const id of requested) {
     const def = m.services[id];
     if (!def) throw new Error(`unknown service id: ${id}`);
-    if (def.optional && !withPlayback) continue;
+    if (def.optional && !admitsOptional(id)) continue;
     addReason(id, 'requested');
     enqueue(id);
   }
@@ -104,7 +119,7 @@ export function computeClosure(
     for (const dep of def.dependsOn) {
       const depDef = m.services[dep];
       if (!depDef) throw new Error(`unknown service id: ${dep}`);
-      if (depDef.optional && !withPlayback) continue;
+      if (depDef.optional && !admitsOptional(dep)) continue;
       const kind = def.depKinds[dep] ?? 'url';
       // Skip browser edges when narrowing a flow closure (see followBrowserEdges).
       if (kind === 'browser' && !followBrowserEdges) continue;

@@ -29,6 +29,7 @@ import type {
   PgProbe,
   RunResult,
   ScriptInvocation,
+  SlotActiveProbe,
 } from '../../../runtime/index.js';
 import StackStatus from '../status.js';
 import StackVerify from '../verify.js';
@@ -415,5 +416,114 @@ describe('stack verify --slot N — backend + saga-dash/coach gate on offset por
     await StackVerify.run([...WS], config);
     expect(probed).toContain(DASH_URL); // frontends gated at slot 0
     expect(probed).toHaveLength(13);
+  });
+});
+
+/** Fake SlotActiveProbe: a slot is active iff its number is in `activeSlots`. */
+function installSlotActive(activeSlots: number[]): void {
+  const active = new Set(activeSlots);
+  const probe: SlotActiveProbe = {
+    async isActive(_stateDir: string, project: string): Promise<boolean> {
+      const slot = project === 'soa' ? 0 : Number.parseInt(project.replace('soa-s', ''), 10);
+      return active.has(slot);
+    },
+  };
+  vi.spyOn(
+    BaseCommand.prototype as unknown as { getSlotActiveProbe: () => SlotActiveProbe },
+    'getSlotActiveProbe',
+  ).mockReturnValue(probe);
+}
+
+/** Fully-green DATA probes that RECORD the postgres container each read hit (to assert
+ *  per-slot mesh selection). Returns the captured container-name list. */
+function installCapturingDataProbes(): { pgContainers: string[] } {
+  const pgContainers: string[] = [];
+  const pg: PgProbe = {
+    async databaseExists(): Promise<boolean> { return true; },
+    async hasMigrationsTable(c): Promise<boolean> { pgContainers.push(c); return true; },
+    async publicTableCount(): Promise<number> { return 0; },
+    async scalar(c, _db, sql): Promise<string> {
+      pgContainers.push(c);
+      if (sql.includes('FROM users WHERE')) return '1';
+      if (sql.includes('FROM users')) return '205';
+      if (sql.includes('personas')) return '6';
+      return '';
+    },
+  };
+  const mesh: MeshExec = { async ready(): Promise<boolean> { return true; } };
+  const proto = BaseCommand.prototype as unknown as {
+    getPgProbe: () => PgProbe;
+    getMeshExec: () => MeshExec;
+  };
+  vi.spyOn(proto, 'getPgProbe').mockReturnValue(pg);
+  vi.spyOn(proto, 'getMeshExec').mockReturnValue(mesh);
+  return { pgContainers };
+}
+
+describe('stack verify --all-slots — report every ACTIVE slot (0..9)', () => {
+  it('no active slots ⇒ resolves (exit 0) with a "no active slots" note, probing nothing', async () => {
+    installSlotActive([]);
+    await expect(StackVerify.run(['--all-slots', ...WS], config)).resolves.toBeUndefined();
+    expect(probed).toHaveLength(0);
+    expect(out.some((l) => l.includes('no active slots'))).toBe(true);
+  });
+
+  it('health-only: renders a section per active slot on that slot’s offset ports (slots 0 + 2)', async () => {
+    installSlotActive([0, 2]);
+    await StackVerify.run(['--all-slots', ...WS], config);
+    const s2 = deriveInstance({ slot: 2 });
+    const iam2 = `http://localhost:${s2.portOverrides['iam-api']}${manifest.services['iam-api'].healthPath}`;
+    // slot 0's base iam + slot 2's +2000 iam were both probed.
+    expect(probed).toContain(`http://localhost:${manifest.services['iam-api'].port}${manifest.services['iam-api'].healthPath}`);
+    expect(probed).toContain(iam2);
+    // one section header per active slot; slots 1 + 3..9 are inactive ⇒ absent.
+    expect(out.some((l) => l.includes('── slot 0 (soa)'))).toBe(true);
+    expect(out.some((l) => l.includes('── slot 2 (soa-s2)'))).toBe(true);
+    expect(out.some((l) => l.includes('── slot 1'))).toBe(false);
+    expect(out.some((l) => l.includes('✓ verify --all-slots: 2/2 active slot(s) green'))).toBe(true);
+  });
+
+  it('--full: each active slot reads DATA against ITS OWN soa-s<N> mesh, posture runs ONCE', async () => {
+    installSlotActive([0, 2]);
+    const { pgContainers } = installCapturingDataProbes();
+    installPostureSeams(); // clean, no overlay
+    const priorEnv = process.env.SAGA_MESH_POSTGRES_CONTAINER;
+    await StackVerify.run(['--full', '--all-slots', ...WS], config);
+    // slot 2's DATA read hit the soa-s2 postgres; slot 0's hit the base container.
+    expect(pgContainers).toContain('soa-s2-postgres-1');
+    expect(pgContainers).toContain('soa-postgres-1');
+    // the per-slot env scoping is fully restored afterwards (no leak).
+    expect(process.env.SAGA_MESH_POSTGRES_CONTAINER).toBe(priorEnv);
+    // source posture rendered EXACTLY once (shared checkouts), not per slot.
+    expect(out.filter((l) => l.includes('── source posture')).length).toBe(1);
+    expect(runnerCalls).toHaveLength(0); // still nothing delegated to verify.sh
+  });
+
+  it('HARD-FAILS (exit 1) naming the failing slot when a service is down in one slot', async () => {
+    installSlotActive([0, 2]);
+    // take slot 2's iam-api down (its +2000 port); slot 0 stays green.
+    const s2 = deriveInstance({ slot: 2 });
+    const iam2 = `http://localhost:${s2.portOverrides['iam-api']}${manifest.services['iam-api'].healthPath}`;
+    installProber([iam2]); // independent of the slot-active spy above
+    await expect(StackVerify.run(['--all-slots', ...WS], config)).rejects.toMatchObject({
+      oclif: { exit: 1 },
+    });
+    expect(out.some((l) => l.includes('1/2 active slot(s) failing') && l.includes('slot(s) 2'))).toBe(true);
+  });
+
+  it('--all-slots with an explicit --slot N>0 is a hard error (mutually exclusive targeting)', async () => {
+    installSlotActive([0]);
+    await expect(StackVerify.run(['--all-slots', '--slot', '3', ...WS], config)).rejects.toMatchObject({
+      oclif: { exit: 2 },
+    });
+  });
+
+  it('--output-json emits a per-slot array with activeSlots + a combined verdict', async () => {
+    installSlotActive([0, 2]);
+    await StackVerify.run(['--all-slots', '--output-json', ...WS], config);
+    const json = JSON.parse(out.join('\n'));
+    expect(json.activeSlots).toEqual([0, 2]);
+    expect(json.slots.map((s: { slot: number }) => s.slot)).toEqual([0, 2]);
+    expect(json.passed).toBe(true);
   });
 });

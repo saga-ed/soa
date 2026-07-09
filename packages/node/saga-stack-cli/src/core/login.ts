@@ -34,7 +34,7 @@ export interface DevLoginRequest {
   url: string;
   /** The `Origin` header — iam's OWN origin (== `iamUrl`); a wrong value is rejected. */
   origin: string;
-  /** `{"email":"<email>"}`. */
+  /** `{"identifier":"<email>","email":"<email>"}` — both keys (see `buildDevLoginRequest`). */
   body: string;
   email: string;
 }

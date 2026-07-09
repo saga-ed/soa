@@ -16,6 +16,18 @@
 ##   ads_adm_local    SDS ads-adm-api            owner=ads_adm
 ##   ledger_local     SDS ledger-api             owner=ledger
 ##
+## Opt-in (only created when `--with authz` selects the `authz` bundle):
+##
+##   openfga           rostering authz stack (openfga server)   owner=postgres_admin
+##   authz_sync_local  rostering authz-sync                      owner=authz_sync
+##
+## OpenFGA itself (server + its `openfga_migrate` one-shot job, see
+## ../services/openfga/compose.yml) only starts when the `authz` compose
+## profile is active (COMPOSE_PROFILES=authz, set by saga-stack-cli's native
+## mesh bring-up iff the closure needs it) — `make up`'s `up:` target has no
+## per-service filter, so profiles are what keep this opt-in unit out of every
+## OTHER project's mesh footprint.
+##
 ## Usage:
 ##   EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed \
 ##   SEED_PROFILE=empty make up PROJECT=saga-mesh
@@ -37,3 +49,4 @@ include:
   - path: ../services/redis/compose.yml
   - path: ../services/rabbitmq/compose.yml
   - path: ../services/connect-mongo/compose.yml
+  - path: ../services/openfga/compose.yml

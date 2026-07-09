@@ -184,6 +184,32 @@ ss e2e run saga-dash/journey --from schedule --through schedule -- --debug
 
 Anything after `--` passes straight to Playwright (`--ui`, `--debug`, a grep).
 
+## Narrow-closure runs stop out-of-closure services
+
+A partial run computes the closure of just the stages it will execute — and **stops
+services outside it** (clean SIGTERM). Running e.g.
+
+```bash
+ss e2e run saga-dash/journey --through pods --headless
+```
+
+on a previously-full stack SIGTERMs the services pods doesn't need (observed live
+2026-07-09: sessions-api stopping cleanly). Two practical consequences:
+
+- **The full stack is now partially down.** Bring a stopped service back without a
+  full re-up:
+
+  ```bash
+  ss stack up --only sessions-api --skip-prep
+  ```
+
+- **saga-dash caveat, not an ss bug:** saga-dash's stack-lane stage-0-coherence smoke
+  probes sessions-api **unconditionally** (`pinnedOrStack` short-circuits when
+  `LANE === 'stack'` — see
+  `apps/web/dash/e2e/sandbox/composition-coherence.e2e.smoke.test.ts:113`). So a
+  narrow `--through` run below sessions can fail stage 0 against a service ss itself
+  just stopped. `--from` runs skip stage 0 (`--no-deps`), so they don't hit this.
+
 ## Assessing the flows (background + foreground sweep)
 
 A compact assessment session, in order:
@@ -224,5 +250,10 @@ ss stack down                                               # 7. tidy up
   cosmetic ordering noise; it self-heals and the run continues.
 - **A flaky pass/fail on session durability** — known app flake (gh-186);
   retry once before digging.
+- **A service is down after a partial run** — expected; narrow closures stop
+  out-of-closure services (see above). `ss stack up --only <svc> --skip-prep`.
+- **A service DIES during a `--from` restore** (42P01 in its log) — the
+  restore-vs-poller race; see
+  [snapshots → Known issue](./snapshots.md#known-issue-restore-races-db-polling-services).
 - Full docs: `docs/e2e.md` (flows/stages/checkpoints in depth), `docs/slots.md`
   (parallel stacks), `docs/worktree-sets.md` (multi-worktree development).

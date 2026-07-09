@@ -132,6 +132,18 @@ describe('tunnel_env overlay (--tunnel)', () => {
     expect(envFor('saga-dash', TUN).__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBe(`dash.${TD}`);
   });
 
+  it('coach-api: CORS allow-list gains the bare tunnel domain (keeps localhost)', () => {
+    // up.sh coach-api: EXPRESS_SERVER_CORSALLOWEDDOMAINS=$COACH_WEB_HOST,$TUNNEL_DOMAIN
+    // (hostname suffix match ⇒ the bare domain admits coach.<td> and any tunnel label).
+    expect(envFor('coach-api', TUN).EXPRESS_SERVER_CORSALLOWEDDOMAINS).toBe(`localhost,${TD}`);
+  });
+
+  it('coach-web: browser API URL flips to the tunnel host + vite host allow', () => {
+    const e = envFor('coach-web', TUN);
+    expect(e.PUBLIC_COACH_API_URL).toBe(`https://coach-api.${TD}`);
+    expect(e.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBe(`coach.${TD}`);
+  });
+
   it('rtsm-api: FLEET_CONFIG_PATH override ONLY when a generated tunnel fleet path is supplied', () => {
     // no fleet path ⇒ keeps the base local fleet.
     expect(envFor('rtsm-api', TUN).FLEET_CONFIG_PATH).toBe(

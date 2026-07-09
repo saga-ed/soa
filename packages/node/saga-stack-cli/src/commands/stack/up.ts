@@ -543,18 +543,38 @@ export default class StackUp extends BaseCommand {
     );
     const seeded = await api.seed(plan);
 
+    // Phase 2 --tunnel: after a successful native (tunnel-aware) launch, start the
+    // reverse tunnels via the VENDORED tunnel.sh (up.sh drives the frpc tunnels the
+    // same way). stdio-inherited so the frpc progress owns the TTY. Ordered BEFORE
+    // login (up.sh: tunnel.sh up → login_user) so a `--tunnel --login` mints against
+    // the PUBLIC iam host the tunnels now expose; a bare `--tunnel` just runs it a
+    // step earlier. `loginTunnelDomain` (set only when the tunnels actually came up)
+    // is what routes the login below at the tunnel hosts.
+    const loginTunnelDomain = overlays.tunnel && seeded.ok ? overlays.tunnel.domain : undefined;
+    if (overlays.tunnel && seeded.ok) {
+      const script = resolveVendorScript('tunnel.sh');
+      const plan = flagMap.tunnel('up');
+      await this.runVendor({ cwd: dirname(script), command: script, args: plan.args, env: plan.env }, flags);
+      this.log(`tunnel mode: browser plane at https://<svc>.${overlays.tunnel.domain}`);
+    }
+
     // 4. (optional) login — NATIVE (Phase-2 FINISH, saga-ed/soa#214). No up.sh: mint the
     // headless cookie jar (default persona dev@saga.org, slot-aware) via the SHARED
     // BaseCommand helper, then best-effort open the vendored browser-login.mjs — exactly
     // what up.sh's `--login` did (jar + best-effort headful browser). BEST-EFFORT: a
     // devLogin miss (login-before-seed) or a browser failure (no DISPLAY/playwright) is a
     // warning only — it must NOT redden an otherwise-healthy stack, so it never exits `up`.
+    // Under --tunnel, route login through the PUBLIC tunnel hosts (iam.<domain> /
+    // dash.<domain>) so the minted cookie is scoped for the tunnel (iam sets
+    // AUTH_SESSIONCOOKIEDOMAIN=.<domain>, which a localhost mint would mis-scope); else
+    // slot-offset localhost.
     if (flags.login) {
       const loginStateDir = flags['state-dir'] ?? profile.stateDir;
       const res = await this.mintNativeLoginJar({
         email: DEFAULT_LOGIN_USER,
         slot: flags.slot,
         stateDir: loginStateDir,
+        loginIamUrl: loginTunnelDomain ? `https://iam.${loginTunnelDomain}` : undefined,
       });
       if (res.ok) {
         this.log(`✓ login: session minted — cookie jar → ${res.jarPath} (cookies: ${res.captured.join(', ') || '(none)'})`);
@@ -566,6 +586,7 @@ export default class StackUp extends BaseCommand {
             email: DEFAULT_LOGIN_USER,
             iamUrl: res.iamUrl,
             stateDir: loginStateDir,
+            dashUrl: loginTunnelDomain ? `https://dash.${loginTunnelDomain}` : undefined,
           });
         }
       } else {
@@ -580,16 +601,6 @@ export default class StackUp extends BaseCommand {
     // fleek-absent / ⚠ failed). Never fatal — a record hiccup can't redden an
     // otherwise-healthy stack (like the AV bring-up).
     if (up.record) this.log(up.record.message);
-
-    // Phase 2 --tunnel: after a successful native (tunnel-aware) launch, start the
-    // reverse tunnels via the VENDORED tunnel.sh (up.sh drives the frpc tunnels the
-    // same way). stdio-inherited so the frpc progress owns the TTY.
-    if (overlays.tunnel && seeded.ok) {
-      const script = resolveVendorScript('tunnel.sh');
-      const plan = flagMap.tunnel('up');
-      await this.runVendor({ cwd: dirname(script), command: script, args: plan.args, env: plan.env }, flags);
-      this.log(`tunnel mode: browser plane at https://<svc>.${overlays.tunnel.domain}`);
-    }
 
     // MAJOR-C: R1 records non-fatal build/db:generate failures as warnings (up.sh
     // warn+continue) rather than aborting — surface them so they're visible.

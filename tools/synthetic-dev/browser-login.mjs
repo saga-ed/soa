@@ -65,7 +65,10 @@ try {
 // /demo page passes).
 const res = await ctx.request.post(`${IAM_URL}/trpc/auth.devLogin`, {
   headers: { 'Content-Type': 'application/json', Origin: IAM_URL },
-  data: { email: EMAIL },
+  // rostering#756: devLogin takes `identifier` (uuid | email); the old `email`-only
+  // body now 400s (identifier undefined). Send both keys — same shape as the
+  // native jar path (core/login.ts buildDevLoginRequest).
+  data: { identifier: EMAIL, email: EMAIL },
 });
 if (!res.ok()) {
   const body = await res.text().catch(() => '');

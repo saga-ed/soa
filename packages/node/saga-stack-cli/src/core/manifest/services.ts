@@ -326,6 +326,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // in M4 as a presumed rogue edit before #280 merged — re-added once the
         // baseline confirmed main requires it.)
         VITE_SESSION_MEASURED: 'true',
+        // soa#271 LAYER 3: the ?mode=session dev override (overrides/resolver.ts gates
+        // on this) so an admin can force the SESSION attendance surface to assert the
+        // measured-time overlay renders real TELEMETRY dosage (journey stage-8, #280).
+        VITE_ENABLE_OVERRIDES: 'true',
       },
     },
     seed: [],

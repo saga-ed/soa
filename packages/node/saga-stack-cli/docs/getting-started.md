@@ -483,6 +483,7 @@ and **[worktree-sets.md](./worktree-sets.md)**.
 
 ## Peer docs
 
+- **[cheatsheet.md](./cheatsheet.md)** — the dense one-liner reference for every command (this page, narrated → that page, terse)
 - **[sub-stacks-and-bundles.md](./sub-stacks-and-bundles.md)** — `--only` closures, `--with` bundles, seeding
 - **[slots.md](./slots.md)** — `--slot N`: multiple isolated stacks on one box
 - **[worktree-sets.md](./worktree-sets.md)** — `--set <name>`: named repo→worktree maps on slots (parallel dev contexts, per-worktree flows, build-collision guard)

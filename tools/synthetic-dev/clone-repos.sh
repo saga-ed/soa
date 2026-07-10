@@ -13,8 +13,8 @@
 #     /repos/saga-ed/soa/contents/tools/synthetic-dev/clone-repos.sh | bash
 #
 # Usage:
-#   ./clone-repos.sh                 clone any missing of the 7 required repos
-#   ./clone-repos.sh --with-optional also clone coach + fleek
+#   ./clone-repos.sh                 clone any missing of the 8 required repos
+#   ./clone-repos.sh --with-optional also clone fleek
 #   ./clone-repos.sh --dry-run       report what it WOULD clone, clone nothing
 #   DEV=~/work ./clone-repos.sh      non-default sibling-repo parent
 #
@@ -30,12 +30,28 @@ ORG=saga-ed
 WITH_OPTIONAL=0
 DRY_RUN=0
 
+# Usage is a here-doc, NOT `sed -n '2,26p' "$0"` — piped in via
+# `gh api … | bash -s -- --help`, `$0` is `bash` and the script never exists as
+# a file, so sed would read the wrong path (or nothing).
+usage(){
+    cat <<'USAGE'
+clone-repos.sh — clone whichever synthetic-dev sibling repos are missing.
+
+  ./clone-repos.sh                 clone any missing of the 8 required repos
+  ./clone-repos.sh --with-optional also clone fleek
+  ./clone-repos.sh --dry-run       report what it WOULD clone, clone nothing
+  DEV=~/work ./clone-repos.sh      non-default sibling-repo parent
+
+Prereq: `gh` authenticated. Does not install deps — run bootstrap.sh after.
+USAGE
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --with-optional) WITH_OPTIONAL=1; shift ;;
         --dry-run)       DRY_RUN=1; shift ;;
-        -h|--help)       sed -n '2,26p' "$0"; exit 0 ;;
-        *) echo "unknown: $1 (use --help)"; exit 1 ;;
+        -h|--help)       usage; exit 0 ;;
+        *) echo "unknown: $1 (use --help)"; usage; exit 1 ;;
     esac
 done
 
@@ -49,10 +65,17 @@ gh auth status >/dev/null 2>&1 || { err "gh is not authenticated — run 'gh aut
 
 DEV=${DEV:-$HOME/dev}
 
-# The 7 repos `up.sh` requires, in the order bootstrap.sh's step-1 loop lists them.
-REQUIRED=(soa rostering program-hub saga-dash student-data-system qboard rtsm)
-# Not provisioned by bootstrap; cloned only under --with-optional.
-OPTIONAL=(coach fleek)
+# The 8 repos up.sh's `check_branches` preflight hard-requires (up.sh ~353) — it
+# exits 1 if any is missing, so ALL of them must be cloned by default.
+#
+# NOTE: bootstrap.sh's own ensure_repos loop lists only 7 (it omits `coach`), as
+# does saga-stack-cli's REQUIRED_BOOTSTRAP_REPOS. That is a bug in THOSE: on a
+# bare machine they clone 7, then up.sh's preflight dies on the missing coach.
+# This list follows up.sh, which is what actually gates the stack coming up.
+REQUIRED=(soa rostering program-hub saga-dash coach student-data-system qboard rtsm)
+# `fleek` is genuinely optional — up.sh defaults a path for it but the preflight
+# does not require it. Cloned only under --with-optional.
+OPTIONAL=(fleek)
 
 REPOS=("${REQUIRED[@]}")
 [[ $WITH_OPTIONAL == 1 ]] && REPOS+=("${OPTIONAL[@]}")
@@ -125,11 +148,17 @@ fi
 
 say "$present present, $cloned cloned, $skipped skipped, $failed failed"
 
+# A skip leaves a REQUIRED repo un-cloned just as surely as a failure does. Exit
+# non-zero for both, so `./clone-repos.sh && ./bootstrap.sh` stops here — at the
+# step the user can actually fix — instead of dying later inside up.sh.
+if [[ $failed -gt 0 ]]; then
+    err "clone failed for $failed repo(s) — check 'gh auth status' and your org access, then re-run"
+fi
 if [[ $skipped -gt 0 ]]; then
     warn "clear or move the skipped director$([[ $skipped -eq 1 ]] && echo y || echo ies) above, then re-run"
 fi
-if [[ $failed -gt 0 ]]; then
-    err "clone failed for $failed repo(s) — check 'gh auth status' and your org access, then re-run"
+if [[ $failed -gt 0 || $skipped -gt 0 ]]; then
+    err "$((failed + skipped)) repo(s) still missing — the stack will not come up"
     exit 1
 fi
 

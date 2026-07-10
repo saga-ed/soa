@@ -13,6 +13,38 @@ real output. For the detail behind each feature, follow the peer-doc links at th
 
 ---
 
+## 0. Get the sibling repos (first machine only)
+
+`ss` drives a fleet of sibling repos checked out under a shared parent (`~/dev` by default).
+Already have them? Skip to **Install**. Starting from an empty `~/dev` — or unsure you have
+them all — run `clone-repos.sh`: it clones whichever of the required repos are missing and
+reports the ones you already have. It needs only an authenticated [`gh`](https://cli.github.com)
+and no checkout, so you can pipe it straight from the GitHub API before anything is local:
+
+```bash
+gh api -H 'Accept: application/vnd.github.raw' \
+  /repos/saga-ed/soa/contents/packages/node/saga-stack-cli/scripts/clone-repos.sh | bash
+```
+
+<details><summary>Reports each repo present / cloned; <code>--dry-run</code> previews, <code>--with-optional</code> adds coach + fleek</summary>
+
+```
+$ ./clone-repos.sh --dry-run
+→ sibling-repo parent: /home/you/dev
+✓ soa                  present  → /home/you/dev/soa
+→ rostering            would clone → /home/you/dev/rostering
+...
+→ dry run: 1 present, 6 to clone, 0 skipped
+```
+
+Idempotent — safe to re-run when a new repo joins the fleet. It does **not** install deps or
+build; that's the next two steps. `DEV=~/work ./clone-repos.sh` uses a non-default parent.
+`ss stack bootstrap` and `cold-start` also clone missing siblings, but over SSH and only once
+`ss` itself is built — this script is the bare-machine bootstrap that comes before that.
+</details>
+
+---
+
 ## 1. Install
 
 Install workspace deps from the monorepo root (once), then build the CLI and put it on your PATH:

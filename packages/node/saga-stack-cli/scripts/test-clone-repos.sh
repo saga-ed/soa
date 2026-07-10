@@ -10,7 +10,7 @@
 #   4. worktree checkout  → `.git` as a FILE counts as present, is never cloned
 #      over (the bug the `-e` test exists to prevent).
 #   5. non-empty dir, no `.git` → skipped, NOT cloned into, and exit is NON-ZERO
-#      so `clone-repos.sh && bootstrap.sh` stops here.
+#      so `clone-repos.sh && ss stack bootstrap` stops here.
 #   6. clone failure      → exit non-zero.
 #   7. --dry-run          → reports, clones nothing, exit 0.
 #   8. --with-optional    → adds coach + fleek (9 repos).
@@ -26,6 +26,9 @@ fail=0
 assert(){ if [[ "$2" == "$3" ]]; then echo "ok: $1"; else echo "FAIL: $1 — got '$2' want '$3'"; fail=1; fi; }
 assert_contains(){ if [[ "$2" == *"$3"* ]]; then echo "ok: $1"; else echo "FAIL: $1 — output does not contain '$3'"; fail=1; fi; }
 assert_missing(){ if [[ "$2" != *"$3"* ]]; then echo "ok: $1"; else echo "FAIL: $1 — output unexpectedly contains '$3'"; fail=1; fi; }
+assert_nonzero(){ if [[ "$2" -ne 0 ]]; then echo "ok: $1"; else echo "FAIL: $1 — got exit 0, want non-zero"; fail=1; fi; }
+assert_isfile(){ if [[ -f "$2" ]]; then echo "ok: $1"; else echo "FAIL: $1 — $2 is not a regular file"; fail=1; fi; }
+assert_absent(){ if [[ ! -e "$2" ]]; then echo "ok: $1"; else echo "FAIL: $1 — $2 unexpectedly exists"; fail=1; fi; }
 
 TMP="$(mktemp -d)"
 FAKE_BIN="$TMP/bin"
@@ -66,7 +69,7 @@ run "$D"
 assert "all-present: exit 0" "$RC" 0
 assert_contains "all-present: counts" "$o" "7 present, 0 cloned"
 
-# ── 2. all missing → all cloned, including coach ──────────────────────────────
+# ── 2. all missing → the 7 required cloned; coach/fleek NOT ──────────────────
 D="$TMP/all-missing"; mkdir -p "$D"
 run "$D"
 assert "all-missing: exit 0" "$RC" 0
@@ -77,7 +80,7 @@ done
 # coach/fleek are opt-in — this guards against silently re-adding them to REQUIRED.
 assert_missing "all-missing: coach NOT cloned by default" "$o" "coach cloned"
 assert_missing "all-missing: fleek NOT cloned by default" "$o" "fleek cloned"
-assert "all-missing: no coach checkout" "$([[ -e "$D/coach" ]] && echo present || echo absent)" absent
+assert_absent "all-missing: no coach checkout" "$D/coach"
 
 # ── 3. idempotency: re-run over (2) clones nothing ────────────────────────────
 run "$D"
@@ -91,7 +94,7 @@ rm -rf "$D/soa"; mkworktree "$D/soa"
 run "$D"
 assert "worktree: exit 0" "$RC" 0
 assert_contains "worktree: counts" "$o" "7 present, 0 cloned"
-assert "worktree: .git still a FILE (not cloned over)" "$([[ -f "$D/soa/.git" ]] && echo file)" file
+assert_isfile "worktree: .git still a FILE (not cloned over)" "$D/soa/.git"
 assert_contains "worktree: .git contents preserved" "$(cat "$D/soa/.git")" "gitdir:"
 
 # ── 5. non-empty dir with no .git → skipped, NOT cloned into, exit NON-ZERO ───
@@ -99,15 +102,15 @@ D="$TMP/stray"; mkdir -p "$D"
 for r in "${REQUIRED[@]}"; do mkclone "$D/$r"; done
 rm -rf "$D/rostering"; mkdir -p "$D/rostering"; echo stray > "$D/rostering/README"
 run "$D"
-assert "stray: exit NON-zero (chained bootstrap must not proceed)" "$([[ $RC -ne 0 ]] && echo nonzero)" nonzero
+assert_nonzero "stray: exit NON-zero (chained bootstrap must not proceed)" "$RC"
 assert_contains "stray: warns SKIPPED" "$o" "SKIPPED"
 assert_contains "stray: says still missing" "$o" "still missing"
-assert "stray: not cloned into" "$([[ -e "$D/rostering/.git" ]] && echo cloned || echo untouched)" untouched
+assert_absent "stray: not cloned into" "$D/rostering/.git"
 
 # ── 6. clone failure → exit non-zero ──────────────────────────────────────────
 D="$TMP/clonefail"; mkdir -p "$D"
 out="$(PATH="$FAKE_BIN:$PATH" DEV="$D" GH_CLONE_RC=1 "$SCRIPT" 2>&1)"; RC=$?
-assert "clone-fail: exit NON-zero" "$([[ $RC -ne 0 ]] && echo nonzero)" nonzero
+assert_nonzero "clone-fail: exit NON-zero" "$RC"
 assert_contains "clone-fail: reports failures" "$out" "7 failed"
 
 # ── 7. --dry-run reports but clones nothing ───────────────────────────────────
@@ -115,9 +118,9 @@ D="$TMP/dryrun"; mkdir -p "$D"
 run "$D" --dry-run
 assert "dry-run: exit 0" "$RC" 0
 assert_contains "dry-run: counts" "$o" "7 to clone"
-assert "dry-run: nothing on disk" "$(ls -A "$D" | wc -l)" 0
+assert "dry-run: nothing on disk" "$(ls -A "$D")" ""
 
-# ── 8. --with-optional adds fleek ─────────────────────────────────────────────
+# ── 8. --with-optional adds coach + fleek ─────────────────────────────────────
 D="$TMP/optional"; mkdir -p "$D"
 run "$D" --with-optional --dry-run
 assert "with-optional: exit 0" "$RC" 0
@@ -132,9 +135,9 @@ assert_contains "help-via-pipe: prints usage" "$out" "clone whichever saga-stack
 assert_missing  "help-via-pipe: no sed error" "$out" "No such file"
 
 # ── 10. unknown flag → exit 1 ─────────────────────────────────────────────────
-out="$(PATH="$FAKE_BIN:$PATH" DEV="$TMP/x" "$SCRIPT" --bogus 2>&1)"; RC=$?
+run "$TMP/x" --bogus
 assert "unknown-flag: exit 1" "$RC" 1
-assert_contains "unknown-flag: names it" "$out" "unknown: --bogus"
+assert_contains "unknown-flag: names it" "$o" "unknown: --bogus"
 
 echo
 if [[ $fail == 0 ]]; then echo "all clone-repos.sh tests passed"; else echo "SOME TESTS FAILED"; fi

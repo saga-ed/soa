@@ -106,12 +106,13 @@ present=0; cloned=0; failed=0; skipped=0
 
 for name in "${REPOS[@]}"; do
     dir="$(repo_path "$name")"
+    label="$(printf '%-20s' "$name")"
 
     # `.git` is a DIR in a normal clone but a FILE (a `gitdir:` pointer) in a
     # `git worktree` — `-e` accepts either, so an overridden worktree isn't
     # mistaken for "needs clone" (which would clone over a populated checkout).
     if [[ -e "$dir/.git" ]]; then
-        ok "$(printf '%-20s' "$name") present  → $dir"
+        ok "$label present  → $dir"
         present=$((present + 1))
         continue
     fi
@@ -119,13 +120,13 @@ for name in "${REPOS[@]}"; do
     # A non-empty directory with no `.git` is someone else's business — a
     # half-finished clone, a stray unpack. Cloning into it would fail anyway.
     if [[ -e "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
-        warn "$(printf '%-20s' "$name") SKIPPED — $dir exists and is non-empty, but has no .git"
+        warn "$label SKIPPED — $dir exists and is non-empty, but has no .git"
         skipped=$((skipped + 1))
         continue
     fi
 
     if [[ $DRY_RUN == 1 ]]; then
-        say "$(printf '%-20s' "$name") would clone → $dir"
+        say "$label would clone → $dir"
         cloned=$((cloned + 1))
         continue
     fi
@@ -155,7 +156,7 @@ if [[ $failed -gt 0 ]]; then
     err "clone failed for $failed repo(s) — check 'gh auth status' and your org access, then re-run"
 fi
 if [[ $skipped -gt 0 ]]; then
-    warn "clear or move the skipped director$([[ $skipped -eq 1 ]] && echo y || echo ies) above, then re-run"
+    warn "clear or move the skipped director(ies) above, then re-run"
 fi
 if [[ $failed -gt 0 || $skipped -gt 0 ]]; then
     err "$((failed + skipped)) repo(s) still missing — the stack will not come up"

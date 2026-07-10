@@ -2,9 +2,10 @@
 # Unit test for clone-repos.sh (no network — stubs `gh` on PATH so `gh auth
 # status` succeeds and `gh repo clone` fabricates a checkout, or fails on demand).
 # Asserts:
-#   1. all repos present  → "8 present, 0 cloned", exit 0, nothing cloned.
-#   2. missing repos      → each is cloned, exit 0, and coach is among them
-#      (up.sh's check_branches hard-requires coach — regression guard).
+#   1. all repos present  → "7 present, 0 cloned", exit 0, nothing cloned.
+#   2. missing repos      → each of the 7 required is cloned, exit 0, and coach
+#      is NOT among them (it is opt-in, matching saga-stack-cli's
+#      EXCLUDED_FROM_BOOTSTRAP — regression guard against re-adding it).
 #   3. idempotency        → a second run over the result of (2) clones nothing.
 #   4. worktree checkout  → `.git` as a FILE counts as present, is never cloned
 #      over (the bug the `-e` test exists to prevent).
@@ -12,7 +13,7 @@
 #      so `clone-repos.sh && bootstrap.sh` stops here.
 #   6. clone failure      → exit non-zero.
 #   7. --dry-run          → reports, clones nothing, exit 0.
-#   8. --with-optional    → adds fleek (9 repos).
+#   8. --with-optional    → adds coach + fleek (9 repos).
 #   9. --help             → prints usage and exits 0 even when `$0` is not a
 #      readable file (the `gh api … | bash -s -- --help` pipe).
 #  10. unknown flag       → exit 1.
@@ -45,7 +46,7 @@ exit 0
 STUB
 chmod +x "$FAKE_BIN/gh"
 
-REQUIRED=(soa rostering program-hub saga-dash coach student-data-system qboard rtsm)
+REQUIRED=(soa rostering program-hub saga-dash student-data-system qboard rtsm)
 
 # Run clone-repos.sh against a scratch $DEV with the stubbed gh first on PATH.
 # Sets $o (combined output) and $RC in the CALLER's shell — do NOT wrap this in
@@ -63,24 +64,25 @@ D="$TMP/all-present"; mkdir -p "$D"
 for r in "${REQUIRED[@]}"; do mkclone "$D/$r"; done
 run "$D"
 assert "all-present: exit 0" "$RC" 0
-assert_contains "all-present: counts" "$o" "8 present, 0 cloned"
+assert_contains "all-present: counts" "$o" "7 present, 0 cloned"
 
 # ── 2. all missing → all cloned, including coach ──────────────────────────────
 D="$TMP/all-missing"; mkdir -p "$D"
 run "$D"
 assert "all-missing: exit 0" "$RC" 0
-assert_contains "all-missing: counts" "$o" "0 present, 8 cloned"
+assert_contains "all-missing: counts" "$o" "0 present, 7 cloned"
 for r in "${REQUIRED[@]}"; do
     if [[ -d "$D/$r/.git" ]]; then echo "ok: all-missing: cloned $r"; else echo "FAIL: all-missing: $r not cloned"; fail=1; fi
 done
-# coach is the regression guard: up.sh check_branches exits 1 without it.
-assert_contains "all-missing: coach cloned by DEFAULT (no --with-optional)" "$o" "coach cloned"
-assert_missing  "all-missing: fleek NOT cloned by default" "$o" "fleek cloned"
+# coach/fleek are opt-in — this guards against silently re-adding them to REQUIRED.
+assert_missing "all-missing: coach NOT cloned by default" "$o" "coach cloned"
+assert_missing "all-missing: fleek NOT cloned by default" "$o" "fleek cloned"
+assert "all-missing: no coach checkout" "$([[ -e "$D/coach" ]] && echo present || echo absent)" absent
 
 # ── 3. idempotency: re-run over (2) clones nothing ────────────────────────────
 run "$D"
 assert "idempotent: exit 0" "$RC" 0
-assert_contains "idempotent: counts" "$o" "8 present, 0 cloned"
+assert_contains "idempotent: counts" "$o" "7 present, 0 cloned"
 
 # ── 4. a git WORKTREE (.git is a file) counts as present, never cloned over ───
 D="$TMP/worktree"; mkdir -p "$D"
@@ -88,7 +90,7 @@ for r in "${REQUIRED[@]}"; do mkclone "$D/$r"; done
 rm -rf "$D/soa"; mkworktree "$D/soa"
 run "$D"
 assert "worktree: exit 0" "$RC" 0
-assert_contains "worktree: counts" "$o" "8 present, 0 cloned"
+assert_contains "worktree: counts" "$o" "7 present, 0 cloned"
 assert "worktree: .git still a FILE (not cloned over)" "$([[ -f "$D/soa/.git" ]] && echo file)" file
 assert_contains "worktree: .git contents preserved" "$(cat "$D/soa/.git")" "gitdir:"
 
@@ -106,13 +108,13 @@ assert "stray: not cloned into" "$([[ -e "$D/rostering/.git" ]] && echo cloned |
 D="$TMP/clonefail"; mkdir -p "$D"
 out="$(PATH="$FAKE_BIN:$PATH" DEV="$D" GH_CLONE_RC=1 "$SCRIPT" 2>&1)"; RC=$?
 assert "clone-fail: exit NON-zero" "$([[ $RC -ne 0 ]] && echo nonzero)" nonzero
-assert_contains "clone-fail: reports failures" "$out" "8 failed"
+assert_contains "clone-fail: reports failures" "$out" "7 failed"
 
 # ── 7. --dry-run reports but clones nothing ───────────────────────────────────
 D="$TMP/dryrun"; mkdir -p "$D"
 run "$D" --dry-run
 assert "dry-run: exit 0" "$RC" 0
-assert_contains "dry-run: counts" "$o" "8 to clone"
+assert_contains "dry-run: counts" "$o" "7 to clone"
 assert "dry-run: nothing on disk" "$(ls -A "$D" | wc -l)" 0
 
 # ── 8. --with-optional adds fleek ─────────────────────────────────────────────
@@ -120,12 +122,13 @@ D="$TMP/optional"; mkdir -p "$D"
 run "$D" --with-optional --dry-run
 assert "with-optional: exit 0" "$RC" 0
 assert_contains "with-optional: 9 repos" "$o" "9 to clone"
+assert_contains "with-optional: includes coach" "$o" "coach"
 assert_contains "with-optional: includes fleek" "$o" "fleek"
 
 # ── 9. --help works when $0 is NOT a readable file (the `| bash -s --` pipe) ──
 out="$(PATH="$FAKE_BIN:$PATH" bash -s -- --help < "$SCRIPT" 2>&1)"; RC=$?
 assert "help-via-pipe: exit 0" "$RC" 0
-assert_contains "help-via-pipe: prints usage" "$out" "clone whichever synthetic-dev sibling repos are missing"
+assert_contains "help-via-pipe: prints usage" "$out" "clone whichever saga-stack sibling repos are missing"
 assert_missing  "help-via-pipe: no sed error" "$out" "No such file"
 
 # ── 10. unknown flag → exit 1 ─────────────────────────────────────────────────

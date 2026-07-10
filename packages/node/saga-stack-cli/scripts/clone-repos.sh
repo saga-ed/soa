@@ -1,28 +1,30 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# clone-repos.sh — get every sibling repo the synthetic-dev stack needs onto
-# this machine, so `ss` / bootstrap.sh has something to drive.
+# clone-repos.sh — get the sibling repos saga-stack-cli (`ss`) drives onto this
+# machine, so there is something for `ss stack bootstrap` to run against.
 #
 # For each repo: report it if already present, `gh repo clone` it if not.
 # Idempotent — safe to re-run any time a new repo joins the mesh.
 #
-# This script is deliberately SELF-CONTAINED (no repo files, no pnpm, no node)
-# so it can run before anything is checked out:
+# WHY THIS EXISTS, given `ss stack bootstrap` already clones missing siblings:
+# that command lives inside soa and needs soa cloned, installed, and built
+# first — and it clones over SSH. This script is deliberately SELF-CONTAINED
+# (no repo files, no pnpm, no node) and rides `gh` auth, so it runs on a bare
+# machine with nothing checked out:
 #
 #   gh api -H 'Accept: application/vnd.github.raw' \
-#     /repos/saga-ed/soa/contents/tools/synthetic-dev/clone-repos.sh | bash
+#     /repos/saga-ed/soa/contents/packages/node/saga-stack-cli/scripts/clone-repos.sh | bash
 #
 # Usage:
-#   ./clone-repos.sh                 clone any missing of the 8 required repos
-#   ./clone-repos.sh --with-optional also clone fleek
+#   ./clone-repos.sh                 clone any missing of the 7 required repos
+#   ./clone-repos.sh --with-optional also clone coach + fleek
 #   ./clone-repos.sh --dry-run       report what it WOULD clone, clone nothing
 #   DEV=~/work ./clone-repos.sh      non-default sibling-repo parent
 #
-# It does NOT install deps. Once the checkouts exist, run bootstrap.sh (or
-# `ss stack bootstrap`), which does co:login + pnpm install + brings the stack up.
+# It does NOT install deps. Once the checkouts exist, run `ss stack bootstrap`,
+# which does co:login + pnpm install + brings the stack up.
 #
-# Prereq: `gh` authenticated (`gh auth status`). Unlike bootstrap.sh's SSH
-# clone, `gh repo clone` rides your existing gh auth — no SSH key setup needed.
+# Prereq: `gh` authenticated (`gh auth status`) — no SSH key setup needed.
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
@@ -35,14 +37,14 @@ DRY_RUN=0
 # a file, so sed would read the wrong path (or nothing).
 usage(){
     cat <<'USAGE'
-clone-repos.sh — clone whichever synthetic-dev sibling repos are missing.
+clone-repos.sh — clone whichever saga-stack sibling repos are missing.
 
-  ./clone-repos.sh                 clone any missing of the 8 required repos
-  ./clone-repos.sh --with-optional also clone fleek
+  ./clone-repos.sh                 clone any missing of the 7 required repos
+  ./clone-repos.sh --with-optional also clone coach + fleek
   ./clone-repos.sh --dry-run       report what it WOULD clone, clone nothing
   DEV=~/work ./clone-repos.sh      non-default sibling-repo parent
 
-Prereq: `gh` authenticated. Does not install deps — run bootstrap.sh after.
+Prereq: `gh` authenticated. Does not install deps — run `ss stack bootstrap`.
 USAGE
 }
 
@@ -65,17 +67,15 @@ gh auth status >/dev/null 2>&1 || { err "gh is not authenticated — run 'gh aut
 
 DEV=${DEV:-$HOME/dev}
 
-# The 8 repos up.sh's `check_branches` preflight hard-requires (up.sh ~353) — it
-# exits 1 if any is missing, so ALL of them must be cloned by default.
-#
-# NOTE: bootstrap.sh's own ensure_repos loop lists only 7 (it omits `coach`), as
-# does saga-stack-cli's REQUIRED_BOOTSTRAP_REPOS. That is a bug in THOSE: on a
-# bare machine they clone 7, then up.sh's preflight dies on the missing coach.
-# This list follows up.sh, which is what actually gates the stack coming up.
-REQUIRED=(soa rostering program-hub saga-dash coach student-data-system qboard rtsm)
-# `fleek` is genuinely optional — up.sh defaults a path for it but the preflight
-# does not require it. Cloned only under --with-optional.
-OPTIONAL=(fleek)
+# The 7 required repos — deliberately the SAME set as saga-stack-cli's
+# REQUIRED_BOOTSTRAP_REPOS (src/runtime/ensure-repos.ts), which is the manifest
+# repo set minus coach + fleek. Keep the two in sync.
+REQUIRED=(soa rostering program-hub saga-dash student-data-system qboard rtsm)
+# coach + fleek are opt-in, matching ensure-repos.ts's EXCLUDED_FROM_BOOTSTRAP.
+# `ss stack up` SKIPS a service whose repo dir is absent, warning rather than
+# erroring (see StackApi's `repoDirExists` seam), so omitting these yields a
+# stack without coach-api/coach-web — not a failed one.
+OPTIONAL=(coach fleek)
 
 REPOS=("${REQUIRED[@]}")
 [[ $WITH_OPTIONAL == 1 ]] && REPOS+=("${OPTIONAL[@]}")
@@ -165,4 +165,4 @@ fi
 ok "all repos present under $DEV"
 printf "\nNext: install deps and stand the stack up —\n"
 printf "    cd %s && pnpm install\n" "$(repo_path soa)"
-printf "    ./tools/synthetic-dev/bootstrap.sh        # or: ss stack bootstrap\n"
+printf "    ss stack bootstrap\n"

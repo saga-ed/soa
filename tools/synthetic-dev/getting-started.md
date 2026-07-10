@@ -356,36 +356,18 @@ captured by `../training/capture/capture.mjs` (regenerable; see
    `pnpm install` in rostering/program-hub/saga-dash will 401 on every
    private package. Get a fresh token any time with
    `pnpm co:login` (defined in each repo's root `package.json`).
-5. **Eight sibling repos cloned under a shared parent**, by default `~/dev/`:
+5. **Seven sibling repos cloned under a shared parent**, by default `~/dev/`:
    ```
    ~/dev/
      ├── soa                  # mesh infra (provides docker compose for pg/redis/rabbitmq)
      ├── rostering            # iam-api + sis-api + iam-db / sis-db
      ├── program-hub          # programs-api + scheduling-api + sessions-api
      ├── saga-dash            # the dash itself
-     ├── coach                # coach-api (:6105) + coach-web (:8800) + coach-db
      ├── student-data-system  # ads-adm-api + this synthetic-dev tooling
      ├── qboard               # connect-api + connect-web (+ livekit/coturn compose)
      └── rtsm                 # rtsm-api (Connect's CRDT/socket service; single-node here)
    ```
    Override the base with `DEV=~/work ./bootstrap.sh`.
-
-   > `coach` is required — `up.sh`'s `check_branches` preflight exits 1 without
-   > it. Note that `bootstrap.sh`'s own "ensure repos" step (and `ss stack
-   > bootstrap`) currently clone only the other seven, so on a bare machine they
-   > stop at that preflight. `clone-repos.sh` clones all eight.
-
-   Starting from nothing? `clone-repos.sh` clones whichever of these you're
-   missing (and reports the ones you already have). It needs only an
-   authenticated `gh`, so you can run it before any repo is checked out:
-   ```bash
-   gh api -H 'Accept: application/vnd.github.raw' \
-     /repos/saga-ed/soa/contents/tools/synthetic-dev/clone-repos.sh | bash
-   ```
-   Already have `soa`? Just `./tools/synthetic-dev/clone-repos.sh`. It's
-   idempotent, `--dry-run` shows what it would do, and it never clones over an
-   existing checkout or worktree. `bootstrap.sh` (and `ss stack bootstrap`)
-   also clone missing siblings, but over SSH and only from inside `soa`.
 6. Each sibling repo's `pnpm install` should succeed at least once (post-
    token-refresh). `up.sh` reruns this idempotently for rostering on every
    `up` because the branch switch isn't dep-neutral; for the others a one-time

@@ -16,7 +16,7 @@ function run(cmd, args, options = {}) {
 
 /**
  * Get EC2 instance metadata via IMDSv2.
- * @returns {{ instance_id: string, az: string, region: string }}
+ * @returns {{ instance_id: string, az: string, region: string, private_ip: string }}
  */
 export function get_instance_metadata() {
     const token = run('curl', [

@@ -246,8 +246,8 @@ export function create_ec2_router(config = {}) {
                 // Register in CloudMap
                 if (namespace_id) {
                     try {
-                        const ip = get_instance_metadata().private_ip;
-                        register({ name, ip, port, namespace_id, region: region || get_instance_metadata().region });
+                        const meta = get_instance_metadata();
+                        register({ name, ip: meta.private_ip, port, namespace_id, region: region || meta.region });
                     } catch (err) {
                         synced.push({
                             ok: true,
@@ -494,8 +494,8 @@ export function create_ec2_router(config = {}) {
                 const ports = get_allocated_ports({ registry_path });
                 const port_entry = ports[name];
                 if (port_entry) {
-                    const ip = get_instance_metadata().private_ip;
-                    register({ name, ip, port: port_entry.port, namespace_id, region: region || get_instance_metadata().region });
+                    const meta = get_instance_metadata();
+                    register({ name, ip: meta.private_ip, port: port_entry.port, namespace_id, region: region || meta.region });
                 }
             }
 
@@ -582,13 +582,13 @@ export function create_ec2_router(config = {}) {
             }
 
             if (namespace_id) {
-                const ip = get_instance_metadata().private_ip;
+                const meta = get_instance_metadata();
                 register({
                     name,
-                    ip,
+                    ip: meta.private_ip,
                     port,
                     namespace_id,
-                    region: region || get_instance_metadata().region,
+                    region: region || meta.region,
                 });
             }
 

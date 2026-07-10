@@ -100,6 +100,9 @@ describe('POST /dbs provision race + rollback', () => {
         // document (eth0 private IP), never from `hostname -I`, whose first entry
         // can be a docker-compose bridge gateway (192.168.x/172.x) on a busy
         // db-host node → an unreachable A-record. See volumes.js private_ip.
+        // The create route stands in for all four register sites (create/sync/
+        // start/hydrate), which share the identical `get_instance_metadata().
+        // private_ip` expression — a reverted site would break them together.
         const ns_server = await create_test_server({
             projects_dir, data_dir,
             registry_path: join(data_dir, 'ports.json'),
@@ -113,7 +116,10 @@ describe('POST /dbs provision race + rollback', () => {
             expect(register).toHaveBeenCalledWith(
                 expect.objectContaining({ name: 'svc-pr-ns', ip: '10.3.142.176' }),
             );
-            // And never registers a bridge/loopback address.
+            // And never registers a bridge/loopback address. NB: this rejects
+            // all of 172.16/12 — fine for the fleet's 10/8 VPC, but a default
+            // AWS VPC (172.31/16) would carry a legitimate eth0 IP in that range,
+            // so tighten this guard if the fleet ever moves off 10/8 addressing.
             for (const [{ ip }] of register.mock.calls) {
                 expect(ip).not.toMatch(/^(192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/);
             }

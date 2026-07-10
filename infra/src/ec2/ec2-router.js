@@ -246,7 +246,7 @@ export function create_ec2_router(config = {}) {
                 // Register in CloudMap
                 if (namespace_id) {
                     try {
-                        const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
+                        const ip = get_instance_metadata().private_ip;
                         register({ name, ip, port, namespace_id, region: region || get_instance_metadata().region });
                     } catch (err) {
                         synced.push({
@@ -412,7 +412,7 @@ export function create_ec2_router(config = {}) {
 
                 // Register with CloudMap
                 if (namespace_id) {
-                    const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
+                    const ip = get_instance_metadata().private_ip;
                     register({
                         name,
                         ip,
@@ -494,7 +494,7 @@ export function create_ec2_router(config = {}) {
                 const ports = get_allocated_ports({ registry_path });
                 const port_entry = ports[name];
                 if (port_entry) {
-                    const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
+                    const ip = get_instance_metadata().private_ip;
                     register({ name, ip, port: port_entry.port, namespace_id, region: region || get_instance_metadata().region });
                 }
             }
@@ -582,7 +582,7 @@ export function create_ec2_router(config = {}) {
             }
 
             if (namespace_id) {
-                const ip = spawnSync('hostname', ['-I'], { encoding: 'utf8' }).stdout.trim().split(/\s+/)[0];
+                const ip = get_instance_metadata().private_ip;
                 register({
                     name,
                     ip,

@@ -64,7 +64,8 @@ export interface FgaRelationsByType {
         | 'staff_admin'
         | 'can_view'
         | 'can_edit'
-        | 'can_delete';
+        | 'can_delete'
+        | 'can_force_clever_sync';
 }
 
 export type FgaRelation<T extends FgaType> = FgaRelationsByType[T];

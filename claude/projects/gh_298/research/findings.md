@@ -7,9 +7,20 @@ Jeff Ward Slack (G01CQ6UPB0E threads 2026-06-12 and 2026-07-10 `tunnel_info.md`)
 
 Tunnel mode is **already ported to `ss` and merged on `main`**. The original up.sh feature
 (soa#156, merged 2026-06-15) was carried into `saga-stack-cli` by the soa#214/#221 "decouple"
-work (Phase 1 = vendor the scripts, Phase 2 = native overlays). What remains is (a) a small
-**drift fix** and (b) the **one genuinely-missing capability** Jeff called out for the Connect
-use case: `ss e2e … --tunnel`.
+work (Phase 1 = vendor the scripts, Phase 2 = native overlays). What remains are **three** gaps
+(count corrected by the ultracode validation pass — see `validation-report.md`):
+
+1. **Vendored `tunnel.sh` drift** — coach missing from the vendored SERVICES table.
+2. **coach browser-plane overlay missing from the TypeScript** — `coach-api`/`coach-web` fall
+   through to `default:{}` in `launch-plan.ts:375`, so ss never sets coach's tunnel CORS /
+   `PUBLIC_COACH_API_URL` / Vite allowed-hosts. **Distinct from #1** — re-vendoring the script
+   fixes frpc plumbing but leaves coach CORS-rejected + Vite-403'd. This is the gap my first
+   pass missed.
+3. **No `ss e2e … --tunnel`** — the capability Jeff called out for the Connect use case.
+
+> ⚠️ The original "exactly two gaps" thesis was **refuted as stated** by validation. Details,
+> per-service parity table, and the e2e implementation surface map are in
+> `research/validation-report.md`.
 
 ## What tunnel mode is (original design, soa#156)
 

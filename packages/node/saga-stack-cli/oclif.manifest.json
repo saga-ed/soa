@@ -152,6 +152,12 @@
           "name": "tunnel",
           "allowNo": false,
           "type": "boolean"
+        },
+        "open-slot": {
+          "description": "leave ONE student seat OPEN (seat only the first student locally) so a REMOTE peer can join as the second student — pair with --tunnel to invite a coworker. The run prints the open persona + the join URL. Sets CONNECT_OPEN_STUDENT_SLOTS=1 on the headed interactive-connect run.",
+          "name": "open-slot",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,

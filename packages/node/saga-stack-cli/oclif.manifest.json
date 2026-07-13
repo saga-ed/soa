@@ -153,11 +153,13 @@
           "allowNo": false,
           "type": "boolean"
         },
-        "open-slot": {
-          "description": "leave ONE student seat OPEN (seat only the first student locally) so a REMOTE peer can join as the second student — pair with --tunnel to invite a coworker. The run prints the open persona + the join URL. Sets CONNECT_OPEN_STUDENT_SLOTS=1 on the headed interactive-connect run.",
-          "name": "open-slot",
-          "allowNo": false,
-          "type": "boolean"
+        "student-login": {
+          "description": "how many of the 2 students THIS run logs in + joins locally (0, 1, or 2; default 2). The rest stay OPEN for a REMOTE peer to take — pair with --tunnel to invite coworkers. The tutor always auto-hosts and starts the session; login URLs for EVERY participant are printed regardless. Sets CONNECT_LOCAL_STUDENTS on the headed interactive-connect run.",
+          "name": "student-login",
+          "default": 2,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,

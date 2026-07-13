@@ -101,10 +101,12 @@ export default class E2eConnect extends BaseCommand {
       description:
         'point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints these Playwright browsers’ URLs — it does NOT relaunch the stack, flip connect-web/rtsm/cookie env, or start frpc. You must have already run `ss stack up --tunnel` so the stack itself is tunnel-served. Connect is slot-0 only, so no slot guard is needed.',
     }),
-    'open-slot': Flags.boolean({
-      default: false,
+    'student-login': Flags.integer({
+      default: 2,
+      min: 0,
+      max: 2,
       description:
-        'leave ONE student seat OPEN (seat only the first student locally) so a REMOTE peer can join as the second student — pair with --tunnel to invite a coworker. The run prints the open persona + the join URL. Sets CONNECT_OPEN_STUDENT_SLOTS=1 on the headed interactive-connect run.',
+        'how many of the 2 students THIS run logs in + joins locally (0, 1, or 2; default 2). The rest stay OPEN for a REMOTE peer to take — pair with --tunnel to invite coworkers. The tutor always auto-hosts and starts the session; login URLs for EVERY participant are printed regardless. Sets CONNECT_LOCAL_STUDENTS on the headed interactive-connect run.',
     }),
   };
 
@@ -136,13 +138,15 @@ export default class E2eConnect extends BaseCommand {
     // the prerequisite + reset entirely, exactly like connect-session.sh.
     const resolved = resolveFlow(disco.manifest, CONNECT_FLOW, { lane: 'stack' });
     const base = flags.reuse ? { ...resolved, prerequisite: undefined } : resolved;
-    // --fake-media (FAKE_MEDIA=1) and --open-slot (CONNECT_OPEN_STUDENT_SLOTS=1) pin
+    // --fake-media (FAKE_MEDIA=1) and --student-login (CONNECT_LOCAL_STUDENTS=N) pin
     // env into THIS flow's env (merged last by computeEnv), so they reach only the
     // connect-session stage (headed interactive-connect) — not the journey
     // prerequisite, a separate ResolvedFlow.
     const stageEnv: Record<string, string> = {};
     if (flags['fake-media']) stageEnv.FAKE_MEDIA = '1';
-    if (flags['open-slot']) stageEnv.CONNECT_OPEN_STUDENT_SLOTS = '1';
+    // Default (2) leaves the env unset ⇒ the spec's own default (all students local),
+    // so a plain `e2e connect` is byte-identical to before. Only pin it when narrowing.
+    if (flags['student-login'] !== 2) stageEnv.CONNECT_LOCAL_STUDENTS = String(flags['student-login']);
     const toRun =
       Object.keys(stageEnv).length > 0
         ? { ...base, flow: { ...base.flow, env: { ...base.flow.env, ...stageEnv } } }

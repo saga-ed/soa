@@ -115,8 +115,11 @@ describe('stack bootstrap — native chain', () => {
     expect(clones.some((c) => c.includes('saga-ed/student-data-system.git → /fixed/dev/student-data-system'))).toBe(
       true,
     );
-    expect(clones.some((c) => c.includes('coach'))).toBe(false);
-    expect(clones.some((c) => c.includes('fleek'))).toBe(false);
+    // Match the repo SLUG, not the raw `url → dir` string: `dir` embeds the soa
+    // checkout path, so a bare `includes('coach')` also fires on a worktree or
+    // branch whose name happens to contain "coach".
+    expect(clones.some((c) => c.includes('saga-ed/coach.git'))).toBe(false);
+    expect(clones.some((c) => c.includes('saga-ed/fleek.git'))).toBe(false);
     expect(steps).toEqual(['overlay apply', 'up --reset --seed roster', 'verify']);
   });
 

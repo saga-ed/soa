@@ -60,7 +60,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       env: {
         PORT: '${IAM_PORT}',
         AUTH_DEVUSERID: '${DEV_USER_UUID}',
-        CORS_ORIGIN: '${DASH_URL},${CONNECT_WEB_URL}',
+        // Stamp the SAME issuer coach-api validates (its AUTH_ISSUER). Injected
+        // rather than left to iam-api/.env so the two ends can never drift.
+        JWT_ISSUER: '${IAM_ISSUER}',
+        // coach-web is here because its browser calls iam's auth.whoami direct
+        // (coach-web session.ts) — omit it and every coach page 503s on CORS.
+        CORS_ORIGIN: '${DASH_URL},${CONNECT_WEB_URL},${COACH_WEB_URL}',
         MAIL_FRONTEND_BASE_URL: 'http://localhost:${IAM_PORT}/demo',
         // iam-api assembles its redis URL from REDIS_HOST+REDIS_PORT (localhost ⇒
         // non-TLS redis://). Slot-offset-aware: :6379 at slot 0, :7379 at slot 1.
@@ -521,14 +526,19 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // SvelteKit SPA — probed on the root path like saga-dash / connect-web.
     healthPath: '/',
     databases: [],
-    // Reaches iam server-side THROUGH coach-api, so it only needs the coach-api URL.
-    dependsOn: ['coach-api'],
-    depKinds: { 'coach-api': 'browser' },
+    // Client-only SPA (ssr = false): the BROWSER calls coach-api for data and
+    // iam's auth.whoami direct for identity — so it needs both URLs, and iam
+    // must allow its origin (see iam-api's CORS_ORIGIN).
+    dependsOn: ['coach-api', 'iam-api'],
+    depKinds: { 'coach-api': 'browser', 'iam-api': 'browser' },
     mesh: [],
     launch: {
       cmd: 'pnpm dev',
       env: {
         PUBLIC_COACH_API_URL: '${COACH_API_URL}',
+        // Without this, coach-web falls back to its .env default
+        // (https://iam.wootdev.com) and the local SPA talks to deployed iam.
+        PUBLIC_IAM_API_URL: '${IAM_URL}',
       },
     },
     seed: [],

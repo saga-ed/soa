@@ -97,12 +97,18 @@ capture as a follow-up issue once slot-0 lands.
 
 ## Effort: ~3–4 focused days, sequenced so each phase ships independently.
 
-## Open questions for Sean/Jeff before Phase 3
+## Decisions (resolved with Sean, 2026-07-13)
 
-1. **Seeding strategy:** snapshot-bridge (fast build, tunnel only the live room) vs full
-   `e2e run --tunnel` (one command, slow journey)? Recommend bridge-as-default, `--tunnel` as
-   escape hatch.
-2. **Guest auth for Connect:** how do invited coworkers authenticate — the tunnelled iam demo
-   login page, or pre-minted jars? Affects what the concierge flow hands them.
-3. **Security posture:** Jeff deliberately made it non-VPN. Keep as-is for v1, or add a shared
-   secret / basic-auth at the box for the public URLs?
+1. **Seeding strategy → snapshot bridge (default).** Build under localhost (fast journey),
+   snapshot, restore under the tunnel cookie domain, tunnel only the live room. `ss e2e run
+   --tunnel` (Phase 2) still ships as the slow all-in-one escape hatch. **Consequence:** Phase 3
+   MUST root-cause Jeff's "Demo District sessions didn't populate after snapshot-restore" — the
+   bridge is the happy path, so that bug is now on the critical path, not a nice-to-have.
+2. **Guest auth → tunnelled iam demo login.** Invited coworkers hit
+   `https://iam.<moniker>.vms.wootdev.com/demo` and log in as a seeded persona. No per-guest jar
+   distribution. The concierge flow just hands out the `connect.<moniker>.vms…` URL; the demo
+   login page is the gate. (Confirms the existing `tunnel_env` `MAIL_FRONTEND_BASE_URL` /
+   `JANUS_LOGIN_HOST` → tunnelled iam demo wiring is the right target.)
+3. **Security posture → keep open (v1).** No VPN, no box-level auth — matches what Jeff
+   deliberately shipped. App-layer iam demo login is the only gate. Hardening (shared
+   secret / basic-auth at the box) is a deliberate follow-up, not v1 scope.

@@ -250,15 +250,13 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     });
   });
 
-  it('coach-api (dual-store: coach_api pg + mesh mongo, iss=iam.wootdev.com — what local iam mints)', () => {
+  // SINGLE-store: mongo is retired (curriculum reads come from Postgres
+  // content_release), so NO MONGO_HOST/MONGO_PORT/MONGO_DATABASE/CONTENT_DATABASE.
+  it('coach-api (single-store: coach_api pg; iss=iam.wootdev.com — what local iam mints)', () => {
     expect(env('coach-api')).toEqual({
       NODE_ENV: 'development',
       EXPRESS_SERVER_PORT: '6105',
       DATABASE_URL: 'postgresql://coach_api_app:dev-password-coach-api-app@localhost:5432/coach_api',
-      MONGO_HOST: 'localhost',
-      MONGO_PORT: '27037',
-      MONGO_DATABASE: 'saga_local',
-      CONTENT_DATABASE: 'wmlms_local',
       AUTH_AUTHENABLED: 'true',
       IAM_API_TARGET: 'http://localhost:3010',
       AUTH_JWKSURL: 'http://localhost:3010/.well-known/jwks.json',

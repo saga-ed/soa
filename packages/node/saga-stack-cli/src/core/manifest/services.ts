@@ -488,19 +488,18 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     databases: ['coach_api'],
     dependsOn: ['iam-api'],
     depKinds: { 'iam-api': 'url' },
-    // DUAL-STORE: coach_api pg (via `databases`) + the mesh mongo (curriculum read
-    // path). RABBITMQ_ENABLED=false, so rabbitmq is intentionally NOT gated on.
-    mesh: ['connect-mongo'],
+    // SINGLE-STORE: coach_api pg only (via `databases`). Mongo is RETIRED — coach's
+    // curriculum read path is Postgres now (PostgresContentReadStore over
+    // content_release), coach-api carries no mongo dependency and reads no MONGO_*
+    // env, so the mesh mongo is NOT gated on and those vars are not injected.
+    // RABBITMQ_ENABLED=false, so rabbitmq is intentionally NOT gated on either.
+    mesh: [],
     launch: {
       cmd: 'pnpm dev',
       env: {
         NODE_ENV: 'development',
         EXPRESS_SERVER_PORT: '${COACH_API_PORT}',
         DATABASE_URL: '${COACH_DB_URL}',
-        MONGO_HOST: 'localhost',
-        MONGO_PORT: '${CONNECT_MONGO_PORT}',
-        MONGO_DATABASE: 'saga_local',
-        CONTENT_DATABASE: 'wmlms_local',
         AUTH_AUTHENABLED: 'true',
         IAM_API_TARGET: '${IAM_URL}',
         AUTH_JWKSURL: '${IAM_URL}/.well-known/jwks.json',

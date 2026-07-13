@@ -94,6 +94,14 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
         expect(rels).not.toContain('admin');
     });
 
+    it('staff_org exposes can_force_clever_sync computed from staff_admin', () => {
+        const rels = byType.staff_org.relations ?? {};
+        expect(rels).toHaveProperty('can_force_clever_sync');
+        // Must resolve THROUGH staff_admin (org_admin+ staff), not a direct
+        // user grant — so it can never be handed to a district persona.
+        expect(JSON.stringify(rels.can_force_clever_sync)).toContain('staff_admin');
+    });
+
     it('staff_org has no `from parent` cascade into the resource tree', () => {
         // No relation on staff_org may resolve through a `parent` edge —
         // the only computed-userset source allowed is `platform`.

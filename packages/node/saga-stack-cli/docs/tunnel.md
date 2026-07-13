@@ -108,6 +108,33 @@ ss e2e run journey --tunnel    # drive a whole flow over the tunnel (see the cav
 - Both are slot-0-only, and `run --tunnel` also requires the local `stack` lane (a deployed lane
   resolves its own hostnames, so `--tunnel --lane sandbox` is rejected).
 
+## Login credentials
+
+Guests log in at `https://iam.<moniker>.vms.wootdev.com/demo#auth` — either via **devLogin**
+(enter the email, no password) or with the shared dev password **`password123`**. Every launchable
+demo session belongs to the **`demo` district** (not the roster/`example.org` personas), so the
+stack must have been brought up with **`--seed full`**, and the dash `/sessions` page only shows
+them once programs are seeded (another reason for `--seed full`).
+
+The personas for the **live, launchable** Connect demo session — Demo North Summer Program, Pod A,
+the one seeded with a renderable board + published content:
+
+| Role | Email | Does |
+|------|-------|------|
+| District admin | `demo-dadmin@saga.org` | Sees every demo session on the dash `/sessions` page |
+| **Tutor (session host)** | `demo-lead-north@saga.org` | Hosts Pod A — **launches** the Connect board |
+| Student | `demo-student-1@saga.org` | Joins the session |
+| Student | `demo-student-2@saga.org` | Joins the session |
+
+All log in with **`password123`** (or devLogin, no password).
+
+> **The launch host is `demo-lead-north`, not `demo-tutor-1`.** `demo-tutor-1` / `demo-tutor-2` host
+> other demo pods, but those are seeded only in `ended` / `edited` / `cancelled` states — no live
+> board. Only `demo-lead-north`'s Pod A session has a renderable, launchable board. (The full demo
+> roster also includes `demo-student-3..6`, `demo-admin-north`, and `demo-dadmin-ro` (read-only
+> observer). The "session-based attendance demo" and the "Connect launchable" demo are the **same**
+> Demo North/South Summer Program fixture — not separate accounts.)
+
 ## Guest security
 
 By design there is **no VPN and no box-level auth** in front of the wildcard hosts — the app-layer

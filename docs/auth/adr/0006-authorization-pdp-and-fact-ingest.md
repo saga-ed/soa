@@ -34,8 +34,9 @@ copies of it.
 
 ### 1. One Authorization PDP owns the store
 
-A single service — **authz-api**, the PDP (rostering north star §3; evolves out of iam-api's
-personas sector and absorbs the staff store) — is the only holder of FGA credentials. Application
+A single service — **authz-api**, the PDP (rostering north star §3; a **new dedicated service**
+per the 2026-07-13 deployment-shape decision, absorbing the personas authority from iam-api and
+the staff store) — is the only holder of FGA credentials. Application
 services call the PDP/SDK (`check` / `capabilities` / `values` / `explain`); they never talk to
 FGA directly and never write tuples (0005 rule, unchanged). One fleet store per environment —
 cross-domain traversal (program → group scope → grant → user) requires one graph.

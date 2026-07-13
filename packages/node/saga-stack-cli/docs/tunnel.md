@@ -146,14 +146,15 @@ Empty Org personas (from the journey — the tested `session e2e` roster):
 
 | Role | Email | Does | Login |
 |------|-------|------|-------|
-| **Org admin** | `empty@saga.org` | Sees the org's sessions on `/sessions/list/today`; can **start/launch** a session (via grant) | devLogin or `password123` |
-| Tutor | `alex.tutor@example.org` | Section tutor (Math 101 / Reading 201) — hosts the session | devLogin |
-| Student | `ann.lee@example.org` | Enrolled student — joins | devLogin |
-| Student | `ben.kim@example.org` | Enrolled student — joins | devLogin |
+| **Tutor / host** | `alex.tutor@example.org` | Hosts the Connect room (`interactive-connect` uses this account) | devLogin |
+| Student | `ann.lee@example.org` | Joins the room | devLogin |
+| Student | `cara.diaz@example.org` | Joins the room | devLogin |
+| Org admin (opt.) | `empty@saga.org` | Org admin / in-room observer (`IN_ROOM_OBSERVER=1`) | devLogin or `password123` |
 
-`empty@saga.org` is the simplest login to **see and launch** the journey sessions. (`dev@saga.org` is
-the *seed*-district admin — a different, pre-journey org.) The full roster (2 tutors, 8 students)
-lives in `saga-dash` `e2e/data/fixtures/example-roster.csv`.
+These three (`alex.tutor`, `ann.lee`, `cara.diaz`) are the accounts `ss e2e connect` seats in the
+live room — all enrolled in the same pod (Math 101 + Reading 201). `empty@saga.org` is the Empty Org
+admin (opt-in observer). `dev@saga.org` is the *seed*-district admin — a different, pre-journey org.
+Full roster (2 tutors, 8 students): `saga-dash` `e2e/data/fixtures/example-roster.csv`.
 
 ## Guest security
 

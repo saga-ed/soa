@@ -99,7 +99,7 @@ export default class E2eConnect extends BaseCommand {
     tunnel: Flags.boolean({
       default: false,
       description:
-        'point the headed Connect room at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can drive the session. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`) and writes the dash tunnel config. Connect is slot-0 only, so no slot guard is needed.',
+        'point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints these Playwright browsers’ URLs — it does NOT relaunch the stack, flip connect-web/rtsm/cookie env, or start frpc. You must have already run `ss stack up --tunnel` so the stack itself is tunnel-served. Connect is slot-0 only, so no slot guard is needed.',
     }),
   };
 

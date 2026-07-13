@@ -37,24 +37,24 @@ The canonical use case: **invite someone to test Connect with you** via a public
 ## Bring the stack up in tunnel mode
 
 ```bash
-ss stack up --tunnel --seed full --reset
+ss stack down && ss stack up --tunnel --seed full --reset
 ```
 
-This is fully native (no `up.sh`): it resolves your moniker via the vendored `tunnel.sh`, builds the
-tunnel-aware browser-plane env for every service (incl. coach), writes the dash's tunnel routing
-(`config.local.json`), brings the stack up, and — after a healthy launch+seed — starts the frpc
-reverse tunnels. When it's up, `https://dash.<moniker>.vms.wootdev.com` loads, logged in.
+The leading `ss stack down` is part of the instruction, not an afterthought: `up --tunnel` skips any
+service whose port is already healthy, so a stack already running in localhost mode would keep its
+non-tunnel env — most visibly iam would set a **host-only** `iam_session` cookie (no
+`Domain=.<moniker>.vms…`) and the dash couldn't hold the session across the API subdomains. Bringing
+it down first guarantees every service (re)launches under the tunnel env. On a cold machine the
+`down` is a harmless no-op, so this one command is always the right way in.
 
-> **Services must (re)launch to pick up the tunnel env.** `up --tunnel` skips any service whose
-> port is already healthy, so if the stack was already running in localhost mode those services keep
-> their non-tunnel env — most visibly, iam then sets a **host-only** `iam_session` cookie (no
-> `Domain=.<moniker>.vms…`), so the dash's calls to the other API subdomains are unauthenticated
-> (you're "logged in" at iam but the dash doesn't hold the session). If in doubt, bring the stack
-> down first so everything launches fresh under the tunnel env:
-> ```bash
-> ss stack down && ss stack up --tunnel --seed full --reset
-> ```
-> Verify with: the `iam_session` `Set-Cookie` should carry `Domain=.<moniker>.vms.wootdev.com`.
+`up --tunnel` is fully native (no `up.sh`): it resolves your moniker via the vendored `tunnel.sh`,
+builds the tunnel-aware browser-plane env for every service (incl. coach), writes the dash's tunnel
+routing (`config.local.json`), launches the stack, and — after a healthy launch+seed — starts the
+frpc reverse tunnels. When it's up, `https://dash.<moniker>.vms.wootdev.com` loads, logged in.
+
+_Verify the relaunch took:_ the `iam_session` `Set-Cookie` should carry
+`Domain=.<moniker>.vms.wootdev.com` (that's what lets the session span the subdomains). A host-only
+cookie means some service didn't relaunch — run `ss stack down` again and re-up.
 
 Manage the tunnels directly (rarely needed — `up --tunnel` drives them for you):
 

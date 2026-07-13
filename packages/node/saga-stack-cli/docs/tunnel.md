@@ -77,11 +77,9 @@ The fast, reliable path is the **snapshot bridge**: build the state under localh
 across the cookie-domain boundary with a snapshot.
 
 ```bash
-# 1. Build the Empty Org with a scheduled (launchable) session — localhost, fast, tested:
-#    Stop at `schedule`, NOT `sessions`: the `sessions` stage runs a start+end test that
-#    leaves today's occurrence in `Ended` state, so nothing is left to launch.
+# 1. Build the Empty Org sessions — localhost, fast, tested:
 ss stack down && ss stack up --seed full --reset
-ss e2e run journey --through schedule
+ss e2e run journey --through sessions
 
 # 2. Snapshot the built state:
 ss stack snapshot store --fixture-id tunnel-journey
@@ -92,7 +90,14 @@ ss stack snapshot restore tunnel-journey
 ```
 
 Then log in at `https://dash.<moniker>.vms.wootdev.com` as `empty@saga.org` (see
-[Login credentials](#login-credentials)); today's session shows on `/sessions/list/today`, launchable.
+[Login credentials](#login-credentials)); the org's sessions show on `/sessions/list/today`.
+
+> **Open item — a *launchable* (not-yet-started) session.** The journey materializes today's
+> occurrence already-completed under its clamped test date (`actualStart`≈`actualEnd`, `status=Ended`),
+> so `/sessions/list/today` shows an **Ended** session, not one you can launch. Neither `--through
+> schedule` nor `--through sessions` changes this. Producing a launchable "today" session for the
+> tunnel demo needs a seed/date tweak (same class as up.sh's `SEED_DEMO_ONLY` demo lane) — tracked
+> for follow-up.
 
 > **Use `ss stack snapshot`, never the legacy `mesh-fixture-cli`.** The legacy tool dumped only 6
 > postgres DBs and **omitted `sessions`** — which is exactly why a manual bridge repopulated users

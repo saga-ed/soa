@@ -45,6 +45,17 @@ tunnel-aware browser-plane env for every service (incl. coach), writes the dash'
 (`config.local.json`), brings the stack up, and — after a healthy launch+seed — starts the frpc
 reverse tunnels. When it's up, `https://dash.<moniker>.vms.wootdev.com` loads, logged in.
 
+> **Services must (re)launch to pick up the tunnel env.** `up --tunnel` skips any service whose
+> port is already healthy, so if the stack was already running in localhost mode those services keep
+> their non-tunnel env — most visibly, iam then sets a **host-only** `iam_session` cookie (no
+> `Domain=.<moniker>.vms…`), so the dash's calls to the other API subdomains are unauthenticated
+> (you're "logged in" at iam but the dash doesn't hold the session). If in doubt, bring the stack
+> down first so everything launches fresh under the tunnel env:
+> ```bash
+> ss stack down && ss stack up --tunnel --seed full --reset
+> ```
+> Verify with: the `iam_session` `Set-Cookie` should carry `Domain=.<moniker>.vms.wootdev.com`.
+
 Manage the tunnels directly (rarely needed — `up --tunnel` drives them for you):
 
 ```bash

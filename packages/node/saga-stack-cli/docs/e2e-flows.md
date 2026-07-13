@@ -35,6 +35,11 @@ ss e2e list          # every SPA, flow, and stage — plus checkpoint freshness
   know when they're stale (`ss e2e list` shows `[checkpoint: re-bake]`).
 - A **prerequisite** flow (ads-adm, connect) needs journey state first — it
   restores journey's checkpoint automatically instead of replaying it.
+- An **additive seed** lets a prerequisite flow (`reset: false`) that *also*
+  declares a `seed` run that seed ON TOP of the restored journey state — e.g.
+  `connect-content` / `connect-nav-lock` publishing their poll into content-api,
+  which journey itself never seeds. Skipped under `--skip-reset`, and never on a
+  `--from` checkpoint (the restore is the state source).
 - A **slot** is an isolated stack instance (`--slot 1..9`, offset ports).
   Slot 0 is your default stack. You never need a slot for a first run.
 

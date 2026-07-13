@@ -613,6 +613,22 @@ export interface DescribeOptions {
 }
 
 /**
+ * Additive seed (no reset): the flow's end-state was built by a PREREQUISITE
+ * (so `reset` is false) yet it declares a `seed` whose steps must run ON TOP —
+ * e.g. connect-content publishes its poll into content-api, which the journey
+ * prerequisite never seeds. Deliberately EXCLUDES the checkpoint (`--from`) case:
+ * there the restore IS the state source, so re-seeding would wipe the DBs the
+ * restore just filled (a `--from` window never seeds). `--from` and a prerequisite
+ * are mutually exclusive (resolve.ts), so keying on `prerequisite` alone is exact.
+ * Also excluded under --skip-reset (the caller then wants pure state reuse).
+ * The single source of truth for both the executor (§2c) and the --dry-run projection.
+ */
+export function isAdditiveSeed(resolved: ResolvedFlow, skipReset: boolean): boolean {
+  const effectiveReset = resolved.reset && !skipReset;
+  return !effectiveReset && !skipReset && !!resolved.seedSelection && !!resolved.prerequisite;
+}
+
+/**
  * Pure projection of a `ResolvedFlow` into the dry-run/JSON shape: the closure,
  * the effective seed plan (composed over the closure, only when this flow resets
  * + seeds), the exact Playwright argv + cwd, and the injected occurrence date.
@@ -629,7 +645,7 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
   const excluded = opts.excluded ?? new Set<ServiceId>();
   const services = resolved.closure.services.filter((id) => !excluded.has(id));
   const seed =
-    effectiveReset && resolved.seedSelection
+    (effectiveReset || isAdditiveSeed(resolved, opts.skipReset)) && resolved.seedSelection
       ? (() => {
           const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());
           return {
@@ -985,6 +1001,17 @@ export async function executeResolvedFlow(
         const seeded = await deps.api.seed(plan);
         if (!seeded.ok) throw new FlowExecError(`seed failed at ${seeded.failed}`);
       }
+    } else if (resolved.seedSelection && isAdditiveSeed(resolved, opts.skipReset)) {
+      // 2c. Additive seed (no reset): run the flow's declared seed ON TOP of the
+      // prerequisite-built state — e.g. connect-content publishes its legacy poll
+      // into content-api, which the journey prerequisite never seeds (content-api
+      // isn't in journey's closure). Flow authors MUST scope such a seed (`only` /
+      // `perSystem`, as connect-content does with only:['content-api']) so it can't
+      // clobber the prerequisite-built state.
+      deps.log('==> additive seed (no reset)');
+      const plan = composeSeedPlan(resolved.seedSelection, new Set(activeServices), new Set<ServiceId>());
+      const seeded = await deps.api.seed(plan);
+      if (!seeded.ok) throw new FlowExecError(`additive seed failed at ${seeded.failed}`);
     } else if (!resolved.checkpoint) {
       deps.log('==> skip reset/seed (reuse current stack state)');
     }

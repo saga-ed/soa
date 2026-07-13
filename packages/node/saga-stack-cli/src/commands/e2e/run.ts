@@ -488,7 +488,11 @@ function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
     `mesh: ${d.closure.mesh.join(', ') || '(none)'}`,
     d.checkpoint
       ? `restore: ${d.checkpoint.fixtureId} (checkpoint after '${d.checkpoint.predecessor}'; validated at run time)`
-      : `reset+seed: ${d.reset ? 'yes' : 'no (reuse state)'}`,
+      : d.reset
+        ? 'reset+seed: yes'
+        : d.seed
+          ? 'seed: additive (no reset)'
+          : 'reset+seed: no (reuse state)',
   ];
   if (d.bakeCheckpoints) {
     lines.push(`bake (per green stage): ${d.bakeCheckpoints.join(', ')}`);

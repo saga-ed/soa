@@ -1,0 +1,28 @@
+# Thin caller of the fleet-shared security scan
+# (saga-ed/ci-actions/.github/workflows/security-scan.yml@v1):
+# OSV-Scanner (dependency CVEs) + Trivy (fs/IaC/secrets) + Semgrep (SAST),
+# with findings classified by this repo's ./security-tier.json exposure
+# tiers. External-tier findings report as future-blocking; internal-tier
+# findings are informational. Warn-only until the shared workflow's
+# `enforce-blocking` input is turned on.
+#
+# Manual-dispatch only for now: run from the Actions tab (workflow_dispatch).
+# The PR / push / daily-schedule triggers are intentionally omitted until the
+# scan is proven out; re-add them under `on:` to put it back in the loop.
+
+name: Security scan
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: security-scan-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-scan:
+    uses: saga-ed/ci-actions/.github/workflows/security-scan.yml@v1

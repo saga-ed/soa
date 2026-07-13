@@ -1,0 +1,31 @@
+{
+  "$comment": "Maps repo paths to security exposure tiers. Used by .github/workflows/security-scan.yml (fleet-shared scan in saga-ed/ci-actions) to prioritize findings. This repo deploys nothing internet-facing itself, but its published @saga-ed/soa-* packages run inside every downstream internet-facing service — so shared package code and the lockfile classify as external while the example/demo apps stay informational.",
+  "tiers": {
+    "external": {
+      "description": "No directly deployed internet-facing apps; published packages inherit downstream exposure via shared_paths. Findings here will block PRs in a future release.",
+      "future_blocking": true,
+      "paths": []
+    },
+    "internal": {
+      "description": "Example/demo apps and dev tooling, never deployed. Findings here are informational only.",
+      "future_blocking": false,
+      "paths": [
+        "apps/",
+        "tools/",
+        "build-tools/",
+        "scripts/",
+        "python/"
+      ]
+    }
+  },
+  "default_tier": "external",
+  "shared_paths": {
+    "$comment": "Published packages and the root lockfile flow into downstream internet-facing services (rostering, program-hub, student-data-system, saga-dash), so treat them as external.",
+    "tier": "external",
+    "paths": [
+      "packages/",
+      "pnpm-lock.yaml",
+      "package.json"
+    ]
+  }
+}

@@ -77,7 +77,12 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     expect(env('iam-api')).toEqual({
       PORT: '3010',
       AUTH_DEVUSERID: 'f0000004-0000-4000-8000-00000000beef',
-      CORS_ORIGIN: 'http://localhost:8900,http://localhost:6210',
+      // coach-web (:8800) is in the allowlist because its browser calls
+      // auth.whoami direct; omit it and every coach page 503s on CORS.
+      CORS_ORIGIN: 'http://localhost:8900,http://localhost:6210,http://localhost:8800',
+      // Stamped into the tokens coach-api validates (its AUTH_ISSUER) — one
+      // token feeds both ends so the `iss` claim cannot drift.
+      JWT_ISSUER: 'https://iam.wootdev.com',
       MAIL_FRONTEND_BASE_URL: 'http://localhost:3010/demo',
       REDIS_HOST: 'localhost',
       REDIS_PORT: '6379', // slot 0 base — offset-aware (:7379 at slot 1), see launch-plan.slot test
@@ -245,7 +250,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     });
   });
 
-  it('coach-api (dual-store: coach_api pg + mesh mongo, iss=iam.saga.org)', () => {
+  it('coach-api (dual-store: coach_api pg + mesh mongo, iss=iam.wootdev.com — what local iam mints)', () => {
     expect(env('coach-api')).toEqual({
       NODE_ENV: 'development',
       EXPRESS_SERVER_PORT: '6105',
@@ -257,7 +262,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       AUTH_AUTHENABLED: 'true',
       IAM_API_TARGET: 'http://localhost:3010',
       AUTH_JWKSURL: 'http://localhost:3010/.well-known/jwks.json',
-      AUTH_ISSUER: 'https://iam.saga.org',
+      AUTH_ISSUER: 'https://iam.wootdev.com',
       RABBITMQ_ENABLED: 'false',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       EXPRESS_SERVER_CORSALLOWEDDOMAINS: 'localhost',
@@ -265,9 +270,12 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     });
   });
 
-  it('coach-web (only needs the coach-api URL)', () => {
+  it('coach-web (client-only SPA: browser calls coach-api AND iam direct)', () => {
     expect(env('coach-web')).toEqual({
       PUBLIC_COACH_API_URL: 'http://localhost:6105',
+      // Without this it falls back to its .env default (https://iam.wootdev.com)
+      // and the local SPA talks to DEPLOYED iam.
+      PUBLIC_IAM_API_URL: 'http://localhost:3010',
     });
   });
 

@@ -44,6 +44,7 @@ import { resolveFlow } from '../../core/flow/index.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
 import { makeStackApi } from '../../stack-api.js';
+import { resolveVendorScript } from '../../runtime/index.js';
 import {
   buildStackContext,
   discoverFlowManifest,
@@ -95,6 +96,11 @@ export default class E2eConnect extends BaseCommand {
       description:
         "swap real mic/cam capture for Chromium's synthetic camera (moving test pattern) + mic (beep) and auto-accept the getUserMedia prompt — for a machine with no camera or where v4l2loopback won't build. Sets FAKE_MEDIA=1 on the headed interactive-connect run (mirrors connect-session.sh --fake-media); the journey prerequisite is unaffected.",
     }),
+    tunnel: Flags.boolean({
+      default: false,
+      description:
+        'point the headed Connect room at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can drive the session. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`) and writes the dash tunnel config. Connect is slot-0 only, so no slot guard is needed.',
+    }),
   };
 
   async run(): Promise<void> {
@@ -145,7 +151,20 @@ export default class E2eConnect extends BaseCommand {
     };
     const delegate = (plan: ScriptPlan): Promise<number> =>
       this.runScript(plan, flags as WorkspaceFlags, { propagateExit: false });
-    const { runtime } = buildStackContext(flags, seams, delegate);
+
+    // --tunnel: resolve <moniker>.<VMS_BASE> from the VENDORED tunnel.sh (the SAME
+    // machinery as `stack up --tunnel`, up.ts:297-303) so the headed Connect room
+    // drives the tunnel hosts. E2eConnect is neither slot- nor set-aware ⇒ slot-0
+    // only, so no slot guard is needed. The seam lets unit tests inject a fixed
+    // moniker instead of spawning tunnel.sh.
+    let tunnelDomain: string | undefined;
+    if (flags.tunnel) {
+      const vmsBase = process.env.VMS_BASE ?? 'vms.wootdev.com';
+      const moniker = await this.getTunnelMoniker()(resolveVendorScript('tunnel.sh'));
+      tunnelDomain = `${moniker}.${vmsBase}`;
+    }
+
+    const { runtime } = buildStackContext(flags, seams, delegate, undefined, tunnelDomain);
     const api = makeStackApi(serviceManifest, runtime);
 
     // M14-C: the checkpoint store so the journey prerequisite can be RESTORED
@@ -191,7 +210,7 @@ export default class E2eConnect extends BaseCommand {
     try {
       const code = await executeResolvedFlow(
         toRun,
-        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), checkpoints },
+        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), checkpoints, tunnelDomain },
         {
           lane: 'stack',
           skipReset: flags.reuse,

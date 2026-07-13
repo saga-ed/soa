@@ -229,6 +229,14 @@ export function buildStackContext(
   seams: StackSeams,
   delegate: (plan: ScriptPlan) => Promise<number>,
   profile: InstanceProfile = deriveInstance({ slot: 0 }),
+  /**
+   * `e2e run --tunnel`: the resolved `<moniker>.<VMS_BASE>` domain. When present the
+   * runtime flips `tunnel:true`+`tunnelDomain`, which the facade already reads to
+   * write dash `config.local.json`'s url-type localDefaults (`stack-api.ts` →
+   * `syncDashLocalDefaults`); no facade change needed. Absent ⇒ `tunnel:false` (the
+   * pre-tunnel default, byte-identical).
+   */
+  tunnelDomain?: string,
 ): { runtime: Runtime; repoRoots: Record<RepoKey, string> } {
   const ctx: ScriptContext = repoContextFromFlags(flags);
 
@@ -281,7 +289,11 @@ export function buildStackContext(
     dashFs: seams.dashFs,
     prober: seams.prober,
     runner: seams.runner,
-    tunnel: false,
+    // --tunnel (Phase 2): a resolved domain flips tunnel mode on so the facade writes
+    // the dash config.local.json url-type localDefaults (up.sh sync_dash_local_defaults
+    // parity). No domain ⇒ the pre-tunnel default (tunnel:false), byte-identical.
+    tunnel: tunnelDomain !== undefined,
+    tunnelDomain,
     delegate,
     // FLIP 3: wire the native-prep seams at EVERY slot (including slot 0) so the e2e's
     // native `StackApi.up` runs R1 build → R2 provision → R3 migrate before launch+seed,
@@ -407,6 +419,61 @@ export function serviceUrlEnv(ports: Partial<Record<ServiceId, number>>): Record
 }
 
 /**
+ * The `ServiceId` → `tunnel.sh` HOSTNAME LABEL map for `e2e run --tunnel`. Under
+ * `--tunnel` the Playwright browser is a REMOTE peer (opened on another box through
+ * the vms rendezvous), so it can't reach `localhost:<port>` — every service URL must
+ * become `https://<label>.<domain>` where `<label>` is the vendored tunnel.sh
+ * SERVICES key (`vendor/tunnel.sh`, the frpc reverse-tunnel table).
+ *
+ * The label is NOT string-derivable from the ServiceId: `saga-dash→dash` /
+ * `connect-web→connect` / `ads-adm-api→ads-adm` are renames; `iam-api`/`sis-api`/
+ * `programs-api`/`scheduling-api`/`sessions-api` drop the `-api` suffix; but
+ * `connect-api→connect-api` KEEPS it. So this is an explicit table keyed 1:1 to the
+ * `PLAYWRIGHT_SERVICE_URL_ENV` ServiceIds (a drift guard test asserts every URL-env
+ * ServiceId has an entry here and each label is a real tunnel.sh SERVICES entry).
+ */
+export const TUNNEL_SERVICE_LABELS: Readonly<Record<ServiceId, string>> = Object.freeze({
+  'saga-dash': 'dash',
+  'iam-api': 'iam',
+  'sis-api': 'sis',
+  'programs-api': 'programs',
+  'scheduling-api': 'scheduling',
+  'sessions-api': 'sessions',
+  'ads-adm-api': 'ads-adm',
+  'connect-web': 'connect',
+  'connect-api': 'connect-api',
+} as Record<ServiceId, string>);
+
+/**
+ * A generous WAN timeout (ms) exported as `PLAYWRIGHT_TUNNEL_TIMEOUT_MS` when
+ * `e2e run --tunnel` is active. The stack services still bind localhost (the prober
+ * needs no bump), but the Playwright BROWSER hairpins over the WAN to
+ * `https://<label>.<domain>` through the frps rendezvous box, so navigation/action
+ * round-trips are far slower than a localhost run. 120s is a deliberately roomy
+ * ceiling for that hop. CROSS-REPO: the value is CONSUMED in saga-dash's
+ * `playwright.config.ts` (read into `use.navigationTimeout`/`actionTimeout`/`timeout`)
+ * — NOT in this package — so the exact env name + ms budget must be confirmed there.
+ */
+export const TUNNEL_PLAYWRIGHT_TIMEOUT_MS = 120_000;
+
+/**
+ * The tunnel-mode variant of `serviceUrlEnv`: every `PLAYWRIGHT_*_URL` key becomes
+ * `https://<label>.<domain>` (the frpc reverse-tunnel host) instead of
+ * `http://localhost:<port>`. Used ONLY on the stack lane when `--tunnel` supplied a
+ * `<moniker>.<VMS_BASE>` domain — a remote browser reaches the local stack through
+ * the vms box. Keyed to the SAME env vars `lane.ts` consumes; the label per ServiceId
+ * comes from `TUNNEL_SERVICE_LABELS`.
+ */
+export function tunnelServiceUrlEnv(domain: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, svc] of Object.entries(PLAYWRIGHT_SERVICE_URL_ENV)) {
+    const label = TUNNEL_SERVICE_LABELS[svc];
+    if (label !== undefined) env[key] = `https://${label}.${domain}`;
+  }
+  return env;
+}
+
+/**
  * The env overlaid on the Playwright child: the centralized clamped date env
  * (`computeEnv` — the Monday-flake fix, with the flow's own `env` merged last so a
  * date-fixed flow's date pins win), THEN the offset-carrying stack-lane service
@@ -441,6 +508,16 @@ export function playwrightEnv(
    * failures). Omitted (default) ⇒ the env is byte-identical to today.
    */
   capture?: boolean,
+  /**
+   * `e2e run --tunnel`: the resolved `<moniker>.<VMS_BASE>` tunnel domain. When
+   * present (stack lane only), the `PLAYWRIGHT_*_URL` keys are re-pointed at the
+   * frpc reverse-tunnel hosts (`https://<label>.<domain>`) so a REMOTE browser can
+   * reach the local stack, and `PLAYWRIGHT_TUNNEL_TIMEOUT_MS` is exported for the
+   * SPA's Playwright config to widen its WAN timeouts. Overlaid AFTER the
+   * localhost/offset service URLs so tunnel always wins for those keys. Absent ⇒ the
+   * env is byte-identical to today.
+   */
+  tunnelDomain?: string,
 ): Record<string, string> {
   // The date env (with `flow.env` merged LAST inside `computeEnv`) comes first, so
   // a flow's own env keeps winning for the occurrence-date clamp. Then, on the
@@ -449,12 +526,16 @@ export function playwrightEnv(
   // service URL can never point slot > 0 back at slot 0's base port (same
   // split-brain class as the dash config.local.json offset). On a deployed lane
   // the service URLs are the lane's own hostnames (resolved in `lane.ts`), so we
-  // do NOT inject/override them.
+  // do NOT inject/override them. Under --tunnel the tunnel HOSTS overlay LAST (over
+  // the localhost URLs) so a remote browser hairpins through the vms box; --tunnel
+  // is slot-0-only, so it never combines with the slot offset.
   const env: Record<string, string> = {
     ...computeEnv(resolved.flow, now),
     ...(dateOverrides ?? {}),
     ...(lane === 'stack' && ports ? serviceUrlEnv(ports) : {}),
+    ...(lane === 'stack' && tunnelDomain ? tunnelServiceUrlEnv(tunnelDomain) : {}),
     ...(capture === true ? { PLAYWRIGHT_CAPTURE: 'all' } : {}),
+    ...(tunnelDomain ? { PLAYWRIGHT_TUNNEL_TIMEOUT_MS: String(TUNNEL_PLAYWRIGHT_TIMEOUT_MS) } : {}),
   };
   if (lane !== 'stack') env.PLAYWRIGHT_LANE = lane;
   return env;
@@ -523,6 +604,12 @@ export interface DescribeOptions {
   excluded?: Set<ServiceId>;
   /** Exploratory-review capture (`--capture`) — surfaces PLAYWRIGHT_CAPTURE in the projected env. */
   capture?: boolean;
+  /**
+   * `e2e run --tunnel`: the resolved `<moniker>.<VMS_BASE>` domain — threaded into the
+   * projected Playwright env so `--tunnel --dry-run` prints the `https://<label>.<domain>`
+   * service URLs (+ `PLAYWRIGHT_TUNNEL_TIMEOUT_MS`) instead of the localhost ones.
+   */
+  tunnelDomain?: string;
 }
 
 /**
@@ -534,7 +621,7 @@ export interface DescribeOptions {
 export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions): ResolvedFlowDescription {
   // Computed ONCE; `env` below carries the same date keys (playwrightEnv wraps
   // computeEnv), so occurrenceDate reads from it instead of recomputing.
-  const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports, undefined, opts.capture);
+  const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports, undefined, opts.capture, opts.tunnelDomain);
   const effectiveReset = resolved.reset && !opts.skipReset;
   // Drop the slot's excluded services (literal-port playback-trio backends) from the
   // closure so the dry-run matches what a `--slot N` run actually brings up. Empty
@@ -662,6 +749,13 @@ export interface ExecDeps {
    * injected into the Playwright env so specs drive the slot's OWN service URLs.
    */
   ports?: Partial<Record<ServiceId, number>>;
+  /**
+   * `e2e run --tunnel`: the resolved `<moniker>.<VMS_BASE>` domain — threaded into the
+   * Playwright child env so a REMOTE browser drives the `https://<label>.<domain>`
+   * tunnel hosts (+ `PLAYWRIGHT_TUNNEL_TIMEOUT_MS`) instead of localhost. Slot-0-only
+   * (guarded at the command). Rides the prerequisite recursion via `deps`.
+   */
+  tunnelDomain?: string;
   /**
    * Services excluded from THIS slot's bring-up (`profile.excludedServices`).
    * Filtered out of the closure before up/reset/seed/verify. Empty at slot 0.
@@ -934,7 +1028,7 @@ export async function executeResolvedFlow(
         [ENV_TERM_END]: restoredDates.termEnd,
       }
     : undefined;
-  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports, dateOverrides, opts.capture);
+  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports, dateOverrides, opts.capture, deps.tunnelDomain);
 
   const spawn = async (stage?: { project: string; noDeps: boolean }): Promise<number> => {
     const argv = playwrightArgv(resolved, opts.passthrough, stage);

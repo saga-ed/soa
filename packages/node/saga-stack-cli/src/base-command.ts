@@ -85,6 +85,7 @@ import {
   generateSlotFleetConfig,
   resolveRepoRoot,
   resolveTunnelMoniker,
+  resolveFleekLivekitCreds,
   resolveScript,
   resolveVendorScript,
   scriptCwd,
@@ -560,6 +561,18 @@ export abstract class BaseCommand extends Command {
    */
   protected getTunnelFleetGen(): typeof generateTunnelFleetConfig {
     return generateTunnelFleetConfig;
+  }
+
+  /**
+   * The `--tunnel` fleek-cluster LiveKit creds seam (real A/V). Production
+   * best-effort-fetches `qboard/fleek/livekit-creds` from Secrets Manager (up.sh's
+   * AV block); the resolved key/secret become connect-api's `LIVEKIT_API_KEY/SECRET`
+   * so it signs tokens the fleek cluster accepts. Returns `null` when unavailable
+   * (no dev creds / secret) ⇒ connect-api signs with the dev key and cluster A/V
+   * fails, but CRDT/chat and the rest of tunnel mode are unaffected.
+   */
+  protected getFleekCreds(): typeof resolveFleekLivekitCreds {
+    return resolveFleekLivekitCreds;
   }
 
   /** The per-slot rtsm-fleet generator seam (soa#271 — endpoint swapped to the slot's

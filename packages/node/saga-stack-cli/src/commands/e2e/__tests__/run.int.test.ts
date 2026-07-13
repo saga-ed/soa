@@ -512,3 +512,42 @@ describe('e2e run — --hold manual-testing handoff (Plan 13)', () => {
     expect(warned.some((w) => w.includes('empty window'))).toBe(true);
   });
 });
+
+describe('e2e run — --tunnel (soa#298)', () => {
+  /** Pull the emitted `--output-json` dry-run object out of the logged lines. */
+  function dryRunJson(): Record<string, unknown> {
+    const line = logged.find((l) => l.trim().startsWith('{'));
+    if (!line) throw new Error(`no JSON emitted; logged: ${logged.join('\\n')}`);
+    return JSON.parse(line) as Record<string, unknown>;
+  }
+
+  beforeEach(() => {
+    // Never spawn the vendored tunnel.sh — inject a fixed moniker (up-native.int.test.ts pattern).
+    vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
+      (async () => 'testmoniker') as never,
+    );
+  });
+
+  it('--tunnel --dry-run: the Playwright service URLs point at the https tunnel hosts + the WAN timeout is exported', async () => {
+    await E2eRun.run(['journey', '--through', 'pods', '--tunnel', '--dry-run', '--output-json', ...ws()], config);
+
+    const env = dryRunJson().env as Record<string, string>;
+    // <label>.<moniker>.<VMS_BASE> — dash is the non-derivable rename for saga-dash.
+    expect(env.PLAYWRIGHT_BASE_URL).toMatch(/^https:\/\/dash\.testmoniker\./);
+    expect(env.PLAYWRIGHT_IAM_URL).toMatch(/^https:\/\/iam\.testmoniker\./);
+    expect(env.PLAYWRIGHT_BASE_URL).not.toContain('localhost');
+    expect(env.PLAYWRIGHT_TUNNEL_TIMEOUT_MS).toMatch(/^\d+$/);
+
+    // still a pure projection — no seam touched.
+    expect(launches).toEqual([]);
+    expect(runs).toEqual([]);
+  });
+
+  it('--tunnel --slot 1 hard-errors (slot-0 only; the single check also covers --set)', async () => {
+    await expect(
+      E2eRun.run(['journey', '--tunnel', '--slot', '1', '--dry-run', ...ws()], config),
+    ).rejects.toMatchObject({ message: expect.stringContaining('--tunnel') });
+    // the guard fires before any moniker resolution / seam touch.
+    expect(launches).toEqual([]);
+  });
+});

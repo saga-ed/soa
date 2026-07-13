@@ -20,9 +20,61 @@
  * the unit tests inject fakes and never spawn tunnel.sh or read the fleet file.
  */
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+/**
+ * Best-effort fetch of the fleek dev-cluster LiveKit creds from Secrets Manager
+ * (`qboard/fleek/livekit-creds`), mirroring up.sh's `--tunnel` AV block
+ * (up.sh:2346-2351). Real cluster A/V needs connect-api to sign LiveKit tokens
+ * with the CLUSTER key — absent creds ⇒ the caller leaves `LIVEKIT_API_KEY` at the
+ * local dev default and the fleek cluster rejects the tokens (A/V fails; CRDT/chat
+ * and everything else still work). The dev-account AWS profile is resolved the same
+ * way tunnel.sh does (by account number) via `tunnel.sh aws-profile`. Returns null
+ * on ANY failure (no creds / wrong account / aws missing / bad JSON) — never throws,
+ * so it can't break the bring-up.
+ */
+export function resolveFleekLivekitCreds(
+  vendorTunnelSh: string,
+): { key: string; secret: string } | null {
+  try {
+    // The dev-account profile tunnel.sh resolves by account number (empty = default chain).
+    let profile = '';
+    try {
+      profile = execFileSync(vendorTunnelSh, ['aws-profile'], {
+        cwd: dirname(vendorTunnelSh),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      profile = '';
+    }
+    const raw = execFileSync(
+      'aws',
+      [
+        'secretsmanager',
+        'get-secret-value',
+        '--secret-id',
+        'qboard/fleek/livekit-creds',
+        '--query',
+        'SecretString',
+        '--output',
+        'text',
+        '--region',
+        'us-west-2',
+        ...(profile ? ['--profile', profile] : []),
+      ],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim();
+    const parsed = JSON.parse(raw) as { api_key?: unknown; api_secret?: unknown };
+    const key = typeof parsed.api_key === 'string' ? parsed.api_key : '';
+    const secret = typeof parsed.api_secret === 'string' ? parsed.api_secret : '';
+    return key && secret ? { key, secret } : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Run `<vendorTunnelSh> moniker`, capturing trimmed stdout (the moniker). stdin +

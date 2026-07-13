@@ -132,6 +132,14 @@ Brings up the Connect closure (iam / sessions / content / connect-api / connect-
 and opens a real interactive session — for hands-on Connect development, not an assertion run.
 </details>
 
+## Share the session — `--tunnel`
+
+`ss e2e run` and `ss e2e connect` take `--tunnel`, which points the Playwright browser at the
+`https://<svc>.<moniker>.vms.wootdev.com` tunnel hosts so a **remote** person can reach your
+slot-0 stack (e.g. invite a coworker to a Connect room). `run --tunnel` WAN-hairpins and is slow —
+for seeding launchable sessions prefer the localhost-build → snapshot → restore-under-tunnel bridge.
+Both are slot-0-only. → [tunnel.md](./tunnel.md)
+
 ## Point at a specific flows.json
 
 `--spa-path <file-or-dir>` overrides discovery (handy for a bundled example or a WIP flow):

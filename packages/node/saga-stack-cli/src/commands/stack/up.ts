@@ -319,6 +319,24 @@ export default class StackUp extends BaseCommand {
         tunnelDomain: domain,
       });
       if (rtsmFleetPath) overlays.tunnel.rtsmFleetPath = rtsmFleetPath;
+
+      // Real-cluster A/V (up.sh's best-effort Secrets Manager fetch, up.sh:2346-2351):
+      // fetch the fleek LiveKit key/secret so connect-api signs tokens the fleek dev
+      // cluster ACCEPTS. Absent (no dev creds / secret) ⇒ connect-api keeps the local
+      // dev key, the cluster rejects the tokens, and only A/V fails — CRDT/chat and the
+      // rest of tunnel mode work. Behind a seam so unit tests inject fixed creds.
+      const lk = this.getFleekCreds()(resolveVendorScript('tunnel.sh'));
+      if (lk) {
+        overlays.tunnel.lkKey = lk.key;
+        overlays.tunnel.lkSecret = lk.secret;
+        this.log('tunnel A/V: fleek dev-cluster LiveKit creds resolved (real camera/mic).');
+      } else {
+        this.warn(
+          'tunnel A/V: could not fetch qboard/fleek/livekit-creds — real A/V will fail ' +
+            '(connect-api signs LiveKit tokens with the dev key, which the fleek cluster ' +
+            'rejects). CRDT/chat still work. `aws sso login` to the dev account + re-up for cluster A/V.',
+        );
+      }
     }
 
     if (flags.record !== undefined) {

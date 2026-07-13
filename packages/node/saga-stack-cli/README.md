@@ -14,7 +14,7 @@ you have to reverse-engineer.
 > path (up → status → verify → e2e → down) with the real output of each command, linking out
 > to per-feature docs ([sub-stacks](./docs/sub-stacks-and-bundles.md) · [slots](./docs/slots.md) ·
 > [verify](./docs/verify.md) · [snapshots](./docs/snapshots.md) · [e2e](./docs/e2e.md) ·
-> [integration](./docs/integration.md)).
+> [tunnel](./docs/tunnel.md) · [integration](./docs/integration.md)).
 
 ```bash
 ss stack up --only scheduling-api,sessions-api   # boot just those + their deps

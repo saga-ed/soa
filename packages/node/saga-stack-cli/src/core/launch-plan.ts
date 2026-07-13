@@ -369,6 +369,26 @@ function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string,
         : {};
     case 'saga-dash':
       return { __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: `dash.${td}` };
+    case 'coach-api':
+      // EXPRESS_SERVER_CORSALLOWEDDOMAINS is coach's hostname allow-list (comma-
+      // split; api-core matches origin.hostname === d || endsWith(".d")), so the
+      // BARE tunnel domain admits coach.${td} — and any other tunnel label —
+      // without enumerating them. Keep COACH_WEB_HOST (localhost) so a local
+      // browser still works alongside remote ones. Splatted after the launch
+      // env's CORS value, so this wins (env last-wins).
+      return {
+        EXPRESS_SERVER_CORSALLOWEDDOMAINS: `${tokens.COACH_WEB_HOST},${td}`,
+      };
+    case 'coach-web':
+      // PUBLIC_COACH_API_URL is BROWSER-side (SvelteKit PUBLIC_ var read at
+      // vite-dev time): a remote coworker's browser must reach coach-api via its
+      // public tunnel name (label `coach-api`), not localhost:6105. iam stays
+      // behind coach-api (cookie composition is server-side, coach#94), so
+      // nothing else flips. Label `coach` is coach-web's own allowed-host.
+      return {
+        PUBLIC_COACH_API_URL: `https://coach-api.${td}`,
+        __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: `coach.${td}`,
+      };
     default:
       return {}; // everything else: dev CORS wildcard already admits *.wootdev.com
   }

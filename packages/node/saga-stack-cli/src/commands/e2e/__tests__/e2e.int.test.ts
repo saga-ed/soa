@@ -264,4 +264,19 @@ describe('e2e connect — foreground connect-session entry', () => {
     expect(pw[1].args).toContain('interactive-connect');
     expect(pw[1].env?.FAKE_MEDIA).toBeUndefined();
   });
+
+  it('--tunnel: the headed interactive-connect session drives the https tunnel hosts (soa#298)', async () => {
+    // Never spawn the vendored tunnel.sh — inject a fixed moniker (run.int.test.ts pattern).
+    vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
+      (async () => 'testmoniker') as never,
+    );
+    await E2eConnect.run(['--tunnel', ...ws()], config);
+    // The live session's env carries the tunnel URLs — proving tunnelDomain reached the
+    // executeResolvedFlow deps (and buildStackContext) for the headed interactive run.
+    const live = playwrightRuns().find((r) => r.args.includes('interactive-connect'));
+    // dash is the non-derivable rename for saga-dash; <label>.<moniker>.<VMS_BASE>.
+    expect(live?.env?.PLAYWRIGHT_BASE_URL).toMatch(/^https:\/\/dash\.testmoniker\./);
+    expect(live?.env?.PLAYWRIGHT_BASE_URL).not.toContain('localhost');
+    expect(live?.env?.PLAYWRIGHT_TUNNEL_TIMEOUT_MS).toMatch(/^\d+$/);
+  });
 });

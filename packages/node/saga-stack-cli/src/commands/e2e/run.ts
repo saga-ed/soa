@@ -35,7 +35,7 @@ import type { Lane } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
 import { reviewBlockLines, runIdFrom } from '../../core/e2e-review.js';
 import type { PreservedRunRecord } from '../../core/e2e-review.js';
-import { preserveSpawnArtifacts } from '../../runtime/index.js';
+import { preserveSpawnArtifacts, resolveVendorScript } from '../../runtime/index.js';
 import { makeStackApi } from '../../stack-api.js';
 import {
   buildStackContext,
@@ -131,6 +131,11 @@ export default class E2eRun extends BaseCommand {
       description: 'plan only: print the resolved flow + closure + seed plan + playwright argv + occurrence date; touch nothing',
       default: false,
     }),
+    tunnel: Flags.boolean({
+      default: false,
+      description:
+        'point the Playwright browser at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can drive this slot-0 stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`); writes the dash tunnel config; exports PLAYWRIGHT_TUNNEL_TIMEOUT_MS for the SPA config. Slot-0 only (hard-errors at --slot > 0 / --set).',
+    }),
     capture: Flags.boolean({
       default: false,
       description:
@@ -164,6 +169,26 @@ export default class E2eRun extends BaseCommand {
     // alias is --phase, and oclif would treat a defaulted value as provided (M14 lesson).
     if (flags.to !== undefined && (flags.through !== undefined || flags.phase !== undefined)) {
       this.error('--to and --through are mutually exclusive: --to K stops BEFORE stage K; --through K runs THROUGH it.');
+    }
+    // --tunnel fronts the FIXED slot-0 browser ports (dash :8900 / connect :6210 / iam :3010)
+    // via the vms rendezvous box, so it is slot-0-only — mirroring `stack up --tunnel`
+    // (up.ts:209-214). The single `flags.slot > 0` check covers `--set` too (a set pins a
+    // slot > 0). Checked before runSetPreflight (the set brings its slot up).
+    if (flags.tunnel && flags.slot > 0) {
+      this.error(
+        `slot ${flags.slot}: --tunnel fronts the FIXED slot-0 browser ports (dash :8900 / connect :6210 / iam :3010) ` +
+          'via the vms rendezvous box, so it cannot run against a peer slot/set. Run the e2e flow at slot 0.',
+      );
+    }
+    // --tunnel only makes sense on the local `stack` lane: the tunnel hosts front the
+    // LOCAL stack, and tunnelServiceUrlEnv is `lane === 'stack'`-gated. A deployed lane
+    // (e.g. `sandbox`) resolves its own hostnames, so --tunnel would spawn tunnel.sh and
+    // export the WAN timeout for nothing. Guard it rather than silently no-op.
+    if (flags.tunnel && flags.lane !== 'stack') {
+      this.error(
+        `--tunnel targets the local stack lane (its hosts front YOUR stack), but --lane ${flags.lane} ` +
+          'resolves its own URLs. Drop --tunnel, or drop --lane to use the stack lane.',
+      );
     }
 
     // M13-B: the implicit set preflight (no-op without --set) — e2e run brings
@@ -218,6 +243,18 @@ export default class E2eRun extends BaseCommand {
     const profile = deriveInstance({ slot: flags.slot });
     const excluded = new Set(profile.excludedServices);
 
+    // --tunnel: resolve <moniker>.<VMS_BASE> from the VENDORED tunnel.sh (the SAME
+    // machinery as `stack up --tunnel`, up.ts:297-303) so the Playwright browser
+    // hairpins to the tunnel hosts. Slot-0-only (guarded above). Resolved for BOTH
+    // the dry-run (so it prints the https:// URLs) and the real run; the seam lets
+    // unit tests inject a fixed moniker instead of spawning tunnel.sh.
+    let tunnelDomain: string | undefined;
+    if (flags.tunnel) {
+      const vmsBase = process.env.VMS_BASE ?? 'vms.wootdev.com';
+      const moniker = await this.getTunnelMoniker()(resolveVendorScript('tunnel.sh'));
+      tunnelDomain = `${moniker}.${vmsBase}`;
+    }
+
     // ── --dry-run: pure projection, no IO, no seam. ──
     if (flags['dry-run']) {
       const desc = describeResolved(resolved, {
@@ -233,6 +270,7 @@ export default class E2eRun extends BaseCommand {
         to: flags.to,
         hold: flags.hold,
         capture: flags.capture,
+        tunnelDomain,
       });
       this.emit(flags, { dryRun: true, ...desc } as unknown as Record<string, unknown>, dryRunLines(desc));
       return;
@@ -262,7 +300,7 @@ export default class E2eRun extends BaseCommand {
     };
     const delegate = (plan: ScriptPlan): Promise<number> =>
       this.runScript(plan, flags as WorkspaceFlags, { propagateExit: false });
-    const { runtime } = buildStackContext(flags, seams, delegate, profile);
+    const { runtime } = buildStackContext(flags, seams, delegate, profile, tunnelDomain);
     const api = makeStackApi(serviceManifest, runtime);
 
     // M14: the checkpoint store (bake/--from) — constructed AFTER applyInstanceEnv
@@ -323,6 +361,7 @@ export default class E2eRun extends BaseCommand {
           excluded,
           checkpoints,
           preserveTraces,
+          tunnelDomain,
         },
         {
           lane,

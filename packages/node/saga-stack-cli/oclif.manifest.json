@@ -146,6 +146,20 @@
           "name": "fake-media",
           "allowNo": false,
           "type": "boolean"
+        },
+        "tunnel": {
+          "description": "point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints these Playwright browsers’ URLs — it does NOT relaunch the stack, flip connect-web/rtsm/cookie env, or start frpc. You must have already run `ss stack up --tunnel` so the stack itself is tunnel-served. Connect is slot-0 only, so no slot guard is needed.",
+          "name": "tunnel",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "student-login": {
+          "description": "how many of the 2 students THIS run logs in + joins locally (0, 1, or 2; default 2). The rest stay OPEN for a REMOTE peer to take — pair with --tunnel to invite coworkers. The tutor always auto-hosts and starts the session; login URLs for EVERY participant are printed regardless. Sets CONNECT_LOCAL_STUDENTS on the headed interactive-connect run.",
+          "name": "student-login",
+          "default": 2,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -510,6 +524,12 @@
         "dry-run": {
           "description": "plan only: print the resolved flow + closure + seed plan + playwright argv + occurrence date; touch nothing",
           "name": "dry-run",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "tunnel": {
+          "description": "point the Playwright browser at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can drive this slot-0 stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`); writes the dash tunnel config; exports PLAYWRIGHT_TUNNEL_TIMEOUT_MS for the SPA config. Slot-0 only (hard-errors at --slot > 0 / --set).",
+          "name": "tunnel",
           "allowNo": false,
           "type": "boolean"
         },

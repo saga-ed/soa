@@ -261,9 +261,15 @@ Resources:
               # routes to the matching laptop tunnel (customDomains).
               # (no shell brace-expansions in this script - it lives inside
               # Fn::Sub, which interprets every dollar-brace sequence)
+              # propagation_delay/timeout + public resolvers make Caddy wait for the
+              # Route53 _acme-challenge TXT to propagate (and self-verify it via
+              # 1.1.1.1/8.8.8.8) BEFORE asking the CA to validate. Without this,
+              # Let's Encrypt PROD's stricter multi-perspective validation runs
+              # before propagation and fails "No TXT record found", so new monikers
+              # never mint a cert (staging, single-perspective, passed). See soa#301.
               for m in $(printf '%s' "$MONIKERS" | tr ',' ' '); do
                   m=$(printf '%s' "$m" | tr -d '[:space:]'); [[ -z "$m" ]] && continue
-                  printf '*.%s.%s {\n    tls {\n        dns route53\n    }\n    reverse_proxy 127.0.0.1:8080\n}\n\n' "$m" "$DOMAIN"
+                  printf '*.%s.%s {\n    tls {\n        dns route53\n        propagation_delay 90s\n        propagation_timeout 5m\n        resolvers 1.1.1.1 8.8.8.8\n    }\n    reverse_proxy 127.0.0.1:8080\n}\n\n' "$m" "$DOMAIN"
               done
           } >"$new_caddy"
 

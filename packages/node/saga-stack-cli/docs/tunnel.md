@@ -28,7 +28,8 @@ ss stack down && ss stack up --tunnel --reset
 ss stack snapshot restore tunnel-connect
 
 # 3 — Open the live Connect room over the tunnel. The tutor auto-hosts + STARTS the session.
-ss e2e connect --tunnel --student-login 1        # tutor + 1 local student; 1 seat left OPEN
+#     --reuse: run against the org you just restored (don't rebuild the prerequisite).
+ss e2e connect --tunnel --student-login 1 --reuse   # tutor + 1 local student; 1 seat left OPEN
 ```
 
 `--student-login N` = how many of the 2 students **this machine** logs in and joins locally

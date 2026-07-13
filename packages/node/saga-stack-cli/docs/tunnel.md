@@ -5,8 +5,56 @@ Tunnel mode exposes the browser-facing services of your **local** stack at
 profile) can reach the stack running on **your** machine — "dev VMs are back." The services keep
 running locally under `pnpm dev` with HMR; the tunnel is a front door, not a deploy.
 
-The canonical use case: **invite someone to test Connect with you** via a publicly-reachable URL
-(`https://connect.<moniker>.vms.wootdev.com`).
+The canonical use case: **run a live Connect session and invite coworkers to join it** over a
+publicly-reachable URL. That whole flow is the concierge below.
+
+---
+
+## Concierge: a live Connect session over the tunnel
+
+From a clean machine to a running tutor + student + student Connect room that a remote coworker can
+join. Run it top to bottom.
+
+```bash
+export AWS_PROFILE=dev_admin      # dev account (moniker registration + fleek A/V creds)
+
+# 1 — Build the Empty Org + a schedule locally (fast, tested), then snapshot it:
+ss stack down && ss stack up --seed full --reset
+ss e2e run journey --through schedule
+ss stack snapshot store --fixture-id tunnel-connect
+
+# 2 — Bring the stack up in TUNNEL mode (fetches fleek A/V creds), then restore the org:
+ss stack down && ss stack up --tunnel --reset
+ss stack snapshot restore tunnel-connect
+
+# 3 — Open the live Connect room over the tunnel. The tutor auto-hosts + STARTS the session.
+ss e2e connect --tunnel --student-login 1        # tutor + 1 local student; 1 seat left OPEN
+```
+
+`--student-login N` = how many of the 2 students **this machine** logs in and joins locally
+(`0`, `1`, or `2`; default `2` = both local). Any seat you don't fill locally stays **open** for a
+remote coworker. Drop `--fake-media` (it's not on by default) — real camera/mic works via the fleek
+cluster once step 2 fetched the creds.
+
+Step 3 prints **login URLs for every participant** — share any with a coworker:
+
+```
+[interactive] ── participant logins (share any to add a remote) ──
+[interactive]   TUTOR   alex.tutor@example.org  (seated locally)
+[interactive]       login: https://iam.<moniker>.vms.wootdev.com/demo#auth  (devLogin as alex.tutor@example.org)  →  join: https://connect.<moniker>.vms.wootdev.com/?slsid=<id>
+[interactive]   STUDENT ann.lee@example.org  (seated locally)
+[interactive]       login: …
+[interactive]   STUDENT cara.diaz@example.org  (OPEN — a remote can take this seat)
+[interactive]       login: …  →  join: https://connect.<moniker>.vms.wootdev.com/?slsid=<id>
+```
+
+**A coworker joins** the open seat: open the `login:` URL, **devLogin** as that email (no password),
+then open the `join:` URL. They land in the same room. The browsers the concierge opened stay up
+until you hit Resume (▶) in the Playwright Inspector.
+
+> Everything below is detail — how each step works and why. You don't need it to run the concierge.
+
+---
 
 ## How it works (one minute)
 
@@ -19,148 +67,109 @@ The canonical use case: **invite someone to test Connect with you** via a public
 - **Moniker** = your per-dev DNS namespace (standard = your initials). It lives in the gitignored
   `vendor/.vms-moniker` and is **never taken on the command line** (a placeholder in a shared
   command cross-contaminates stacks). First use prompts for it and registers it in SSM; the box
-  then mints your wildcard cert `*.<moniker>.vms.wootdev.com` within ~1 minute.
-- **AV (LiveKit) stays on the fleek dev cluster** (`*.fleek.wootdev.com`), NOT the tunnel. LiveKit
-  is UDP and can't ride the HTTP tunnels, so a remote guest gets CRDT/chat locally (rtsm is
-  websockets) but their audio/video goes through the real fleek cluster. This is deliberate.
+  then mints your wildcard cert `*.<moniker>.vms.wootdev.com` within ~1-2 minutes.
+- **A/V rides the fleek dev cluster** (`wss://*.fleek.wootdev.com`), not the tunnel (LiveKit is UDP
+  and can't ride the HTTP tunnels). `up --tunnel` best-effort-fetches the cluster's LiveKit creds
+  from Secrets Manager (`qboard/fleek/livekit-creds`) so connect-api signs tokens the cluster
+  accepts — that's what makes **real** A/V work. CRDT/chat (rtsm, websockets) rides the tunnel.
 
 ## Prerequisites
 
-- **AWS dev-account creds.** tunnel.sh reads `/vms/frp-token` and registers your moniker in
-  `/vms/monikers`, both in the **dev** account (`396913734878`). It resolves the profile by account
-  number and hard-fails if your creds land elsewhere. If you see an account-mismatch error:
-  `aws sso login --profile <your-dev-profile>` (or set `AWS_PROFILE`).
+- **AWS dev-account creds.** tunnel.sh reads `/vms/frp-token` + registers your moniker in
+  `/vms/monikers`, and `up --tunnel` fetches the fleek A/V creds — all in the **dev** account
+  (`396913734878`). It resolves the profile by account number and hard-fails elsewhere. If you see
+  an account mismatch: `aws sso login --profile <your-dev-profile>` (or `export AWS_PROFILE=…`).
 - **Slot 0 only.** `--tunnel` fronts the FIXED slot-0 browser ports (dash :8900 / connect :6210 /
-  iam :3010), so every `--tunnel` command hard-errors at `--slot > 0` / `--set`. Slotted tunneling
-  is a separate, deferred effort.
+  iam :3010), so every `--tunnel` command hard-errors at `--slot > 0` / `--set`.
 
-## Bring the stack up in tunnel mode
+## Why the two-phase build (step 1 + 2)
 
-```bash
-ss stack down && ss stack up --tunnel --seed full --reset
-```
+`iam_session` has exactly one cookie `Domain` — host-only `localhost` **or** `.<moniker>.vms…`,
+never both — so one running iam serves the localhost journey **or** the tunnel dash, not both. The
+concierge therefore **builds the org under localhost** (where the tested journey is fast and
+reliable), snapshots it, then **restores it under the tunnel** cookie domain. The Connect room
+itself doesn't need a pre-launched dash session: `ss e2e connect` reads the schedule, **starts the
+occurrence via `sessions.start`**, and everyone joins — so `--through schedule` is enough (no need
+for the `sessions`/`attendance` stages, which would leave today's occurrence `Ended`).
 
-The leading `ss stack down` is part of the instruction, not an afterthought: `up --tunnel` skips any
-service whose port is already healthy, so a stack already running in localhost mode would keep its
-non-tunnel env — most visibly iam would set a **host-only** `iam_session` cookie (no
-`Domain=.<moniker>.vms…`) and the dash couldn't hold the session across the API subdomains. Bringing
-it down first guarantees every service (re)launches under the tunnel env. On a cold machine the
-`down` is a harmless no-op, so this one command is always the right way in.
+> **Use `ss stack snapshot`, never the legacy `mesh-fixture-cli`.** The legacy tool dumped only 6
+> postgres DBs and **omitted `sessions`**. `ss stack snapshot` is manifest-driven and covers all 10
+> pg DBs + the `connectv3` mongo DB (see [snapshots.md](./snapshots.md)).
 
-`up --tunnel` is fully native (no `up.sh`): it resolves your moniker via the vendored `tunnel.sh`,
-builds the tunnel-aware browser-plane env for every service (incl. coach), writes the dash's tunnel
-routing (`config.local.json`), launches the stack, and — after a healthy launch+seed — starts the
-frpc reverse tunnels. When it's up, `https://dash.<moniker>.vms.wootdev.com` loads, logged in.
+## Bringing the stack up in tunnel mode (`up --tunnel`)
+
+`ss stack down && ss stack up --tunnel --reset` is fully native (no `up.sh`): it resolves your
+moniker via the vendored `tunnel.sh`, builds the tunnel-aware browser-plane env for every service
+(incl. coach), writes the dash's tunnel routing (`config.local.json`), fetches the fleek A/V creds,
+launches the stack, and starts the frpc reverse tunnels.
+
+The leading `ss stack down` is **part of the instruction**: `up --tunnel` skips any service whose
+port is already healthy, so a stack already up in localhost mode would keep its non-tunnel env —
+most visibly iam would set a **host-only** `iam_session` cookie and the dash couldn't hold the
+session across the API subdomains. `down` guarantees every service (re)launches under the tunnel
+env; on a cold machine it's a harmless no-op.
 
 _Verify the relaunch took:_ the `iam_session` `Set-Cookie` should carry
-`Domain=.<moniker>.vms.wootdev.com` (that's what lets the session span the subdomains). A host-only
-cookie means some service didn't relaunch — run `ss stack down` again and re-up.
+`Domain=.<moniker>.vms.wootdev.com`. A host-only cookie means a service didn't relaunch — `down`
+again and re-up.
 
-Manage the tunnels directly (rarely needed — `up --tunnel` drives them for you):
+Manage the tunnels directly (rarely needed — `up --tunnel` drives them):
 
 ```bash
 ss stack tunnel status     # frpc process + per-URL health probes
-ss stack tunnel up         # (re)attach tunnels to an already-tunnel-launched stack
-ss stack tunnel down       # stop the tunnels
+ss stack tunnel up|down    # (re)attach / stop the tunnels
 ss stack tunnel urls       # print the public URL table
 ```
 
-## Seed launchable Connect sessions — the snapshot bridge
-
-`ss stack up --tunnel --seed full --reset` brings the stack up **but with no launchable sessions**:
-those are produced by the journey e2e, whose Playwright browsers can't be pointed at the tunnel
-without a WAN hairpin (slow) and — more fundamentally — because `iam_session` has exactly one cookie
-`Domain` (host-only `localhost` **or** `.<moniker>.vms.wootdev.com`, never both), so one running iam
-serves the localhost journey **or** the tunnel dash, not both at once.
-
-The fast, reliable path is the **snapshot bridge**: build the state under localhost, then carry it
-across the cookie-domain boundary with a snapshot.
-
-```bash
-# 1. Build the Empty Org sessions — localhost, fast, tested:
-ss stack down && ss stack up --seed full --reset
-ss e2e run journey --through sessions
-
-# 2. Snapshot the built state:
-ss stack snapshot store --fixture-id tunnel-journey
-
-# 3. Bring the stack up in tunnel mode and restore:
-ss stack down && ss stack up --tunnel --reset
-ss stack snapshot restore tunnel-journey
-```
-
-Then log in at `https://dash.<moniker>.vms.wootdev.com` as `empty@saga.org` (see
-[Login credentials](#login-credentials)); the org's sessions show on `/sessions/list/today`.
-
-> **Open item — a *launchable* (not-yet-started) session.** The journey materializes today's
-> occurrence already-completed under its clamped test date (`actualStart`≈`actualEnd`, `status=Ended`),
-> so `/sessions/list/today` shows an **Ended** session, not one you can launch. Neither `--through
-> schedule` nor `--through sessions` changes this. Producing a launchable "today" session for the
-> tunnel demo needs a seed/date tweak (same class as up.sh's `SEED_DEMO_ONLY` demo lane) — tracked
-> for follow-up.
-
-> **Use `ss stack snapshot`, never the legacy `mesh-fixture-cli`.** The legacy tool dumped only 6
-> postgres DBs and **omitted `sessions`** — which is exactly why a manual bridge repopulated users
-> but left Demo District sessions empty. `ss stack snapshot` is manifest-driven and covers all 10
-> pg DBs + the `connectv3` mongo DB (see [snapshots.md](./snapshots.md)). Keep the seed profile the
-> same between build and restore (or pass `--force`) so the restore's profile guard doesn't abort.
-
-## e2e in tunnel mode (`--tunnel`)
+## `ss e2e … --tunnel`
 
 `ss e2e run` and `ss e2e connect` accept `--tunnel`, which resolves your moniker and points the
-Playwright browser at `https://<label>.<moniker>.vms.wootdev.com` instead of localhost (the spec
-`lane.ts` already reads every service URL from `PLAYWRIGHT_*_URL`, so no spec change is needed).
+Playwright browser at `https://<label>.<moniker>.vms.wootdev.com` instead of localhost.
 
-```bash
-ss e2e connect --tunnel        # open the live Connect room, reachable at connect.<moniker>.vms…
-ss e2e run journey --tunnel    # drive a whole flow over the tunnel (see the caveat below)
-```
-
-- **`ss e2e connect --tunnel`** is the concierge front door for the invite-a-coworker use case:
-  it opens the live interactive-connect room and the room is reachable at
-  `https://connect.<moniker>.vms.wootdev.com`. Guests authenticate at
-  `https://iam.<moniker>.vms.wootdev.com/demo` as a seeded persona. Pair it with the snapshot bridge
-  above so there are sessions to launch.
-- **`ss e2e run … --tunnel` is the slow all-in-one.** Every request WAN-hairpins (your localhost
-  Playwright → DNS → the vms box → frp → back to your localhost), so a full journey crawls and the
-  timeouts stretch — `--tunnel` exports `PLAYWRIGHT_TUNNEL_TIMEOUT_MS` (consumed by the SPA's
-  `playwright.config.ts`) to compensate. Prefer the snapshot bridge for seeding and reserve
-  `run --tunnel` for when you specifically need the flow to execute against the tunnel.
-- Both are slot-0-only, and `run --tunnel` also requires the local `stack` lane (a deployed lane
-  resolves its own hostnames, so `--tunnel --lane sandbox` is rejected).
+- **`ss e2e connect --tunnel`** — the concierge front door (step 3). `--student-login N` sets how
+  many students join locally; `--fake-media` swaps in a synthetic camera/mic (drop it for real
+  A/V). The tutor always auto-hosts and starts the session. slot-0 only.
+- **`ss e2e run … --tunnel`** is the slow all-in-one: every request WAN-hairpins (localhost →
+  vms box → frp → localhost), so a full journey crawls; it exports `PLAYWRIGHT_TUNNEL_TIMEOUT_MS`
+  for the SPA's `playwright.config.ts`. Prefer the snapshot bridge (step 1) for seeding. slot-0 +
+  local `stack` lane only (`--tunnel --lane sandbox` is rejected).
 
 ## Login credentials
 
 Log in at `https://iam.<moniker>.vms.wootdev.com/demo#auth` via **devLogin** (enter the email, no
-password). The `@saga.org` seed aliases below also accept the shared dev password **`password123`**;
-the `@example.org` roster users are provisioned by the journey, so use **devLogin** for them.
+password). The `@saga.org` seed aliases also accept the shared dev password **`password123`**; the
+`@example.org` roster users are provisioned by the journey, so use **devLogin** for them.
 
-> **Which personas have launchable sessions?** The ones the **journey / Empty Org** creates — NOT the
-> `demo-*` district personas. `ss … --seed full` runs the *canonical projection bake*, which does
-> **not** seed the demo-district sessions (that was up.sh's separate `SEED_DEMO_ONLY` lane). So the
-> `demo-dadmin` / `demo-lead-north` / `demo-student-*` accounts exist and can log in, but under `ss`
-> they have **no sessions to launch**. Launchable sessions come from the [snapshot bridge](#seed-launchable-connect-sessions--the-snapshot-bridge)
-> (`ss e2e run journey --through sessions`), which builds the **Empty Org**.
+The Connect room seats these Empty Org personas (the concierge prints their login URLs):
 
-Empty Org personas (from the journey — the tested `session e2e` roster):
+| Role | Email | Login |
+|------|-------|-------|
+| **Tutor / host** | `alex.tutor@example.org` | devLogin |
+| Student | `ann.lee@example.org` | devLogin |
+| Student | `cara.diaz@example.org` | devLogin |
+| Org admin (opt.) | `empty@saga.org` | devLogin or `password123` |
 
-| Role | Email | Does | Login |
-|------|-------|------|-------|
-| **Tutor / host** | `alex.tutor@example.org` | Hosts the Connect room (`interactive-connect` uses this account) | devLogin |
-| Student | `ann.lee@example.org` | Joins the room | devLogin |
-| Student | `cara.diaz@example.org` | Joins the room | devLogin |
-| Org admin (opt.) | `empty@saga.org` | Org admin / in-room observer (`IN_ROOM_OBSERVER=1`) | devLogin or `password123` |
+All three room personas are in the same pod (Math 101 + Reading 201). `empty@saga.org` is the Empty
+Org admin (opt-in observer via `IN_ROOM_OBSERVER=1`); `dev@saga.org` is the *seed*-district admin, a
+different org. Full roster: `saga-dash` `e2e/data/fixtures/example-roster.csv`.
 
-These three (`alex.tutor`, `ann.lee`, `cara.diaz`) are the accounts `ss e2e connect` seats in the
-live room — all enrolled in the same pod (Math 101 + Reading 201). `empty@saga.org` is the Empty Org
-admin (opt-in observer). `dev@saga.org` is the *seed*-district admin — a different, pre-journey org.
-Full roster (2 tutors, 8 students): `saga-dash` `e2e/data/fixtures/example-roster.csv`.
+> The `demo-dadmin` / `demo-lead-north` / `demo-student-*` accounts exist and can log in, but under
+> `ss` they have **no sessions** — `--seed full` runs the canonical projection bake, not up.sh's
+> `SEED_DEMO_ONLY` demo-session lane. Launchable sessions come from the journey / Empty Org.
+
+## A/V
+
+Real camera/mic works when `up --tunnel` fetched the fleek cluster creds (needs dev creds; it warns
+if it couldn't and connect-api falls back to the dev key, which the cluster rejects → A/V fails but
+CRDT/chat still work). Use `--fake-media` on `ss e2e connect` for a synthetic camera/mic (a machine
+with no camera, or where `v4l2loopback` won't build). A/V always routes through the fleek dev
+cluster, never the tunnel.
 
 ## Guest security
 
 By design there is **no VPN and no box-level auth** in front of the wildcard hosts — the app-layer
 iam demo login is the only gate. Anyone with the URL reaches the login page. (Hardening — a shared
-secret / basic-auth at the box — is a possible future follow-up, not the current posture.)
+secret / basic-auth at the box — is a possible follow-up, not the current posture.)
 
 ## See also
 

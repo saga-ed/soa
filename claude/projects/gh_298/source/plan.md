@@ -8,6 +8,23 @@ Bring tunnel mode to the `ss` synthetic-dev CLI and verify it functions identica
 `--tunnel`, driven by the real use case: **Jeff invites coworkers to test Connect via a
 publicly-reachable URL against his local stack.** Slot 0 first; slot 1..N deferred.
 
+## Status (updated 2026-07-13)
+
+- ✅ **Phase 1a / 1b / 2 — implemented** (commit `0c8b50e`): re-vendored `tunnel.sh` + drift guard;
+  coach browser-plane overlay; `ss e2e run/connect --tunnel`. Typecheck clean, full suite 1150/0.
+- ✅ **Phase 4 — docs** (this commit): `docs/tunnel.md` + pointers from README / e2e.md / snapshots.md.
+- ✅ **Static + real-binary verification done here** (no dev creds needed): `ss e2e run --tunnel
+  --dry-run` emits the correct `https://<label>.<moniker>.vms…` for all 9 services + timeout;
+  non-tunnel stays localhost; slot-1 and lane-sandbox guards hard-error; snapshot set confirmed to
+  include `sessions` (Phase 3 root-cause fix). Coach overlay + drift guard pass as unit tests.
+- ⏳ **Phase 0 / 3 — live-stack verification PENDING (needs dev-account AWS creds).** This box's
+  creds resolve to account `531314149529`, not dev `396913734878`, so the frpc bring-up, moniker
+  registration, coach runtime reachability, and the real snapshot-bridge round-trip can't be run
+  here. The exact command sequence to run is in `docs/tunnel.md`; see the checklist at the bottom
+  of this plan.
+- ⏳ **Cross-repo confirmations** (saga-dash `lane.ts` reads the URLs; `playwright.config.ts` reads
+  `PLAYWRIGHT_TUNNEL_TIMEOUT_MS`).
+
 ## Reframing (important)
 
 Tunnel mode is **already ported and merged** (soa#214/#221). `ss stack up --tunnel` and

@@ -174,11 +174,32 @@ export default class DevelopCoach extends BaseCommand {
     }),
   };
 
+  /**
+   * `develop coach` brings up an isolated `soa-s<N>` coach sub-stack at slot > 0
+   * — the whole point of a per-slot dev concierge. It mirrors `e2e run` (same
+   * slot-aware `executeResolvedFlow`), derives the slot profile via
+   * `deriveInstance`, and hands off the browser at the SLOT-OFFSET coach-web port
+   * (`launchContext.ports['coach-web']`), so nothing is pinned to slot 0.
+   */
+  protected slotAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(DevelopCoach);
     const scenario = flags.scenario as Scenario;
     const spec = SCENARIOS[scenario];
     const passthrough = argv as string[];
+
+    // --tunnel fronts the FIXED slot-0 browser ports via the vms rendezvous box,
+    // so it is slot-0-only — mirroring `e2e run --tunnel` (run.ts) and `stack up
+    // --tunnel`. The `flags.slot > 0` check covers `--set` too (a set pins slot > 0).
+    if (flags.tunnel && flags.slot > 0) {
+      this.error(
+        `slot ${flags.slot}: --tunnel fronts the FIXED slot-0 browser ports via the vms rendezvous box, ` +
+          'so it cannot run against a peer slot/set. Run develop coach at slot 0, or drop --tunnel.',
+      );
+    }
 
     // Discover + load coach-web's authored flows.json (COACH checkout; no bundled
     // example — coach ships its own, so an absent checkout is a hard, clear error).

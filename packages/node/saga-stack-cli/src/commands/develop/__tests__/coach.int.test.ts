@@ -239,6 +239,21 @@ describe('develop coach — content-viewer (default scenario)', () => {
   });
 });
 
+describe('develop coach — slot awareness (slot > 0)', () => {
+  it('accepts --slot 2 (slotAware) and still hands off', async () => {
+    // Was a hard-error before slotAware(): a per-slot dev concierge must run at
+    // slot > 0. (The concrete hand-off port at slot > 0 is verified live — the
+    // test harness mocks the port probe to fixed values, so it cannot assert the
+    // real mesh offset here.)
+    await DevelopCoach.run(['--slot', '2', ...ws()], config);
+    expect(browserRuns()).toHaveLength(1);
+  });
+
+  it('--tunnel --slot 2 hard-errors (tunnel fronts fixed slot-0 ports)', async () => {
+    await expect(DevelopCoach.run(['--tunnel', '--slot', '2', ...ws()], config)).rejects.toThrow(/slot 2:.*slot-0 browser ports/);
+  });
+});
+
 describe('develop coach — admin (descoped, mock-backed)', () => {
   it('drives the dashboard flow, logs in demo-dadmin at /reports, and WARNS that the report is mock-backed', async () => {
     await DevelopCoach.run(['--scenario', 'admin', ...ws()], config);

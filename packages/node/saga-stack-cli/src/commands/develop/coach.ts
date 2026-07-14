@@ -226,20 +226,41 @@ export default class DevelopCoach extends BaseCommand {
     const base = flags.reuse ? { ...resolved, prerequisite: undefined } : resolved;
 
     const now = new Date();
+
+    // M7: resolve the slot profile once — it drives the offset ports/project/
+    // container-env (buildStackContext), the launcher's per-slot state dir, and the
+    // DB/mesh targeting so `--slot N` provisions + migrates + seeds against slot N's
+    // OWN offset ports/DBs (mirrors e2e run.ts). At slot 0 it is the byte-identical
+    // no-offset default. WITHOUT this, `--slot N` would silently target slot 0.
+    const profile = deriveInstance({ slot: flags.slot });
+    // Apply the slot's container-env seam (mesh container names + snapshot dir) and
+    // point the launcher at the slot's state dir (pids/logs) — both no-ops at slot 0.
+    this.applyInstanceEnv(profile);
+    const stateDir = flags['state-dir'] ?? profile.stateDir;
+
     const seams = {
-      launcher: this.getLauncher(flags['state-dir']),
+      launcher: this.getLauncher(stateDir),
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
+      // Native-prep seams: buildStackContext wires them into the runtime at EVERY
+      // slot so StackApi.up runs R2 provision + R3 migrate on the slot's offset DBs
+      // before launch+seed (mirrors e2e run.ts — required for a slot > 0 bring-up).
+      pgProbe: this.getPgProbe(),
+      prepIsFresh: this.getPrepFreshCheck(),
+      prepWriteStamp: this.getPrepStampWriter(),
+      prepRepairDeps: this.getPrepDepRepairer(),
+      prepDbGenerateScan: this.getDbGenerateScan(),
+      repoDirExists: this.getRepoDirCheck(),
     };
     const delegate = (plan: ScriptPlan): Promise<number> =>
       this.runScript(plan, flags as WorkspaceFlags, { propagateExit: false });
 
     // --tunnel: resolve <moniker>.<VMS_BASE> from the VENDORED tunnel.sh (same
-    // machinery as connect/`stack up --tunnel`). develop coach is slot-0 only, so
-    // no slot guard is needed. The seam lets unit tests inject a fixed moniker.
+    // machinery as connect/`stack up --tunnel`). Guarded slot-0-only above (the
+    // tunnel fronts fixed slot-0 ports). The seam lets unit tests inject a moniker.
     let tunnelDomain: string | undefined;
     if (flags.tunnel) {
       const vmsBase = process.env.VMS_BASE ?? 'vms.wootdev.com';
@@ -247,7 +268,7 @@ export default class DevelopCoach extends BaseCommand {
       tunnelDomain = `${moniker}.${vmsBase}`;
     }
 
-    const { runtime } = buildStackContext(flags, seams, delegate, undefined, tunnelDomain);
+    const { runtime } = buildStackContext(flags, seams, delegate, profile, tunnelDomain);
     const api = makeStackApi(serviceManifest, runtime);
 
     // Drive the flow (up → reset+seed → verify → headless Playwright smoke). This
@@ -271,9 +292,8 @@ export default class DevelopCoach extends BaseCommand {
       await this.orchestratePlaylist(coachRoot, runtime.launchContext.tokens.COACH_DB_URL);
     }
 
-    // Hand off a HEADED, logged-in coach-web at the scenario's route. develop coach
-    // is slot-0 only; use the slot-0 state dir unless overridden.
-    const stateDir = flags['state-dir'] ?? deriveInstance({ slot: 0 }).stateDir;
+    // Hand off a HEADED, logged-in coach-web at the scenario's route — the slot's
+    // OFFSET coach-web port + the per-slot state dir resolved above.
     await this.handoff(flags, scenario, spec, resolved, runtime.launchContext.ports['coach-web'], stateDir);
   }
 

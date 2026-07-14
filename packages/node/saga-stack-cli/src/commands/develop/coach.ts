@@ -243,6 +243,10 @@ export default class DevelopCoach extends BaseCommand {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      // soa#300: buildStackContext threads this into the runtime so StackApi.up writes
+      // coach-web's `.env.local` (local mesh offset URLs) before launch — else its
+      // browser inlines the checked-in `.env` remote defaults and 503s at sign-in.
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
       // Native-prep seams: buildStackContext wires them into the runtime at EVERY

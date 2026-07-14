@@ -171,6 +171,9 @@ export default class DevelopConnect extends BaseCommand {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      // soa#300: coach-web `.env.local` prelaunch seam — harmless here (coach-web is not
+      // in the connect closure), wired for parity with the other bring-up paths.
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
     };

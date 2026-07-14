@@ -67,6 +67,7 @@ import {
   generateSlotFleetConfig,
 } from './runtime/index.js';
 import type {
+  CoachWebFs,
   DashFs,
   HealthProber,
   MeshExec,
@@ -178,6 +179,13 @@ export interface StackSeams {
   meshExec: MeshExec;
   portProbe: PortProbe;
   dashFs: DashFs;
+  /**
+   * soa#300: the coach-web `.env.local` prelaunch fs seam — when coach-web is in the
+   * closure, `up` writes `<coachWebRoot>/.env.local` so its browser boots against the
+   * LOCAL mesh. Optional so callers that don't wire it stay byte-identical; the
+   * command builds it from `getCoachWebFs()`.
+   */
+  coachWebFs?: CoachWebFs;
   prober: HealthProber;
   runner: Runner;
   /**
@@ -287,6 +295,7 @@ export function buildStackContext(
     meshExec: seams.meshExec,
     portProbe: seams.portProbe,
     dashFs: seams.dashFs,
+    coachWebFs: seams.coachWebFs,
     prober: seams.prober,
     runner: seams.runner,
     // --tunnel (Phase 2): a resolved domain flips tunnel mode on so the facade writes

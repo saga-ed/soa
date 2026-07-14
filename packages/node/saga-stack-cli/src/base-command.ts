@@ -59,6 +59,7 @@ import {
   makeRealConfirm,
   makeRealCookiePoster,
   makeRealDashFs,
+  makeRealCoachWebFs,
   makeRealGhRunner,
   makeRealGitRunner,
   makeRealJarWriter,
@@ -95,6 +96,7 @@ import {
 import type {
   ConfirmSeam,
   CookiePoster,
+  CoachWebFs,
   DashFs,
   GhRunner,
   GitRunner,
@@ -502,6 +504,16 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * The coach-web env fs seam (soa#300 — the `.env.local` prelaunch hook) —
+   * production is the only place coach-web's `.env.local` is written/removed for the
+   * hook, so its browser boots against the local mesh instead of the checked-in
+   * `.env` remote defaults.
+   */
+  protected getCoachWebFs(): CoachWebFs {
+    return makeRealCoachWebFs();
+  }
+
+  /**
    * The repo-dir existence check (M4 native partial-stack) — production is a real
    * `fs.existsSync` predicate. The native `stack up` path calls it per service to
    * SKIP (warn, not fail) any service whose sibling-repo checkout is absent (e.g.
@@ -821,6 +833,7 @@ export abstract class BaseCommand extends Command {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
       // M8 native prep pass (R1 build → R2 provision → R3 migrate on `up`; harmless

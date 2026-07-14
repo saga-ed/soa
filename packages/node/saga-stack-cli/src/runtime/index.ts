@@ -21,6 +21,7 @@ export * from './preflight.js';
 export * from './prep-repair.js';
 export * from './orphan-audit.js';
 export * from './dash-defaults.js';
+export * from './coach-web-env.js';
 export * from './flows.js';
 export * from './pg-probe.js';
 export * from './prep.js';

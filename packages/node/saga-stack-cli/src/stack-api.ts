@@ -56,12 +56,15 @@ import {
   prepClosure,
   provisionDbs,
   resetClosure,
+  syncCoachWebEnvLocal,
   syncDashLocalDefaults,
   viteCachePaths,
 } from './runtime/index.js';
 import type {
   AutoPullRepo,
   AutoPullResult,
+  CoachWebFs,
+  CoachWebSyncResult,
   DashFs,
   DashSyncResult,
   GitRunner,
@@ -110,6 +113,15 @@ export interface Runtime {
   portProbe: PortProbe;
   /** Dash-config fs seam (the prelaunch hook's `config.local.json` write/remove). */
   dashFs: DashFs;
+  /**
+   * coach-web env fs seam (soa#300 — the `.env.local` prelaunch hook's write/remove).
+   * When PRESENT AND coach-web is launchable, `up` writes `<coachWebRoot>/.env.local`
+   * so coach-web's browser boots against the LOCAL mesh instead of the checked-in
+   * `.env` remote defaults. ABSENT ⇒ the hook is skipped (the facade unit/int tests
+   * that don't wire it stay byte-identical); coachWebRoot resolves from
+   * `launchContext.repoRoots.COACH`.
+   */
+  coachWebFs?: CoachWebFs;
   /** HTTP health prober (verify). */
   prober: HealthProber;
   /** Process seam — mesh `make up` + the native seed steps. */
@@ -320,6 +332,8 @@ export interface UpResult {
   migrate?: MigrateResult;
   /** What the dash prelaunch hook did (only when saga-dash was in the closure). */
   dash?: DashSyncResult;
+  /** What the coach-web `.env.local` prelaunch hook did (only when coach-web was launchable + the seam wired). */
+  coachWeb?: CoachWebSyncResult;
   /** Per-service launch results, in the order launched (topo waves flattened). */
   launched: LaunchResult[];
   /** Services skipped because their repo checkout dir is absent (warn, not fail). */
@@ -863,6 +877,31 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         );
       }
 
+      // 4b. coach-web prelaunch hook (soa#300) — ONLY when coach-web is launchable AND
+      // the seam is wired. coach-web is a SvelteKit adapter-static SPA that INLINES its
+      // PUBLIC_* URLs from `.env` at vite-dev start; the checked-in `.env` points at
+      // REMOTE hosts (…wootdev.com) + the base coach-api port, so its browser boots
+      // against remote/wrong hosts → whoami fails → it renders a 503 sign-in error and
+      // NO route renders. Write a per-slot `.env.local` (> `.env` in Vite; gitignored)
+      // mapping each PUBLIC_ var to THIS slot's LOCAL mesh offset port so the browser
+      // boots against the local stack. `launchContext.ports` are already slot-offset
+      // (same map the dash hook uses). Runs at EVERY slot including 0 (the remote
+      // defaults break local browser-testing at slot 0 too — the original soa#300);
+      // no-ops under tunnel (public coach-web URLs are a separate concern).
+      let coachWeb: CoachWebSyncResult | undefined;
+      if (launchable.includes('coach-web') && runtime.coachWebFs) {
+        const coachRoot = (launchContext.repoRoots as Record<RepoKey, string>).COACH;
+        coachWeb = syncCoachWebEnvLocal(
+          {
+            coachWebRoot: joinPath(coachRoot, 'apps/web/coach-web'),
+            tunnel: runtime.tunnel,
+            slot: runtime.slot,
+            stackPorts: launchContext.ports,
+          },
+          runtime.coachWebFs,
+        );
+      }
+
       // 5. launch the launchable set in topo WAVES — health-gate each wave before the
       // next. Reuse the faithful per-service spec builder (launchPlan), then regroup
       // the flat specs into waves via launchOrder so dependents only start once their
@@ -905,7 +944,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         launched.push(...results);
         const failed = results.find((r) => !r.ok);
         if (failed) {
-          return { ok: false, autoPull, av, mesh, prep, provision, migrate, dash, launched, skipped, failedAt: failed.id as ServiceId };
+          return { ok: false, autoPull, av, mesh, prep, provision, migrate, dash, coachWeb, launched, skipped, failedAt: failed.id as ServiceId };
         }
       }
 
@@ -950,7 +989,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         }
       }
 
-      return { ok: true, autoPull, av, mesh, prep, provision, migrate, dash, launched, skipped, record };
+      return { ok: true, autoPull, av, mesh, prep, provision, migrate, dash, coachWeb, launched, skipped, record };
     },
 
     async down(services: ServiceId[]): Promise<DownResult> {

@@ -25,6 +25,7 @@ import { makeStackApi } from '../stack-api.js';
 import type { Runtime } from '../stack-api.js';
 import { stopServices } from '../runtime/index.js';
 import type {
+  CoachWebFs,
   DashFs,
   GitRunner,
   HealthProber,
@@ -67,11 +68,12 @@ interface Fakes {
   runs: ScriptInvocation[];
   meshExecs: { container: string; cmd: string }[];
   dashCalls: string[];
+  coachWebWrites: Array<{ path: string; contents: string }>;
   delegated: ScriptInvocation[];
 }
 
 function makeRuntime(overrides: Partial<Runtime> = {}): { runtime: Runtime; fakes: Fakes } {
-  const fakes: Fakes = { launches: [], stopped: [], runs: [], meshExecs: [], dashCalls: [], delegated: [] };
+  const fakes: Fakes = { launches: [], stopped: [], runs: [], meshExecs: [], dashCalls: [], coachWebWrites: [], delegated: [] };
 
   const launcher: ServiceLauncher = {
     async launch(spec: LaunchSpec): Promise<LaunchResult> {
@@ -106,6 +108,11 @@ function makeRuntime(overrides: Partial<Runtime> = {}): { runtime: Runtime; fake
     remove: (p: string) => fakes.dashCalls.push(`remove:${p}`),
     write: (p: string) => fakes.dashCalls.push(`write:${p}`),
   };
+  const coachWebFs: CoachWebFs = {
+    existsDir: () => true,
+    write: (path: string, contents: string) => fakes.coachWebWrites.push({ path, contents }),
+    remove: () => {},
+  };
   const prober: HealthProber = {
     async probe(url: string) {
       // content-api runs on :3009 — mark it down so the verify/tolerate test bites.
@@ -128,6 +135,7 @@ function makeRuntime(overrides: Partial<Runtime> = {}): { runtime: Runtime; fake
     meshExec,
     portProbe,
     dashFs,
+    coachWebFs,
     prober,
     runner,
     delegate: async (plan) => {
@@ -198,6 +206,63 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     expect(res.dash?.action).toBe('noop-absent'); // existsFile:false, non-tunnel ⇒ nothing to remove
     expect(fakes.dashCalls.some((c) => c.startsWith('existsDir:'))).toBe(true);
     expect(fakes.launches.some((s) => s.id === 'saga-dash')).toBe(true);
+  });
+
+  it('soa#300: writes coach-web .env.local (local mesh URLs) when coach-web is launchable — even at slot 0', async () => {
+    const { runtime, fakes } = makeRuntime(); // default slot (undefined ⇒ 0)
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['coach-web'] as ServiceId[]);
+    const res = await api.up(closure.services);
+
+    expect(res.coachWeb?.action).toBe('wrote');
+    expect(res.coachWeb?.path).toBe('/dev/coach/apps/web/coach-web/.env.local');
+    expect(fakes.coachWebWrites).toHaveLength(1);
+    const contents = fakes.coachWebWrites[0].contents;
+    // base ports at slot 0: iam 3010, coach-api 6105, saga-dash 8900. No remote defaults.
+    expect(contents).toContain('PUBLIC_IAM_API_URL=http://localhost:3010');
+    expect(contents).toContain('PUBLIC_COACH_API_URL=http://localhost:6105');
+    expect(contents).toContain('PUBLIC_DASHBOARD_URL=http://localhost:8900');
+    expect(contents).toContain('PUBLIC_LOGIN_URL=http://localhost:3010');
+    expect(contents).not.toContain('wootdev.com');
+  });
+
+  it('soa#300: coach-web .env.local carries the OFFSET URLs at slot > 0', async () => {
+    const profile = deriveInstance({ slot: 1 });
+    const slotCtx = defaultLaunchContext({
+      repoRoots: REPO_ROOTS,
+      vendorDir: '/dev/vendor',
+      portOverrides: profile.portOverrides,
+      meshOffset: profile.meshOffset,
+    });
+    const { runtime, fakes } = makeRuntime({ launchContext: slotCtx, slot: 1 });
+    const api = makeStackApi(manifest, runtime);
+    await api.up(['coach-web'] as ServiceId[]);
+
+    const contents = fakes.coachWebWrites[0].contents;
+    // slot 1 = base + 1000: iam 4010, coach-api 7105, saga-dash 9900.
+    expect(contents).toContain('PUBLIC_IAM_API_URL=http://localhost:4010');
+    expect(contents).toContain('PUBLIC_COACH_API_URL=http://localhost:7105');
+    expect(contents).toContain('PUBLIC_DASHBOARD_URL=http://localhost:9900');
+    expect(contents).not.toContain(':6105'); // slot 0's coach-api must not leak
+  });
+
+  it('soa#300: no coach-web .env.local write when coach-web is not in the closure', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
+    const res = await api.up(closure.services);
+
+    expect(res.coachWeb).toBeUndefined();
+    expect(fakes.coachWebWrites).toEqual([]);
+  });
+
+  it('soa#300: no coach-web .env.local write under --tunnel (public URLs are a separate concern)', async () => {
+    const { runtime, fakes } = makeRuntime({ tunnel: true, tunnelDomain: 'abc.vms.wootdev.com' });
+    const api = makeStackApi(manifest, runtime);
+    const res = await api.up(['coach-web'] as ServiceId[]);
+
+    expect(res.coachWeb?.action).toBe('noop-tunnel');
+    expect(fakes.coachWebWrites).toEqual([]);
   });
 
   it('slot 0: a frontend launch command is byte-identical (no --port appended)', async () => {

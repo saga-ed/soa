@@ -286,6 +286,9 @@ export default class E2eRun extends BaseCommand {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      // soa#300: coach-web `.env.local` prelaunch seam — buildStackContext threads it so
+      // a coach-web-in-closure e2e run boots the SPA against the LOCAL mesh, not remote.
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
       // Native-prep seams (built always; since FLIP 3 buildStackContext wires them

@@ -632,7 +632,7 @@ describe('StackApi.reset — native (M8 R4)', () => {
   /** The `-c "<sql>"` payload of a `docker exec … psql … -c <sql>` run. */
   const sqlOf = (r: ScriptInvocation): string => r.args[r.args.indexOf('-c') + 1];
 
-  it('native: truncates closure DBs preserving _prisma_migrations + re-seeds the dev user', async () => {
+  it('native: truncates closure DBs preserving _prisma_migrations + re-seeds registry BEFORE the dev user', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['sessions-api'] as ServiceId[]);
@@ -648,8 +648,15 @@ describe('StackApi.reset — native (M8 R4)', () => {
       expect(sqlOf(t)).toContain("tablename <> '_prisma_migrations'");
       expect(sqlOf(t)).toContain('RESTART IDENTITY CASCADE');
     }
-    // dev-user re-seed ran (iam-api is in the closure) via the seed path.
+    // registry + dev-user re-seed ran (iam-api is in the closure) via the seed path.
     expect(res.seed?.ok).toBe(true);
+    // soa#253 recurrence guard: the truncate wiped the permission catalog, so
+    // `iam-registry` MUST re-seed BEFORE the `iam-dev-user` dev-admin grant.
+    const seedRuns = fakes.runs.map((r) => r.args.join(' '));
+    const regIdx = seedRuns.findIndex((a) => a.includes('seed-registry.js'));
+    const devIdx = seedRuns.findIndex((a) => a.includes('seed-dev-user.js'));
+    expect(regIdx).toBeGreaterThanOrEqual(0);
+    expect(devIdx).toBeGreaterThan(regIdx);
     expect(res.native?.dbs.some((d) => d.action === 'truncated')).toBe(true);
     // no up.sh delegation on the native path.
     expect(fakes.delegated).toEqual([]);

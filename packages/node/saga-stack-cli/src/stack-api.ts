@@ -1040,9 +1040,24 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       let seed: SeedResult | undefined;
       if (services.includes('iam-api')) {
         const ran: SeedResult['ran'] = { offline: [], online: [] };
-        const devUser = buildSeedRegistry(manifest)['iam-dev-user'];
-        const ok = await runSeedStep(devUser, 'offline', ran);
-        seed = { ok, ran, skipped: [], ...(ok ? {} : { failed: devUser.id }) };
+        const registry = buildSeedRegistry(manifest);
+        // soa#253 recurrence guard: resetClosure() truncated iam_local's permission
+        // catalog (incl. session perms 053/054/055), and a truncate never re-migrates.
+        // So `iam-registry` MUST run before the `iam-dev-user` dev-admin grant — else
+        // applyDevAdminGrant refuses (missing session perms) and dev regresses to
+        // DEFAULT_USER_BUNDLE (saga-dash#209.10/#209.1). Registry is FATAL (a failed
+        // registry means the grant can't be provisioned safely); dev-user stays warn.
+        const registryStep = registry['iam-registry'];
+        const registryOk = await runSeedStep(registryStep, 'offline', ran);
+        const devUser = registry['iam-dev-user'];
+        const devUserOk = registryOk && (await runSeedStep(devUser, 'offline', ran));
+        const ok = registryOk && devUserOk;
+        seed = {
+          ok,
+          ran,
+          skipped: [],
+          ...(ok ? {} : { failed: registryOk ? devUser.id : registryStep.id }),
+        };
       }
 
       // EXIT-CODE CONTRACT (M8 fold-in): up.sh's reset always exits 0 (per-DB failures

@@ -302,7 +302,9 @@ describe('develop coach — admin (descoped, mock-backed)', () => {
 
 describe('develop coach — --real-content (REAL archive curriculum)', () => {
   afterEach(() => {
-    delete process.env.ARCHIVE_DIR; // the command exports it for the flow; don't leak across tests.
+    // the command exports these for the authored flow; don't leak across tests.
+    delete process.env.ARCHIVE_DIR;
+    delete process.env.DATABASE_URL;
   });
 
   it('fails fast with an actionable message when the content-archive checkout is ABSENT — before any bring-up', async () => {
@@ -327,9 +329,12 @@ describe('develop coach — --real-content (REAL archive curriculum)', () => {
 
     // the REAL-archive flow (publish base-coach → materialize), not the synthetic fixture.
     expect(logged.join('\n')).toContain('coach-web/module-playback-real-content');
-    // ARCHIVE_DIR is the one thing the authored flow needs from the invoking env
-    // (its flows.json env block supplies PUBLISH_REAL_CONTENT=1).
+    // The authored flow's lane gates on ARCHIVE_DIR **and** DATABASE_URL and
+    // self-skips if either is missing (its flows.json env block supplies
+    // PUBLISH_REAL_CONTENT=1). Export both — DATABASE_URL must be THIS slot's
+    // coach_api so the publish lands in the slot's own Postgres.
     expect(process.env.ARCHIVE_DIR).toBe('/fixed/dev/content-archive');
+    expect(process.env.DATABASE_URL).toContain('coach_api');
     const br = browserRuns();
     expect(br[0].env?.LOGIN_EMAIL).toBe('demo-tutor-1@saga.org');
   });

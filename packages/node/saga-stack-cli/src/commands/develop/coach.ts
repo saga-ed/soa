@@ -321,6 +321,15 @@ export default class DevelopCoach extends BaseCommand {
     const { runtime } = buildStackContext(flags, seams, delegate, profile, tunnelDomain);
     const api = makeStackApi(serviceManifest, runtime);
 
+    // --real-content: the authored flow's lane (`real-content-lane.ts`) gates on
+    // ARCHIVE_DIR **and** DATABASE_URL ("the stack lane's own DB" — its flows.json
+    // says saga-stack-cli supplies it), and SELF-SKIPS if either is missing. Export
+    // the SLOT's coach_api URL now that the launch context is resolved, so the spec
+    // publishes into THIS slot's Postgres instead of silently skipping.
+    if (flags['real-content']) {
+      process.env.DATABASE_URL = runtime.launchContext.tokens.COACH_DB_URL;
+    }
+
     // Drive the flow (up → reset+seed → verify → headless Playwright smoke). This
     // seeds demo-tutor-1's content + mints the tutor session inside Playwright and
     // asserts the renderers work BEFORE we hand off the real browser.

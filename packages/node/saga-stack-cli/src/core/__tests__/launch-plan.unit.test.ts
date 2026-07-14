@@ -255,6 +255,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       MONGO_PORT: '27037',
       MONGO_DATABASE: 'saga_local',
       CONTENT_DATABASE: 'wmlms_local',
+      // gh_305: content read-store pinned to Postgres (serves the seeded release).
+      CONTENT_STORE_BACKEND: 'postgres',
       AUTH_AUTHENABLED: 'true',
       IAM_API_TARGET: 'http://localhost:3010',
       AUTH_JWKSURL: 'http://localhost:3010/.well-known/jwks.json',

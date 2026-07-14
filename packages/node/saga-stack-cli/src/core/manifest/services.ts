@@ -499,6 +499,13 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         MONGO_PORT: '${CONNECT_MONGO_PORT}',
         MONGO_DATABASE: 'saga_local',
         CONTENT_DATABASE: 'wmlms_local',
+        // gh_305: pin the content read-store to Postgres explicitly. coach-db's
+        // db:seed lands the offline `content_release` fixture in coach_api pg, and
+        // both the module-playback e2e flow and `ss develop coach --scenario
+        // content-viewer` render from it. The UNSET default is disputed (docs 02 vs
+        // 06 disagree on whether it serves mongo or pg), so don't rely on it — the
+        // dev stack always serves the seeded pg release.
+        CONTENT_STORE_BACKEND: 'postgres',
         AUTH_AUTHENABLED: 'true',
         IAM_API_TARGET: '${IAM_URL}',
         AUTH_JWKSURL: '${IAM_URL}/.well-known/jwks.json',

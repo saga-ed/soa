@@ -1,5 +1,170 @@
 {
   "commands": {
+    "develop:coach": {
+      "aliases": [],
+      "args": {},
+      "description": "Bring up + seed a coach stack and drop into a headed, logged-in coach-web: the ported content viewer (default), the mock-backed admin Reports route, or a playlist track-switch.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --scenario admin",
+        "<%= config.bin %> <%= command.id %> --scenario playlist",
+        "<%= config.bin %> <%= command.id %> --reuse -- --debug"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "scenario": {
+          "description": "which coach surface to set up: content-viewer (ported module player, demo-tutor-1) [default]; admin (mock-backed Reports route, demo-dadmin); playlist (switch demo-tutor-1 to a 2nd track via coach-content — needs coach#238).",
+          "name": "scenario",
+          "default": "content-viewer",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "options": [
+            "content-viewer",
+            "admin",
+            "playlist"
+          ],
+          "type": "option"
+        },
+        "reuse": {
+          "description": "skip the reset+seed; hand off against the CURRENT stack state (mirrors develop connect --reuse).",
+          "name": "reuse",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "spa-path": {
+          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
+          "name": "spa-path",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "tunnel": {
+          "description": "point THIS run's flow browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints the flow's Playwright browsers — it does NOT relaunch the stack; you must have already run `ss stack up --tunnel`. Slot-0 only.",
+          "name": "tunnel",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "develop:coach",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": false,
+      "enableJsonFlag": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "develop",
+        "coach.js"
+      ]
+    },
     "develop:connect": {
       "aliases": [
         "e2e:connect"

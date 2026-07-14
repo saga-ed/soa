@@ -159,6 +159,19 @@ describe('serviceUrlEnv / playwrightEnv — offset Playwright service URLs', () 
     expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:3010');
   });
 
+  it('PLAYWRIGHT_BASE_URL is the FLOW SPA frontend, not hardcoded saga-dash (soa#300 tail)', () => {
+    // A coach-web flow must navigate to coach-web (:9800 at slot 1), NOT saga-dash
+    // (:9900) — coach-web's lane.ts reuses PLAYWRIGHT_BASE_URL as its baseURL, so a
+    // saga-dash value would drive the wrong app (and its globalSetup the wrong iam).
+    const coachResolved = { flow, spa: { system: 'coach-web' } } as unknown as ResolvedFlow;
+    const coachEnv = playwrightEnv(coachResolved, now, 'stack', p1);
+    expect(coachEnv.PLAYWRIGHT_BASE_URL).toBe('http://localhost:9800'); // coach-web 8800 + 1000
+    expect(coachEnv.PLAYWRIGHT_IAM_URL).toBe('http://localhost:4010'); // slot iam, still offset
+    // A saga-dash flow is byte-identical to before (system === 'saga-dash').
+    const dashResolved = { flow, spa: { system: 'saga-dash' } } as unknown as ResolvedFlow;
+    expect(playwrightEnv(dashResolved, now, 'stack', p1).PLAYWRIGHT_BASE_URL).toBe('http://localhost:9900');
+  });
+
   it('playwrightEnv on a DEPLOYED lane does NOT inject localhost URLs (lane.ts owns the hostnames)', () => {
     const env = playwrightEnv(resolved, now, 'sandbox', p1);
     expect(env.PLAYWRIGHT_BASE_URL).toBeUndefined();

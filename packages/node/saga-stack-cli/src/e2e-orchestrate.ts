@@ -542,6 +542,14 @@ export function playwrightEnv(
     ...computeEnv(resolved.flow, now),
     ...(dateOverrides ?? {}),
     ...(lane === 'stack' && ports ? serviceUrlEnv(ports) : {}),
+    // `PLAYWRIGHT_BASE_URL` is the Playwright `baseURL` — THIS flow's OWN frontend
+    // origin. `serviceUrlEnv` hardcodes it to saga-dash (the first SPA), so a
+    // coach-web / connectv3 flow would otherwise navigate to saga-dash. Override it
+    // to the resolved SPA's frontend service port (`resolved.spa.system`): a no-op
+    // for saga-dash flows (system === 'saga-dash'), corrected for the others.
+    ...(lane === 'stack' && !tunnelDomain && resolved.spa?.system && ports?.[resolved.spa.system] !== undefined
+      ? { PLAYWRIGHT_BASE_URL: `http://localhost:${ports[resolved.spa.system]}` }
+      : {}),
     ...(lane === 'stack' && tunnelDomain ? tunnelServiceUrlEnv(tunnelDomain) : {}),
     ...(capture === true ? { PLAYWRIGHT_CAPTURE: 'all' } : {}),
     ...(tunnelDomain ? { PLAYWRIGHT_TUNNEL_TIMEOUT_MS: String(TUNNEL_PLAYWRIGHT_TIMEOUT_MS) } : {}),

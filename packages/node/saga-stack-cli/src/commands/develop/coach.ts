@@ -281,7 +281,21 @@ export default class DevelopCoach extends BaseCommand {
     try {
       const code = await executeResolvedFlow(
         base,
-        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), tunnelDomain },
+        // Pass the SLOT-OFFSET ports (mirrors e2e run) so the coach-web Playwright
+        // spawn gets PLAYWRIGHT_IAM_URL = the slot iam and PLAYWRIGHT_BASE_URL = the
+        // slot coach-web. Without this the specs' lane.ts falls back to base ports
+        // (iam :3010, coach-web :8800) — globalSetup then mints the iam_session on
+        // the wrong iam and the browser boots 503 (soa#300 tail).
+        {
+          api,
+          runner: seams.runner,
+          appCwd,
+          now,
+          log: (l) => this.log(l),
+          slot: profile.slot,
+          ports: runtime.launchContext.ports,
+          tunnelDomain,
+        },
         { lane: 'stack', skipReset: flags.reuse, passthrough },
       );
       if (code !== 0) this.exit(code);

@@ -78,3 +78,41 @@ local iam wiring stale, blocks local browser-testing"); M0 fixed only the manife
 #300) — inspect the preserved Playwright trace under
 `coach/apps/web/coach-web/test-results/dashboard-*/trace.zip`. The ss `develop coach` command itself
 is confirmed correct end-to-end up to that coach-web-side boot.
+
+## Chasing soa#300 (2026-07-14, coach-web now owned by us) — CORE fixed + remaining mapped
+
+Opened the Playwright trace and root-caused #300 across its layers:
+
+1. **CORE (FIXED, `719d342`): coach-web's browser booted against REMOTE hosts.** The trace showed it
+   fetched `https://iam.wootdev.com/trpc/auth.whoami` (+ `dash`/`login.wootdev.com`) — the checked-in
+   `.env` remote defaults — because coach-web reads `PUBLIC_*` via `$env/static/public` (inlines
+   `.env` at vite-dev start) and there was no `.env.local`; the injected process env is ignored.
+   **Fix:** a per-slot `.env.local` prelaunch write (`runtime/coach-web-env.ts`, mirrors the saga-dash
+   `config.local.json` seam), gated on coach-web launchable, mapping each `PUBLIC_*` var to the local
+   mesh OFFSET url. **Verified live: the browser now fetches `http://localhost:5010` (slot-2 iam).**
+   This is the substantive #300 unblock — a real `ss develop coach` hand-off now reaches the local iam.
+
+2. **REMAINING (smoke-only, ss-flow ↔ coach-web-e2e env contract):** the headless Playwright smoke
+   still 503s because coach-web's e2e `globalSetup` mints the session against the BASE iam
+   (`localhost:3010`) instead of the slot iam (`localhost:5010`). `e2e/fixtures/lane.ts`:
+   `IAM_URL = process.env.PLAYWRIGHT_IAM_URL ?? 'http://localhost:3010'`. The flow HAS a
+   `PLAYWRIGHT_SERVICE_URL_ENV` map (`e2e-orchestrate.ts:397`: `PLAYWRIGHT_IAM_URL→iam-api`,
+   `PLAYWRIGHT_BASE_URL→saga-dash`) but (a) it isn't reaching coach-web's spawn (lane.ts fell back to
+   `:3010`), and (b) `PLAYWRIGHT_BASE_URL` is hardwired to `saga-dash`, wrong for a coach-web flow.
+   The `:3010` iam happens to be a **leftover tunnel process** with `AUTH_SESSIONCOOKIEDOMAIN=
+   .sk.vms.wootdev.com`, so the minted cookie is scoped to a remote domain the localhost browser never
+   sends back → `cookies:[]` → 503.
+   - **Note:** the SLOT iam (`:5010`) has `AUTH_SESSIONCOOKIEDOMAIN` UNSET → issues a HOST-ONLY
+     (localhost) cookie (iam's `sessionCookieDomain` is `z.string().optional()`), which IS correct.
+     So no manifest cookie-domain fix is needed — the fix is purely to make globalSetup mint against
+     the slot iam.
+   - **Fix direction:** make the coach-web flow export `PLAYWRIGHT_IAM_URL` (slot iam offset) AND
+     `PLAYWRIGHT_BASE_URL` (coach-web offset, not saga-dash) to coach-web's Playwright spawn — an
+     ss-flow env-contract change. This affects the automated SMOKE; a real interactive hand-off uses
+     ss `mintNativeLoginJar` (targets the slot iam directly), so it is likely already unblocked by #1.
+   - **Environment note:** a leftover slot-0 tunnel iam (`:3010`, `.sk.vms.wootdev.com` cookie/CORS)
+     is running — likely from other tunnel work; left untouched (slot 0 may be in use).
+
+**Status:** #300 core FIXED + verified (coach-web boots against local mesh). The remaining smoke-only
+env-contract fix (`PLAYWRIGHT_IAM_URL`/`PLAYWRIGHT_BASE_URL` for coach-web flows) is scoped and ready
+to implement next. Slot 2 torn down; a stale coach-web watch orphan was killed.

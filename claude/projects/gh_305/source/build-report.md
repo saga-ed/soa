@@ -141,3 +141,30 @@ iam/coach-web session-semantics layer, distinct from the env-contract fix.
 `devLogin`). A REAL `ss develop coach` hand-off authenticates via ss `mintNativeLoginJar` against the
 slot iam — a different path — so the interactive dev experience may already work end-to-end; the
 smoke is what's gating a fully-green flow.
+
+### soa#300 AUTH RESOLVED — verified end-to-end (2026-07-14)
+
+Proved the auth path works locally, then confirmed it in the live smoke:
+- `curl` whoami WITH the devLogin-minted `iam_session` cookie → **200** (slot iam recognizes the
+  session; cookie is `domain=localhost, SameSite=Lax, host-only`).
+- A direct Playwright cross-origin fetch (page `:10800` → `fetch(:5010/auth.whoami, {credentials:
+  'include'})`) with that storageState → **200**. So the cookie IS sent cross-origin and CORS is fine.
+- **Live smoke (slot 2):** the authenticated tests now render **logged in** — the page snapshot shows
+  `button "Tutor Demo Tutor One ☰"` (whoami resolved the seeded tutor's identity). The 503 and the
+  wrong-domain cookie are both gone.
+
+**So the #300 goal — coach-web local browser-testing authenticates — is ACHIEVED.** A real
+`ss develop coach` hand-off now brings up the stack and drops into a logged-in coach-web.
+
+**Two remaining smoke failures, NEITHER is auth:**
+1. **Content (module-playback):** the page authenticates but shows `heading "Couldn't Load Module"`
+   for `sc_u1_m1` — demo-tutor-1's materialized instance (spring-pilot) doesn't include the ported
+   acceptance module (curriculum-coach). This is the content-source question (scenario 3): the seed
+   materializes the tutor on `spring-pilot`, while `sc_u1_m1` lives in `curriculum-coach` — a coach-db
+   seed / coach-api content-resolution matter, not ss plumbing (the #228 Dashboard/Explore mismatch).
+2. **Unauthenticated shell/nav tests** (default project, no storageState) redirect to iam `/demo` —
+   coach-web requires auth at boot (no dev bypass), so these coach-web e2e specs need a storageState
+   wired into the default project. A coach-web e2e test-design fix, not ss.
+
+Net: the coach-web ↔ local-iam auth wiring (the heart of #300) is fixed and verified. What's left is
+coach-repo content-seed (module) + coach-web e2e test wiring (unauth shell specs).

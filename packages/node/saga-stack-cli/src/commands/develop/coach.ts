@@ -21,12 +21,14 @@
  *                     Reports route (/reports). DESCOPED v1: the org-wide report
  *                     is MOCK-backed (coach-web reportsStore.fetchReport →
  *                     getMockReport) pending coach-repo work — printed as a note.
- *   - playlist        orchestrate the coach-OWNED track switch: publish a 2nd
- *                     track, `coach-content playlist assign`, `materialize
- *                     --replace`, then hand off. The `playlist assign` verb is
- *                     being built in parallel (coach#238); if it is not present
- *                     on the developer's coach checkout this fails fast with an
- *                     actionable message rather than crashing mid-bring-up.
+ *   - playlist        orchestrate the coach-OWNED track switch onto the 2nd track
+ *                     coach-db's seed already ships (curriculum-coach-b — no
+ *                     publish step): `coach-content playlist assign` the demo
+ *                     district to it, `materialize --replace` demo-tutor-1's
+ *                     instance (keyed by the tutor's derived user id) onto it, then
+ *                     hand off. Needs the `coach-content playlist` verb (coach#238)
+ *                     AND the seeded 2nd track; a precheck confirms BOTH before any
+ *                     bring-up and fails fast with an actionable message otherwise.
  *
  * `--reuse` skips the reset+seed and runs against the CURRENT stack state (mirror
  * connect). `--tunnel` repoints THIS run's flow browsers at the vms tunnel hosts
@@ -110,11 +112,27 @@ const SCENARIOS: Readonly<Record<Scenario, ScenarioSpec>> = Object.freeze({
 });
 
 /**
- * The 2nd track `--scenario playlist` publishes + switches demo-tutor-1 onto
- * (the committed seed ships only `spring-pilot`). A distinct content_name so the
- * switch is observable. Kept here so the orchestration + its message agree.
+ * The 2nd track `--scenario playlist` switches demo-tutor-1 onto. It is a
+ * MATERIALIZABLE curriculum coach-db's offline seed ALREADY ships in the active
+ * content_release (fixtures/content-release.json → `curriculum-coach-b`: a
+ * top-level-nav + units track twin of `curriculum-coach`, the only doc shape
+ * `coach-content materialize` can instantiate). Distinct from the tutor's seeded
+ * track (`spring-pilot`) so the switch is observable. NOT published at runtime —
+ * the precheck confirms this name is present in the developer's coach seed before
+ * any bring-up, so `materialize --content` always has a real target.
  */
-const PLAYLIST_TRACK_2 = 'base-coach';
+const PLAYLIST_TRACK_2 = 'curriculum-coach-b';
+
+/**
+ * demo-tutor-1's canonical coach user id — `deriveUserId('demo-tutor-1')` from
+ * `@saga-ed/iam-seed-ids`, the id coach-db's seed keys the tutor's persona +
+ * content_instance to (content-instances.json) AND the id coach-web's iam
+ * `whoami` returns. `materialize` MUST write the switched instance under THIS id,
+ * not the `demo-tutor-1` HANDLE, or the new playlist is invisible to coach-web.
+ * Hardcoded with an explicit derivation note (the soa CLI is a separate monorepo
+ * that cannot import iam-seed-ids) — mirrors DEMO_DISTRICT_GROUP below.
+ */
+const COACH_TUTOR_USER_ID = '1c939568-1464-5f9a-b5a4-0bc73a0454cb';
 
 /** demo district group id the seed maps to a track (deriveGroupId('demo'), research 03/04). */
 const DEMO_DISTRICT_GROUP = 'a0da8362-1a93-5d1d-aeaa-b6d8960e9821';
@@ -176,10 +194,11 @@ export default class DevelopCoach extends BaseCommand {
     // COACH checkout root: appCwd is `<coachRoot>/apps/web/coach-web`.
     const coachRoot = appCwd.slice(0, appCwd.length - resolved.spa.appDir.length - 1);
 
-    // --scenario playlist: FEATURE-DETECT coach#238's `coach-content playlist assign`
-    // verb BEFORE any bring-up, so a checkout without it fails fast with an actionable
-    // message instead of crashing halfway through docker + seed.
-    if (scenario === 'playlist') this.assertPlaylistVerb(coachRoot);
+    // --scenario playlist: PRECHECK coach#238's `coach-content playlist` verb AND
+    // coach-db's seeded 2nd track BEFORE any bring-up, so a checkout missing either
+    // fails fast with an actionable message instead of crashing halfway through
+    // docker + seed (or, worse, materializing against a track that isn't there).
+    if (scenario === 'playlist') this.assertPlaylistPrereqs(coachRoot);
 
     // coach flows are non-progressive + prerequisite-free; --reuse just drops the
     // reset+seed (mirrors connect). base === resolved when the flow has no prereq.
@@ -238,13 +257,22 @@ export default class DevelopCoach extends BaseCommand {
   }
 
   /**
-   * FEATURE-DETECT the coach#238 `coach-content playlist` verb group. The sibling
-   * plan (playlisting-port-plan.md §Decision) places it at
-   * `packages/node/coach-content-publish/src/playlist.ts` (beside `src/store.ts`).
-   * Absent ⇒ fail fast with an actionable message pointing at coach#238, BEFORE any
-   * bring-up. Reuses the shared repo-dir existence seam (tests stub it).
+   * PRECHECK both prerequisites the coach-owned playlist switch needs, BEFORE any
+   * bring-up, so a stale coach checkout fails fast with an actionable message
+   * instead of an opaque throw mid-orchestration:
+   *
+   *   1. the coach#238 `coach-content playlist` verb group — placed at
+   *      `packages/node/coach-content-publish/src/playlist.ts` (beside `store.ts`),
+   *      per playlisting-port-plan.md §Decision. Absent ⇒ point at coach#238.
+   *   2. the seeded 2nd track (`PLAYLIST_TRACK_2`) — a MATERIALIZABLE curriculum in
+   *      coach-db's offline seed release (fixtures/content-release.json). Without it
+   *      `materialize --content` throws `active release has no curriculum doc named`
+   *      deep in the run. We read the fixture and confirm the track is present so
+   *      the materialize target the orchestration uses is guaranteed to exist.
+   *
+   * Reuses the shared repo-dir existence + repo-file-read seams (tests stub them).
    */
-  private assertPlaylistVerb(coachRoot: string): void {
+  private assertPlaylistPrereqs(coachRoot: string): void {
     const verbFile = join(coachRoot, 'packages', 'node', 'coach-content-publish', 'src', 'playlist.ts');
     if (!this.getRepoDirCheck()(verbFile)) {
       this.error(
@@ -255,14 +283,51 @@ export default class DevelopCoach extends BaseCommand {
           `\`ss develop coach\` (content-viewer) and \`--scenario admin\` work without it.`,
       );
     }
+
+    // The 2nd track must exist as a materializable curriculum in coach-db's seed
+    // release — otherwise the later `materialize --content ${PLAYLIST_TRACK_2}`
+    // aborts with `active release has no curriculum doc named …`.
+    const seedFixture = join(
+      coachRoot,
+      'packages', 'node', 'coach-db', 'src', 'seed', 'fixtures', 'content-release.json',
+    );
+    const raw = this.getRepoFileRead()(seedFixture);
+    if (raw === undefined) {
+      this.error(
+        `--scenario playlist could not read coach-db's seed fixture to confirm the 2nd track ` +
+          `'${PLAYLIST_TRACK_2}' is present.\n` +
+          `  expected: ${seedFixture}\n` +
+          `  Update your coach checkout (it must ship the additive seed with '${PLAYLIST_TRACK_2}'), then retry.`,
+      );
+    }
+    let tracks: string[];
+    try {
+      const parsed = JSON.parse(raw) as { curricula?: Array<{ name?: unknown }> };
+      tracks = (parsed.curricula ?? []).map((c) => String(c.name));
+    } catch {
+      this.error(
+        `--scenario playlist: coach-db's seed fixture is not valid JSON, cannot confirm the 2nd track.\n` +
+          `  file: ${seedFixture}`,
+      );
+    }
+    if (!tracks.includes(PLAYLIST_TRACK_2)) {
+      this.error(
+        `--scenario playlist needs the materializable 2nd track '${PLAYLIST_TRACK_2}' in coach-db's seed ` +
+          `release, but your coach checkout's fixture does not ship it (found: ${tracks.join(', ') || 'none'}).\n` +
+          `  file: ${seedFixture}\n` +
+          `  Update your coach checkout to the additive seed that adds '${PLAYLIST_TRACK_2}', then retry.`,
+      );
+    }
   }
 
   /**
    * The coach-owned track switch for `--scenario playlist` (playlisting-port-plan
    * Option A). Runs the documented one-command local path against the mesh coach_api
-   * Postgres: publish/ensure a 2nd track, `playlist assign` it to the demo district
-   * (writes ONLY group_id→content_name), then `materialize --replace` demo-tutor-1
-   * onto it. Only reached once `assertPlaylistVerb` has confirmed the verb exists.
+   * Postgres: `playlist assign` the demo district to the seeded 2nd track (writes
+   * ONLY group_id→content_name), then `materialize --replace` demo-tutor-1's
+   * instance — keyed by the tutor's DERIVED user id, the id coach-web reads by —
+   * onto it. No publish step: `PLAYLIST_TRACK_2` is already in coach-db's seed
+   * release, and `assertPlaylistPrereqs` has confirmed both the verb and the track.
    */
   private async orchestratePlaylist(coachRoot: string, databaseUrl: string): Promise<void> {
     const runner = this.getRunner();
@@ -278,8 +343,8 @@ export default class DevelopCoach extends BaseCommand {
       if (code !== 0) this.error(`playlist: \`coach-content ${args[0]}\` failed (exit ${code}).`);
     };
 
-    // 1. Ensure a 2nd published track exists (the committed seed ships only
-    //    spring-pilot). materialize below points demo-tutor-1 at it.
+    // 1. Point the demo district at the seeded 2nd track (curriculum-coach-b —
+    //    already in the active content_release; the precheck confirmed it).
     await coachContent('assign the 2nd track to the demo district', [
       'playlist',
       'assign',
@@ -289,16 +354,20 @@ export default class DevelopCoach extends BaseCommand {
       PLAYLIST_TRACK_2,
     ]);
     // 2. Re-materialize demo-tutor-1 onto the newly-assigned track (replace the
-    //    existing instance so the dashboard renders the switched playlist).
+    //    existing instance so the dashboard renders the switched playlist). Keyed
+    //    by the tutor's DERIVED user id — the id coach-web's whoami returns — NOT
+    //    the `demo-tutor-1` handle, or the switched instance is invisible in-app.
     await coachContent('re-materialize demo-tutor-1 onto the 2nd track', [
       'materialize',
       '--user',
-      'demo-tutor-1',
+      COACH_TUTOR_USER_ID,
       '--content',
       PLAYLIST_TRACK_2,
       '--replace',
     ]);
-    this.log(`==> playlist: demo-tutor-1 switched to '${PLAYLIST_TRACK_2}'.`);
+    this.log(
+      `==> playlist: demo-tutor-1 (${COACH_TUTOR_USER_ID}) switched to '${PLAYLIST_TRACK_2}'.`,
+    );
   }
 
   /**

@@ -31,6 +31,19 @@ const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
 const DEV_ROOT = '/fixed/dev';
 
+/**
+ * The 2nd track `--scenario playlist` switches onto — the MATERIALIZABLE curriculum
+ * coach-db's seed ships (fixtures/content-release.json → curriculum-coach-b). MUST
+ * stay in lock-step with coach.ts's `PLAYLIST_TRACK_2`.
+ */
+const PLAYLIST_TRACK_2 = 'curriculum-coach-b';
+/**
+ * demo-tutor-1's DERIVED coach user id (`deriveUserId('demo-tutor-1')`) — the id
+ * coach-web's whoami reads by and the seed keys the tutor's instance to. materialize
+ * MUST use this, not the `demo-tutor-1` handle. Mirrors coach.ts's COACH_TUTOR_USER_ID.
+ */
+const COACH_TUTOR_UUID = '1c939568-1464-5f9a-b5a4-0bc73a0454cb';
+
 /** coach-web's authored flows.json (the fields the resolver + our command read). */
 const COACH_FLOWS = {
   schemaVersion: 1,
@@ -141,6 +154,20 @@ function installRepoDirCheck(playlistVerb: boolean): void {
   }) as never);
 }
 
+/**
+ * Stub the repo-file-read seam so the playlist precheck reads a coach-db seed
+ * fixture carrying exactly `tracks` as its curricula names. Any other path reads
+ * as absent (undefined), mirroring the real seam's error → undefined contract.
+ */
+function installRepoFileRead(tracks: string[]): void {
+  vi.spyOn(BaseCommand.prototype as never, 'getRepoFileRead' as never).mockReturnValue(((path: string) => {
+    if (path.endsWith(join('coach-db', 'src', 'seed', 'fixtures', 'content-release.json'))) {
+      return JSON.stringify({ curricula: tracks.map((name) => ({ name })) });
+    }
+    return undefined;
+  }) as never);
+}
+
 beforeAll(() => {
   COACH_ROOT = mkdtempSync(join(tmpdir(), 'coach-dev-'));
   const e2eDir = join(COACH_ROOT, 'apps', 'web', 'coach-web', 'e2e');
@@ -160,6 +187,7 @@ beforeEach(async () => {
   warned = [];
   installLoginSeams();
   installRepoDirCheck(true);
+  installRepoFileRead([PLAYLIST_TRACK_2]);
   vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m?: string) => {
     logged.push(String(m ?? ''));
   });
@@ -242,8 +270,20 @@ describe('develop coach — playlist (coach#238 feature-detect)', () => {
     expect(playwrightRuns()).toHaveLength(0);
   });
 
-  it('when the verb IS present: brings up + seeds, runs playlist assign + materialize --replace, then hands off', async () => {
+  it('fails fast when the coach seed does NOT ship the materializable 2nd track — before any bring-up', async () => {
+    installRepoDirCheck(true); // verb present…
+    installRepoFileRead(['curriculum-coach']); // …but the seed lacks curriculum-coach-b
+    await expect(DevelopCoach.run(['--scenario', 'playlist', ...ws()], config)).rejects.toMatchObject({
+      message: expect.stringContaining(PLAYLIST_TRACK_2),
+    });
+    // fail-fast: nothing was launched and no Playwright ran.
+    expect(launches).toEqual([]);
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('when the verb + seeded track are present: brings up + seeds, assigns + materializes the SEEDED 2nd track keyed by the derived user id, then hands off', async () => {
     installRepoDirCheck(true);
+    installRepoFileRead([PLAYLIST_TRACK_2]);
     await DevelopCoach.run(['--scenario', 'playlist', ...ws()], config);
 
     // the coach-owned track switch ran against the mesh coach_api pg.
@@ -253,9 +293,22 @@ describe('develop coach — playlist (coach#238 feature-detect)', () => {
     expect(assign).toBeDefined();
     expect(assign?.args).toContain('playlist');
     expect(assign?.args).toContain('--group');
+
+    // The materialize target is the SAME track the assign uses AND the one the
+    // precheck confirmed the seed ships — not a name nothing ensures exists.
+    const assignContent = assign?.args[(assign?.args.indexOf('--content') ?? -1) + 1];
+    const materializeContent = materialize?.args[(materialize?.args.indexOf('--content') ?? -1) + 1];
+    expect(assignContent).toBe(PLAYLIST_TRACK_2);
+    expect(materializeContent).toBe(PLAYLIST_TRACK_2);
+
     expect(materialize).toBeDefined();
     expect(materialize?.args).toContain('--replace');
-    expect(materialize?.args).toContain('demo-tutor-1');
+    // Keyed by the tutor's DERIVED user id (what coach-web reads by), NOT the
+    // 'demo-tutor-1' handle — the switched instance is invisible in-app otherwise.
+    const materializeUser = materialize?.args[(materialize?.args.indexOf('--user') ?? -1) + 1];
+    expect(materializeUser).toBe(COACH_TUTOR_UUID);
+    expect(materialize?.args).not.toContain('demo-tutor-1');
+
     // both carry the coach_api DATABASE_URL so they hit the mesh pg.
     expect(assign?.env?.DATABASE_URL).toContain('coach_api');
 

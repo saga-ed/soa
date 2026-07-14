@@ -513,6 +513,23 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * Read a sibling-repo file as UTF-8 text for prechecks — production is a real
+   * `fs.readFileSync` that returns `undefined` on ANY error (missing / unreadable
+   * / permission) so callers decide how to degrade. `develop coach`'s playlist
+   * precheck uses it to read coach-db's seed fixture and confirm the 2nd track is
+   * present BEFORE bring-up. Seam-mocking tests stub it to supply fixture content.
+   */
+  protected getRepoFileRead(): (path: string) => string | undefined {
+    return (path: string) => {
+      try {
+        return readFileSync(path, 'utf8');
+      } catch {
+        return undefined;
+      }
+    };
+  }
+
+  /**
    * The `--record` bring-up seam (Phase 2) — production is the only place the
    * fleek recording docker-compose stack + CodeArtifact token fetch is shelled.
    */

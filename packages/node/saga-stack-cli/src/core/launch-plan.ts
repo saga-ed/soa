@@ -98,6 +98,8 @@ export interface LaunchTokens {
   SAGA_API_TARGET: string;
   /** up.sh `COACH_API_URL` — `http://localhost:$COACH_API_PORT` (coach-web PUBLIC_COACH_API_URL). */
   COACH_API_URL: string;
+  /** coach-web lane URL — `http://localhost:$COACH_WEB_PORT` (soa#300: iam-api CORS_ORIGIN entry). */
+  COACH_WEB_URL: string;
   /** up.sh `COACH_WEB_HOST` — bare hostname for coach-api's CORS allow-list (`localhost`). */
   COACH_WEB_HOST: string;
   /** up.sh `SAGA_API_TARGET_COACH` — coach's frontend upstream-saga config (default https://staging.wootmath.com). */
@@ -627,6 +629,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     RTSM_URL: `http://localhost:${ports['rtsm-api']}`,
     SAGA_API_TARGET: inputs.sagaApiTarget ?? 'https://wootmath.com',
     COACH_API_URL: `http://localhost:${ports['coach-api']}`,
+    COACH_WEB_URL: `http://localhost:${ports['coach-web']}`,
     COACH_WEB_HOST: 'localhost',
     SAGA_API_TARGET_COACH: 'https://staging.wootmath.com',
     IAM_ISSUER: 'https://iam.saga.org',

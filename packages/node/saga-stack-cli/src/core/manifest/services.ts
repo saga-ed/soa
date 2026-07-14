@@ -60,7 +60,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       env: {
         PORT: '${IAM_PORT}',
         AUTH_DEVUSERID: '${DEV_USER_UUID}',
-        CORS_ORIGIN: '${DASH_URL},${CONNECT_WEB_URL}',
+        // soa#300: coach-web (post-coach#226) reads identity DIRECT from iam in
+        // the browser (`${PUBLIC_IAM_API_URL}/trpc/auth.whoami`), so iam must
+        // allow coach-web's origin or the whoami is CORS-blocked and sign-in 503s.
+        CORS_ORIGIN: '${DASH_URL},${CONNECT_WEB_URL},${COACH_WEB_URL}',
         MAIL_FRONTEND_BASE_URL: 'http://localhost:${IAM_PORT}/demo',
         // iam-api assembles its redis URL from REDIS_HOST+REDIS_PORT (localhost ⇒
         // non-TLS redis://). Slot-offset-aware: :6379 at slot 0, :7379 at slot 1.
@@ -529,6 +532,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         PUBLIC_COACH_API_URL: '${COACH_API_URL}',
+        // soa#300: post-coach#226 coach-web reads identity DIRECT from iam in the
+        // browser (SvelteKit inlines this PUBLIC_ var at `pnpm dev` start). Without
+        // this override it falls back to its checked-in .env default
+        // (`https://iam.wootdev.com`), where a local `ss` cookie is invalid ⇒ 503
+        // at sign-in. Point it at the slot's local iam so browser login works.
+        PUBLIC_IAM_API_URL: '${IAM_URL}',
       },
     },
     seed: [],

@@ -77,7 +77,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     expect(env('iam-api')).toEqual({
       PORT: '3010',
       AUTH_DEVUSERID: 'f0000004-0000-4000-8000-00000000beef',
-      CORS_ORIGIN: 'http://localhost:8900,http://localhost:6210',
+      // soa#300: coach-web (8800) appended so browser-direct iam whoami isn't CORS-blocked.
+      CORS_ORIGIN: 'http://localhost:8900,http://localhost:6210,http://localhost:8800',
       MAIL_FRONTEND_BASE_URL: 'http://localhost:3010/demo',
       REDIS_HOST: 'localhost',
       REDIS_PORT: '6379', // slot 0 base — offset-aware (:7379 at slot 1), see launch-plan.slot test
@@ -265,9 +266,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     });
   });
 
-  it('coach-web (only needs the coach-api URL)', () => {
+  it('coach-web (coach-api URL + soa#300 direct-iam URL)', () => {
     expect(env('coach-web')).toEqual({
       PUBLIC_COACH_API_URL: 'http://localhost:6105',
+      // soa#300: coach-web reads identity direct from iam in the browser.
+      PUBLIC_IAM_API_URL: 'http://localhost:3010',
     });
   });
 

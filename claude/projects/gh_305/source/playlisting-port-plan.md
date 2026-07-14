@@ -96,6 +96,27 @@ loop entirely (it was never in it).
 Recommend **A now** (it's the piece `develop` actually needs), track **B** as a coach-repo follow-up
 coordinated under saga-dash #448/#463 and Seth's #237.
 
+### ✅ DECISION (2026-07-14): Option A locked (Sean)
+
+Scope for this effort = **Option A**. Concretely:
+1. **`coach-content playlist assign --group <groupId> --content <content_name>`** — a new `playlist`
+   subcommand group on the existing `@saga-ed/coach-content-publish` CLI (`src/playlist.ts` beside
+   `src/store.ts`); writes/upserts a `group_track_map` row via Prisma → `coach_api` Postgres. No new
+   package. No UI. Likely companions: `playlist list` (show current group→track map) and
+   `playlist unassign`. Surface from coach-api via a delegating `package.json` script (precedent
+   `db:seed:run`). **Must not read `saga_api`/saga-dash `user_policy` at runtime.**
+2. **Seed/publish a 2nd track** so a persona can be switched between ≥2 playlists locally (seed ships
+   only `spring-pilot` today).
+3. Wire the one-command local seeding path into `ss develop coach --scenario playlist`
+   (publish 2nd track → `playlist assign` → `materialize --replace`).
+
+**Out of scope (deferred to Option B / follow-up):** the legacy `user_policy` selection cutover and
+the iam-policy (`coach:coach_playlist_name`) → `group_track_map` projector for live prod parity.
+
+**Build dependency to confirm with Seth (question 3):** coach PR #237 (Phase 2b tag-filter) may
+reshape the assignment seam — design `playlist assign` to be additive to `group_track_map` and
+compatible with `tagFilter`. This is why issue-filing is held (below), not the scope itself.
+
 ## Open questions for Seth (we've pinged him; these are the specifics)
 
 1. Is the legacy `saga_api` `user_policy` playlist-selection cutover (cross-api-plan § session

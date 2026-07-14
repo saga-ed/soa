@@ -116,3 +116,28 @@ Opened the Playwright trace and root-caused #300 across its layers:
 **Status:** #300 core FIXED + verified (coach-web boots against local mesh). The remaining smoke-only
 env-contract fix (`PLAYWRIGHT_IAM_URL`/`PLAYWRIGHT_BASE_URL` for coach-web flows) is scoped and ready
 to implement next. Slot 2 torn down; a stale coach-web watch orphan was killed.
+
+### env-contract fix DONE + verified (2026-07-14) — 503 cleared; one deeper layer remains
+
+Fixed the env contract (commit `fix: coach-web Playwright gets slot iam + its own baseURL`):
+1. `develop coach` now passes `ports: runtime.launchContext.ports` to `executeResolvedFlow` (it
+   didn't — mirrors e2e run), so `serviceUrlEnv` sets `PLAYWRIGHT_IAM_URL`=slot iam.
+2. `playwrightEnv` now sets `PLAYWRIGHT_BASE_URL` to the flow SPA's OWN frontend
+   (`resolved.spa.system`) — no-op for saga-dash, corrected for coach-web/connectv3 (coach-web's
+   `lane.ts` reuses `PLAYWRIGHT_BASE_URL`). +1 unit test; suite 1190 green.
+
+**Verified live on slot 2:** the **503 is GONE**; the e2e session cookie is now `domain=localhost`
+(was `.sk.vms.wootdev.com`); the browser hits the correct slot ports (coach-web :10800, iam :5010,
+login redirect to :5010/demo); smoke went 1→2 passing.
+
+**DEEPER LAYER STILL OPEN (iam session recognition, not env):** whoami at the slot iam still returns
+401 with a localhost cookie present, so coach-web redirects to iam's `/demo` login page (tests see
+"IAM API Demo") — the devLogin-minted session isn't recognized by the slot iam's whoami. Next
+suspects: the slot-2 iam's `AUTH_AUTHENABLED` posture (devLogin expects `false`), or the
+`iam_session` cookie's SameSite/attributes on the cross-origin (10800→5010) fetch. This is an
+iam/coach-web session-semantics layer, distinct from the env-contract fix.
+
+**Important:** this remaining failure is in the automated e2e SMOKE (coach-web `globalSetup` /
+`devLogin`). A REAL `ss develop coach` hand-off authenticates via ss `mintNativeLoginJar` against the
+slot iam — a different path — so the interactive dev experience may already work end-to-end; the
+smoke is what's gating a fully-green flow.

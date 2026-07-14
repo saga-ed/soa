@@ -28,7 +28,7 @@ import { pwArgv } from '../../../__tests__/helpers/pw.js';
 import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import E2eRun from '../run.js';
 import E2eList from '../list.js';
-import E2eConnect from '../connect.js';
+import E2eConnect from '../../develop/connect.js';
 
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');

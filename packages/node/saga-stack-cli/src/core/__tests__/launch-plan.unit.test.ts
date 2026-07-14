@@ -127,6 +127,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       JANUS_REQUIRED: 'false',
       CORS_ORIGIN: 'http://localhost:8900',
       JANUS_LOGIN_HOST: 'localhost:3010/demo',
+      JWT_ISSUER: 'https://iam.wootdev.com',
     });
   });
 
@@ -139,6 +140,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       JANUS_REQUIRED: 'false',
       CORS_ORIGIN: 'http://localhost:8900',
       JANUS_LOGIN_HOST: 'localhost:3010/demo',
+      JWT_ISSUER: 'https://iam.wootdev.com',
     });
   });
 
@@ -149,6 +151,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       IAM_API_URL: 'http://localhost:3010',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       CORS_ORIGIN: 'http://localhost:8900',
+      JWT_ISSUER: 'https://iam.wootdev.com',
     });
   });
 
@@ -160,6 +163,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       IAM_API_URL: 'http://localhost:3010',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       CORS_ORIGIN: 'http://localhost:8900',
+      JWT_ISSUER: 'https://iam.wootdev.com',
     });
   });
 
@@ -169,7 +173,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       SESSIONS_API_CLIENT_BASEURL: 'http://localhost:3007',
       IAM_API_CLIENT_BASEURL: 'http://localhost:3010/trpc',
       IAM_API_URL: 'http://localhost:3010',
-      JWT_ISSUER: 'https://iam.saga.org',
+      JWT_ISSUER: 'https://iam.wootdev.com',
       SERVICE_TOKEN_SERVICESLUG: 'ads-adm-api',
       ADS_ADM_DATABASE_URL: 'postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local',
       DATABASE_URL: 'postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local',
@@ -196,7 +200,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       AUTH_ENABLED: 'true',
       JANUS_REQUIRED: 'false',
       IAM_API_URL: 'http://localhost:3010',
-      JWT_ISSUER: 'https://iam.saga.org',
+      JWT_ISSUER: 'https://iam.wootdev.com',
       // #222 port: dash joins the CORS allowlist; rtsm wired for private-convos.
       ALLOWED_ORIGINS: 'http://localhost:6210,http://localhost:8900',
       SESSIONS_API_BASE_URL: 'http://localhost:3007',

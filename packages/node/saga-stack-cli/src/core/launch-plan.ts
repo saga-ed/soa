@@ -106,10 +106,13 @@ export interface LaunchTokens {
   SAGA_API_TARGET_COACH: string;
   /**
    * The `iss` claim: stamped INTO iam's tokens (JWT_ISSUER) and validated by
-   * coach-api (AUTH_ISSUER). One token feeds both ends so they cannot drift —
-   * this was `https://iam.saga.org` (prod) while the local iam-api stamped
+   * every JWT-verifying consumer — coach-api (AUTH_ISSUER) plus programs-api,
+   * scheduling-api, sessions-api, content-api, ads-adm-api, and connect-api
+   * (JWT_ISSUER). One token feeds all ends so they cannot drift — this was
+   * `https://iam.saga.org` (prod) while the local iam-api stamped
    * `https://iam.wootdev.com` (its .env default), so coach-api 401'd every
-   * locally-minted session.
+   * locally-minted session; 58d58e4 aligned coach but left the other
+   * validators on the prod literal (or the verifier's prod default).
    */
   IAM_ISSUER: string;
 

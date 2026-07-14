@@ -173,6 +173,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         JANUS_REQUIRED: 'false',
         CORS_ORIGIN: '${DASH_URL}',
         JANUS_LOGIN_HOST: 'localhost:${IAM_PORT}/demo',
+        // Validate the SAME issuer iam-api stamps (its JWT_ISSUER). Without this
+        // the rostering-client verifier falls back to the prod issuer and 401s
+        // every locally-minted session on authenticated procedures.
+        JWT_ISSUER: '${IAM_ISSUER}',
       },
     },
     seed: ['programs'],
@@ -202,6 +206,8 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         JANUS_REQUIRED: 'false',
         CORS_ORIGIN: '${DASH_URL}',
         JANUS_LOGIN_HOST: 'localhost:${IAM_PORT}/demo',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
+        JWT_ISSUER: '${IAM_ISSUER}',
       },
     },
     seed: [],
@@ -230,6 +236,8 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         CORS_ORIGIN: '${DASH_URL}',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
+        JWT_ISSUER: '${IAM_ISSUER}',
       },
     },
     // qtf-demo runs `db:seed:qtf-demo` against the sessions DB (up.sh seed_qtf_demo); add-on, online.
@@ -259,6 +267,8 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         CORS_ORIGIN: '${DASH_URL}',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
+        JWT_ISSUER: '${IAM_ISSUER}',
       },
     },
     seed: ['content'],
@@ -294,7 +304,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         SESSIONS_API_CLIENT_BASEURL: 'http://localhost:${SESSIONS_PORT}',
         IAM_API_CLIENT_BASEURL: '${IAM_URL}/trpc',
         IAM_API_URL: '${IAM_URL}',
-        JWT_ISSUER: 'https://iam.saga.org',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note. Was the
+        // prod literal, which 401'd once iam began minting ${IAM_ISSUER} (58d58e4).
+        JWT_ISSUER: '${IAM_ISSUER}',
         SERVICE_TOKEN_SERVICESLUG: 'ads-adm-api',
         ADS_ADM_DATABASE_URL: '${ADS_ADM_DB_URL}',
         DATABASE_URL: '${ADS_ADM_DB_URL}',
@@ -383,7 +395,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         AUTH_ENABLED: 'true',
         JANUS_REQUIRED: 'false',
         IAM_API_URL: '${IAM_URL}',
-        JWT_ISSUER: 'https://iam.saga.org',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note. Was the
+        // prod literal, which 401'd once iam began minting ${IAM_ISSUER} (58d58e4).
+        JWT_ISSUER: '${IAM_ISSUER}',
         // #222 port: dash calls connect-api cross-origin (journey attendance /
         // connect embeds) — without DASH_URL in the allowlist those are CORS-blocked.
         ALLOWED_ORIGINS: '${CONNECT_WEB_URL},${DASH_URL}',

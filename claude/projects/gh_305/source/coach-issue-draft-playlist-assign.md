@@ -30,7 +30,8 @@ coach-owned way to (re)assign a group's track without the legacy stack.
 - [ ] Add a `playlist` subcommand group to `packages/node/coach-content-publish/src/cli.ts`
       (`src/playlist.ts` beside `src/store.ts`), Prisma → `coach_api` Postgres:
   - `coach-content playlist assign --group <groupId> --content <content_name>` — upsert a
-    `group_track_map` row.
+    `group_track_map` row. **Writes only the `group_id → content_name` track mapping**; does not set
+    `tagFilter`/grain (those stay owned by PR #237's Phase 2b path — this verb is additive).
   - `coach-content playlist list [--group <groupId>]` — show the current group→track map.
   - `coach-content playlist unassign --group <groupId>` — remove a mapping.
 - [ ] Surface from coach-api via a delegating `package.json` script (precedent: `db:seed:run`).

@@ -105,6 +105,9 @@ Scope for this effort = **Option A**. Concretely:
    package. No UI. Likely companions: `playlist list` (show current group→track map) and
    `playlist unassign`. Surface from coach-api via a delegating `package.json` script (precedent
    `db:seed:run`). **Must not read `saga_api`/saga-dash `user_policy` at runtime.**
+   **Writes ONLY the `group_id → content_name` track mapping** (Sean, 2026-07-14) — it does **not**
+   set `tagFilter` or grain; those stay owned by coach PR #237's Phase 2b path, so the verb is
+   strictly additive to Seth's work.
 2. **Seed/publish a 2nd track** so a persona can be switched between ≥2 playlists locally (seed ships
    only `spring-pilot` today).
 3. Wire the one-command local seeding path into `ss develop coach --scenario playlist`
@@ -113,9 +116,11 @@ Scope for this effort = **Option A**. Concretely:
 **Out of scope (deferred to Option B / follow-up):** the legacy `user_policy` selection cutover and
 the iam-policy (`coach:coach_playlist_name`) → `group_track_map` projector for live prod parity.
 
-**Build dependency to confirm with Seth (question 3):** coach PR #237 (Phase 2b tag-filter) may
-reshape the assignment seam — design `playlist assign` to be additive to `group_track_map` and
-compatible with `tagFilter`. This is why issue-filing is held (below), not the scope itself.
+**Build dependency (question 3) — RESOLVED (Sean, 2026-07-14):** `playlist assign` writes **only**
+the `group_id → content_name` mapping and leaves `tagFilter`/grain to coach PR #237. The verb is
+therefore additive to Seth's Phase 2b by construction, and the #237 seam no longer blocks the design.
+Issue-filing is now fully ready — held only pending an explicit "file it" (outward-facing action that
+tags Seth) or Seth's ack that we're not duplicating something in-flight.
 
 ## Open questions for Seth (we've pinged him; these are the specifics)
 

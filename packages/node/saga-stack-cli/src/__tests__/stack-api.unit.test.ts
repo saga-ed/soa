@@ -751,11 +751,14 @@ describe('StackApi.reset — native (M8 R4)', () => {
   });
 });
 
-describe('StackApi.seed — R5 stdinFile steps (coach curriculum + playback bootstrap)', () => {
-  it('coach curriculum: mongoimport with the resolved mongo container + stdinFile piped', async () => {
+// Coach's curriculum mongoimport used to be the other stdinFile step here. Mongo is
+// retired (coach is single-store; curriculum reads come from Postgres content_release),
+// so playback's psql-from-stdin now carries the stdinFile + container-token contract.
+describe('StackApi.seed — R5 stdinFile steps (playback bootstrap)', () => {
+  it('coach seeds from Postgres alone — no mongoimport survives the retirement', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
-    // full profile, narrowed to coach-api ⇒ coach-pg + coach-mongo (offline).
+    // full profile, narrowed to coach-api ⇒ coach-pg ONLY (offline).
     const plan = composeSeedPlan(
       { profile: 'full', only: ['coach-api'] },
       new Set(['coach-api'] as ServiceId[]),
@@ -764,19 +767,10 @@ describe('StackApi.seed — R5 stdinFile steps (coach curriculum + playback boot
     const res = await api.seed(plan);
     expect(res.ok).toBe(true);
 
-    const mongoimports = fakes.runs.filter((r) => r.command === 'docker' && r.args.includes('mongoimport'));
-    // both upserts ran: content_coach (main) + content (optional tail).
-    expect(mongoimports).toHaveLength(2);
-    const [contentCoach, content] = mongoimports;
-    // container token expanded to the resolved slot-0 mongo container.
-    expect(contentCoach.args.slice(0, 4)).toEqual(['exec', '-i', 'soa-connect-mongo-1', 'mongoimport']);
-    // NO dangling ${TOKEN} survives in the argv.
-    for (const a of contentCoach.args) expect(a).not.toMatch(/\$\{/);
-    // stdinFile resolved to the coach-api fixtures under the COACH repo root.
-    expect(contentCoach.stdinFile).toBe('/dev/coach/apps/node/coach-api/scripts/data/content_coach.json');
-    expect(contentCoach.args).toContain('content_coach');
-    expect(content.stdinFile).toBe('/dev/coach/apps/node/coach-api/scripts/data/content.json');
-    expect(content.args).toContain('--jsonArray');
+    expect(fakes.runs.filter((r) => r.args.includes('mongoimport'))).toHaveLength(0);
+    // coach-db's db:seed is the whole coach seed (content + the three projections).
+    const seed = fakes.runs.find((r) => r.command === 'pnpm' && r.args.includes('db:seed'));
+    expect(seed?.env.DATABASE_URL).toContain('coach_api');
   });
 
   it('playback provisioning: psql bootstrap from stdin + the migrate tail, gated behind --with playback', async () => {

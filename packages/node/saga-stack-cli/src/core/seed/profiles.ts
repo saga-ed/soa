@@ -25,8 +25,7 @@ export type SeedStepId =
   | 'programs'
   | 'scheduling'
   | 'content'
-  | 'coach-pg'
-  | 'coach-mongo' //           M8 R5: coach curriculum mongoimport (stdinFile)
+  | 'coach-pg' //              coach's WHOLE seed — mongo is retired (single-store)
   | 'transcripts-provision' // M8 R5: playback bootstrap SQL + migrate (--with playback)
   | 'insights-provision'
   | 'chat-provision'
@@ -40,9 +39,10 @@ export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>>
   // soa#253: `iam-registry` FIRST — the Permission/Policy catalog that iam-dev-user's
   // dev-admin grant depends on (registry-gated view_rosters_tab/view_sessions_tab).
   roster: ['iam-registry', 'iam-dev-user', 'iam', 'sessions'],
-  // M8 R5: coach-mongo (curriculum) is now expressible (stdinFile) — un-gated so
-  // native `--seed full` seeds BOTH coach stores (mongo curriculum + pg progress).
-  full: ['iam-registry', 'iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content', 'coach-pg', 'coach-mongo'],
+  // coach is SINGLE-STORE now: mongo is retired (curriculum reads come from
+  // Postgres content_release), so `coach-mongo` is gone and `coach-pg` — which
+  // also seeds the group_track_map projection — is the whole coach seed.
+  full: ['iam-registry', 'iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content', 'coach-pg'],
 };
 
 /** Add-on → the seed-step ids it contributes (plan §4.1). */
@@ -87,7 +87,6 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
   'scheduling',
   'content',
   'coach-pg',
-  'coach-mongo',
   // playback provisioning (bootstrap + migrate) precedes the playback fixtures.
   'transcripts-provision',
   'insights-provision',
@@ -121,7 +120,6 @@ const MESH_PG_PORT_TOKEN = '${MESH_PG_PORT}';
  * the resolved `pgContainer`. At slot 0 they expand to `soa-postgres-1` /
  * `soa-connect-mongo-1`.
  */
-const MONGO_CONTAINER_TOKEN = '${SAGA_MESH_CONNECT_MONGO_CONTAINER}';
 const PG_CONTAINER_TOKEN = '${SAGA_MESH_POSTGRES_CONTAINER}';
 
 /** The mesh superuser creds up.sh's playback `*_DB_URL` migrate as. */
@@ -407,13 +405,14 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
         },
       ],
     },
-    // coach progress store (Postgres) — coach-db `db:seed` (coach#155 local-snapshot),
-    // DATABASE_URL forced to the mesh :5432 coach_api (== $COACH_DB_URL; coach-db's own
-    // default is :5433). main runs it best-effort in seed_stack full after content
-    // (`warn` on failure — coach may be absent / coach#155 unmerged).
+    // coach's WHOLE seed (Postgres) — coach-db `db:seed` (local-snapshot):
+    // content_instance + the THREE iam→coach projections (persona_definition,
+    // persona_assignment, group_track_map) + the content_release the curriculum
+    // read path serves from. DATABASE_URL forced to the mesh :5432 coach_api
+    // (== $COACH_DB_URL; coach-db's own default is :5433).
     //
-    // M8 R5: the curriculum mongoimport is now the 'coach-mongo' step below (was
-    // OMITTED for lack of stdin redirect; `stdinFile` makes it expressible).
+    // There is no mongo companion step any more: coach is single-store, so the
+    // former `coach-mongo` curriculum mongoimport seeded a store nothing reads.
     'coach-pg': {
       id: 'coach-pg',
       service: 'coach-api',
@@ -423,46 +422,6 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       env: inlineDatabaseUrl(getDb('coach_api', m)),
       requiresServiceUp: [], // direct pg db:seed — offline
       failureMode: 'warn',
-    },
-    // M8 R5 — coach curriculum mongoimport (up.sh `seed_coach_mongo_only`).
-    // TWO upserts into the mesh mongo: content_coach.json (single object) →
-    // saga_local.content_coach, and content.json (array) → wmlms_local.content —
-    // the dbs coach-api's launch_if points at. Curriculum is static committed
-    // fixtures, so `--mode upsert` makes re-seeds converge. Reads each file from
-    // stdin (`stdinFile`) so no `docker cp` into the container. `--port 27017` is
-    // the CONTAINER-internal port (slot-invariant); the container name is the
-    // slot-resolved token. Best-effort (coach may be absent).
-    'coach-mongo': {
-      id: 'coach-mongo',
-      service: 'coach-api',
-      databases: [], // mongo curriculum (saga_local/wmlms_local) — not a tracked DbId; always seeds
-      cwd: 'apps/node/coach-api',
-      command: [
-        'docker', 'exec', '-i', MONGO_CONTAINER_TOKEN,
-        'mongoimport', '--quiet', '--port', '27017',
-        '-d', 'saga_local', '-c', 'content_coach', '--mode', 'upsert', '--upsertFields', 'name',
-      ],
-      stdinFile: 'scripts/data/content_coach.json',
-      env: { kind: 'inline', vars: {} },
-      requiresServiceUp: [],
-      failureMode: 'warn',
-      optionalSteps: [
-        {
-          id: 'coach-mongo-content',
-          service: 'coach-api',
-          databases: [],
-          cwd: 'apps/node/coach-api',
-          command: [
-            'docker', 'exec', '-i', MONGO_CONTAINER_TOKEN,
-            'mongoimport', '--quiet', '--port', '27017',
-            '-d', 'wmlms_local', '-c', 'content', '--jsonArray', '--mode', 'upsert', '--upsertFields', 'id',
-          ],
-          stdinFile: 'scripts/data/content.json',
-          env: { kind: 'inline', vars: {} },
-          requiresServiceUp: [],
-          failureMode: 'warn',
-        },
-      ],
     },
     // M8 R5 — playback DB provisioning (bootstrap SQL + migrate),
     // gated under `--with playback`. Precede the fixture seed steps below.

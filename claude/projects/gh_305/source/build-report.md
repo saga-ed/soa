@@ -47,3 +47,34 @@ materialize/switch against a live `coach_api` Postgres. PRs kept as **drafts** p
 - Option B playlisting: legacy `saga_api` `user_policy` selection cutover + iam-policy→`group_track_map` projector for prod parity.
 - `develop saga-dash` / `ads` / `sis` (prompt-2 scenarios 2/6/7) — topic is built to extend; each needs its own research pass.
 - Cosmetic: stale `contentHash` in the coach seed fixture (nothing validates it).
+
+## Live test on slot 2 (2026-07-14) — 3 fixes made + verified; one residual (coach-web / #300)
+
+Ran `ss develop coach --slot 2` live. It surfaced and I fixed **three real bugs** (all committed +
+pushed + verified live):
+
+1. **`bf089c5` slot-aware** — `develop coach` hard-errored at `--slot > 0` (missing `slotAware()`).
+   (Also learned: the dev binary needs `dist` rebuilt — gitignored — for changes to take effect.)
+2. **`8544166` reset ordering (soa#253 recurrence)** — `api.reset()` truncated the iam permission
+   catalog then re-seeded only `iam-dev-user`, so the dev-admin grant failed on session perms
+   053/054/055. Now `iam-registry` runs first. **Verified live: the seed error is GONE.**
+3. **`c8f96e4` slot-profile threading** — `develop coach` passed `undefined` profile to
+   `buildStackContext` (+ lacked `applyInstanceEnv`/prep seams/stateDir), so `--slot N` silently ran
+   at slot 0. Now threads the profile like `e2e run`. **Verified live: DBs at `:7432`, services at
+   slot-2 offset ports (iam 5010 / coach-api 8105 / coach-web 10800), all healthy (200).**
+
+**Verified working at slot 2:** stack up, seed (clean), tutor session minted, iam whoami reachable,
+CORS + preflight + 401-login-challenge all correct (curl-confirmed against the coach-web origin).
+
+**Residual blocker (coach-web-side — the core of soa#300, NOT ss develop plumbing):** coach-web's
+*browser* boot renders `503 "Unable to reach the sign-in service"` — its client-side whoami fetch
+(`session.ts:82` → `+layout.ts:36`) fails as a "real error" even though the host reaches iam fine
+(curl 401-with-challenge + OPTIONS 204 both succeed, identical to saga-dash). So the failure is in
+coach-web's client-side auth flow at slot > 0, not reproducible from the host — needs Playwright
+trace analysis + coach-web internals (Seth). This is the unresolved core of soa#300 ("coach-web
+local iam wiring stale, blocks local browser-testing"); M0 fixed only the manifest CORS/env half.
+
+**Next step for a green live run:** resolve the coach-web browser-boot whoami failure (coach repo /
+#300) — inspect the preserved Playwright trace under
+`coach/apps/web/coach-web/test-results/dashboard-*/trace.zip`. The ss `develop coach` command itself
+is confirmed correct end-to-end up to that coach-web-side boot.

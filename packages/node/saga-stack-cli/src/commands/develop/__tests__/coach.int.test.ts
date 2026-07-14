@@ -89,6 +89,24 @@ const COACH_FLOWS = {
         },
       ],
     },
+    {
+      name: 'module-playback-real-content',
+      description: 'Module playback against REAL archive curriculum (base-coach).',
+      lanes: ['stack'],
+      progressive: false,
+      seed: { profile: 'full', reset: true },
+      // The flow itself supplies the gate; the invoker supplies only ARCHIVE_DIR.
+      env: { PUBLISH_REAL_CONTENT: '1' },
+      stages: [
+        {
+          id: 'module-playback-real-content',
+          phase: 1,
+          project: 'chromium',
+          spec: 'module-playback-real-content/module-playback-real-content.e2e.test.ts',
+          requiredSystems: ['coach-web', 'coach-api', 'iam-api'],
+        },
+      ],
+    },
   ],
 };
 
@@ -147,6 +165,14 @@ function installLoginSeams(result: PostResult = OK_COOKIES): void {
  * `coach-content/src/playlist.ts` feature-detect passes; every OTHER path
  * (coach-web appDir for the browser step) reports present so the hand-off runs.
  */
+/** Stub the repo-dir seam so the `--real-content` precheck sees (or misses) an archive checkout. */
+function installArchiveDirCheck(present: boolean): void {
+  vi.spyOn(BaseCommand.prototype as never, 'getRepoDirCheck' as never).mockReturnValue(((dir: string) => {
+    if (dir.endsWith(join('content-archive', '.git'))) return present;
+    return true;
+  }) as never);
+}
+
 function installRepoDirCheck(playlistVerb: boolean): void {
   vi.spyOn(BaseCommand.prototype as never, 'getRepoDirCheck' as never).mockReturnValue(((dir: string) => {
     if (dir.endsWith(join('coach-content-publish', 'src', 'playlist.ts'))) return playlistVerb;
@@ -271,6 +297,41 @@ describe('develop coach — admin (descoped, mock-backed)', () => {
 
     // the mock-backed caveat is surfaced.
     expect(warned.some((w) => w.includes('mock-backed') || w.includes('MOCK data'))).toBe(true);
+  });
+});
+
+describe('develop coach — --real-content (REAL archive curriculum)', () => {
+  afterEach(() => {
+    delete process.env.ARCHIVE_DIR; // the command exports it for the flow; don't leak across tests.
+  });
+
+  it('fails fast with an actionable message when the content-archive checkout is ABSENT — before any bring-up', async () => {
+    installArchiveDirCheck(false); // <archive>/.git not present
+    await expect(DevelopCoach.run(['--real-content', ...ws()], config)).rejects.toMatchObject({
+      message: expect.stringContaining('content-archive'),
+    });
+    // fail-fast: no docker/seed spent on a run the flow would only self-skip.
+    expect(launches).toEqual([]);
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('--real-content on a non-content-viewer scenario hard-errors', async () => {
+    await expect(DevelopCoach.run(['--real-content', '--scenario', 'admin', ...ws()], config)).rejects.toThrow(
+      /--real-content applies to --scenario content-viewer/,
+    );
+  });
+
+  it('drives the AUTHORED real-content flow, exports ARCHIVE_DIR, and still hands off the logged-in tutor', async () => {
+    installRepoDirCheck(true);
+    await DevelopCoach.run(['--real-content', '--archive-dir', '/fixed/dev/content-archive', ...ws()], config);
+
+    // the REAL-archive flow (publish base-coach → materialize), not the synthetic fixture.
+    expect(logged.join('\n')).toContain('coach-web/module-playback-real-content');
+    // ARCHIVE_DIR is the one thing the authored flow needs from the invoking env
+    // (its flows.json env block supplies PUBLISH_REAL_CONTENT=1).
+    expect(process.env.ARCHIVE_DIR).toBe('/fixed/dev/content-archive');
+    const br = browserRuns();
+    expect(br[0].env?.LOGIN_EMAIL).toBe('demo-tutor-1@saga.org');
   });
 });
 

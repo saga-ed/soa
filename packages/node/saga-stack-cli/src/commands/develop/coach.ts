@@ -124,6 +124,19 @@ const SCENARIOS: Readonly<Record<Scenario, ScenarioSpec>> = Object.freeze({
 const PLAYLIST_TRACK_2 = 'curriculum-coach-b';
 
 /**
+ * `--real-content`: coach-web's AUTHORED flow that plays REAL archive curriculum
+ * instead of the synthetic seed. It publishes the archive's `base-coach` into the
+ * slot's coach_api Postgres (`coach-content publish`), materializes demo-tutor-1
+ * onto it, then renders the SAME route the synthetic flow uses
+ * (`/units/unit_1/sc_u1_m1` — real base-coach carries that module; coach-db's
+ * synthetic `curriculum-coach` release does NOT, which is why the default flow
+ * shows "Couldn't Load Module" — coach#228 seed misalignment, research/11).
+ * The flow's own flows.json `env` block sets `PUBLISH_REAL_CONTENT=1`; the ONLY
+ * thing the invoker must supply is `ARCHIVE_DIR` (a content-archive checkout).
+ */
+const REAL_CONTENT_FLOW = 'module-playback-real-content';
+
+/**
  * demo-tutor-1's canonical coach user id — `deriveUserId('demo-tutor-1')` from
  * `@saga-ed/iam-seed-ids`, the id coach-db's seed keys the tutor's persona +
  * content_instance to (content-instances.json) AND the id coach-web's iam
@@ -163,6 +176,15 @@ export default class DevelopCoach extends BaseCommand {
     reuse: Flags.boolean({
       default: false,
       description: 'skip the reset+seed; hand off against the CURRENT stack state (mirrors develop connect --reuse).',
+    }),
+    'real-content': Flags.boolean({
+      default: false,
+      description:
+        "content-viewer only: play REAL curriculum published from a saga-ed/content-archive checkout (base-coach) instead of coach-db's synthetic acceptance fixture. Drives coach-web's authored `module-playback-real-content` flow, which publishes the archive into the slot's coach_api Postgres and materializes demo-tutor-1 onto it. Needs an archive checkout (--archive-dir / $ARCHIVE_DIR / $DEV/content-archive).",
+    }),
+    'archive-dir': Flags.string({
+      description:
+        'path to a saga-ed/content-archive checkout for --real-content (default: $ARCHIVE_DIR, else <dev>/content-archive).',
     }),
     'spa-path': Flags.string({
       description: 'explicit path to a flows.json (file or dir) — highest-priority discovery override',
@@ -210,7 +232,18 @@ export default class DevelopCoach extends BaseCommand {
       );
     }
 
-    const resolved = resolveFlow(disco.manifest, spec.flow, { lane: 'stack' });
+    // --real-content swaps the content-viewer's synthetic flow for coach-web's
+    // authored REAL-archive flow (publish base-coach → materialize → same route).
+    if (flags['real-content'] && scenario !== 'content-viewer') {
+      this.error(
+        `--real-content applies to --scenario content-viewer (got '${scenario}'). ` +
+          'It swaps the ported module player onto REAL published archive curriculum; ' +
+          'admin/playlist do not read the archive.',
+      );
+    }
+    const flowName = flags['real-content'] ? REAL_CONTENT_FLOW : spec.flow;
+
+    const resolved = resolveFlow(disco.manifest, flowName, { lane: 'stack' });
     const appCwd = resolveAppCwd(resolved.spa, flags, process.env);
     // COACH checkout root: appCwd is `<coachRoot>/apps/web/coach-web`.
     const coachRoot = appCwd.slice(0, appCwd.length - resolved.spa.appDir.length - 1);
@@ -220,6 +253,19 @@ export default class DevelopCoach extends BaseCommand {
     // fails fast with an actionable message instead of crashing halfway through
     // docker + seed (or, worse, materializing against a track that isn't there).
     if (scenario === 'playlist') this.assertPlaylistPrereqs(coachRoot);
+
+    // --real-content: resolve + PRECHECK the content-archive checkout BEFORE any
+    // bring-up, then export it as ARCHIVE_DIR — the ONE thing the authored flow
+    // requires from "the invoking shell's env" (its flows.json env block supplies
+    // PUBLISH_REAL_CONTENT=1; DATABASE_URL comes from our own launch-plan). The
+    // Runner spawns Playwright with `{...process.env, ...spec.env}`, so setting it
+    // here is exactly the contract the flow documents.
+    if (flags['real-content']) {
+      const archiveDir = this.resolveArchiveDir(flags);
+      this.assertRealContentPrereqs(archiveDir);
+      process.env.ARCHIVE_DIR = archiveDir;
+      this.log(`==> real-content: publishing base-coach from ${archiveDir}`);
+    }
 
     // coach flows are non-progressive + prerequisite-free; --reuse just drops the
     // reset+seed (mirrors connect). base === resolved when the flow has no prereq.
@@ -331,6 +377,34 @@ export default class DevelopCoach extends BaseCommand {
    *
    * Reuses the shared repo-dir existence + repo-file-read seams (tests stub them).
    */
+  /**
+   * The content-archive checkout `--real-content` publishes from: an explicit
+   * `--archive-dir`, else `$ARCHIVE_DIR` (the env var the authored flow documents),
+   * else the sibling-repo convention `<dev>/content-archive` — mirroring how every
+   * other repo root resolves (`runtime/scripts.ts` `resolveRepoRoot`).
+   */
+  private resolveArchiveDir(flags: { 'archive-dir'?: string; dev?: string }): string {
+    const dev = flags.dev ?? process.env.DEV ?? join(process.env.HOME ?? '', 'dev');
+    return flags['archive-dir'] ?? process.env.ARCHIVE_DIR ?? join(dev, 'content-archive');
+  }
+
+  /**
+   * `--real-content` PRECHECK: the archive must be a real git checkout before we
+   * spend a docker bring-up + full seed on a run the flow would only self-skip
+   * (`real-content-lane.ts` returns `{skip}` when ARCHIVE_DIR is unset/blank, and
+   * the spec asserts `<archiveDir>/.git` exists). Fail fast + actionable instead.
+   */
+  private assertRealContentPrereqs(archiveDir: string): void {
+    if (!this.getRepoDirCheck()(join(archiveDir, '.git'))) {
+      this.error(
+        `--real-content needs a saga-ed/content-archive checkout, but ${archiveDir} is not a git checkout.\n` +
+          `  clone it:  git clone git@github.com:saga-ed/content-archive.git ${archiveDir}\n` +
+          `  or point at an existing one:  --archive-dir <path>  (or export ARCHIVE_DIR=<path>)\n` +
+          `  Without --real-content, content-viewer plays coach-db's synthetic seed instead.`,
+      );
+    }
+  }
+
   private assertPlaylistPrereqs(coachRoot: string): void {
     const verbFile = join(coachRoot, 'packages', 'node', 'coach-content-publish', 'src', 'playlist.ts');
     if (!this.getRepoDirCheck()(verbFile)) {

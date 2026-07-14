@@ -88,6 +88,8 @@ export interface LaunchTokens {
   DASH_URL: string;
   /** up.sh `CONNECT_WEB_URL`. */
   CONNECT_WEB_URL: string;
+  /** coach-web (:8800) — its own origin, and the iam URL its browser calls. */
+  COACH_WEB_URL: string;
   /** up.sh `CONNECT_API_URL`. */
   CONNECT_API_URL: string;
   /** up.sh `CONTENT_API_URL`. */
@@ -102,7 +104,13 @@ export interface LaunchTokens {
   COACH_WEB_HOST: string;
   /** up.sh `SAGA_API_TARGET_COACH` — coach's frontend upstream-saga config (default https://staging.wootmath.com). */
   SAGA_API_TARGET_COACH: string;
-  /** up.sh `IAM_ISSUER` — the `iss` claim coach-api/ads-adm-api validate (`https://iam.saga.org`). */
+  /**
+   * The `iss` claim: stamped INTO iam's tokens (JWT_ISSUER) and validated by
+   * coach-api (AUTH_ISSUER). One token feeds both ends so they cannot drift —
+   * this was `https://iam.saga.org` (prod) while the local iam-api stamped
+   * `https://iam.wootdev.com` (its .env default), so coach-api 401'd every
+   * locally-minted session.
+   */
   IAM_ISSUER: string;
 
   // ── mesh broker + DB / mongo connection strings ──
@@ -622,6 +630,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     IAM_URL: `http://localhost:${ports['iam-api']}`,
     DASH_URL: `http://localhost:${ports['saga-dash']}`,
     CONNECT_WEB_URL: `http://localhost:${ports['connect-web']}`,
+    COACH_WEB_URL: `http://localhost:${ports['coach-web']}`,
     CONNECT_API_URL: `http://localhost:${ports['connect-api']}`,
     CONTENT_API_URL: `http://localhost:${ports['content-api']}`,
     RTSM_URL: `http://localhost:${ports['rtsm-api']}`,
@@ -629,7 +638,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     COACH_API_URL: `http://localhost:${ports['coach-api']}`,
     COACH_WEB_HOST: 'localhost',
     SAGA_API_TARGET_COACH: 'https://staging.wootmath.com',
-    IAM_ISSUER: 'https://iam.saga.org',
+    IAM_ISSUER: 'https://iam.wootdev.com',
 
     // mesh broker + connection strings
     MESH_MQ: `amqp://rabbitmq_admin:password123@localhost:${mqPort}`,

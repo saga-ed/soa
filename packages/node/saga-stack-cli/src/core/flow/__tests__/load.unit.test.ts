@@ -25,13 +25,29 @@ const EXAMPLE_PATH = fileURLToPath(
 );
 const EXAMPLE_TEXT = readFileSync(EXAMPLE_PATH, 'utf8');
 
+/**
+ * The flows the bundled example must ALWAYS carry — asserted with
+ * `arrayContaining`, deliberately NOT as an exact list.
+ *
+ * `examples/flows/saga-dash.flows.json` is a MIRROR that legitimately gains flows
+ * over time, and an exact list turns every such addition into an unrelated red
+ * build in a file the author never touched. That has now bitten twice: 6b6571f
+ * (patched reactively by 62977b1) and #308/fc4440c (soa#312, which left main red).
+ * Pinning the literal a third time would just reset the trap.
+ *
+ * This still catches the regression that actually matters — a load-bearing flow
+ * going MISSING from the mirror. Flow CONTENT is asserted below (journey's 8
+ * ordered stages, connect-session's prerequisite), which is the real coverage.
+ */
+const LOAD_BEARING_FLOWS = ['journey', 'connect-session', 'connect-add-student'];
+
 describe('parseFlowManifest — the bundled example validates', () => {
   it('parses against the zod schema and exposes the spa + bundled flows', () => {
     const m = parseFlowManifest(EXAMPLE_TEXT, EXAMPLE_PATH);
     expect(m.schemaVersion).toBe(1);
     expect(m.spa.id).toBe('saga-dash');
     expect(m.spa.system).toBe('saga-dash');
-    expect(m.flows.map((f) => f.name)).toEqual(['journey', 'connect-session', 'connect-add-student']);
+    expect(m.flows.map((f) => f.name)).toEqual(expect.arrayContaining(LOAD_BEARING_FLOWS));
   });
 
   it('strips unknown top-level keys (the example carries a $comment annotation)', () => {
@@ -90,7 +106,9 @@ describe('loadFlowManifest — injectable reader seam (no disk IO)', () => {
       return EXAMPLE_TEXT;
     });
     expect(reads).toEqual(['/virtual/flows.json']);
-    expect(m.flows.map((f) => f.name)).toEqual(['journey', 'connect-session', 'connect-add-student']);
+    // This test's job is the READER SEAM (it parsed exactly what the reader
+    // returned) — the mirror's flow list is incidental here, so same rule as above.
+    expect(m.flows.map((f) => f.name)).toEqual(expect.arrayContaining(LOAD_BEARING_FLOWS));
   });
 
   it('wraps a reader error in a path-tagged message', () => {

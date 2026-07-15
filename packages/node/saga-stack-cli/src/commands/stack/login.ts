@@ -63,16 +63,6 @@ export default class StackLogin extends BaseCommand {
   async run(): Promise<void> {
     const { args, flags } = await this.parse(StackLogin);
 
-    // --browser opens a Chromium against slot 0's dash (DASH :8900, PROFILE under
-    // /tmp/sds-synthetic). browser-login.mjs is not slot-parameterised, so refuse
-    // --browser at slot > 0 rather than open a window pointed at slot 0's dash.
-    if (flags.browser && flags.slot > 0) {
-      this.error(
-        `slot ${flags.slot}: --browser opens a Chromium against slot 0's dash (DASH :8900, ` +
-          "PROFILE under /tmp/sds-synthetic). Drop --browser to mint the slot's headless jar natively.",
-      );
-    }
-
     // ── NATIVE headless cookie jar (BOTH the default AND the --browser path). ──
     // Shared with `up --login` via the BaseCommand helper — NEITHER touches up.sh.
     const email = args.email ?? DEFAULT_LOGIN_USER;
@@ -116,7 +106,14 @@ export default class StackLogin extends BaseCommand {
     // ── --browser: ALSO open the headful Chromium via the shared VENDORED browser-login.mjs
     // helper (BaseCommand.openVendoredBrowser) — the same one `up --login` uses. ──
     if (flags.browser) {
-      await this.openVendoredBrowser(flags, { email, iamUrl, stateDir });
+      // Point the browser at the SLOT's own dash (base 8900 + slot*1000, from the
+      // resolved profile). LOGIN_DASH_URL still wins for the tunnel case. iamUrl and
+      // stateDir (⇒ PROFILE_DIR) are already slot-aware; the per-slot stateDir gives a
+      // distinct persistent profile per slot. At slot 0 dashPort is 8900, so this is
+      // byte-identical to the previous slot-0-only behaviour.
+      const dashPort = profile.portOverrides['saga-dash'] ?? 8900;
+      const dashUrl = process.env.LOGIN_DASH_URL || `http://localhost:${dashPort}`;
+      await this.openVendoredBrowser(flags, { email, iamUrl, stateDir, dashUrl });
     }
   }
 }

@@ -119,11 +119,12 @@ export const baseFlags = {
     // CEILING 9 (M7 MINOR): the mesh's rabbitmq (:5672) and rabbitmq-mgmt (:15672)
     // differ by 10000 = 10 * the 1000 stride, so slot 10's rabbitmq (:15672) would
     // collide with slot 0's rabbitmq-mgmt (:15672). Cap at 9 so every slot's full
-    // resolved port band stays disjoint. Slot > 0 is a BACKEND sub-stack (the
-    // literal-port backends + browser frontends are excluded — see derive-instance).
+    // resolved port band stays disjoint. Slot > 0 is a BACKEND + FRONTEND sub-stack:
+    // the saga-dash/coach-web/connect-web frontends run on their OFFSET port; only the
+    // literal-port playback trio stays excluded (soa#271 — see derive-instance).
     max: 9,
     description:
-      'stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> BACKEND sub-stack — the literal-port backends + browser frontends stay on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.',
+      'stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.',
   }),
   'output-json': Flags.boolean({
     description: 'emit structured JSON on stdout instead of human-readable text',

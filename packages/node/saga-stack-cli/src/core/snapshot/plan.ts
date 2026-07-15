@@ -187,10 +187,10 @@ export interface RestoreDbAction {
 
 /** A guard that blocks (or warns about) a restore. */
 export interface RestoreGuardFailure {
-  kind: 'profile-mismatch' | 'snapshot-ahead';
-  /** The offending db (snapshot-ahead only). */
+  kind: 'profile-mismatch' | 'snapshot-ahead' | 'db-ahead';
+  /** The offending db (snapshot-ahead / db-ahead only). */
   db?: DbId;
-  /** Whether `--force` bypasses this guard (profile only; snapshot-ahead is hard). */
+  /** Whether `--force` bypasses this guard (profile only; snapshot-ahead and db-ahead are hard). */
   bypassableByForce: boolean;
   message: string;
 }
@@ -207,6 +207,16 @@ export interface RestorePlanOptions {
    * guard fires unless `force`. Omit to skip the profile guard (can't compare).
    */
   currentProfile?: string;
+  /**
+   * The LIVE DB's `_prisma_migrations` head per pg DB (the command reads each
+   * via `SnapshotIO.readSchemaRev` — the same probe store-time capture uses).
+   * Feeds the DB-AHEAD guard: `pg_restore --clean` only drops objects the dump
+   * knows about, so restoring an older snapshot over a migrated-ahead DB
+   * half-applies (FK-blocked drop chains) AND rewinds `_prisma_migrations`,
+   * leaving an applied-but-unrecorded migration that fails the next migrate.
+   * A missing/`null` entry skips the check for that DB (can't compare).
+   */
+  liveSchemaRevs?: Partial<Record<DbId, string | null>>;
 }
 
 export interface RestorePlan {
@@ -236,6 +246,12 @@ export interface RestorePlan {
  *    Skipped for `iam_pii_local` (db push, `schemaRev:null`) and `connectv3`
  *    (mongo, `schemaRev:null`) — both carry a `null` rev, so the predicate
  *    short-circuits without needing the engine.
+ *  - DB-AHEAD GUARD (HARD, not bypassable): per pg DB with a captured rev AND
+ *    an observed live head (`opts.liveSchemaRevs`), refuse if the live head is
+ *    ahead of (or unknown relative to) the snapshot's rev — the DB has been
+ *    migrated past the dump, so `--clean` would half-apply and rewind
+ *    `_prisma_migrations`. A live head strictly BEHIND the snapshot's rev is
+ *    allowed: the dump carries the newer schema wholesale.
  */
 export function restorePlan(
   snapshot: SnapshotManifest,
@@ -275,6 +291,32 @@ export function restorePlan(
           `Run \`stack up --pull\` to update migrations, then retry.`,
       });
     }
+  }
+
+  // DB-AHEAD GUARD (per pg DB with a captured rev + an observed live head).
+  for (const entry of snapshot.databases) {
+    if (entry.schemaRev === null) continue; // db-push / mongo — no history to compare
+    const live = opts.liveSchemaRevs?.[entry.db];
+    if (live == null || live === entry.schemaRev) continue; // unobservable / in sync
+    // Migration ids are timestamp-prefixed, so the local list is chronological:
+    // a live head strictly EARLIER than the snapshot's rev is a behind-DB
+    // (restore carries it forward — fine); later, or unknown to the checkout,
+    // means the live DB is ahead of the dump.
+    const known = localMigrations[entry.db] ?? [];
+    const liveIdx = known.indexOf(live);
+    const snapIdx = known.indexOf(entry.schemaRev);
+    if (liveIdx !== -1 && snapIdx !== -1 && liveIdx < snapIdx) continue;
+    guardFailures.push({
+      kind: 'db-ahead',
+      db: entry.db,
+      bypassableByForce: false,
+      message:
+        `live '${entry.db}' is at migration '${live}', AHEAD of the snapshot's ` +
+        `'${entry.schemaRev}' — pg_restore --clean cannot drop objects the dump does ` +
+        `not know about, so restoring would half-apply and rewind _prisma_migrations. ` +
+        `Re-store the fixture on the current schema, or reset '${entry.db}' to the ` +
+        `snapshot's schema first.`,
+    });
   }
 
   // Order restore actions by manifest declaration order, restricted to the

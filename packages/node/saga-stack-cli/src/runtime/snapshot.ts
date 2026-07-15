@@ -58,8 +58,10 @@ export interface SnapshotIO {
    * `docker exec -i <container> pg_restore -U <ownerRole> -d <db> --clean
    * --if-exists` with `inPath` streamed via stdin (no shared host↔container
    * volume needed). Connects AS THE DB OWNER (snapshot invariant — ledger_local
-   * → `ledger`). pg_restore exits non-zero on benign warnings too, so a non-zero
-   * exit is only treated as failure when stderr carries a real `ERROR:`/`FATAL:`.
+   * → `ledger`). pg_restore exits non-zero on benign warnings too, so a
+   * non-zero exit is only treated as failure when stderr carries a real error
+   * (`pgRestoreFailed`: `pg_restore: error:`-prefixed or bare `ERROR:`/`FATAL:`
+   * lines) — then it REJECTS so the restore command exits non-zero.
    */
   pgRestore(db: string, container: string, ownerRole: string, inPath: string): Promise<void>;
 
@@ -187,6 +189,22 @@ async function isContainerRunning(container: string): Promise<boolean> {
 }
 
 /**
+ * Classify a pg_restore exit — PURE, exported for unit tests. pg_restore exits
+ * non-zero for benign `--if-exists` "does not exist, skipping" warnings too, so
+ * a non-zero exit alone is not failure; but real errors arrive in TWO shapes
+ * depending on phase: client-side lines prefixed `pg_restore: error:` (which
+ * embed the server's `ERROR:` mid-line) and bare server `ERROR:`/`FATAL:`
+ * lines. The original bare-`ERROR:`-only regex missed the prefixed shape, so a
+ * restore over a schema-drifted DB (FK-blocked `--clean` drop chains, failed
+ * COPYs) printed 7 errors and still reported success — a half-applied restore
+ * must FAIL the command instead.
+ */
+export function pgRestoreFailed(exitCode: number | null, stderr: string): boolean {
+  if (exitCode === 0) return false;
+  return /^pg_restore: (error|fatal):/im.test(stderr) || /^\s*(ERROR|FATAL):/m.test(stderr);
+}
+
+/**
  * The production SnapshotIO: every method shells out via `docker exec`. This is
  * the one place real container/DB processes are launched. Tests never call this
  * — they inject a fake through `BaseCommand.getSnapshotIO()`.
@@ -208,10 +226,7 @@ export function makeRealSnapshotIO(): SnapshotIO {
         ['exec', '-i', container, 'pg_restore', '-U', ownerRole, '-d', db, '--clean', '--if-exists'],
         { stdinFromFile: inPath },
       );
-      // pg_restore returns non-zero on benign warnings too (e.g. "object didn't
-      // exist, skipping" under --if-exists). Only a real ERROR:/FATAL: in stderr
-      // is a failure; otherwise surface warnings and continue.
-      if (exitCode !== 0 && /^\s*(ERROR|FATAL):/m.test(stderr)) {
+      if (pgRestoreFailed(exitCode, stderr)) {
         throw new Error(`pg_restore ${db} failed (exit=${exitCode}).\n${stderr}`);
       }
       if (stderr) process.stderr.write(stderr);

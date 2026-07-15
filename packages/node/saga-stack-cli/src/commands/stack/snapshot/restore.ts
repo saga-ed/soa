@@ -5,11 +5,15 @@
  * RESTORES a named snapshot over the running stack: `pg_restore --clean
  * --if-exists` (AS each DB's OWNER role — snapshot invariant: ledger_local → the
  * `ledger` role) and `mongorestore --archive --drop`, then optionally flushes
- * redis (rostering cache invalidation, PR #82). Two pure guards (in
- * `restorePlan`) gate the restore BEFORE any IO:
+ * redis (rostering cache invalidation, PR #82). Three guards (evaluated purely
+ * in `restorePlan`) gate the restore before any dump is applied:
  *   - PROFILE mismatch (snapshot vs live SEED_PROFILE) — bypassable with --force.
  *   - SNAPSHOT-AHEAD (a pg DB's recorded `schemaRev` is unknown in the local
  *     checkout) — HARD; the snapshot is newer than your code, run `stack up --pull`.
+ *   - DB-AHEAD (a live pg DB's `_prisma_migrations` head — probed via
+ *     `readSchemaRev` before planning — is ahead of the snapshot's recorded
+ *     rev) — HARD; `--clean` would half-apply and rewind migration history.
+ *     Re-store the fixture on the current schema instead.
  *
  * THIN: the pure `restorePlan` orders the actions + evaluates the guards; the
  * injectable `SnapshotIO` (`this.getSnapshotIO()`) does the `docker exec`. Local
@@ -62,7 +66,8 @@ export default class SnapshotRestore extends BaseCommand {
         'restore only the DBs in the dependency closure of these services (comma-list)',
     }),
     force: Flags.boolean({
-      description: 'bypass the profile-mismatch guard (does NOT bypass the snapshot-ahead guard)',
+      description:
+        'bypass the profile-mismatch guard (does NOT bypass the snapshot-ahead / db-ahead guards)',
       default: false,
     }),
     'flush-redis': Flags.boolean({
@@ -117,20 +122,29 @@ export default class SnapshotRestore extends BaseCommand {
     const ctx = this.scriptContextFromFlags(flags);
     const localMigrations = this.localMigrationsFor(snapshot, ctx);
 
+    const io = this.getSnapshotIO();
+    const pgC = postgresContainer();
+    const mongoC = mongoContainer();
+
+    // The DB-AHEAD guard input needs the live pg heads, so assert + probe BEFORE
+    // planning (pure guards still all evaluate inside restorePlan).
+    await io.assertPgRunning(pgC);
+    const liveSchemaRevs: Partial<Record<DbId, string | null>> = {};
+    for (const entry of snapshot.databases) {
+      if (entry.schemaRev === null) continue; // db-push / mongo — nothing to compare
+      liveSchemaRevs[entry.db] = await io.readSchemaRev(entry.db, pgC);
+    }
+
     const plan = restorePlan(snapshot, manifest, localMigrations, {
       force: flags.force,
       currentProfile: process.env.SEED_PROFILE,
+      liveSchemaRevs,
     });
 
     if (!plan.ok) {
       this.error(plan.guardFailures.map((g) => g.message).join('\n'));
     }
 
-    const io = this.getSnapshotIO();
-    const pgC = postgresContainer();
-    const mongoC = mongoContainer();
-
-    await io.assertPgRunning(pgC);
     if (plan.actions.some((a) => a.engine === 'mongo')) {
       await io.assertMongoRunning(mongoC);
     }

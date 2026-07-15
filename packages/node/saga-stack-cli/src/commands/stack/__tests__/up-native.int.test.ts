@@ -510,6 +510,41 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     // (no write). The key assertion: NO stack-slot write happened at slot 0.
     expect(dashCalls.some((c) => c.startsWith('write:'))).toBe(false);
   });
+
+  // NB: these two --login tests are placed at the END of this describe (not by the
+  // BARE `--tunnel` test above) on purpose — soa#291 adds its LiveKit-creds tests
+  // right after that bare test, so keeping these here avoids an overlay merge
+  // conflict between the two tunnel PRs in this shared file.
+  it('--tunnel --login: login mints against the PUBLIC tunnel iam + opens the tunnel dash, AFTER the tunnels are up', async () => {
+    await StackUp.run(['--tunnel', '--login', ...WS], config);
+    const TD = 'testmoniker.vms.wootdev.com';
+
+    // devLogin POSTed at the PUBLIC tunnel iam (not localhost:3010), so the minted
+    // iam_session is scoped for the tunnel cookie domain instead of mis-scoped.
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe(`https://iam.${TD}/trpc/auth.devLogin`);
+
+    // the best-effort headful browser targets the tunnel dash + iam (not localhost).
+    const browserLogin = runs.find(
+      (r) => r.command === 'node' && r.args.some((a) => a.endsWith('browser-login.mjs')),
+    );
+    expect(browserLogin?.env?.DASH_URL).toBe(`https://dash.${TD}`);
+    expect(browserLogin?.env?.IAM_URL).toBe(`https://iam.${TD}`);
+
+    // ORDERING (up.sh: tunnel.sh up → login_user): the tunnels came up BEFORE the
+    // login browser step. Both go through runVendor, so compare their run indices.
+    const tunIdx = runs.findIndex((r) => r.command.endsWith('tunnel.sh'));
+    const browserIdx = runs.findIndex(
+      (r) => r.command === 'node' && r.args.some((a) => a.endsWith('browser-login.mjs')),
+    );
+    expect(tunIdx).toBeGreaterThanOrEqual(0);
+    expect(browserIdx).toBeGreaterThan(tunIdx);
+  });
+
+  it('--login WITHOUT --tunnel still mints against localhost (tunnel routing is opt-in)', async () => {
+    await StackUp.run(['--only', 'iam-api', '--login', ...WS], config);
+    expect(posts[0]?.url).toBe('http://localhost:3010/trpc/auth.devLogin');
+  });
 });
 
 describe('stack up — native Connect AV (#221, M9)', () => {

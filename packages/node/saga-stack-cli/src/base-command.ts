@@ -978,9 +978,15 @@ export abstract class BaseCommand extends Command {
     email: string;
     slot: number;
     stateDir: string;
+    /** Explicit iam host (the `--tunnel` public host); else `LOGIN_IAM_URL` else localhost. */
+    loginIamUrl?: string;
   }): Promise<NativeLoginResult> {
-    // LOGIN_IAM_URL wins (tunnel: login goes through the PUBLIC iam host); else slot-offset localhost.
-    const iamUrl = resolveIamUrl({ slot: opts.slot, loginIamUrl: process.env.LOGIN_IAM_URL });
+    // An explicit loginIamUrl (tunnel: login goes through the PUBLIC iam host) wins, then
+    // the LOGIN_IAM_URL env override, else slot-offset localhost.
+    const iamUrl = resolveIamUrl({
+      slot: opts.slot,
+      loginIamUrl: opts.loginIamUrl ?? process.env.LOGIN_IAM_URL,
+    });
     const jarPath = join(opts.stateDir, COOKIE_JAR_FILE);
     return nativeLogin(
       { email: opts.email, iamUrl, jarPath },

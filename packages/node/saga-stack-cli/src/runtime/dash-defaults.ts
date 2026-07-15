@@ -29,7 +29,13 @@ import type { ServiceId } from '../core/manifest/index.js';
 /**
  * The dash service-key → tunnel host-label map (verbatim from up.sh's inline
  * node script). Note `program-hub` and `enrollment-api` BOTH map to `programs`,
- * preserved exactly.
+ * preserved exactly. `ads-adm` is included because the tunnel forwards it
+ * (`ads-adm:5005` in tools/synthetic-dev/tunnel.sh) and the dash's Overview page
+ * dials it for real (`adm.getOverviewSummary`) — without this entry the dash
+ * falls back to `config.json`'s `ads-adm: localhost:5005`, a mixed-content block
+ * from the HTTPS tunnel page. `transcripts-api`/`ledger-api` are intentionally
+ * absent: the tunnel does not forward them, so a label here would point at a
+ * dead host.
  */
 export const DASH_TUNNEL_LABELS: Readonly<Record<string, string>> = {
   iam: 'iam',
@@ -40,6 +46,7 @@ export const DASH_TUNNEL_LABELS: Readonly<Record<string, string>> = {
   'sis-api': 'sis',
   'content-api': 'content',
   connect: 'connect',
+  'ads-adm': 'ads-adm',
 };
 
 /**

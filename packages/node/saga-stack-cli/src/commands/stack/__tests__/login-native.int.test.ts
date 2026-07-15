@@ -232,6 +232,7 @@ describe('stack login — native headless cookie jar', () => {
 
     await StackLogin.run(['--browser', '--slot', '1', ...WS], config);
 
+    expect(runnerCalls).toHaveLength(1);
     const spawn = runnerCalls[0];
     // dash URL is the explicit override; iam stays the slot's (LOGIN_DASH_URL is dash-only).
     expect(spawn?.env?.DASH_URL).toBe('https://dash.moniker.wootdev.com');

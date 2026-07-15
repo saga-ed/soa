@@ -38,6 +38,7 @@
       "e2e": {
         "description": "Run end-to-end flows in-process against a running stack."
       },
+      "frontend": { "description": "Run extra saga-dash versions against one stack (compare frontends)." },
       "set": {
         "description": "Worktree sets (M13): named repo→path maps bound to slots — list, show, and check the parallel dev contexts --set runs against."
       }

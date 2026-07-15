@@ -54,6 +54,7 @@ import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
 import type { RecordUp, Runtime } from './stack-api.js';
 import { COOKIE_JAR_FILE, nativeLogin } from './runtime/login.js';
 import type { NativeLoginResult } from './runtime/login.js';
+import { type FrontendRegistryIo, makeRealFrontendRegistryIo } from './runtime/frontend-registry.js';
 import {
   buildRepoEnv,
   makeRealConfirm,
@@ -653,6 +654,11 @@ export abstract class BaseCommand extends Command {
     return makeRealJarWriter();
   }
 
+  /** Injectable frontends.json IO (the `ss frontend` registry). Real fs in prod. */
+  protected getFrontendRegistryIo(): FrontendRegistryIo {
+    return makeRealFrontendRegistryIo();
+  }
+
   /**
    * The vite-cache-clear fs seam (M9 — native `restart`) — production is the only
    * place the `nuke_vite` `rm -rf` runs.
@@ -1015,6 +1021,48 @@ export abstract class BaseCommand extends Command {
     } catch (err) {
       // spawn-level failure (node missing, ENOENT race, …) — warn, never redden.
       this.warn(`headful browser skipped — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Open ONE Chromium with a tab per url (`ss frontend browser`) — a single
+   * devLogin against `ctx.iamUrl`, a dedicated per-slot profile
+   * (`<stateDir>/frontend-browser-profile`, distinct from `stack login --browser`'s
+   * to avoid Chrome's singleton lock), and `DASH_URLS` (one tab each). Reuses the
+   * vendored browser-login.mjs + saga-dash playwright resolution. Best-effort: a
+   * browser failure warns, never throws.
+   */
+  protected async openFrontendBrowser(
+    flags: WorkspaceFlags,
+    ctx: { iamUrl: string; stateDir: string; urls: string[]; email: string },
+  ): Promise<void> {
+    const script = resolveVendorScript('browser-login.mjs');
+    const sagaDashDash = join(
+      resolveRepoRoot('SAGA_DASH', this.scriptContextFromFlags(flags)),
+      'apps',
+      'web',
+      'dash',
+    );
+    if (!this.getRepoDirCheck()(sagaDashDash)) {
+      this.warn(
+        `frontend browser skipped — saga-dash dash app not found at ${sagaDashDash} ` +
+          '(playwright resolves from there; clone saga-dash for the browser step)',
+      );
+      return;
+    }
+    const env: Record<string, string> = {
+      IAM_URL: ctx.iamUrl,
+      DASH_URLS: ctx.urls.join(','),
+      LOGIN_EMAIL: ctx.email,
+      PROFILE_DIR: join(ctx.stateDir, 'frontend-browser-profile'),
+      SAGA_DASH_DASH: sagaDashDash,
+    };
+    try {
+      await this.runVendor({ cwd: sagaDashDash, command: 'node', args: [script], env }, flags, {
+        propagateExit: false,
+      });
+    } catch (err) {
+      this.warn(`frontend browser skipped — ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

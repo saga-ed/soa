@@ -24,6 +24,7 @@ import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
 import type { ServiceId } from '../../core/manifest/index.js';
+import { clearRegistry } from '../../runtime/frontend-registry.js';
 import { meshDown, repoContextFromFlags, resolveRepoRoot } from '../../runtime/index.js';
 import type {
   MeshDownResult,
@@ -84,6 +85,11 @@ export default class StackDown extends BaseCommand {
     const stopper = this.getServiceStopper();
     const stopped = await stopper(stateDir);
     this.reportStopped(profile, stateDir, stopped);
+
+    // `ss frontend` variants were reaped above (their `saga-dash@<label>.pid` files
+    // live under this state dir); clear the now-stale registry so `frontend browser`
+    // doesn't point at dead ports.
+    clearRegistry(stateDir, this.getFrontendRegistryIo());
 
     // ── POST-DOWN ORPHAN AUDIT (saga-ed/soa#249). ──
     // The group-kill above reaps every RECORDED pid's whole subtree, but a watch

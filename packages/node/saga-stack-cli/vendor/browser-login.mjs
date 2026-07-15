@@ -17,6 +17,7 @@
 // Env in:
 //   IAM_URL          iam-api base       (default http://localhost:3010)
 //   DASH_URL         dash base          (default http://localhost:8900)
+//   DASH_URLS        comma-separated dash bases → one TAB each (overrides DASH_URL)
 //   LOGIN_EMAIL      persona to log in  (default dev@saga.org)
 //   PROFILE_DIR      persistent profile (default /tmp/sds-synthetic/browser-profile)
 //   SAGA_DASH_DASH   path to saga-dash apps/web/dash (for playwright resolution)
@@ -93,12 +94,23 @@ if (!who.ok() || userId === 'unknown') {
   fail(`whoami did not confirm a session (HTTP ${who.status()})`);
 }
 
-const page = ctx.pages()[0] ?? (await ctx.newPage());
-await page.goto(DASH_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+// DASH_URLS (comma-separated) opens one TAB per url in this ONE logged-in profile
+// (frontend-compare mode); an unset DASH_URLS keeps the original single-tab flow.
+const urls = (process.env.DASH_URLS || DASH_URL)
+  .split(',')
+  .map((u) => u.trim())
+  .filter(Boolean);
+if (urls.length === 0) fail('DASH_URLS resolved to no usable urls');
+let firstPage;
+for (let i = 0; i < urls.length; i++) {
+  const page = i === 0 ? (ctx.pages()[0] ?? (await ctx.newPage())) : await ctx.newPage();
+  if (i === 0) firstPage = page;
+  await page.goto(urls[i], { waitUntil: 'domcontentloaded' }).catch(() => {});
+}
 // Give the dash's tRPC auth probe a moment, then report where we ended up so a
 // lingering Janus redirect is visible in the log.
-await page.waitForTimeout(1500);
-const finalUrl = page.url();
+await firstPage.waitForTimeout(1500);
+const finalUrl = firstPage.url();
 
 console.log(`AUTOLOGIN_OK ${EMAIL} ${userId} ${finalUrl}`);
 

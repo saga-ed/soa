@@ -256,13 +256,23 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     expect(fakes.coachWebWrites).toEqual([]);
   });
 
-  it('soa#300: no coach-web .env.local write under --tunnel (public URLs are a separate concern)', async () => {
+  it('soa#298: under --tunnel the coach-web .env.local carries the PUBLIC tunnel hosts', async () => {
+    // The facade must thread runtime.tunnelDomain into the hook — without it the hook
+    // cannot name the public hosts. Asserted here (not just in the hook's own unit
+    // test) because THAT plumbing is the half a unit test cannot see.
     const { runtime, fakes } = makeRuntime({ tunnel: true, tunnelDomain: 'abc.vms.wootdev.com' });
     const api = makeStackApi(manifest, runtime);
     const res = await api.up(['coach-web'] as ServiceId[]);
 
-    expect(res.coachWeb?.action).toBe('noop-tunnel');
-    expect(fakes.coachWebWrites).toEqual([]);
+    expect(res.coachWeb?.action).toBe('wrote-tunnel');
+    expect(fakes.coachWebWrites).toHaveLength(1);
+
+    const contents = fakes.coachWebWrites[0].contents;
+    expect(contents).toContain('PUBLIC_COACH_API_URL=https://coach-api.abc.vms.wootdev.com');
+    expect(contents).toContain('PUBLIC_IAM_API_URL=https://iam.abc.vms.wootdev.com');
+    expect(contents).toContain('PUBLIC_DASHBOARD_URL=https://dash.abc.vms.wootdev.com');
+    // A remote browser must never receive a localhost URL in its inlined bundle.
+    expect(contents).not.toContain('localhost');
   });
 
   it('slot 0: a frontend launch command is byte-identical (no --port appended)', async () => {

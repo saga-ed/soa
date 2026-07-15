@@ -886,8 +886,10 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       // mapping each PUBLIC_ var to THIS slot's LOCAL mesh offset port so the browser
       // boots against the local stack. `launchContext.ports` are already slot-offset
       // (same map the dash hook uses). Runs at EVERY slot including 0 (the remote
-      // defaults break local browser-testing at slot 0 too — the original soa#300);
-      // no-ops under tunnel (public coach-web URLs are a separate concern).
+      // defaults break local browser-testing at slot 0 too — the original soa#300).
+      // Under --tunnel it writes the PUBLIC tunnel hosts instead (soa#298): the same
+      // inlining means tunnelOverlay()'s PUBLIC_COACH_API_URL never reaches the browser,
+      // and a stale local `.env.local` would otherwise SHADOW it.
       let coachWeb: CoachWebSyncResult | undefined;
       if (launchable.includes('coach-web') && runtime.coachWebFs) {
         const coachRoot = (launchContext.repoRoots as Record<RepoKey, string>).COACH;
@@ -895,6 +897,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
           {
             coachWebRoot: joinPath(coachRoot, 'apps/web/coach-web'),
             tunnel: runtime.tunnel,
+            tunnelDomain: runtime.tunnelDomain,
             slot: runtime.slot,
             stackPorts: launchContext.ports,
           },

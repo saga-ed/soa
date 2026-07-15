@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { PLAYWRIGHT_SERVICE_URL_ENV, TUNNEL_SERVICE_LABELS } from '../e2e-orchestrate.js';
+import { COACH_WEB_TUNNEL_LABELS } from '../runtime/coach-web-env.js';
 
 /** Walk UP from `start` to the first ancestor for which `join(dir, ...rel)` exists. */
 function findUp(start: string, rel: string[]): string {
@@ -78,5 +79,44 @@ describe('TUNNEL_SERVICE_LABELS ↔ PLAYWRIGHT_SERVICE_URL_ENV ↔ vendor/tunnel
         expect(TUNNEL_SERVICE_LABELS['ads-adm-api']).toBe('ads-adm');
         expect(TUNNEL_SERVICE_LABELS['connect-api']).toBe('connect-api');
         expect(TUNNEL_SERVICE_LABELS['iam-api']).toBe('iam');
+    });
+});
+
+/**
+ * The same drift risk, for the coach-web `.env.local` writer (soa#298).
+ *
+ * `COACH_WEB_TUNNEL_LABELS` is a SECOND label table — deliberately separate, because
+ * the one above serves `PLAYWRIGHT_*_URL` for the e2e lane and carries no coach
+ * entries. Both must stay pinned to the same vendored source of truth, so a
+ * re-vendored `tunnel.sh` that renames a host fails HERE rather than 502-ing a
+ * remote coworker's browser.
+ */
+describe('COACH_WEB_TUNNEL_LABELS ↔ vendor/tunnel.sh (soa#298)', () => {
+    const vendorLabels = tunnelServiceLabels();
+
+    it('every coach-web label is a REAL vendor/tunnel.sh SERVICES entry (no phantom hosts)', () => {
+        for (const [svc, label] of Object.entries(COACH_WEB_TUNNEL_LABELS)) {
+            expect(
+                vendorLabels.has(label as string),
+                `label '${label}' (for '${svc}') is not a tunnel.sh SERVICES entry`,
+            ).toBe(true);
+        }
+    });
+
+    it('covers every service coach-web dials, and pins the non-derivable names', () => {
+        // These three back the four PUBLIC_* vars coach-web reads at vite-dev time
+        // (PUBLIC_LOGIN_URL points at iam — tunnel.sh has no `login` host).
+        expect(COACH_WEB_TUNNEL_LABELS['iam-api']).toBe('iam');
+        expect(COACH_WEB_TUNNEL_LABELS['saga-dash']).toBe('dash'); // rename
+        expect(COACH_WEB_TUNNEL_LABELS['coach-api']).toBe('coach-api'); // keeps -api, unlike iam-api
+    });
+
+    it('agrees with TUNNEL_SERVICE_LABELS wherever the two tables overlap', () => {
+        // Two tables, one truth: if they ever disagree on a shared service, one lane is
+        // pointing at the wrong host.
+        for (const [svc, label] of Object.entries(COACH_WEB_TUNNEL_LABELS)) {
+            const shared = TUNNEL_SERVICE_LABELS[svc as keyof typeof TUNNEL_SERVICE_LABELS];
+            if (shared !== undefined) expect(shared, `tables disagree on '${svc}'`).toBe(label);
+        }
     });
 });

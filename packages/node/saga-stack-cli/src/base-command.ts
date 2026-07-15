@@ -1025,6 +1025,48 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * Open ONE Chromium with a tab per url (`ss frontend browser`) — a single
+   * devLogin against `ctx.iamUrl`, a dedicated per-slot profile
+   * (`<stateDir>/frontend-browser-profile`, distinct from `stack login --browser`'s
+   * to avoid Chrome's singleton lock), and `DASH_URLS` (one tab each). Reuses the
+   * vendored browser-login.mjs + saga-dash playwright resolution. Best-effort: a
+   * browser failure warns, never throws.
+   */
+  protected async openFrontendBrowser(
+    flags: WorkspaceFlags,
+    ctx: { iamUrl: string; stateDir: string; urls: string[]; email: string },
+  ): Promise<void> {
+    const script = resolveVendorScript('browser-login.mjs');
+    const sagaDashDash = join(
+      resolveRepoRoot('SAGA_DASH', this.scriptContextFromFlags(flags)),
+      'apps',
+      'web',
+      'dash',
+    );
+    if (!this.getRepoDirCheck()(sagaDashDash)) {
+      this.warn(
+        `frontend browser skipped — saga-dash dash app not found at ${sagaDashDash} ` +
+          '(playwright resolves from there; clone saga-dash for the browser step)',
+      );
+      return;
+    }
+    const env: Record<string, string> = {
+      IAM_URL: ctx.iamUrl,
+      DASH_URLS: ctx.urls.join(','),
+      LOGIN_EMAIL: ctx.email,
+      PROFILE_DIR: join(ctx.stateDir, 'frontend-browser-profile'),
+      SAGA_DASH_DASH: sagaDashDash,
+    };
+    try {
+      await this.runVendor({ cwd: sagaDashDash, command: 'node', args: [script], env }, flags, {
+        propagateExit: false,
+      });
+    } catch (err) {
+      this.warn(`frontend browser skipped — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
    * Emit a result in one of three shapes, picked by flags:
    *   --output-json → JSON.stringify(json, null, 2)
    *   --porcelain   → one key=value line per entry (primitives only)

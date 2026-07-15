@@ -100,6 +100,7 @@ const urls = (process.env.DASH_URLS || DASH_URL)
   .split(',')
   .map((u) => u.trim())
   .filter(Boolean);
+if (urls.length === 0) fail('DASH_URLS resolved to no usable urls');
 let firstPage;
 for (let i = 0; i < urls.length; i++) {
   const page = i === 0 ? (ctx.pages()[0] ?? (await ctx.newPage())) : await ctx.newPage();

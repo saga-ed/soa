@@ -73,6 +73,7 @@ beforeEach(async () => {
   config = await Config.load(PKG_ROOT);
   logged = [];
   delete process.env.LOGIN_IAM_URL;
+  delete process.env.LOGIN_DASH_URL;
   vi.spyOn(BaseCommand.prototype as unknown as { log: (m?: string) => void }, 'log').mockImplementation(
     (m?: string) => {
       logged.push(m ?? '');
@@ -84,6 +85,7 @@ beforeEach(async () => {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.LOGIN_IAM_URL;
+  delete process.env.LOGIN_DASH_URL;
 });
 
 const out = (): string => logged.join('\n');
@@ -190,14 +192,50 @@ describe('stack login — native headless cookie jar', () => {
     });
   });
 
-  it('--browser at slot > 0 is refused (browser-login targets slot 0 dash)', async () => {
+  it('--browser at slot > 0 opens the browser against the SLOT\'s dash + iam (not slot 0)', async () => {
     installPoster(OK_COOKIES);
     installJar();
-    await expect(StackLogin.run(['--browser', '--slot', '1', ...WS], config)).rejects.toMatchObject({
-      message: expect.stringContaining('slot 1'),
+    // the spawn guard checks the saga-dash dash dir exists; report it present.
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue(() => true);
+
+    await StackLogin.run(['--browser', '--slot', '1', ...WS], config);
+
+    // native jar minted against the slot-1 iam (:4010) at the slot-1 state dir.
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe('http://localhost:4010/trpc/auth.devLogin');
+    expect(jarWrites).toHaveLength(1);
+    expect(jarWrites[0]?.path).toBe('/tmp/sds-synthetic-s1/cookies.txt');
+
+    // browser opened against the SLOT-1 dash (:9900) with the SLOT-1 persistent profile.
+    expect(runnerCalls).toHaveLength(1);
+    const spawn = runnerCalls[0];
+    expect(spawn?.command).toBe('node');
+    expect((spawn?.args[0] ?? '').endsWith('browser-login.mjs')).toBe(true);
+    expect(spawn?.env).toMatchObject({
+      IAM_URL: 'http://localhost:4010',
+      DASH_URL: 'http://localhost:9900',
+      PROFILE_DIR: '/tmp/sds-synthetic-s1/browser-profile',
     });
-    // refused BEFORE minting a jar or spawning anything.
-    expect(posts ?? []).toHaveLength(0);
-    expect(runnerCalls).toHaveLength(0);
+  });
+
+  it('LOGIN_DASH_URL overrides the computed slot dash URL (tunnel escape hatch)', async () => {
+    process.env.LOGIN_DASH_URL = 'https://dash.moniker.wootdev.com';
+    installPoster(OK_COOKIES);
+    installJar();
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue(() => true);
+
+    await StackLogin.run(['--browser', '--slot', '1', ...WS], config);
+
+    expect(runnerCalls).toHaveLength(1);
+    const spawn = runnerCalls[0];
+    // dash URL is the explicit override; iam stays the slot's (LOGIN_DASH_URL is dash-only).
+    expect(spawn?.env?.DASH_URL).toBe('https://dash.moniker.wootdev.com');
+    expect(spawn?.env?.IAM_URL).toBe('http://localhost:4010');
   });
 });

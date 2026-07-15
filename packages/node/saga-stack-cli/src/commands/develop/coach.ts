@@ -367,7 +367,15 @@ export default class DevelopCoach extends BaseCommand {
 
     // Hand off a HEADED, logged-in coach-web at the scenario's route — the slot's
     // OFFSET coach-web port + the per-slot state dir resolved above.
-    await this.handoff(flags, scenario, spec, resolved, runtime.launchContext.ports['coach-web'], stateDir);
+    await this.handoff(
+      flags,
+      scenario,
+      spec,
+      resolved,
+      runtime.launchContext.ports['coach-web'],
+      stateDir,
+      profile.slot,
+    );
   }
 
   /**
@@ -513,12 +521,20 @@ export default class DevelopCoach extends BaseCommand {
   }
 
   /**
-   * Mint the persona cookie jar (slot-0) and open a HEADED, auto-logged-in coach-web
-   * at the scenario's deep-linked route via the generalized `openVendoredBrowser`
-   * ({ repoEnvVar:'COACH', appDir:'apps/web/coach-web', port:8800 }). Mirrors the M2
-   * `holdEpilogue` email-param path but for a first-class command. Best-effort: a
-   * failed jar / browserless host WARNS, never crashes — the stack is up and seeded.
-   * The headed browser holds the terminal until the developer closes it.
+   * Mint the persona cookie jar for THIS SLOT and open a HEADED, auto-logged-in
+   * coach-web at the scenario's deep-linked route via the generalized
+   * `openVendoredBrowser` ({ repoEnvVar:'COACH', appDir:'apps/web/coach-web',
+   * port:8800 }). Mirrors the M2 `holdEpilogue` email-param path but for a
+   * first-class command. Best-effort: a failed jar / browserless host WARNS, never
+   * crashes — the stack is up and seeded. The headed browser holds the terminal
+   * until the developer closes it.
+   *
+   * `slot` MUST be threaded: it selects the iam the jar is minted against
+   * (`mintNativeLoginJar` → `resolveIamUrl({ slot })`, offset :3010 + slot*1000).
+   * It was hardcoded to 0 while the printed `coachWebUrl` already used the
+   * slot-offset `spaPort`, so `--slot N` minted against SLOT 0's iam and opened
+   * slot N's coach-web — a jar for the wrong stack, or (with slot 0 down) a mint
+   * failure warning on an otherwise healthy slot-N run.
    */
   private async handoff(
     flags: WorkspaceFlags & { porcelain: boolean; 'output-json': boolean },
@@ -527,10 +543,11 @@ export default class DevelopCoach extends BaseCommand {
     resolved: ReturnType<typeof resolveFlow>,
     spaPort: number | undefined,
     stateDir: string,
+    slot: number,
   ): Promise<void> {
     const email = spec.email;
 
-    const res = await this.mintNativeLoginJar({ email, slot: 0, stateDir });
+    const res = await this.mintNativeLoginJar({ email, slot, stateDir });
     if (!res.ok) {
       this.warn(
         `hand-off: session mint failed (HTTP ${res.status}) for ${email} — the stack is up + seeded but no ` +

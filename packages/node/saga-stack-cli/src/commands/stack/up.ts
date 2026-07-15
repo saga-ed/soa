@@ -703,6 +703,7 @@ export interface UpFailureView {
   provision?: { ok: boolean; failed?: string };
   migrate?: { ok: boolean; failed?: string };
   failedAt?: string;
+  failedReason?: string;
 }
 
 /**
@@ -742,7 +743,9 @@ export function describeUpFailure(up: UpFailureView): string[] {
       `migrate FAILED${up.migrate.failed ? ` on ${up.migrate.failed}` : ''} — \`prisma migrate\` exited non-zero; see the streamed output above`,
     ];
   }
-  return [`service launch FAILED at ${up.failedAt ?? '(unknown)'} — it never became healthy`];
+  return [
+    `service launch FAILED at ${up.failedAt ?? '(unknown)'} — ${up.failedReason ?? 'it never became healthy'}`,
+  ];
 }
 
 // Local flag shapes (subset of the parsed StackUp flags each path reads).

@@ -67,6 +67,16 @@ export interface LaunchSpec {
   env: Record<string, string>;
   /** Health URL polled for a 200, e.g. `http://localhost:3010/health`. */
   healthUrl: string;
+  /**
+   * Launch-env keys whose stamped value must match for the `alreadyUp` adoption to
+   * be safe (`ServiceDef.adoptEnv`). When set, the launcher fingerprints these keys'
+   * values from `env` at spawn and, on a pre-launch 200, refuses to adopt a process
+   * whose recorded fingerprint is absent or disagrees — the process was launched by
+   * a build that stamped a different contract and may be drifted (soa#305). Absent/
+   * empty ⇒ the adoption short-circuit is unconditional (unchanged for every other
+   * service).
+   */
+  adoptEnv?: readonly string[];
 }
 
 /** The outcome of launching one service. */
@@ -79,6 +89,13 @@ export interface LaunchResult {
   pid?: number;
   /** True iff a 200 came back BEFORE we launched — up.sh's "already up :$port" path. */
   alreadyUp?: boolean;
+  /**
+   * Set only on a NON-ok result that needs an explanation the caller can't infer from
+   * `id` alone — today the `adoptEnv` drift refusal (an already-up process whose launch
+   * contract can't be verified), so `up` reports the real cause instead of the generic
+   * "never became healthy".
+   */
+  reason?: string;
 }
 
 /** The outcome of stopping one service (the down path). */
@@ -134,6 +151,10 @@ export interface RealLauncherDeps {
   writePid?: (path: string, pid: number) => void;
   /** Read a pid file's contents (for stopServices). Default `fs.readFileSync`; returns null when absent. */
   readPid?: (path: string) => string | null;
+  /** Persist a service's adopt-contract fingerprint file. Default `fs.writeFileSync`. */
+  writeContract?: (path: string, body: string) => void;
+  /** Read a service's adopt-contract fingerprint file. Default `fs.readFileSync`; null when absent. */
+  readContract?: (path: string) => string | null;
   /** Deliver a kill signal. Default `process.kill`. */
   kill?: (pid: number, signal?: NodeJS.Signals) => void;
 }
@@ -160,6 +181,25 @@ export function pidFilePath(stateDir: string, id: string): string {
 /** Path to a service's log file under the state dir. */
 export function logFilePath(stateDir: string, id: string): string {
   return join(stateDir, `${id}.log`);
+}
+
+/** Path to a service's adopt-contract fingerprint under the state dir (soa#305). */
+export function contractFilePath(stateDir: string, id: string): string {
+  return join(stateDir, `${id}.env-contract`);
+}
+
+/**
+ * The subset of `env` the adoption guard fingerprints, in `adoptEnv` order so the
+ * serialization is stable (a key absent from `env` is omitted). Used both to WRITE
+ * the fingerprint at spawn and to compute the EXPECTED value on an adoption check.
+ */
+function contractFingerprint(env: Record<string, string>, adoptEnv: readonly string[]): string {
+  const picked: Record<string, string> = {};
+  for (const k of adoptEnv) {
+    const v = env[k];
+    if (v !== undefined) picked[k] = v;
+  }
+  return JSON.stringify(picked);
 }
 
 /** Read a positive integer from an env var, or undefined if unset/invalid. */
@@ -204,6 +244,17 @@ export function makeRealLauncher(deps: RealLauncherDeps = {}): ServiceLauncher {
         return null;
       }
     });
+  const writeContract =
+    deps.writeContract ?? ((path: string, body: string) => writeFileSync(path, body));
+  const readContract =
+    deps.readContract ??
+    ((path: string): string | null => {
+      try {
+        return readFileSync(path, 'utf8');
+      } catch {
+        return null;
+      }
+    });
   const kill = deps.kill ?? ((pid: number, signal?: NodeJS.Signals) => process.kill(pid, signal));
   const doSpawn: SpawnFn =
     deps.spawn ??
@@ -219,8 +270,26 @@ export function makeRealLauncher(deps: RealLauncherDeps = {}): ServiceLauncher {
 
   return {
     async launch(spec: LaunchSpec): Promise<LaunchResult> {
+      const guardKeys = spec.adoptEnv ?? [];
       // Idempotent re-run: a 200 before we touch anything ⇒ "already up".
       if ((await prober.probe(spec.healthUrl)).ok) {
+        // But the drift guarantee this CLI stamps (services.ts:63) only holds for a
+        // process THIS build launched. For guarded keys, adopt ONLY when the recorded
+        // fingerprint matches what we'd stamp now; a missing/mismatched fingerprint
+        // means the live process was launched by another build (or an older CLI with
+        // no stamp) and may serve a drifted contract — refuse loudly rather than
+        // silently adopt it (soa#305: a stale iam minting the wrong iss 401'd for hours).
+        if (guardKeys.length > 0) {
+          const expected = contractFingerprint(spec.env, guardKeys);
+          const recorded = readContract(contractFilePath(stateDir, spec.id));
+          if (recorded !== expected) {
+            return {
+              id: spec.id,
+              ok: false,
+              reason: `already up but its launch-env contract can't be verified — refusing to adopt a possibly-drifted process. Expected ${expected}, recorded ${recorded ?? '(none)'}. Stop the foreign process and re-run so this CLI relaunches it with the stamp.`,
+            };
+          }
+        }
         return { id: spec.id, ok: true, alreadyUp: true };
       }
 
@@ -237,6 +306,11 @@ export function makeRealLauncher(deps: RealLauncherDeps = {}): ServiceLauncher {
       child.on('error', () => {});
       const pid = child.pid;
       if (typeof pid === 'number') writePid(pidFilePath(stateDir, spec.id), pid);
+      // Record the launch-env contract this build stamped so a later `up` can prove a
+      // still-200-ing process is ours (matching stamp) before adopting it (soa#305).
+      if (guardKeys.length > 0) {
+        writeContract(contractFilePath(stateDir, spec.id), contractFingerprint(spec.env, guardKeys));
+      }
       // Don't keep the parent event loop alive for the detached child.
       child.unref();
 

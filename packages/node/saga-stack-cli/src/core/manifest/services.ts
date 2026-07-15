@@ -123,6 +123,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'iam',
     isFrontend: false,
     optional: false,
+    // iam MINTS the iss every JWT consumer validates (its JWT_ISSUER, stamped from
+    // ${IAM_ISSUER}). An already-up iam launched by an older CLI without this stamp
+    // falls back to iam-api's saga.org default and mints a token coach-api rejects
+    // (invalid-issuer → 401) — so a drifted/adopted iam is worse than none. Guard
+    // adoption on it (soa#305).
+    adoptEnv: ['JWT_ISSUER'],
   },
   'sis-api': {
     id: 'sis-api',

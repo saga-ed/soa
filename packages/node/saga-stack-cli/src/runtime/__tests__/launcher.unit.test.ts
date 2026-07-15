@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { makeRealLauncher, pidFilePath, stopServices } from '../launcher.js';
+import { contractFilePath, makeRealLauncher, pidFilePath, stopServices } from '../launcher.js';
 
 // Mock node:child_process so the DEFAULT SpawnFn's options can be pinned (the
 // injectable `deps.spawn` seam sits ABOVE the `detached: true` flag, so only a
@@ -204,6 +204,93 @@ describe('makeRealLauncher.launch', () => {
     expect(opts.env.AUTH_DEVUSERID).toBe('beef');
     // The pid recorded IS the group leader's pid (pid == pgid under detached).
     expect(writePid).toHaveBeenCalledWith(pidFilePath(STATE, 'iam-api'), 4242);
+  });
+});
+
+describe('makeRealLauncher.launch adopt-contract guard (soa#305)', () => {
+  // iam-api's spec carries adoptEnv:['JWT_ISSUER'] — the key whose stamp coach-api
+  // validates. A stale iam launched by an older CLI (no stamp / a different iss)
+  // still 200s on /health but mints a token every consumer 401s; the guard refuses
+  // to ADOPT such a process instead of silently serving its drifted contract.
+  const GUARDED: LaunchSpec = {
+    ...SPEC,
+    env: { PORT: '3010', JWT_ISSUER: 'https://iam.wootdev.com' },
+    adoptEnv: ['JWT_ISSUER'],
+  };
+  const FINGERPRINT = JSON.stringify({ JWT_ISSUER: 'https://iam.wootdev.com' });
+
+  it('refuses to adopt an already-up process with NO recorded contract fingerprint', async () => {
+    const { prober } = seqProber([true]); // already up
+    const { spawn, calls } = fakeSpawn(1);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn,
+      readContract: () => null, // launched by a build that wrote no fingerprint
+    });
+
+    const res = await launcher.launch(GUARDED);
+
+    expect(res.ok).toBe(false);
+    expect(res.alreadyUp).toBeUndefined(); // NOT adopted
+    expect(res.reason).toMatch(/contract/);
+    expect(calls).toHaveLength(0); // did not spawn (port is held) — a loud fail
+  });
+
+  it('refuses to adopt when the recorded fingerprint DISAGREES (drifted issuer)', async () => {
+    const { prober } = seqProber([true]);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn: fakeSpawn(1).spawn,
+      readContract: () => JSON.stringify({ JWT_ISSUER: 'https://iam.saga.org' }),
+    });
+
+    const res = await launcher.launch(GUARDED);
+
+    expect(res.ok).toBe(false);
+    expect(res.reason).toContain('iam.saga.org');
+  });
+
+  it('adopts when the recorded fingerprint MATCHES what we would stamp', async () => {
+    const { prober } = seqProber([true]);
+    const readContract = vi.fn(() => FINGERPRINT);
+    const launcher = makeRealLauncher({ stateDir: STATE, prober, readContract });
+
+    const res = await launcher.launch(GUARDED);
+
+    expect(res).toEqual({ id: 'iam-api', ok: true, alreadyUp: true });
+    expect(readContract).toHaveBeenCalledWith(contractFilePath(STATE, 'iam-api'));
+  });
+
+  it('records the contract fingerprint when it spawns a guarded service', async () => {
+    const { prober } = seqProber([false, true]); // not up ⇒ spawn, then healthy
+    const writeContract = vi.fn();
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn: fakeSpawn(4242).spawn,
+      writeContract,
+      writePid: () => {},
+      openLog: () => 'ignore',
+      ensureDir: () => {},
+      sleep: async () => {},
+    });
+
+    await launcher.launch(GUARDED);
+
+    expect(writeContract).toHaveBeenCalledWith(contractFilePath(STATE, 'iam-api'), FINGERPRINT);
+  });
+
+  it('leaves an UNguarded service (no adoptEnv) adopted unconditionally', async () => {
+    const { prober } = seqProber([true]);
+    const readContract = vi.fn(() => null);
+    const launcher = makeRealLauncher({ stateDir: STATE, prober, readContract });
+
+    const res = await launcher.launch(SPEC); // no adoptEnv
+
+    expect(res).toEqual({ id: 'iam-api', ok: true, alreadyUp: true });
+    expect(readContract).not.toHaveBeenCalled(); // guard never consulted
   });
 });
 

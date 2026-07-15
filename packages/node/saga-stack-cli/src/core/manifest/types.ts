@@ -160,6 +160,18 @@ export interface ServiceDef {
   optional: boolean;
   /** Config-file prep run immediately before this service boots (review minor — §3). */
   prelaunchHook?: 'sync-dash-local-defaults';
+  /**
+   * Launch-env keys whose STAMPED value must match for an already-up process to be
+   * safely ADOPTED (the `alreadyUp` short-circuit). The drift-guarantee this CLI
+   * asserts on these vars (services.ts:63 — "the two ends can never drift") holds
+   * ONLY for processes THIS build launched; a service already 200-ing when `up`
+   * runs may have been launched by an OLDER CLI that stamped a different (or no)
+   * value. For such keys the launcher fingerprints the stamp at spawn and refuses
+   * to adopt on mismatch/absence rather than serve a drifted process. iam-api sets
+   * JWT_ISSUER (a stale iam minting iss=iam.saga.org while coach-api validated
+   * iam.wootdev.com 401'd every GraphQL call for hours — soa#305).
+   */
+  adoptEnv?: readonly string[];
 }
 
 export interface MeshDef {

@@ -54,6 +54,12 @@ export interface LaunchTokens {
   /** sessions-api port (3007) — ads-adm-api's SESSIONS_API_CLIENT_BASEURL (was a
    *  literal `:3007` in up.sh; tokenized for M13 ads-adm slottability). */
   SESSIONS_PORT: string;
+  /** programs-api port (3006) — ads-adm-api's PROGRAMS_API_CLIENT_BASEURL. ads-adm
+   *  resolves program display names from programs-api (`programs.get`), because
+   *  sessions-api projects no display strings, so the occurrence wire's programName
+   *  is only the programId echo (sds#275). Without this token a slot > 0 ads-adm-api
+   *  would dial slot 0's programs-api. */
+  PROGRAMS_PORT: string;
   /** content-api port — up.sh `CONTENT_PORT` (3009; default :3010 collides with iam). */
   CONTENT_PORT: string;
   /** connect-api port — up.sh `CONNECT_API_PORT` (6106). */
@@ -618,6 +624,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     IAM_PORT: String(ports['iam-api']),
     SIS_PORT: String(ports['sis-api']),
     SESSIONS_PORT: String(ports['sessions-api']),
+    PROGRAMS_PORT: String(ports['programs-api']),
     CONTENT_PORT: String(ports['content-api']),
     CONNECT_API_PORT: String(ports['connect-api']),
     RTSM_PORT: String(ports['rtsm-api']),

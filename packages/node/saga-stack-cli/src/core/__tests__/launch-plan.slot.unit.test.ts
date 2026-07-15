@@ -158,6 +158,10 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     const env = resolveLaunchEnv('ads-adm-api', 'stack', slotCtx(2));
     expect(env.EXPRESS_SERVER_PORT).toBe('7005'); // 5005 + 2000
     expect(env.SESSIONS_API_CLIENT_BASEURL).toBe('http://localhost:5007'); // 3007 + 2000
+    // sds#275: ads-adm resolves program display names from programs-api. Untokenized,
+    // a slot > 0 ads-adm would dial SLOT 0's programs-api and silently resolve names
+    // against the wrong stack (best-effort ⇒ it would no-op, not fail loudly).
+    expect(env.PROGRAMS_API_CLIENT_BASEURL).toBe('http://localhost:5006'); // 3006 + 2000
     expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:5010/trpc'); // 3010 + 2000
     expect(env.IAM_API_URL).toBe('http://localhost:5010');
     expect(env.CORS_ORIGIN).toBe('http://localhost:10900'); // dash 8900 + 2000
@@ -166,7 +170,7 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     expect(portOf(env.RABBITMQ_URL)).toBe(getMesh('rabbitmq').port + 2000);
     // no base-port literal survives anywhere in the resolved env.
     for (const v of Object.values(env)) {
-      expect(v).not.toMatch(/localhost:(3007|3010|5432|5672|8900)\b/);
+      expect(v).not.toMatch(/localhost:(3006|3007|3010|5432|5672|8900)\b/);
     }
   });
 
@@ -174,6 +178,7 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     const env = resolveLaunchEnv('ads-adm-api', 'stack', slotCtx(0));
     expect(env.EXPRESS_SERVER_PORT).toBeUndefined(); // no offset ⇒ no injection
     expect(env.SESSIONS_API_CLIENT_BASEURL).toBe('http://localhost:3007');
+    expect(env.PROGRAMS_API_CLIENT_BASEURL).toBe('http://localhost:3006');
     expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:3010/trpc');
     expect(env.ADS_ADM_DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
     expect(env.DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');

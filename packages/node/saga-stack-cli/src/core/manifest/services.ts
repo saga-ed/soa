@@ -290,8 +290,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     portEnvVar: 'EXPRESS_SERVER_PORT',
     healthPath: '/health',
     databases: ['ads_adm_local', 'ledger_local'],
-    dependsOn: ['iam-api', 'sessions-api'],
-    depKinds: { 'iam-api': 'url', 'sessions-api': 's2s' },
+    // programs-api: ads-adm resolves program display NAMES from it (`programs.get`,
+    // a publicProcedure → 'url', not 's2s' like sessions-api's service-gated reads).
+    // sessions-api projects no display strings, so the occurrence wire's programName
+    // is only the programId echo; ads-adm resolves names itself (sds#275).
+    dependsOn: ['iam-api', 'sessions-api', 'programs-api'],
+    depKinds: { 'iam-api': 'url', 'sessions-api': 's2s', 'programs-api': 'url' },
     mesh: ['postgres', 'rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
@@ -302,6 +306,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       env: {
         ADS_ADM_SCHEDULE_PROVIDER: 'program-hub',
         SESSIONS_API_CLIENT_BASEURL: 'http://localhost:${SESSIONS_PORT}',
+        PROGRAMS_API_CLIENT_BASEURL: 'http://localhost:${PROGRAMS_PORT}',
         IAM_API_CLIENT_BASEURL: '${IAM_URL}/trpc',
         IAM_API_URL: '${IAM_URL}',
         // Same iss iam-api stamps — see programs-api's JWT_ISSUER note. Was the

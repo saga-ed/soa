@@ -31,8 +31,11 @@ import { parseFlowRef, resolveFlow } from '../../core/flow/index.js';
 import { DEFAULT_LOGIN_USER } from '../../core/login.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
-import type { Lane } from '../../core/manifest/index.js';
+import type { Lane, RepoKey } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
+import { reviewBlockLines, runIdFrom } from '../../core/e2e-review.js';
+import type { PreservedRunRecord } from '../../core/e2e-review.js';
+import { preserveSpawnArtifacts, resolveVendorScript } from '../../runtime/index.js';
 import { makeStackApi } from '../../stack-api.js';
 import {
   buildStackContext,
@@ -54,6 +57,7 @@ export default class E2eRun extends BaseCommand {
     '<%= config.bin %> <%= command.id %> journey --through pods --dry-run',
     '<%= config.bin %> <%= command.id %> saga-dash/journey --through 2 --headless',
     '<%= config.bin %> <%= command.id %> journey --skip-reset -- --debug',
+    '<%= config.bin %> <%= command.id %> saga-dash/periods-ordering --capture --headless',
   ];
 
   // One required positional ([<spa>/]<flow>) + trailing playwright passthrough (after `--`).
@@ -127,6 +131,18 @@ export default class E2eRun extends BaseCommand {
       description: 'plan only: print the resolved flow + closure + seed plan + playwright argv + occurrence date; touch nothing',
       default: false,
     }),
+    tunnel: Flags.boolean({
+      default: false,
+      description:
+        'point the Playwright browser at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can drive this slot-0 stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`); writes the dash tunnel config; exports PLAYWRIGHT_TUNNEL_TIMEOUT_MS for the SPA config. Slot-0 only (hard-errors at --slot > 0 / --set).',
+    }),
+    capture: Flags.boolean({
+      default: false,
+      description:
+        'exploratory-review capture: run Playwright with PLAYWRIGHT_CAPTURE=all (per-action trace + video on every ' +
+        'test) and PRESERVE the artifacts under <stateDir>/e2e-runs/<runId>/ (Playwright wipes test-results/ at the ' +
+        "next run's start). A FAILED stage's artifacts are preserved even without this flag. Review with `e2e traces`.",
+    }),
   };
 
   /** M7: `e2e run --slot N` brings up + drives an ISOLATED `soa-s<N>` stack. */
@@ -153,6 +169,26 @@ export default class E2eRun extends BaseCommand {
     // alias is --phase, and oclif would treat a defaulted value as provided (M14 lesson).
     if (flags.to !== undefined && (flags.through !== undefined || flags.phase !== undefined)) {
       this.error('--to and --through are mutually exclusive: --to K stops BEFORE stage K; --through K runs THROUGH it.');
+    }
+    // --tunnel fronts the FIXED slot-0 browser ports (dash :8900 / connect :6210 / iam :3010)
+    // via the vms rendezvous box, so it is slot-0-only — mirroring `stack up --tunnel`
+    // (up.ts:209-214). The single `flags.slot > 0` check covers `--set` too (a set pins a
+    // slot > 0). Checked before runSetPreflight (the set brings its slot up).
+    if (flags.tunnel && flags.slot > 0) {
+      this.error(
+        `slot ${flags.slot}: --tunnel fronts the FIXED slot-0 browser ports (dash :8900 / connect :6210 / iam :3010) ` +
+          'via the vms rendezvous box, so it cannot run against a peer slot/set. Run the e2e flow at slot 0.',
+      );
+    }
+    // --tunnel only makes sense on the local `stack` lane: the tunnel hosts front the
+    // LOCAL stack, and tunnelServiceUrlEnv is `lane === 'stack'`-gated. A deployed lane
+    // (e.g. `sandbox`) resolves its own hostnames, so --tunnel would spawn tunnel.sh and
+    // export the WAN timeout for nothing. Guard it rather than silently no-op.
+    if (flags.tunnel && flags.lane !== 'stack') {
+      this.error(
+        `--tunnel targets the local stack lane (its hosts front YOUR stack), but --lane ${flags.lane} ` +
+          'resolves its own URLs. Drop --tunnel, or drop --lane to use the stack lane.',
+      );
     }
 
     // M13-B: the implicit set preflight (no-op without --set) — e2e run brings
@@ -207,6 +243,18 @@ export default class E2eRun extends BaseCommand {
     const profile = deriveInstance({ slot: flags.slot });
     const excluded = new Set(profile.excludedServices);
 
+    // --tunnel: resolve <moniker>.<VMS_BASE> from the VENDORED tunnel.sh (the SAME
+    // machinery as `stack up --tunnel`, up.ts:297-303) so the Playwright browser
+    // hairpins to the tunnel hosts. Slot-0-only (guarded above). Resolved for BOTH
+    // the dry-run (so it prints the https:// URLs) and the real run; the seam lets
+    // unit tests inject a fixed moniker instead of spawning tunnel.sh.
+    let tunnelDomain: string | undefined;
+    if (flags.tunnel) {
+      const vmsBase = process.env.VMS_BASE ?? 'vms.wootdev.com';
+      const moniker = await this.getTunnelMoniker()(resolveVendorScript('tunnel.sh'));
+      tunnelDomain = `${moniker}.${vmsBase}`;
+    }
+
     // ── --dry-run: pure projection, no IO, no seam. ──
     if (flags['dry-run']) {
       const desc = describeResolved(resolved, {
@@ -221,6 +269,8 @@ export default class E2eRun extends BaseCommand {
         prereqFromSnapshot: flags['prereq-from-snapshot'],
         to: flags.to,
         hold: flags.hold,
+        capture: flags.capture,
+        tunnelDomain,
       });
       this.emit(flags, { dryRun: true, ...desc } as unknown as Record<string, unknown>, dryRunLines(desc));
       return;
@@ -236,6 +286,9 @@ export default class E2eRun extends BaseCommand {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      // soa#300: coach-web `.env.local` prelaunch seam — buildStackContext threads it so
+      // a coach-web-in-closure e2e run boots the SPA against the LOCAL mesh, not remote.
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
       // Native-prep seams (built always; since FLIP 3 buildStackContext wires them
@@ -250,7 +303,7 @@ export default class E2eRun extends BaseCommand {
     };
     const delegate = (plan: ScriptPlan): Promise<number> =>
       this.runScript(plan, flags as WorkspaceFlags, { propagateExit: false });
-    const { runtime } = buildStackContext(flags, seams, delegate, profile);
+    const { runtime } = buildStackContext(flags, seams, delegate, profile, tunnelDomain);
     const api = makeStackApi(serviceManifest, runtime);
 
     // M14: the checkpoint store (bake/--from) — constructed AFTER applyInstanceEnv
@@ -274,6 +327,29 @@ export default class E2eRun extends BaseCommand {
       if (sha !== '') spaHead = { sha, dirty: (await git.statusPorcelain(spaRepoRoot)).trim() !== '' };
     }
 
+    // Exploratory-review preservation (docs/e2e-review.md): copy each spawn's
+    // artifacts out of the SPA's test-results/ (which Playwright wipes at the
+    // next run's start) into <stateDir>/e2e-runs/<runId>/…. Fires on every
+    // spawn of a --capture run and on any RED spawn regardless; the review
+    // block below prints the paste-ready show-trace lines.
+    const runsRoot = `${stateDir}/e2e-runs`;
+    const runId = runIdFrom(now);
+    const preserved: PreservedRunRecord[] = [];
+    const preserveTraces = (frame: {
+      appCwd: string;
+      spaId: string;
+      flowName: string;
+      stages: readonly { id: string; project: string }[];
+    }): void => {
+      const record = preserveSpawnArtifacts(frame, { runsRoot, runId, warn: (l) => this.warn(l) });
+      if (record.groups.length > 0) preserved.push(record);
+    };
+    const printReviewBlock = (): void => {
+      for (const record of preserved) {
+        for (const line of reviewBlockLines(record, appCwd)) this.log(line);
+      }
+    };
+
     try {
       const code = await executeResolvedFlow(
         resolved,
@@ -287,6 +363,8 @@ export default class E2eRun extends BaseCommand {
           ports: runtime.launchContext.ports,
           excluded,
           checkpoints,
+          preserveTraces,
+          tunnelDomain,
         },
         {
           lane,
@@ -296,8 +374,10 @@ export default class E2eRun extends BaseCommand {
           fromStaleOk: flags['from-stale-ok'],
           spaHead,
           prereqFromSnapshot: flags['prereq-from-snapshot'],
+          capture: flags.capture,
         },
       );
+      printReviewBlock();
       if (code !== 0) this.exit(code);
 
       // Plan 13 --hold: the window is green and the stack stays up — hand off a
@@ -314,6 +394,10 @@ export default class E2eRun extends BaseCommand {
         });
       }
     } catch (err) {
+      // A red PREREQUISITE surfaces as FlowExecError after its spawn's
+      // artifacts were already preserved — print the review block so the
+      // reviewer gets the failure traces before the error exits.
+      printReviewBlock();
       if (err instanceof FlowExecError) this.error(err.message);
       throw err;
     }
@@ -330,9 +414,21 @@ export default class E2eRun extends BaseCommand {
   private async holdEpilogue(
     resolved: ReturnType<typeof resolveFlow>,
     flags: WorkspaceFlags & { set?: string; to?: string; porcelain: boolean; 'output-json': boolean },
-    ctx: { slot: number; stateDir: string; spaPort?: number; services: string[]; boundary?: string },
+    ctx: {
+      slot: number;
+      stateDir: string;
+      spaPort?: number;
+      services: string[];
+      boundary?: string;
+      // gh_305: the login persona for the held jar + browser. Defaults to
+      // DEFAULT_LOGIN_USER (dev@saga.org — the seeded Seed District admin), so
+      // existing `e2e run --hold` callers are unchanged. A concierge that seeds a
+      // different persona (e.g. `develop coach` → demo-tutor-1) overrides it so the
+      // held browser lands on that persona's populated app instead of an empty one.
+      email?: string;
+    },
   ): Promise<void> {
-    const email = DEFAULT_LOGIN_USER;
+    const email = ctx.email ?? DEFAULT_LOGIN_USER;
     const res = await this.mintNativeLoginJar({ email, slot: ctx.slot, stateDir: ctx.stateDir });
     if (!res.ok) {
       // A failed jar (no roster seed yet, iam down) is a WARN, not a crash — the run
@@ -386,6 +482,16 @@ export default class E2eRun extends BaseCommand {
         iamUrl: res.iamUrl,
         stateDir: ctx.stateDir,
         dashUrl: spaUrl,
+        // gh_305: gate the clone-check + playwright cwd off THIS flow's SPA (from the
+        // resolved `spa` block / registry row), not hardwired saga-dash — so `e2e run
+        // coach-web/… --hold` opens coach-web from the coach checkout. For a saga-dash
+        // flow this is byte-identical to the old SAGA_DASH / apps/web/dash default.
+        // The registry-sourced `repoEnvVar` is always a real manifest RepoKey.
+        spa: {
+          repoEnvVar: resolved.spa.repoEnvVar as RepoKey,
+          appDir: resolved.spa.appDir,
+          port: ctx.spaPort,
+        },
       });
     }
   }
@@ -407,7 +513,11 @@ function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
     `mesh: ${d.closure.mesh.join(', ') || '(none)'}`,
     d.checkpoint
       ? `restore: ${d.checkpoint.fixtureId} (checkpoint after '${d.checkpoint.predecessor}'; validated at run time)`
-      : `reset+seed: ${d.reset ? 'yes' : 'no (reuse state)'}`,
+      : d.reset
+        ? 'reset+seed: yes'
+        : d.seed
+          ? 'seed: additive (no reset)'
+          : 'reset+seed: no (reuse state)',
   ];
   if (d.bakeCheckpoints) {
     lines.push(`bake (per green stage): ${d.bakeCheckpoints.join(', ')}`);
@@ -432,6 +542,9 @@ function dryRunLines(d: ReturnType<typeof describeResolved>): string[] {
   }
   if (d.hold) {
     lines.push('hold: after green, mint the dev cookie jar + open a logged-in browser (the stack stays up)');
+  }
+  if (d.env.PLAYWRIGHT_CAPTURE === 'all') {
+    lines.push('capture: PLAYWRIGHT_CAPTURE=all (per-action trace + video; artifacts preserved under <stateDir>/e2e-runs)');
   }
   lines.push(
     `PLAYWRIGHT_OCCURRENCE_DATE: ${d.occurrenceDate}`,

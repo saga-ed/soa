@@ -22,7 +22,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { BaseCommand } from '../../../base-command.js';
 import type { LaunchSpec, ScriptInvocation, SnapshotIO } from '../../../runtime/index.js';
 import E2eRun from '../run.js';
-import E2eConnect from '../connect.js';
+import E2eConnect from '../../develop/connect.js';
 
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');

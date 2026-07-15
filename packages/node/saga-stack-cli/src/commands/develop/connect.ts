@@ -1,5 +1,9 @@
 /**
- * `saga-stack e2e connect` — open a LIVE interactive Connect tutoring session (M5).
+ * `saga-stack develop connect` — open a LIVE interactive Connect tutoring session (M5).
+ *
+ * Migrated from `e2e connect` (gh_305): dev-setup concierge commands live under the
+ * `develop` topic; the old `e2e connect` id keeps working via a deprecating alias
+ * (`static aliases`/`deprecateAliases` below).
  *
  * Replaces the M2 thin shell over connect-session.sh. It resolves the
  * `connect-session` flow from saga-dash's `flows.json` (bundled example until the
@@ -31,10 +35,10 @@
  * or the journey stages changed. Requires the default `--prereq-from-snapshot` (it
  * bakes so that path can restore); mutually exclusive with `--reuse`.
  *
- *   node bin/dev.js e2e connect
- *   node bin/dev.js e2e connect --reuse -- --debug
- *   node bin/dev.js e2e connect --fake-media
- *   node bin/dev.js e2e connect --refresh-snapshot
+ *   node bin/dev.js develop connect
+ *   node bin/dev.js develop connect --reuse -- --debug
+ *   node bin/dev.js develop connect --fake-media
+ *   node bin/dev.js develop connect --refresh-snapshot
  */
 
 import { Flags } from '@oclif/core';
@@ -44,6 +48,7 @@ import { resolveFlow } from '../../core/flow/index.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
 import { makeStackApi } from '../../stack-api.js';
+import { resolveVendorScript } from '../../runtime/index.js';
 import {
   buildStackContext,
   discoverFlowManifest,
@@ -56,9 +61,16 @@ import {
 const CONNECT_SPA = 'saga-dash';
 const CONNECT_FLOW = 'connect-session';
 
-export default class E2eConnect extends BaseCommand {
+export default class DevelopConnect extends BaseCommand {
   static description =
     'Open a live interactive Connect session: 1 tutor + 2 students (in-process; builds the journey prerequisite, then a headed Connect room).';
+
+  // gh_305: `connect` migrated from the `e2e` topic to `develop`. Keep the old id
+  // working for one cycle with a deprecation warning (@oclif/core ^4). Aliases use
+  // the colon form in code; the topicSeparator (" ") means it is invoked as
+  // `ss e2e connect`.
+  static aliases = ['e2e:connect'];
+  static deprecateAliases = true;
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
@@ -95,10 +107,22 @@ export default class E2eConnect extends BaseCommand {
       description:
         "swap real mic/cam capture for Chromium's synthetic camera (moving test pattern) + mic (beep) and auto-accept the getUserMedia prompt — for a machine with no camera or where v4l2loopback won't build. Sets FAKE_MEDIA=1 on the headed interactive-connect run (mirrors connect-session.sh --fake-media); the journey prerequisite is unaffected.",
     }),
+    tunnel: Flags.boolean({
+      default: false,
+      description:
+        'point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints these Playwright browsers’ URLs — it does NOT relaunch the stack, flip connect-web/rtsm/cookie env, or start frpc. You must have already run `ss stack up --tunnel` so the stack itself is tunnel-served. Connect is slot-0 only, so no slot guard is needed.',
+    }),
+    'student-login': Flags.integer({
+      default: 2,
+      min: 0,
+      max: 2,
+      description:
+        'how many of the 2 students THIS run logs in + joins locally (0, 1, or 2; default 2). The rest stay OPEN for a REMOTE peer to take — pair with --tunnel to invite coworkers. The tutor always auto-hosts and starts the session; login URLs for EVERY participant are printed regardless. Sets CONNECT_LOCAL_STUDENTS on the headed interactive-connect run.',
+    }),
   };
 
   async run(): Promise<void> {
-    const { argv, flags } = await this.parse(E2eConnect);
+    const { argv, flags } = await this.parse(DevelopConnect);
     const passthrough = (argv as string[]).filter((a) => a !== CONNECT_FLOW);
 
     // --refresh-snapshot bakes the journey prerequisite fresh, then restores it.
@@ -125,12 +149,19 @@ export default class E2eConnect extends BaseCommand {
     // the prerequisite + reset entirely, exactly like connect-session.sh.
     const resolved = resolveFlow(disco.manifest, CONNECT_FLOW, { lane: 'stack' });
     const base = flags.reuse ? { ...resolved, prerequisite: undefined } : resolved;
-    // --fake-media pins FAKE_MEDIA=1 into THIS flow's env (merged last by
-    // computeEnv), so it reaches only the connect-session stage (headed
-    // interactive-connect) — not the journey prerequisite, a separate ResolvedFlow.
-    const toRun = flags['fake-media']
-      ? { ...base, flow: { ...base.flow, env: { ...base.flow.env, FAKE_MEDIA: '1' } } }
-      : base;
+    // --fake-media (FAKE_MEDIA=1) and --student-login (CONNECT_LOCAL_STUDENTS=N) pin
+    // env into THIS flow's env (merged last by computeEnv), so they reach only the
+    // connect-session stage (headed interactive-connect) — not the journey
+    // prerequisite, a separate ResolvedFlow.
+    const stageEnv: Record<string, string> = {};
+    if (flags['fake-media']) stageEnv.FAKE_MEDIA = '1';
+    // Default (2) leaves the env unset ⇒ the spec's own default (all students local),
+    // so a plain `e2e connect` is byte-identical to before. Only pin it when narrowing.
+    if (flags['student-login'] !== 2) stageEnv.CONNECT_LOCAL_STUDENTS = String(flags['student-login']);
+    const toRun =
+      Object.keys(stageEnv).length > 0
+        ? { ...base, flow: { ...base.flow, env: { ...base.flow.env, ...stageEnv } } }
+        : base;
 
     const appCwd = resolveAppCwd(resolved.spa, flags, process.env);
     const now = new Date();
@@ -140,12 +171,28 @@ export default class E2eConnect extends BaseCommand {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      // soa#300: coach-web `.env.local` prelaunch seam — harmless here (coach-web is not
+      // in the connect closure), wired for parity with the other bring-up paths.
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
     };
     const delegate = (plan: ScriptPlan): Promise<number> =>
       this.runScript(plan, flags as WorkspaceFlags, { propagateExit: false });
-    const { runtime } = buildStackContext(flags, seams, delegate);
+
+    // --tunnel: resolve <moniker>.<VMS_BASE> from the VENDORED tunnel.sh (the SAME
+    // machinery as `stack up --tunnel`, up.ts:297-303) so the headed Connect room
+    // drives the tunnel hosts. E2eConnect is neither slot- nor set-aware ⇒ slot-0
+    // only, so no slot guard is needed. The seam lets unit tests inject a fixed
+    // moniker instead of spawning tunnel.sh.
+    let tunnelDomain: string | undefined;
+    if (flags.tunnel) {
+      const vmsBase = process.env.VMS_BASE ?? 'vms.wootdev.com';
+      const moniker = await this.getTunnelMoniker()(resolveVendorScript('tunnel.sh'));
+      tunnelDomain = `${moniker}.${vmsBase}`;
+    }
+
+    const { runtime } = buildStackContext(flags, seams, delegate, undefined, tunnelDomain);
     const api = makeStackApi(serviceManifest, runtime);
 
     // M14-C: the checkpoint store so the journey prerequisite can be RESTORED
@@ -191,7 +238,7 @@ export default class E2eConnect extends BaseCommand {
     try {
       const code = await executeResolvedFlow(
         toRun,
-        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), checkpoints },
+        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), checkpoints, tunnelDomain },
         {
           lane: 'stack',
           skipReset: flags.reuse,

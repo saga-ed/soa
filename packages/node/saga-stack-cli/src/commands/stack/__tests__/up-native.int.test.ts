@@ -149,6 +149,8 @@ function installNativeSeams(launchFail: Set<string> = new Set()): void {
   // Phase 2: a fixed moniker (never spawn tunnel.sh) + a recording seam that records
   // the resolved RecordPlan (never touches docker/aws).
   vi.spyOn(proto, 'getTunnelMoniker').mockReturnValue(async () => 'testmoniker');
+  // Phase: fixed fleek LiveKit creds (never spawn `tunnel.sh aws-profile` / `aws`).
+  vi.spyOn(proto, 'getFleekCreds').mockReturnValue(() => ({ key: 'realkey', secret: 'realsecret' }));
   // Phase 2 (BLOCKER-2): a fake fleet-config generator that records the request and
   // echoes the outPath as the generated fleet path (never touches the fs).
   vi.spyOn(proto, 'getTunnelFleetGen').mockReturnValue((opts) => {
@@ -641,6 +643,18 @@ describe('stack up — Phase 2 native --sandbox / --tunnel / --record / --worksp
     expect(rtsm?.env.FLEET_CONFIG_PATH).toBe(fleetGenCalls[0].outPath);
     expect(rtsm?.env.FLEET_CONFIG_PATH).toMatch(/\/rtsm-fleet-tunnel\.json$/);
     expect(rtsm?.env.FLEET_CONFIG_PATH).not.toMatch(/rtsm-fleet-local\.json$/);
+  });
+
+  it('--tunnel → connect-api signs with the fetched fleek LiveKit creds (real cluster A/V)', async () => {
+    // The fleek-creds seam resolved real cluster creds (up.sh's Secrets Manager fetch);
+    // connect-api must sign LiveKit tokens with them, not the local dev key, or the
+    // fleek cluster rejects the tokens and A/V fails.
+    await StackUp.run(['--tunnel', ...WS], config);
+    const connectApi = launches.find((s) => s.id === 'connect-api');
+    expect(connectApi?.env.LIVEKIT_API_KEY).toBe('realkey');
+    expect(connectApi?.env.LIVEKIT_API_SECRET).toBe('realsecret');
+    // topology always points browsers at the fleek dev cluster in tunnel mode.
+    expect(connectApi?.env.FLEEK_TOPOLOGY_JSON).toContain('fleek.wootdev.com');
   });
 
   it('--only programs-api --sandbox demo → programs-api gets IAM_API_URL flip + originate (sandbox_env)', async () => {

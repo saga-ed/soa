@@ -132,14 +132,16 @@ describe('tunnel_env overlay (--tunnel)', () => {
     expect(envFor('saga-dash', TUN).__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBe(`dash.${TD}`);
   });
 
-  it('coach-api: CORS allow-list gains the bare tunnel domain (keeps localhost)', () => {
-    // up.sh coach-api: EXPRESS_SERVER_CORSALLOWEDDOMAINS=$COACH_WEB_HOST,$TUNNEL_DOMAIN
-    // (hostname suffix match ⇒ the bare domain admits coach.<td> and any tunnel label).
-    expect(envFor('coach-api', TUN).EXPRESS_SERVER_CORSALLOWEDDOMAINS).toBe(`localhost,${TD}`);
+  it('coach-api: CORS allow-list appends the BARE tunnel domain, keeping the localhost host', () => {
+    const e = envFor('coach-api', TUN);
+    // up.sh: "$COACH_WEB_HOST,$TUNNEL_DOMAIN" — localhost host retained, bare
+    // domain admits coach.${TD} (api-core hostname match), no per-label enum.
+    expect(e.EXPRESS_SERVER_CORSALLOWEDDOMAINS).toBe(`localhost,${TD}`);
   });
 
-  it('coach-web: browser API URL flips to the tunnel host + vite host allow', () => {
+  it('coach-web: browser-side API URL (label coach-api) + vite host allow (label coach)', () => {
     const e = envFor('coach-web', TUN);
+    // Labels are HARDCODED to up.sh's, NOT the manifest tunnelSlug (coach-web).
     expect(e.PUBLIC_COACH_API_URL).toBe(`https://coach-api.${TD}`);
     expect(e.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBe(`coach.${TD}`);
   });

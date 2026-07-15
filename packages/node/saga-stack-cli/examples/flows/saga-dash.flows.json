@@ -96,6 +96,21 @@
       ]
     },
     {
+      "name": "session-viewer-observations",
+      "description": "Session Viewer QTF + observation-notes PERSISTENCE for observers (the review-surface half of the observer save defect). Rides the journey@schedule end state, then as the Empty Org admin observer: seeds its own QTF rating + general note + a note over sessions-api and a SECOND reviewer's evaluation directly in the sessions DB, opens /session-viewer/<id>, and asserts the observer's prior marks render (own rating + general note + the seeded note), the multi-reviewer CHIP BAR shows both reviewers (the 2nd chip swaps to a read-only view), and that EDITS made from the viewer — an added QTF level plus a tagged and an untagged note — PERSIST across a reload through the real sessions-api read/write. No AV: QTF/notes bind to a scheduled session id independently of the video. Targets a different weekday's session than the concurrent Connect observer flow so their QTF writes don't collide.",
+      "lanes": ["stack"],
+      "progressive": false,
+      "prerequisite": { "flow": "journey", "throughStage": "schedule" },
+      "stages": [
+        {
+          "id": "session-viewer-observations",
+          "project": "session-viewer-observations",
+          "spec": "session-viewer/observations.e2e.test.ts",
+          "requiredSystems": ["saga-dash", "sessions-api", "iam-api", "programs-api"]
+        }
+      ]
+    },
+    {
       "name": "connect-add-student",
       "description": "Add a student to a RUNNING Connect session with no refresh for the room (qboard#145): an admin adds student 2 via the real Edit-tutor-&-students modal; the student's /sessions/now card appears on its own via the 20s poll (#328), then they join and tile into the tutor's multi-view grid (#296). Builds the journey end-state through 'schedule' first. Runs headless with fake media under `ss e2e run`; connect-add-student.sh sets INTERACTIVE_HOLD=1 to hold the windows open for a human.",
       "lanes": ["stack"],

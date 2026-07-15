@@ -53,6 +53,24 @@ export const SPA_REGISTRY: Readonly<Record<string, SpaDescriptor>> = Object.free
     // repo-relative to `appDir` (Playwright runs in `appDir`).
     playwrightConfig: 'playwright.config.ts',
   },
+
+  // ── coach-web (the THIRD-SPA proof, coach e2e/saga-stack-cli parity task) ──
+  // `repoEnvVar: 'COACH'` matches `runtime/repos.ts`'s existing `coach: 'COACH'`
+  // mapping; `system: 'coach-web'` and `defaultRepoSubpath: 'coach'` match the
+  // manifest's `coach-web` service (repo `'COACH'`, `core/manifest/services.ts`).
+  // The real `flows.json` is authored in the coach repo at
+  // `apps/web/coach-web/e2e/flows.json` (not bundled here — coach-web already
+  // has a real Playwright suite, unlike connectv3's placeholder).
+  'coach-web': {
+    id: 'coach-web',
+    system: 'coach-web',
+    repoEnvVar: 'COACH',
+    defaultRepoSubpath: 'coach',
+    appDir: 'apps/web/coach-web',
+    e2eDir: 'apps/web/coach-web/e2e',
+    // repo-relative to `appDir` (Playwright runs in `appDir`).
+    playwrightConfig: 'playwright.config.ts',
+  },
 });
 
 /** Look up a known SPA descriptor by id (undefined if not registered). */

@@ -158,3 +158,8 @@ type staff_org
     define can_view: staff_admin
     define can_edit: staff_admin
     define can_delete: staff_admin
+    # Staff-only trigger for a district's SIS (Clever) sync. Resolves from
+    # staff_admin (org_admin+ staff), NOT any district persona — sis-api's
+    # forceSync gate checks THIS, replacing the placeholder district-admin
+    # `sis:force_clever_sync` persona permission.
+    define can_force_clever_sync: staff_admin

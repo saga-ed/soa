@@ -67,6 +67,7 @@ import {
   generateSlotFleetConfig,
 } from './runtime/index.js';
 import type {
+  CoachWebFs,
   DashFs,
   HealthProber,
   MeshExec,
@@ -178,6 +179,13 @@ export interface StackSeams {
   meshExec: MeshExec;
   portProbe: PortProbe;
   dashFs: DashFs;
+  /**
+   * soa#300: the coach-web `.env.local` prelaunch fs seam — when coach-web is in the
+   * closure, `up` writes `<coachWebRoot>/.env.local` so its browser boots against the
+   * LOCAL mesh. Optional so callers that don't wire it stay byte-identical; the
+   * command builds it from `getCoachWebFs()`.
+   */
+  coachWebFs?: CoachWebFs;
   prober: HealthProber;
   runner: Runner;
   /**
@@ -229,6 +237,14 @@ export function buildStackContext(
   seams: StackSeams,
   delegate: (plan: ScriptPlan) => Promise<number>,
   profile: InstanceProfile = deriveInstance({ slot: 0 }),
+  /**
+   * `e2e run --tunnel`: the resolved `<moniker>.<VMS_BASE>` domain. When present the
+   * runtime flips `tunnel:true`+`tunnelDomain`, which the facade already reads to
+   * write dash `config.local.json`'s url-type localDefaults (`stack-api.ts` →
+   * `syncDashLocalDefaults`); no facade change needed. Absent ⇒ `tunnel:false` (the
+   * pre-tunnel default, byte-identical).
+   */
+  tunnelDomain?: string,
 ): { runtime: Runtime; repoRoots: Record<RepoKey, string> } {
   const ctx: ScriptContext = repoContextFromFlags(flags);
 
@@ -279,9 +295,14 @@ export function buildStackContext(
     meshExec: seams.meshExec,
     portProbe: seams.portProbe,
     dashFs: seams.dashFs,
+    coachWebFs: seams.coachWebFs,
     prober: seams.prober,
     runner: seams.runner,
-    tunnel: false,
+    // --tunnel (Phase 2): a resolved domain flips tunnel mode on so the facade writes
+    // the dash config.local.json url-type localDefaults (up.sh sync_dash_local_defaults
+    // parity). No domain ⇒ the pre-tunnel default (tunnel:false), byte-identical.
+    tunnel: tunnelDomain !== undefined,
+    tunnelDomain,
     delegate,
     // FLIP 3: wire the native-prep seams at EVERY slot (including slot 0) so the e2e's
     // native `StackApi.up` runs R1 build → R2 provision → R3 migrate before launch+seed,
@@ -358,6 +379,17 @@ export function playwrightArgv(
   if (stage?.noDeps) argv.push('--no-deps');
   if (resolved.playwright.grepInvert) argv.push('--grep-invert', resolved.playwright.grepInvert);
   if (resolved.playwright.headed) argv.push('--headed');
+  // Scope the run to the terminal stage's own spec — else Playwright's testMatch
+  // sweeps every spec in the SPA's e2e dir (found running coach-web/dashboard: it
+  // also executed unrelated nav/timer specs). Gated to the single-spawn path only
+  // (no `stage` override): `resolved.playwright.spec` is the TERMINAL stage's spec,
+  // so pushing it during a bake/--from per-stage spawn (`stage.project` overridden
+  // to a non-terminal project) would filter that stage's own project to a spec it
+  // doesn't contain, running zero tests. Progressive flows' per-stage `project`s are
+  // already testMatch-scoped to their own spec by the SPA's Playwright config, so
+  // they don't need this — it's specifically for single-project SPAs like coach-web
+  // where one `chromium` project matches every spec in the dir.
+  if (!stage && resolved.playwright.spec) argv.push(resolved.playwright.spec);
   argv.push(...passthrough);
   return argv;
 }
@@ -369,12 +401,16 @@ export function playwrightArgv(
  * URL as `process.env.PLAYWRIGHT_<X>_URL ?? http://localhost:<base port>`, and the
  * Playwright config's `baseURL` is `PLAYWRIGHT_BASE_URL ?? http://localhost:8900`.
  * By injecting each key from `launchContext.ports[svc]` (= manifest base + slot
- * offset), a slot-1 journey drives saga-dash on :9900 and hits iam :4010 /
- * scheduling :4008 / sessions :4007 / … instead of slot 0's base ports. Keyed to
- * the exact env vars `lane.ts` consumes today (nothing invented).
+ * offset), a slot-1 journey drives the SPA frontend on its offset port and hits
+ * iam :4010 / scheduling :4008 / sessions :4007 / … instead of slot 0's base
+ * ports. Keyed to the exact env vars `lane.ts` consumes today (nothing invented).
+ *
+ * `PLAYWRIGHT_BASE_URL` has no fixed `ServiceId` here — it must resolve to
+ * WHICHEVER SPA's flow is running (`resolved.spa.system`), not always saga-dash.
+ * `serviceUrlEnv`/`playwrightEnv` take that id as a param and default to
+ * `'saga-dash'` only when the caller has no spa context (back-compat).
  */
 export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = Object.freeze({
-  PLAYWRIGHT_BASE_URL: 'saga-dash', // the dash frontend origin (Playwright `baseURL`)
   PLAYWRIGHT_IAM_URL: 'iam-api',
   PLAYWRIGHT_SIS_URL: 'sis-api',
   PLAYWRIGHT_PROGRAMS_URL: 'programs-api',
@@ -389,6 +425,9 @@ export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = O
   PLAYWRIGHT_CONNECT_API_URL: 'connect-api',
 });
 
+/** `PLAYWRIGHT_BASE_URL`'s `ServiceId` when no SPA context is available (back-compat). */
+const DEFAULT_BASE_URL_SERVICE: ServiceId = 'saga-dash';
+
 /**
  * Build the stack-lane service-URL env from RESOLVED ports (each = manifest base +
  * slot offset). At slot 0 the ports are the base ports, so this yields the SAME
@@ -396,12 +435,87 @@ export const PLAYWRIGHT_SERVICE_URL_ENV: Readonly<Record<string, ServiceId>> = O
  * carries the `N * 1000` offset. Derived from `launchContext.ports` — never a
  * hardcoded port — so a re-banded/remapped service slots for free. A service with
  * no resolved port is omitted rather than emitting `localhost:undefined`.
+ *
+ * `baseUrlService` picks WHICH service backs `PLAYWRIGHT_BASE_URL` — the running
+ * flow's own SPA frontend (`resolved.spa.system`), defaulting to saga-dash when
+ * the caller has none.
  */
-export function serviceUrlEnv(ports: Partial<Record<ServiceId, number>>): Record<string, string> {
+export function serviceUrlEnv(
+  ports: Partial<Record<ServiceId, number>>,
+  baseUrlService: ServiceId = DEFAULT_BASE_URL_SERVICE,
+): Record<string, string> {
   const env: Record<string, string> = {};
+  const basePort = ports[baseUrlService];
+  if (basePort !== undefined) env.PLAYWRIGHT_BASE_URL = `http://localhost:${basePort}`;
   for (const [key, svc] of Object.entries(PLAYWRIGHT_SERVICE_URL_ENV)) {
     const port = ports[svc];
     if (port !== undefined) env[key] = `http://localhost:${port}`;
+  }
+  return env;
+}
+
+/**
+ * The `ServiceId` → `tunnel.sh` HOSTNAME LABEL map for `e2e run --tunnel`. Under
+ * `--tunnel` the Playwright browser is a REMOTE peer (opened on another box through
+ * the vms rendezvous), so it can't reach `localhost:<port>` — every service URL must
+ * become `https://<label>.<domain>` where `<label>` is the vendored tunnel.sh
+ * SERVICES key (`vendor/tunnel.sh`, the frpc reverse-tunnel table).
+ *
+ * The label is NOT string-derivable from the ServiceId: `saga-dash→dash` /
+ * `connect-web→connect` / `ads-adm-api→ads-adm` are renames; `iam-api`/`sis-api`/
+ * `programs-api`/`scheduling-api`/`sessions-api` drop the `-api` suffix; but
+ * `connect-api→connect-api` KEEPS it. So this is an explicit table keyed 1:1 to the
+ * `PLAYWRIGHT_SERVICE_URL_ENV` ServiceIds (a drift guard test asserts every URL-env
+ * ServiceId has an entry here and each label is a real tunnel.sh SERVICES entry).
+ */
+export const TUNNEL_SERVICE_LABELS: Readonly<Record<ServiceId, string>> = Object.freeze({
+  'saga-dash': 'dash',
+  'iam-api': 'iam',
+  'sis-api': 'sis',
+  'programs-api': 'programs',
+  'scheduling-api': 'scheduling',
+  'sessions-api': 'sessions',
+  'ads-adm-api': 'ads-adm',
+  'connect-web': 'connect',
+  'connect-api': 'connect-api',
+} as Record<ServiceId, string>);
+
+/**
+ * A generous WAN timeout (ms) exported as `PLAYWRIGHT_TUNNEL_TIMEOUT_MS` when
+ * `e2e run --tunnel` is active. The stack services still bind localhost (the prober
+ * needs no bump), but the Playwright BROWSER hairpins over the WAN to
+ * `https://<label>.<domain>` through the frps rendezvous box, so navigation/action
+ * round-trips are far slower than a localhost run. 120s is a deliberately roomy
+ * ceiling for that hop. CROSS-REPO: the value is CONSUMED in saga-dash's
+ * `playwright.config.ts` (read into `use.navigationTimeout`/`actionTimeout`/`timeout`)
+ * — NOT in this package — so the exact env name + ms budget must be confirmed there.
+ */
+export const TUNNEL_PLAYWRIGHT_TIMEOUT_MS = 120_000;
+
+/**
+ * The tunnel-mode variant of `serviceUrlEnv`: every `PLAYWRIGHT_*_URL` key becomes
+ * `https://<label>.<domain>` (the frpc reverse-tunnel host) instead of
+ * `http://localhost:<port>`. Used ONLY on the stack lane when `--tunnel` supplied a
+ * `<moniker>.<VMS_BASE>` domain — a remote browser reaches the local stack through
+ * the vms box. Keyed to the SAME env vars `lane.ts` consumes; the label per ServiceId
+ * comes from `TUNNEL_SERVICE_LABELS`.
+ */
+export function tunnelServiceUrlEnv(
+  domain: string,
+  baseUrlService: ServiceId = DEFAULT_BASE_URL_SERVICE,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  // `PLAYWRIGHT_BASE_URL` is NOT in `PLAYWRIGHT_SERVICE_URL_ENV` — it has no fixed
+  // ServiceId (it follows the running flow's SPA). It must still be tunnelled: this
+  // map-walk alone would leave a --tunnel run with NO baseURL, and the browser would
+  // fall back to `localhost:8900` while every other URL is an https tunnel host —
+  // silently defeating `e2e connect --tunnel` (soa#298), whose whole point is that a
+  // REMOTE peer can reach the stack. Emit it explicitly from the flow's own SPA.
+  const baseLabel = TUNNEL_SERVICE_LABELS[baseUrlService];
+  if (baseLabel !== undefined) env.PLAYWRIGHT_BASE_URL = `https://${baseLabel}.${domain}`;
+  for (const [key, svc] of Object.entries(PLAYWRIGHT_SERVICE_URL_ENV)) {
+    const label = TUNNEL_SERVICE_LABELS[svc];
+    if (label !== undefined) env[key] = `https://${label}.${domain}`;
   }
   return env;
 }
@@ -419,6 +533,11 @@ export function serviceUrlEnv(ports: Partial<Record<ServiceId, number>>): Record
  * service URLs are the lane's own hostnames (resolved in `lane.ts`), NOT localhost,
  * so we do NOT inject them. `now` is supplied by the command (`new Date()`); this
  * never reads the clock.
+ *
+ * `PLAYWRIGHT_BASE_URL` is derived from `resolved.spa.system` — the flow's OWN
+ * SPA frontend — not hardcoded to saga-dash, else a non-dash flow's Playwright
+ * run navigates to saga-dash's port and 500s (found running coach-web's
+ * `dashboard` flow: it opened `:8900`, saga-dash's port, instead of coach-web's).
  */
 export function playwrightEnv(
   resolved: ResolvedFlow,
@@ -434,6 +553,23 @@ export function playwrightEnv(
    * `PLAYWRIGHT_*_URL` keys.
    */
   dateOverrides?: Record<string, string>,
+  /**
+   * Exploratory-review capture (`e2e run --capture`, docs/e2e-review.md):
+   * inject `PLAYWRIGHT_CAPTURE=all`, the knob the SPA's stack config already
+   * honours (per-action trace + video on EVERY test, not just retried
+   * failures). Omitted (default) ⇒ the env is byte-identical to today.
+   */
+  capture?: boolean,
+  /**
+   * `e2e run --tunnel`: the resolved `<moniker>.<VMS_BASE>` tunnel domain. When
+   * present (stack lane only), the `PLAYWRIGHT_*_URL` keys are re-pointed at the
+   * frpc reverse-tunnel hosts (`https://<label>.<domain>`) so a REMOTE browser can
+   * reach the local stack, and `PLAYWRIGHT_TUNNEL_TIMEOUT_MS` is exported for the
+   * SPA's Playwright config to widen its WAN timeouts. Overlaid AFTER the
+   * localhost/offset service URLs so tunnel always wins for those keys. Absent ⇒ the
+   * env is byte-identical to today.
+   */
+  tunnelDomain?: string,
 ): Record<string, string> {
   // The date env (with `flow.env` merged LAST inside `computeEnv`) comes first, so
   // a flow's own env keeps winning for the occurrence-date clamp. Then, on the
@@ -442,11 +578,16 @@ export function playwrightEnv(
   // service URL can never point slot > 0 back at slot 0's base port (same
   // split-brain class as the dash config.local.json offset). On a deployed lane
   // the service URLs are the lane's own hostnames (resolved in `lane.ts`), so we
-  // do NOT inject/override them.
+  // do NOT inject/override them. Under --tunnel the tunnel HOSTS overlay LAST (over
+  // the localhost URLs) so a remote browser hairpins through the vms box; --tunnel
+  // is slot-0-only, so it never combines with the slot offset.
   const env: Record<string, string> = {
     ...computeEnv(resolved.flow, now),
     ...(dateOverrides ?? {}),
-    ...(lane === 'stack' && ports ? serviceUrlEnv(ports) : {}),
+    ...(lane === 'stack' && ports ? serviceUrlEnv(ports, resolved.spa?.system) : {}),
+    ...(lane === 'stack' && tunnelDomain ? tunnelServiceUrlEnv(tunnelDomain, resolved.spa?.system) : {}),
+    ...(capture === true ? { PLAYWRIGHT_CAPTURE: 'all' } : {}),
+    ...(tunnelDomain ? { PLAYWRIGHT_TUNNEL_TIMEOUT_MS: String(TUNNEL_PLAYWRIGHT_TIMEOUT_MS) } : {}),
   };
   if (lane !== 'stack') env.PLAYWRIGHT_LANE = lane;
   return env;
@@ -513,6 +654,30 @@ export interface DescribeOptions {
    * literal-port playback-trio backends that would collide with slot 0. Empty at slot 0.
    */
   excluded?: Set<ServiceId>;
+  /** Exploratory-review capture (`--capture`) — surfaces PLAYWRIGHT_CAPTURE in the projected env. */
+  capture?: boolean;
+  /**
+   * `e2e run --tunnel`: the resolved `<moniker>.<VMS_BASE>` domain — threaded into the
+   * projected Playwright env so `--tunnel --dry-run` prints the `https://<label>.<domain>`
+   * service URLs (+ `PLAYWRIGHT_TUNNEL_TIMEOUT_MS`) instead of the localhost ones.
+   */
+  tunnelDomain?: string;
+}
+
+/**
+ * Additive seed (no reset): the flow's end-state was built by a PREREQUISITE
+ * (so `reset` is false) yet it declares a `seed` whose steps must run ON TOP —
+ * e.g. connect-content publishes its poll into content-api, which the journey
+ * prerequisite never seeds. Deliberately EXCLUDES the checkpoint (`--from`) case:
+ * there the restore IS the state source, so re-seeding would wipe the DBs the
+ * restore just filled (a `--from` window never seeds). `--from` and a prerequisite
+ * are mutually exclusive (resolve.ts), so keying on `prerequisite` alone is exact.
+ * Also excluded under --skip-reset (the caller then wants pure state reuse).
+ * The single source of truth for both the executor (§2c) and the --dry-run projection.
+ */
+export function isAdditiveSeed(resolved: ResolvedFlow, skipReset: boolean): boolean {
+  const effectiveReset = resolved.reset && !skipReset;
+  return !effectiveReset && !skipReset && !!resolved.seedSelection && !!resolved.prerequisite;
 }
 
 /**
@@ -524,7 +689,7 @@ export interface DescribeOptions {
 export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions): ResolvedFlowDescription {
   // Computed ONCE; `env` below carries the same date keys (playwrightEnv wraps
   // computeEnv), so occurrenceDate reads from it instead of recomputing.
-  const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports);
+  const env = playwrightEnv(resolved, opts.now, opts.lane, opts.ports, undefined, opts.capture, opts.tunnelDomain);
   const effectiveReset = resolved.reset && !opts.skipReset;
   // Drop the slot's excluded services (literal-port playback-trio backends) from the
   // closure so the dry-run matches what a `--slot N` run actually brings up. Empty
@@ -532,7 +697,7 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
   const excluded = opts.excluded ?? new Set<ServiceId>();
   const services = resolved.closure.services.filter((id) => !excluded.has(id));
   const seed =
-    effectiveReset && resolved.seedSelection
+    (effectiveReset || isAdditiveSeed(resolved, opts.skipReset)) && resolved.seedSelection
       ? (() => {
           const plan = composeSeedPlan(resolved.seedSelection, new Set(services), new Set<ServiceId>());
           return {
@@ -577,9 +742,10 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
           ...opts,
           passthrough: [],
           skipReset: false,
-          // --to/--hold apply to the MAIN flow only, never the prerequisite build.
+          // --to/--hold/--capture apply to the MAIN flow only, never the prerequisite build.
           to: undefined,
           hold: false,
+          capture: undefined,
         })
       : null,
     checkpoint: resolved.checkpoint
@@ -652,6 +818,13 @@ export interface ExecDeps {
    */
   ports?: Partial<Record<ServiceId, number>>;
   /**
+   * `e2e run --tunnel`: the resolved `<moniker>.<VMS_BASE>` domain — threaded into the
+   * Playwright child env so a REMOTE browser drives the `https://<label>.<domain>`
+   * tunnel hosts (+ `PLAYWRIGHT_TUNNEL_TIMEOUT_MS`) instead of localhost. Slot-0-only
+   * (guarded at the command). Rides the prerequisite recursion via `deps`.
+   */
+  tunnelDomain?: string;
+  /**
    * Services excluded from THIS slot's bring-up (`profile.excludedServices`).
    * Filtered out of the closure before up/reset/seed/verify. Empty at slot 0.
    */
@@ -663,6 +836,23 @@ export interface ExecDeps {
    * (the second caller, `e2e connect`, never sets it).
    */
   checkpoints?: CheckpointStore;
+  /**
+   * Exploratory-review preservation hook (docs/e2e-review.md): called after
+   * EVERY Playwright spawn that warrants preservation — every spawn of a
+   * `--capture` run, and any RED spawn regardless (whatever artifacts exist:
+   * retry traces, failure screenshots, error context). Playwright wipes
+   * test-results/ at the next run's start, so this must fire per spawn (the
+   * per-stage ladder and a prerequisite's replay each wipe the previous
+   * spawn's artifacts). Rides down the prerequisite recursion via `deps`, so
+   * a red prerequisite replay is preserved too. Absent ⇒ no preservation
+   * (the second caller, `e2e connect`, never sets it).
+   */
+  preserveTraces?: (frame: {
+    appCwd: string;
+    spaId: string;
+    flowName: string;
+    stages: readonly { id: string; project: string }[];
+  }) => void | Promise<void>;
 }
 
 /** Per-run knobs. */
@@ -693,6 +883,14 @@ export interface ExecOptions {
    * true at the command layer (`--no-prereq-from-snapshot` opts out).
    */
   prereqFromSnapshot?: boolean;
+  /**
+   * Exploratory-review capture (`--capture`): inject `PLAYWRIGHT_CAPTURE=all`
+   * into the Playwright child and preserve EVERY spawn's artifacts (not just
+   * red ones). Kept in OPTIONS so the prerequisite recursion (which rebuilds
+   * opts) never inherits it — a prerequisite is a build step, not the thing
+   * under review; its red spawns are still preserved via the deps hook.
+   */
+  capture?: boolean;
 }
 
 /**
@@ -855,6 +1053,17 @@ export async function executeResolvedFlow(
         const seeded = await deps.api.seed(plan);
         if (!seeded.ok) throw new FlowExecError(`seed failed at ${seeded.failed}`);
       }
+    } else if (resolved.seedSelection && isAdditiveSeed(resolved, opts.skipReset)) {
+      // 2c. Additive seed (no reset): run the flow's declared seed ON TOP of the
+      // prerequisite-built state — e.g. connect-content publishes its legacy poll
+      // into content-api, which the journey prerequisite never seeds (content-api
+      // isn't in journey's closure). Flow authors MUST scope such a seed (`only` /
+      // `perSystem`, as connect-content does with only:['content-api']) so it can't
+      // clobber the prerequisite-built state.
+      deps.log('==> additive seed (no reset)');
+      const plan = composeSeedPlan(resolved.seedSelection, new Set(activeServices), new Set<ServiceId>());
+      const seeded = await deps.api.seed(plan);
+      if (!seeded.ok) throw new FlowExecError(`additive seed failed at ${seeded.failed}`);
     } else if (!resolved.checkpoint) {
       deps.log('==> skip reset/seed (reuse current stack state)');
     }
@@ -898,7 +1107,7 @@ export async function executeResolvedFlow(
         [ENV_TERM_END]: restoredDates.termEnd,
       }
     : undefined;
-  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports, dateOverrides);
+  const env = playwrightEnv(resolved, deps.now, opts.lane, deps.ports, dateOverrides, opts.capture, deps.tunnelDomain);
 
   const spawn = async (stage?: { project: string; noDeps: boolean }): Promise<number> => {
     const argv = playwrightArgv(resolved, opts.passthrough, stage);
@@ -913,12 +1122,31 @@ export async function executeResolvedFlow(
     return code;
   };
 
+  // Exploratory-review preservation (docs/e2e-review.md): after EVERY spawn a
+  // --capture run made, and after any RED spawn regardless (the failure
+  // artifacts Playwright would wipe at the next run's start). Must run per
+  // spawn — the per-stage ladder and any later spawn wipe test-results/.
+  const preserveAfter = async (code: number): Promise<void> => {
+    if (deps.preserveTraces === undefined) return;
+    if (opts.capture !== true && code === 0) return;
+    await deps.preserveTraces({
+      appCwd: deps.appCwd,
+      spaId: resolved.spa.id,
+      flowName: resolved.flow.name,
+      stages: resolved.stages.map((s) => ({ id: s.id, project: s.project })),
+    });
+  };
+
   // Default path: ONE spawn with the terminal project — Playwright's config-side
   // dependency chain replays 1..N (byte-identical to pre-M14). The per-stage
   // ladder exists ONLY for M14: baking needs a checkpoint between stages, and a
   // --from window must NOT let the dependency chain replay the restored prefix.
   const perStage = opts.snapshotStages === true || resolved.checkpoint !== undefined;
-  if (!perStage) return spawn();
+  if (!perStage) {
+    const code = await spawn();
+    await preserveAfter(code);
+    return code;
+  }
 
   if (opts.snapshotStages === true && deps.checkpoints === undefined) {
     throw new FlowExecError('--snapshot-stages requires the checkpoint store (internal wiring error)');
@@ -931,6 +1159,7 @@ export async function executeResolvedFlow(
     // chain (--no-deps) so earlier stages are never replayed.
     const isFlowFirst = resolved.flow.stages[0]?.id === stage.id;
     const code = await spawn({ project: stage.project, noDeps: !isFlowFirst });
+    await preserveAfter(code);
     if (code !== 0) {
       // No checkpoint for a red stage — and stop the ladder (later checkpoints
       // would capture state the failed stage never produced).

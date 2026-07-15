@@ -12,6 +12,7 @@ vi.mock('../../src/ec2/volumes.js', () => ({
     cleanup_volume: vi.fn(() => true),
     get_instance_metadata: vi.fn(() => ({
         instance_id: 'i-test', az: 'us-west-2a', region: 'us-west-2',
+        private_ip: '10.3.142.176',
     })),
 }));
 vi.mock('../../src/ec2/ports.js', () => ({
@@ -40,6 +41,7 @@ vi.mock('child_process', () => ({
 import { spawnSync } from 'child_process';
 import { create_volume, cleanup_volume } from '../../src/ec2/volumes.js';
 import { release_port } from '../../src/ec2/ports.js';
+import { register } from '../../src/ec2/cloudmap.js';
 import { create_ec2_router } from '../../src/ec2/ec2-router.js';
 
 function create_test_server(router_options) {
@@ -91,6 +93,39 @@ describe('POST /dbs provision race + rollback', () => {
         expect(status).toBe(200);
         expect(data).toMatchObject({ ok: true, name: 'svc-pr-1', volumeId: 'vol-test123' });
         expect(existsSync(join(projects_dir, 'svc-pr-1'))).toBe(true);
+    });
+
+    it('registers the CloudMap A-record with the IMDS private IP, not `hostname -I`', async () => {
+        // Regression guard: the register IP must come from the instance-identity
+        // document (eth0 private IP), never from `hostname -I`, whose first entry
+        // can be a docker-compose bridge gateway (192.168.x/172.x) on a busy
+        // db-host node → an unreachable A-record. See volumes.js private_ip.
+        // The create route stands in for all four register sites (create/sync/
+        // start/hydrate), which share the identical `get_instance_metadata().
+        // private_ip` expression — a reverted site would break them together.
+        const ns_server = await create_test_server({
+            projects_dir, data_dir,
+            registry_path: join(data_dir, 'ports.json'),
+            namespace_id: 'ns-test',
+        });
+        try {
+            const { status } = await api(ns_server.base_url, 'POST', '/dbs', {
+                name: 'svc-pr-ns', engine: 'postgres',
+            });
+            expect(status).toBe(200);
+            expect(register).toHaveBeenCalledWith(
+                expect.objectContaining({ name: 'svc-pr-ns', ip: '10.3.142.176' }),
+            );
+            // And never registers a bridge/loopback address. NB: this rejects
+            // all of 172.16/12 — fine for the fleet's 10/8 VPC, but a default
+            // AWS VPC (172.31/16) would carry a legitimate eth0 IP in that range,
+            // so tighten this guard if the fleet ever moves off 10/8 addressing.
+            for (const [{ ip }] of register.mock.calls) {
+                expect(ip).not.toMatch(/^(192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/);
+            }
+        } finally {
+            await ns_server.close();
+        }
     });
 
     it('409s a duplicate provision without touching AWS (name reserved before create)', async () => {

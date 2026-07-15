@@ -22,6 +22,8 @@ export interface PwArgvOptions {
   noDeps?: boolean;
   /** Append `--grep-invert <tag>` (pipeline runs exclude e.g. `@interactive`). */
   grepInvert?: string;
+  /** Append the terminal stage's `spec` (scopes the run to just that spec file). */
+  spec?: string;
 }
 
 /** Build the expected `pnpm` args array for a spawned Playwright child. */
@@ -30,5 +32,6 @@ export function pwArgv(opts: PwArgvOptions): string[] {
   if (opts.noDeps) argv.push('--no-deps');
   if (opts.grepInvert !== undefined) argv.push('--grep-invert', opts.grepInvert);
   if (opts.headed) argv.push('--headed');
+  if (opts.spec !== undefined) argv.push(opts.spec);
   return argv;
 }

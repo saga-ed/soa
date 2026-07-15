@@ -4,6 +4,10 @@ Everything here uses the `ss` CLI (already on your PATH; `node bin/dev.js` from
 `~/dev/soa/packages/node/saga-stack-cli` is the equivalent if it isn't). Every
 command is copy-pasteable. Nothing here requires up.sh.
 
+**Reviewing or debugging a run** (watch/step-through/hold/iterate/review —
+the technique ladder, plus `--capture` / `ss e2e traces`):
+[e2e-review.md](e2e-review.md).
+
 **See what exists at any moment:**
 
 ```bash
@@ -31,6 +35,11 @@ ss e2e list          # every SPA, flow, and stage — plus checkpoint freshness
   know when they're stale (`ss e2e list` shows `[checkpoint: re-bake]`).
 - A **prerequisite** flow (ads-adm, connect) needs journey state first — it
   restores journey's checkpoint automatically instead of replaying it.
+- An **additive seed** lets a prerequisite flow (`reset: false`) that *also*
+  declares a `seed` run that seed ON TOP of the restored journey state — e.g.
+  `connect-content` / `connect-nav-lock` publishing their poll into content-api,
+  which journey itself never seeds. Skipped under `--skip-reset`, and never on a
+  `--from` checkpoint (the restore is the state source).
 - A **slot** is an isolated stack instance (`--slot 1..9`, offset ports).
   Slot 0 is your default stack. You never need a slot for a first run.
 
@@ -101,14 +110,14 @@ for the general pattern.
 ### 4. connect-session — manual/AV only
 
 ```bash
-ss e2e connect              # RESTORES the journey@schedule checkpoint (when baked),
+ss develop connect              # RESTORES the journey@schedule checkpoint (when baked),
                             # else replays journey headless, then opens the headed
                             # interactive room (holds via page.pause)
-ss e2e connect --reuse      # skip the state rebuild; use the current stack
-ss e2e connect --refresh-snapshot   # re-bake journey@schedule FRESH, then open the room
+ss develop connect --reuse      # skip the state rebuild; use the current stack
+ss develop connect --refresh-snapshot   # re-bake journey@schedule FRESH, then open the room
 ```
 
-`ss e2e connect` restores the `flow-saga-dash-journey-s5-schedule` checkpoint
+`ss develop connect` restores the `flow-saga-dash-journey-s5-schedule` checkpoint
 instead of replaying journey 1..5 headless — the big accelerant — falling back to
 the full replay when nothing is baked (`--no-prereq-from-snapshot` forces the
 replay). Bake it once with `ss e2e run saga-dash/journey --through schedule
@@ -232,7 +241,7 @@ ss e2e run saga-dash/ads-adm-attendance --headless          # 2. persistence
 ss e2e run saga-dash/scheduling-topology --headless         # 3. realization
 ss e2e run saga-dash/journey --through pods --headed        # 4. watch one headed
 ss e2e run saga-dash/journey --from schedule --to schedule --hold   # 5. drive one by hand
-ss e2e connect                                              # 6. live room (mic/cam)
+ss develop connect                                              # 6. live room (mic/cam)
 ss stack down                                               # 7. tidy up
 ```
 

@@ -14,7 +14,7 @@ you have to reverse-engineer.
 > path (up → status → verify → e2e → down) with the real output of each command, linking out
 > to per-feature docs ([sub-stacks](./docs/sub-stacks-and-bundles.md) · [slots](./docs/slots.md) ·
 > [verify](./docs/verify.md) · [snapshots](./docs/snapshots.md) · [e2e](./docs/e2e.md) ·
-> [integration](./docs/integration.md)).
+> [develop](./docs/develop.md) · [tunnel](./docs/tunnel.md) · [integration](./docs/integration.md)).
 
 ```bash
 ss stack up --only scheduling-api,sessions-api   # boot just those + their deps
@@ -108,12 +108,23 @@ E2e scenarios are **data** (`flows.json`), not hardcoded bash.
 | --- | --- |
 | **`run`** | `ss e2e run <spa>/<flow>` → discover the flow → compute just the stack it needs → seed → run Playwright. `--through <stage>` runs a prefix of a progressive flow; `--headless`. |
 | **`list`** | Discoverable SPAs, their flows, and stages. |
-| **`connect`** | Open a live interactive Connect session (1 tutor + 2 students). |
+| **`traces`** | List preserved e2e run traces (newest first) with paste-ready show-trace commands. |
 
 Onboarding a new SPA or scenario is a registry row + a `flows.json` entry (progressive
 multi-stage journeys, prerequisites, foreground/AV markers, per-stage `requiredSystems`) —
 **zero new orchestration code**. A clamped occurrence-date is injected so weekend runs don't
 flake.
+
+## `ss develop …` — concierge stacks for hands-on work
+
+Where `e2e` *runs test flows*, `develop` *sets up + hands off* a developable stack: bring up
+the closure, reset + seed it, then drop you into a running app to drive by hand.
+
+| Command | What it does |
+| --- | --- |
+| **`connect`** | Open a live interactive Connect session (1 tutor + 2 students). Migrated from `e2e connect` (the old id still works with a deprecation warning). |
+
+→ [docs/develop.md](./docs/develop.md)
 
 ## Architecture
 

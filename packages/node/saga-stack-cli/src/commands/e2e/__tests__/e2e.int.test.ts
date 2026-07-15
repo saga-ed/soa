@@ -28,7 +28,7 @@ import { pwArgv } from '../../../__tests__/helpers/pw.js';
 import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import E2eRun from '../run.js';
 import E2eList from '../list.js';
-import E2eConnect from '../connect.js';
+import E2eConnect from '../../develop/connect.js';
 
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
@@ -169,7 +169,9 @@ describe('e2e run — native orchestration (stack lane)', () => {
     // VARIANT argv (T5): differs from run.int's golden literal pin only in the
     // project — built with the shared pwArgv (the literal shape protection
     // lives in run.int.test.ts's happy-path anchor).
-    expect(pw[0].args).toEqual(pwArgv({ project: 'stage-1-roster', grepInvert: '@interactive' }));
+    expect(pw[0].args).toEqual(
+      pwArgv({ project: 'stage-1-roster', grepInvert: '@interactive', spec: 'roster/csv-upload-view.e2e.test.ts' }),
+    );
     expect(pw[0].env?.PLAYWRIGHT_OCCURRENCE_DATE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(pw[0].stdio).toBe('inherit');
   });
@@ -263,5 +265,20 @@ describe('e2e connect — foreground connect-session entry', () => {
     const pw = playwrightRuns();
     expect(pw[1].args).toContain('interactive-connect');
     expect(pw[1].env?.FAKE_MEDIA).toBeUndefined();
+  });
+
+  it('--tunnel: the headed interactive-connect session drives the https tunnel hosts (soa#298)', async () => {
+    // Never spawn the vendored tunnel.sh — inject a fixed moniker (run.int.test.ts pattern).
+    vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
+      (async () => 'testmoniker') as never,
+    );
+    await E2eConnect.run(['--tunnel', ...ws()], config);
+    // The live session's env carries the tunnel URLs — proving tunnelDomain reached the
+    // executeResolvedFlow deps (and buildStackContext) for the headed interactive run.
+    const live = playwrightRuns().find((r) => r.args.includes('interactive-connect'));
+    // dash is the non-derivable rename for saga-dash; <label>.<moniker>.<VMS_BASE>.
+    expect(live?.env?.PLAYWRIGHT_BASE_URL).toMatch(/^https:\/\/dash\.testmoniker\./);
+    expect(live?.env?.PLAYWRIGHT_BASE_URL).not.toContain('localhost');
+    expect(live?.env?.PLAYWRIGHT_TUNNEL_TIMEOUT_MS).toMatch(/^\d+$/);
   });
 });

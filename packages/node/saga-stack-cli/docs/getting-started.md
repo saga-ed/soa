@@ -13,6 +13,38 @@ real output. For the detail behind each feature, follow the peer-doc links at th
 
 ---
 
+## 0. Get the sibling repos (first machine only)
+
+`ss` drives a fleet of sibling repos checked out under a shared parent (`~/dev` by default).
+Already have them? Skip to **Install**. Starting from an empty `~/dev` — or unsure you have
+them all — run `clone-repos.sh`: it clones whichever of the required repos are missing and
+reports the ones you already have. It needs only an authenticated [`gh`](https://cli.github.com)
+and no checkout, so you can pipe it straight from the GitHub API before anything is local:
+
+```bash
+gh api -H 'Accept: application/vnd.github.raw' \
+  /repos/saga-ed/soa/contents/packages/node/saga-stack-cli/scripts/clone-repos.sh | bash
+```
+
+<details><summary>Reports each repo present / cloned; <code>--dry-run</code> previews, <code>--with-optional</code> adds coach + fleek</summary>
+
+```
+$ ./clone-repos.sh --dry-run
+→ sibling-repo parent: /home/you/dev
+✓ soa                  present  → /home/you/dev/soa
+→ rostering            would clone → /home/you/dev/rostering
+...
+→ dry run: 1 present, 6 to clone, 0 skipped
+```
+
+Idempotent — safe to re-run when a new repo joins the fleet. It does **not** install deps or
+build; that's the next two steps. `DEV=~/work ./clone-repos.sh` uses a non-default parent.
+`ss stack bootstrap` and `cold-start` also clone missing siblings, but over SSH and only once
+`ss` itself is built — this script is the bare-machine bootstrap that comes before that.
+</details>
+
+---
+
 ## 1. Install
 
 Install workspace deps from the monorepo root (once), then build the CLI and put it on your PATH:
@@ -264,7 +296,8 @@ ss e2e run saga-dash/journey --through sessions --headless
 ```
 
 `--through <stage>` runs a prefix of a progressive flow. See **[e2e.md](./e2e.md)** for
-authoring flows, `e2e list`, and `e2e connect` (live interactive Connect session).
+authoring flows and `e2e list`, and **[develop.md](./develop.md)** for `develop connect`
+(live interactive Connect session).
 </details>
 
 ---
@@ -483,12 +516,14 @@ and **[worktree-sets.md](./worktree-sets.md)**.
 
 ## Peer docs
 
+- **[cheatsheet.md](./cheatsheet.md)** — the dense one-liner reference for every command (this page, narrated → that page, terse)
 - **[sub-stacks-and-bundles.md](./sub-stacks-and-bundles.md)** — `--only` closures, `--with` bundles, seeding
 - **[slots.md](./slots.md)** — `--slot N`: multiple isolated stacks on one box
 - **[worktree-sets.md](./worktree-sets.md)** — `--set <name>`: named repo→worktree maps on slots (parallel dev contexts, per-worktree flows, build-collision guard)
 - **[verify.md](./verify.md)** — the health / data / source-posture checks (and what fails vs warns)
 - **[snapshots.md](./snapshots.md)** — store/restore DB fixtures instead of re-seeding
-- **[e2e.md](./e2e.md)** — flows-as-data, `e2e run`/`list`/`connect`
+- **[e2e.md](./e2e.md)** — flows-as-data, `e2e run`/`list`/`traces`
+- **[develop.md](./develop.md)** — `develop <app>`: concierge stacks that set up + hand off a running app (`develop connect`)
 - **[e2e-flows.md](./e2e-flows.md)** — the browsable flow worlds (hermetic-flow viewer)
 - **[integration.md](./integration.md)** — `overlay` (in-flight PRs), `bootstrap`, `login`, `tunnel`
 - **[cold-start.md](./cold-start.md)** — `cold-start`: the destructive clean-slate baseline (docker wipe → repos to main → clean build → `.env` → up)

@@ -16,7 +16,7 @@ function run(cmd, args, options = {}) {
 
 /**
  * Get EC2 instance metadata via IMDSv2.
- * @returns {{ instance_id: string, az: string, region: string }}
+ * @returns {{ instance_id: string, az: string, region: string, private_ip: string }}
  */
 export function get_instance_metadata() {
     const token = run('curl', [
@@ -36,6 +36,13 @@ export function get_instance_metadata() {
         instance_id: identity.instanceId,
         az: identity.availabilityZone,
         region: identity.region,
+        // The node's eth0 private IP, straight from the instance-identity
+        // document. This is the authoritative fleet-network address to register
+        // in CloudMap — unlike `hostname -I`, it is never a docker-compose
+        // bridge gateway (192.168.x/172.x), which on a busy db-host node with
+        // many compose networks would otherwise get picked up and registered as
+        // an unreachable A-record.
+        private_ip: identity.privateIp,
     };
 }
 

@@ -83,8 +83,12 @@ fast with a `re-bake with a wider --through` error instead of half-restoring.
 - **e2e stage checkpoints** — mid-flow e2e state (`flow-<spa>-<flow>-s<N>-<stage>` fixtures,
   baked by `e2e run --snapshot-stages`, restored by `--from`); `snapshot list` shows their
   flow provenance as a sub-line. See [e2e → Stage checkpoints](./e2e.md#stage-checkpoints--skip-the-replay-m14).
+- **tunnel-mode bridge** — build launchable state under localhost, snapshot, then restore it under
+  the tunnel cookie domain (`ss stack snapshot` covers all 10 pg DBs + `connectv3` mongo, so
+  sessions survive the bridge; the legacy `mesh-fixture-cli` omitted `sessions`). See
+  [tunnel.md → the snapshot bridge](./tunnel.md#seed-launchable-connect-sessions--the-snapshot-bridge).
 
-← [verify](./verify.md) · [e2e →](./e2e.md)
+← [verify](./verify.md) · [e2e →](./e2e.md) · [tunnel →](./tunnel.md)
 
 ## Porting legacy mesh-fixture fixtures (e.g. `iam-small`, soa#194)
 

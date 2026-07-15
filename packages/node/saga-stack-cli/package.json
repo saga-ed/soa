@@ -38,6 +38,9 @@
       "e2e": {
         "description": "Run end-to-end flows in-process against a running stack."
       },
+      "develop": {
+        "description": "Concierge scripts that set up and drop you into a developable stack for a specific app or workflow (seed, reset, prerequisites, then hand off a running app)."
+      },
       "set": {
         "description": "Worktree sets (M13): named repo→path maps bound to slots — list, show, and check the parallel dev contexts --set runs against."
       }

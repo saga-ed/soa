@@ -120,21 +120,15 @@ ss e2e run saga-dash/journey --from schedule --to schedule --hold --set topo
 and runs nothing (pair it with `--hold`, or it does nothing observable). Teardown when
 done with `ss stack down [--set <name> | --slot N]`.
 
-## Live interactive Connect session
+## Live interactive Connect session — moved to `develop`
 
-```bash
-ss e2e connect
-```
-
-<details><summary>Opens a live 1-tutor + 2-student Connect session against the running stack</summary>
-
-Brings up the Connect closure (iam / sessions / content / connect-api / connect-web / rtsm)
-and opens a real interactive session — for hands-on Connect development, not an assertion run.
-</details>
+Setting up a stack to *use* by hand (vs. running a test flow) now lives under the
+[`develop`](./develop.md) topic. `ss e2e connect` moved to **`ss develop connect`**; the old
+id still works for one cycle with a deprecation warning. → [develop.md](./develop.md)
 
 ## Share the session — `--tunnel`
 
-`ss e2e run` and `ss e2e connect` take `--tunnel`, which points the Playwright browser at the
+`ss e2e run` and `ss develop connect` take `--tunnel`, which points the Playwright browser at the
 `https://<svc>.<moniker>.vms.wootdev.com` tunnel hosts so a **remote** person can reach your
 slot-0 stack (e.g. invite a coworker to a Connect room). `run --tunnel` WAN-hairpins and is slow —
 for seeding launchable sessions prefer the localhost-build → snapshot → restore-under-tunnel bridge.

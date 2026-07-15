@@ -31,7 +31,7 @@ import { parseFlowRef, resolveFlow } from '../../core/flow/index.js';
 import { DEFAULT_LOGIN_USER } from '../../core/login.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
-import type { Lane } from '../../core/manifest/index.js';
+import type { Lane, RepoKey } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
 import { reviewBlockLines, runIdFrom } from '../../core/e2e-review.js';
 import type { PreservedRunRecord } from '../../core/e2e-review.js';
@@ -286,6 +286,9 @@ export default class E2eRun extends BaseCommand {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      // soa#300: coach-web `.env.local` prelaunch seam — buildStackContext threads it so
+      // a coach-web-in-closure e2e run boots the SPA against the LOCAL mesh, not remote.
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
       // Native-prep seams (built always; since FLIP 3 buildStackContext wires them
@@ -411,9 +414,21 @@ export default class E2eRun extends BaseCommand {
   private async holdEpilogue(
     resolved: ReturnType<typeof resolveFlow>,
     flags: WorkspaceFlags & { set?: string; to?: string; porcelain: boolean; 'output-json': boolean },
-    ctx: { slot: number; stateDir: string; spaPort?: number; services: string[]; boundary?: string },
+    ctx: {
+      slot: number;
+      stateDir: string;
+      spaPort?: number;
+      services: string[];
+      boundary?: string;
+      // gh_305: the login persona for the held jar + browser. Defaults to
+      // DEFAULT_LOGIN_USER (dev@saga.org — the seeded Seed District admin), so
+      // existing `e2e run --hold` callers are unchanged. A concierge that seeds a
+      // different persona (e.g. `develop coach` → demo-tutor-1) overrides it so the
+      // held browser lands on that persona's populated app instead of an empty one.
+      email?: string;
+    },
   ): Promise<void> {
-    const email = DEFAULT_LOGIN_USER;
+    const email = ctx.email ?? DEFAULT_LOGIN_USER;
     const res = await this.mintNativeLoginJar({ email, slot: ctx.slot, stateDir: ctx.stateDir });
     if (!res.ok) {
       // A failed jar (no roster seed yet, iam down) is a WARN, not a crash — the run
@@ -467,6 +482,16 @@ export default class E2eRun extends BaseCommand {
         iamUrl: res.iamUrl,
         stateDir: ctx.stateDir,
         dashUrl: spaUrl,
+        // gh_305: gate the clone-check + playwright cwd off THIS flow's SPA (from the
+        // resolved `spa` block / registry row), not hardwired saga-dash — so `e2e run
+        // coach-web/… --hold` opens coach-web from the coach checkout. For a saga-dash
+        // flow this is byte-identical to the old SAGA_DASH / apps/web/dash default.
+        // The registry-sourced `repoEnvVar` is always a real manifest RepoKey.
+        spa: {
+          repoEnvVar: resolved.spa.repoEnvVar as RepoKey,
+          appDir: resolved.spa.appDir,
+          port: ctx.spaPort,
+        },
       });
     }
   }

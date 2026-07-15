@@ -59,6 +59,7 @@ import {
   makeRealConfirm,
   makeRealCookiePoster,
   makeRealDashFs,
+  makeRealCoachWebFs,
   makeRealGhRunner,
   makeRealGitRunner,
   makeRealJarWriter,
@@ -95,6 +96,7 @@ import {
 import type {
   ConfirmSeam,
   CookiePoster,
+  CoachWebFs,
   DashFs,
   GhRunner,
   GitRunner,
@@ -502,6 +504,16 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * The coach-web env fs seam (soa#300 — the `.env.local` prelaunch hook) —
+   * production is the only place coach-web's `.env.local` is written/removed for the
+   * hook, so its browser boots against the local mesh instead of the checked-in
+   * `.env` remote defaults.
+   */
+  protected getCoachWebFs(): CoachWebFs {
+    return makeRealCoachWebFs();
+  }
+
+  /**
    * The repo-dir existence check (M4 native partial-stack) — production is a real
    * `fs.existsSync` predicate. The native `stack up` path calls it per service to
    * SKIP (warn, not fail) any service whose sibling-repo checkout is absent (e.g.
@@ -510,6 +522,23 @@ export abstract class BaseCommand extends Command {
    */
   protected getRepoDirCheck(): (dir: string) => boolean {
     return (dir: string) => existsSync(dir);
+  }
+
+  /**
+   * Read a sibling-repo file as UTF-8 text for prechecks — production is a real
+   * `fs.readFileSync` that returns `undefined` on ANY error (missing / unreadable
+   * / permission) so callers decide how to degrade. `develop coach`'s playlist
+   * precheck uses it to read coach-db's seed fixture and confirm the 2nd track is
+   * present BEFORE bring-up. Seam-mocking tests stub it to supply fixture content.
+   */
+  protected getRepoFileRead(): (path: string) => string | undefined {
+    return (path: string) => {
+      try {
+        return readFileSync(path, 'utf8');
+      } catch {
+        return undefined;
+      }
+    };
   }
 
   /**
@@ -804,6 +833,7 @@ export abstract class BaseCommand extends Command {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
       // M8 native prep pass (R1 build → R2 provision → R3 migrate on `up`; harmless
@@ -964,10 +994,17 @@ export abstract class BaseCommand extends Command {
    * `open_login_browser`. Both `stack login --browser` and `up --login` call this.
    *
    * Passes the exact env browser-login.mjs reads: `IAM_URL` (the resolved iam host),
-   * `DASH_URL` (`LOGIN_DASH_URL` override else localhost:8900), `LOGIN_EMAIL` (the persona),
+   * `DASH_URL` (`LOGIN_DASH_URL` override else the SPA's port), `LOGIN_EMAIL` (the persona),
    * `PROFILE_DIR` (`<stateDir>/browser-profile`, up.sh's BROWSER_PROFILE), and
-   * `SAGA_DASH_DASH` (the resolved saga-dash dash app dir). node runs with `cwd` = that
-   * dash dir so `createRequire`'d playwright + its browsers resolve there.
+   * `SAGA_DASH_DASH` (the resolved SPA app dir — the name is historical; it is just the
+   * dir playwright is `createRequire`'d from). node runs with `cwd` = that app dir so the
+   * SPA's `createRequire`'d playwright + its browsers resolve there.
+   *
+   * SPA-PARAMETERIZED (gh_305): `ctx.spa` sources `{ repoEnvVar, appDir, port }` from a
+   * `spa-registry` row so a non-saga-dash concierge (e.g. `develop coach` → coach-web on
+   * :8800) opens its OWN app, gated on its OWN repo checkout. It DEFAULTS to saga-dash's
+   * `SAGA_DASH` / `apps/web/dash` / :8900, so existing `stack login`/`up --login`/`e2e run
+   * --hold` callers behave identically.
    *
    * BEST-EFFORT (`propagateExit:false`): the headless jar is already minted, so a browser
    * failure (playwright absent, no DISPLAY, …) — which browser-login.mjs reports as an
@@ -976,40 +1013,56 @@ export abstract class BaseCommand extends Command {
    */
   protected async openVendoredBrowser(
     flags: WorkspaceFlags,
-    ctx: { email: string; iamUrl: string; stateDir: string; dashUrl?: string },
+    ctx: {
+      email: string;
+      iamUrl: string;
+      stateDir: string;
+      dashUrl?: string;
+      /**
+       * The SPA to open (defaults to saga-dash's dash app on :8900). Sourced from a
+       * `spa-registry` row: `repoEnvVar`/`appDir` drive the clone-gate + playwright cwd
+       * off the SPA's OWN repo; `port` supplies the fallback `DASH_URL` when `dashUrl`
+       * is absent (a bare `stack login` with no run-resolved URL).
+       */
+      spa?: { repoEnvVar: ManifestRepoKey; appDir: string; port?: number };
+    },
   ): Promise<void> {
     const script = resolveVendorScript('browser-login.mjs');
-    const sagaDashDash = join(
-      resolveRepoRoot('SAGA_DASH', this.scriptContextFromFlags(flags)),
-      'apps',
-      'web',
-      'dash',
+    const repoEnvVar = ctx.spa?.repoEnvVar ?? 'SAGA_DASH';
+    const appSubdir = ctx.spa?.appDir ?? join('apps', 'web', 'dash');
+    const port = ctx.spa?.port ?? 8900;
+    const spaAppDir = join(
+      resolveRepoRoot(repoEnvVar, this.scriptContextFromFlags(flags)),
+      appSubdir,
     );
     // TRULY best-effort — guard SPAWN-level failures too, mirroring up.sh's
     // open_login_browser preflight ([[ -f BROWSER_LOGIN ]] / command -v node /
     // [[ -d …/dash ]] each warn-and-return). `propagateExit:false` only tolerates a
     // NON-ZERO child exit; a missing cwd rejects with ENOENT from the spawn 'error'
     // event and would otherwise redden `up`/`login` even though the headless jar is
-    // already minted. saga-dash-absent is a supported state (`up` skips it with a
-    // warning), so the browser step must degrade the same way.
-    if (!this.getRepoDirCheck()(sagaDashDash)) {
+    // already minted. An absent SPA checkout is a supported state (`up` skips it with a
+    // warning), so the browser step must degrade the same way — gated on the SPA's OWN
+    // repo (saga-dash by default; e.g. coach for a coach-web hand-off).
+    if (!this.getRepoDirCheck()(spaAppDir)) {
       this.warn(
-        `headful browser skipped — saga-dash dash app not found at ${sagaDashDash} ` +
-          '(the headless cookie jar is minted; clone saga-dash for the browser step)',
+        `headful browser skipped — SPA app not found at ${spaAppDir} ` +
+          `(the headless cookie jar is minted; clone the ${repoEnvVar} repo for the browser step)`,
       );
       return;
     }
     const env: Record<string, string> = {
       IAM_URL: ctx.iamUrl,
       // Plan 13 --hold passes the run's RESOLVED (slot-offset) SPA URL so the held
-      // browser opens the slot's own dash; login's default keeps LOGIN_DASH_URL / :8900.
-      DASH_URL: ctx.dashUrl ?? (process.env.LOGIN_DASH_URL || 'http://localhost:8900'),
+      // browser opens the slot's own app; login's default keeps LOGIN_DASH_URL else the
+      // SPA's own port (:8900 for saga-dash, :8800 for coach-web, …).
+      DASH_URL: ctx.dashUrl ?? (process.env.LOGIN_DASH_URL || `http://localhost:${port}`),
       LOGIN_EMAIL: ctx.email,
       PROFILE_DIR: join(ctx.stateDir, 'browser-profile'),
-      SAGA_DASH_DASH: sagaDashDash,
+      // browser-login.mjs reads this as its playwright-resolution dir (name historical).
+      SAGA_DASH_DASH: spaAppDir,
     };
     try {
-      await this.runVendor({ cwd: sagaDashDash, command: 'node', args: [script], env }, flags, {
+      await this.runVendor({ cwd: spaAppDir, command: 'node', args: [script], env }, flags, {
         propagateExit: false,
       });
     } catch (err) {

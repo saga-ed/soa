@@ -1,5 +1,9 @@
 /**
- * `saga-stack e2e connect` — open a LIVE interactive Connect tutoring session (M5).
+ * `saga-stack develop connect` — open a LIVE interactive Connect tutoring session (M5).
+ *
+ * Migrated from `e2e connect` (gh_305): dev-setup concierge commands live under the
+ * `develop` topic; the old `e2e connect` id keeps working via a deprecating alias
+ * (`static aliases`/`deprecateAliases` below).
  *
  * Replaces the M2 thin shell over connect-session.sh. It resolves the
  * `connect-session` flow from saga-dash's `flows.json` (bundled example until the
@@ -31,10 +35,10 @@
  * or the journey stages changed. Requires the default `--prereq-from-snapshot` (it
  * bakes so that path can restore); mutually exclusive with `--reuse`.
  *
- *   node bin/dev.js e2e connect
- *   node bin/dev.js e2e connect --reuse -- --debug
- *   node bin/dev.js e2e connect --fake-media
- *   node bin/dev.js e2e connect --refresh-snapshot
+ *   node bin/dev.js develop connect
+ *   node bin/dev.js develop connect --reuse -- --debug
+ *   node bin/dev.js develop connect --fake-media
+ *   node bin/dev.js develop connect --refresh-snapshot
  */
 
 import { Flags } from '@oclif/core';
@@ -57,9 +61,16 @@ import {
 const CONNECT_SPA = 'saga-dash';
 const CONNECT_FLOW = 'connect-session';
 
-export default class E2eConnect extends BaseCommand {
+export default class DevelopConnect extends BaseCommand {
   static description =
     'Open a live interactive Connect session: 1 tutor + 2 students (in-process; builds the journey prerequisite, then a headed Connect room).';
+
+  // gh_305: `connect` migrated from the `e2e` topic to `develop`. Keep the old id
+  // working for one cycle with a deprecation warning (@oclif/core ^4). Aliases use
+  // the colon form in code; the topicSeparator (" ") means it is invoked as
+  // `ss e2e connect`.
+  static aliases = ['e2e:connect'];
+  static deprecateAliases = true;
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
@@ -111,7 +122,7 @@ export default class E2eConnect extends BaseCommand {
   };
 
   async run(): Promise<void> {
-    const { argv, flags } = await this.parse(E2eConnect);
+    const { argv, flags } = await this.parse(DevelopConnect);
     const passthrough = (argv as string[]).filter((a) => a !== CONNECT_FLOW);
 
     // --refresh-snapshot bakes the journey prerequisite fresh, then restores it.
@@ -160,6 +171,9 @@ export default class E2eConnect extends BaseCommand {
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
+      // soa#300: coach-web `.env.local` prelaunch seam — harmless here (coach-web is not
+      // in the connect closure), wired for parity with the other bring-up paths.
+      coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
     };

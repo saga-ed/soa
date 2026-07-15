@@ -108,7 +108,7 @@ ss e2e run saga-dash/journey --hold              # after green: open a logged-in
 ss e2e run saga-dash/journey --to pods --hold    # run UP TO (not including) a stage, then hold
 ss e2e run --set feat-sched saga-dash/journey    # run a flow against a worktree set (its slot)
 ss e2e run saga-dash/journey --slot 1            # run on an isolated slot
-ss e2e connect                       # LIVE interactive Connect: 1 tutor + 2 students, HEADED + FOREGROUND
+ss develop connect                   # LIVE interactive Connect: 1 tutor + 2 students, HEADED + FOREGROUND
                                      #   (opens 3 windows into a real room, holds them open; needs cam/mic + AV up).
                                      #   = `ss e2e run saga-dash/interactive-connect --headed`. Ctrl-C / Resume (▶) to end.
 ```

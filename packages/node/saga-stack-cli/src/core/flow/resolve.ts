@@ -37,6 +37,8 @@ export interface ResolvedPlaywright {
   config: string;
   /** The TERMINAL stage's Playwright `project`; deps chain 1..N (matches check-e2e.sh). */
   project: string;
+  /** The TERMINAL stage's `spec` file, scoping the Playwright invocation to just that spec. */
+  spec?: string;
   /** Playwright `--grep-invert` tag for pipeline runs (e.g. `@interactive`); omitted when the run IS the tagged stage. */
   grepInvert?: string;
   /** Run headed (foreground flows default headed; `--headless` flips it). */
@@ -345,6 +347,7 @@ export function resolveFlow(
       config: manifest.spa.playwrightConfig,
       // Empty window ⇒ no terminal stage ⇒ no project (the executor skips Playwright).
       project: terminal?.project ?? '',
+      spec: terminal?.spec,
       grepInvert,
       headed,
     },

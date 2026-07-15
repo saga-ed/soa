@@ -29,7 +29,7 @@ ss stack snapshot restore tunnel-connect
 
 # 3 — Open the live Connect room over the tunnel. The tutor auto-hosts + STARTS the session.
 #     --reuse: run against the org you just restored (don't rebuild the prerequisite).
-ss e2e connect --tunnel --student-login 1 --reuse   # tutor + 1 local student; 1 seat left OPEN
+ss develop connect --tunnel --student-login 1 --reuse   # tutor + 1 local student; 1 seat left OPEN
 ```
 
 `--student-login N` = how many of the 2 students **this machine** logs in and joins locally
@@ -89,7 +89,7 @@ until you hit Resume (▶) in the Playwright Inspector.
 never both — so one running iam serves the localhost journey **or** the tunnel dash, not both. The
 concierge therefore **builds the org under localhost** (where the tested journey is fast and
 reliable), snapshots it, then **restores it under the tunnel** cookie domain. The Connect room
-itself doesn't need a pre-launched dash session: `ss e2e connect` reads the schedule, **starts the
+itself doesn't need a pre-launched dash session: `ss develop connect` reads the schedule, **starts the
 occurrence via `sessions.start`**, and everyone joins — so `--through schedule` is enough (no need
 for the `sessions`/`attendance` stages, which would leave today's occurrence `Ended`).
 
@@ -124,10 +124,10 @@ ss stack tunnel urls       # print the public URL table
 
 ## `ss e2e … --tunnel`
 
-`ss e2e run` and `ss e2e connect` accept `--tunnel`, which resolves your moniker and points the
+`ss e2e run` and `ss develop connect` accept `--tunnel`, which resolves your moniker and points the
 Playwright browser at `https://<label>.<moniker>.vms.wootdev.com` instead of localhost.
 
-- **`ss e2e connect --tunnel`** — the concierge front door (step 3). `--student-login N` sets how
+- **`ss develop connect --tunnel`** — the concierge front door (step 3). `--student-login N` sets how
   many students join locally; `--fake-media` swaps in a synthetic camera/mic (drop it for real
   A/V). The tutor always auto-hosts and starts the session. slot-0 only.
 - **`ss e2e run … --tunnel`** is the slow all-in-one: every request WAN-hairpins (localhost →
@@ -162,7 +162,7 @@ different org. Full roster: `saga-dash` `e2e/data/fixtures/example-roster.csv`.
 
 Real camera/mic works when `up --tunnel` fetched the fleek cluster creds (needs dev creds; it warns
 if it couldn't and connect-api falls back to the dev key, which the cluster rejects → A/V fails but
-CRDT/chat still work). Use `--fake-media` on `ss e2e connect` for a synthetic camera/mic (a machine
+CRDT/chat still work). Use `--fake-media` on `ss develop connect` for a synthetic camera/mic (a machine
 with no camera, or where `v4l2loopback` won't build). A/V always routes through the fleek dev
 cluster, never the tunnel.
 

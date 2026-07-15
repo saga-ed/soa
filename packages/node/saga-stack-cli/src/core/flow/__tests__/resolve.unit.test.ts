@@ -97,6 +97,10 @@ describe('resolveFlow — journey --through pods (progressive prefix)', () => {
     expect(r.playwright.grepInvert).toBe('@interactive'); // pipeline default-excludes the AV stage
   });
 
+  it('carries the terminal stage’s spec, scoping the run to just that file (not the whole testMatch)', () => {
+    expect(r.playwright.spec).toBe('journey/pods.e2e.test.ts'); // the --through stage's own spec
+  });
+
   it('carries the flow-level roster seed and resets itself (no prerequisite)', () => {
     expect(r.seedSelection).toMatchObject({ profile: 'roster', reset: true });
     expect(r.reset).toBe(true);

@@ -296,7 +296,8 @@ ss e2e run saga-dash/journey --through sessions --headless
 ```
 
 `--through <stage>` runs a prefix of a progressive flow. See **[e2e.md](./e2e.md)** for
-authoring flows, `e2e list`, and `e2e connect` (live interactive Connect session).
+authoring flows and `e2e list`, and **[develop.md](./develop.md)** for `develop connect`
+(live interactive Connect session).
 </details>
 
 ---
@@ -521,7 +522,8 @@ and **[worktree-sets.md](./worktree-sets.md)**.
 - **[worktree-sets.md](./worktree-sets.md)** — `--set <name>`: named repo→worktree maps on slots (parallel dev contexts, per-worktree flows, build-collision guard)
 - **[verify.md](./verify.md)** — the health / data / source-posture checks (and what fails vs warns)
 - **[snapshots.md](./snapshots.md)** — store/restore DB fixtures instead of re-seeding
-- **[e2e.md](./e2e.md)** — flows-as-data, `e2e run`/`list`/`connect`
+- **[e2e.md](./e2e.md)** — flows-as-data, `e2e run`/`list`/`traces`
+- **[develop.md](./develop.md)** — `develop <app>`: concierge stacks that set up + hand off a running app (`develop connect`)
 - **[e2e-flows.md](./e2e-flows.md)** — the browsable flow worlds (hermetic-flow viewer)
 - **[integration.md](./integration.md)** — `overlay` (in-flight PRs), `bootstrap`, `login`, `tunnel`
 - **[cold-start.md](./cold-start.md)** — `cold-start`: the destructive clean-slate baseline (docker wipe → repos to main → clean build → `.env` → up)

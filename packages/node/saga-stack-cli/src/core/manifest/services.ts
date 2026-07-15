@@ -60,9 +60,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       env: {
         PORT: '${IAM_PORT}',
         AUTH_DEVUSERID: '${DEV_USER_UUID}',
-        // soa#300: coach-web (post-coach#226) reads identity DIRECT from iam in
-        // the browser (`${PUBLIC_IAM_API_URL}/trpc/auth.whoami`), so iam must
-        // allow coach-web's origin or the whoami is CORS-blocked and sign-in 503s.
+        // Stamp the SAME issuer coach-api validates (its AUTH_ISSUER). Injected
+        // rather than left to iam-api/.env so the two ends can never drift.
+        JWT_ISSUER: '${IAM_ISSUER}',
+        // coach-web is here because its browser calls iam's auth.whoami direct
+        // (coach-web session.ts) — omit it and every coach page 503s on CORS.
         CORS_ORIGIN: '${DASH_URL},${CONNECT_WEB_URL},${COACH_WEB_URL}',
         MAIL_FRONTEND_BASE_URL: 'http://localhost:${IAM_PORT}/demo',
         // iam-api assembles its redis URL from REDIS_HOST+REDIS_PORT (localhost ⇒
@@ -171,6 +173,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         JANUS_REQUIRED: 'false',
         CORS_ORIGIN: '${DASH_URL}',
         JANUS_LOGIN_HOST: 'localhost:${IAM_PORT}/demo',
+        // Validate the SAME issuer iam-api stamps (its JWT_ISSUER). Without this
+        // the rostering-client verifier falls back to the prod issuer and 401s
+        // every locally-minted session on authenticated procedures.
+        JWT_ISSUER: '${IAM_ISSUER}',
       },
     },
     seed: ['programs'],
@@ -200,6 +206,8 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         JANUS_REQUIRED: 'false',
         CORS_ORIGIN: '${DASH_URL}',
         JANUS_LOGIN_HOST: 'localhost:${IAM_PORT}/demo',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
+        JWT_ISSUER: '${IAM_ISSUER}',
       },
     },
     seed: [],
@@ -228,6 +236,8 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         CORS_ORIGIN: '${DASH_URL}',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
+        JWT_ISSUER: '${IAM_ISSUER}',
       },
     },
     // qtf-demo runs `db:seed:qtf-demo` against the sessions DB (up.sh seed_qtf_demo); add-on, online.
@@ -257,6 +267,8 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         CORS_ORIGIN: '${DASH_URL}',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
+        JWT_ISSUER: '${IAM_ISSUER}',
       },
     },
     seed: ['content'],
@@ -292,7 +304,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         SESSIONS_API_CLIENT_BASEURL: 'http://localhost:${SESSIONS_PORT}',
         IAM_API_CLIENT_BASEURL: '${IAM_URL}/trpc',
         IAM_API_URL: '${IAM_URL}',
-        JWT_ISSUER: 'https://iam.saga.org',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note. Was the
+        // prod literal, which 401'd once iam began minting ${IAM_ISSUER} (58d58e4).
+        JWT_ISSUER: '${IAM_ISSUER}',
         SERVICE_TOKEN_SERVICESLUG: 'ads-adm-api',
         ADS_ADM_DATABASE_URL: '${ADS_ADM_DB_URL}',
         DATABASE_URL: '${ADS_ADM_DB_URL}',
@@ -381,7 +395,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         AUTH_ENABLED: 'true',
         JANUS_REQUIRED: 'false',
         IAM_API_URL: '${IAM_URL}',
-        JWT_ISSUER: 'https://iam.saga.org',
+        // Same iss iam-api stamps — see programs-api's JWT_ISSUER note. Was the
+        // prod literal, which 401'd once iam began minting ${IAM_ISSUER} (58d58e4).
+        JWT_ISSUER: '${IAM_ISSUER}',
         // #222 port: dash calls connect-api cross-origin (journey attendance /
         // connect embeds) — without DASH_URL in the allowlist those are CORS-blocked.
         ALLOWED_ORIGINS: '${CONNECT_WEB_URL},${DASH_URL}',
@@ -486,26 +502,18 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     databases: ['coach_api'],
     dependsOn: ['iam-api'],
     depKinds: { 'iam-api': 'url' },
-    // DUAL-STORE: coach_api pg (via `databases`) + the mesh mongo (curriculum read
-    // path). RABBITMQ_ENABLED=false, so rabbitmq is intentionally NOT gated on.
-    mesh: ['connect-mongo'],
+    // SINGLE-STORE: coach_api pg only (via `databases`). Mongo is RETIRED — coach's
+    // curriculum read path is Postgres now (PostgresContentReadStore over
+    // content_release), coach-api carries no mongo dependency and reads no MONGO_*
+    // env, so the mesh mongo is NOT gated on and those vars are not injected.
+    // RABBITMQ_ENABLED=false, so rabbitmq is intentionally NOT gated on either.
+    mesh: [],
     launch: {
       cmd: 'pnpm dev',
       env: {
         NODE_ENV: 'development',
         EXPRESS_SERVER_PORT: '${COACH_API_PORT}',
         DATABASE_URL: '${COACH_DB_URL}',
-        MONGO_HOST: 'localhost',
-        MONGO_PORT: '${CONNECT_MONGO_PORT}',
-        MONGO_DATABASE: 'saga_local',
-        CONTENT_DATABASE: 'wmlms_local',
-        // gh_305: pin the content read-store to Postgres explicitly. coach-db's
-        // db:seed lands the offline `content_release` fixture in coach_api pg, and
-        // both the module-playback e2e flow and `ss develop coach --scenario
-        // content-viewer` render from it. The UNSET default is disputed (docs 02 vs
-        // 06 disagree on whether it serves mongo or pg), so don't rely on it — the
-        // dev stack always serves the seeded pg release.
-        CONTENT_STORE_BACKEND: 'postgres',
         AUTH_AUTHENABLED: 'true',
         IAM_API_TARGET: '${IAM_URL}',
         AUTH_JWKSURL: '${IAM_URL}/.well-known/jwks.json',
@@ -531,19 +539,18 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // SvelteKit SPA — probed on the root path like saga-dash / connect-web.
     healthPath: '/',
     databases: [],
-    // Reaches iam server-side THROUGH coach-api, so it only needs the coach-api URL.
-    dependsOn: ['coach-api'],
-    depKinds: { 'coach-api': 'browser' },
+    // Client-only SPA (ssr = false): the BROWSER calls coach-api for data and
+    // iam's auth.whoami direct for identity — so it needs both URLs, and iam
+    // must allow its origin (see iam-api's CORS_ORIGIN).
+    dependsOn: ['coach-api', 'iam-api'],
+    depKinds: { 'coach-api': 'browser', 'iam-api': 'browser' },
     mesh: [],
     launch: {
       cmd: 'pnpm dev',
       env: {
         PUBLIC_COACH_API_URL: '${COACH_API_URL}',
-        // soa#300: post-coach#226 coach-web reads identity DIRECT from iam in the
-        // browser (SvelteKit inlines this PUBLIC_ var at `pnpm dev` start). Without
-        // this override it falls back to its checked-in .env default
-        // (`https://iam.wootdev.com`), where a local `ss` cookie is invalid ⇒ 503
-        // at sign-in. Point it at the slot's local iam so browser login works.
+        // Without this, coach-web falls back to its .env default
+        // (https://iam.wootdev.com) and the local SPA talks to deployed iam.
         PUBLIC_IAM_API_URL: '${IAM_URL}',
       },
     },

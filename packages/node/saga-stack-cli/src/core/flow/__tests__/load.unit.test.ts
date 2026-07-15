@@ -31,7 +31,7 @@ describe('parseFlowManifest — the bundled example validates', () => {
     expect(m.schemaVersion).toBe(1);
     expect(m.spa.id).toBe('saga-dash');
     expect(m.spa.system).toBe('saga-dash');
-    expect(m.flows.map((f) => f.name)).toEqual(['journey', 'connect-session', 'connect-add-student']);
+    expect(m.flows.map((f) => f.name)).toEqual(['journey', 'connect-session', 'session-viewer-observations', 'connect-add-student']);
   });
 
   it('strips unknown top-level keys (the example carries a $comment annotation)', () => {
@@ -90,7 +90,7 @@ describe('loadFlowManifest — injectable reader seam (no disk IO)', () => {
       return EXAMPLE_TEXT;
     });
     expect(reads).toEqual(['/virtual/flows.json']);
-    expect(m.flows.map((f) => f.name)).toEqual(['journey', 'connect-session', 'connect-add-student']);
+    expect(m.flows.map((f) => f.name)).toEqual(['journey', 'connect-session', 'session-viewer-observations', 'connect-add-student']);
   });
 
   it('wraps a reader error in a path-tagged message', () => {

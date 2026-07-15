@@ -65,19 +65,30 @@ describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () =
   // whether iam-api ∈ restored; it is not part of composeSeedPlan (M0).
   it.todo('snapshot layer: iam-api ∈ restored only when BOTH iam DBs restored (partial ⇒ kept)');
 
-  it('EXEMPTS a `databases: []` static-fixture step (coach-mongo) even when its service is restored', () => {
-    // A coach-api PG snapshot restore puts coach-api ∈ restored — that skips its
-    // PG-writing step (coach-pg) but MUST NOT skip the coach curriculum mongoimport
-    // (coach-mongo, `databases: []`), whose mongo data is NOT in the PG snapshot.
-    // up.sh's seed_coach_mongo_only always runs (else subjectData 500s post-restore).
-    const sel: SeedSelection = { profile: 'full' };
+  it('EXEMPTS a `databases: []` static-fixture step (fga-bootstrap) even when its service is restored', () => {
+    // A step that writes NO tracked DB is not represented in a PG snapshot, so a
+    // service-restored skip must not swallow it. fga-bootstrap (service iam-api,
+    // `databases: []`) writes the OpenFGA store — restoring iam-api's PG snapshot
+    // says nothing about it, so it MUST still run.
+    //
+    // (This exemption used to be pinned by coach-mongo, the curriculum mongoimport.
+    // Coach is single-store now — mongo is retired — so fga-bootstrap is the
+    // remaining `databases: []` step and carries the case.)
+    const sel: SeedSelection = { profile: 'full', addOns: ['authz'] };
     const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api', 'coach-api');
-    const plan = composeSeedPlan(sel, active, set('coach-api'));
+    const plan = composeSeedPlan(sel, active, set('iam-api', 'coach-api'));
 
-    // coach-mongo (databases: []) survives; coach-pg (databases:['coach_api']) skipped.
-    expect(ids(plan.offline)).toContain('coach-mongo');
+    // fga-bootstrap (databases: []) survives despite iam-api ∈ restored...
+    expect(ids(plan.offline)).toContain('fga-bootstrap');
+    // ...while the DB-writing steps of both restored services are skipped.
     expect(ids(plan.offline)).not.toContain('coach-pg');
-    expect(plan.skipped.filter((s) => s.reason === 'service-restored').map((s) => s.id)).toEqual(['coach-pg']);
+    expect(ids(plan.offline)).not.toContain('iam');
+    expect(plan.skipped.filter((s) => s.reason === 'service-restored').map((s) => s.id)).toEqual([
+      'iam-registry',
+      'iam-dev-user',
+      'iam',
+      'coach-pg',
+    ]);
   });
 });
 
@@ -88,8 +99,9 @@ describe('composeSeedPlan — gate 3: offline / online partition', () => {
     const plan = composeSeedPlan(sel, active, set());
 
     // qtf-demo (requires sessions-api) + content (requires content-api) defer online;
-    // scheduling + coach-pg + coach-mongo (db:seed / docker-exec, no requiresServiceUp)
-    // stay offline. coach-pg + coach-mongo trail content in the canonical run order.
+    // scheduling + coach-pg (db:seed, no requiresServiceUp) stay offline. coach-pg
+    // trails content in the canonical run order, and is now coach's ONLY seed step
+    // (mongo is retired — the former coach-mongo mongoimport is gone).
     expect(ids(plan.offline)).toEqual([
       'iam-registry',
       'iam-dev-user',
@@ -98,7 +110,6 @@ describe('composeSeedPlan — gate 3: offline / online partition', () => {
       'programs',
       'scheduling',
       'coach-pg',
-      'coach-mongo',
     ]);
     expect(ids(plan.online)).toEqual(['qtf-demo', 'content']);
     expect(plan.skipped).toEqual([]);

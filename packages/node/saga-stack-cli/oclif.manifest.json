@@ -135,6 +135,19 @@
           "allowNo": false,
           "type": "boolean"
         },
+        "real-content": {
+          "description": "content-viewer only: play REAL curriculum published from a saga-ed/content-archive checkout (base-coach) instead of coach-db's synthetic acceptance fixture. Drives coach-web's authored `module-playback-real-content` flow, which publishes the archive into the slot's coach_api Postgres and materializes demo-tutor-1 onto it. Needs an archive checkout (--archive-dir / $ARCHIVE_DIR / $DEV/content-archive).",
+          "name": "real-content",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "archive-dir": {
+          "description": "path to a saga-ed/content-archive checkout for --real-content (default: $ARCHIVE_DIR, else <dev>/content-archive).",
+          "name": "archive-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
         "spa-path": {
           "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
           "name": "spa-path",

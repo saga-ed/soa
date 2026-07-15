@@ -86,6 +86,9 @@ export default class FrontendUp extends BaseCommand {
     const occupied = new Set<number>(Object.values(reg).map((r) => r.port));
     let port: number;
     if (flags.port !== undefined) {
+      if (reservedServicePorts().has(flags.port)) {
+        this.error(`port ${flags.port} is reserved for a stack service`);
+      }
       if (occupied.has(flags.port) || (await probe.listening(flags.port))) {
         this.error(`port ${flags.port} is already in use`);
       }

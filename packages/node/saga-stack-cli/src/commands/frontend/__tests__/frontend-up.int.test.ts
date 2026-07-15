@@ -184,6 +184,15 @@ describe('ss frontend up', () => {
     });
   });
 
+  it('rejects an explicit --port reserved for another slot, even though nothing is registered or listening', async () => {
+    // 9900 is slot 1's saga-dash base port (reservedServicePorts() spans every
+    // slot's stack services), but we're running at slot 0 — nothing is
+    // registered locally and the (mocked) probe reports every port as free.
+    await expect(FrontendUp.run([`feat=${VARIANT}`, '--port', '9900', ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('port 9900 is reserved for a stack service'),
+    });
+  });
+
   it('rejects once slot 0 is at the MAX_VARIANTS_PER_SLOT cap', async () => {
     const reg: Record<string, { label: string; path: string; port: number; pid: number; slot: number }> = {};
     for (let i = 0; i < MAX_VARIANTS_PER_SLOT; i += 1) {
@@ -191,7 +200,7 @@ describe('ss frontend up', () => {
     }
     regFiles['/tmp/sds-synthetic/frontends.json'] = JSON.stringify(reg);
     await expect(FrontendUp.run([`feat=${VARIANT}`, ...WS], config)).rejects.toMatchObject({
-      message: expect.stringContaining(`${MAX_VARIANTS_PER_SLOT}`),
+      message: expect.stringContaining(`already has ${MAX_VARIANTS_PER_SLOT} frontends (the cap)`),
     });
   });
 });

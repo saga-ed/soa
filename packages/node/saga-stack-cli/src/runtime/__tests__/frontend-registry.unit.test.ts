@@ -34,6 +34,10 @@ describe('frontend-registry', () => {
     expect(readRegistry(SD, fakeIo({ [frontendRegistryPath(SD)]: 'not json' }))).toEqual({});
   });
 
+  it('read returns {} when the file holds a JSON array (not a valid registry)', () => {
+    expect(readRegistry(SD, fakeIo({ [frontendRegistryPath(SD)]: '[1,2,3]' }))).toEqual({});
+  });
+
   it('upsert writes the record keyed by label; read round-trips', () => {
     const io = fakeIo();
     upsertRegistry(SD, REC, io);

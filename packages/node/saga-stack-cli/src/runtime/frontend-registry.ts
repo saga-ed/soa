@@ -53,7 +53,7 @@ export function readRegistry(
   if (raw === null) return {};
   try {
     const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === 'object' ? (parsed as FrontendRegistry) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as FrontendRegistry) : {};
   } catch {
     return {};
   }

@@ -379,6 +379,20 @@ export function playwrightArgv(
   if (stage?.noDeps) argv.push('--no-deps');
   if (resolved.playwright.grepInvert) argv.push('--grep-invert', resolved.playwright.grepInvert);
   if (resolved.playwright.headed) argv.push('--headed');
+  // Restrict a NON-PROGRESSIVE flow to its own stage's spec. Such a flow resolves
+  // to exactly ONE stage (resolve.ts §3) whose project carries no dependency chain,
+  // so a file filter is safe — and without it the spawn runs EVERY spec in the
+  // project: coach-web's `chromium` project has 11, including unauthenticated shell
+  // specs that always fail against an auth-required app, so a flow could never go
+  // green (and `develop coach` could never reach its hand-off) no matter how well
+  // its OWN spec did. Progressive flows chain stage deps 1..N through the config's
+  // project graph — a file filter would break that chain — so they stay unfiltered
+  // (byte-identical). Pushed BEFORE passthrough so an explicit `-- <filter>` still
+  // reaches Playwright.
+  if (!stage && !resolved.flow.progressive && resolved.stages.length === 1) {
+    const spec = resolved.stages[0]?.spec;
+    if (spec) argv.push(spec);
+  }
   argv.push(...passthrough);
   return argv;
 }

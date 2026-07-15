@@ -246,6 +246,8 @@ describe('develop coach — content-viewer (default scenario)', () => {
     expect(pw).toHaveLength(1);
     expect(pw[0].cwd).toBe(join(COACH_ROOT, 'apps', 'web', 'coach-web'));
     expect(logged.join('\n')).toContain('coach-web/module-playback');
+    // Non-progressive ⇒ restricted to this flow's OWN spec (not the whole project).
+    expect(pw[0].args).toContain('module-playback/module-playback.e2e.smoke.test.ts');
 
     // hand-off: demo-tutor-1 jar minted, then a headed coach-web at the module route.
     expect(posts).toHaveLength(1);
@@ -329,6 +331,13 @@ describe('develop coach — --real-content (REAL archive curriculum)', () => {
 
     // the REAL-archive flow (publish base-coach → materialize), not the synthetic fixture.
     expect(logged.join('\n')).toContain('coach-web/module-playback-real-content');
+    // Non-progressive ⇒ Playwright is restricted to THIS flow's spec. Without the
+    // filter the spawn runs coach-web's whole chromium project (11 specs, incl.
+    // unauthenticated shell specs that always fail) and the flow could never go
+    // green — so `develop coach` would never reach its hand-off.
+    expect(playwrightRuns()[0].args).toContain(
+      'module-playback-real-content/module-playback-real-content.e2e.test.ts',
+    );
     // The authored flow's lane gates on ARCHIVE_DIR **and** DATABASE_URL and
     // self-skips if either is missing (its flows.json env block supplies
     // PUBLISH_REAL_CONTENT=1). Export both — DATABASE_URL must be THIS slot's

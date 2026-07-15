@@ -44,6 +44,7 @@
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import type { WorkspaceFlags } from '../../base-command.js';
+import { deriveInstance } from '../../core/derive-instance.js';
 import { resolveFlow } from '../../core/flow/index.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
@@ -110,7 +111,7 @@ export default class DevelopConnect extends BaseCommand {
     tunnel: Flags.boolean({
       default: false,
       description:
-        'point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints these Playwright browsers’ URLs — it does NOT relaunch the stack, flip connect-web/rtsm/cookie env, or start frpc. You must have already run `ss stack up --tunnel` so the stack itself is tunnel-served. Connect is slot-0 only, so no slot guard is needed.',
+        'point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints these Playwright browsers’ URLs — it does NOT relaunch the stack, flip connect-web/rtsm/cookie env, or start frpc. You must have already run `ss stack up --tunnel` so the stack itself is tunnel-served. Slot-0 only.',
     }),
     'student-login': Flags.integer({
       default: 2,
@@ -121,9 +122,34 @@ export default class DevelopConnect extends BaseCommand {
     }),
   };
 
+  /**
+   * `develop connect` brings up an isolated `soa-s<N>` connect sub-stack at slot > 0
+   * — a live tutoring room is exactly the thing a dev wants off the shared slot 0.
+   * It mirrors `e2e run` / `develop coach`: `deriveInstance` drives the offset
+   * ports/DBs/mesh, the per-slot state dir, and the per-slot checkpoint root, and
+   * the flow's Playwright children get the slot's own service URLs — so nothing is
+   * pinned to slot 0. (See run(): the profile MUST reach buildStackContext and the
+   * env seam MUST precede the checkpoint store, or this flag silently lies.)
+   */
+  protected slotAware(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(DevelopConnect);
     const passthrough = (argv as string[]).filter((a) => a !== CONNECT_FLOW);
+
+    // --tunnel fronts the FIXED slot-0 browser ports via the vms rendezvous box, so
+    // it is slot-0-only — mirroring `develop coach`, `e2e run --tunnel` and `stack up
+    // --tunnel` (docs/tunnel.md). Guard BEFORE resolving the moniker below: without
+    // it, `--tunnel --slot N` falls through and drives slot 0's tunnel hosts while
+    // the rest of the run targets slot N.
+    if (flags.tunnel && flags.slot > 0) {
+      this.error(
+        `slot ${flags.slot}: --tunnel fronts the FIXED slot-0 browser ports via the vms rendezvous box, ` +
+          'so it cannot run against a peer slot. Run develop connect at slot 0, or drop --tunnel.',
+      );
+    }
 
     // --refresh-snapshot bakes the journey prerequisite fresh, then restores it.
     // --reuse strips the prerequisite entirely (nothing to bake); --no-prereq-from-snapshot
@@ -166,8 +192,22 @@ export default class DevelopConnect extends BaseCommand {
     const appCwd = resolveAppCwd(resolved.spa, flags, process.env);
     const now = new Date();
 
+    // M7: resolve the slot profile once — it drives the offset ports/project/
+    // container-env (buildStackContext), the launcher's per-slot state dir, the
+    // checkpoint store's snapshot root, and the DB/mesh targeting so `--slot N`
+    // provisions + migrates + seeds against slot N's OWN offset ports/DBs (mirrors
+    // e2e run.ts). At slot 0 it is the byte-identical no-offset default. WITHOUT
+    // this, `--slot N` would silently target slot 0.
+    const profile = deriveInstance({ slot: flags.slot });
+    // Apply the slot's container-env seam (mesh container names + snapshot dir) and
+    // point the launcher at the slot's state dir (pids/logs) — both no-ops at slot 0.
+    // ORDER-CRITICAL: the checkpoint store's resolvers read $SAGA_MESH_* when INVOKED,
+    // so this call must land before any bake/restore below.
+    this.applyInstanceEnv(profile);
+    const stateDir = flags['state-dir'] ?? profile.stateDir;
+
     const seams = {
-      launcher: this.getLauncher(flags['state-dir']),
+      launcher: this.getLauncher(stateDir),
       meshExec: this.getMeshExec(),
       portProbe: this.getPortProbe(),
       dashFs: this.getDashFs(),
@@ -176,15 +216,26 @@ export default class DevelopConnect extends BaseCommand {
       coachWebFs: this.getCoachWebFs(),
       prober: this.getProber(),
       runner: this.getRunner(),
+      // Native-prep seams: buildStackContext wires them into the runtime at EVERY
+      // slot so StackApi.up runs R2 provision + R3 migrate on the slot's offset DBs
+      // before launch+seed (mirrors e2e run.ts — required for a slot > 0 bring-up,
+      // whose DBs do not exist yet). StackApi gates the whole native-prep pass on
+      // `runtime.pgProbe`, so omitting these silently skips provision + migrate.
+      pgProbe: this.getPgProbe(),
+      prepIsFresh: this.getPrepFreshCheck(),
+      prepWriteStamp: this.getPrepStampWriter(),
+      prepRepairDeps: this.getPrepDepRepairer(),
+      prepDbGenerateScan: this.getDbGenerateScan(),
+      repoDirExists: this.getRepoDirCheck(),
     };
     const delegate = (plan: ScriptPlan): Promise<number> =>
       this.runScript(plan, flags as WorkspaceFlags, { propagateExit: false });
 
     // --tunnel: resolve <moniker>.<VMS_BASE> from the VENDORED tunnel.sh (the SAME
     // machinery as `stack up --tunnel`, up.ts:297-303) so the headed Connect room
-    // drives the tunnel hosts. E2eConnect is neither slot- nor set-aware ⇒ slot-0
-    // only, so no slot guard is needed. The seam lets unit tests inject a fixed
-    // moniker instead of spawning tunnel.sh.
+    // drives the tunnel hosts. Guarded slot-0-only above (the tunnel fronts fixed
+    // slot-0 ports). The seam lets unit tests inject a fixed moniker instead of
+    // spawning tunnel.sh.
     let tunnelDomain: string | undefined;
     if (flags.tunnel) {
       const vmsBase = process.env.VMS_BASE ?? 'vms.wootdev.com';
@@ -192,13 +243,27 @@ export default class DevelopConnect extends BaseCommand {
       tunnelDomain = `${moniker}.${vmsBase}`;
     }
 
-    const { runtime } = buildStackContext(flags, seams, delegate, undefined, tunnelDomain);
+    const { runtime } = buildStackContext(flags, seams, delegate, profile, tunnelDomain);
     const api = makeStackApi(serviceManifest, runtime);
 
     // M14-C: the checkpoint store so the journey prerequisite can be RESTORED
-    // instead of replayed (slot-0 command — no instance env needed; --reuse
-    // strips the prerequisite entirely, so nothing to restore there). Also
-    // needed for --refresh-snapshot's fresh bake of the same prerequisite.
+    // instead of replayed (--reuse strips the prerequisite entirely, so nothing to
+    // restore there). Also needed for --refresh-snapshot's fresh bake.
+    //
+    // ORDER-CRITICAL — `applyInstanceEnv(profile)` MUST precede the first store CALL.
+    // The store's resolvers read `$SAGA_MESH_SNAPSHOTS_DIR` / `$SAGA_MESH_*_CONTAINER`
+    // when INVOKED, not when built (runtime/checkpoint-store.ts "CALL-TIME ENV
+    // CONTRACT", snapshot-store.ts `snapshotsRoot()`); `applyInstanceEnv` is what points
+    // them at the slot's root (`~/.saga-mesh/snapshots-s<N>`). Constructing it here —
+    // after that call, before any bake/restore — keeps the invariant trivially true.
+    // Break it and EVERY slot falls back to the SHARED `~/.saga-mesh/snapshots`: two
+    // concurrent slots bake/restore the SAME journey@schedule checkpoint — on-disk data
+    // corruption, not a port clash. `connect.int.test.ts` pins the ordering.
+    //
+    // The other root input is `scriptContextFromFlags(flags)` — the `--<repo>` path
+    // pins the schema-ahead guard resolves local migrations from. It is flag-derived,
+    // not env-derived, so it is order-independent. (`--set` would pin repo paths AND
+    // a slot ≥ 1, but connect is not `setAware()`, so parse rejects it.)
     const checkpoints =
       toRun.prerequisite !== undefined && (flags['prereq-from-snapshot'] || flags['refresh-snapshot'])
         ? this.getCheckpointStore(this.scriptContextFromFlags(flags))
@@ -225,7 +290,19 @@ export default class DevelopConnect extends BaseCommand {
       try {
         const bakeCode = await executeResolvedFlow(
           prereq,
-          { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), checkpoints },
+          // The bake is a headless replay against THIS slot's stack, so it needs the
+          // same slot-offset ports as the main run below — otherwise its Playwright
+          // children mint against the base iam and bake a slot-0-shaped checkpoint.
+          {
+            api,
+            runner: seams.runner,
+            appCwd,
+            now,
+            log: (l) => this.log(l),
+            slot: profile.slot,
+            ports: runtime.launchContext.ports,
+            checkpoints,
+          },
           { lane: 'stack', skipReset: false, passthrough: [], snapshotStages: true, prereqFromSnapshot: false, spaHead },
         );
         if (bakeCode !== 0) this.error(`--refresh-snapshot: prerequisite bake failed (exit ${bakeCode}).`);
@@ -238,7 +315,23 @@ export default class DevelopConnect extends BaseCommand {
     try {
       const code = await executeResolvedFlow(
         toRun,
-        { api, runner: seams.runner, appCwd, now, log: (l) => this.log(l), checkpoints, tunnelDomain },
+        // Pass the SLOT-OFFSET ports (mirrors e2e run) so the Playwright spawns get
+        // PLAYWRIGHT_IAM_URL/_CONNECT_URL/_CONNECT_API_URL for THIS slot. Without
+        // `ports`, playwrightEnv skips serviceUrlEnv entirely and the specs' lane.ts
+        // falls back to the hardcoded base ports (iam :3010, connect :6210) — the
+        // room boots against slot 0 (soa#300 tail). Deps ride through the
+        // prerequisite recursion, so the journey prerequisite inherits them.
+        {
+          api,
+          runner: seams.runner,
+          appCwd,
+          now,
+          log: (l) => this.log(l),
+          slot: profile.slot,
+          ports: runtime.launchContext.ports,
+          checkpoints,
+          tunnelDomain,
+        },
         {
           lane: 'stack',
           skipReset: flags.reuse,

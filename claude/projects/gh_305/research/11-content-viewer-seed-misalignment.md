@@ -47,8 +47,38 @@ mismatch, which coach explicitly DEFERRED.
    different/partial path than coach CI). NEEDS: confirm whether coach's `module-playback.e2e.smoke`
    is green on main; if it's red/skipped there too, the synthetic path is a known gap.
 
+## RESOLVED via option 1 — `ss develop coach --real-content` (2026-07-14)
+
+Implemented + live-verified on slot 2. `--real-content` drives coach-web's AUTHORED
+`module-playback-real-content` flow (publish archive `base-coach` → materialize demo-tutor-1 →
+render the same `/units/unit_1/sc_u1_m1` route). Two ss-side pieces were needed:
+1. Resolve + precheck the content-archive checkout (`--archive-dir` / `$ARCHIVE_DIR` /
+   `<dev>/content-archive`) and export **`ARCHIVE_DIR`** — the flow's flows.json `env` block supplies
+   `PUBLISH_REAL_CONTENT=1`; the Runner spawns Playwright with `{...process.env}`, exactly the
+   contract the flow documents.
+2. Export **`DATABASE_URL`** = the slot's `COACH_DB_URL`. `real-content-lane.ts` gates on ARCHIVE_DIR
+   **and** DATABASE_URL and SELF-SKIPS otherwise — the flow's doc claims saga-stack-cli supplies it,
+   but nothing did, so the spec silently skipped. This is why the first live run looked "green-ish"
+   while doing nothing.
+
+**LIVE RESULT — the content issue is FIXED.** With a FULL archive clone (the flow pins
+`DEFAULT_ARCHIVE_REF=215a7152…`; a `--depth 1` clone fails `rev-parse`), the run now:
+publish ✓ → materialize ✓ → **module RENDERS** (`.not-found` count 0 — "Couldn't Load Module" is
+GONE; `.mc-task`, short_answer et al. all pass). The ported content viewer plays REAL archive
+curriculum.
+
+## NEW finding (distinct, coach-repo): showdown tasks don't survive publish→render
+
+The real-content spec's last assertion still fails: `.showdown-content` expected **2**, received
+**0**. This is NOT a stale test — sc_u1_m1's poll in the archive at the pinned ref genuinely carries
+**2 `showdown_task_`** entries (`exports/75958/polls/607075e88264ee04ae000003/poll.json`; base-coach
+maps `sc_u1_m1 → content_id brvhsb6uxsutr4pn`). So real showdown content exists but renders zero
+elements — a **publish-fidelity or renderer gap** (cf. coach #202 "carry poll questions/tag_list
+through publish to Postgres"). Next step for whoever picks it up: check whether `coach-content
+publish` carries `showdown_task` payloads into `content_release_poll`, and whether coach-web's
+`TaskRenderer` dispatches the `showdown_task` base type.
+
 ## Status
-Root cause definitively identified + live-verified. The develop-coach concierge + soa#300 auth are
-DONE and working (tutor logs in). The remaining `--scenario content-viewer` module-load gap is a
-coach content-seed/content-source decision (options above), not ss plumbing — Seth's domain, or a
-scoped coach-repo effort once the intended content model is confirmed.
+Original root cause (synthetic seed misalignment) identified, and RESOLVED for develop-coach via
+`--real-content` (real archive curriculum now plays). Remaining: the showdown publish/render gap
+above (coach-repo), plus the unauthenticated shell/nav e2e specs (coach-web e2e test wiring).

@@ -54,18 +54,13 @@ export const SPA_REGISTRY: Readonly<Record<string, SpaDescriptor>> = Object.free
     playwrightConfig: 'playwright.config.ts',
   },
 
-  // ── coach-web (gh_305 — the `develop coach` concierge target) ──────────────
-  // The THIRD-SPA onboarding (same M6 pattern as connectv3): this row + coach's
-  // already-authored `apps/web/coach-web/e2e/flows.json` are ALL it takes — zero
-  // new resolver/command/core logic. Unlike saga-dash/connectv3 there is NO
-  // bundled example fallback; discovery finds coach's real `flows.json` directly
-  // in the `$COACH` checkout (BUNDLED_EXAMPLE, `e2e-orchestrate.ts`, only covers
-  // repos that haven't authored one).
-  //
-  // Paths confirmed against `core/manifest/services.ts` `coach-web` (COACH ·
-  // `apps/web/coach-web`, port 8800 hard-set in coach-web's vite.config.ts) and
-  // coach's own `flows.json` `spa` block. The authored `flows.json`'s own `spa`
-  // block remains authoritative once loaded; this row only locates it.
+  // ── coach-web (the THIRD-SPA proof, coach e2e/saga-stack-cli parity task) ──
+  // `repoEnvVar: 'COACH'` matches `runtime/repos.ts`'s existing `coach: 'COACH'`
+  // mapping; `system: 'coach-web'` and `defaultRepoSubpath: 'coach'` match the
+  // manifest's `coach-web` service (repo `'COACH'`, `core/manifest/services.ts`).
+  // The real `flows.json` is authored in the coach repo at
+  // `apps/web/coach-web/e2e/flows.json` (not bundled here — coach-web already
+  // has a real Playwright suite, unlike connectv3's placeholder).
   'coach-web': {
     id: 'coach-web',
     system: 'coach-web',

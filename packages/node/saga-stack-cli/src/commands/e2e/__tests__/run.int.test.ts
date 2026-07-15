@@ -209,6 +209,7 @@ describe('e2e run — native orchestration (stack lane)', () => {
       'stage-4-pods',
       '--grep-invert',
       '@interactive',
+      'journey/pods.e2e.test.ts',
     ]);
     expect(pw[0].args).not.toContain('--headed');
     expect(pw[0].env?.PLAYWRIGHT_OCCURRENCE_DATE).toMatch(/^\d{4}-\d{2}-\d{2}$/);

@@ -169,7 +169,9 @@ describe('e2e run — native orchestration (stack lane)', () => {
     // VARIANT argv (T5): differs from run.int's golden literal pin only in the
     // project — built with the shared pwArgv (the literal shape protection
     // lives in run.int.test.ts's happy-path anchor).
-    expect(pw[0].args).toEqual(pwArgv({ project: 'stage-1-roster', grepInvert: '@interactive' }));
+    expect(pw[0].args).toEqual(
+      pwArgv({ project: 'stage-1-roster', grepInvert: '@interactive', spec: 'roster/csv-upload-view.e2e.test.ts' }),
+    );
     expect(pw[0].env?.PLAYWRIGHT_OCCURRENCE_DATE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(pw[0].stdio).toBe('inherit');
   });

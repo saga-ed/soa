@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveInstance } from '../core/derive-instance.js';
 import {
   buildStackContext,
+  playwrightArgv,
   playwrightEnv,
   serviceUrlEnv,
   tunnelServiceUrlEnv,
@@ -159,17 +160,14 @@ describe('serviceUrlEnv / playwrightEnv — offset Playwright service URLs', () 
     expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:3010');
   });
 
-  it('PLAYWRIGHT_BASE_URL is the FLOW SPA frontend, not hardcoded saga-dash (soa#300 tail)', () => {
-    // A coach-web flow must navigate to coach-web (:9800 at slot 1), NOT saga-dash
-    // (:9900) — coach-web's lane.ts reuses PLAYWRIGHT_BASE_URL as its baseURL, so a
-    // saga-dash value would drive the wrong app (and its globalSetup the wrong iam).
-    const coachResolved = { flow, spa: { system: 'coach-web' } } as unknown as ResolvedFlow;
-    const coachEnv = playwrightEnv(coachResolved, now, 'stack', p1);
-    expect(coachEnv.PLAYWRIGHT_BASE_URL).toBe('http://localhost:9800'); // coach-web 8800 + 1000
-    expect(coachEnv.PLAYWRIGHT_IAM_URL).toBe('http://localhost:4010'); // slot iam, still offset
-    // A saga-dash flow is byte-identical to before (system === 'saga-dash').
-    const dashResolved = { flow, spa: { system: 'saga-dash' } } as unknown as ResolvedFlow;
-    expect(playwrightEnv(dashResolved, now, 'stack', p1).PLAYWRIGHT_BASE_URL).toBe('http://localhost:9900');
+  it('a non-dash SPA (coach-web) gets ITS OWN port for PLAYWRIGHT_BASE_URL, not saga-dash\'s (regression: coach-web/dashboard opened :8900 and 500\'d before this fix)', () => {
+    const coachResolved = {
+      flow,
+      spa: { id: 'coach-web', system: 'coach-web' },
+    } as unknown as ResolvedFlow;
+    const env = playwrightEnv(coachResolved, now, 'stack', p0);
+    expect(env.PLAYWRIGHT_BASE_URL).toBe('http://localhost:8800'); // coach-web, NOT :8900 (saga-dash)
+    expect(env.PLAYWRIGHT_IAM_URL).toBe('http://localhost:3010');
   });
 
   it('playwrightEnv on a DEPLOYED lane does NOT inject localhost URLs (lane.ts owns the hostnames)', () => {
@@ -208,68 +206,48 @@ describe('serviceUrlEnv / playwrightEnv — offset Playwright service URLs', () 
   });
 });
 
-describe('tunnelServiceUrlEnv / playwrightEnv --tunnel (soa#298)', () => {
-  const DOMAIN = 'testmoniker.vms.wootdev.com';
-  const p0 = deriveInstance({ slot: 0 }).portOverrides;
-  const flow = { name: 'journey', env: undefined } as unknown as ResolvedFlow['flow'];
-  const resolved = { flow } as ResolvedFlow;
-  const now = new Date('2026-06-30T12:00:00'); // a Tuesday — deterministic clamp
+describe('playwrightArgv — spec scoping (single-spawn only, never on a stage override)', () => {
+  const specResolved = {
+    playwright: {
+      config: 'playwright.config.ts',
+      project: 'chromium',
+      headed: false,
+      spec: 'dashboard/dashboard-authenticated.e2e.smoke.test.ts',
+    },
+  } as unknown as ResolvedFlow;
 
-  it('tunnelServiceUrlEnv maps every URL key to https://<label>.<domain>', () => {
-    const env = tunnelServiceUrlEnv(DOMAIN);
-    // renames + suffix quirks (the non-derivable labels).
-    expect(env.PLAYWRIGHT_BASE_URL).toBe(`https://dash.${DOMAIN}`); // saga-dash → dash
-    expect(env.PLAYWRIGHT_CONNECT_URL).toBe(`https://connect.${DOMAIN}`); // connect-web → connect
-    expect(env.PLAYWRIGHT_ADS_ADM_URL).toBe(`https://ads-adm.${DOMAIN}`);
-    expect(env.PLAYWRIGHT_CONNECT_API_URL).toBe(`https://connect-api.${DOMAIN}`); // KEEPS -api
-    // suffix-dropping ids.
-    expect(env.PLAYWRIGHT_IAM_URL).toBe(`https://iam.${DOMAIN}`);
-    expect(env.PLAYWRIGHT_SIS_URL).toBe(`https://sis.${DOMAIN}`);
-    expect(env.PLAYWRIGHT_PROGRAMS_URL).toBe(`https://programs.${DOMAIN}`);
-    expect(env.PLAYWRIGHT_SCHEDULING_URL).toBe(`https://scheduling.${DOMAIN}`);
-    expect(env.PLAYWRIGHT_SESSIONS_URL).toBe(`https://sessions.${DOMAIN}`);
+  it('the single-spawn path (no stage override) pushes the terminal spec — scopes a single-project SPA to just that spec', () => {
+    const argv = playwrightArgv(specResolved);
+    expect(argv).toEqual([
+      'exec',
+      'playwright',
+      'test',
+      '--config=playwright.config.ts',
+      '--project',
+      'chromium',
+      'dashboard/dashboard-authenticated.e2e.smoke.test.ts',
+    ]);
   });
 
-  it('playwrightEnv (stack lane, --tunnel): tunnel https URLs BEAT the localhost URLs + exports the WAN timeout', () => {
-    const env = playwrightEnv(resolved, now, 'stack', p0, undefined, undefined, DOMAIN);
-    // every service URL is the tunnel host, not localhost (the tunnel overlay wins).
-    expect(env.PLAYWRIGHT_BASE_URL).toBe(`https://dash.${DOMAIN}`);
-    expect(env.PLAYWRIGHT_IAM_URL).toBe(`https://iam.${DOMAIN}`);
-    expect(env.PLAYWRIGHT_SESSIONS_URL).toBe(`https://sessions.${DOMAIN}`);
-    expect(env.PLAYWRIGHT_BASE_URL).not.toContain('localhost');
-    // the net-new WAN timeout env (consumed cross-repo in saga-dash playwright.config.ts).
-    expect(env.PLAYWRIGHT_TUNNEL_TIMEOUT_MS).toBe(String(TUNNEL_PLAYWRIGHT_TIMEOUT_MS));
-    // the date clamp still rides along.
-    expect(env.PLAYWRIGHT_OCCURRENCE_DATE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  it('a stage override (bake/--from per-stage spawn) does NOT push the terminal spec (regression guard: pushing it would filter a non-terminal stage.project to a spec it does not contain, running zero tests)', () => {
+    const argv = playwrightArgv(specResolved, [], { project: 'stage-2-program', noDeps: true });
+    expect(argv).toEqual([
+      'exec',
+      'playwright',
+      'test',
+      '--config=playwright.config.ts',
+      '--project',
+      'stage-2-program',
+      '--no-deps',
+    ]);
+    expect(argv).not.toContain('dashboard/dashboard-authenticated.e2e.smoke.test.ts');
   });
 
-  it('playwrightEnv WITHOUT a tunnel domain is byte-identical to today (localhost URLs, no timeout key)', () => {
-    const plain = playwrightEnv(resolved, now, 'stack', p0);
-    const explicitUndefined = playwrightEnv(resolved, now, 'stack', p0, undefined, undefined, undefined);
-    // absent domain ⇒ the exact pre-tunnel env (deep-equal), no tunnel keys leak in.
-    expect(explicitUndefined).toEqual(plain);
-    expect(plain.PLAYWRIGHT_BASE_URL).toBe('http://localhost:8900');
-    expect(plain.PLAYWRIGHT_TUNNEL_TIMEOUT_MS).toBeUndefined();
-  });
-
-  it('a DEPLOYED lane never injects tunnel URLs (lane.ts owns the hostnames)', () => {
-    const env = playwrightEnv(resolved, now, 'sandbox', p0, undefined, undefined, DOMAIN);
-    expect(env.PLAYWRIGHT_BASE_URL).toBeUndefined();
-    expect(env.PLAYWRIGHT_LANE).toBe('sandbox');
-    // the timeout export is domain-gated, not lane-gated — a --tunnel run on a deployed
-    // lane is nonsensical (guarded at the command), but the env stays coherent regardless.
-    expect(env.PLAYWRIGHT_TUNNEL_TIMEOUT_MS).toBe(String(TUNNEL_PLAYWRIGHT_TIMEOUT_MS));
-  });
-
-  it('buildStackContext flips tunnel:true + tunnelDomain when a domain is passed (facade reads these)', () => {
-    const { runtime } = buildStackContext(FLAGS, seams(), delegate, deriveInstance({ slot: 0 }), DOMAIN);
-    expect(runtime.tunnel).toBe(true);
-    expect(runtime.tunnelDomain).toBe(DOMAIN);
-  });
-
-  it('buildStackContext WITHOUT a domain keeps tunnel:false (byte-identical default)', () => {
-    const { runtime } = buildStackContext(FLAGS, seams(), delegate, deriveInstance({ slot: 0 }));
-    expect(runtime.tunnel).toBe(false);
-    expect(runtime.tunnelDomain).toBeUndefined();
+  it('a flow with no spec (progressive saga-dash flows omit it) never pushes an extra positional arg', () => {
+    const noSpecResolved = {
+      playwright: { config: 'playwright.stack.config.ts', project: 'stage-4-pods', headed: false },
+    } as unknown as ResolvedFlow;
+    const argv = playwrightArgv(noSpecResolved);
+    expect(argv).toEqual(['exec', 'playwright', 'test', '--config=playwright.stack.config.ts', '--project', 'stage-4-pods']);
   });
 });

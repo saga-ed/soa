@@ -4,24 +4,31 @@
  * it in the facade's bring-up sequence, gated on coach-web being launchable.
  *
  * WHY: coach-web (a SvelteKit adapter-static SPA at `<coachRoot>/apps/web/coach-web`)
- * reads its `PUBLIC_*` URLs via `$env/static/public`, which SvelteKit/Vite INLINES
- * from the CHECKED-IN `.env` at vite-dev start. That `.env` carries REMOTE defaults
- * (`https://iam.wootdev.com`, `https://dash.wootdev.com`, …) plus the base coach-api
- * port (wrong at slot > 0). So the browser boots against remote/wrong hosts → the
- * whoami fetch fails → coach-web renders a 503 "Unable to reach the sign-in service"
- * and NO route renders. Injecting env into the process does NOT help — SvelteKit
- * inlines `.env`, not `process.env`.
+ * reads its `PUBLIC_*` URLs via `$env/static/public`, inlined at vite-dev start. Its
+ * CHECKED-IN `.env` carries REMOTE defaults (`https://iam.wootdev.com`,
+ * `https://login.wootdev.com`, `https://dash.wootdev.com`) plus the base coach-api port
+ * (wrong at slot > 0), so an un-overridden browser boots against remote/wrong hosts →
+ * the whoami fetch fails → coach-web renders a 503 "Unable to reach the sign-in
+ * service" and NO route renders (the original soa#300).
  *
- * THE FIX: write a per-slot `<coachWebRoot>/.env.local` mapping each PUBLIC_ var to
- * this slot's LOCAL mesh OFFSET url. `.env.local` beats `.env` in Vite/SvelteKit and
- * is gitignored in coach-web, so this overrides the remote defaults without a
- * coach-web code change and without dirtying the checkout. Runs at EVERY slot,
- * including slot 0 — the `.env` remote defaults break local browser-testing at slot 0
- * too (that is the original soa#300).
+ * PRECEDENCE — the thing to get right before touching this file (soa#298, live-proved
+ * over a real tunnel): for a `$env/static/public` var, `process.env` (the LAUNCH ENV)
+ * WINS over `.env.local`, which wins over `.env`. An earlier version of this comment
+ * claimed the launch env was ignored; a tunnel run disproved it — with the launch env
+ * and `.env.local` set to DIFFERENT hosts, the served bundle carried the launch env's,
+ * and only the vars ABSENT from the launch env fell through to `.env.local`.
  *
- * SCOPE: the local `stack` lane only. Under `--tunnel` the coach-web URLs are a
- * separate concern (public tunnel hosts), so the hook NO-OPS and leaves `.env` /
- * any tunnel wiring alone — mirroring how the dash hook keeps tunnel routing distinct.
+ * SO WHAT THIS HOOK ACTUALLY BUYS: `PUBLIC_LOGIN_URL` + `PUBLIC_DASHBOARD_URL` — the
+ * two the launch env does NOT set, whose `.env` defaults are shared REMOTE hosts.
+ * `PUBLIC_IAM_API_URL` / `PUBLIC_COACH_API_URL` are also written here, but the manifest
+ * sets both (`core/manifest/services.ts`, `${IAM_URL}` / `${COACH_API_URL}`) and the
+ * launch env outranks this file, so those two lines are a redundant fallback rather
+ * than the operative fix. Do not "fix" a URL bug by editing them alone — check whether
+ * the manifest or `tunnelOverlay()` sets the var first, because that is what wins.
+ *
+ * SCOPE: the local `stack` lane only. Under `--tunnel` every coach-web PUBLIC_ var is
+ * set by `tunnelOverlay()` in the LAUNCH ENV (which outranks whatever is on disk here),
+ * so the hook NO-OPS — mirroring how the dash hook keeps tunnel routing distinct.
  *
  * The fs (dir-exists / write / remove) is behind the injectable `CoachWebFs` so the
  * hook is unit-tested with NO real filesystem; production wires `makeRealCoachWebFs()`.

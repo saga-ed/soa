@@ -280,6 +280,21 @@ describe('develop coach — slot awareness (slot > 0)', () => {
   it('--tunnel --slot 2 hard-errors (tunnel fronts fixed slot-0 ports)', async () => {
     await expect(DevelopCoach.run(['--tunnel', '--slot', '2', ...ws()], config)).rejects.toThrow(/slot 2:.*slot-0 browser ports/);
   });
+
+  it("mints the hand-off jar against THIS SLOT's iam, not slot 0's", async () => {
+    // Regression: handoff() hardcoded `slot: 0` while the coach-web URL it opened
+    // already used the slot-offset port — so `--slot 2` minted a jar against SLOT 0's
+    // iam and opened slot 2's app (a jar for the wrong stack; or, with slot 0 down, a
+    // mint-failure warning on an otherwise healthy slot-2 run).
+    //
+    // Unlike the hand-off PORT (the harness mocks the port probe to fixed values, per
+    // the sibling test above), the iam URL is derived from the slot ALONE
+    // (`resolveIamUrl`: :3010 + slot*1000), so it IS assertable here.
+    await DevelopCoach.run(['--slot', '2', ...ws()], config);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].url).toContain(':5010'); // 3010 + 2*1000
+    expect(posts[0].url).not.toContain(':3010'); // slot 0's iam — the bug
+  });
 });
 
 describe('develop coach — admin (descoped, mock-backed)', () => {

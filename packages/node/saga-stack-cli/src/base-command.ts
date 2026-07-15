@@ -54,6 +54,7 @@ import type { RepoKey as ManifestRepoKey } from './core/manifest/index.js';
 import type { RecordUp, Runtime } from './stack-api.js';
 import { COOKIE_JAR_FILE, nativeLogin } from './runtime/login.js';
 import type { NativeLoginResult } from './runtime/login.js';
+import { type FrontendRegistryIo, makeRealFrontendRegistryIo } from './runtime/frontend-registry.js';
 import {
   buildRepoEnv,
   makeRealConfirm,
@@ -651,6 +652,11 @@ export abstract class BaseCommand extends Command {
    */
   protected getJarWriter(): JarWriter {
     return makeRealJarWriter();
+  }
+
+  /** Injectable frontends.json IO (the `ss frontend` registry). Real fs in prod. */
+  protected getFrontendRegistryIo(): FrontendRegistryIo {
+    return makeRealFrontendRegistryIo();
   }
 
   /**

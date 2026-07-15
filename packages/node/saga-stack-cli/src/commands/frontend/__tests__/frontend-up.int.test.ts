@@ -1,11 +1,35 @@
 import { join, resolve } from 'node:path';
 import { Config } from '@oclif/core';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { restoreEnv, saveEnv, type EnvSnapshot } from '../../../__tests__/helpers/env.js';
 import { BaseCommand } from '../../../base-command.js';
 import { MAX_VARIANTS_PER_SLOT } from '../../../core/frontend-variant.js';
 import type { LaunchSpec } from '../../../runtime/index.js';
 import type { FrontendRegistryIo } from '../../../runtime/frontend-registry.js';
 import FrontendUp from '../up.js';
+
+// resolveRepoRoot('SAGA_DASH', …) reads $SAGA_DASH before falling back to
+// `<dev>/saga-dash`; the "rejects the primary saga-dash checkout" test below
+// only exercises that fallback if the var is unset, so isolate it like
+// up-native.int.test.ts's SLOT_ENV_KEYS block does.
+const ENV_KEYS = ['SAGA_DASH'];
+
+// NOT redundant with the beforeEach/afterEach below: `shared-flags.ts`'s
+// `--saga-dash` flag bakes `process.env.SAGA_DASH` into its oclif `default` at
+// MODULE IMPORT time (base-command.ts:301-302 — "repo flags bake env vars in
+// as oclif defaults"), and ES imports (BaseCommand/FrontendUp above) evaluate
+// before ANY test-file code — including a `beforeEach` — ever runs. So if the
+// ambient shell exports SAGA_DASH, a plain beforeEach delete is already too
+// late: the flag default is frozen by the time it runs, and the
+// primary-checkout guard below silently stops firing. `vi.hoisted` is
+// vitest's documented escape hatch for code that must run BEFORE a file's
+// imports are evaluated — use it to sanitize SAGA_DASH before `up.js` (and
+// its `shared-flags.ts` dependency) is ever imported.
+const ORIGINAL_SAGA_DASH = vi.hoisted(() => {
+  const value = process.env.SAGA_DASH;
+  delete process.env.SAGA_DASH;
+  return value;
+});
 
 const PKG_ROOT = process.cwd();
 const SOA_ROOT = resolve(PKG_ROOT, '..', '..', '..');
@@ -18,6 +42,7 @@ let launched: LaunchSpec[];
 let regFiles: Record<string, string>;
 let dashActions: string[];
 let logged: string[];
+let savedEnv: EnvSnapshot;
 
 function install(): void {
   launched = [];
@@ -61,7 +86,16 @@ function install(): void {
   vi.spyOn(proto, 'getFrontendRegistryIo').mockReturnValue(io);
 }
 
+// Put back whatever the ambient shell actually had, once this file's tests
+// (and the module-load-time flag default they depend on) are done with it.
+afterAll(() => {
+  if (ORIGINAL_SAGA_DASH === undefined) delete process.env.SAGA_DASH;
+  else process.env.SAGA_DASH = ORIGINAL_SAGA_DASH;
+});
+
 beforeEach(async () => {
+  savedEnv = saveEnv(ENV_KEYS);
+  delete process.env.SAGA_DASH;
   config = await Config.load(PKG_ROOT);
   logged = [];
   vi.spyOn(BaseCommand.prototype, 'log').mockImplementation((m?: string) => {
@@ -72,6 +106,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  restoreEnv(savedEnv);
 });
 
 describe('ss frontend up', () => {

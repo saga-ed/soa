@@ -391,13 +391,31 @@ function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string,
         EXPRESS_SERVER_CORSALLOWEDDOMAINS: `${tokens.COACH_WEB_HOST},${td}`,
       };
     case 'coach-web':
-      // PUBLIC_COACH_API_URL is BROWSER-side (SvelteKit PUBLIC_ var read at
-      // vite-dev time): a remote coworker's browser must reach coach-api via its
-      // public tunnel name (label `coach-api`), not localhost:6105. iam stays
-      // behind coach-api (cookie composition is server-side, coach#94), so
-      // nothing else flips. Label `coach` is coach-web's own allowed-host.
+      // coach-web's PUBLIC_* vars are BROWSER-side (SvelteKit `$env/static/public`,
+      // inlined at vite-dev start), so EVERY host a remote coworker's browser dials
+      // must be a public tunnel name — localhost is unreachable from their machine.
+      //
+      // These belong in the LAUNCH ENV (here) rather than coach-web's `.env.local`:
+      // for a PUBLIC_ var, `process.env` WINS over `.env.local`/`.env`, so the launch
+      // env is the only override that reliably reaches the browser. (Live-proved over
+      // a real tunnel: with both set and disagreeing, the bundle carried the launch
+      // env's value; vars ABSENT here fell through to `.env.local`.)
       return {
         PUBLIC_COACH_API_URL: `https://coach-api.${td}`,
+        // iam MUST flip too — the browser fetches whoami DIRECT from iam, NOT through
+        // coach-api (coach-web `src/lib/api/session.ts`:
+        // `const WHOAMI_URL = \`${'$'}{PUBLIC_IAM_API_URL}/trpc/auth.whoami\``). The base
+        // manifest pins this to `${'$'}{IAM_URL}` (localhost:3010) for the local mesh, and
+        // that would otherwise reach the remote browser verbatim → whoami fails →
+        // coach-web renders the soa#300 503 "Unable to reach the sign-in service".
+        PUBLIC_IAM_API_URL: `https://iam.${td}`,
+        // Logout target and the "open dashboard" link. Not boot-critical (unlike the two
+        // above), but their `.env` defaults are the SHARED remote hosts
+        // (login./dash.wootdev.com) — a tunnel session must stay inside its own mesh.
+        // No `login` host exists in tunnel.sh SERVICES, so login points at iam (which
+        // serves the /demo challenge), matching the local lane.
+        PUBLIC_LOGIN_URL: `https://iam.${td}`,
+        PUBLIC_DASHBOARD_URL: `https://dash.${td}`,
         __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: `coach.${td}`,
       };
     default:

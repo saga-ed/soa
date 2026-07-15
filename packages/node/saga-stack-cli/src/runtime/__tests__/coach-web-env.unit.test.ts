@@ -1,8 +1,8 @@
 /**
- * coach-web-env prelaunch hook (soa#300, soa#298). The fs is injected, so this asserts
- * the mode-for-mode behaviour with NO real filesystem: the per-slot `.env.local`
- * contents (offset PUBLIC_* URLs at slot 0 and slot 2), the TUNNEL lane's public hosts
- * (incl. the stale-local-file shadow this fix exists to kill), and the no-app no-op.
+ * coach-web-env prelaunch hook (soa#300). The fs is injected, so this asserts the
+ * mode-for-mode behaviour with NO real filesystem: the per-slot `.env.local`
+ * contents (offset PUBLIC_* URLs at slot 0 and slot 2), the tunnel no-op, and the
+ * no-app no-op.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -16,8 +16,6 @@ import type { ServiceId } from '../../core/manifest/index.js';
 
 const COACH_WEB = '/repo/coach/apps/web/coach-web';
 const ENV_LOCAL = coachWebEnvLocalPath(COACH_WEB);
-/** A representative tunnel domain (`<moniker>.<VMS_BASE>`). */
-const TD = 'sk.vms.wootdev.com';
 
 /** A fake fs with controllable existence + recorded mutations. */
 function fakeFs(opts: { hasApp?: boolean } = {}): {
@@ -62,79 +60,15 @@ describe('syncCoachWebEnvLocal', () => {
     expect(written).toEqual([]);
   });
 
-  it('--tunnel: WRITES the PUBLIC tunnel hosts (NOT localhost) so a remote browser boots', () => {
-    // soa#298. tunnelOverlay() sets PUBLIC_COACH_API_URL in the LAUNCH ENV, which
-    // SvelteKit ignores ($env/static/public inlines `.env.local`/`.env`) — so this
-    // file is the only thing a remote browser actually sees.
-    const { fs, removed, written } = fakeFs();
-    const res = syncCoachWebEnvLocal(
-      { coachWebRoot: COACH_WEB, tunnel: true, tunnelDomain: TD, stackPorts: slotPorts(0) },
-      fs,
-    );
-    expect(res.action).toBe('wrote-tunnel');
-    expect(removed).toEqual([]);
-    expect(written).toHaveLength(1);
-
-    const env = parseEnv(written[0].contents);
-    expect(env.PUBLIC_COACH_API_URL).toBe(`https://coach-api.${TD}`);
-    // iam MUST flip too: coach-web fetches whoami DIRECT from iam (api/session.ts),
-    // so leaving it at the `.env` default (https://iam.wootdev.com) 503s the remote
-    // browser — the gap tunnelOverlay() could not close.
-    expect(env.PUBLIC_IAM_API_URL).toBe(`https://iam.${TD}`);
-    expect(env.PUBLIC_DASHBOARD_URL).toBe(`https://dash.${TD}`);
-    // No `login` host exists in tunnel.sh SERVICES ⇒ login points at iam in both lanes.
-    expect(env.PUBLIC_LOGIN_URL).toBe(`https://iam.${TD}`);
-    // The whole point: not one localhost URL survives into a remote browser's bundle.
-    expect(written[0].contents).not.toContain('localhost');
-  });
-
-  it('--tunnel: OVERWRITES a stale LOCAL .env.local (the shadow that broke tunnel coach)', () => {
-    // The regression this fix exists for: `.env.local` > `.env` > launch env, so a file
-    // left by an earlier LOCAL run would pin a remote browser to localhost. Same path,
-    // rewritten — never appended to, never left in place.
-    const { fs, written } = fakeFs();
-    syncCoachWebEnvLocal({ coachWebRoot: COACH_WEB, stackPorts: slotPorts(0) }, fs); // local run
-    syncCoachWebEnvLocal(
-      { coachWebRoot: COACH_WEB, tunnel: true, tunnelDomain: TD, stackPorts: slotPorts(0) },
-      fs,
-    ); // then tunnel
-
-    expect(written).toHaveLength(2);
-    expect(written[1].path).toBe(written[0].path); // same file, so the stale one is gone
-    expect(written[0].contents).toContain('http://localhost:6105');
-    expect(written[1].contents).not.toContain('localhost');
-  });
-
-  it('--tunnel: ignores stackPorts entirely (tunnel hosts are static labels)', () => {
-    // A tunnel run must not degrade to a `.env` REMOTE default just because a port is
-    // unresolved — every host is a tunnel.sh label, so all four vars are always written.
-    const { fs, written } = fakeFs();
-    const res = syncCoachWebEnvLocal(
-      { coachWebRoot: COACH_WEB, tunnel: true, tunnelDomain: TD, stackPorts: {} },
-      fs,
-    );
-    expect(res.action).toBe('wrote-tunnel');
-    const env = parseEnv(written[0].contents);
-    expect(Object.keys(env).sort()).toEqual([
-      'PUBLIC_COACH_API_URL',
-      'PUBLIC_DASHBOARD_URL',
-      'PUBLIC_IAM_API_URL',
-      'PUBLIC_LOGIN_URL',
-    ]);
-  });
-
-  it('--tunnel with NO domain: REMOVES a stale .env.local rather than pinning localhost', () => {
-    // Not reachable via the facade (it always pairs tunnel+domain), but if it were, a
-    // leftover LOCAL file would shadow `.env` and send a remote browser to localhost.
-    // Degrade to coach-web's own `.env` defaults instead of a knowably-wrong host.
+  it('no-ops under --tunnel (public coach-web URLs are a separate concern)', () => {
     const { fs, removed, written } = fakeFs();
     const res = syncCoachWebEnvLocal(
       { coachWebRoot: COACH_WEB, tunnel: true, stackPorts: slotPorts(0) },
       fs,
     );
     expect(res.action).toBe('noop-tunnel');
+    expect(removed).toEqual([]);
     expect(written).toEqual([]);
-    expect(removed).toEqual([`${COACH_WEB}/.env.local`]);
   });
 
   it('slot 0: WRITES .env.local with the LOCAL (base-port) PUBLIC_* URLs', () => {

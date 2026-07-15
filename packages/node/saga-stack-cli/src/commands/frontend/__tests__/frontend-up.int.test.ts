@@ -2,6 +2,7 @@ import { join, resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
+import { MAX_VARIANTS_PER_SLOT } from '../../../core/frontend-variant.js';
 import type { LaunchSpec } from '../../../runtime/index.js';
 import type { FrontendRegistryIo } from '../../../runtime/frontend-registry.js';
 import FrontendUp from '../up.js';
@@ -119,6 +120,43 @@ describe('ss frontend up', () => {
     ).mockReturnValue(() => false);
     await expect(FrontendUp.run([`feat=${VARIANT}`, ...WS], config)).rejects.toMatchObject({
       message: expect.stringContaining('apps/web/dash'),
+    });
+  });
+
+  it('rejects the primary saga-dash checkout', async () => {
+    const primary = join(DEV_ROOT, 'saga-dash'); // resolveRepoRoot('SAGA_DASH', …) default under --dev
+    await expect(FrontendUp.run([`feat=${primary}`, ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('primary saga-dash checkout'),
+    });
+  });
+
+  it('rejects an explicit --port that is already in use', async () => {
+    vi.spyOn(
+      BaseCommand.prototype as unknown as {
+        getPortProbe: () => { dockerHolder: () => Promise<null>; listening: (p: number) => Promise<boolean> };
+      },
+      'getPortProbe',
+    ).mockReturnValue({
+      async dockerHolder() {
+        return null;
+      },
+      async listening() {
+        return true; // every probed port reports "in use"
+      },
+    });
+    await expect(FrontendUp.run([`feat=${VARIANT}`, '--port', '8950', ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining('port 8950 is already in use'),
+    });
+  });
+
+  it('rejects once slot 0 is at the MAX_VARIANTS_PER_SLOT cap', async () => {
+    const reg: Record<string, { label: string; path: string; port: number; pid: number; slot: number }> = {};
+    for (let i = 0; i < MAX_VARIANTS_PER_SLOT; i += 1) {
+      reg[`v${i}`] = { label: `v${i}`, path: `/home/me/dash-v${i}`, port: 8901 + i, pid: 1000 + i, slot: 0 };
+    }
+    regFiles['/tmp/sds-synthetic/frontends.json'] = JSON.stringify(reg);
+    await expect(FrontendUp.run([`feat=${VARIANT}`, ...WS], config)).rejects.toMatchObject({
+      message: expect.stringContaining(`${MAX_VARIANTS_PER_SLOT}`),
     });
   });
 });

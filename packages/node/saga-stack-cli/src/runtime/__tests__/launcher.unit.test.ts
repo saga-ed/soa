@@ -91,7 +91,7 @@ describe('makeRealLauncher.launch', () => {
 
     const res = await launcher.launch(SPEC);
 
-    expect(res).toEqual({ id: 'iam-api', ok: true, alreadyUp: true });
+    expect(res).toEqual({ id: 'iam-api', ok: true, alreadyUp: true, adoptedForeign: true });
     expect(calls).toHaveLength(0); // never spawned
     expect(ensureDir).not.toHaveBeenCalled();
   });
@@ -219,6 +219,34 @@ describe('makeRealLauncher.launch adopt-contract guard (soa#305)', () => {
   };
   const FINGERPRINT = JSON.stringify({ JWT_ISSUER: 'https://iam.wootdev.com' });
 
+  it('flags an UNGUARDED already-up process as adoptedForeign when it has no pidfile (soa#329)', async () => {
+    // A foreign process (another CLI/terminal launched it) 200s on /health and gets
+    // adopted — but its env is unverifiable, which silently voids `down`'s relaunch
+    // guarantee across lane/tunnel transitions. The flag is the caller's cue to WARN.
+    const { prober } = seqProber([true]);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn: fakeSpawn(1).spawn,
+      readPid: () => null, // no pidfile in this slot's state dir ⇒ foreign
+    });
+    const res = await launcher.launch(SPEC); // no adoptEnv — unguarded service
+    expect(res).toMatchObject({ ok: true, alreadyUp: true, adoptedForeign: true });
+  });
+
+  it('does NOT flag adoption when OUR pidfile exists (a normal idempotent re-run)', async () => {
+    const { prober } = seqProber([true]);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn: fakeSpawn(1).spawn,
+      readPid: () => '4242', // this CLI's own pidfile
+    });
+    const res = await launcher.launch(SPEC);
+    expect(res.alreadyUp).toBe(true);
+    expect(res.adoptedForeign).toBeUndefined();
+  });
+
   it('refuses to adopt an already-up process with NO recorded contract fingerprint', async () => {
     const { prober } = seqProber([true]); // already up
     const { spawn, calls } = fakeSpawn(1);
@@ -337,7 +365,7 @@ describe('makeRealLauncher.launch adopt-contract guard (soa#305)', () => {
 
     const res = await launcher.launch(SPEC); // no adoptEnv
 
-    expect(res).toEqual({ id: 'iam-api', ok: true, alreadyUp: true });
+    expect(res).toEqual({ id: 'iam-api', ok: true, alreadyUp: true, adoptedForeign: true });
     expect(readContract).not.toHaveBeenCalled(); // guard never consulted
   });
 });

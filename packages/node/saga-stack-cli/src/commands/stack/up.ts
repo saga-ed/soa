@@ -632,7 +632,17 @@ export default class StackUp extends BaseCommand {
     }
 
     // Report.
-    const launchedIds = up.launched.map((r) => `${r.id}${r.alreadyUp ? ' (already up)' : ''}`);
+    const launchedIds = up.launched.map(
+      (r) => `${r.id}${r.adoptedForeign ? ' (already up, FOREIGN)' : r.alreadyUp ? ' (already up)' : ''}`,
+    );
+    const foreign = up.launched.filter((r) => r.adoptedForeign).map((r) => r.id);
+    if (foreign.length > 0) {
+      this.warn(
+        `adopted ${foreign.length} process(es) NOT launched by this CLI (no pidfile): ${foreign.join(', ')} — ` +
+          'their env is unverifiable (a lane/tunnel transition may not have applied). ' +
+          'If behavior looks wrong, stop them and re-run so this CLI relaunches them.',
+      );
+    }
     this.emit(
       flags,
       {

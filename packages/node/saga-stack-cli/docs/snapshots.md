@@ -14,7 +14,7 @@ Bring your stack to the state you want, then:
 ss stack snapshot store --fixture-id my-baseline
 ```
 
-<details><summary>✓ dumps every closure DB (pg) + connectv3 (mongo) into a named fixture</summary>
+<details><summary>✓ dumps every stack DB (pg, storePlan's default set) + connectv3 (mongo) into a named fixture</summary>
 
 ```
 snapshot 'my-baseline' — storing …
@@ -72,7 +72,7 @@ Recovery is one command — relaunch the dead service:
 ss stack up --only programs-api --skip-prep
 ```
 
-The coverage guard, by contrast, behaves well: restoring beyond the baked closure fails
+The coverage guard, by contrast, behaves well: restoring beyond the baked set fails
 fast with a `re-bake with a wider --through` error instead of half-restoring.
 
 ## When to use which

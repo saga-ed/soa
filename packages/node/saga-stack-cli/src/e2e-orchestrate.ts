@@ -284,6 +284,14 @@ export function buildStackContext(
     pinoLevel: process.env.PINO_LOGGER_LEVEL,
     pinoIsExpressContext: process.env.PINO_LOGGER_ISEXPRESSCONTEXT,
     rtsmFleetPath,
+    // --tunnel: thread the domain into the LAUNCH TOKENS, not just the Runtime.
+    // Without this, tunnelOverlay() returns {} for every service THIS path
+    // auto-launches, so `develop … --tunnel` silently brought services up with
+    // pure-local browser env (VITE_*/PUBLIC_* = localhost) inlined into pages
+    // served over the public tunnel origin (soa#322). Services already up are
+    // still adopted untouched — this only fixes what develop itself launches.
+    // lk creds / the generated rtsm fleet stay `stack up --tunnel` machinery.
+    tunnel: tunnelDomain !== undefined ? { domain: tunnelDomain } : undefined,
   });
 
   const runtime: Runtime = {

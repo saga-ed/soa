@@ -115,6 +115,28 @@ describe('buildStackContext — slot threading (parity with stack up buildRuntim
     expect(runtime.pgProbe).toBe(PG_PROBE);
     expect(runtime.launchContext.ports['iam-api']).toBe(3010);
   });
+
+  it('--tunnel: the domain reaches the LAUNCH TOKENS, not just the Runtime (soa#322)', () => {
+    // Without TUNNEL_DOMAIN in the tokens, tunnelOverlay() returns {} for every
+    // service this path auto-launches — `develop … --tunnel` then serves pages over
+    // the public tunnel origin whose inlined VITE_*/PUBLIC_* still say localhost.
+    // Runtime.tunnelDomain alone only drives Playwright URLs + the dash hook.
+    const { runtime } = buildStackContext(
+      FLAGS,
+      seams(),
+      delegate,
+      deriveInstance({ slot: 0 }),
+      'x.vms.wootdev.com',
+    );
+    expect(runtime.tunnel).toBe(true);
+    expect(runtime.tunnelDomain).toBe('x.vms.wootdev.com');
+    expect(runtime.launchContext.tokens.TUNNEL_DOMAIN).toBe('x.vms.wootdev.com');
+  });
+
+  it('no --tunnel: no TUNNEL_DOMAIN token (local launches stay overlay-free)', () => {
+    const { runtime } = buildStackContext(FLAGS, seams(), delegate);
+    expect(runtime.launchContext.tokens.TUNNEL_DOMAIN).toBeUndefined();
+  });
 });
 
 describe('serviceUrlEnv / playwrightEnv — offset Playwright service URLs', () => {

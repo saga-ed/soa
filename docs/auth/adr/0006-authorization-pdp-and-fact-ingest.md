@@ -54,6 +54,12 @@ Facts whose authority lives in another domain (program→scope edges, pod tutors
 from `programs.*` / `scheduling.*` / `sessions.*`; identity/staff facts from `iam.*`) arrive as
 events through the PDP's **ingest API**, which centrally implements, once:
 
+Transport is the fleet's existing event mesh — the owning domain's transactional outbox
+(`@saga-ed/soa-event-outbox` relay → RabbitMQ topic exchange, e.g. `iam.events`) consumed via
+`@saga-ed/soa-event-consumer`, whose per-message transaction inserts into `consumed_events`
+(composite PK `consumer_name, event_id`) atomically with the projection write. The ingest API is
+a disciplined *consumer* of that mesh, not a parallel transport.
+
 - **Ownership partition**: each *directly-assignable* tuple type (`type#relation` that can carry
   stored tuples — computed relations have no writer and are out of scope) is registered to exactly
   one producing domain. The partition registry lives beside the model in
@@ -63,9 +69,12 @@ events through the PDP's **ingest API**, which centrally implements, once:
 - **Ordering**: tombstones for out-of-order remove/add (the exact guard the local projections
   already use), so replays and skew cannot resurrect a removed fact.
 - **Backfill**: registering a fact type requires a snapshot replay path; a partition is not "live"
-  until its initial state is loaded.
-- **Reconciliation**: periodic source-diff per partition (producer exposes a snapshot; the PDP
-  diffs and repairs), so a single lost event cannot linger forever.
+  until its initial state is loaded. The preferred mechanism is **outbox re-emit** — the producer
+  re-emits events for existing rows through the same bus, so backfill exercises the one code path
+  consumers already handle (idempotent upserts with monotonic source-timestamp guards) instead of
+  a second bulk-read API. Snapshot endpoints are the fallback where re-emit is too heavy.
+- **Reconciliation**: periodic source-diff per partition (producer re-emits or exposes a snapshot;
+  the PDP diffs and repairs), so a single lost event cannot linger forever.
 
 Contextual tuples in checks are **not writes** and don't violate the partition — but any relation
 intended to be supplied contextually must be marked so in the partition registry, so a relation is
@@ -90,7 +99,14 @@ their facts without owning FGA plumbing; one audit path per fact class; one thin
 **Negative:** the PDP is a new critical-path service (its availability posture — distinct
 503-class signal, SDK caching, never masked NOT_FOUND — is part of the north star and must ship
 with step 1); the ingest API is real engineering (it replaces N workers, but someone builds it);
-domains must expose snapshot endpoints for reconciliation.
+producers must support re-emit (or expose snapshot endpoints) for backfill and reconciliation.
+
+**First realization (2026-07-16):** the `iam.*` projection consumer inside authz-api — step 1's
+façade serves capabilities/values from a local projection fed by iam-api's outbox, with re-emit
+backfill. An earlier step-1 draft instead read iam_db directly through a read-only role; that
+cross-service database read violated this ADR's §3 (and the mesh's projection rule) and is
+removed. It also surfaced one producer-side coverage gap: persona policy values had no event,
+closed additively as `iam.persona_policies.upserted.v1`.
 
 ## Alternatives considered
 

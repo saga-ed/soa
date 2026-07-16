@@ -192,7 +192,7 @@ export default class DevelopCoach extends BaseCommand {
     tunnel: Flags.boolean({
       default: false,
       description:
-        "point THIS run's flow browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints the flow's Playwright browsers — it does NOT relaunch the stack; you must have already run `ss stack up --tunnel`. Slot-0 only.",
+        "point THIS run's flow browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). Services ALREADY UP are reused untouched; any service this run must launch itself comes up WITH the tunnel browser-env overlay (soa#322). It does NOT start frpc — run `ss stack up --tunnel` first for the tunnel itself. Slot-0 only.",
     }),
   };
 

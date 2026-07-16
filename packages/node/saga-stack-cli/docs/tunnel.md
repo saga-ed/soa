@@ -21,7 +21,7 @@ export AWS_PROFILE=dev_admin      # dev account (moniker registration + fleek A/
 # 1 — Build the Empty Org + a schedule locally (fast, tested), then snapshot it:
 ss stack down && ss stack up --seed full --reset
 ss e2e run journey --through schedule
-ss stack snapshot store --fixture-id tunnel-connect
+ss stack snapshot store --fixture-id tunnel-connect   # add --force on a re-run (the fixture persists)
 
 # 2 — Bring the stack up in TUNNEL mode (fetches fleek A/V creds), then restore the org:
 ss stack down && ss stack up --tunnel --reset

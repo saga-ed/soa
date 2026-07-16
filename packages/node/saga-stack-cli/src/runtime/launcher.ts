@@ -90,6 +90,12 @@ export interface LaunchResult {
   /** True iff a 200 came back BEFORE we launched — up.sh's "already up :$port" path. */
   alreadyUp?: boolean;
   /**
+   * alreadyUp AND no pidfile in this slot's state dir — the process answers its
+   * health URL but was NOT launched by this CLI (docs/tunnel.md's "down guarantees
+   * every service (re)launches" is silently void for it: its env may be any lane's).
+   */
+  adoptedForeign?: boolean;
+  /**
    * Set only on a NON-ok result that needs an explanation the caller can't infer from
    * `id` alone — today the `adoptEnv` drift refusal (an already-up process whose launch
    * contract can't be verified), so `up` reports the real cause instead of the generic
@@ -290,7 +296,17 @@ export function makeRealLauncher(deps: RealLauncherDeps = {}): ServiceLauncher {
             };
           }
         }
-        return { id: spec.id, ok: true, alreadyUp: true };
+        // Unguarded services still deserve a trace when the adoptee is FOREIGN
+        // (no pidfile here ⇒ some other CLI/terminal launched it): its env is
+        // unverifiable, which silently voids `down`'s relaunch guarantee — the
+        // walkthrough watched a foreign programs-api ride through a localhost→
+        // tunnel transition this way (soa#329).
+        // Guarded specs that reach here PROVED provenance (fingerprint matched),
+        // pidfile or not. Only an UNGUARDED adoptee with no pidfile is unknowable.
+        const foreign = guardKeys.length === 0 && readPid(pidFilePath(stateDir, spec.id)) === null;
+        return foreign
+          ? { id: spec.id, ok: true, alreadyUp: true, adoptedForeign: true }
+          : { id: spec.id, ok: true, alreadyUp: true };
       }
 
       ensureDir(stateDir);

@@ -207,6 +207,11 @@ export default class DevelopCoach extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: the concierge brings up + DRIVES the slot's sub-stack — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(DevelopCoach);
     const scenario = flags.scenario as Scenario;

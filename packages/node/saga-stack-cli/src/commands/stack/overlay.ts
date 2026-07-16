@@ -104,6 +104,13 @@ export default class StackOverlay extends BaseCommand {
     }),
   };
 
+  /** Slot claims: apply/reset/compose-rest mutate the checkouts; `list` is read-only.
+   * Dispatch on the PARSED verb positional — raw-argv sniffing would match flag
+   * values too (`--prs list` is a legal branch name). */
+  protected claimsSlot(positionals?: readonly string[]): boolean {
+    return (positionals?.[0] ?? 'apply') !== 'list';
+  }
+
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(StackOverlay);
 

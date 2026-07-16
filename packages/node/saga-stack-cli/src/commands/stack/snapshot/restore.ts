@@ -91,6 +91,11 @@ export default class SnapshotRestore extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: a restore rewrites the slot's data — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(SnapshotRestore);
     // M13-A: apply the slot env seam BEFORE any snapshot-store resolver runs —

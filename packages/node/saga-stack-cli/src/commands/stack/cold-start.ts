@@ -109,6 +109,11 @@ export default class StackColdStart extends BaseCommand {
     }),
   };
 
+  /** Slot claims: the factory reset DRIVES the (slot-0) stack — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackColdStart);
     const dry = flags['dry-run'];

@@ -161,6 +161,11 @@ export default class StackUp extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: `up` DRIVES the slot's stack — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackUp);
 

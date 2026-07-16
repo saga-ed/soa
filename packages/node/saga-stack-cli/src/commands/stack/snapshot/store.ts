@@ -85,6 +85,11 @@ export default class SnapshotStore extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: the dump writes the slot's snapshot state — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(SnapshotStore);
     // M13-A: apply the slot env seam BEFORE any snapshot-store resolver runs —

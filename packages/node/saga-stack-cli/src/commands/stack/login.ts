@@ -60,6 +60,11 @@ export default class StackLogin extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: minting the jar writes slot state — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(StackLogin);
 

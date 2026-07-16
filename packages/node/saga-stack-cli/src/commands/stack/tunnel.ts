@@ -63,6 +63,11 @@ export default class StackTunnel extends BaseCommand {
     }),
   };
 
+  /** Slot claims: the tunnel repoints the (slot-0) browser plane — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(StackTunnel);
     // Reuse the pure flag→argv/env mapping, but RESOLVE + RUN the VENDORED copy

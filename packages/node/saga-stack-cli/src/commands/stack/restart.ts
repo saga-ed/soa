@@ -39,6 +39,11 @@ export default class StackRestart extends BaseCommand {
   // to slot 0, so a `--slot > 0` is rejected by the central guard. The teardown is still
   // dir-scoped/slot-safe (launcher kill-by-pidfile, never a host-global `pkill`).
 
+  /** Slot claims: a bounce DRIVES the (slot-0) stack — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackRestart);
 

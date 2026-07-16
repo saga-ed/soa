@@ -155,6 +155,11 @@ export default class E2eRun extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: `e2e run` brings up + DRIVES the slot's stack — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(E2eRun);
 

@@ -55,6 +55,11 @@ export default class StackBootstrap extends BaseCommand {
     }),
   };
 
+  /** Slot claims: the bootstrap chain DRIVES the (slot-0) stack — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackBootstrap);
 

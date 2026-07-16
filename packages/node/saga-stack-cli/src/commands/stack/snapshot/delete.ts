@@ -33,6 +33,11 @@ export default class SnapshotDelete extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: deleting a snapshot mutates the slot's state — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(SnapshotDelete);
     // M13-A: apply the slot env seam BEFORE any snapshot-store resolver runs —

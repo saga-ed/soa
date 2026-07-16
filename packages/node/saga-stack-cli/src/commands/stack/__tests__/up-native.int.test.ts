@@ -508,6 +508,11 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
       type: 'url',
       url: 'https://iam.testmoniker.vms.wootdev.com',
     });
+    // … and the launch spec carries the adoptEnv guard on that key: the env now
+    // SHADOWS the static file in a new-enough dash, so a mode-drifted already-up
+    // dash (e.g. tunnel → plain `up` without a `stack down`) must be refused and
+    // relaunched, not adopted with frozen tunnel routing (soa#305 pattern).
+    expect(dash?.adoptEnv).toContain('DASH_CONFIG_LOCAL_JSON');
   });
 
   it('--slot 10 is rejected at the flag layer (rabbitmq-mgmt collision ceiling)', async () => {

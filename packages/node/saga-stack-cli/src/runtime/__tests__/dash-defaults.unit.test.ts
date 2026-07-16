@@ -17,6 +17,7 @@ import {
   tunnelConfigContents,
 } from '../dash-defaults.js';
 import type { DashFs } from '../dash-defaults.js';
+import { getService } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 
 const DASH = '/repo/saga-dash';
@@ -184,6 +185,16 @@ describe('buildDashLocalDefaultsJson — soa#328 per-instance env JSON', () => {
     // saga-dash's dev-server middleware reads process.env.DASH_CONFIG_LOCAL_JSON —
     // renaming this breaks the cross-repo contract (soa#328).
     expect(DASH_CONFIG_ENV_VAR).toBe('DASH_CONFIG_LOCAL_JSON');
+  });
+
+  it("the env var is a saga-dash adoptEnv guard key (manifest ties to the constant)", () => {
+    // The env now SHADOWS the static file in a new-enough dash, so an already-up
+    // dash carrying a different mode's stamp must be REFUSED, not adopted — else
+    // `up --tunnel` → plain `up` leaves a dash serving dead tunnel hosts from its
+    // frozen env after the file hook removed config.local.json (the file-only
+    // self-heal is gone). services.ts declares the key as a string literal (core
+    // can't import runtime); this pins the two together.
+    expect(getService('saga-dash').adoptEnv).toContain(DASH_CONFIG_ENV_VAR);
   });
 
   it('tunnel mode: returns the EXACT string the tunnel file writer emits', () => {

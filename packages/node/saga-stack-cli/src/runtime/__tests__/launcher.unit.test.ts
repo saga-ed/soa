@@ -282,6 +282,54 @@ describe('makeRealLauncher.launch adopt-contract guard (soa#305)', () => {
     expect(writeContract).toHaveBeenCalledWith(contractFilePath(STATE, 'iam-api'), FINGERPRINT);
   });
 
+  // saga-dash's guard (soa#328): DASH_CONFIG_LOCAL_JSON is injected only in
+  // tunnel / slot > 0 modes, so a MODE SWITCH shows up as the key present in one
+  // fingerprint and ABSENT (omitted, not '') from the other. The stale env
+  // SHADOWS the corrected static file in a new-enough dash, so adoption across
+  // the switch must be refused.
+  it('refuses to adopt across a mode switch: guarded key now ABSENT, stamp has it (tunnel → slot-0 dash)', async () => {
+    const { prober } = seqProber([true]); // old tunnel dash still healthy on :8900
+    const { spawn, calls } = fakeSpawn(1);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn,
+      // stamped by the earlier `up --tunnel`.
+      readContract: () =>
+        JSON.stringify({ DASH_CONFIG_LOCAL_JSON: '{"localDefaults":{"iam":{"type":"url","url":"https://iam.m.vms.wootdev.com"}}}' }),
+    });
+
+    const res = await launcher.launch({
+      ...SPEC,
+      id: 'saga-dash',
+      // plain slot-0 `up`: no injection ⇒ expected fingerprint omits the key ({}).
+      env: { PORT: '8900' },
+      adoptEnv: ['DASH_CONFIG_LOCAL_JSON'],
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/contract/);
+    expect(calls).toHaveLength(0); // loud fail, never a silent stale adoption
+  });
+
+  it('adopts a same-mode re-run when the guarded key is absent on BOTH sides (slot-0 → slot-0 dash)', async () => {
+    const { prober } = seqProber([true]);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      readContract: () => JSON.stringify({}), // stamped by a slot-0 non-tunnel spawn
+    });
+
+    const res = await launcher.launch({
+      ...SPEC,
+      id: 'saga-dash',
+      env: { PORT: '8900' },
+      adoptEnv: ['DASH_CONFIG_LOCAL_JSON'],
+    });
+
+    expect(res).toEqual({ id: 'saga-dash', ok: true, alreadyUp: true });
+  });
+
   it('leaves an UNguarded service (no adoptEnv) adopted unconditionally', async () => {
     const { prober } = seqProber([true]);
     const readContract = vi.fn(() => null);

@@ -646,6 +646,7 @@ export default class StackUp extends BaseCommand {
         skipped: up.skipped.map((s) => ({ id: s.id, repo: s.repo, repoDir: s.repoDir })),
         mesh: { ok: up.mesh.ok, units: up.mesh.units.map((u) => ({ id: u.id, ok: u.ok })) },
         dash: up.dash?.action ?? null,
+        dashConfigEnv: up.dashConfigEnv ?? null,
         seed: {
           ok: seeded.ok,
           offline: seeded.ran.offline,
@@ -660,6 +661,10 @@ export default class StackUp extends BaseCommand {
         ...(up.skipped.length ? [`skipped (repo not cloned): ${up.skipped.map((s) => s.id).join(', ')}`] : []),
         `mesh: ${up.mesh.units.map((u) => `${u.id}=${u.ok ? 'ready' : 'DOWN'}`).join(', ') || '(none)'}`,
         ...(up.dash ? [`dash defaults: ${up.dash.action}`] : []),
+        // soa#328: the per-instance dash routing env (same JSON as the file write).
+        ...(up.dashConfigEnv
+          ? [`dash config env: DASH_CONFIG_LOCAL_JSON injected (${up.dashConfigEnv.mode}, slot ${up.dashConfigEnv.slot})`]
+          : []),
         `seed offline: ${seeded.ran.offline.join(', ') || '(none)'}`,
         `seed online:  ${seeded.ran.online.join(', ') || '(none)'}`,
         seeded.ok ? 'seed: OK' : `seed: FAILED at ${seeded.failed}`,

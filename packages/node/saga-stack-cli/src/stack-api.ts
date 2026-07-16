@@ -48,8 +48,10 @@ import { buildSeedRegistry } from './core/seed/profiles.js';
 import type { SeedPlan, SeedStep, SkipNote } from './core/seed/types.js';
 import type { PullMode } from './core/auto-pull.js';
 import {
+  DASH_CONFIG_ENV_VAR,
   REPO_DEFAULT_DIR,
   autoPullRepos,
+  buildDashLocalDefaultsJson,
   meshContainer,
   meshUp,
   migrateClosure,
@@ -332,6 +334,13 @@ export interface UpResult {
   migrate?: MigrateResult;
   /** What the dash prelaunch hook did (only when saga-dash was in the closure). */
   dash?: DashSyncResult;
+  /**
+   * The per-instance dash routing env injection (soa#328) — set only when
+   * `DASH_CONFIG_LOCAL_JSON` was injected into saga-dash's launch env (tunnel
+   * mode, or non-tunnel slot > 0). Absent ⇒ nothing injected (slot-0 non-tunnel,
+   * or saga-dash not launchable).
+   */
+  dashConfigEnv?: { mode: 'tunnel' | 'stack-slot'; slot: number };
   /** What the coach-web `.env.local` prelaunch hook did (only when coach-web was launchable + the seam wired). */
   coachWeb?: CoachWebSyncResult;
   /** Per-service launch results, in the order launched (topo waves flattened). */
@@ -879,6 +888,27 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         );
       }
 
+      // 4a. per-instance dash routing env (soa#328) — the SAME JSON the file hook
+      // writes/would write, carried in saga-dash's OWN launch env as
+      // DASH_CONFIG_LOCAL_JSON. A new saga-dash's dev server serves it back for
+      // GET /config.local.json, so each dash instance gets ITS OWN routing from
+      // its own process env instead of the shared static file (which stays, via
+      // the hook above, as transitional back-compat for older saga-dash
+      // checkouts). Null (slot-0 non-tunnel) ⇒ nothing injected — the launch env
+      // stays byte-identical to today.
+      const dashConfigJson = launchable.includes('saga-dash')
+        ? buildDashLocalDefaultsJson({
+            tunnel: runtime.tunnel,
+            tunnelDomain: runtime.tunnelDomain,
+            slot: runtime.slot,
+            stackPorts: launchContext.ports,
+          })
+        : null;
+      const dashConfigEnv: UpResult['dashConfigEnv'] =
+        dashConfigJson !== null
+          ? { mode: runtime.tunnel ? 'tunnel' : 'stack-slot', slot: runtime.slot ?? 0 }
+          : undefined;
+
       // 4b. coach-web prelaunch hook (soa#300) — ONLY when coach-web is launchable AND
       // the seam is wired. coach-web is a SvelteKit adapter-static SPA that INLINES its
       // PUBLIC_* URLs from `.env` at vite-dev start; the checked-in `.env` points at
@@ -938,7 +968,12 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
               cwd: spec.cwd,
               command,
               args,
-              env: spec.env,
+              // soa#328: saga-dash carries its own routing JSON in its launch env
+              // (tunnel / slot > 0 only — dashConfigJson is null otherwise).
+              env:
+                id === 'saga-dash' && dashConfigJson !== null
+                  ? { ...spec.env, [DASH_CONFIG_ENV_VAR]: dashConfigJson }
+                  : spec.env,
               healthUrl: spec.healthUrl,
               // Guard the `alreadyUp` adoption on the service's contract keys (iam-api's
               // JWT_ISSUER) so a drifted/foreign already-up process is refused, not adopted
@@ -950,7 +985,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         launched.push(...results);
         const failed = results.find((r) => !r.ok);
         if (failed) {
-          return { ok: false, autoPull, av, mesh, prep, provision, migrate, dash, coachWeb, launched, skipped, failedAt: failed.id as ServiceId, failedReason: failed.reason };
+          return { ok: false, autoPull, av, mesh, prep, provision, migrate, dash, dashConfigEnv, coachWeb, launched, skipped, failedAt: failed.id as ServiceId, failedReason: failed.reason };
         }
       }
 
@@ -995,7 +1030,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         }
       }
 
-      return { ok: true, autoPull, av, mesh, prep, provision, migrate, dash, coachWeb, launched, skipped, record };
+      return { ok: true, autoPull, av, mesh, prep, provision, migrate, dash, dashConfigEnv, coachWeb, launched, skipped, record };
     },
 
     async down(services: ServiceId[]): Promise<DownResult> {

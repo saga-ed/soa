@@ -7,14 +7,17 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  DASH_CONFIG_ENV_VAR,
   DASH_LOCAL_SERVICES,
   DASH_TUNNEL_LABELS,
+  buildDashLocalDefaultsJson,
   dashLocalConfigPath,
   stackSlotConfigContents,
   syncDashLocalDefaults,
   tunnelConfigContents,
 } from '../dash-defaults.js';
 import type { DashFs } from '../dash-defaults.js';
+import { getService } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 
 const DASH = '/repo/saga-dash';
@@ -168,5 +171,62 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
     const parsed = JSON.parse(stackSlotConfigContents({ 'iam-api': 4010 }));
     expect(parsed.localDefaults.iam).toEqual({ type: 'url', url: 'http://localhost:4010' });
     expect(parsed.localDefaults.connect).toBeUndefined(); // connect-api port absent → dropped
+  });
+});
+
+describe('buildDashLocalDefaultsJson — soa#328 per-instance env JSON', () => {
+  const PORTS: Partial<Record<ServiceId, number>> = {
+    'iam-api': 4010,
+    'programs-api': 4006,
+    'ads-adm-api': 6005,
+  };
+
+  it('the env var name is the locked cross-repo contract', () => {
+    // saga-dash's dev-server middleware reads process.env.DASH_CONFIG_LOCAL_JSON —
+    // renaming this breaks the cross-repo contract (soa#328).
+    expect(DASH_CONFIG_ENV_VAR).toBe('DASH_CONFIG_LOCAL_JSON');
+  });
+
+  it("the env var is a saga-dash adoptEnv guard key (manifest ties to the constant)", () => {
+    // The env now SHADOWS the static file in a new-enough dash, so an already-up
+    // dash carrying a different mode's stamp must be REFUSED, not adopted — else
+    // `up --tunnel` → plain `up` leaves a dash serving dead tunnel hosts from its
+    // frozen env after the file hook removed config.local.json (the file-only
+    // self-heal is gone). services.ts declares the key as a string literal (core
+    // can't import runtime); this pins the two together.
+    expect(getService('saga-dash').adoptEnv).toContain(DASH_CONFIG_ENV_VAR);
+  });
+
+  it('tunnel mode: returns the EXACT string the tunnel file writer emits', () => {
+    expect(buildDashLocalDefaultsJson({ tunnel: true, tunnelDomain: 'abc.vms.wootdev.com' })).toBe(
+      tunnelConfigContents('abc.vms.wootdev.com'),
+    );
+  });
+
+  it('tunnel without a domain: null (never an https://<label>.undefined config)', () => {
+    expect(buildDashLocalDefaultsJson({ tunnel: true })).toBeNull();
+  });
+
+  it('non-tunnel slot > 0: returns the EXACT string the slot file writer emits', () => {
+    expect(buildDashLocalDefaultsJson({ slot: 1, stackPorts: PORTS })).toBe(
+      stackSlotConfigContents(PORTS),
+    );
+  });
+
+  it('non-tunnel slot 0: null even with stackPorts present (nothing to inject)', () => {
+    expect(buildDashLocalDefaultsJson({ slot: 0, stackPorts: PORTS })).toBeNull();
+    expect(buildDashLocalDefaultsJson({ stackPorts: PORTS })).toBeNull();
+  });
+
+  it('non-tunnel slot > 0 WITHOUT stackPorts: null (no ports to point at)', () => {
+    expect(buildDashLocalDefaultsJson({ slot: 1 })).toBeNull();
+  });
+
+  it('output satisfies the reader contract: JSON.parse yields a localDefaults url map', () => {
+    // The dash middleware serves the string VERBATIM after a JSON.parse gate.
+    const out = buildDashLocalDefaultsJson({ slot: 1, stackPorts: PORTS });
+    const parsed = JSON.parse(out ?? 'null');
+    expect(parsed.localDefaults.iam).toEqual({ type: 'url', url: 'http://localhost:4010' });
+    expect(parsed.localDefaults['ads-adm']).toEqual({ type: 'url', url: 'http://localhost:6005' });
   });
 });

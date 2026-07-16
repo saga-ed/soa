@@ -381,6 +381,19 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     isFrontend: true,
     optional: false,
     prelaunchHook: 'sync-dash-local-defaults',
+    // soa#328: the dash's routing JSON rides its OWN launch env now
+    // (DASH_CONFIG_LOCAL_JSON — dash-defaults.ts's DASH_CONFIG_ENV_VAR, stamped
+    // by stack-api's launch loop in tunnel / slot > 0 modes), and a new-enough
+    // dash dev server serves that env verbatim for /config.local.json —
+    // SHADOWING the static file. Without this guard an already-up dash from a
+    // different mode gets adopted with its frozen routing (e.g. `up --tunnel`
+    // then plain `up`: the file hook removes config.local.json, but the adopted
+    // dash keeps serving the dead tunnel hosts from its stale env — the
+    // file-only self-heal the dash used to have is gone). Fingerprint the key so
+    // a mode-drifted dash is REFUSED loudly and relaunched with the current
+    // mode's env (soa#305 pattern, like iam-api's JWT_ISSUER; same one-time
+    // "stop and re-run" cost for a dash launched by an older CLI with no stamp).
+    adoptEnv: ['DASH_CONFIG_LOCAL_JSON'],
   },
   'connect-api': {
     id: 'connect-api',

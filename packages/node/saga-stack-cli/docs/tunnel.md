@@ -104,6 +104,21 @@ moniker via the vendored `tunnel.sh`, builds the tunnel-aware browser-plane env 
 (incl. coach), writes the dash's tunnel routing (`config.local.json`), fetches the fleek A/V creds,
 launches the stack, and starts the frpc reverse tunnels.
 
+The dash's tunnel routing rides **two channels** (soa#328): the same JSON is also injected into
+saga-dash's launch env as `DASH_CONFIG_LOCAL_JSON`, which a new-enough saga-dash dev server serves
+back for `GET /config.local.json` — per-instance routing that doesn't depend on the shared static
+file. The `config.local.json` file write remains as transitional back-compat for older saga-dash
+checkouts (the env injection also covers non-tunnel `--slot N` lanes; slot-0 non-tunnel injects
+nothing).
+
+Because the env **shadows** the file in a new-enough dash, a still-running dash from a different
+mode can no longer self-heal by re-reading (or missing) the file — so `DASH_CONFIG_LOCAL_JSON` is
+an `adoptEnv` guard key (the soa#305 mechanism): `up` refuses to adopt an already-healthy dash
+whose stamped routing env doesn't match the current mode (tunnel → plain `up`, a changed moniker,
+a different mode in the same slot) and asks you to stop it and re-run, instead of silently leaving
+it dialing dead tunnel hosts. One-time cost: the first new-CLI `up` over a dash launched by an
+older build (no stamp) is refused the same way — stop the dash (or `ss stack down`) and re-run.
+
 The leading `ss stack down` is **part of the instruction**: `up --tunnel` skips any service whose
 port is already healthy, so a stack already up in localhost mode would keep its non-tunnel env —
 most visibly iam would set a **host-only** `iam_session` cookie and the dash couldn't hold the

@@ -18,6 +18,12 @@
  * `DashFs` so the hook is unit-tested with NO real filesystem; production wires
  * `makeRealDashFs()`. This is runtime (fs IO), not core.
  *
+ * soa#328: the SAME JSON (via the pure `buildDashLocalDefaultsJson`) is also
+ * injected into saga-dash's launch env as `DASH_CONFIG_LOCAL_JSON` (see
+ * stack-api's launch loop), so each dash instance can serve its own routing
+ * without the shared static file. The file write/remove here is kept EXACTLY
+ * as before — transitional back-compat for older saga-dash checkouts.
+ *
  * INVARIANT (plan hard constraint): fs IO lives only in `src/runtime/**`;
  * `src/core/**` never imports this and stays pure.
  */
@@ -150,6 +156,34 @@ export function stackSlotConfigContents(stackPorts: Partial<Record<ServiceId, nu
   return `${JSON.stringify({ localDefaults }, null, 2)}\n`;
 }
 
+/** The env var name of the per-instance dash routing contract (soa#328). */
+export const DASH_CONFIG_ENV_VAR = 'DASH_CONFIG_LOCAL_JSON';
+
+/**
+ * PURE builder for a dash instance's `config.local.json` JSON (soa#328) — the
+ * EXACT string the file writers below emit for the same mode, or `null` when
+ * the mode writes no config:
+ *   - tunnel mode (with a domain)            ⇒ the `https://<label>.<domain>` map;
+ *   - tunnel mode WITHOUT a domain           ⇒ `null` (never `https://x.undefined`);
+ *   - non-tunnel slot > 0 (with `stackPorts`)⇒ the offset-localhost map;
+ *   - non-tunnel slot 0                      ⇒ `null` (dash's built-in defaults).
+ *
+ * Used by BOTH the file-write hook (`syncDashLocalDefaults`, transitional
+ * back-compat for older saga-dash checkouts) AND stack-api's launch-env
+ * injection (`DASH_CONFIG_ENV_VAR` = `DASH_CONFIG_LOCAL_JSON`, read by a new
+ * saga-dash dev-server middleware serving GET /config.local.json), so the two
+ * channels can never drift.
+ */
+export function buildDashLocalDefaultsJson(
+  ctx: Omit<DashDefaultsContext, 'sagaDashRoot'>,
+): string | null {
+  if (ctx.tunnel) {
+    return ctx.tunnelDomain ? tunnelConfigContents(ctx.tunnelDomain) : null;
+  }
+  if ((ctx.slot ?? 0) > 0 && ctx.stackPorts) return stackSlotConfigContents(ctx.stackPorts);
+  return null;
+}
+
 /**
  * Run the prelaunch hook. Pure-decision over the injectable `DashFs`, so it's
  * fully testable; returns what it did. In tunnel mode without a `tunnelDomain`
@@ -164,27 +198,22 @@ export function syncDashLocalDefaults(
   if (!fs.existsDir(staticDir)) return { action: 'noop-no-static' };
 
   const cfgPath = dashLocalConfigPath(ctx.sagaDashRoot);
+  const contents = buildDashLocalDefaultsJson(ctx);
 
-  // Non-tunnel (stack lane):
-  if (!ctx.tunnel) {
-    // M7 slot > 0: WRITE the offset-localhost config so the slot's dash dials its
-    // own ports (removing the file would fall back to the base-port = slot-0 iam).
-    if ((ctx.slot ?? 0) > 0 && ctx.stackPorts) {
-      fs.write(cfgPath, stackSlotConfigContents(ctx.stackPorts));
-      return { action: 'wrote-stack-slot', path: cfgPath };
-    }
-    // Slot 0: localhost defaults — remove any stale tunnel config (byte-identical).
-    if (fs.existsFile(cfgPath)) {
-      fs.remove(cfgPath);
-      return { action: 'removed', path: cfgPath };
-    }
-    return { action: 'noop-absent', path: cfgPath };
+  // A mode with config WRITES it (tunnel map, or M7 slot > 0's offset-localhost
+  // map so the slot's dash dials its own ports rather than slot 0's base ports).
+  if (contents !== null) {
+    fs.write(cfgPath, contents);
+    return { action: ctx.tunnel ? 'wrote' : 'wrote-stack-slot', path: cfgPath };
   }
 
-  // Tunnel: write the <svc>→https://<label>.<domain> map.
-  if (!ctx.tunnelDomain) return { action: 'noop-absent', path: cfgPath };
-  fs.write(cfgPath, tunnelConfigContents(ctx.tunnelDomain));
-  return { action: 'wrote', path: cfgPath };
+  // Non-tunnel slot 0: localhost defaults — remove any stale config (byte-identical
+  // to the pre-builder behaviour). Tunnel-without-domain skips the remove too.
+  if (!ctx.tunnel && fs.existsFile(cfgPath)) {
+    fs.remove(cfgPath);
+    return { action: 'removed', path: cfgPath };
+  }
+  return { action: 'noop-absent', path: cfgPath };
 }
 
 /** The production fs surface for the hook. */

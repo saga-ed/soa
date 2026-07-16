@@ -49,7 +49,7 @@ import { resolveFlow } from '../../core/flow/index.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
 import { makeStackApi } from '../../stack-api.js';
-import { resolveVendorScript } from '../../runtime/index.js';
+import { makePersonaPreflight, resolveVendorScript } from '../../runtime/index.js';
 import {
   buildStackContext,
   discoverFlowManifest,
@@ -331,6 +331,14 @@ export default class DevelopConnect extends BaseCommand {
           ports: runtime.launchContext.ports,
           checkpoints,
           tunnelDomain,
+          // soa#327: the tunnel post-restore devLogin probe — a --tunnel session
+          // whose journey@schedule checkpoint restored TORN must fail loud here,
+          // before the room's browsers launch and 401 minutes later.
+          preflight: makePersonaPreflight({
+            poster: this.getCookiePoster(),
+            log: (l) => this.log(l),
+            sleep: this.getSleep(),
+          }),
         },
         {
           lane: 'stack',

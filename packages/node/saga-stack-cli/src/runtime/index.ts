@@ -43,6 +43,7 @@ export * from './host-reinstall.js';
 export * from './env-ensure.js';
 export * from './http-post.js';
 export * from './login.js';
+export * from './settle-barrier.js';
 export * from './record.js';
 export * from './tunnel-prep.js';
 export * from './set-store.js';

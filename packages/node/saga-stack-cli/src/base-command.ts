@@ -78,6 +78,7 @@ import {
   repoOverridesFromFlags,
   makeRealSnapshotIO,
   makeRealViteClear,
+  realSleep,
   makeRealDockerWipe,
   makeRealBuildCleaner,
   makeRealEnvFs,
@@ -114,6 +115,7 @@ import type {
   SetStore,
   ServiceLauncher,
   ServiceStopper,
+  SleepFn,
   SnapshotIO,
   ViteClear,
   DockerWipe,
@@ -672,6 +674,16 @@ export abstract class BaseCommand extends Command {
    */
   protected getCookiePoster(): CookiePoster {
     return makeRealCookiePoster();
+  }
+
+  /**
+   * The sleep seam (soa#327 — settle barrier polls + tunnel-preflight retries).
+   * Production is the ONLY place real time passes between attempts; the shared
+   * test battery replaces it with an instant no-op so retry/poll LOGIC is
+   * asserted without wall-clock waits.
+   */
+  protected getSleep(): SleepFn {
+    return realSleep;
   }
 
   /**

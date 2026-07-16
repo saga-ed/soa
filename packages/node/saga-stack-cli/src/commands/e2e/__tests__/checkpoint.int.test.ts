@@ -20,7 +20,15 @@ import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import { Config } from '@oclif/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import type { LaunchSpec, ScriptInvocation, SnapshotIO } from '../../../runtime/index.js';
+import { PREFLIGHT_ATTEMPTS } from '../../../runtime/index.js';
+import type {
+  CookiePoster,
+  LaunchSpec,
+  PostOptions,
+  PostResult,
+  ScriptInvocation,
+  SnapshotIO,
+} from '../../../runtime/index.js';
 import E2eRun from '../run.js';
 import E2eConnect from '../../develop/connect.js';
 
@@ -488,6 +496,129 @@ describe('tunnel fail-loud (soa#327): unusable prerequisite checkpoint under --t
     await E2eConnect.run([...ws()], config);
     expect(logged.join('\n')).toContain('falling back to full replay');
     expect(playwrightRuns().length).toBeGreaterThan(1); // journey replay + the room
+  });
+});
+
+describe('tunnel post-restore persona preflight (soa#327)', () => {
+  let posts: { url: string; opts: PostOptions }[];
+  let savedVmsBase: string | undefined;
+
+  /** Poster answering `statuses` in order (last repeats); records every call. */
+  function installPoster(statuses: number[]): void {
+    posts = [];
+    const poster: CookiePoster = {
+      async post(url: string, opts: PostOptions): Promise<PostResult> {
+        posts.push({ url, opts });
+        const status = statuses[Math.min(posts.length - 1, statuses.length - 1)] ?? 0;
+        return { status, ok: status >= 200 && status < 300, setCookies: [] };
+      },
+    };
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getCookiePoster: () => CookiePoster },
+      'getCookiePoster',
+    ).mockReturnValue(poster);
+  }
+
+  function fakeMoniker(): void {
+    vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
+      (async () => 'testmoniker') as never,
+    );
+  }
+
+  beforeEach(() => {
+    // Pin the tunnel base domain so the probed URL is exactly assertable.
+    savedVmsBase = process.env.VMS_BASE;
+    process.env.VMS_BASE = 'vms.test';
+  });
+  afterEach(() => {
+    if (savedVmsBase === undefined) delete process.env.VMS_BASE;
+    else process.env.VMS_BASE = savedVmsBase;
+  });
+
+  async function bakeSchedule(): Promise<void> {
+    await E2eRun.run(['journey', '--through', 'schedule', '--snapshot-stages', '--headless', ...ws()], config);
+    runs.length = 0;
+    ioCalls.length = 0;
+    logged.length = 0;
+  }
+
+  it('valid checkpoint + poster 200: the session proceeds; ONE devLogin against the exact tunnel iam host', async () => {
+    await bakeSchedule();
+    installPoster([200]);
+    fakeMoniker();
+    await E2eConnect.run(['--tunnel', ...ws()], config);
+
+    // The probe drove the SAME host the room's browsers will use, with iam's own
+    // origin (the origin-check is load-bearing) and the declared persona.
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe('https://iam.testmoniker.vms.test/trpc/auth.devLogin');
+    expect(posts[0]!.opts.origin).toBe('https://iam.testmoniker.vms.test');
+    expect(posts[0]!.opts.body).toContain('alex.tutor@example.org');
+    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
+  });
+
+  it('poster 401: TORN checkpoint — loud error naming the persona + the recipe; no browser launches', async () => {
+    await bakeSchedule();
+    installPoster([401]);
+    fakeMoniker();
+    await expect(E2eConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(
+      /alex\.tutor@example\.org[\s\S]*HTTP 401[\s\S]*ss stack snapshot restore tunnel-connect/,
+    );
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('transport blips: status 0 twice then 200 proceeds — poster called 3x', async () => {
+    await bakeSchedule();
+    installPoster([0, 0, 200]);
+    fakeMoniker();
+    await E2eConnect.run(['--tunnel', ...ws()], config);
+    expect(posts).toHaveLength(3);
+    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
+  });
+
+  it('persistently unreachable iam: capped retries then the loud torn error', async () => {
+    await bakeSchedule();
+    installPoster([0]);
+    fakeMoniker();
+    await expect(E2eConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(/no response/);
+    expect(posts).toHaveLength(PREFLIGHT_ATTEMPTS);
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('poster 403: devLogin-disabled misconfig gets its OWN message, NOT the re-bake recipe', async () => {
+    await bakeSchedule();
+    installPoster([403]);
+    fakeMoniker();
+    let message = '';
+    try {
+      await E2eConnect.run(['--tunnel', ...ws()], config);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/devLogin is disabled/);
+    // Re-baking cannot fix an AUTH_ENABLED/origin misconfig — the recipe would
+    // send the user on a wild-goose chase.
+    expect(message).not.toContain('ss stack snapshot restore tunnel-connect');
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('e2e run --from --tunnel fires the preflight after the --from restore too', async () => {
+    await bakeThroughProgram();
+    runs.length = 0;
+    installPoster([200]);
+    fakeMoniker();
+    await E2eRun.run(['journey', '--from', 'program', '--through', 'program', '--tunnel', '--headless', ...ws()], config);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe('https://iam.testmoniker.vms.test/trpc/auth.devLogin');
+    expect(playwrightRuns()).toHaveLength(1);
+  });
+
+  it('a NON-tunnel restore makes ZERO devLogin probes (local lane byte-identical)', async () => {
+    await bakeSchedule();
+    installPoster([200]);
+    await E2eConnect.run([...ws()], config);
+    expect(posts).toHaveLength(0);
+    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
   });
 });
 

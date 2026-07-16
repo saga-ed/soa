@@ -143,6 +143,19 @@ export const flowDefSchema = z.object({
   seed: seedSelectionSchema.optional(),
   /** Extra env injected for every stage of this flow. */
   env: z.record(z.string(), z.string()).optional(),
+  /**
+   * soa#327: persona emails whose devLogin-ability DEFINES "settled" for the
+   * state THIS flow produces — declared on the PRODUCING flow (journey), read
+   * by the bake quiescence barrier and the tunnel post-restore preflight.
+   * These personas are created by the flow itself (roster-sync during stage
+   * replay), NOT by `stack seed` — a seed-alias probe (dev@saga.org) would
+   * false-negative because its pii row exists even in a torn dump. Keep in
+   * sync with the SPA's spec constants (saga-dash: TUTOR_EMAIL in
+   * e2e/interactive/connect-session.e2e.test.ts). Deliberately EXCLUDED from
+   * `stagePrefixHash` — declaring a probe persona does not change the state
+   * the stages produce, so it must not invalidate existing checkpoints.
+   */
+  settlePersonas: z.array(z.string().min(1)).optional(),
 });
 
 /** Top-level `flows.json` document (plan §5.1). */

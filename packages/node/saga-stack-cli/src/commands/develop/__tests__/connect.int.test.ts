@@ -175,11 +175,24 @@ describe('develop connect — slot awareness (slot > 0)', () => {
     vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
       (async () => 'testmoniker') as never,
     );
+    // The concierge path never restores a checkpoint, so the soa#327 preflight
+    // must make ZERO devLogin probes — record every poster call to prove it.
+    const posterCalls: string[] = [];
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getCookiePoster: () => unknown },
+      'getCookiePoster',
+    ).mockReturnValue({
+      post: async (url: string) => {
+        posterCalls.push(url);
+        return { status: 200, ok: true, setCookies: [] };
+      },
+    });
     // --reuse: the walkthrough-verified concierge path (docs/tunnel.md step 3). A bare
     // tunnel run with no baked prerequisite checkpoint now fail-louds by design
     // (soa#327, covered below); the concierge path must stay byte-identical.
     await DevelopConnect.run(['--tunnel', '--reuse', ...ws()], config);
     expect(liveRun()?.env?.PLAYWRIGHT_BASE_URL).toMatch(/^https:\/\/dash\.testmoniker\./);
+    expect(posterCalls).toHaveLength(0);
   });
 });
 

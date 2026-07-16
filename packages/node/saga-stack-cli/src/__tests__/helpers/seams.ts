@@ -157,6 +157,9 @@ export function installCoreSeams(opts: CoreSeamsOptions): CoreSeams {
   // repo present so no service is skipped. Suites that test the skip-when-absent
   // path re-spy this per test.
   vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
+  // soa#327: retry/poll delays (tunnel preflight, settle barrier) must never
+  // wall-clock-wait in tests — attempt/poll COUNTS carry the semantics.
+  vi.spyOn(proto, 'getSleep').mockReturnValue(async () => {});
 
   return {
     launches,

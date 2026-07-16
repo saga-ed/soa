@@ -319,6 +319,14 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // prod literal, which 401'd once iam began minting ${IAM_ISSUER} (58d58e4).
         JWT_ISSUER: '${IAM_ISSUER}',
         SERVICE_TOKEN_SERVICESLUG: 'ads-adm-api',
+        // NOT an up.sh literal — a deliberate post-up.sh addition, like
+        // PROGRAMS_API_CLIENT_BASEURL above (soa#320 precedent). Opens ads-adm's
+        // per-request rosterMode override gate so e2e probes (saga-dash#446 /
+        // saga-dash#570 period-path) can hard-assert period-roster derivation in
+        // CI. The DEFAULT mode is untouched (ADM_ROSTER_MODE deliberately not
+        // set — occurrence stays the default); prod is masked by design since
+        // prod is never ss-launched and its deployment omits this flag.
+        ADM_ALLOW_ROSTER_MODE_OVERRIDE: 'true',
         ADS_ADM_DATABASE_URL: '${ADS_ADM_DB_URL}',
         DATABASE_URL: '${ADS_ADM_DB_URL}',
         CORS_ORIGIN: '${DASH_URL}',

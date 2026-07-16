@@ -162,6 +162,9 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     // a slot > 0 ads-adm would dial SLOT 0's programs-api and silently resolve names
     // against the wrong stack (best-effort ⇒ it would no-op, not fail loudly).
     expect(env.PROGRAMS_API_CLIENT_BASEURL).toBe('http://localhost:5006'); // 3006 + 2000
+    // saga-dash#446/#570: the rosterMode override gate is a static literal —
+    // open at every slot, untouched by port/mesh offsets.
+    expect(env.ADM_ALLOW_ROSTER_MODE_OVERRIDE).toBe('true');
     expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:5010/trpc'); // 3010 + 2000
     expect(env.IAM_API_URL).toBe('http://localhost:5010');
     expect(env.CORS_ORIGIN).toBe('http://localhost:10900'); // dash 8900 + 2000
@@ -179,6 +182,10 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     expect(env.EXPRESS_SERVER_PORT).toBeUndefined(); // no offset ⇒ no injection
     expect(env.SESSIONS_API_CLIENT_BASEURL).toBe('http://localhost:3007');
     expect(env.PROGRAMS_API_CLIENT_BASEURL).toBe('http://localhost:3006');
+    // Deliberate post-up.sh addition (not part of the byte-identity set):
+    // the override gate is open at slot 0 too, so a slot-0 e2e probe can
+    // hard-assert the period path (saga-dash#446/#570).
+    expect(env.ADM_ALLOW_ROSTER_MODE_OVERRIDE).toBe('true');
     expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:3010/trpc');
     expect(env.ADS_ADM_DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
     expect(env.DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');

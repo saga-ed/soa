@@ -384,14 +384,17 @@ export default class DevelopCoach extends BaseCommand {
   }
 
   /**
-   * PRECHECK both prerequisites the coach-owned playlist switch needs, BEFORE any
-   * bring-up, so a stale coach checkout fails fast with an actionable message
+   * PRECHECK all three prerequisites the coach-owned playlist switch needs, BEFORE
+   * any bring-up, so a stale coach checkout fails fast with an actionable message
    * instead of an opaque throw mid-orchestration:
    *
    *   1. the coach#238 `coach-content playlist` verb group — placed at
    *      `packages/node/coach-content-publish/src/playlist.ts` (beside `store.ts`),
    *      per playlisting-port-plan.md §Decision. Absent ⇒ point at coach#238.
-   *   2. the seeded 2nd track (`PLAYLIST_TRACK_2`) — a MATERIALIZABLE curriculum in
+   *   2. the BUILT CLI entry (`dist/cli.js`) — orchestratePlaylist invokes it with
+   *      node directly (soa#335), so source alone is not enough. A checkout with
+   *      the verb but no build ⇒ point at the package's build script, NOT coach#238.
+   *   3. the seeded 2nd track (`PLAYLIST_TRACK_2`) — a MATERIALIZABLE curriculum in
    *      coach-db's offline seed release (fixtures/content-release.json). Without it
    *      `materialize --content` throws `active release has no curriculum doc named`
    *      deep in the run. We read the fixture and confirm the track is present so
@@ -439,6 +442,23 @@ export default class DevelopCoach extends BaseCommand {
       );
     }
 
+    // The BUILT CLI entry must exist too: orchestratePlaylist runs it via node
+    // directly (soa#335 — pnpm `exec` cannot resolve the package's own bin), so a
+    // checkout with src/playlist.ts but no dist/ would otherwise crash AFTER the
+    // full docker + seed bring-up. Distinct from the src check above: src absent
+    // means coach#238 hasn't landed; dist absent means the developer just needs to
+    // build the package.
+    const cliJs = join(coachRoot, 'packages', 'node', 'coach-content-publish', 'dist', 'cli.js');
+    if (!this.getRepoDirCheck()(cliJs)) {
+      this.error(
+        `--scenario playlist needs the BUILT \`coach-content\` CLI, but your coach checkout has not built it.\n` +
+          `  expected: ${cliJs}\n` +
+          `  Build it from the coach root (${coachRoot}):\n` +
+          `    pnpm --filter @saga-ed/coach-content-publish build\n` +
+          `  then retry.`,
+      );
+    }
+
     // The 2nd track must exist as a materializable curriculum in coach-db's seed
     // release — otherwise the later `materialize --content ${PLAYLIST_TRACK_2}`
     // aborts with `active release has no curriculum doc named …`.
@@ -482,16 +502,25 @@ export default class DevelopCoach extends BaseCommand {
    * ONLY group_id→content_name), then `materialize --replace` demo-tutor-1's
    * instance — keyed by the tutor's DERIVED user id, the id coach-web reads by —
    * onto it. No publish step: `PLAYLIST_TRACK_2` is already in coach-db's seed
-   * release, and `assertPlaylistPrereqs` has confirmed both the verb and the track.
+   * release, and `assertPlaylistPrereqs` has confirmed the verb, the track AND the
+   * built CLI bin below.
+   *
+   * The CLI is invoked as `node <coachRoot>/packages/node/coach-content-publish/
+   * dist/cli.js …` — NOT `pnpm --filter … exec coach-content`. pnpm cannot resolve
+   * a workspace package's OWN `bin` through `exec` (live result, soa#335:
+   * ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL "Command coach-content not found", even with
+   * dist/ freshly built); direct node invocation of the built entry works and is
+   * exactly what coach#238's docs run.
    */
   private async orchestratePlaylist(coachRoot: string, databaseUrl: string): Promise<void> {
     const runner = this.getRunner();
+    const cliJs = join(coachRoot, 'packages', 'node', 'coach-content-publish', 'dist', 'cli.js');
     const coachContent = async (label: string, args: string[]): Promise<void> => {
       this.log(`==> playlist: ${label} (coach-content ${args.join(' ')})`);
       const { code } = await runner.run({
         cwd: coachRoot,
-        command: 'pnpm',
-        args: ['--filter', '@saga-ed/coach-content-publish', 'exec', 'coach-content', ...args],
+        command: 'node',
+        args: [cliJs, ...args],
         env: { DATABASE_URL: databaseUrl },
         stdio: 'inherit',
       });

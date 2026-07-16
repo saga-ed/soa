@@ -6,8 +6,9 @@
  * Coverage: command wiring (`--help` renders; the command resolves), the
  * scenario→flow/persona/route mapping (content-viewer→module-playback→demo-tutor-1
  * vs admin→dashboard→demo-dadmin), the mock-backed admin note, --reuse, and the
- * `--scenario playlist` coach#238 feature-detect (fail-fast when the verb is
- * absent; orchestrate publish/assign/materialize when present).
+ * `--scenario playlist` prechecks (fail-fast when the coach#238 verb, the BUILT
+ * dist/cli.js (soa#335), or the seeded 2nd track is absent; orchestrate
+ * assign/materialize via direct node invocation when all are present).
  *
  * Hermetic: a real coach `flows.json` (copied structure) is written into a temp
  * COACH checkout that `--coach` points at, so discovery resolves coach-web's
@@ -132,9 +133,15 @@ function playwrightRuns(): ScriptInvocation[] {
 function browserRuns(): ScriptInvocation[] {
   return runs.filter((r) => r.command === 'node' && (r.args[0] ?? '').endsWith('browser-login.mjs'));
 }
-/** The coach-content CLI invocations the Runner recorded (playlist orchestration). */
+/**
+ * The coach-content CLI invocations the Runner recorded (playlist orchestration).
+ * soa#335: the orchestration invokes the BUILT entry directly (`node …/dist/cli.js`)
+ * — pnpm `exec` cannot resolve a workspace package's own bin — so match on that.
+ */
 function coachContentRuns(): ScriptInvocation[] {
-  return runs.filter((r) => r.command === 'pnpm' && r.args.includes('coach-content'));
+  return runs.filter(
+    (r) => r.command === 'node' && (r.args[0] ?? '').endsWith(join('coach-content-publish', 'dist', 'cli.js')),
+  );
 }
 
 // Native-login seams (cookie poster + jar writer), mirroring run.int.test.ts.
@@ -162,8 +169,9 @@ function installLoginSeams(result: PostResult = OK_COOKIES): void {
 
 /**
  * Stub the repo-dir existence seam. `playlistVerb` controls whether the coach#238
- * `coach-content/src/playlist.ts` feature-detect passes; every OTHER path
- * (coach-web appDir for the browser step) reports present so the hand-off runs.
+ * `coach-content/src/playlist.ts` feature-detect passes; `builtCli` controls the
+ * soa#335 `dist/cli.js` built-bin precheck; every OTHER path (coach-web appDir for
+ * the browser step) reports present so the hand-off runs.
  */
 /** Stub the repo-dir seam so the `--real-content` precheck sees (or misses) an archive checkout. */
 function installArchiveDirCheck(present: boolean): void {
@@ -173,9 +181,10 @@ function installArchiveDirCheck(present: boolean): void {
   }) as never);
 }
 
-function installRepoDirCheck(playlistVerb: boolean): void {
+function installRepoDirCheck(playlistVerb: boolean, builtCli = true): void {
   vi.spyOn(BaseCommand.prototype as never, 'getRepoDirCheck' as never).mockReturnValue(((dir: string) => {
     if (dir.endsWith(join('coach-content-publish', 'src', 'playlist.ts'))) return playlistVerb;
+    if (dir.endsWith(join('coach-content-publish', 'dist', 'cli.js'))) return builtCli;
     return true;
   }) as never);
 }
@@ -375,6 +384,19 @@ describe('develop coach — playlist (coach#238 feature-detect)', () => {
     expect(playwrightRuns()).toHaveLength(0);
   });
 
+  it('fails fast with a BUILD-pointing message when the verb is present but dist/cli.js is NOT built — before any bring-up', async () => {
+    // soa#335: orchestratePlaylist invokes the BUILT entry via node directly, so
+    // src/playlist.ts alone is not enough. The error must point at the package's
+    // build script (the fix is local), NOT at coach#238 (which HAS landed here).
+    installRepoDirCheck(true, false); // verb present, dist/cli.js absent
+    await expect(DevelopCoach.run(['--scenario', 'playlist', ...ws()], config)).rejects.toMatchObject({
+      message: expect.stringContaining('pnpm --filter @saga-ed/coach-content-publish build'),
+    });
+    // fail-fast: nothing was launched and no Playwright ran.
+    expect(launches).toEqual([]);
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
   it('fails fast when the coach seed does NOT ship the materializable 2nd track — before any bring-up', async () => {
     installRepoDirCheck(true); // verb present…
     installRepoFileRead(['curriculum-coach']); // …but the seed lacks curriculum-coach-b
@@ -398,6 +420,16 @@ describe('develop coach — playlist (coach#238 feature-detect)', () => {
     expect(assign).toBeDefined();
     expect(assign?.args).toContain('playlist');
     expect(assign?.args).toContain('--group');
+
+    // soa#335: BOTH invocations run the BUILT entry directly from the coach root
+    // (`node <coachRoot>/…/dist/cli.js`) — pnpm `--filter … exec coach-content`
+    // cannot resolve the package's own bin (ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL).
+    const expectedCli = join(COACH_ROOT, 'packages', 'node', 'coach-content-publish', 'dist', 'cli.js');
+    for (const r of [assign, materialize]) {
+      expect(r?.command).toBe('node');
+      expect(r?.args[0]).toBe(expectedCli);
+      expect(r?.cwd).toBe(COACH_ROOT);
+    }
 
     // The materialize target is the SAME track the assign uses AND the one the
     // precheck confirmed the seed ships — not a name nothing ensures exists.

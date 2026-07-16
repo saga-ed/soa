@@ -145,6 +145,39 @@ describe('runBootstrapSteps — ledger sequencing', () => {
     expect(log.some((l) => l.includes('RESUMING'))).toBe(true);
     expect(current()).toBeNull(); // completed ⇒ cleared
   });
+
+  it('recorded completions AFTER the resume point are stale: pruned (persisted) and re-run', async () => {
+    // The cross-shape poisoning case: a failed FAST-PATH run recorded the
+    // phase-2 ids ('c','d'); the re-run has the FULL shape and must not skip
+    // them after re-executing the phase-1 steps ('a','b') underneath them.
+    const { io, writes } = fakeLedgerIO({ version: 1, startedAt: 'x', completed: ['c', 'd'] });
+    const a = step('a');
+    const b = step('b');
+    const c = step('c');
+    const d = step('d');
+    const log: string[] = [];
+    await runBootstrapSteps([a, b, c, d], deps(io, log));
+
+    for (const s of [a, b, c, d]) expect(s.calls).toHaveLength(1);
+    expect(log.some((l) => l.includes('invalidated'))).toBe(true);
+    // The prune itself is persisted BEFORE any step runs, so a crash mid-run
+    // cannot resurrect the stale ids in a later differently-shaped resume.
+    expect(writes[0]?.completed).toEqual([]);
+  });
+
+  it('recorded completions BEFORE the resume point (even from another shape) still skip', async () => {
+    // Full-run failure at 'c' then a fast-path-shaped resume [b, c, d]: 'b' is
+    // a valid leading prefix — only ids AFTER the first un-recorded step die.
+    const { io } = fakeLedgerIO({ version: 1, startedAt: 'x', completed: ['a', 'b'] });
+    const b = step('b');
+    const c = step('c');
+    const d = step('d');
+    await runBootstrapSteps([b, c, d], deps(io));
+
+    expect(b.calls).toHaveLength(0);
+    expect(c.calls).toHaveLength(1);
+    expect(d.calls).toHaveLength(1);
+  });
 });
 
 describe('bootstrapFailureMessage', () => {

@@ -323,6 +323,80 @@ describe('develop connect --bootstrap — ledger: failure stops, re-run resumes,
     expect(existsSync(ledgerPath())).toBe(false); // success clears
     expect(liveRun()).toBeDefined();
   });
+
+  it('phase-2 ids from a failed FAST-PATH run do NOT skip tunnel-down/tunnel-up in a --rebuild re-run', async () => {
+    // Run 1: fresh fixture ⇒ fast path (phase 2 only); restore fails, leaving
+    // 'tunnel-down'/'tunnel-up' in the ledger. Run 2 (--rebuild) executes
+    // phase 1 (localhost env) UNDER those recorded completions — honoring them
+    // would bypass the --forbid-foreign hard stop and declare the bridge up on
+    // a localhost-mode stack.
+    vi.restoreAllMocks();
+    installSeams({ fixture: fixtureAgedDays(1) });
+    vi.spyOn(BaseCommand.prototype, 'log').mockImplementation(() => {});
+    vi.spyOn(BaseCommand.prototype, 'warn').mockImplementation(((m: string) => m) as never);
+
+    (snapRestoreSpy as unknown as { mockRejectedValueOnce: (e: Error) => void }).mockRejectedValueOnce(
+      new Error('fixture torn'),
+    );
+    await expect(DevelopConnect.run(['--tunnel', '--bootstrap', ...ws()], config)).rejects.toThrow(
+      /bootstrap FAILED at step 'snapshot-restore'/,
+    );
+    expect(ledgerCompleted()).toEqual(['tunnel-down', 'tunnel-up']);
+
+    // ── Run 2: the natural remediation `--bootstrap --rebuild`. ──
+    downSpy.mockClear();
+    upSpy.mockClear();
+    snapStoreSpy.mockClear();
+    snapRestoreSpy.mockClear();
+
+    await DevelopConnect.run(['--tunnel', '--bootstrap', '--rebuild', ...ws()], config);
+
+    // BOTH phases ran: local down/up AND tunnel down/up (with the hard stop).
+    expect(downSpy).toHaveBeenCalledTimes(2);
+    expect(upSpy).toHaveBeenCalledTimes(2);
+    expect(argvOf(upSpy, 0)).toEqual(expect.arrayContaining(['--seed', 'full', '--reset']));
+    expect(argvOf(upSpy, 0)).not.toContain('--tunnel');
+    expect(argvOf(upSpy, 1)).toEqual(expect.arrayContaining(['--tunnel', '--reset', '--forbid-foreign']));
+    expect(snapStoreSpy).toHaveBeenCalledTimes(1);
+    expect(snapRestoreSpy).toHaveBeenCalledTimes(1);
+    expect(existsSync(ledgerPath())).toBe(false);
+    expect(liveRun()).toBeDefined();
+  });
+
+  it('a failed --rebuild prints a resume command carrying --rebuild + pins; even a bare re-run resumes the rebuild', async () => {
+    // Run 1: fresh-but-bad fixture ⇒ --rebuild; the journey replay fails both
+    // attempts, stopping phase 1 at 'prerequisite'. Without the run-shaped
+    // resume command AND the in-flight-ledger fast-path override, the re-run
+    // would fast-path (fixture still fresh), restore the OLD fixture the user
+    // asked to replace, and clear the ledger as "success".
+    vi.restoreAllMocks();
+    installSeams({ fixture: fixtureAgedDays(1), playwrightFail: 'stage-5-schedule' });
+    vi.spyOn(BaseCommand.prototype, 'log').mockImplementation(() => {});
+    vi.spyOn(BaseCommand.prototype, 'warn').mockImplementation(((m: string) => m) as never);
+
+    const err = await DevelopConnect.run(['--tunnel', '--bootstrap', '--rebuild', ...ws()], config).catch(
+      (e: Error) => e,
+    );
+    expect((err as Error).message).toMatch(/bootstrap FAILED at step 'prerequisite'/);
+    expect((err as Error).message).toContain('ss develop connect --tunnel --bootstrap --rebuild');
+    expect((err as Error).message).toContain(`--state-dir ${STATE_DIR}`);
+    expect(ledgerCompleted()).toEqual(['local-down', 'local-up']);
+
+    // ── Run 2: the BARE command (shell-history hazard). Must resume phase 1. ──
+    vi.restoreAllMocks();
+    installSeams({ fixture: fixtureAgedDays(1) }); // journeys green now
+    vi.spyOn(BaseCommand.prototype, 'log').mockImplementation(() => {});
+    vi.spyOn(BaseCommand.prototype, 'warn').mockImplementation(((m: string) => m) as never);
+
+    await DevelopConnect.run(['--tunnel', '--bootstrap', ...ws()], config);
+
+    expect(journeyRuns()).toHaveLength(1); // prerequisite resumed (fresh runs array)
+    expect(snapStoreSpy).toHaveBeenCalledTimes(1); // the rebuild's NEW fixture stored
+    expect(upSpy).toHaveBeenCalledTimes(1); // local-up skipped via ledger; only tunnel up ran
+    expect(argvOf(upSpy, 0)).toContain('--tunnel');
+    expect(existsSync(ledgerPath())).toBe(false);
+    expect(liveRun()).toBeDefined();
+  });
 });
 
 describe('develop connect --bootstrap — phase-2 foreign hard stop', () => {

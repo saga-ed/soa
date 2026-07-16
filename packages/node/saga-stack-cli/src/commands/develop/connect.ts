@@ -75,6 +75,7 @@ import SnapshotRestore from '../stack/snapshot/restore.js';
 import SnapshotStore from '../stack/snapshot/store.js';
 import {
   BootstrapStepError,
+  bootstrapResumeCommand,
   bootstrapWorkspaceArgv,
   runBootstrapSteps,
   tunnelFixtureFresh,
@@ -484,20 +485,12 @@ export default class DevelopConnect extends BaseCommand {
     // before calling this) — the store's resolvers read $SAGA_MESH_* at CALL time.
     const store = this.getCheckpointStore(this.scriptContextFromFlags(flags));
 
-    // FAST PATH: a fresh (<7d) tunnel-connect fixture makes phase 1 pure waste —
-    // phase 2 restores the fixture anyway. --rebuild forces the full rebuild.
+    // FAST-PATH input: a fresh (<7d) tunnel-connect fixture makes phase 1 pure
+    // waste — phase 2 restores the fixture anyway. The DECISION sits below the
+    // step lists: it must also consult the ledger (an in-flight phase-1 rebuild
+    // must resume, never be fast-pathed over).
     const fixture = store.load(TUNNEL_CONNECT_FIXTURE_ID);
     const fresh = tunnelFixtureFresh(fixture, now);
-    const skipPhase1 = fresh && !flags.rebuild;
-    if (skipPhase1) {
-      this.log(
-        `==> bootstrap FAST PATH: fixture '${TUNNEL_CONNECT_FIXTURE_ID}' is fresh (created ${fixture?.createdAt}) — skipping phase 1 (--rebuild forces the full rebuild)`,
-      );
-    } else if (fresh && flags.rebuild) {
-      this.log(
-        `==> bootstrap: --rebuild — ignoring the fresh '${TUNNEL_CONNECT_FIXTURE_ID}' fixture; running the full phase-1 rebuild`,
-      );
-    }
 
     // PHASE-1 stack context: NO tunnelDomain. Phase 1 rebuilds state against
     // localhost — anything IT launches must get the plain local browser env, and
@@ -592,12 +585,40 @@ export default class DevelopConnect extends BaseCommand {
       },
     ];
 
+    // FAST-PATH decision. A ledger recording completed PHASE-1 steps means a
+    // rebuild is mid-flight from a failed run: the fast path would discard it —
+    // restore the OLD fixture the user asked to replace and clear the ledger as
+    // "success" — so an in-flight rebuild always disables the fast path. The
+    // resume command mirrors this run's shape (--rebuild + workspace pins); the
+    // bare base command would not resume under a custom --state-dir.
+    const ledgerIO = this.getBootstrapLedgerIO();
+    const ledgerPath = bootstrapLedgerPath(stateDir);
+    const phase1Ids = new Set(phase1.map((s) => s.id));
+    const rebuildInFlight = (ledgerIO.read(ledgerPath)?.completed ?? []).some((id) =>
+      phase1Ids.has(id),
+    );
+    const skipPhase1 = fresh && !flags.rebuild && !rebuildInFlight;
+    if (skipPhase1) {
+      this.log(
+        `==> bootstrap FAST PATH: fixture '${TUNNEL_CONNECT_FIXTURE_ID}' is fresh (created ${fixture?.createdAt}) — skipping phase 1 (--rebuild forces the full rebuild)`,
+      );
+    } else if (fresh && flags.rebuild) {
+      this.log(
+        `==> bootstrap: --rebuild — ignoring the fresh '${TUNNEL_CONNECT_FIXTURE_ID}' fixture; running the full phase-1 rebuild`,
+      );
+    } else if (fresh && rebuildInFlight) {
+      this.log(
+        `==> bootstrap: ledger records an in-flight phase-1 rebuild — resuming it past the fresh '${TUNNEL_CONNECT_FIXTURE_ID}' fixture`,
+      );
+    }
+
     try {
       await runBootstrapSteps(skipPhase1 ? phase2 : [...phase1, ...phase2], {
-        ledger: this.getBootstrapLedgerIO(),
-        ledgerPath: bootstrapLedgerPath(stateDir),
+        ledger: ledgerIO,
+        ledgerPath,
         log: (l) => this.log(l),
         now,
+        resumeCommand: bootstrapResumeCommand(flags),
       });
     } catch (err) {
       if (err instanceof BootstrapStepError) this.error(err.message);

@@ -40,8 +40,22 @@ import type { WorkspaceFlags } from './base-command.js';
 /** The snapshot fixture the bridge stores/restores (docs/tunnel.md's name). */
 export const TUNNEL_CONNECT_FIXTURE_ID = 'tunnel-connect';
 
-/** The exact command a failed bootstrap tells the user to re-run (it resumes). */
+/** The BASE resume command; `bootstrapResumeCommand` appends the run's flags. */
 export const BOOTSTRAP_RESUME_COMMAND = 'ss develop connect --tunnel --bootstrap';
+
+/**
+ * The EXACT command a failed bootstrap tells the user to re-run: the base plus
+ * `--rebuild` and the workspace/--state-dir pins THIS run was given. The bare
+ * base command is not always a resume — under a custom --state-dir it reads a
+ * different ledger, and after a failed `--rebuild` it would fast-path over the
+ * very rebuild the user asked for (restoring the old fixture as "success").
+ */
+export function bootstrapResumeCommand(
+  flags: WorkspaceFlags & { 'state-dir'?: string; rebuild?: boolean },
+): string {
+  const extra = [...(flags.rebuild ? ['--rebuild'] : []), ...bootstrapWorkspaceArgv(flags)];
+  return [BOOTSTRAP_RESUME_COMMAND, ...extra].join(' ');
+}
 
 /** One sequencer step: a stable ledger id, a human title, and the work. */
 export interface BootstrapStep {
@@ -58,6 +72,8 @@ export interface BootstrapRunDeps {
   ledgerPath: string;
   log: (line: string) => void;
   now: Date;
+  /** Failure-message resume command; the BASE constant when omitted (tests). */
+  resumeCommand?: string;
 }
 
 /** A step failure, message pre-built with the ledger + resume remediation. */
@@ -101,6 +117,32 @@ export async function runBootstrapSteps(steps: BootstrapStep[], deps: BootstrapR
   }
 
   const done = new Set(ledger.completed);
+
+  // A recorded completion is only valid while every step BEFORE it (in THIS
+  // run's step list) is also recorded: re-executing an earlier step rebuilds
+  // the world underneath the later one. Without this, a fast-path run that
+  // failed after tunnel-up leaves 'tunnel-down'/'tunnel-up' in the ledger, and
+  // a later --rebuild run would run phase 1 (localhost env) then SKIP both —
+  // bypassing the --forbid-foreign hard stop and finishing "successfully" on a
+  // localhost-mode stack. Prune the stale ids and PERSIST the prune, so they
+  // cannot resurface in a later resume with a different step shape either.
+  const resumeIdx = steps.findIndex((s) => !done.has(s.id));
+  if (resumeIdx >= 0) {
+    const stale = steps
+      .slice(resumeIdx + 1)
+      .filter((s) => done.has(s.id))
+      .map((s) => s.id);
+    if (stale.length > 0) {
+      deps.log(
+        `==> bootstrap: recorded step(s) ${stale.join(', ')} follow the resume point ` +
+          `('${steps[resumeIdx]?.id}') and are invalidated by its re-run — they will re-execute`,
+      );
+      for (const id of stale) done.delete(id);
+      ledger = { ...ledger, completed: ledger.completed.filter((id) => !stale.includes(id)) };
+      deps.ledger.write(deps.ledgerPath, ledger);
+    }
+  }
+
   for (const [i, step] of steps.entries()) {
     const label = `${i + 1}/${steps.length} ${step.title}`;
     if (done.has(step.id)) {
@@ -114,7 +156,13 @@ export async function runBootstrapSteps(steps: BootstrapStep[], deps: BootstrapR
       // Keep the ledger (it already records everything BEFORE this step) and
       // stop. No teardown: the half-built state is what the user debugs.
       throw new BootstrapStepError(
-        bootstrapFailureMessage(step, ledger, deps.ledgerPath, (err as Error).message ?? String(err)),
+        bootstrapFailureMessage(
+          step,
+          ledger,
+          deps.ledgerPath,
+          (err as Error).message ?? String(err),
+          deps.resumeCommand,
+        ),
       );
     }
     ledger = { ...ledger, completed: [...ledger.completed, step.id] };
@@ -132,6 +180,7 @@ export function bootstrapFailureMessage(
   ledger: BootstrapLedger,
   ledgerPath: string,
   cause: string,
+  resumeCommand: string = BOOTSTRAP_RESUME_COMMAND,
 ): string {
   return [
     `bootstrap FAILED at step '${step.id}' (${step.title}):`,
@@ -142,7 +191,7 @@ export function bootstrapFailureMessage(
     `  failed:    ${step.id}`,
     '',
     `Fix the cause, then resume from '${step.id}' with:`,
-    `  ${BOOTSTRAP_RESUME_COMMAND}`,
+    `  ${resumeCommand}`,
   ].join('\n');
 }
 

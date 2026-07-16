@@ -56,6 +56,12 @@ export interface GitRunner {
   hasUpstream(repoPath: string): Promise<boolean>;
   /** `git rev-list --count HEAD..@{u}` — commits behind upstream (`0` on any error). */
   revListCount(repoPath: string): Promise<number>;
+  /**
+   * `git rev-list --count HEAD [-- <pathspec>]` — total commits reaching HEAD,
+   * optionally restricted to a pathspec (the CLI's auto-incrementing patch
+   * number, soa#—`ss version`). `null` on any error (not a checkout, no HEAD).
+   */
+  commitCount(repoPath: string, pathspec?: string): Promise<number | null>;
   /** `git merge --ff-only @{u}` — true iff it exited 0 (false ⇒ diverged / no ff possible). */
   mergeFfOnly(repoPath: string): Promise<boolean>;
 
@@ -199,6 +205,13 @@ export function makeRealGitRunner(): GitRunner {
       const out = await gitOut(repoPath, ['rev-list', '--count', 'HEAD..@{u}']);
       const n = Number.parseInt(out, 10);
       return Number.isFinite(n) ? n : 0;
+    },
+    async commitCount(repoPath: string, pathspec?: string): Promise<number | null> {
+      const args = ['rev-list', '--count', 'HEAD'];
+      if (pathspec !== undefined) args.push('--', pathspec);
+      const out = await gitOut(repoPath, args);
+      const n = Number.parseInt(out, 10);
+      return Number.isFinite(n) ? n : null;
     },
     mergeFfOnly(repoPath: string): Promise<boolean> {
       return gitOk(repoPath, ['merge', '--ff-only', '@{u}']);

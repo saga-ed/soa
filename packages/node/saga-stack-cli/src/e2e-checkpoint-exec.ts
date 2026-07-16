@@ -124,11 +124,26 @@ export async function bakeStageCheckpoint(
   // roster pipeline to settle). A barrier timeout FAILS the bake loudly — the
   // seam contract says it throws rather than let torn state be written.
   const personas = resolved.flow.settlePersonas ?? [];
-  if (deps.settleBarrier !== undefined && personas.length > 0 && dbs.includes('iam_pii_local')) {
-    try {
-      await deps.settleBarrier({ fixtureId, stageId: stage.id, personas });
-    } catch (err) {
-      throw new FlowExecError((err as Error).message);
+  if (dbs.includes('iam_pii_local')) {
+    if (deps.settleBarrier !== undefined && personas.length > 0) {
+      try {
+        await deps.settleBarrier({ fixtureId, stageId: stage.id, personas });
+      } catch (err) {
+        throw new FlowExecError((err as Error).message);
+      }
+    } else {
+      // The skip must be LOUD: discovery prefers the SPA repo's authored
+      // flows.json over the bundled example, so a flow that never declared
+      // settlePersonas there would otherwise bake iam state with no barrier
+      // and no trace in the run output (the original soa#327 silent tear).
+      const why =
+        personas.length === 0
+          ? `flow '${resolved.flow.name}' declares no settlePersonas`
+          : 'no settle barrier wired (internal wiring gap)';
+      deps.log(
+        `⚠ bake quiescence barrier skipped: ${why} — this dump covers iam_pii_local ` +
+          'and may bake TORN state (personas can 401 after restore)',
+      );
     }
   }
 

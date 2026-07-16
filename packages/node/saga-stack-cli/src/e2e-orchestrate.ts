@@ -1135,6 +1135,20 @@ export async function executeResolvedFlow(
       }
     }
     if (!restored) {
+      // soa#327: EVERY road into the full prerequisite replay is guarded, not
+      // just the failed-restore path above — --no-prereq-from-snapshot, a
+      // missing checkpoint store, and a nested prerequisite chain all land
+      // here with tunnelDomain still riding down into the replay's Playwright
+      // env (the WAN-starved-polls trap). Cannot double-fire: the restore
+      // branch's own tunnel throw fires before `restored` can stay false.
+      if (deps.tunnelDomain !== undefined) {
+        throw new FlowExecError(
+          tunnelPrereqFallbackMessage(
+            'the full prerequisite replay was selected (checkpoint restore skipped: ' +
+              '--no-prereq-from-snapshot, no checkpoint store, or a nested prerequisite chain)',
+          ),
+        );
+      }
       deps.log(`==> prerequisite: ${prereq.flow.name} (through '${prereq.stages.at(-1)?.id}', headless)`);
       const preCode = await executeResolvedFlow(prereq, deps, {
         lane: opts.lane,

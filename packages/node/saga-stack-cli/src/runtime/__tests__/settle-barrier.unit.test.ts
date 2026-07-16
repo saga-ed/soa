@@ -83,7 +83,10 @@ describe('makePersonaPreflight', () => {
   it('persistent status 0 exhausts the cap and returns 0 (the caller raises the verdict)', async () => {
     const { preflight, posts } = harness([0]);
     await expect(preflight(REQ)).resolves.toBe(0);
-    expect(posts).toHaveLength(PREFLIGHT_ATTEMPTS);
+    // Literal, not the imported constant: this test PINS the cap's absolute
+    // value (a constant-relative assertion would pass for any cap).
+    expect(PREFLIGHT_ATTEMPTS).toBe(3);
+    expect(posts).toHaveLength(3);
   });
 
   it('401 is an ANSWER, not a blip: returned immediately with no retry (it IS the torn verdict)', async () => {

@@ -20,7 +20,6 @@ import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import { Config } from '@oclif/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import { PREFLIGHT_ATTEMPTS } from '../../../runtime/index.js';
 import type {
   CookiePoster,
   LaunchSpec,
@@ -451,6 +450,13 @@ describe('e2e connect --refresh-snapshot (bake the prerequisite fresh, then rest
     // The freshly baked terminal checkpoint is on disk with the right provenance.
     const schedule = readCkptManifest(CKPT_SCHEDULE);
     expect((schedule.flow as Record<string, unknown>).stageId).toBe('schedule');
+
+    // soa#327 wiring pin: THIS bake path (develop connect --refresh-snapshot)
+    // must pass the settle barrier into the bake deps — it exists precisely to
+    // produce the checkpoint the tunnel session will trust. Unwiring
+    // settleBarrier in connect.ts silently bakes torn iam state ⇒ red here.
+    expect(barrierCalls.map((c) => c.stageId)).toEqual(['roster', 'program', 'enrollment', 'pods', 'schedule']);
+    expect(barrierCalls[0]?.personas).toEqual(['alex.tutor@example.org']);
   });
 
   it('--refresh-snapshot --reuse is rejected (reuse strips the prerequisite there is nothing to bake)', async () => {
@@ -486,6 +492,19 @@ describe('tunnel fail-loud (soa#327): unusable prerequisite checkpoint under --t
     );
     // The gate refuses BEFORE any replay spawn — deletion of the gate makes the
     // journey replay run and these appear (the mutation signature).
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('--no-prereq-from-snapshot under --tunnel refuses the replay loudly (every road into the replay is guarded)', async () => {
+    // No checkpoint baked at all: the flag skips the restore attempt entirely,
+    // so the ONLY protection is the guard at the replay entry itself — the
+    // restore-block gate never runs (deps.checkpoints is unconstructed).
+    fakeMoniker();
+    await expect(E2eConnect.run(['--tunnel', '--no-prereq-from-snapshot', ...ws()], config)).rejects.toThrow(
+      /refusing to fall back silently[\s\S]*--no-prereq-from-snapshot/,
+    );
+    // Refused BEFORE any spawn — deleting the replay-entry guard makes the
+    // journey replay run over the tunnel (the WAN-starved-polls trap).
     expect(playwrightRuns()).toHaveLength(0);
   });
 
@@ -545,7 +564,7 @@ describe('bake quiescence barrier (soa#327)', () => {
     expect(playwrightRuns()).toHaveLength(1);
   });
 
-  it('a flow with NO settlePersonas bakes with ZERO barrier calls (byte-identical bake)', async () => {
+  it('a flow with NO settlePersonas bakes with ZERO barrier calls — and says so LOUDLY per stage', async () => {
     // Same bundled journey minus the declaration, via the --spa-path override.
     const manifest = JSON.parse(
       readFileSync(
@@ -557,12 +576,19 @@ describe('bake quiescence barrier (soa#327)', () => {
     const spaPath = join(DASH_ROOT, 'no-personas.flows.json');
     writeFileSync(spaPath, JSON.stringify(manifest));
 
+    logged.length = 0;
     await E2eRun.run(
       ['journey', '--through', 'program', '--snapshot-stages', '--headless', '--spa-path', spaPath, ...ws()],
       config,
     );
     expect(barrierCalls).toHaveLength(0);
     expect(() => readCkptManifest(CKPT_ROSTER)).not.toThrow(); // bake unaffected
+    // The skip is VISIBLE: discovery prefers the SPA repo's authored flows.json,
+    // so an undeclared flow baking iam state silently is the soa#327 trap.
+    const warns = logged.filter((l) =>
+      l.includes("bake quiescence barrier skipped: flow 'journey' declares no settlePersonas"),
+    );
+    expect(warns).toHaveLength(2); // once per baked stage (roster, program)
   });
 
   it('the default bake DOES invoke the barrier with the journey personas (gating positive)', async () => {
@@ -654,7 +680,8 @@ describe('tunnel post-restore persona preflight (soa#327)', () => {
     installPoster([0]);
     fakeMoniker();
     await expect(E2eConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(/no response/);
-    expect(posts).toHaveLength(PREFLIGHT_ATTEMPTS);
+    // Literal, not the imported constant, so the cap's value stays pinned.
+    expect(posts).toHaveLength(3);
     expect(playwrightRuns()).toHaveLength(0);
   });
 

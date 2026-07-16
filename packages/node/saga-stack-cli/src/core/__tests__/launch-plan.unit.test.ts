@@ -167,10 +167,16 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     });
   });
 
-  it('ads-adm-api (tokenized env resolves to exactly up.sh literals at base ports)', () => {
+  it('ads-adm-api (tokenized env resolves to exactly up.sh literals at base ports, + PROGRAMS_API_CLIENT_BASEURL)', () => {
     expect(env('ads-adm-api')).toEqual({
       ADS_ADM_SCHEDULE_PROVIDER: 'program-hub',
       SESSIONS_API_CLIENT_BASEURL: 'http://localhost:3007',
+      // NOT an up.sh literal — a deliberate post-up.sh addition (sds#275). ads-adm
+      // resolves program display names from programs-api because sessions-api
+      // projects no display strings (its occurrence wire's programName is only the
+      // programId echo). Tokenized so a slot > 0 ads-adm dials ITS slot's
+      // programs-api rather than slot 0's.
+      PROGRAMS_API_CLIENT_BASEURL: 'http://localhost:3006',
       IAM_API_CLIENT_BASEURL: 'http://localhost:3010/trpc',
       IAM_API_URL: 'http://localhost:3010',
       JWT_ISSUER: 'https://iam.wootdev.com',

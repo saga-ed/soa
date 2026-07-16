@@ -805,6 +805,46 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
 /** Structural alias for the stage arg `checkpointFixtureId` takes (pure projection use). */
 type StageDefLike = ResolvedFlow['stages'][number];
 
+// ── tunnel fail-loud (soa#327) ─────────────────────────────────────────────────
+
+/**
+ * The docs/tunnel.md concierge recipe, verbatim — the remediation every tunnel
+ * fail-loud error embeds. Local state is rebuilt LOCALLY (fast, tested), then the
+ * tunnel comes up and restores the snapshot; the alternative the gate prevents is
+ * a silent full Playwright replay over the WAN, whose 30s polls starve and fail
+ * far slower than this recipe runs.
+ */
+const TUNNEL_RECIPE_LINES: readonly string[] = [
+  'Rebuild the state locally, then bring the tunnel up and restore it (docs/tunnel.md concierge):',
+  '  ss stack down && ss stack up --seed full --reset',
+  '  ss e2e run journey --through schedule',
+  '  ss stack snapshot store --fixture-id tunnel-connect',
+  '  ss stack down && ss stack up --tunnel --reset',
+  '  ss stack snapshot restore tunnel-connect',
+  '  ss develop connect --tunnel --student-login 1 --reuse',
+  '',
+  'Faster escape hatches when only the CHECKPOINT is the problem:',
+  '  ss develop connect --refresh-snapshot   # re-bake the journey prerequisite fresh, then open the room',
+  '  ss e2e run … --from-stale-ok            # accept an over-7-day checkpoint (e2e run only)',
+];
+
+/**
+ * PURE builder for the fail-loud error a `--tunnel` run raises instead of the
+ * local lane's silent warn+full-replay when the prerequisite checkpoint is
+ * unusable (missing / stale / failed validation). The original violation is
+ * embedded verbatim so the remediation is exact. Exported for unit tests.
+ */
+export function tunnelPrereqFallbackMessage(violation: string): string {
+  return [
+    '--tunnel: the prerequisite checkpoint is unusable, and a full replay over the tunnel is',
+    'a trap (its WAN round-trips starve the specs’ 30s polls) — refusing to fall back silently.',
+    '',
+    violation.replace(/^/gm, '  '),
+    '',
+    ...TUNNEL_RECIPE_LINES,
+  ].join('\n');
+}
+
 // ── execution ─────────────────────────────────────────────────────────────────
 
 // M15: FlowExecError + the M14 checkpoint restore/bake execution live in
@@ -990,6 +1030,13 @@ export async function executeResolvedFlow(
         if (!(err instanceof FlowExecError)) throw err;
         // A failed BRING-UP would fail the replay too — don't retry it.
         if (err.message.includes('bring-up failed')) throw err;
+        // soa#327 fail-loud: under --tunnel the silent full replay is a TRAP, not a
+        // fallback — the remote browser's WAN round-trips starve the specs' 30s
+        // polls, so the replay fails slower than the local re-bake recipe runs.
+        // Local lane (tunnelDomain undefined) keeps the warn+replay byte-identical.
+        if (deps.tunnelDomain !== undefined) {
+          throw new FlowExecError(tunnelPrereqFallbackMessage(err.message));
+        }
         deps.log(`⚠ prerequisite checkpoint unavailable — falling back to full replay:\n${err.message}`);
       }
     }

@@ -454,6 +454,43 @@ describe('e2e connect --refresh-snapshot (bake the prerequisite fresh, then rest
   });
 });
 
+describe('tunnel fail-loud (soa#327): unusable prerequisite checkpoint under --tunnel', () => {
+  function fakeMoniker(): void {
+    vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
+      (async () => 'testmoniker') as never,
+    );
+  }
+
+  it('a STALE journey@schedule checkpoint hard-errors with the violation + the docs/tunnel.md recipe', async () => {
+    await E2eRun.run(['journey', '--through', 'schedule', '--snapshot-stages', '--headless', ...ws()], config);
+    const m = readCkptManifest(CKPT_SCHEDULE);
+    (m.flow as Record<string, unknown>).bakedAt = '2020-01-01T00:00:00.000Z';
+    writeCkptManifest(CKPT_SCHEDULE, m);
+
+    runs.length = 0;
+    fakeMoniker();
+    await expect(E2eConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(
+      /days old[\s\S]*ss stack snapshot restore tunnel-connect[\s\S]*--refresh-snapshot/,
+    );
+    // The gate refuses BEFORE any replay spawn — deletion of the gate makes the
+    // journey replay run and these appear (the mutation signature).
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('the SAME stale checkpoint WITHOUT --tunnel keeps the local warn+replay (regression pin)', async () => {
+    await E2eRun.run(['journey', '--through', 'schedule', '--snapshot-stages', '--headless', ...ws()], config);
+    const m = readCkptManifest(CKPT_SCHEDULE);
+    (m.flow as Record<string, unknown>).bakedAt = '2020-01-01T00:00:00.000Z';
+    writeCkptManifest(CKPT_SCHEDULE, m);
+
+    runs.length = 0;
+    logged.length = 0;
+    await E2eConnect.run([...ws()], config);
+    expect(logged.join('\n')).toContain('falling back to full replay');
+    expect(playwrightRuns().length).toBeGreaterThan(1); // journey replay + the room
+  });
+});
+
 describe('M14-C review fixes', () => {
   it('--no-prereq-from-snapshot --dry-run does NOT advertise a restore the run would never attempt', async () => {
     logged.length = 0;

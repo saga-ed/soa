@@ -171,12 +171,50 @@ describe('develop connect — slot awareness (slot > 0)', () => {
     expect(playwrightRuns()).toHaveLength(0);
   });
 
-  it('--tunnel at slot 0 still works (the guard is slot-scoped, not a tunnel ban)', async () => {
+  it('--tunnel --reuse at slot 0 still works (the guard is slot-scoped, not a tunnel ban)', async () => {
     vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
       (async () => 'testmoniker') as never,
     );
-    await DevelopConnect.run(['--tunnel', ...ws()], config);
+    // --reuse: the walkthrough-verified concierge path (docs/tunnel.md step 3). A bare
+    // tunnel run with no baked prerequisite checkpoint now fail-louds by design
+    // (soa#327, covered below); the concierge path must stay byte-identical.
+    await DevelopConnect.run(['--tunnel', '--reuse', ...ws()], config);
     expect(liveRun()?.env?.PLAYWRIGHT_BASE_URL).toMatch(/^https:\/\/dash\.testmoniker\./);
+  });
+});
+
+describe('develop connect — tunnel fail-loud on an unusable prerequisite checkpoint (soa#327)', () => {
+  function fakeMoniker(): void {
+    vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
+      (async () => 'testmoniker') as never,
+    );
+  }
+
+  it('--tunnel with NO baked checkpoint hard-errors with the docs/tunnel.md recipe — no silent WAN replay', async () => {
+    fakeMoniker();
+    // The seams' store fake answers load → null (no checkpoint baked).
+    await expect(DevelopConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(
+      /ss stack snapshot restore tunnel-connect[\s\S]*--refresh-snapshot/,
+    );
+    // The gate must PREVENT the replay: no Playwright child (journey stages or the
+    // room) was ever spawned, and no reset/seed ran. If the gate is deleted, the
+    // fallback replay runs and these invocations appear — the mutation is caught.
+    expect(playwrightRuns()).toHaveLength(0);
+    expect(runs.some((r) => r.args.includes('db:seed'))).toBe(false);
+  });
+
+  it('the loud error embeds the ORIGINAL violation so the remediation is exact', async () => {
+    fakeMoniker();
+    await expect(DevelopConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(/no checkpoint 'flow-saga-dash-journey-s5-schedule'/);
+  });
+
+  it('WITHOUT --tunnel the same missing checkpoint still falls back to the full replay (local lane pinned)', async () => {
+    // Regression twin of checkpoint.int.test.ts "falls back … never hard-errors":
+    // the gate is tunnel-scoped, the local lane keeps the silent replay.
+    await DevelopConnect.run([...ws()], config);
+    // Replay signature: the journey prerequisite spawned before the live room.
+    expect(playwrightRuns().length).toBeGreaterThan(1);
+    expect(liveRun()).toBeDefined();
   });
 });
 

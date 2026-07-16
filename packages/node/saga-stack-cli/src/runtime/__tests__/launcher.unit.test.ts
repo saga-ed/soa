@@ -358,6 +358,142 @@ describe('makeRealLauncher.launch adopt-contract guard (soa#305)', () => {
     expect(res).toEqual({ id: 'saga-dash', ok: true, alreadyUp: true });
   });
 
+  // coach-web's guard (soa#336): its PUBLIC_* map is INLINED at vite-dev start
+  // (launch env > .env.local > .env), so an adopted vite serves the hosts it
+  // started with forever — the only correct handling of a mode-mismatched
+  // frontend is refuse-or-relaunch, never adopt. Two of the four guarded keys
+  // are tunnel-ONLY (PUBLIC_LOGIN_URL / PUBLIC_DASHBOARD_URL): absent from a
+  // plain launch env, they're OMITTED from a plain fingerprint but PRESENT in a
+  // tunnel one — that presence asymmetry alone mismatches in both directions.
+  const COACH_ADOPT = [
+    'PUBLIC_COACH_API_URL',
+    'PUBLIC_IAM_API_URL',
+    'PUBLIC_LOGIN_URL',
+    'PUBLIC_DASHBOARD_URL',
+  ];
+  // Plain slot-0 launch env: only the two boot-critical keys (manifest launch.env).
+  const COACH_PLAIN_ENV = {
+    PUBLIC_COACH_API_URL: 'http://localhost:6105',
+    PUBLIC_IAM_API_URL: 'http://localhost:3010',
+  };
+  // Tunnel launch env: all four, rewritten to the public hosts (tunnelOverlay()).
+  const COACH_TUNNEL_ENV = {
+    PUBLIC_COACH_API_URL: 'https://coach-api.sk.vms.wootdev.com',
+    PUBLIC_IAM_API_URL: 'https://iam.sk.vms.wootdev.com',
+    PUBLIC_LOGIN_URL: 'https://iam.sk.vms.wootdev.com',
+    PUBLIC_DASHBOARD_URL: 'https://dash.sk.vms.wootdev.com',
+  };
+
+  it('refuses to adopt a TUNNEL-leftover coach-web on a plain run (the 2026-07-16 slot-0 incident)', async () => {
+    const { prober } = seqProber([true]); // the leftover vite still 200s on :8800
+    const { spawn, calls } = fakeSpawn(1);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn,
+      readContract: () => JSON.stringify(COACH_TUNNEL_ENV), // stamped by `develop --tunnel`
+    });
+
+    const res = await launcher.launch({
+      ...SPEC,
+      id: 'coach-web',
+      env: COACH_PLAIN_ENV, // plain `develop coach`
+      adoptEnv: COACH_ADOPT,
+    });
+
+    // Pre-#336 this was a silent adoption → browser whoami dialed the dead
+    // tunnel iam → the misleading soa#300 503. Now: loud refusal, no spawn.
+    expect(res.ok).toBe(false);
+    expect(res.alreadyUp).toBeUndefined();
+    expect(res.reason).toMatch(/contract/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refuses the REVERSE switch: plain-stamped coach-web vs a tunnel run (presence asymmetry)', async () => {
+    const { prober } = seqProber([true]);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn: fakeSpawn(1).spawn,
+      // A plain spawn's stamp OMITS the tunnel-only keys — even if the two
+      // boot-critical values somehow agreed, present-vs-omitted still refuses.
+      readContract: () => JSON.stringify(COACH_PLAIN_ENV),
+    });
+
+    const res = await launcher.launch({
+      ...SPEC,
+      id: 'coach-web',
+      env: COACH_TUNNEL_ENV,
+      adoptEnv: COACH_ADOPT,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/contract/);
+  });
+
+  it('adopts a same-mode coach-web re-run (plain → plain: tunnel-only keys omitted on BOTH sides)', async () => {
+    const { prober } = seqProber([true]);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      readContract: () => JSON.stringify(COACH_PLAIN_ENV),
+    });
+
+    const res = await launcher.launch({
+      ...SPEC,
+      id: 'coach-web',
+      env: COACH_PLAIN_ENV,
+      adoptEnv: COACH_ADOPT,
+    });
+
+    expect(res).toEqual({ id: 'coach-web', ok: true, alreadyUp: true });
+  });
+
+  it("refuses a tunnel-leftover iam-api whose JWT_ISSUER alone would MATCH (soa#336's finding A)", async () => {
+    // The widened iam guard: JWT_ISSUER is lane-independent, so the old
+    // single-key fingerprint was byte-identical across modes and a tunnel
+    // leftover was silently adopted. The tunnel-rewritten browser-plane trio
+    // (CORS_ORIGIN / MAIL_FRONTEND_BASE_URL / tunnel-only
+    // AUTH_SESSIONCOOKIEDOMAIN) now makes the modes distinguishable.
+    const IAM_ADOPT = [
+      'JWT_ISSUER',
+      'CORS_ORIGIN',
+      'MAIL_FRONTEND_BASE_URL',
+      'AUTH_SESSIONCOOKIEDOMAIN',
+    ];
+    const { prober } = seqProber([true]);
+    const { spawn, calls } = fakeSpawn(1);
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn,
+      // Stamped by the earlier `stack tunnel`: same issuer, tunnel browser plane.
+      readContract: () =>
+        JSON.stringify({
+          JWT_ISSUER: 'https://iam.wootdev.com',
+          CORS_ORIGIN:
+            'http://localhost:8900,http://localhost:6210,https://dash.sk.vms.wootdev.com,https://connect.sk.vms.wootdev.com',
+          MAIL_FRONTEND_BASE_URL: 'https://iam.sk.vms.wootdev.com/demo',
+          AUTH_SESSIONCOOKIEDOMAIN: '.sk.vms.wootdev.com',
+        }),
+    });
+
+    const res = await launcher.launch({
+      ...SPEC,
+      env: {
+        // plain-mode launch env: SAME issuer, localhost browser plane, no cookie domain.
+        JWT_ISSUER: 'https://iam.wootdev.com',
+        CORS_ORIGIN: 'http://localhost:8900,http://localhost:6210,http://localhost:8800',
+        MAIL_FRONTEND_BASE_URL: 'http://localhost:3010/demo',
+      },
+      adoptEnv: IAM_ADOPT,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.reason).toMatch(/contract/);
+    expect(calls).toHaveLength(0);
+  });
+
   it('leaves an UNguarded service (no adoptEnv) adopted unconditionally', async () => {
     const { prober } = seqProber([true]);
     const readContract = vi.fn(() => null);

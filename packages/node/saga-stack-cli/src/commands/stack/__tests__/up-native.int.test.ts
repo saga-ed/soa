@@ -492,10 +492,21 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     const iam = launches.find((s) => s.id === 'iam-api');
     expect(iam?.env.AUTH_SESSIONCOOKIEDOMAIN).toBe('.testmoniker.vms.wootdev.com');
     expect(iam?.env.CORS_ORIGIN).toContain('https://dash.testmoniker.vms.wootdev.com');
+    // … and its launch spec GUARDS those tunnel-rewritten keys (soa#336): the
+    // lane-independent JWT_ISSUER alone stamped identical fingerprints across
+    // modes, so a tunnel-leftover iam was silently adopted by a plain run.
+    expect(iam?.adoptEnv).toEqual(
+      expect.arrayContaining(['JWT_ISSUER', 'CORS_ORIGIN', 'AUTH_SESSIONCOOKIEDOMAIN']),
+    );
     // connect-web's VITE_* deps flip to the tunnel hosts.
     const cweb = launches.find((s) => s.id === 'connect-web');
     expect(cweb?.env.VITE_IAM_API_URL).toBe('https://iam.testmoniker.vms.wootdev.com');
     expect(cweb?.env.VITE_CONNECTV3_API_URL).toBe('https://connect-api.testmoniker.vms.wootdev.com');
+    // … and the browser-plane deps are adoption-guarded too (soa#336, the
+    // saga-dash idiom below extended to the remaining frontends).
+    expect(cweb?.adoptEnv).toEqual(
+      expect.arrayContaining(['VITE_CONNECTV3_API_URL', 'VITE_IAM_API_URL']),
+    );
     // the VENDORED tunnel.sh up ran after the launch (not soa's tools/synthetic-dev copy).
     const tun = runs.find((r) => r.command.endsWith('tunnel.sh'));
     expect(tun?.args).toEqual(['up']);

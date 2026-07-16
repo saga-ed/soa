@@ -146,6 +146,31 @@ describe('tunnel_env overlay (--tunnel)', () => {
     expect(e.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBe(`coach.${TD}`);
   });
 
+  it('coach-web: iam flips too — the browser fetches whoami DIRECT from iam (soa#298)', () => {
+    // The overlay used to omit this, reasoning "iam stays behind coach-api". It does not:
+    // coach-web's `src/lib/api/session.ts` does `${PUBLIC_IAM_API_URL}/trpc/auth.whoami`
+    // from the BROWSER. Omitting it left the manifest's `${IAM_URL}` (localhost:3010) in
+    // a remote coworker's bundle → whoami fails → the soa#300 503. Confirmed live.
+    expect(envFor('coach-web', TUN).PUBLIC_IAM_API_URL).toBe(`https://iam.${TD}`);
+  });
+
+  it('coach-web: login + dashboard leave the SHARED remote hosts for this tunnel', () => {
+    const e = envFor('coach-web', TUN);
+    // `.env` defaults are login./dash.wootdev.com — shared remote infra. A tunnel session
+    // must stay inside its own mesh. No `login` host exists in tunnel.sh SERVICES, so
+    // login points at iam (which serves the /demo challenge), as in the local lane.
+    expect(e.PUBLIC_LOGIN_URL).toBe(`https://iam.${TD}`);
+    expect(e.PUBLIC_DASHBOARD_URL).toBe(`https://dash.${TD}`);
+  });
+
+  it('coach-web: NO localhost survives into a remote browser bundle', () => {
+    // The property that actually matters: every PUBLIC_ var a remote browser inlines must
+    // be publicly resolvable. localhost is not, from their machine.
+    for (const [k, v] of Object.entries(envFor('coach-web', TUN))) {
+      if (k.startsWith('PUBLIC_')) expect(v, `${k} leaks a local host`).not.toMatch(/localhost/);
+    }
+  });
+
   it('rtsm-api: FLEET_CONFIG_PATH override ONLY when a generated tunnel fleet path is supplied', () => {
     // no fleet path ⇒ keeps the base local fleet.
     expect(envFor('rtsm-api', TUN).FLEET_CONFIG_PATH).toBe(

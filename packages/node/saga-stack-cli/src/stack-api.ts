@@ -340,6 +340,8 @@ export interface UpResult {
   skipped: UpSkip[];
   /** The first service that failed health (set only when `ok` is false at the service stage). */
   failedAt?: ServiceId;
+  /** Why `failedAt` failed, when it's not a plain health timeout (e.g. the adopt-contract drift refusal). */
+  failedReason?: string;
 }
 
 /** The outcome of a native `seed`. */
@@ -938,13 +940,17 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
               args,
               env: spec.env,
               healthUrl: spec.healthUrl,
+              // Guard the `alreadyUp` adoption on the service's contract keys (iam-api's
+              // JWT_ISSUER) so a drifted/foreign already-up process is refused, not adopted
+              // with a stale env the CLI's stamp never reached (soa#305).
+              adoptEnv: getService(id, manifest).adoptEnv,
             });
           }),
         );
         launched.push(...results);
         const failed = results.find((r) => !r.ok);
         if (failed) {
-          return { ok: false, autoPull, av, mesh, prep, provision, migrate, dash, coachWeb, launched, skipped, failedAt: failed.id as ServiceId };
+          return { ok: false, autoPull, av, mesh, prep, provision, migrate, dash, coachWeb, launched, skipped, failedAt: failed.id as ServiceId, failedReason: failed.reason };
         }
       }
 

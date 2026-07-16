@@ -74,6 +74,17 @@ describe('syncDashLocalDefaults', () => {
       type: 'url',
       url: 'https://programs.abc.vms.wootdev.com',
     });
+    // ads-adm MUST route to its tunnel host (the dash Overview page dials it for
+    // real) — not fall back to config.json's localhost:5005 (a mixed-content
+    // block from the HTTPS tunnel page).
+    expect(parsed.localDefaults['ads-adm']).toEqual({
+      type: 'url',
+      url: 'https://ads-adm.abc.vms.wootdev.com',
+    });
+    // transcripts-api/ledger-api are NOT forwarded by the tunnel, so they must
+    // stay out of the tunnel map (a label would point at a dead host).
+    expect(parsed.localDefaults['transcripts-api']).toBeUndefined();
+    expect(parsed.localDefaults['ledger-api']).toBeUndefined();
     // every label key present, trailing newline preserved.
     expect(Object.keys(parsed.localDefaults).sort()).toEqual(Object.keys(DASH_TUNNEL_LABELS).sort());
     expect(written[0].contents.endsWith('\n')).toBe(true);

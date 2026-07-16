@@ -78,5 +78,9 @@ describe('TUNNEL_SERVICE_LABELS ↔ PLAYWRIGHT_SERVICE_URL_ENV ↔ vendor/tunnel
         expect(TUNNEL_SERVICE_LABELS['ads-adm-api']).toBe('ads-adm');
         expect(TUNNEL_SERVICE_LABELS['connect-api']).toBe('connect-api');
         expect(TUNNEL_SERVICE_LABELS['iam-api']).toBe('iam');
+        // coach pair: coach-web→coach is a rename; coach-api keeps its suffix. Their
+        // absence left tunnel coach flows on a localhost base URL (soa#305 matrix).
+        expect(TUNNEL_SERVICE_LABELS['coach-web']).toBe('coach');
+        expect(TUNNEL_SERVICE_LABELS['coach-api']).toBe('coach-api');
     });
 });

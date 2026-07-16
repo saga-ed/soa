@@ -478,6 +478,13 @@ export const TUNNEL_SERVICE_LABELS: Readonly<Record<ServiceId, string>> = Object
   'ads-adm-api': 'ads-adm',
   'connect-web': 'connect',
   'connect-api': 'connect-api',
+  // coach pair (vendored tunnel.sh: "coach:8800" / "coach-api:6105"). Without the
+  // coach-web entry a tunnel coach flow keeps PLAYWRIGHT_BASE_URL=localhost:8800
+  // while iam (AUTH_SESSIONCOOKIEDOMAIN=.<domain>) mints .<domain>-scoped SameSite
+  // cookies — cross-site from a localhost page, so whoami never sees the session
+  // and coach-web renders the soa#300 503 over an otherwise healthy tunnel.
+  'coach-web': 'coach',
+  'coach-api': 'coach-api',
 } as Record<ServiceId, string>);
 
 /**

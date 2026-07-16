@@ -50,7 +50,8 @@ export interface BakeInput {
   /** The flow's effective seed profile (stamped as the manifest `profile`). */
   profile: string;
   /** The DBs to dump — the slot-filtered flow closure's set. */
-  dbs: DbId[];
+  /** Optional subset; omitted ⇒ storePlan's default set (snapshot-store parity). */
+  dbs?: DbId[];
   /** The M14 provenance block `--from` validates. */
   flow: SnapshotFlowBlock;
 }

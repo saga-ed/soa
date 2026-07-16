@@ -110,9 +110,15 @@ export async function bakeStageCheckpoint(
   const position = resolved.flow.stages.findIndex((s) => s.id === stage.id) + 1;
   const fixtureId = checkpointFixtureId(resolved.spa.id, resolved.flow.name, stage, position);
 
-  // The bake scope is the SLOT-FILTERED closure's DB set (post-closure exclusion,
-  // same rule as `snapshot store --slot N`) — never dump DBs the slot never provisioned.
-  const dbs = [...new Set(services.flatMap((id) => m.services[id]?.databases ?? []))];
+  // The bake scope is NOT passed: checkpoint-store falls through to storePlan's
+  // DEFAULT selection — every manifest DB except the playback/authz extras —
+  // giving byte-for-byte PARITY with `stack snapshot store` (docs/tunnel.md's
+  // known-good bridge). A flow-closure subset silently dropped `sessions`
+  // (event-materialized, load-bearing for `develop connect`, which strands at
+  // "No sessions on the term-start Monday" — soa#327 proof C); and "manifest
+  // minus slot-exclusions" over-reaches into DBs the stack never provisioned
+  // (pg_dump: role "transcripts_app" does not exist). The store plan's default
+  // is the one set proven correct in production use.
 
   // soa#327 quiescence barrier — BEFORE the first dump. A green Playwright stage
   // is not proof the DBs are settled: roster-sync's outbox relay (and the
@@ -124,7 +130,10 @@ export async function bakeStageCheckpoint(
   // roster pipeline to settle). A barrier timeout FAILS the bake loudly — the
   // seam contract says it throws rather than let torn state be written.
   const personas = resolved.flow.settlePersonas ?? [];
-  if (dbs.includes('iam_pii_local')) {
+  // The default store set always covers the iam pair, so the barrier is
+  // unconditional (it was previously gated on the closure subset covering
+  // iam_pii_local — a set that no longer exists).
+  {
     if (deps.settleBarrier !== undefined && personas.length > 0) {
       try {
         await deps.settleBarrier({ fixtureId, stageId: stage.id, personas });
@@ -152,7 +161,6 @@ export async function bakeStageCheckpoint(
     // No fabricated default: a seedless flow's checkpoint says so ('unseeded'
     // never false-matches a real profile in the restore-time double guard).
     profile: resolved.seedSelection?.profile ?? 'unseeded',
-    dbs,
     flow: {
       spa: resolved.spa.id,
       flow: resolved.flow.name,

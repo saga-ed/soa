@@ -162,6 +162,18 @@ describe('--snapshot-stages (bake)', () => {
     ).rejects.toThrow(/--snapshot-stages.*requires the stack lane/);
   });
 
+  it('bakes the SLOT-PROVISIONED manifest DB set, not the flow closure subset (soa#327 proof C)', async () => {
+    await bakeThroughProgram();
+    // The through-program closure has NO sessions-api, but `sessions` rows are
+    // event-materialized by bake time and load-bearing for checkpoint CONSUMERS
+    // (`develop connect` restores s5 and reads the expanded session rows — a
+    // closure-scoped dump strands it at "No sessions on the term-start Monday").
+    // Same defect class as the legacy mesh-fixture-cli's 6-DB dump that omitted
+    // `sessions` (docs/tunnel.md). So: every manifest DB the slot provisions.
+    const dbs = (readCkptManifest(CKPT_ROSTER).databases as { db: string }[]).map((d) => d.db);
+    expect(dbs).toEqual(expect.arrayContaining(['sessions', 'iam_local', 'iam_pii_local', 'ledger_local', 'coach_api']));
+  });
+
   it('a RED stage bakes no checkpoint and stops the ladder', async () => {
     installSeams('stage-1-roster'); // stage-1's Playwright child exits 1
     await expect(bakeThroughProgram()).rejects.toMatchObject({ oclif: { exit: 1 } });

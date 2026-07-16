@@ -146,9 +146,13 @@ beforeEach(async () => {
   installClaimReader();
   installGit();
   installDirCheck([]);
+  // Pin "now" (Date only — real timers) so LAST DRIVEN relative ages are stable:
+  // the canned claims are at 12:00Z ⇒ they render as "2h ago".
+  vi.useFakeTimers({ now: new Date('2026-07-16T14:00:00.000Z'), toFake: ['Date'] });
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -171,13 +175,18 @@ describe('stack slots — who is on what slot (read-only)', () => {
 
     // One row per active/claimed/set slot.
     expect(text).toMatch(/^0\s+● up\s+—\s+—/m); // active, no set, no claim
-    expect(text).toMatch(/^2\s+● up\s+journey-fix\s+coach-aug3-training\s+2026-07-16T12:00:00\.000Z/m);
-    expect(text).toMatch(/^4\s+—\s+—\s+claude:41234 \(stale\)/m); // dead pid ⇒ stale
-    // The set-bound active slot postures its pinned repo.
-    expect(text).toMatch(/saga-dash\s+@ feat\/x\s+\(clean\)/);
-    // Slots with nothing collapse into ONE dim summary line.
-    expect(text).toContain('slots 1, 3, 5, 6, 7, 8, 9: unused');
+    expect(text).toMatch(/^2\s+● up\s+journey-fix\s+coach-aug3-training\s+2h ago/m); // relative age
+    expect(text).toMatch(/^4\s+—\s+—\s+claude:41234 \(stale\)\s+2h ago/m); // dead pid ⇒ stale
+    // The set-bound active slot postures its pinned repo (aligned annotation column).
+    expect(text).toMatch(/saga-dash\s+@ feat\/x\s+clean/);
+    // The separator matches the header width exactly.
+    const [headerLine, sepLine] = out;
+    expect(sepLine).toBe('─'.repeat(headerLine!.length));
+    // Slots with nothing collapse into ONE dim, range-collapsed summary line.
+    expect(text).toContain('slots 1, 3, 5-9: unused');
     expect(text.match(/unused/g)).toHaveLength(1);
+    // Blank line between slot blocks (and before the unused line).
+    expect(out.filter((l) => l === '').length).toBeGreaterThanOrEqual(2);
   });
 
   it('nothing anywhere ⇒ a single idle note (and exit 0 — the command never fails)', async () => {

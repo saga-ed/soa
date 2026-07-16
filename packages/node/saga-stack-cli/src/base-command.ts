@@ -57,6 +57,7 @@ import type { NativeLoginResult } from './runtime/login.js';
 import {
   buildRepoEnv,
   makeRealConfirm,
+  makeRealBootstrapLedgerIO,
   makeRealCookiePoster,
   makeRealDashFs,
   makeRealCoachWebFs,
@@ -96,6 +97,7 @@ import {
   REPO_DEFAULT_DIR,
 } from './runtime/index.js';
 import type {
+  BootstrapLedgerIO,
   ConfirmSeam,
   CookiePoster,
   CoachWebFs,
@@ -704,6 +706,16 @@ export abstract class BaseCommand extends Command {
       slot,
       sleep: this.getSleep(),
     });
+  }
+
+  /**
+   * The bootstrap-ledger fs seam (soa#329 `develop connect --bootstrap`) —
+   * production is the ONLY place `<stateDir>/bootstrap.json` is read/written/
+   * cleared. The sequencer consumes it injected, so its resume/clear logic is
+   * fake-testable (the CoachWebFs precedent).
+   */
+  protected getBootstrapLedgerIO(): BootstrapLedgerIO {
+    return makeRealBootstrapLedgerIO();
   }
 
   /**

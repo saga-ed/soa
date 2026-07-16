@@ -18,6 +18,7 @@
       "progressive": true,
       "foreground": true,
       "seed": { "reset": true, "profile": "roster" },
+      "settlePersonas": ["alex.tutor@example.org"],
       "stages": [
         {
           "id": "roster",

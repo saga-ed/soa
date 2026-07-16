@@ -35,7 +35,7 @@ import type { Lane, RepoKey } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
 import { reviewBlockLines, runIdFrom } from '../../core/e2e-review.js';
 import type { PreservedRunRecord } from '../../core/e2e-review.js';
-import { preserveSpawnArtifacts, resolveVendorScript } from '../../runtime/index.js';
+import { makePersonaPreflight, preserveSpawnArtifacts, resolveVendorScript } from '../../runtime/index.js';
 import { makeStackApi } from '../../stack-api.js';
 import {
   buildStackContext,
@@ -365,6 +365,18 @@ export default class E2eRun extends BaseCommand {
           checkpoints,
           preserveTraces,
           tunnelDomain,
+          // soa#327: the tunnel post-restore devLogin probe (only consulted when
+          // tunnelDomain is set and a checkpoint restore succeeded).
+          preflight: makePersonaPreflight({
+            poster: this.getCookiePoster(),
+            log: (l) => this.log(l),
+            sleep: this.getSleep(),
+          }),
+          // soa#327: the pre-dump quiescence barrier for --snapshot-stages bakes
+          // (invoked only per-bake, only when the flow declares settlePersonas).
+          // Built after applyInstanceEnv above — same call-time-env contract as
+          // the checkpoint store.
+          settleBarrier: this.getSettleBarrier(profile.slot, (l) => this.log(l)),
         },
         {
           lane,

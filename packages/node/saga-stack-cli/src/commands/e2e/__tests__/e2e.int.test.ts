@@ -272,7 +272,11 @@ describe('e2e connect — foreground connect-session entry', () => {
     vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
       (async () => 'testmoniker') as never,
     );
-    await E2eConnect.run(['--tunnel', ...ws()], config);
+    // --reuse: the concierge path (docs/tunnel.md step 3). Without it a tunnel run
+    // with NO baked prerequisite checkpoint now fail-louds (soa#327) instead of
+    // silently replaying over the WAN — that gate has its own coverage in
+    // connect.int.test.ts; this test owns the tunnel-env plumbing.
+    await E2eConnect.run(['--tunnel', '--reuse', ...ws()], config);
     // The live session's env carries the tunnel URLs — proving tunnelDomain reached the
     // executeResolvedFlow deps (and buildStackContext) for the headed interactive run.
     const live = playwrightRuns().find((r) => r.args.includes('interactive-connect'));

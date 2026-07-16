@@ -78,6 +78,8 @@ import {
   repoOverridesFromFlags,
   makeRealSnapshotIO,
   makeRealViteClear,
+  makeSettleBarrier,
+  realSleep,
   makeRealDockerWipe,
   makeRealBuildCleaner,
   makeRealEnvFs,
@@ -114,6 +116,8 @@ import type {
   SetStore,
   ServiceLauncher,
   ServiceStopper,
+  SettleBarrier,
+  SleepFn,
   SnapshotIO,
   ViteClear,
   DockerWipe,
@@ -672,6 +676,34 @@ export abstract class BaseCommand extends Command {
    */
   protected getCookiePoster(): CookiePoster {
     return makeRealCookiePoster();
+  }
+
+  /**
+   * The sleep seam (soa#327 — settle barrier polls + tunnel-preflight retries).
+   * Production is the ONLY place real time passes between attempts; the shared
+   * test battery replaces it with an instant no-op so retry/poll LOGIC is
+   * asserted without wall-clock waits.
+   */
+  protected getSleep(): SleepFn {
+    return realSleep;
+  }
+
+  /**
+   * The bake quiescence barrier (soa#327) — production composes the real pg
+   * probe + devLogin poster into the pre-dump settle wait; the shared test
+   * battery replaces the WHOLE barrier with a recording no-op (its poll/cap
+   * logic has its own scripted unit coverage). Must be built AFTER
+   * `applyInstanceEnv` has run for the slot — like the checkpoint store, the
+   * barrier resolves the postgres container at CALL time.
+   */
+  protected getSettleBarrier(slot: number, log: (line: string) => void): SettleBarrier {
+    return makeSettleBarrier({
+      probe: this.getPgProbe(),
+      poster: this.getCookiePoster(),
+      log,
+      slot,
+      sleep: this.getSleep(),
+    });
   }
 
   /**

@@ -46,7 +46,9 @@ import {
   resolveRepoRoot as resolveSpaRepoRoot,
   splitSpaPaths,
 } from './core/flow/index.js';
-import type { ResolvedFlow, SpaDescriptor } from './core/flow/index.js';
+import type { FlowDef, ResolvedFlow, SpaDescriptor } from './core/flow/index.js';
+import { buildDevLoginRequest } from './core/login.js';
+import type { PersonaPreflight, SettleBarrier } from './runtime/settle-barrier.js';
 import { deriveInstance } from './core/derive-instance.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import { defaultLaunchContext } from './core/launch-plan.js';
@@ -805,6 +807,112 @@ export function describeResolved(resolved: ResolvedFlow, opts: DescribeOptions):
 /** Structural alias for the stage arg `checkpointFixtureId` takes (pure projection use). */
 type StageDefLike = ResolvedFlow['stages'][number];
 
+// ── tunnel fail-loud (soa#327) ─────────────────────────────────────────────────
+
+/**
+ * The docs/tunnel.md concierge recipe, verbatim — the remediation every tunnel
+ * fail-loud error embeds. Local state is rebuilt LOCALLY (fast, tested), then the
+ * tunnel comes up and restores the snapshot; the alternative the gate prevents is
+ * a silent full Playwright replay over the WAN, whose 30s polls starve and fail
+ * far slower than this recipe runs.
+ */
+const TUNNEL_RECIPE_LINES: readonly string[] = [
+  'Rebuild the state locally, then bring the tunnel up and restore it (docs/tunnel.md concierge):',
+  '  ss stack down && ss stack up --seed full --reset',
+  '  ss e2e run journey --through schedule',
+  '  ss stack snapshot store --fixture-id tunnel-connect',
+  '  ss stack down && ss stack up --tunnel --reset',
+  '  ss stack snapshot restore tunnel-connect',
+  '  ss develop connect --tunnel --student-login 1 --reuse',
+  '',
+  'Faster escape hatches when only the CHECKPOINT is the problem:',
+  '  ss develop connect --refresh-snapshot   # re-bake the journey prerequisite fresh, then open the room',
+  '  ss e2e run … --from-stale-ok            # accept an over-7-day checkpoint (e2e run only)',
+];
+
+/**
+ * PURE builder for the fail-loud error a `--tunnel` run raises instead of the
+ * local lane's silent warn+full-replay when the prerequisite checkpoint is
+ * unusable (missing / stale / failed validation). The original violation is
+ * embedded verbatim so the remediation is exact. Exported for unit tests.
+ */
+export function tunnelPrereqFallbackMessage(violation: string): string {
+  return [
+    '--tunnel: the prerequisite checkpoint is unusable, and a full replay over the tunnel is',
+    'a trap (its WAN round-trips starve the specs’ 30s polls) — refusing to fall back silently.',
+    '',
+    violation.replace(/^/gm, '  '),
+    '',
+    ...TUNNEL_RECIPE_LINES,
+  ].join('\n');
+}
+
+/**
+ * PURE builder for the post-restore preflight's torn-checkpoint error (soa#327):
+ * the restore SUCCEEDED but the flow's own persona cannot devLogin over the
+ * tunnel — the baked state predates the roster work that creates the persona
+ * (the walkthrough's alex.tutor 401). Remediation = the same re-bake recipe.
+ */
+export function tunnelTornCheckpointMessage(email: string, status: number): string {
+  return [
+    `--tunnel: the restored checkpoint looks TORN — devLogin for '${email}' returned ` +
+      `${status === 0 ? 'no response' : `HTTP ${status}`} over the tunnel iam host, so the flow's ` +
+      'personas cannot log in (their roster/pii state is missing from the baked dump).',
+    '',
+    ...TUNNEL_RECIPE_LINES,
+  ].join('\n');
+}
+
+/**
+ * PURE builder for the preflight's 403 verdict: devLogin is DISABLED on the iam
+ * host — an iam-api/tunnel CONFIGURATION problem, so the re-bake recipe would be
+ * a wild-goose chase and is deliberately NOT included.
+ */
+export function tunnelAuthMisconfigMessage(email: string, iamUrl: string): string {
+  return [
+    `--tunnel: devLogin for '${email}' returned HTTP 403 from ${iamUrl} — devLogin is disabled`,
+    'there (AUTH_ENABLED is on, or the Origin is not allowlisted). This is an iam-api/tunnel',
+    'configuration problem, NOT a stale checkpoint — re-baking will not help. Check the iam-api',
+    'env this stack runs with (devLogin needs AUTH_ENABLED off in dev) and the tunnel host config.',
+  ].join('\n');
+}
+
+/**
+ * soa#327 post-restore preflight (tunnel only): one devLogin per flow-declared
+ * settle persona against the tunnel iam host — the DIRECT probe that the
+ * checkpoint just restored is usable by the very login the session will mint.
+ * Callers gate on `deps.tunnelDomain !== undefined`; a flow with no declared
+ * personas skips with a warning (nothing trustworthy to probe — the seed-alias
+ * personas exist even in torn dumps).
+ */
+async function tunnelPersonaPreflight(flow: FlowDef, deps: ExecDeps): Promise<void> {
+  const domain = deps.tunnelDomain as string;
+  const personas = flow.settlePersonas ?? [];
+  if (personas.length === 0) {
+    deps.log(
+      `⚠ tunnel preflight skipped: flow '${flow.name}' declares no settlePersonas — ` +
+        'cannot verify the restored checkpoint is login-ready before the browsers launch',
+    );
+    return;
+  }
+  if (deps.preflight === undefined) {
+    deps.log('⚠ tunnel preflight skipped: no devLogin prober wired (internal wiring gap)');
+    return;
+  }
+  // The SAME host the remote browsers will use (tunnelServiceUrlEnv hands them
+  // `https://<label>.<domain>`), so the probe exercises the room's exact path.
+  const iamUrl = `https://${TUNNEL_SERVICE_LABELS['iam-api']}.${domain}`;
+  for (const email of personas) {
+    const status = await deps.preflight(buildDevLoginRequest(email, iamUrl));
+    if (status === 200) {
+      deps.log(`✓ tunnel preflight: devLogin 200 for ${email}`);
+      continue;
+    }
+    if (status === 403) throw new FlowExecError(tunnelAuthMisconfigMessage(email, iamUrl));
+    throw new FlowExecError(tunnelTornCheckpointMessage(email, status));
+  }
+}
+
 // ── execution ─────────────────────────────────────────────────────────────────
 
 // M15: FlowExecError + the M14 checkpoint restore/bake execution live in
@@ -868,6 +976,24 @@ export interface ExecDeps {
     flowName: string;
     stages: readonly { id: string; project: string }[];
   }) => void | Promise<void>;
+  /**
+   * soa#327 tunnel preflight: POST one devLogin (capped transport-class retries
+   * inside the impl) and return the FINAL HTTP status. Consulted ONLY after a
+   * successful checkpoint restore when `tunnelDomain` is set; absent ⇒ the
+   * probe is skipped with a warning. Real impl: `makePersonaPreflight`
+   * (runtime/settle-barrier.ts), wired by the command from its poster seam.
+   */
+  preflight?: PersonaPreflight;
+  /**
+   * soa#327 bake quiescence barrier: awaited at the TOP of `bakeStageCheckpoint`
+   * (before any dump) when the flow declares `settlePersonas` and the bake
+   * covers iam_pii_local — so a per-stage checkpoint is never dumped while the
+   * roster-sync pipeline (outbox relay + the in-flight pii write window) still
+   * has work in flight. Throws on timeout (a red bake beats a torn checkpoint).
+   * Absent ⇒ no barrier (e.g. `e2e connect`, which never bakes). Real impl:
+   * `makeSettleBarrier` (runtime/settle-barrier.ts), command-wired.
+   */
+  settleBarrier?: SettleBarrier;
 }
 
 /** Per-run knobs. */
@@ -990,10 +1116,39 @@ export async function executeResolvedFlow(
         if (!(err instanceof FlowExecError)) throw err;
         // A failed BRING-UP would fail the replay too — don't retry it.
         if (err.message.includes('bring-up failed')) throw err;
+        // soa#327 fail-loud: under --tunnel the silent full replay is a TRAP, not a
+        // fallback — the remote browser's WAN round-trips starve the specs' 30s
+        // polls, so the replay fails slower than the local re-bake recipe runs.
+        // Local lane (tunnelDomain undefined) keeps the warn+replay byte-identical.
+        if (deps.tunnelDomain !== undefined) {
+          throw new FlowExecError(tunnelPrereqFallbackMessage(err.message));
+        }
         deps.log(`⚠ prerequisite checkpoint unavailable — falling back to full replay:\n${err.message}`);
+      }
+      // soa#327 preflight: the restore SUCCEEDED, but under --tunnel that is not
+      // enough — probe that the prerequisite flow's own personas can devLogin
+      // over the tunnel iam host BEFORE any browser launches. A torn checkpoint
+      // (the walkthrough's alex.tutor 401) fails loud here with the re-bake
+      // recipe instead of minting a session that 401s minutes later.
+      if (restored && deps.tunnelDomain !== undefined) {
+        await tunnelPersonaPreflight(prereq.flow, deps);
       }
     }
     if (!restored) {
+      // soa#327: EVERY road into the full prerequisite replay is guarded, not
+      // just the failed-restore path above — --no-prereq-from-snapshot, a
+      // missing checkpoint store, and a nested prerequisite chain all land
+      // here with tunnelDomain still riding down into the replay's Playwright
+      // env (the WAN-starved-polls trap). Cannot double-fire: the restore
+      // branch's own tunnel throw fires before `restored` can stay false.
+      if (deps.tunnelDomain !== undefined) {
+        throw new FlowExecError(
+          tunnelPrereqFallbackMessage(
+            'the full prerequisite replay was selected (checkpoint restore skipped: ' +
+              '--no-prereq-from-snapshot, no checkpoint store, or a nested prerequisite chain)',
+          ),
+        );
+      }
       deps.log(`==> prerequisite: ${prereq.flow.name} (through '${prereq.stages.at(-1)?.id}', headless)`);
       const preCode = await executeResolvedFlow(prereq, deps, {
         lane: opts.lane,
@@ -1045,6 +1200,12 @@ export async function executeResolvedFlow(
     // resolved.reset is already false for a --from window by construction).
     if (resolved.checkpoint) {
       restoredDates = await restoreCheckpoint(resolved, deps, opts, services, m);
+      // soa#327 preflight (the --from twin of the prerequisite site above): a
+      // restored mid-flow checkpoint under --tunnel must be login-ready for the
+      // flow's own personas before Playwright spawns.
+      if (deps.tunnelDomain !== undefined) {
+        await tunnelPersonaPreflight(resolved.flow, deps);
+      }
     }
 
     // 2b. reset + seed (coupled; skipped on --skip-reset or when a prerequisite built the state).

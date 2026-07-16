@@ -52,6 +52,7 @@ import type {
   Runner,
   ScriptInvocation,
   ServiceLauncher,
+  SettleBarrierContext,
   StopResult,
 } from '../../runtime/index.js';
 
@@ -84,6 +85,13 @@ export interface CoreSeams {
    * purpose: up-native pre-seeds the playback trio before any test runs.
    */
   provisioned: Set<string>;
+  /**
+   * Every settle-barrier invocation (soa#327 pre-dump quiescence gate), in
+   * call order. The battery's default barrier is a recording NO-OP — its real
+   * poll/cap logic has scripted unit coverage in settle-barrier.unit.test.ts;
+   * suites that need a hanging/rejecting barrier re-spy `getSettleBarrier`.
+   */
+  barrierCalls: SettleBarrierContext[];
   /** Present only when `captureLauncherSpy` was set. */
   launcherSpy?: ReturnType<typeof vi.spyOn>;
 }
@@ -157,11 +165,22 @@ export function installCoreSeams(opts: CoreSeamsOptions): CoreSeams {
   // repo present so no service is skipped. Suites that test the skip-when-absent
   // path re-spy this per test.
   vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => true);
+  // soa#327: retry/poll delays (tunnel preflight, settle barrier) must never
+  // wall-clock-wait in tests — attempt/poll COUNTS carry the semantics.
+  vi.spyOn(proto, 'getSleep').mockReturnValue(async () => {});
+  // soa#327: the REAL barrier would poll the (fake, never-settling) pgProbe up
+  // to its cap on every bake — replace it with a recording no-op so bakes stay
+  // instant; the barrier's own logic is unit-tested with scripted probes.
+  const barrierCalls: SettleBarrierContext[] = [];
+  vi.spyOn(proto, 'getSettleBarrier').mockReturnValue(async (ctx: SettleBarrierContext) => {
+    barrierCalls.push(ctx);
+  });
 
   return {
     launches,
     runs,
     provisioned,
+    barrierCalls,
     ...(opts.captureLauncherSpy ? { launcherSpy } : {}),
   };
 }

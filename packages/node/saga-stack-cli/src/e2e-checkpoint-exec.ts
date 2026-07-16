@@ -110,16 +110,57 @@ export async function bakeStageCheckpoint(
   const position = resolved.flow.stages.findIndex((s) => s.id === stage.id) + 1;
   const fixtureId = checkpointFixtureId(resolved.spa.id, resolved.flow.name, stage, position);
 
-  // The bake scope is the SLOT-FILTERED closure's DB set (post-closure exclusion,
-  // same rule as `snapshot store --slot N`) — never dump DBs the slot never provisioned.
-  const dbs = [...new Set(services.flatMap((id) => m.services[id]?.databases ?? []))];
+  // The bake scope is NOT passed: checkpoint-store falls through to storePlan's
+  // DEFAULT selection — every manifest DB except the playback/authz extras —
+  // giving byte-for-byte PARITY with `stack snapshot store` (docs/tunnel.md's
+  // known-good bridge). A flow-closure subset silently dropped `sessions`
+  // (event-materialized, load-bearing for `develop connect`, which strands at
+  // "No sessions on the term-start Monday" — soa#327 proof C); and "manifest
+  // minus slot-exclusions" over-reaches into DBs the stack never provisioned
+  // (pg_dump: role "transcripts_app" does not exist). The store plan's default
+  // is the one set proven correct in production use.
+
+  // soa#327 quiescence barrier — BEFORE the first dump. A green Playwright stage
+  // is not proof the DBs are settled: roster-sync's outbox relay (and the
+  // in-flight pii-write window) can still be draining when the stage's HTTP
+  // responses return, and a dump taken then bakes a TORN checkpoint whose
+  // personas 401 after restore (the walkthrough failure). Gated on the flow
+  // DECLARING settlePersonas (no personas ⇒ nothing trustworthy to probe) and
+  // on the bake actually covering iam_pii_local (a closure without iam has no
+  // roster pipeline to settle). A barrier timeout FAILS the bake loudly — the
+  // seam contract says it throws rather than let torn state be written.
+  const personas = resolved.flow.settlePersonas ?? [];
+  // The default store set always covers the iam pair, so the barrier is
+  // unconditional (it was previously gated on the closure subset covering
+  // iam_pii_local — a set that no longer exists).
+  {
+    if (deps.settleBarrier !== undefined && personas.length > 0) {
+      try {
+        await deps.settleBarrier({ fixtureId, stageId: stage.id, personas });
+      } catch (err) {
+        throw new FlowExecError((err as Error).message);
+      }
+    } else {
+      // The skip must be LOUD: discovery prefers the SPA repo's authored
+      // flows.json over the bundled example, so a flow that never declared
+      // settlePersonas there would otherwise bake iam state with no barrier
+      // and no trace in the run output (the original soa#327 silent tear).
+      const why =
+        personas.length === 0
+          ? `flow '${resolved.flow.name}' declares no settlePersonas`
+          : 'no settle barrier wired (internal wiring gap)';
+      deps.log(
+        `⚠ bake quiescence barrier skipped: ${why} — this dump covers iam_pii_local ` +
+          'and may bake TORN state (personas can 401 after restore)',
+      );
+    }
+  }
 
   await checkpoints.bake({
     fixtureId,
     // No fabricated default: a seedless flow's checkpoint says so ('unseeded'
     // never false-matches a real profile in the restore-time double guard).
     profile: resolved.seedSelection?.profile ?? 'unseeded',
-    dbs,
     flow: {
       spa: resolved.spa.id,
       flow: resolved.flow.name,

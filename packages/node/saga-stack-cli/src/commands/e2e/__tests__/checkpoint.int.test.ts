@@ -20,7 +20,16 @@ import { installCoreSeams } from '../../../__tests__/helpers/seams.js';
 import { Config } from '@oclif/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
-import type { LaunchSpec, ScriptInvocation, SnapshotIO } from '../../../runtime/index.js';
+import type {
+  CookiePoster,
+  LaunchSpec,
+  PostOptions,
+  PostResult,
+  ScriptInvocation,
+  SettleBarrier,
+  SettleBarrierContext,
+  SnapshotIO,
+} from '../../../runtime/index.js';
 import E2eRun from '../run.js';
 import E2eConnect from '../../develop/connect.js';
 
@@ -38,6 +47,7 @@ let launches: LaunchSpec[];
 let runs: ScriptInvocation[];
 const ioCalls: SnapshotIOCall[] = [];
 let logged: string[];
+let barrierCalls: SettleBarrierContext[];
 
 // Hermetic per-test checkpoint root (real files land here — manifest + canned
 // dump bytes), never the developer's real ~/.saga-mesh/snapshots.
@@ -54,6 +64,7 @@ function installSeams(playwrightFail?: string): void {
   const seams = installCoreSeams({ pidBase: 3000, prepFresh: true, playwrightFail });
   launches = seams.launches;
   runs = seams.runs;
+  barrierCalls = seams.barrierCalls;
 
   // schemaRev: null ⇒ the snapshot-ahead guard is inert (covered by
   // snapshot.int.test.ts) — this suite owns the FLOW-level compat rules.
@@ -149,6 +160,18 @@ describe('--snapshot-stages (bake)', () => {
     await expect(
       E2eRun.run(['journey', '--lane', 'sandbox', '--snapshot-stages', '--headless', ...ws()], config),
     ).rejects.toThrow(/--snapshot-stages.*requires the stack lane/);
+  });
+
+  it('bakes the SLOT-PROVISIONED manifest DB set, not the flow closure subset (soa#327 proof C)', async () => {
+    await bakeThroughProgram();
+    // The through-program closure has NO sessions-api, but `sessions` rows are
+    // event-materialized by bake time and load-bearing for checkpoint CONSUMERS
+    // (`develop connect` restores s5 and reads the expanded session rows — a
+    // closure-scoped dump strands it at "No sessions on the term-start Monday").
+    // Same defect class as the legacy mesh-fixture-cli's 6-DB dump that omitted
+    // `sessions` (docs/tunnel.md). So: every manifest DB the slot provisions.
+    const dbs = (readCkptManifest(CKPT_ROSTER).databases as { db: string }[]).map((d) => d.db);
+    expect(dbs).toEqual(expect.arrayContaining(['sessions', 'iam_local', 'iam_pii_local', 'ledger_local', 'coach_api']));
   });
 
   it('a RED stage bakes no checkpoint and stops the ladder', async () => {
@@ -439,6 +462,13 @@ describe('e2e connect --refresh-snapshot (bake the prerequisite fresh, then rest
     // The freshly baked terminal checkpoint is on disk with the right provenance.
     const schedule = readCkptManifest(CKPT_SCHEDULE);
     expect((schedule.flow as Record<string, unknown>).stageId).toBe('schedule');
+
+    // soa#327 wiring pin: THIS bake path (develop connect --refresh-snapshot)
+    // must pass the settle barrier into the bake deps — it exists precisely to
+    // produce the checkpoint the tunnel session will trust. Unwiring
+    // settleBarrier in connect.ts silently bakes torn iam state ⇒ red here.
+    expect(barrierCalls.map((c) => c.stageId)).toEqual(['roster', 'program', 'enrollment', 'pods', 'schedule']);
+    expect(barrierCalls[0]?.personas).toEqual(['alex.tutor@example.org']);
   });
 
   it('--refresh-snapshot --reuse is rejected (reuse strips the prerequisite there is nothing to bake)', async () => {
@@ -451,6 +481,256 @@ describe('e2e connect --refresh-snapshot (bake the prerequisite fresh, then rest
     await expect(
       E2eConnect.run(['--refresh-snapshot', '--no-prereq-from-snapshot', ...ws()], config),
     ).rejects.toThrow(/needs --prereq-from-snapshot/);
+  });
+});
+
+describe('tunnel fail-loud (soa#327): unusable prerequisite checkpoint under --tunnel', () => {
+  function fakeMoniker(): void {
+    vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
+      (async () => 'testmoniker') as never,
+    );
+  }
+
+  it('a STALE journey@schedule checkpoint hard-errors with the violation + the docs/tunnel.md recipe', async () => {
+    await E2eRun.run(['journey', '--through', 'schedule', '--snapshot-stages', '--headless', ...ws()], config);
+    const m = readCkptManifest(CKPT_SCHEDULE);
+    (m.flow as Record<string, unknown>).bakedAt = '2020-01-01T00:00:00.000Z';
+    writeCkptManifest(CKPT_SCHEDULE, m);
+
+    runs.length = 0;
+    fakeMoniker();
+    await expect(E2eConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(
+      /days old[\s\S]*ss stack snapshot restore tunnel-connect[\s\S]*--refresh-snapshot/,
+    );
+    // The gate refuses BEFORE any replay spawn — deletion of the gate makes the
+    // journey replay run and these appear (the mutation signature).
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('--no-prereq-from-snapshot under --tunnel refuses the replay loudly (every road into the replay is guarded)', async () => {
+    // No checkpoint baked at all: the flag skips the restore attempt entirely,
+    // so the ONLY protection is the guard at the replay entry itself — the
+    // restore-block gate never runs (deps.checkpoints is unconstructed).
+    fakeMoniker();
+    await expect(E2eConnect.run(['--tunnel', '--no-prereq-from-snapshot', ...ws()], config)).rejects.toThrow(
+      /refusing to fall back silently[\s\S]*--no-prereq-from-snapshot/,
+    );
+    // Refused BEFORE any spawn — deleting the replay-entry guard makes the
+    // journey replay run over the tunnel (the WAN-starved-polls trap).
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('the SAME stale checkpoint WITHOUT --tunnel keeps the local warn+replay (regression pin)', async () => {
+    await E2eRun.run(['journey', '--through', 'schedule', '--snapshot-stages', '--headless', ...ws()], config);
+    const m = readCkptManifest(CKPT_SCHEDULE);
+    (m.flow as Record<string, unknown>).bakedAt = '2020-01-01T00:00:00.000Z';
+    writeCkptManifest(CKPT_SCHEDULE, m);
+
+    runs.length = 0;
+    logged.length = 0;
+    await E2eConnect.run([...ws()], config);
+    expect(logged.join('\n')).toContain('falling back to full replay');
+    expect(playwrightRuns().length).toBeGreaterThan(1); // journey replay + the room
+  });
+});
+
+describe('bake quiescence barrier (soa#327)', () => {
+  it('fires ONCE per stage BEFORE that stage’s first dump (declared personas ride the context)', async () => {
+    // Recording barrier that snapshots how many pgDumps had happened at call
+    // time — the ordering witness. Deleting the await (or moving it after the
+    // bake) makes the second entry include its own stage's dumps ⇒ red.
+    const pgDumpsAtBarrier: number[] = [];
+    const fixtures: string[] = [];
+    const barrier: SettleBarrier = async (ctx) => {
+      pgDumpsAtBarrier.push(ioCalls.filter((c) => c.op === 'pgDump').length);
+      fixtures.push(ctx.fixtureId);
+      expect(ctx.personas).toEqual(['alex.tutor@example.org']);
+    };
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getSettleBarrier: () => SettleBarrier },
+      'getSettleBarrier',
+    ).mockReturnValue(barrier);
+
+    await bakeThroughProgram();
+
+    expect(fixtures).toEqual([CKPT_ROSTER, CKPT_PROGRAM]);
+    const perStage = ioCalls.filter((c) => c.op === 'pgDump').length / 2;
+    expect(perStage).toBeGreaterThan(0);
+    // Stage 1's barrier ran before ANY dump; stage 2's before its OWN dumps.
+    expect(pgDumpsAtBarrier).toEqual([0, perStage]);
+  });
+
+  it('a barrier timeout FAILS the bake: no manifest for the stage, ladder stops', async () => {
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getSettleBarrier: () => SettleBarrier },
+      'getSettleBarrier',
+    ).mockReturnValue(async () => {
+      throw new Error("settle barrier TIMED OUT before baking 'flow-saga-dash-journey-s1-roster'");
+    });
+
+    await expect(bakeThroughProgram()).rejects.toThrow(/settle barrier TIMED OUT/);
+    // NOTHING was dumped or manifested for the unsettled stage — a red bake, not
+    // a torn checkpoint. Stage 2 never spawned (the ladder stopped).
+    expect(ioCalls.filter((c) => c.op === 'pgDump')).toHaveLength(0);
+    expect(() => readCkptManifest(CKPT_ROSTER)).toThrow();
+    expect(playwrightRuns()).toHaveLength(1);
+  });
+
+  it('a flow with NO settlePersonas bakes with ZERO barrier calls — and says so LOUDLY per stage', async () => {
+    // Same bundled journey minus the declaration, via the --spa-path override.
+    const manifest = JSON.parse(
+      readFileSync(
+        resolve(PKG_ROOT, 'examples', 'flows', 'saga-dash.flows.json'),
+        'utf8',
+      ),
+    ) as { flows: Record<string, unknown>[] };
+    for (const flow of manifest.flows) delete flow.settlePersonas;
+    const spaPath = join(DASH_ROOT, 'no-personas.flows.json');
+    writeFileSync(spaPath, JSON.stringify(manifest));
+
+    logged.length = 0;
+    await E2eRun.run(
+      ['journey', '--through', 'program', '--snapshot-stages', '--headless', '--spa-path', spaPath, ...ws()],
+      config,
+    );
+    expect(barrierCalls).toHaveLength(0);
+    expect(() => readCkptManifest(CKPT_ROSTER)).not.toThrow(); // bake unaffected
+    // The skip is VISIBLE: discovery prefers the SPA repo's authored flows.json,
+    // so an undeclared flow baking iam state silently is the soa#327 trap.
+    const warns = logged.filter((l) =>
+      l.includes("bake quiescence barrier skipped: flow 'journey' declares no settlePersonas"),
+    );
+    expect(warns).toHaveLength(2); // once per baked stage (roster, program)
+  });
+
+  it('the default bake DOES invoke the barrier with the journey personas (gating positive)', async () => {
+    await bakeThroughProgram();
+    expect(barrierCalls.map((c) => c.stageId)).toEqual(['roster', 'program']);
+    expect(barrierCalls[0]?.personas).toEqual(['alex.tutor@example.org']);
+  });
+});
+
+describe('tunnel post-restore persona preflight (soa#327)', () => {
+  let posts: { url: string; opts: PostOptions }[];
+  let savedVmsBase: string | undefined;
+
+  /** Poster answering `statuses` in order (last repeats); records every call. */
+  function installPoster(statuses: number[]): void {
+    posts = [];
+    const poster: CookiePoster = {
+      async post(url: string, opts: PostOptions): Promise<PostResult> {
+        posts.push({ url, opts });
+        const status = statuses[Math.min(posts.length - 1, statuses.length - 1)] ?? 0;
+        return { status, ok: status >= 200 && status < 300, setCookies: [] };
+      },
+    };
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getCookiePoster: () => CookiePoster },
+      'getCookiePoster',
+    ).mockReturnValue(poster);
+  }
+
+  function fakeMoniker(): void {
+    vi.spyOn(BaseCommand.prototype as never, 'getTunnelMoniker' as never).mockReturnValue(
+      (async () => 'testmoniker') as never,
+    );
+  }
+
+  beforeEach(() => {
+    // Pin the tunnel base domain so the probed URL is exactly assertable.
+    savedVmsBase = process.env.VMS_BASE;
+    process.env.VMS_BASE = 'vms.test';
+  });
+  afterEach(() => {
+    if (savedVmsBase === undefined) delete process.env.VMS_BASE;
+    else process.env.VMS_BASE = savedVmsBase;
+  });
+
+  async function bakeSchedule(): Promise<void> {
+    await E2eRun.run(['journey', '--through', 'schedule', '--snapshot-stages', '--headless', ...ws()], config);
+    runs.length = 0;
+    ioCalls.length = 0;
+    logged.length = 0;
+  }
+
+  it('valid checkpoint + poster 200: the session proceeds; ONE devLogin against the exact tunnel iam host', async () => {
+    await bakeSchedule();
+    installPoster([200]);
+    fakeMoniker();
+    await E2eConnect.run(['--tunnel', ...ws()], config);
+
+    // The probe drove the SAME host the room's browsers will use, with iam's own
+    // origin (the origin-check is load-bearing) and the declared persona.
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe('https://iam.testmoniker.vms.test/trpc/auth.devLogin');
+    expect(posts[0]!.opts.origin).toBe('https://iam.testmoniker.vms.test');
+    expect(posts[0]!.opts.body).toContain('alex.tutor@example.org');
+    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
+  });
+
+  it('poster 401: TORN checkpoint — loud error naming the persona + the recipe; no browser launches', async () => {
+    await bakeSchedule();
+    installPoster([401]);
+    fakeMoniker();
+    await expect(E2eConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(
+      /alex\.tutor@example\.org[\s\S]*HTTP 401[\s\S]*ss stack snapshot restore tunnel-connect/,
+    );
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('transport blips: status 0 twice then 200 proceeds — poster called 3x', async () => {
+    await bakeSchedule();
+    installPoster([0, 0, 200]);
+    fakeMoniker();
+    await E2eConnect.run(['--tunnel', ...ws()], config);
+    expect(posts).toHaveLength(3);
+    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
+  });
+
+  it('persistently unreachable iam: capped retries then the loud torn error', async () => {
+    await bakeSchedule();
+    installPoster([0]);
+    fakeMoniker();
+    await expect(E2eConnect.run(['--tunnel', ...ws()], config)).rejects.toThrow(/no response/);
+    // Literal, not the imported constant, so the cap's value stays pinned.
+    expect(posts).toHaveLength(3);
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('poster 403: devLogin-disabled misconfig gets its OWN message, NOT the re-bake recipe', async () => {
+    await bakeSchedule();
+    installPoster([403]);
+    fakeMoniker();
+    let message = '';
+    try {
+      await E2eConnect.run(['--tunnel', ...ws()], config);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/devLogin is disabled/);
+    // Re-baking cannot fix an AUTH_ENABLED/origin misconfig — the recipe would
+    // send the user on a wild-goose chase.
+    expect(message).not.toContain('ss stack snapshot restore tunnel-connect');
+    expect(playwrightRuns()).toHaveLength(0);
+  });
+
+  it('e2e run --from --tunnel fires the preflight after the --from restore too', async () => {
+    await bakeThroughProgram();
+    runs.length = 0;
+    installPoster([200]);
+    fakeMoniker();
+    await E2eRun.run(['journey', '--from', 'program', '--through', 'program', '--tunnel', '--headless', ...ws()], config);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]!.url).toBe('https://iam.testmoniker.vms.test/trpc/auth.devLogin');
+    expect(playwrightRuns()).toHaveLength(1);
+  });
+
+  it('a NON-tunnel restore makes ZERO devLogin probes (local lane byte-identical)', async () => {
+    await bakeSchedule();
+    installPoster([200]);
+    await E2eConnect.run([...ws()], config);
+    expect(posts).toHaveLength(0);
+    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
   });
 });
 

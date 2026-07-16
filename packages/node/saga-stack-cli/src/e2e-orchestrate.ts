@@ -48,7 +48,7 @@ import {
 } from './core/flow/index.js';
 import type { FlowDef, ResolvedFlow, SpaDescriptor } from './core/flow/index.js';
 import { buildDevLoginRequest } from './core/login.js';
-import type { PersonaPreflight } from './runtime/settle-barrier.js';
+import type { PersonaPreflight, SettleBarrier } from './runtime/settle-barrier.js';
 import { deriveInstance } from './core/derive-instance.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import { defaultLaunchContext } from './core/launch-plan.js';
@@ -984,6 +984,16 @@ export interface ExecDeps {
    * (runtime/settle-barrier.ts), wired by the command from its poster seam.
    */
   preflight?: PersonaPreflight;
+  /**
+   * soa#327 bake quiescence barrier: awaited at the TOP of `bakeStageCheckpoint`
+   * (before any dump) when the flow declares `settlePersonas` and the bake
+   * covers iam_pii_local — so a per-stage checkpoint is never dumped while the
+   * roster-sync pipeline (outbox relay + the in-flight pii write window) still
+   * has work in flight. Throws on timeout (a red bake beats a torn checkpoint).
+   * Absent ⇒ no barrier (e.g. `e2e connect`, which never bakes). Real impl:
+   * `makeSettleBarrier` (runtime/settle-barrier.ts), command-wired.
+   */
+  settleBarrier?: SettleBarrier;
 }
 
 /** Per-run knobs. */

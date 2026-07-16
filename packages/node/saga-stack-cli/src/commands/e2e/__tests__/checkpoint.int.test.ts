@@ -27,6 +27,8 @@ import type {
   PostOptions,
   PostResult,
   ScriptInvocation,
+  SettleBarrier,
+  SettleBarrierContext,
   SnapshotIO,
 } from '../../../runtime/index.js';
 import E2eRun from '../run.js';
@@ -46,6 +48,7 @@ let launches: LaunchSpec[];
 let runs: ScriptInvocation[];
 const ioCalls: SnapshotIOCall[] = [];
 let logged: string[];
+let barrierCalls: SettleBarrierContext[];
 
 // Hermetic per-test checkpoint root (real files land here — manifest + canned
 // dump bytes), never the developer's real ~/.saga-mesh/snapshots.
@@ -62,6 +65,7 @@ function installSeams(playwrightFail?: string): void {
   const seams = installCoreSeams({ pidBase: 3000, prepFresh: true, playwrightFail });
   launches = seams.launches;
   runs = seams.runs;
+  barrierCalls = seams.barrierCalls;
 
   // schemaRev: null ⇒ the snapshot-ahead guard is inert (covered by
   // snapshot.int.test.ts) — this suite owns the FLOW-level compat rules.
@@ -496,6 +500,75 @@ describe('tunnel fail-loud (soa#327): unusable prerequisite checkpoint under --t
     await E2eConnect.run([...ws()], config);
     expect(logged.join('\n')).toContain('falling back to full replay');
     expect(playwrightRuns().length).toBeGreaterThan(1); // journey replay + the room
+  });
+});
+
+describe('bake quiescence barrier (soa#327)', () => {
+  it('fires ONCE per stage BEFORE that stage’s first dump (declared personas ride the context)', async () => {
+    // Recording barrier that snapshots how many pgDumps had happened at call
+    // time — the ordering witness. Deleting the await (or moving it after the
+    // bake) makes the second entry include its own stage's dumps ⇒ red.
+    const pgDumpsAtBarrier: number[] = [];
+    const fixtures: string[] = [];
+    const barrier: SettleBarrier = async (ctx) => {
+      pgDumpsAtBarrier.push(ioCalls.filter((c) => c.op === 'pgDump').length);
+      fixtures.push(ctx.fixtureId);
+      expect(ctx.personas).toEqual(['alex.tutor@example.org']);
+    };
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getSettleBarrier: () => SettleBarrier },
+      'getSettleBarrier',
+    ).mockReturnValue(barrier);
+
+    await bakeThroughProgram();
+
+    expect(fixtures).toEqual([CKPT_ROSTER, CKPT_PROGRAM]);
+    const perStage = ioCalls.filter((c) => c.op === 'pgDump').length / 2;
+    expect(perStage).toBeGreaterThan(0);
+    // Stage 1's barrier ran before ANY dump; stage 2's before its OWN dumps.
+    expect(pgDumpsAtBarrier).toEqual([0, perStage]);
+  });
+
+  it('a barrier timeout FAILS the bake: no manifest for the stage, ladder stops', async () => {
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getSettleBarrier: () => SettleBarrier },
+      'getSettleBarrier',
+    ).mockReturnValue(async () => {
+      throw new Error("settle barrier TIMED OUT before baking 'flow-saga-dash-journey-s1-roster'");
+    });
+
+    await expect(bakeThroughProgram()).rejects.toThrow(/settle barrier TIMED OUT/);
+    // NOTHING was dumped or manifested for the unsettled stage — a red bake, not
+    // a torn checkpoint. Stage 2 never spawned (the ladder stopped).
+    expect(ioCalls.filter((c) => c.op === 'pgDump')).toHaveLength(0);
+    expect(() => readCkptManifest(CKPT_ROSTER)).toThrow();
+    expect(playwrightRuns()).toHaveLength(1);
+  });
+
+  it('a flow with NO settlePersonas bakes with ZERO barrier calls (byte-identical bake)', async () => {
+    // Same bundled journey minus the declaration, via the --spa-path override.
+    const manifest = JSON.parse(
+      readFileSync(
+        resolve(PKG_ROOT, 'examples', 'flows', 'saga-dash.flows.json'),
+        'utf8',
+      ),
+    ) as { flows: Record<string, unknown>[] };
+    for (const flow of manifest.flows) delete flow.settlePersonas;
+    const spaPath = join(DASH_ROOT, 'no-personas.flows.json');
+    writeFileSync(spaPath, JSON.stringify(manifest));
+
+    await E2eRun.run(
+      ['journey', '--through', 'program', '--snapshot-stages', '--headless', '--spa-path', spaPath, ...ws()],
+      config,
+    );
+    expect(barrierCalls).toHaveLength(0);
+    expect(() => readCkptManifest(CKPT_ROSTER)).not.toThrow(); // bake unaffected
+  });
+
+  it('the default bake DOES invoke the barrier with the journey personas (gating positive)', async () => {
+    await bakeThroughProgram();
+    expect(barrierCalls.map((c) => c.stageId)).toEqual(['roster', 'program']);
+    expect(barrierCalls[0]?.personas).toEqual(['alex.tutor@example.org']);
   });
 });
 

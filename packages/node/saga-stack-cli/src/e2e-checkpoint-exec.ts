@@ -114,6 +114,24 @@ export async function bakeStageCheckpoint(
   // same rule as `snapshot store --slot N`) — never dump DBs the slot never provisioned.
   const dbs = [...new Set(services.flatMap((id) => m.services[id]?.databases ?? []))];
 
+  // soa#327 quiescence barrier — BEFORE the first dump. A green Playwright stage
+  // is not proof the DBs are settled: roster-sync's outbox relay (and the
+  // in-flight pii-write window) can still be draining when the stage's HTTP
+  // responses return, and a dump taken then bakes a TORN checkpoint whose
+  // personas 401 after restore (the walkthrough failure). Gated on the flow
+  // DECLARING settlePersonas (no personas ⇒ nothing trustworthy to probe) and
+  // on the bake actually covering iam_pii_local (a closure without iam has no
+  // roster pipeline to settle). A barrier timeout FAILS the bake loudly — the
+  // seam contract says it throws rather than let torn state be written.
+  const personas = resolved.flow.settlePersonas ?? [];
+  if (deps.settleBarrier !== undefined && personas.length > 0 && dbs.includes('iam_pii_local')) {
+    try {
+      await deps.settleBarrier({ fixtureId, stageId: stage.id, personas });
+    } catch (err) {
+      throw new FlowExecError((err as Error).message);
+    }
+  }
+
   await checkpoints.bake({
     fixtureId,
     // No fabricated default: a seedless flow's checkpoint says so ('unseeded'

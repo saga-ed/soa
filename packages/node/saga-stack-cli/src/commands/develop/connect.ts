@@ -302,6 +302,10 @@ export default class DevelopConnect extends BaseCommand {
             slot: profile.slot,
             ports: runtime.launchContext.ports,
             checkpoints,
+            // soa#327: the fresh bake must wait out the roster-sync pipeline
+            // before each per-stage dump — this bake path exists precisely to
+            // produce the checkpoint the tunnel session will trust.
+            settleBarrier: this.getSettleBarrier(profile.slot, (l) => this.log(l)),
           },
           { lane: 'stack', skipReset: false, passthrough: [], snapshotStages: true, prereqFromSnapshot: false, spaHead },
         );

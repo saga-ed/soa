@@ -407,6 +407,14 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     expect(launches.map((s) => s.id)).toContain('iam-api'); // backend dep up too
     // dash prelaunch hook ran and WROTE the offset-port slot config (not removed).
     expect(dashCalls.some((c) => c.startsWith('write:'))).toBe(true);
+    // soa#328: the SAME routing JSON also rides saga-dash's OWN launch env, so the
+    // slot's dash serves its own /config.local.json without the shared static file.
+    const cfg = JSON.parse(dash?.env.DASH_CONFIG_LOCAL_JSON ?? 'null');
+    expect(cfg.localDefaults.iam).toEqual({ type: 'url', url: 'http://localhost:4010' }); // 3010 + slot 1 offset
+    expect(cfg.localDefaults['ads-adm'].url).not.toContain(':5005'); // never slot 0's ads-adm
+    // no other service gets the dash-only var.
+    const iam = launches.find((s) => s.id === 'iam-api');
+    expect(iam?.env.DASH_CONFIG_LOCAL_JSON).toBeUndefined();
   });
 
   it('BARE full-stack --slot 1 routes through the NATIVE path (never the up.sh wrapper)', async () => {
@@ -492,6 +500,14 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     const tun = runs.find((r) => r.command.endsWith('tunnel.sh'));
     expect(tun?.args).toEqual(['up']);
     expect(tun?.command).toContain('vendor');
+    // soa#328: saga-dash's launch env carries its own tunnel routing JSON (the same
+    // map the file hook writes), so the dash serves per-instance /config.local.json.
+    const dash = launches.find((s) => s.id === 'saga-dash');
+    const cfg = JSON.parse(dash?.env.DASH_CONFIG_LOCAL_JSON ?? 'null');
+    expect(cfg.localDefaults.iam).toEqual({
+      type: 'url',
+      url: 'https://iam.testmoniker.vms.wootdev.com',
+    });
   });
 
   it('--slot 10 is rejected at the flag layer (rabbitmq-mgmt collision ceiling)', async () => {
@@ -509,6 +525,9 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     // dash existsFile()=false in the fake ⇒ non-tunnel slot-0 path is a noop-absent
     // (no write). The key assertion: NO stack-slot write happened at slot 0.
     expect(dashCalls.some((c) => c.startsWith('write:'))).toBe(false);
+    // soa#328: slot-0 non-tunnel injects NO dash config env — launch env byte-identical.
+    const dash = launches.find((s) => s.id === 'saga-dash');
+    expect(dash?.env.DASH_CONFIG_LOCAL_JSON).toBeUndefined();
   });
 
   // NB: these two --login tests are placed at the END of this describe (not by the

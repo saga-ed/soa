@@ -175,6 +175,10 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       // so without this live SESSION rows lose their SLS linkage and render
       // ungrouped (saga-dash gh_560 manual pass).
       ADS_ADM_SESSION_DATA_PROVIDER: 'sessions-api',
+      // Companion gate: the mock policy provider's per-program
+      // sessionDataEnabled default is false — without this the collator
+      // ignores the session layer regardless of the provider binding.
+      ADS_ADM_MOCK_SESSION_DATA_ENABLED: 'true',
       SESSIONS_API_CLIENT_BASEURL: 'http://localhost:3007',
       // NOT an up.sh literal — a deliberate post-up.sh addition (sds#275). ads-adm
       // resolves program display names from programs-api because sessions-api
@@ -204,6 +208,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
 
   it('ads-adm-api: the session-data provider is adoption-guarded (a stale legacy-provider process is refused, not adopted)', () => {
     expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADS_ADM_SESSION_DATA_PROVIDER');
+    expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADS_ADM_MOCK_SESSION_DATA_ENABLED');
   });
 
   it('saga-dash', () => {

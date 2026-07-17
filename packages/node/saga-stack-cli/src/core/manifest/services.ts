@@ -336,6 +336,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // silently died on relaunch; baking it here makes grouping survive
         // cold-start. Prod is masked by design (never ss-launched).
         ADS_ADM_SESSION_DATA_PROVIDER: 'sessions-api',
+        // Second half of the same gate (sds e693d82): the mock policy
+        // provider defaults sessionDataEnabled=false per program, which makes
+        // the collator IGNORE the session layer (ignoreSessionData) and clear
+        // the SLS stamp even when the provider above is bound. Both vars are
+        // required for grouped SESSION rows; both died together on relaunch.
+        ADS_ADM_MOCK_SESSION_DATA_ENABLED: 'true',
         SESSIONS_API_CLIENT_BASEURL: 'http://localhost:${SESSIONS_PORT}',
         PROGRAMS_API_CLIENT_BASEURL: 'http://localhost:${PROGRAMS_PORT}',
         IAM_API_CLIENT_BASEURL: '${IAM_URL}/trpc',
@@ -372,7 +378,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // ADS_ADM_SESSION_DATA_PROVIDER joins the fingerprint so a pre-existing
     // process launched without it (legacy provider ⇒ no SESSION grouping) is
     // refused rather than silently adopted — same trap, same cure.
-    adoptEnv: ['ADM_ALLOW_ROSTER_MODE_OVERRIDE', 'ADS_ADM_SESSION_DATA_PROVIDER'],
+    adoptEnv: [
+      'ADM_ALLOW_ROSTER_MODE_OVERRIDE',
+      'ADS_ADM_SESSION_DATA_PROVIDER',
+      'ADS_ADM_MOCK_SESSION_DATA_ENABLED',
+    ],
   },
   'saga-dash': {
     id: 'saga-dash',

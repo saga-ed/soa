@@ -119,3 +119,24 @@ of this one. Slot 1 was the gh_275 effort's test slot; that effort shipped
 
 M0 ✅ merged. M1+M2 ≈ one focused session in the soa repo (`saga-stack-cli`),
 M3 spans claude-plugins + saga-dash docs.
+
+
+## Slot-1 mechanics validation (2026-07-17)
+
+Ran `develop session-adm --slot 1 --no-hold --no-admin` against a virgin slot 1
+(twice; second run `--reuse` after building journey@attendance-personas). Results:
+
+- **Command mechanics: pass** — closure bounce with the demo VITE env, #346-baked
+  `ADS_ADM_*` adoption stamps, journey prerequisite recursion, headless flow launch,
+  failure-path browser/abort handling, and non-zero exit on flow failure (int-test
+  covered; an earlier "exits 0" observation was a `| tail` pipeline artifact).
+- **Demo spec bug found + fixed upstream:** the spec resolved the program by
+  navigating the TUTOR to `/programs`; dash#580 (landing redirects in load()) bounces
+  non-elevated users to `/sessions/list/today`, so resolution dead-ends on any fresh
+  env (slot 0 only appeared to work from pre-#580 residue). Fixed via API-based
+  resolution → saga-dash#650 (draft).
+- **Slot>0 telemetry boundary characterized:** connect-api's ping handler 500s at
+  slot>0 — s2s `sessions.itemGet` UNAUTHORIZED (connect not slot-tokenized). Filed
+  soa#348. Consequence: dosage can only accrue on slot 0, which is now the concrete
+  content of the "AV requires slot 0" doctrine in the command help. Full demo
+  validation (counters climbing, freeze-on-close) happens on slot 0 with a desktop.

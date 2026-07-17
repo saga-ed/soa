@@ -326,6 +326,16 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       // the tokens expand to exactly the old literals (byte-identity holds).
       env: {
         ADS_ADM_SCHEDULE_PROVIDER: 'program-hub',
+        // Session layer resolves via program-hub's sessions-api (sds e693d82).
+        // Without this the DI default falls back to the legacy program-hub
+        // provider whose saga_api `ars` bridge is retired and never runs in
+        // the synthetic mesh — the collator then never stamps the SLS linkage
+        // (externalSourceType/Id) and every live SESSION row renders under
+        // "Unscheduled" with no per-session grouping (saga-dash gh_560 manual
+        // pass, 2026-07-17). Was previously a hand-exported demo var that
+        // silently died on relaunch; baking it here makes grouping survive
+        // cold-start. Prod is masked by design (never ss-launched).
+        ADS_ADM_SESSION_DATA_PROVIDER: 'sessions-api',
         SESSIONS_API_CLIENT_BASEURL: 'http://localhost:${SESSIONS_PORT}',
         PROGRAMS_API_CLIENT_BASEURL: 'http://localhost:${PROGRAMS_PORT}',
         IAM_API_CLIENT_BASEURL: '${IAM_URL}/trpc',
@@ -359,7 +369,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // ("ignoring client-supplied rosterMode"). Fingerprinting the key refuses
     // the stale process instead. One-time "stop and re-run" cost for
     // pre-existing processes, same as iam-api/saga-dash paid.
-    adoptEnv: ['ADM_ALLOW_ROSTER_MODE_OVERRIDE'],
+    // ADS_ADM_SESSION_DATA_PROVIDER joins the fingerprint so a pre-existing
+    // process launched without it (legacy provider ⇒ no SESSION grouping) is
+    // refused rather than silently adopted — same trap, same cure.
+    adoptEnv: ['ADM_ALLOW_ROSTER_MODE_OVERRIDE', 'ADS_ADM_SESSION_DATA_PROVIDER'],
   },
   'saga-dash': {
     id: 'saga-dash',

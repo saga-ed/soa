@@ -353,6 +353,13 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'ads-adm',
     isFrontend: false,
     optional: false,
+    // Adoption guard (soa#305 pattern): a process launched before this flag
+    // existed carries no gate, and the launcher would happily adopt it — the
+    // #446/#570 period-path probe then hard-fails with a confusing cause
+    // ("ignoring client-supplied rosterMode"). Fingerprinting the key refuses
+    // the stale process instead. One-time "stop and re-run" cost for
+    // pre-existing processes, same as iam-api/saga-dash paid.
+    adoptEnv: ['ADM_ALLOW_ROSTER_MODE_OVERRIDE'],
   },
   'saga-dash': {
     id: 'saga-dash',

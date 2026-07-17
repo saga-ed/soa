@@ -193,6 +193,10 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     });
   });
 
+  it('ads-adm-api: the override gate is adoption-guarded (a stale gate-less process is refused, not adopted)', () => {
+    expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADM_ALLOW_ROSTER_MODE_OVERRIDE');
+  });
+
   it('saga-dash', () => {
     expect(env('saga-dash')).toEqual({
       VITE_ADS_ADM_REAL: 'true',

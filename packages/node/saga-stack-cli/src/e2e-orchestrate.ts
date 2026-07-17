@@ -884,8 +884,11 @@ export function tunnelAuthMisconfigMessage(email: string, iamUrl: string): strin
  * Callers gate on `deps.tunnelDomain !== undefined`; a flow with no declared
  * personas skips with a warning (nothing trustworthy to probe — the seed-alias
  * personas exist even in torn dumps).
+ *
+ * EXPORTED (soa#329): `develop connect --bootstrap` runs the SAME probe as its
+ * phase-2 'persona-preflight' step, right after the tunnel-connect restore.
  */
-async function tunnelPersonaPreflight(flow: FlowDef, deps: ExecDeps): Promise<void> {
+export async function tunnelPersonaPreflight(flow: FlowDef, deps: ExecDeps): Promise<void> {
   const domain = deps.tunnelDomain as string;
   const personas = flow.settlePersonas ?? [];
   if (personas.length === 0) {

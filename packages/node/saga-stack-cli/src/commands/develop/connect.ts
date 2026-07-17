@@ -35,28 +35,53 @@
  * or the journey stages changed. Requires the default `--prereq-from-snapshot` (it
  * bakes so that path can restore); mutually exclusive with `--reuse`.
  *
+ * `--bootstrap` (soa#329, with `--tunnel` only) automates docs/tunnel.md's
+ * two-phase bridge before the room opens: phase 1 rebuilds usable state LOCALLY
+ * and snapshots it (`tunnel-connect`); phase 2 relaunches the stack in tunnel
+ * mode and restores it (one iam serves localhost OR the tunnel — never both).
+ * Ledgered in `<stateDir>/bootstrap.json` (a failed run resumes); a fresh (<7d)
+ * fixture skips phase 1 (`--rebuild` forces it). Implies `--reuse`.
+ *
  *   node bin/dev.js develop connect
  *   node bin/dev.js develop connect --reuse -- --debug
  *   node bin/dev.js develop connect --fake-media
  *   node bin/dev.js develop connect --refresh-snapshot
+ *   node bin/dev.js develop connect --tunnel --bootstrap
  */
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import type { WorkspaceFlags } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
+import type { InstanceProfile } from '../../core/derive-instance.js';
 import { resolveFlow } from '../../core/flow/index.js';
+import type { ResolvedFlow } from '../../core/flow/index.js';
 import { manifest as serviceManifest } from '../../core/manifest/index.js';
 import type { ScriptPlan } from '../../core/flag-map.js';
 import { makeStackApi } from '../../stack-api.js';
-import { makePersonaPreflight, resolveVendorScript } from '../../runtime/index.js';
+import { bootstrapLedgerPath, makePersonaPreflight, resolveVendorScript } from '../../runtime/index.js';
 import {
   buildStackContext,
   discoverFlowManifest,
   executeResolvedFlow,
   FlowExecError,
   resolveAppCwd,
+  tunnelPersonaPreflight,
 } from '../../e2e-orchestrate.js';
+import type { ExecDeps, StackSeams } from '../../e2e-orchestrate.js';
+import StackDown from '../stack/down.js';
+import StackUp from '../stack/up.js';
+import SnapshotRestore from '../stack/snapshot/restore.js';
+import SnapshotStore from '../stack/snapshot/store.js';
+import {
+  BootstrapStepError,
+  bootstrapResumeCommand,
+  bootstrapWorkspaceArgv,
+  runBootstrapSteps,
+  tunnelFixtureFresh,
+  TUNNEL_CONNECT_FIXTURE_ID,
+} from '../../bootstrap-connect.js';
+import type { BootstrapStep } from '../../bootstrap-connect.js';
 
 /** The connect-session flow is a built-in saga-dash flow. */
 const CONNECT_SPA = 'saga-dash';
@@ -78,6 +103,8 @@ export default class DevelopConnect extends BaseCommand {
     '<%= config.bin %> <%= command.id %> --reuse -- --debug',
     '<%= config.bin %> <%= command.id %> --fake-media',
     '<%= config.bin %> <%= command.id %> --refresh-snapshot',
+    '<%= config.bin %> <%= command.id %> --tunnel --bootstrap',
+    '<%= config.bin %> <%= command.id %> --tunnel --bootstrap --rebuild --student-login 1',
   ];
 
   // Allow trailing playwright passthrough args (after `--`).
@@ -120,6 +147,16 @@ export default class DevelopConnect extends BaseCommand {
       description:
         'how many of the 2 students THIS run logs in + joins locally (0, 1, or 2; default 2). The rest stay OPEN for a REMOTE peer to take — pair with --tunnel to invite coworkers. The tutor always auto-hosts and starts the session; login URLs for EVERY participant are printed regardless. Sets CONNECT_LOCAL_STUDENTS on the headed interactive-connect run.',
     }),
+    bootstrap: Flags.boolean({
+      default: false,
+      description:
+        "with --tunnel: automate docs/tunnel.md's two-phase bridge before opening the room. Phase 1 rebuilds usable state LOCALLY (down → up --seed full --reset → journey prerequisite → settle → snapshot store tunnel-connect); phase 2 relaunches in tunnel mode and restores it (down → up --tunnel --reset (hard stop if a foreign process survives) → snapshot restore → persona preflight). SKIPS phase 1 when a fresh (<7d) tunnel-connect fixture exists (--rebuild forces it). Progress is ledgered in <stateDir>/bootstrap.json, so a failed run RESUMES at the failed step; implies --reuse for the final session. Slot-0 only.",
+    }),
+    rebuild: Flags.boolean({
+      default: false,
+      description:
+        'with --bootstrap: run the full phase-1 local rebuild even when a fresh (<7d) tunnel-connect fixture exists (the fast path would otherwise skip it).',
+    }),
   };
 
   /**
@@ -143,6 +180,43 @@ export default class DevelopConnect extends BaseCommand {
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(DevelopConnect);
     const passthrough = (argv as string[]).filter((a) => a !== CONNECT_FLOW);
+
+    // ── soa#329 --bootstrap rejections FIRST (before any resolution/IO). Manual,
+    // not oclif `exclusive:` — the M14 lesson (a defaulted value counts as
+    // provided there). `--set` needs no check here: connect is not setAware(),
+    // so BaseCommand.parse already rejected it above. ──
+    if (flags.rebuild && !flags.bootstrap) {
+      this.error(
+        '--rebuild only modifies --bootstrap (it forces the full phase-1 rebuild past a fresh tunnel-connect fixture). Add --bootstrap or drop --rebuild.',
+      );
+    }
+    if (flags.bootstrap) {
+      if (!flags.tunnel) {
+        this.error(
+          "--bootstrap automates docs/tunnel.md's TWO-PHASE TUNNEL bridge — it is meaningless without --tunnel. Add --tunnel (or drop --bootstrap for a local session).",
+        );
+      }
+      if (flags.slot > 0) {
+        this.error(
+          `slot ${flags.slot}: --bootstrap rebuilds slot 0's stack and snapshots/restores its tunnel bridge (the tunnel fronts the FIXED slot-0 browser ports), so it cannot run against a peer slot. Drop --slot.`,
+        );
+      }
+      if (!flags['prereq-from-snapshot']) {
+        this.error(
+          '--bootstrap owns the prerequisite strategy (restore a usable checkpoint, else the local headless replay) — --no-prereq-from-snapshot would force the slow replay inside the bridge. Drop it.',
+        );
+      }
+      if (flags['refresh-snapshot']) {
+        this.error(
+          '--bootstrap and --refresh-snapshot are mutually exclusive: phase 1 already rebuilds the state the bridge needs. Use --bootstrap --rebuild to force the full rebuild.',
+        );
+      }
+    }
+
+    // --bootstrap implies --reuse for the final hand-off: the phases below leave the
+    // stack tunnel-mode with the tunnel-connect fixture restored — exactly the state
+    // the reuse path runs against (rebuilding the prerequisite again would wipe it).
+    const reuse = flags.reuse || flags.bootstrap;
 
     // --tunnel fronts the FIXED slot-0 browser ports via the vms rendezvous box, so
     // it is slot-0-only — mirroring `develop coach`, `e2e run --tunnel` and `stack up
@@ -179,7 +253,7 @@ export default class DevelopConnect extends BaseCommand {
     // Foreground + headed by default (the flow is `foreground:true`); --reuse drops
     // the prerequisite + reset entirely, exactly like connect-session.sh.
     const resolved = resolveFlow(disco.manifest, CONNECT_FLOW, { lane: 'stack' });
-    const base = flags.reuse ? { ...resolved, prerequisite: undefined } : resolved;
+    const base = reuse ? { ...resolved, prerequisite: undefined } : resolved;
     // --fake-media (FAKE_MEDIA=1) and --student-login (CONNECT_LOCAL_STUDENTS=N) pin
     // env into THIS flow's env (merged last by computeEnv), so they reach only the
     // connect-session stage (headed interactive-connect) — not the journey
@@ -250,6 +324,25 @@ export default class DevelopConnect extends BaseCommand {
 
     const { runtime } = buildStackContext(flags, seams, delegate, profile, tunnelDomain);
     const api = makeStackApi(serviceManifest, runtime);
+
+    // ── soa#329 --bootstrap: run the two-phase bridge BEFORE the live session.
+    // On success the stack is up in TUNNEL mode with the tunnel-connect fixture
+    // restored — exactly the state the --reuse hand-off below runs against.
+    // tunnelDomain is guaranteed here (--bootstrap requires --tunnel, rejected
+    // above), so the room's browsers drive the tunnel hosts. ──
+    if (flags.bootstrap) {
+      await this.runBootstrapPhases({
+        flags,
+        resolved,
+        appCwd,
+        now,
+        seams,
+        delegate,
+        profile,
+        stateDir,
+        tunnelDomain: tunnelDomain as string,
+      });
+    }
 
     // M14-C: the checkpoint store so the journey prerequisite can be RESTORED
     // instead of replayed (--reuse strips the prerequisite entirely, so nothing to
@@ -351,7 +444,7 @@ export default class DevelopConnect extends BaseCommand {
         },
         {
           lane: 'stack',
-          skipReset: flags.reuse,
+          skipReset: reuse,
           passthrough,
           prereqFromSnapshot: flags['prereq-from-snapshot'],
         },
@@ -360,6 +453,219 @@ export default class DevelopConnect extends BaseCommand {
     } catch (err) {
       if (err instanceof FlowExecError) this.error(err.message);
       throw err;
+    }
+  }
+
+  /**
+   * soa#329: the --bootstrap two-phase bridge. Builds the step list (phase 1 is
+   * dropped entirely on the fast path — a fresh <7d tunnel-connect fixture; the
+   * ledger separately skips steps a previous FAILED run completed) and hands it
+   * to the sequencer. The steps compose EXISTING machinery only: the stack/
+   * snapshot sub-commands (forwarded the same workspace argv, the `stack
+   * bootstrap` precedent), the in-process flow orchestrator for the prerequisite,
+   * and the soa#327 settle-barrier/preflight seams.
+   */
+  private async runBootstrapPhases(ctx: {
+    flags: WorkspaceFlags & Record<string, unknown> & { 'state-dir'?: string; rebuild: boolean };
+    resolved: ResolvedFlow;
+    appCwd: string;
+    now: Date;
+    seams: StackSeams;
+    delegate: (plan: ScriptPlan) => Promise<number>;
+    profile: InstanceProfile;
+    stateDir: string;
+    tunnelDomain: string;
+  }): Promise<void> {
+    const { flags, resolved, profile, now, stateDir, tunnelDomain } = ctx;
+    const prereq = resolved.prerequisite;
+    if (prereq === undefined) {
+      this.error(
+        `--bootstrap: flow '${CONNECT_FLOW}' declares no prerequisite — there is no journey state to bake into the '${TUNNEL_CONNECT_FIXTURE_ID}' fixture.`,
+      );
+    }
+    const terminalStage = prereq.stages.at(-1)?.id ?? '';
+
+    // The checkpoint store doubles as the fixture-manifest reader (fast path) and
+    // the prerequisite's restore source. Built AFTER applyInstanceEnv (run() did,
+    // before calling this) — the store's resolvers read $SAGA_MESH_* at CALL time.
+    const store = this.getCheckpointStore(this.scriptContextFromFlags(flags));
+
+    // FAST-PATH input: a fresh (<7d) tunnel-connect fixture makes phase 1 pure
+    // waste — phase 2 restores the fixture anyway. The DECISION sits below the
+    // step lists: it must also consult the ledger (an in-flight phase-1 rebuild
+    // must resume, never be fast-pathed over).
+    const fixture = store.load(TUNNEL_CONNECT_FIXTURE_ID);
+    const fresh = tunnelFixtureFresh(fixture, now);
+
+    // PHASE-1 stack context: NO tunnelDomain. Phase 1 rebuilds state against
+    // localhost — anything IT launches must get the plain local browser env, and
+    // the prerequisite must keep the LOCAL lane's restore-else-replay fallback
+    // (the tunnel fail-loud gates key off deps.tunnelDomain).
+    const { runtime: localRuntime } = buildStackContext(flags, ctx.seams, ctx.delegate, profile);
+    const localApi = makeStackApi(serviceManifest, localRuntime);
+    const localDeps: ExecDeps = {
+      api: localApi,
+      runner: ctx.seams.runner,
+      appCwd: ctx.appCwd,
+      now,
+      log: (l) => this.log(l),
+      slot: profile.slot,
+      ports: localRuntime.launchContext.ports,
+      checkpoints: store,
+    };
+
+    // The workspace argv every sub-command step gets, so down/up/store/restore
+    // resolve the SAME checkouts + state dir this run did.
+    const ws = bootstrapWorkspaceArgv(flags);
+
+    const phase1: BootstrapStep[] = [
+      {
+        id: 'local-down',
+        title: 'phase 1 — stack down (clean local relaunch)',
+        run: async () => void (await StackDown.run([...ws], this.config)),
+      },
+      {
+        id: 'local-up',
+        title: 'phase 1 — stack up --seed full --reset (local baseline)',
+        run: async () => void (await StackUp.run(['--seed', 'full', '--reset', ...ws], this.config)),
+      },
+      {
+        id: 'prerequisite',
+        title: `phase 1 — journey prerequisite through '${terminalStage}' (checkpoint restore if usable, else headless replay; retry-once on stage flake)`,
+        run: () => this.runBootstrapPrerequisite(resolved, localDeps),
+      },
+      {
+        id: 'settle',
+        title: 'phase 1 — settle barrier (roster-sync drain + persona devLogin)',
+        run: async () => {
+          await this.getSettleBarrier(profile.slot, (l) => this.log(l))({
+            fixtureId: TUNNEL_CONNECT_FIXTURE_ID,
+            stageId: terminalStage,
+            personas: prereq.flow.settlePersonas ?? [],
+          });
+        },
+      },
+      {
+        id: 'snapshot-store',
+        title: `phase 1 — snapshot store --fixture-id ${TUNNEL_CONNECT_FIXTURE_ID} --force`,
+        run: async () =>
+          void (await SnapshotStore.run(
+            ['--fixture-id', TUNNEL_CONNECT_FIXTURE_ID, '--profile', 'full', '--force', ...ws],
+            this.config,
+          )),
+      },
+    ];
+
+    const phase2: BootstrapStep[] = [
+      {
+        id: 'tunnel-down',
+        title: 'phase 2 — stack down (every service must RELAUNCH with the tunnel env)',
+        run: async () => void (await StackDown.run([...ws], this.config)),
+      },
+      {
+        id: 'tunnel-up',
+        title: 'phase 2 — stack up --tunnel --reset (hard stop if a foreign process survived)',
+        run: async () =>
+          void (await StackUp.run(['--tunnel', '--reset', '--forbid-foreign', ...ws], this.config)),
+      },
+      {
+        id: 'snapshot-restore',
+        title: `phase 2 — snapshot restore ${TUNNEL_CONNECT_FIXTURE_ID}`,
+        run: async () => void (await SnapshotRestore.run([TUNNEL_CONNECT_FIXTURE_ID, ...ws], this.config)),
+      },
+      {
+        id: 'persona-preflight',
+        title: 'phase 2 — persona preflight (devLogin over the tunnel iam host, soa#331)',
+        run: async () => {
+          await tunnelPersonaPreflight(prereq.flow, {
+            ...localDeps,
+            tunnelDomain,
+            preflight: makePersonaPreflight({
+              poster: this.getCookiePoster(),
+              log: (l) => this.log(l),
+              sleep: this.getSleep(),
+            }),
+          });
+        },
+      },
+    ];
+
+    // FAST-PATH decision. A ledger recording completed PHASE-1 steps means a
+    // rebuild is mid-flight from a failed run: the fast path would discard it —
+    // restore the OLD fixture the user asked to replace and clear the ledger as
+    // "success" — so an in-flight rebuild always disables the fast path. The
+    // resume command mirrors this run's shape (--rebuild + workspace pins); the
+    // bare base command would not resume under a custom --state-dir.
+    const ledgerIO = this.getBootstrapLedgerIO();
+    const ledgerPath = bootstrapLedgerPath(stateDir);
+    const phase1Ids = new Set(phase1.map((s) => s.id));
+    const rebuildInFlight = (ledgerIO.read(ledgerPath)?.completed ?? []).some((id) =>
+      phase1Ids.has(id),
+    );
+    const skipPhase1 = fresh && !flags.rebuild && !rebuildInFlight;
+    if (skipPhase1) {
+      this.log(
+        `==> bootstrap FAST PATH: fixture '${TUNNEL_CONNECT_FIXTURE_ID}' is fresh (created ${fixture?.createdAt}) — skipping phase 1 (--rebuild forces the full rebuild)`,
+      );
+    } else if (fresh && flags.rebuild) {
+      this.log(
+        `==> bootstrap: --rebuild — ignoring the fresh '${TUNNEL_CONNECT_FIXTURE_ID}' fixture; running the full phase-1 rebuild`,
+      );
+    } else if (fresh && rebuildInFlight) {
+      this.log(
+        `==> bootstrap: ledger records an in-flight phase-1 rebuild — resuming it past the fresh '${TUNNEL_CONNECT_FIXTURE_ID}' fixture`,
+      );
+    }
+
+    try {
+      await runBootstrapSteps(skipPhase1 ? phase2 : [...phase1, ...phase2], {
+        ledger: ledgerIO,
+        ledgerPath,
+        log: (l) => this.log(l),
+        now,
+        resumeCommand: bootstrapResumeCommand(flags),
+      });
+    } catch (err) {
+      if (err instanceof BootstrapStepError) this.error(err.message);
+      throw err;
+    }
+    this.log('✓ bootstrap complete — two-phase bridge up; handing off to the live session (--reuse).');
+  }
+
+  /**
+   * Phase-1 'prerequisite' step: put the LOCAL stack into the journey@schedule
+   * end-state via the EXISTING orchestrator. Executes a stages-empty variant of
+   * the connect-session flow, so executeResolvedFlow's own prerequisite handling
+   * supplies the strategy — restore the baked journey@schedule checkpoint when
+   * one is usable, else the full headless replay (local lane ⇒ silent fallback)
+   * — then up+verify the connect closure and stop before any Playwright spawn
+   * (`stages: []` is the Plan-13 empty window). One retry on failure: a single
+   * failed journey stage is the known async-settle flake class (soa#327).
+   */
+  private async runBootstrapPrerequisite(resolved: ResolvedFlow, deps: ExecDeps): Promise<void> {
+    const stateOnly: ResolvedFlow = { ...resolved, stages: [], reset: false, seedSelection: undefined };
+    const attempt = (): Promise<number> =>
+      executeResolvedFlow(stateOnly, deps, {
+        lane: 'stack',
+        skipReset: false,
+        passthrough: [],
+        prereqFromSnapshot: true,
+      });
+
+    try {
+      const code = await attempt();
+      if (code === 0) return;
+      this.log(`⚠ bootstrap prerequisite exited ${code} — retrying once (known async-settle stage-flake class)`);
+    } catch (err) {
+      if (!(err instanceof FlowExecError)) throw err;
+      this.log(
+        `⚠ bootstrap prerequisite failed — retrying once (known async-settle stage-flake class):\n${err.message}`,
+      );
+    }
+
+    const code = await attempt();
+    if (code !== 0) {
+      throw new Error(`prerequisite failed twice (exit ${code}) — not the retry-once flake class`);
     }
   }
 }

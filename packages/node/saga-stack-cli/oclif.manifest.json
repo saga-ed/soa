@@ -322,7 +322,9 @@
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> --reuse -- --debug",
         "<%= config.bin %> <%= command.id %> --fake-media",
-        "<%= config.bin %> <%= command.id %> --refresh-snapshot"
+        "<%= config.bin %> <%= command.id %> --refresh-snapshot",
+        "<%= config.bin %> <%= command.id %> --tunnel --bootstrap",
+        "<%= config.bin %> <%= command.id %> --tunnel --bootstrap --rebuild --student-login 1"
       ],
       "flags": {
         "porcelain": {
@@ -474,6 +476,18 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "bootstrap": {
+          "description": "with --tunnel: automate docs/tunnel.md's two-phase bridge before opening the room. Phase 1 rebuilds usable state LOCALLY (down → up --seed full --reset → journey prerequisite → settle → snapshot store tunnel-connect); phase 2 relaunches in tunnel mode and restores it (down → up --tunnel --reset (hard stop if a foreign process survives) → snapshot restore → persona preflight). SKIPS phase 1 when a fresh (<7d) tunnel-connect fixture exists (--rebuild forces it). Progress is ledgered in <stateDir>/bootstrap.json, so a failed run RESUMES at the failed step; implies --reuse for the final session. Slot-0 only.",
+          "name": "bootstrap",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "rebuild": {
+          "description": "with --bootstrap: run the full phase-1 local rebuild even when a fresh (<7d) tunnel-connect fixture exists (the fast path would otherwise skip it).",
+          "name": "rebuild",
+          "allowNo": false,
+          "type": "boolean"
         }
       },
       "hasDynamicHelp": false,
@@ -2936,6 +2950,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "type": "option"
+        },
+        "forbid-foreign": {
+          "description": "hard-error (instead of warn) when the bring-up ADOPTS an already-up process this CLI did not launch (no pidfile — env unverifiable).",
+          "hidden": true,
+          "name": "forbid-foreign",
+          "allowNo": false,
+          "type": "boolean"
         },
         "workspace": {
           "description": "NATIVE (Phase 2): a switchboard workspace.json selecting per-service run mode (local-source/sandbox) — the general case of --only/--sandbox.",

@@ -145,6 +145,16 @@ export default class StackUp extends BaseCommand {
       description:
         'NATIVE (Phase 2): point a local service set at a cloud sandbox — the sandbox_env dep-repoint overlay (iam URL flip + preview-routing header). Accompanies --only/--with.',
     }),
+    'forbid-foreign': Flags.boolean({
+      // INTERNAL (soa#329 `develop connect --bootstrap` phase 2): hidden — a human
+      // running `stack up` gets the existing WARNING; only the bootstrap sequencer,
+      // whose phase-2 correctness DEPENDS on every service relaunching with the
+      // tunnel env, escalates it to a hard abort.
+      hidden: true,
+      default: false,
+      description:
+        'hard-error (instead of warn) when the bring-up ADOPTS an already-up process this CLI did not launch (no pidfile — env unverifiable).',
+    }),
     workspace: Flags.string({
       description:
         'NATIVE (Phase 2): a switchboard workspace.json selecting per-service run mode (local-source/sandbox) — the general case of --only/--sandbox.',
@@ -512,7 +522,8 @@ export default class StackUp extends BaseCommand {
       );
     }
 
-    const api = makeStackApi(manifest, this.buildRuntime(flags, profile, overlays));
+    const runtime = this.buildRuntime(flags, profile, overlays);
+    const api = makeStackApi(manifest, runtime);
 
     // 1. native bring-up (mesh + topo-wave service launch + M9 auto-pull + AV).
     const up = await api.up(services);
@@ -538,6 +549,18 @@ export default class StackUp extends BaseCommand {
       this.logUpFailure(up);
       this.exit(1);
       return;
+    }
+
+    // soa#329 `--forbid-foreign` (develop connect --bootstrap phase 2): adopting a
+    // FOREIGN process (already up, no pidfile — env unverifiable) silently voids the
+    // down→relaunch guarantee the two-phase tunnel bridge depends on: the survivor
+    // still carries its OLD (e.g. non-tunnel) env. Escalate the report-time warning
+    // below to a hard abort HERE — before reset/seed/tunnel touch anything else.
+    if (flags['forbid-foreign']) {
+      const foreignIds = up.launched.filter((r) => r.adoptedForeign).map((r) => r.id as ServiceId);
+      if (foreignIds.length > 0) {
+        this.error(forbidForeignMessage(foreignIds, runtime.launchContext.ports));
+      }
     }
 
     // 2. (optional) reset — NATIVE (M8 R4). Truncates the closure's DBs to an empty
@@ -779,6 +802,32 @@ export function describeUpFailure(up: UpFailureView): string[] {
   ];
 }
 
+/**
+ * PURE builder for the `--forbid-foreign` abort (soa#329 bootstrap phase 2). A
+ * foreign adoptee by definition has NO pid on record (no pidfile is what makes it
+ * foreign), so the actionable identification is its LISTEN port: each line carries
+ * the exact `lsof` that reveals the pid to kill. Remediation = stop them and
+ * re-run (the bootstrap ledger resumes at the aborted step).
+ */
+export function forbidForeignMessage(
+  ids: ServiceId[],
+  ports: Partial<Record<ServiceId, number>>,
+): string {
+  const rows = ids.map((id) => {
+    const port = ports[id];
+    return port !== undefined
+      ? `  ✗ ${id} (port ${port}) — find the pid:  lsof -nP -iTCP:${port} -sTCP:LISTEN`
+      : `  ✗ ${id} — no resolved port; find it via its health URL's port`;
+  });
+  return [
+    `--forbid-foreign: adopted ${ids.length} process(es) NOT launched by this CLI (already up, no pidfile — env unverifiable):`,
+    ...rows,
+    'They survived `stack down` (down reaps only the pids this CLI recorded), so they still run',
+    'with their OLD launch env — this bring-up REQUIRES every service to relaunch (tunnel bridge).',
+    'Kill the listed listeners, then re-run — the bootstrap ledger resumes at this step.',
+  ].join('\n');
+}
+
 // Local flag shapes (subset of the parsed StackUp flags each path reads).
 type DryRunFlags = WorkspaceFlags & {
   porcelain: boolean;
@@ -795,6 +844,8 @@ type NativeFlags = DryRunFlags & {
   'skip-prep': boolean;
   pull: boolean;
   'no-auto-pull': boolean;
+  /** soa#329 bootstrap phase 2: hard-error on a foreign (pidfile-less) adoption. */
+  'forbid-foreign'?: boolean;
 };
 /**
  * BLOCKER-1 launch-set narrowing for the sandbox/workspace cases (Phase 2). Absent

@@ -177,6 +177,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       // programId echo). Tokenized so a slot > 0 ads-adm dials ITS slot's
       // programs-api rather than slot 0's.
       PROGRAMS_API_CLIENT_BASEURL: 'http://localhost:3006',
+      // Also NOT an up.sh literal (same precedent): opens the per-request
+      // rosterMode override gate for e2e probes (saga-dash#446/#570). Static
+      // 'true' at every slot; ADM_ROSTER_MODE stays unset so the default mode
+      // is still occurrence — only the override gate opens.
+      ADM_ALLOW_ROSTER_MODE_OVERRIDE: 'true',
       IAM_API_CLIENT_BASEURL: 'http://localhost:3010/trpc',
       IAM_API_URL: 'http://localhost:3010',
       JWT_ISSUER: 'https://iam.wootdev.com',
@@ -186,6 +191,10 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       CORS_ORIGIN: 'http://localhost:8900',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
     });
+  });
+
+  it('ads-adm-api: the override gate is adoption-guarded (a stale gate-less process is refused, not adopted)', () => {
+    expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADM_ALLOW_ROSTER_MODE_OVERRIDE');
   });
 
   it('saga-dash', () => {

@@ -213,6 +213,65 @@ describe('restorePlan — SNAPSHOT-AHEAD guard (HARD, not bypassable)', () => {
   });
 });
 
+describe('restorePlan — DB-AHEAD guard (HARD, not bypassable)', () => {
+  // buildSnapshot captures `iam_local_mig_001`; the checkout knows one newer.
+  const REV = 'iam_local_mig_001';
+  const NEWER = 'iam_local_mig_002';
+  const snap = buildSnapshot(['iam_local']);
+  const ordered: LocalMigrations = { iam_local: [REV, NEWER] };
+
+  it('refuses when the live head is AHEAD of the snapshot rev', () => {
+    const plan = restorePlan(snap, manifest, ordered, {
+      liveSchemaRevs: { iam_local: NEWER },
+    });
+    expect(plan.ok).toBe(false);
+    const g = plan.guardFailures.find((f) => f.kind === 'db-ahead');
+    expect(g?.db).toBe('iam_local');
+    expect(g?.bypassableByForce).toBe(false);
+    expect(g?.message).toMatch(/AHEAD/);
+    expect(g?.message).toMatch(/rewind _prisma_migrations/);
+  });
+
+  it('is HARD: --force does NOT bypass a migrated-ahead DB', () => {
+    const plan = restorePlan(snap, manifest, ordered, {
+      liveSchemaRevs: { iam_local: NEWER },
+      force: true,
+    });
+    expect(plan.ok).toBe(false);
+  });
+
+  it('refuses when the live head is unknown to the local checkout', () => {
+    const plan = restorePlan(snap, manifest, ordered, {
+      liveSchemaRevs: { iam_local: 'not_a_known_migration' },
+    });
+    expect(plan.ok).toBe(false);
+    expect(plan.guardFailures.some((f) => f.kind === 'db-ahead')).toBe(true);
+  });
+
+  it('allows an in-sync DB (live head equals the snapshot rev)', () => {
+    const plan = restorePlan(snap, manifest, ordered, {
+      liveSchemaRevs: { iam_local: REV },
+    });
+    expect(plan.ok).toBe(true);
+    expect(plan.guardFailures).toHaveLength(0);
+  });
+
+  it('allows a live head strictly BEHIND the snapshot rev (dump carries the newer schema)', () => {
+    const newerSnap = buildSnapshot(['iam_local'], { revFor: () => NEWER });
+    const plan = restorePlan(newerSnap, manifest, ordered, {
+      liveSchemaRevs: { iam_local: REV },
+    });
+    expect(plan.ok).toBe(true);
+  });
+
+  it('skips the guard when no live head was observed (absent or null)', () => {
+    expect(restorePlan(snap, manifest, ordered, {}).ok).toBe(true);
+    expect(
+      restorePlan(snap, manifest, ordered, { liveSchemaRevs: { iam_local: null } }).ok,
+    ).toBe(true);
+  });
+});
+
 describe('restorePlan — restore-as-owner + fully-restored services', () => {
   const full = buildSnapshot([...PG_APP_DBS, 'connectv3']);
   const known = knownMigrations(full);

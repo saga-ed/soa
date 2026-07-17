@@ -172,6 +172,11 @@ export default class DevelopConnect extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: the tutoring room brings up + DRIVES the slot's sub-stack — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { argv, flags } = await this.parse(DevelopConnect);
     const passthrough = (argv as string[]).filter((a) => a !== CONNECT_FLOW);

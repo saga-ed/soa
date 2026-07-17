@@ -242,6 +242,38 @@ describe('stack snapshot restore — restore-as-owner + guards', () => {
     await expect(SnapshotRestore.run(['demo', '--force'], config)).rejects.toThrow(/ahead|stack up --pull/i);
   });
 
+  it('DB-AHEAD guard is HARD: a live head past the snapshot rev refuses, even with --force', async () => {
+    await store(); // manifest captured at CANNED_REV
+    // The live DBs answer with a NEWER head; the checkout knows both, in order.
+    const LIVE_REV = 'mig_002';
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getSnapshotIO: () => SnapshotIO },
+      'getSnapshotIO',
+    ).mockReturnValue(fakeSnapshotIO({ ioCalls, schemaRev: LIVE_REV }));
+    vi.spyOn(
+      SnapshotRestore.prototype as unknown as {
+        localMigrationsFor: (s: SnapshotManifest) => LocalMigrations;
+      },
+      'localMigrationsFor',
+    ).mockImplementation((s: SnapshotManifest) => {
+      const m: Record<string, readonly string[]> = {};
+      for (const d of s.databases) m[d.db] = [CANNED_REV, LIVE_REV];
+      return m as LocalMigrations;
+    });
+    await expect(SnapshotRestore.run(['demo', '--force'], config)).rejects.toThrow(/AHEAD/);
+    // Guard fires BEFORE any dump is applied — nothing restored.
+    expect(dbsCalled('pgRestore')).toHaveLength(0);
+    expect(ioCalls.some((c) => c.op === 'redisFlushdb')).toBe(false);
+  });
+
+  it('DB-AHEAD guard probes only migrate-deploy pg DBs (skips db-push + mongo)', async () => {
+    await store();
+    await SnapshotRestore.run(['demo'], config);
+    expect(dbsCalled('readSchemaRev')).toContain('iam_local');
+    expect(dbsCalled('readSchemaRev')).not.toContain('iam_pii_local');
+    expect(dbsCalled('readSchemaRev')).not.toContain('connectv3');
+  });
+
   it('errors clearly when the snapshot does not exist', async () => {
     await expect(SnapshotRestore.run(['nope'], config)).rejects.toThrow(/no valid snapshot manifest/);
   });

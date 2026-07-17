@@ -128,7 +128,22 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // falls back to iam-api's saga.org default and mints a token coach-api rejects
     // (invalid-issuer → 401) — so a drifted/adopted iam is worse than none. Guard
     // adoption on it (soa#305).
-    adoptEnv: ['JWT_ISSUER'],
+    //
+    // soa#336: JWT_ISSUER alone can't tell a tunnel leftover from a plain run —
+    // ${IAM_ISSUER} is lane-independent, so both modes stamp the SAME fingerprint
+    // and a tunnel-env'd iam gets silently adopted by a plain `up`/`develop`.
+    // What tunnelOverlay() actually rewrites on iam-api is the browser-plane trio
+    // below, so fingerprint those too:
+    //  - CORS_ORIGIN / MAIL_FRONTEND_BASE_URL: in the plain launch env AND
+    //    value-flipped under --tunnel ⇒ the fingerprints differ in both directions.
+    //  - AUTH_SESSIONCOOKIEDOMAIN: tunnel-ONLY (no plain-env entry). The
+    //    fingerprint OMITS absent keys, so a plain stamp lacks it while a tunnel
+    //    stamp carries it — present-vs-omitted still mismatches BOTH ways, which
+    //    is exactly the refusal we want (the saga-dash DASH_CONFIG_LOCAL_JSON
+    //    guard relies on the same asymmetry).
+    // Same one-time "stop and re-run" cost as saga-dash for processes stamped by
+    // a pre-#336 CLI (their recorded contract is the JWT_ISSUER-only shape).
+    adoptEnv: ['JWT_ISSUER', 'CORS_ORIGIN', 'MAIL_FRONTEND_BASE_URL', 'AUTH_SESSIONCOOKIEDOMAIN'],
   },
   'sis-api': {
     id: 'sis-api',
@@ -319,6 +334,14 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // prod literal, which 401'd once iam began minting ${IAM_ISSUER} (58d58e4).
         JWT_ISSUER: '${IAM_ISSUER}',
         SERVICE_TOKEN_SERVICESLUG: 'ads-adm-api',
+        // NOT an up.sh literal — a deliberate post-up.sh addition, like
+        // PROGRAMS_API_CLIENT_BASEURL above (soa#320 precedent). Opens ads-adm's
+        // per-request rosterMode override gate so e2e probes (saga-dash#446 /
+        // saga-dash#570 period-path) can hard-assert period-roster derivation in
+        // CI. The DEFAULT mode is untouched (ADM_ROSTER_MODE deliberately not
+        // set — occurrence stays the default); prod is masked by design since
+        // prod is never ss-launched and its deployment omits this flag.
+        ADM_ALLOW_ROSTER_MODE_OVERRIDE: 'true',
         ADS_ADM_DATABASE_URL: '${ADS_ADM_DB_URL}',
         DATABASE_URL: '${ADS_ADM_DB_URL}',
         CORS_ORIGIN: '${DASH_URL}',
@@ -330,6 +353,13 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'ads-adm',
     isFrontend: false,
     optional: false,
+    // Adoption guard (soa#305 pattern): a process launched before this flag
+    // existed carries no gate, and the launcher would happily adopt it — the
+    // #446/#570 period-path probe then hard-fails with a confusing cause
+    // ("ignoring client-supplied rosterMode"). Fingerprinting the key refuses
+    // the stale process instead. One-time "stop and re-run" cost for
+    // pre-existing processes, same as iam-api/saga-dash paid.
+    adoptEnv: ['ADM_ALLOW_ROSTER_MODE_OVERRIDE'],
   },
   'saga-dash': {
     id: 'saga-dash',
@@ -481,6 +511,24 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'connect',
     isFrontend: true,
     optional: false,
+    // soa#336 (the saga-dash soa#328 idiom): connect-web's VITE_* deps are
+    // BROWSER-plane, resolved by the vite dev server from its launch env at
+    // start — an adopted dev server keeps serving whatever hosts it started
+    // with, and nothing written to disk afterward can win (launch env >
+    // dotfiles). In the tunnel-then-plain incident that meant a leftover
+    // `--tunnel` frontend rode into a plain run still dialing the dead
+    // https://*.vms.wootdev.com hosts. Fingerprint the tunnel-rewritten dep
+    // URLs (all five are in the plain launch env above AND value-flipped by
+    // tunnelOverlay(), so tunnel-vs-plain mismatches in both directions) so a
+    // mode-drifted connect-web is REFUSED loudly and relaunched with the
+    // current mode's env — refuse-or-relaunch, never adopt.
+    adoptEnv: [
+      'VITE_CONNECTV3_API_URL',
+      'VITE_IAM_API_URL',
+      'VITE_RTSM_BOOTSTRAP_URL',
+      'VITE_JANUS_LOGIN_HOST',
+      'VITE_DASHBOARD_URL',
+    ],
   },
   'rtsm-api': {
     id: 'rtsm-api',
@@ -583,6 +631,31 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'coach-web',
     isFrontend: true,
     optional: false,
+    // soa#336 (the saga-dash soa#328 idiom): coach-web's PUBLIC_* vars are
+    // SvelteKit `$env/static/public` — INLINED into the bundle at vite-dev
+    // start with launch env > .env.local > .env precedence (coach-web-env.ts,
+    // soa#298). An adopted vite therefore serves the hosts baked in at ITS
+    // start forever; no post-hoc .env.local write can win. That is exactly the
+    // 2026-07-16 slot-0 incident: a plain `develop coach` adopted a leftover
+    // `--tunnel` coach-web and the browser whoami dialed the dead tunnel iam →
+    // the misleading soa#300 "503 — Unable to reach the sign-in service".
+    // Fingerprint the four browser-plane keys tunnelOverlay() rewrites:
+    //  - PUBLIC_COACH_API_URL / PUBLIC_IAM_API_URL (boot-critical): in the
+    //    plain launch env above AND value-flipped under --tunnel ⇒ the
+    //    fingerprints differ in both directions.
+    //  - PUBLIC_LOGIN_URL / PUBLIC_DASHBOARD_URL: tunnel-ONLY (no plain-env
+    //    entry — plain runs let them fall through to coach-web's dotfiles).
+    //    The fingerprint OMITS absent keys, so plain stamps lack them while
+    //    tunnel stamps carry them — present-vs-omitted still mismatches BOTH
+    //    ways, the same asymmetry saga-dash's guard relies on.
+    // A mode-drifted coach-web is REFUSED loudly and relaunched with the
+    // current mode's env — refuse-or-relaunch, never adopt.
+    adoptEnv: [
+      'PUBLIC_COACH_API_URL',
+      'PUBLIC_IAM_API_URL',
+      'PUBLIC_LOGIN_URL',
+      'PUBLIC_DASHBOARD_URL',
+    ],
   },
   'transcripts-api': {
     id: 'transcripts-api',

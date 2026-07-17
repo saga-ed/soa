@@ -115,6 +115,11 @@ export default class StackSeed extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: seeding rewrites the slot's data — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { args, flags } = await this.parse(StackSeed);
     const profile = args.profile as SeedProfile;

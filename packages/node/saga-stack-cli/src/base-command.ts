@@ -39,13 +39,14 @@ import { Command } from '@oclif/core';
 import type { Interfaces } from '@oclif/core';
 import { dirname, join } from 'node:path';
 import { SET_UNSUPPORTED_COMMAND_MESSAGE, SLOT_UNSUPPORTED_COMMAND_MESSAGE, baseFlags } from './shared-flags.js';
-import { applySetToFlags, resolveSet } from './core/set/index.js';
-import type { SetInjectableFlags, WorktreeSet } from './core/set/index.js';
+import { SET_REPO_KEYS, applySetToFlags, resolveSet } from './core/set/index.js';
+import type { SetInjectableFlags, SetRepoKey, WorktreeSet } from './core/set/index.js';
 import { checkWorktreeSet, makeCheckpointStore, makeSlotActiveProbe } from './runtime/index.js';
 import { stampMatches, writeStamp } from './runtime/prep-stamp.js';
 import { repairStaleDeps } from './runtime/prep-repair.js';
 import type { CheckpointStore, SlotActiveProbe } from './runtime/index.js';
 import type { PullMode } from './core/auto-pull.js';
+import { deriveInstance } from './core/derive-instance.js';
 import type { InstanceProfile } from './core/derive-instance.js';
 import type { RecordMode, ScriptPlan } from './core/flag-map.js';
 import { defaultLaunchContext } from './core/launch-plan.js';
@@ -56,6 +57,8 @@ import { COOKIE_JAR_FILE, nativeLogin } from './runtime/login.js';
 import type { NativeLoginResult } from './runtime/login.js';
 import {
   buildRepoEnv,
+  makeClaimReader,
+  makeClaimWriter,
   makeRealConfirm,
   makeRealBootstrapLedgerIO,
   makeRealCookiePoster,
@@ -95,9 +98,12 @@ import {
   scriptCwd,
   stopServices,
   REPO_DEFAULT_DIR,
+  REPO_ENV_VAR,
 } from './runtime/index.js';
 import type {
   BootstrapLedgerIO,
+  ClaimReader,
+  ClaimWriter,
   ConfirmSeam,
   CookiePoster,
   CoachWebFs,
@@ -212,6 +218,32 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * Opt-in: does this command DRIVE a slot's stack (⇒ write an advisory claim
+   * on entry)? Default `false` — read-only commands never touch `claim.json`.
+   * The mutating lifecycle set overrides this to `true`; the claim hook in
+   * `parse` runs AFTER set-injection + the slot guard and is suppressed by
+   * `--dry-run` (nothing mutated ⇒ nothing claimed). `positionals` are the
+   * PARSED positional tokens (never flag values), for verb-dispatched commands
+   * (`overlay`) whose mutating-ness depends on the verb.
+   */
+  protected claimsSlot(_positionals?: readonly string[]): boolean {
+    return false;
+  }
+
+  /**
+   * Per-process claim latch: `cold-start`/`bootstrap` re-invoke `StackUp.run()`
+   * (and `StackOverlay.run()`) IN-PROCESS, and the inner command's parse would
+   * overwrite the claim with a synthetic argv the user never typed. One process
+   * is one user command, so only the FIRST claim in a process wins.
+   */
+  private static slotClaimWritten = false;
+
+  /** Test seam — in-process command runs share one process (and this latch). */
+  static resetSlotClaimLatchForTests(): void {
+    BaseCommand.slotClaimWritten = false;
+  }
+
+  /**
    * The worktree-set store seam (M13-A). Production reads
    * `$SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json`.
    */
@@ -226,6 +258,23 @@ export abstract class BaseCommand extends Command {
    */
   protected getSlotActiveProbe(): SlotActiveProbe {
     return makeSlotActiveProbe();
+  }
+
+  /**
+   * The advisory slot-claim writer (slot claims — "who last drove this slot").
+   * Production writes `<stateDir>/claim.json`; it NEVER throws (every error
+   * folds to a silent no-op — advisory state must not break a real run).
+   */
+  protected getClaimWriter(): ClaimWriter {
+    return makeClaimWriter();
+  }
+
+  /**
+   * The advisory slot-claim reader (`stack slots`). Staleness is derived at
+   * READ time from the recorded pid's liveness — no recorded active state.
+   */
+  protected getClaimReader(): ClaimReader {
+    return makeClaimReader();
   }
 
   /**
@@ -301,6 +350,7 @@ export abstract class BaseCommand extends Command {
     // (there are seven independent builders), so rewriting it here threads the
     // set through all of them. Runs BEFORE the slot guard so a set's slot is
     // guarded exactly like a typed `--slot`.
+    let injectedSet: string | undefined; // captured for the claim hook below
     const setName = (result.flags as { set?: unknown }).set;
     if (typeof setName === 'string') {
       if (!this.setAware()) this.error(SET_UNSUPPORTED_COMMAND_MESSAGE);
@@ -333,11 +383,45 @@ export abstract class BaseCommand extends Command {
       }
 
       applySetToFlags(result.flags as SetInjectableFlags, typed, set);
+      injectedSet = set.name;
     }
 
     const slot = (result.flags as { slot?: unknown }).slot;
     if (typeof slot === 'number' && slot > 0 && !this.slotAware()) {
       this.error(SLOT_UNSUPPORTED_COMMAND_MESSAGE);
+    }
+
+    // ── Slot claims (advisory): a DRIVING command (`claimsSlot()` ⇒ true)
+    // records "who last drove this slot" to `<stateDir>/claim.json` on entry.
+    // AFTER the set-injection (the set's slot/pins are what get claimed) and
+    // the slot guard (a rejected slot never claims); `--dry-run` mutates
+    // nothing, so it claims nothing. The writer folds every error to a silent
+    // no-op — advisory state must never break a real run. The per-process
+    // latch keeps nested in-process re-invocations (cold-start/bootstrap →
+    // StackUp.run) from overwriting the user's real command line.
+    if (
+      !BaseCommand.slotClaimWritten &&
+      this.claimsSlot((result.argv ?? []) as string[]) &&
+      (result.flags as { 'dry-run'?: unknown })['dry-run'] !== true
+    ) {
+      BaseCommand.slotClaimWritten = true;
+      const claimSlot = typeof slot === 'number' ? slot : 0;
+      const stateDir =
+        ((result.flags as { 'state-dir'?: unknown })['state-dir'] as string | undefined) ??
+        deriveInstance({ slot: claimSlot }).stateDir;
+      // The same flag-side resolution every command uses (kebab pins → manifest
+      // keys → roots), keyed back by the kebab `SetRepoKey` — the claim's repo
+      // vocabulary. The writer skips roots that don't exist on disk.
+      const ctx = repoContextFromFlags(result.flags as Record<string, unknown>);
+      const repoRoots: Partial<Record<SetRepoKey, string>> = {};
+      for (const repo of SET_REPO_KEYS) repoRoots[repo] = resolveRepoRoot(REPO_ENV_VAR[repo], ctx);
+      await this.getClaimWriter().write({
+        slot: claimSlot,
+        stateDir,
+        command: [this.config.bin, this.id, ...this.argv].join(' '),
+        set: injectedSet,
+        repoRoots,
+      });
     }
     return result;
   }

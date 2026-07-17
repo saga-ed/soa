@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultLaunchContext, resolveLaunchEnv } from '../launch-plan.js';
 import type { LaunchContextInputs } from '../launch-plan.js';
+import { getService } from '../manifest/index.js';
 import type { RepoKey, ServiceId } from '../manifest/index.js';
 
 const REPO_ROOTS: Record<RepoKey, string> = {
@@ -190,4 +191,35 @@ describe('sandbox + tunnel compose (tunnel wins last, matching up.sh splat order
     // … and tunnel_env CORS (splatted after, last-wins on the shared key).
     expect(e.CORS_ORIGIN).toContain('https://dash.m1.vms.wootdev.com');
   });
+});
+
+describe('soa#336: tunnel-rewritten keys are covered by the adoption contract', () => {
+  // The guard's fingerprint (`ServiceDef.adoptEnv`) must SEE every key
+  // tunnelOverlay() rewrites on these services — any uncovered key is a lane
+  // drift a tunnel leftover could carry through a plain run's adoption check
+  // unnoticed (finding A: iam's JWT_ISSUER-only fingerprint was byte-identical
+  // across modes, so a tunnel-env'd iam was silently adopted). Computes the
+  // rewrite set as the plain-vs-tunnel env DIFF against the REAL manifest, so
+  // a future overlay key can't silently escape the guard.
+  //
+  // __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS is exempt: it's the vite dev
+  // server's host allow-list (server-plane, not inlined into the browser
+  // bundle), and any mode switch that matters flips a guarded key with it.
+  const EXEMPT = new Set(['__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS']);
+  const TD = 'm1.vms.wootdev.com';
+
+  for (const id of ['iam-api', 'coach-web', 'connect-web'] as ServiceId[]) {
+    it(`${id}: adoptEnv ⊇ its tunnelOverlay() rewrite set`, () => {
+      const plain = envFor(id, {});
+      const tunneled = envFor(id, { tunnel: { domain: TD } });
+      const rewritten = Object.keys(tunneled).filter(
+        (k) => !EXEMPT.has(k) && tunneled[k] !== plain[k],
+      );
+      expect(rewritten.length).toBeGreaterThan(0); // the overlay really touches this service
+      const guard = getService(id).adoptEnv ?? [];
+      for (const k of rewritten) {
+        expect(guard, `${k} is tunnel-rewritten on ${id} but not adoption-guarded`).toContain(k);
+      }
+    });
+  }
 });

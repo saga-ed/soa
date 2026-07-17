@@ -64,6 +64,11 @@ export default class StackDown extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: a teardown DRIVES the slot — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackDown);
 

@@ -55,6 +55,11 @@ export default class StackReset extends BaseCommand {
     return true;
   }
 
+  /** Slot claims: a DB wipe DRIVES the slot — record the advisory claim on entry. */
+  protected claimsSlot(): boolean {
+    return true;
+  }
+
   async run(): Promise<void> {
     const { flags } = await this.parse(StackReset);
     const withPlayback = effectiveWithPlayback(flags.with);

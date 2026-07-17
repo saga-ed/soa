@@ -61,6 +61,7 @@ import type { ScriptPlan } from '../../core/flag-map.js';
 import { makeStackApi } from '../../stack-api.js';
 import { bootstrapLedgerPath, makePersonaPreflight, resolveVendorScript } from '../../runtime/index.js';
 import {
+  bakePrerequisiteCheckpoints,
   buildStackContext,
   discoverFlowManifest,
   executeResolvedFlow,
@@ -373,45 +374,29 @@ export default class DevelopConnect extends BaseCommand {
     // Deterministic fixtureIds ⇒ the bake OVERWRITES any stale checkpoint; the main run
     // below then restores the just-made journey@schedule (prereq-from-snapshot path).
     if (flags['refresh-snapshot'] && toRun.prerequisite !== undefined) {
-      const prereq = toRun.prerequisite;
-      // M14 §2.3 (advisory): stamp the SPA checkout HEAD into the bake so a later
-      // restore can WARN on drift. '' sha (not a git checkout) ⇒ omitted.
-      let spaHead: { sha: string; dirty: boolean } | undefined;
-      const spaRepoRoot = appCwd.slice(0, appCwd.length - resolved.spa.appDir.length - 1);
-      const git = this.getGitRunner();
-      const sha = await git.headSha(spaRepoRoot);
-      if (sha !== '') spaHead = { sha, dirty: (await git.statusPorcelain(spaRepoRoot)).trim() !== '' };
-
-      this.log(
-        `==> refresh-snapshot: baking ${prereq.flow.name}@${prereq.stages.at(-1)?.id} checkpoints (headless replay, --snapshot-stages)…`,
+      await bakePrerequisiteCheckpoints(
+        toRun.prerequisite,
+        resolved.spa.appDir,
+        // The bake is a headless replay against THIS slot's stack, so it needs the
+        // same slot-offset ports as the main run below — otherwise its Playwright
+        // children mint against the base iam and bake a slot-0-shaped checkpoint.
+        // The settle barrier (soa#327) is REQUIRED by the shared helper: the fresh
+        // bake must wait out the roster-sync pipeline before each per-stage dump —
+        // this bake path exists precisely to produce the checkpoint the tunnel
+        // session will trust.
+        {
+          api,
+          runner: seams.runner,
+          appCwd,
+          now,
+          log: (l) => this.log(l),
+          slot: profile.slot,
+          ports: runtime.launchContext.ports,
+          checkpoints,
+          settleBarrier: this.getSettleBarrier(profile.slot, (l) => this.log(l)),
+        },
+        { git: this.getGitRunner(), log: (l) => this.log(l), fail: (msg: string): never => this.error(msg) },
       );
-      try {
-        const bakeCode = await executeResolvedFlow(
-          prereq,
-          // The bake is a headless replay against THIS slot's stack, so it needs the
-          // same slot-offset ports as the main run below — otherwise its Playwright
-          // children mint against the base iam and bake a slot-0-shaped checkpoint.
-          {
-            api,
-            runner: seams.runner,
-            appCwd,
-            now,
-            log: (l) => this.log(l),
-            slot: profile.slot,
-            ports: runtime.launchContext.ports,
-            checkpoints,
-            // soa#327: the fresh bake must wait out the roster-sync pipeline
-            // before each per-stage dump — this bake path exists precisely to
-            // produce the checkpoint the tunnel session will trust.
-            settleBarrier: this.getSettleBarrier(profile.slot, (l) => this.log(l)),
-          },
-          { lane: 'stack', skipReset: false, passthrough: [], snapshotStages: true, prereqFromSnapshot: false, spaHead },
-        );
-        if (bakeCode !== 0) this.error(`--refresh-snapshot: prerequisite bake failed (exit ${bakeCode}).`);
-      } catch (err) {
-        if (err instanceof FlowExecError) this.error(`--refresh-snapshot: ${err.message}`);
-        throw err;
-      }
     }
 
     try {

@@ -79,6 +79,24 @@
       ]
     },
     {
+      "name": "connect-session-demo",
+      "description": "STANDUP DEMO of per-student SESSION self-report telemetry (qboard#302 emitters + connectv3-api v3 ingress + student-data-system#251 v3 single-subject consumer). A tutor joins, then Alex's 3 pod-A students (ann.lee/cara.diaz/gina.park) JOIN staggered 15s apart, each in its OWN closeable Connect window (FAKE media). Each student's SESSION measured-time counter climbs independently on the admin dash; closing one student's window FREEZES only that counter (its self-report pings stop) while the others keep climbing. Held open via DEMO_HOLD for a presenter. Needs the connectv3 build with VITE_CONNECTV3_HEARTBEAT_INTERVAL_MS small for a fast cadence, and the ads-adm SLS-grouping fix (student-data-system) so the rows group UNDER their session, not Unscheduled.",
+      "lanes": ["stack"],
+      "progressive": false,
+      "foreground": true,
+      "av": true,
+      "prerequisite": { "flow": "journey", "throughStage": "attendance" },
+      "stages": [
+        {
+          "id": "connect-session-demo",
+          "project": "connect-session-demo",
+          "spec": "interactive/connect-session-demo.e2e.test.ts",
+          "requiredSystems": ["connect-web", "connect-api", "rtsm-api", "sessions-api", "ads-adm-api", "iam-api", "programs-api"],
+          "tags": ["@interactive"]
+        }
+      ]
+    },
+    {
       "name": "connect-session",
       "description": "Live interactive Connect tutoring session (1 tutor + 2 students). Builds the journey end-state through 'schedule' first, then drives a real Connect room.",
       "lanes": ["stack"],

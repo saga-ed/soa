@@ -63,6 +63,13 @@ export interface ScriptInvocation {
    * Ignored together with `stdinFile` (install never redirects stdin).
    */
   detectUnauthorized?: boolean;
+  /**
+   * Optional caller-owned abort handle: the real runner passes it straight to
+   * `spawn`, so aborting kills the child (SIGTERM) instead of orphaning it when
+   * the CLI exits first (the `develop session-adm` admin-browser lifecycle). A
+   * fake runner just records it — a test can assert `signal.aborted` afterwards.
+   */
+  signal?: AbortSignal;
 }
 
 /** The result of running a script: the process exit code (+ FLIP 4 auth signal). */
@@ -107,6 +114,7 @@ export function makeRealRunner(): Runner {
             cwd: spec.cwd,
             env: { ...process.env, ...spec.env },
             stdio: ['inherit', 'pipe', 'pipe'],
+            signal: spec.signal,
           });
           let buf = '';
           const tee = (out: NodeJS.WriteStream) => (d: Buffer): void => {
@@ -136,6 +144,7 @@ export function makeRealRunner(): Runner {
           cwd: spec.cwd,
           env: { ...process.env, ...spec.env },
           stdio,
+          signal: spec.signal,
         });
         // Node does NOT auto-close a raw fd passed in the stdio array — close it
         // once the child has been wired up (spawn has already dup'd it).

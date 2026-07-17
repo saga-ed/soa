@@ -123,6 +123,7 @@ the closure, reset + seed it, then drop you into a running app to drive by hand.
 | Command | What it does |
 | --- | --- |
 | **`connect`** | Open a live interactive Connect session (1 tutor + 2 students). Migrated from `e2e connect` (the old id still works with a deprecation warning). |
+| **`session-adm`** | The live SESSION-attendance ADM demo: 3 staggered Connect students self-report telemetry dosage onto an auto-opened admin attendance dash. |
 
 → [docs/develop.md](./docs/develop.md)
 

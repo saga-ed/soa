@@ -1073,7 +1073,7 @@ export abstract class BaseCommand extends Command {
    * propagated (unless `propagateExit:false`, e.g. the best-effort browser step).
    */
   protected async runVendor(
-    spec: { cwd: string; command: string; args: string[]; env: Record<string, string> },
+    spec: { cwd: string; command: string; args: string[]; env: Record<string, string>; signal?: AbortSignal },
     flags: WorkspaceFlags,
     opts: { propagateExit?: boolean } = {},
   ): Promise<number> {
@@ -1085,6 +1085,7 @@ export abstract class BaseCommand extends Command {
       args: spec.args,
       env,
       stdio: 'inherit',
+      signal: spec.signal,
     });
     if (opts.propagateExit !== false && code !== 0) {
       this.exit(code);
@@ -1159,6 +1160,13 @@ export abstract class BaseCommand extends Command {
        * is absent (a bare `stack login` with no run-resolved URL).
        */
       spa?: { repoEnvVar: ManifestRepoKey; appDir: string; port?: number };
+      /**
+       * Optional caller-owned abort handle (develop session-adm's admin-browser
+       * lifecycle): aborting kills the vendored browser child instead of leaving
+       * it orphaned when the command exits first. An abort-triggered spawn
+       * rejection is the CALLER's own close request — swallowed, never warned.
+       */
+      signal?: AbortSignal;
     },
   ): Promise<void> {
     const script = resolveVendorScript('browser-login.mjs');
@@ -1196,10 +1204,15 @@ export abstract class BaseCommand extends Command {
       SAGA_DASH_DASH: spaAppDir,
     };
     try {
-      await this.runVendor({ cwd: spaAppDir, command: 'node', args: [script], env }, flags, {
-        propagateExit: false,
-      });
+      await this.runVendor(
+        { cwd: spaAppDir, command: 'node', args: [script], env, signal: ctx.signal },
+        flags,
+        { propagateExit: false },
+      );
     } catch (err) {
+      // The caller aborted (killed the browser child on its own exit path) —
+      // the AbortError rejection is the requested close, not a failure.
+      if (ctx.signal?.aborted) return;
       // spawn-level failure (node missing, ENOENT race, …) — warn, never redden.
       this.warn(`headful browser skipped — ${err instanceof Error ? err.message : String(err)}`);
     }

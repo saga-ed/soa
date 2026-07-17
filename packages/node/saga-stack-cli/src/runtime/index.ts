@@ -54,3 +54,4 @@ export * from './checkpoint-store.js';
 export * from './trace-preserve.js';
 export * from './foreign-procs.js';
 export * from './claim.js';
+export * from './cli-version.js';

@@ -1,88 +1,93 @@
 {
-  "name": "@saga-ed/saga-stack-cli",
-  "version": "0.0.1",
-  "type": "module",
-  "description": "Unified CLI for bringing up, seeding, verifying, and e2e-testing the synthetic saga dev stack across all repos. Supersedes mesh-fixture-cli. saga-ed/soa#214.",
-  "bin": {
-    "saga-stack": "./bin/run.js",
-    "ss": "./bin/run.js"
-  },
-  "exports": {
-    "./core": {
-      "import": "./dist/core/index.js",
-      "types": "./dist/core/index.d.ts"
+    "name": "@saga-ed/saga-stack-cli",
+    "version": "1.0.0",
+    "type": "module",
+    "description": "Unified CLI for bringing up, seeding, verifying, and e2e-testing the synthetic saga dev stack across all repos. Supersedes mesh-fixture-cli. saga-ed/soa#214.",
+    "bin": {
+        "saga-stack": "./bin/run.js",
+        "ss": "./bin/run.js"
     },
-    "./stack-api": {
-      "import": "./dist/stack-api.js",
-      "types": "./dist/stack-api.d.ts"
-    }
-  },
-  "oclif": {
-    "bin": "saga-stack",
-    "dirname": "saga-stack",
-    "commands": {
-      "strategy": "pattern",
-      "target": "./dist/commands"
+    "exports": {
+        "./core": {
+            "import": "./dist/core/index.js",
+            "types": "./dist/core/index.d.ts"
+        },
+        "./stack-api": {
+            "import": "./dist/stack-api.js",
+            "types": "./dist/stack-api.d.ts"
+        }
     },
-    "plugins": [
-      "@oclif/plugin-help"
+    "oclif": {
+        "bin": "saga-stack",
+        "dirname": "saga-stack",
+        "commands": {
+            "strategy": "pattern",
+            "target": "./dist/commands"
+        },
+        "plugins": [
+            "@oclif/plugin-help"
+        ],
+        "topicSeparator": " ",
+        "topics": {
+            "stack": {
+                "description": "Bring the synthetic dev stack up/down, seed, reset, verify, and log in."
+            },
+            "stack:snapshot": {
+                "description": "Store, restore, list, validate, and delete native DB snapshots (all pg app DBs + connectv3 mongo)."
+            },
+            "e2e": {
+                "description": "Run end-to-end flows in-process against a running stack."
+            },
+            "develop": {
+                "description": "Concierge scripts that set up and drop you into a developable stack for a specific app or workflow (seed, reset, prerequisites, then hand off a running app)."
+            },
+            "set": {
+                "description": "Worktree sets (M13): named repo\u2192path maps bound to slots \u2014 list, show, and check the parallel dev contexts --set runs against."
+            }
+        },
+        "hooks": {
+            "init": [
+                "./dist/hooks/init/version-flag.js"
+            ]
+        }
+    },
+    "files": [
+        "dist",
+        "vendor",
+        "bin",
+        "examples",
+        "oclif.manifest.json",
+        "README.md"
     ],
-    "topicSeparator": " ",
-    "topics": {
-      "stack": {
-        "description": "Bring the synthetic dev stack up/down, seed, reset, verify, and log in."
-      },
-      "stack:snapshot": {
-        "description": "Store, restore, list, validate, and delete native DB snapshots (all pg app DBs + connectv3 mongo)."
-      },
-      "e2e": {
-        "description": "Run end-to-end flows in-process against a running stack."
-      },
-      "develop": {
-        "description": "Concierge scripts that set up and drop you into a developable stack for a specific app or workflow (seed, reset, prerequisites, then hand off a running app)."
-      },
-      "set": {
-        "description": "Worktree sets (M13): named repo→path maps bound to slots — list, show, and check the parallel dev contexts --set runs against."
-      }
+    "scripts": {
+        "build": "tsc && oclif manifest",
+        "dev": "tsc --watch",
+        "check-types": "tsc --noEmit",
+        "clean": "rm -rf dist oclif.manifest.json",
+        "test": "vitest run",
+        "lint": "eslint src/",
+        "saga-stack": "node bin/run.js"
+    },
+    "dependencies": {
+        "@oclif/core": "^4.0.0",
+        "@oclif/plugin-help": "^6.0.0",
+        "zod": "3.25.67"
+    },
+    "devDependencies": {
+        "@saga-ed/soa-typescript-config": "workspace:*",
+        "@types/node": "latest",
+        "oclif": "^4.22.93",
+        "tsx": "^4.20.3",
+        "typescript": "^5.8.3",
+        "vitest": "^1.5.0"
+    },
+    "publishConfig": {
+        "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/saga-ed/soa.git",
+        "directory": "packages/node/saga-stack-cli"
     }
-  },
-  "files": [
-    "dist",
-    "vendor",
-    "bin",
-    "examples",
-    "oclif.manifest.json",
-    "README.md"
-  ],
-  "scripts": {
-    "build": "tsc && oclif manifest",
-    "dev": "tsc --watch",
-    "check-types": "tsc --noEmit",
-    "clean": "rm -rf dist oclif.manifest.json",
-    "test": "vitest run",
-    "lint": "eslint src/",
-    "saga-stack": "node bin/run.js"
-  },
-  "dependencies": {
-    "@oclif/core": "^4.0.0",
-    "@oclif/plugin-help": "^6.0.0",
-    "zod": "3.25.67"
-  },
-  "devDependencies": {
-    "@saga-ed/soa-typescript-config": "workspace:*",
-    "@types/node": "latest",
-    "oclif": "^4.22.93",
-    "tsx": "^4.20.3",
-    "typescript": "^5.8.3",
-    "vitest": "^1.5.0"
-  },
-  "publishConfig": {
-    "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/saga-ed/soa.git",
-    "directory": "packages/node/saga-stack-cli"
-  }
 }

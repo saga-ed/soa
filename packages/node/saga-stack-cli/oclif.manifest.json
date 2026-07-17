@@ -1,5 +1,137 @@
 {
   "commands": {
+    "version": {
+      "aliases": [],
+      "args": {},
+      "description": "Print the CLI version: major.minor from package.json, auto-incrementing patch = commit count of the CLI package (+short sha, .dirty when the checkout has uncommitted changes).",
+      "examples": [
+        "<%= config.bin %> version",
+        "<%= config.bin %> -v",
+        "<%= config.bin %> version --output-json"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "version",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "slotClaimWritten": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "version.js"
+      ]
+    },
     "develop:coach": {
       "aliases": [],
       "args": {},
@@ -359,6 +491,532 @@
         "commands",
         "develop",
         "connect.js"
+      ]
+    },
+    "e2e:list": {
+      "aliases": [],
+      "args": {},
+      "description": "List discoverable SPAs, their e2e flows, and phases (reads flows.json / the bundled example).",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --output-json"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "spa-path": {
+          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
+          "name": "spa-path",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "e2e:list",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "slotClaimWritten": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "e2e",
+        "list.js"
+      ]
+    },
+    "e2e:run": {
+      "aliases": [],
+      "args": {},
+      "description": "Run an e2e flow in-process: discover flows.json -> closure -> StackApi up/reset/seed/verify -> Playwright. --dry-run prints the plan.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %> journey --through pods --dry-run",
+        "<%= config.bin %> <%= command.id %> saga-dash/journey --through 2 --headless",
+        "<%= config.bin %> <%= command.id %> journey --skip-reset -- --debug",
+        "<%= config.bin %> <%= command.id %> saga-dash/periods-ordering --capture --headless"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "through": {
+          "description": "run THROUGH this phase/stage (name, number, or project); progressive flows run 1..N",
+          "name": "through",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "phase": {
+          "description": "alias of --through",
+          "name": "phase",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "to": {
+          "description": "Plan 13: run UP TO but NOT INCLUDING this phase/stage (name, number, or project) — leaves the stack at that stage's ENTRY state for manual testing. Progressive flows only; mutually exclusive with --through. Pair with --hold for a logged-in browser at the boundary.",
+          "name": "to",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "hold": {
+          "description": "Plan 13: after the run goes green, mint the dev-persona cookie jar and open a logged-in browser at the SPA (slot-offset URL), print a held-state summary, and exit 0 — the stack stays up. Best-effort browser (a headless host warns, never errors).",
+          "name": "hold",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "lane": {
+          "description": "URL lane to target",
+          "name": "lane",
+          "default": "stack",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "options": [
+            "stack",
+            "sandbox"
+          ],
+          "type": "option"
+        },
+        "headed": {
+          "description": "force a headed (windowed) run (foreground flows are headed by default)",
+          "name": "headed",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "headless": {
+          "description": "force a headless (CI-style) run; flips a foreground flow off headed",
+          "name": "headless",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "skip-reset": {
+          "description": "reuse the current stack state; skip the reset+seed before Playwright",
+          "name": "skip-reset",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "from": {
+          "description": "M14: start AT this stage (id / number / project — same matching as --through) by RESTORING the predecessor stage's checkpoint instead of replaying earlier Playwright stages. Bake checkpoints first with --snapshot-stages.",
+          "name": "from",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "snapshot-stages": {
+          "description": "M14: bake a DB checkpoint after each green stage (Playwright runs once per stage) so later runs can --from into the middle of the flow. Progressive flows only.",
+          "name": "snapshot-stages",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "from-stale-ok": {
+          "description": "M14: accept a checkpoint older than the 7-day staleness cliff (its baked dates may no longer fit the calendar — you're overriding that guard). Only meaningful with --from.",
+          "name": "from-stale-ok",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "prereq-from-snapshot": {
+          "description": "M14-C: satisfy a flow's prerequisite by RESTORING its terminal-stage checkpoint (when a valid one is baked) instead of the full headless replay; silently falls back to the replay when absent/invalid. NOTE the restore flushes redis (the replay leaves it warm). --no-prereq-from-snapshot forces the replay.",
+          "name": "prereq-from-snapshot",
+          "allowNo": true,
+          "type": "boolean"
+        },
+        "spa-path": {
+          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
+          "name": "spa-path",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dry-run": {
+          "description": "plan only: print the resolved flow + closure + seed plan + playwright argv + occurrence date; touch nothing",
+          "name": "dry-run",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "tunnel": {
+          "description": "point the Playwright browser at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can drive this slot-0 stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`); writes the dash tunnel config; exports PLAYWRIGHT_TUNNEL_TIMEOUT_MS for the SPA config. Slot-0 only (hard-errors at --slot > 0 / --set).",
+          "name": "tunnel",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "capture": {
+          "description": "exploratory-review capture: run Playwright with PLAYWRIGHT_CAPTURE=all (per-action trace + video on every test) and PRESERVE the artifacts under <stateDir>/e2e-runs/<runId>/ (Playwright wipes test-results/ at the next run's start). A FAILED stage's artifacts are preserved even without this flag. Review with `e2e traces`.",
+          "name": "capture",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "e2e:run",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": false,
+      "enableJsonFlag": false,
+      "slotClaimWritten": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "e2e",
+        "run.js"
+      ]
+    },
+    "e2e:traces": {
+      "aliases": [],
+      "args": {},
+      "description": "List preserved e2e run traces (from `e2e run --capture` / failed stages), newest first, with paste-ready show-trace commands.",
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --flow saga-dash/periods-ordering",
+        "<%= config.bin %> <%= command.id %> --open"
+      ],
+      "flags": {
+        "porcelain": {
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "slot": {
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "name": "slot",
+          "default": 0,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "output-json": {
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "allowNo": false,
+          "type": "boolean"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "name": "set",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "name": "dev",
+          "noCacheDefault": true,
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "name": "state-dir",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "name": "soa",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "name": "rostering",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "name": "program-hub",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "name": "saga-dash",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "name": "coach",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "name": "sds",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "name": "qboard",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "name": "rtsm",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "name": "fleek",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "flow": {
+          "description": "filter to one flow ('<spa>/<flow>' or a bare '<flow>' across SPAs)",
+          "name": "flow",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "type": "option"
+        },
+        "open": {
+          "description": "open the newest preserved run: PREFERS the whole-run HTML report (`playwright show-report`) when one exists, else falls back to the newest trace (`show-trace`). Best-effort; a headless host warns.",
+          "name": "open",
+          "allowNo": false,
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "e2e:traces",
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "strict": true,
+      "enableJsonFlag": false,
+      "slotClaimWritten": false,
+      "isESM": true,
+      "relativePath": [
+        "dist",
+        "commands",
+        "e2e",
+        "traces.js"
       ]
     },
     "stack:bootstrap": {
@@ -2485,532 +3143,6 @@
         "verify.js"
       ]
     },
-    "e2e:list": {
-      "aliases": [],
-      "args": {},
-      "description": "List discoverable SPAs, their e2e flows, and phases (reads flows.json / the bundled example).",
-      "examples": [
-        "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --output-json"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "name": "slot",
-          "default": 0,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "name": "set",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "noCacheDefault": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "spa-path": {
-          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
-          "name": "spa-path",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "e2e:list",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "slotClaimWritten": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "e2e",
-        "list.js"
-      ]
-    },
-    "e2e:run": {
-      "aliases": [],
-      "args": {},
-      "description": "Run an e2e flow in-process: discover flows.json -> closure -> StackApi up/reset/seed/verify -> Playwright. --dry-run prints the plan.",
-      "examples": [
-        "<%= config.bin %> <%= command.id %> journey --through pods --dry-run",
-        "<%= config.bin %> <%= command.id %> saga-dash/journey --through 2 --headless",
-        "<%= config.bin %> <%= command.id %> journey --skip-reset -- --debug",
-        "<%= config.bin %> <%= command.id %> saga-dash/periods-ordering --capture --headless"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "name": "slot",
-          "default": 0,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "name": "set",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "noCacheDefault": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "through": {
-          "description": "run THROUGH this phase/stage (name, number, or project); progressive flows run 1..N",
-          "name": "through",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "phase": {
-          "description": "alias of --through",
-          "name": "phase",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "to": {
-          "description": "Plan 13: run UP TO but NOT INCLUDING this phase/stage (name, number, or project) — leaves the stack at that stage's ENTRY state for manual testing. Progressive flows only; mutually exclusive with --through. Pair with --hold for a logged-in browser at the boundary.",
-          "name": "to",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "hold": {
-          "description": "Plan 13: after the run goes green, mint the dev-persona cookie jar and open a logged-in browser at the SPA (slot-offset URL), print a held-state summary, and exit 0 — the stack stays up. Best-effort browser (a headless host warns, never errors).",
-          "name": "hold",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "lane": {
-          "description": "URL lane to target",
-          "name": "lane",
-          "default": "stack",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "options": [
-            "stack",
-            "sandbox"
-          ],
-          "type": "option"
-        },
-        "headed": {
-          "description": "force a headed (windowed) run (foreground flows are headed by default)",
-          "name": "headed",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "headless": {
-          "description": "force a headless (CI-style) run; flips a foreground flow off headed",
-          "name": "headless",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "skip-reset": {
-          "description": "reuse the current stack state; skip the reset+seed before Playwright",
-          "name": "skip-reset",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "from": {
-          "description": "M14: start AT this stage (id / number / project — same matching as --through) by RESTORING the predecessor stage's checkpoint instead of replaying earlier Playwright stages. Bake checkpoints first with --snapshot-stages.",
-          "name": "from",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "snapshot-stages": {
-          "description": "M14: bake a DB checkpoint after each green stage (Playwright runs once per stage) so later runs can --from into the middle of the flow. Progressive flows only.",
-          "name": "snapshot-stages",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "from-stale-ok": {
-          "description": "M14: accept a checkpoint older than the 7-day staleness cliff (its baked dates may no longer fit the calendar — you're overriding that guard). Only meaningful with --from.",
-          "name": "from-stale-ok",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "prereq-from-snapshot": {
-          "description": "M14-C: satisfy a flow's prerequisite by RESTORING its terminal-stage checkpoint (when a valid one is baked) instead of the full headless replay; silently falls back to the replay when absent/invalid. NOTE the restore flushes redis (the replay leaves it warm). --no-prereq-from-snapshot forces the replay.",
-          "name": "prereq-from-snapshot",
-          "allowNo": true,
-          "type": "boolean"
-        },
-        "spa-path": {
-          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
-          "name": "spa-path",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dry-run": {
-          "description": "plan only: print the resolved flow + closure + seed plan + playwright argv + occurrence date; touch nothing",
-          "name": "dry-run",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "tunnel": {
-          "description": "point the Playwright browser at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can drive this slot-0 stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`); writes the dash tunnel config; exports PLAYWRIGHT_TUNNEL_TIMEOUT_MS for the SPA config. Slot-0 only (hard-errors at --slot > 0 / --set).",
-          "name": "tunnel",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "capture": {
-          "description": "exploratory-review capture: run Playwright with PLAYWRIGHT_CAPTURE=all (per-action trace + video on every test) and PRESERVE the artifacts under <stateDir>/e2e-runs/<runId>/ (Playwright wipes test-results/ at the next run's start). A FAILED stage's artifacts are preserved even without this flag. Review with `e2e traces`.",
-          "name": "capture",
-          "allowNo": false,
-          "type": "boolean"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "e2e:run",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": false,
-      "enableJsonFlag": false,
-      "slotClaimWritten": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "e2e",
-        "run.js"
-      ]
-    },
-    "e2e:traces": {
-      "aliases": [],
-      "args": {},
-      "description": "List preserved e2e run traces (from `e2e run --capture` / failed stages), newest first, with paste-ready show-trace commands.",
-      "examples": [
-        "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --flow saga-dash/periods-ordering",
-        "<%= config.bin %> <%= command.id %> --open"
-      ],
-      "flags": {
-        "porcelain": {
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "slot": {
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "name": "slot",
-          "default": 0,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "output-json": {
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "allowNo": false,
-          "type": "boolean"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "name": "set",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "name": "dev",
-          "noCacheDefault": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "name": "state-dir",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "name": "soa",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "name": "rostering",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "name": "program-hub",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "name": "saga-dash",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "name": "coach",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "name": "sds",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "name": "qboard",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "name": "rtsm",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "name": "fleek",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "flow": {
-          "description": "filter to one flow ('<spa>/<flow>' or a bare '<flow>' across SPAs)",
-          "name": "flow",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
-        "open": {
-          "description": "open the newest preserved run: PREFERS the whole-run HTML report (`playwright show-report`) when one exists, else falls back to the newest trace (`show-trace`). Best-effort; a headless host warns.",
-          "name": "open",
-          "allowNo": false,
-          "type": "boolean"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "e2e:traces",
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "strict": true,
-      "enableJsonFlag": false,
-      "slotClaimWritten": false,
-      "isESM": true,
-      "relativePath": [
-        "dist",
-        "commands",
-        "e2e",
-        "traces.js"
-      ]
-    },
     "set:check": {
       "aliases": [],
       "args": {
@@ -4666,5 +4798,5 @@
       ]
     }
   },
-  "version": "0.0.1"
+  "version": "1.0.0"
 }

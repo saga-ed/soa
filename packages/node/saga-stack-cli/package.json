@@ -60,7 +60,7 @@
         "README.md"
     ],
     "scripts": {
-        "build": "tsc && oclif manifest",
+        "build": "tsc && oclif manifest && node scripts/canonicalize-manifest.mjs",
         "dev": "tsc --watch",
         "check-types": "tsc --noEmit",
         "clean": "rm -rf dist oclif.manifest.json",

@@ -82,6 +82,7 @@ import {
   makeRealSnapshotIO,
   makeRealViteClear,
   makeSettleBarrier,
+  makeSlotWipe,
   realSleep,
   makeRealDockerWipe,
   makeRealBuildCleaner,
@@ -124,6 +125,7 @@ import type {
   ServiceStopper,
   SettleBarrier,
   SleepFn,
+  SlotWipe,
   SnapshotIO,
   ViteClear,
   DockerWipe,
@@ -813,6 +815,15 @@ export abstract class BaseCommand extends Command {
    */
   protected getDockerWipe(): DockerWipe {
     return makeRealDockerWipe();
+  }
+
+  /**
+   * The slot-dir removal seam (`stack wipe` steps c/d — soa#340) — production is the only
+   * place the wipe's `rm -rf` of a slot's state dir / snapshots root runs. Injected so the
+   * removal plan (which paths, in what order) is asserted with no real fs.
+   */
+  protected getSlotWipe(): SlotWipe {
+    return makeSlotWipe();
   }
 
   /**

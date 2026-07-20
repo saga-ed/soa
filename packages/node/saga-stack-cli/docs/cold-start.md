@@ -11,6 +11,8 @@ to be *certain* you're starting from the team's known-good baseline and not yest
 
 > **Slot-0 only** (like `restart`): a cold start re-bases the *shared* baseline, so a `--slot > 0`
 > is rejected. It always operates on the default `soa` mesh / `/tmp/sds-synthetic` state dir.
+> The per-slot mirror image is [`ss stack wipe --slot N`](./slots.md#wiping-a-slot-pristine) —
+> pristine-reset ONE slot (1–9), never the source checkouts.
 
 ---
 
@@ -102,7 +104,9 @@ Expect this to take several minutes (reinstall + rebuild of every repo).
   `apps/node/*-api/.env`) is **not** created — those you still provision by hand the first time.
   The scaffolded values are the template's defaults; **review them** before a live demo.
 - **Slot-0 only.** For an isolated per-slot reset, use `ss stack down --mesh --slot N` +
-  `ss stack up --reset --slot N` instead.
+  `ss stack up --reset --slot N`; to hand a slot back **pristine** (containers + volumes +
+  state dir removed, source never touched), use `ss stack wipe --slot N` — see
+  [slots.md](./slots.md#wiping-a-slot-pristine).
 
 See also **[getting-started.md](./getting-started.md)**, **[integration.md](./integration.md)**
 (`bootstrap`), **[sub-stacks-and-bundles.md](./sub-stacks-and-bundles.md)**, and

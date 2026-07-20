@@ -60,6 +60,52 @@ stopped: iam-api, scheduling-api, sessions-api
 ```
 </details>
 
+## Wiping a slot pristine
+
+`down` *stops* a slot (volumes, state dir, and snapshots all survive for the next `up`).
+When you want the slot **gone** — handed back as if it had never been used — `wipe` is the
+per-slot sledgehammer: it stops the slot's services natively, removes the `soa-s<N>`
+compose project's containers **and volumes** (`docker compose -p soa-s<N> down -v`), and
+`rm -rf`s the slot's state dir (pids, logs, cookies, `claim.json`), so the slot vanishes
+from `ss stack slots`. Snapshots are **kept** unless you add `--snapshots`.
+
+```bash
+ss stack wipe --slot 3              # prompts, enumerating exactly what dies
+ss stack wipe --set journey-fix --yes   # non-interactive; the set's slot
+ss stack wipe --slot 3 --dry-run    # the same enumeration; changes nothing
+ss stack wipe --slot 3 --snapshots --yes  # also remove ~/.saga-mesh/snapshots-s3
+```
+
+<details><summary>✓ slot 3 wiped — containers + volumes + state dir gone; snapshots and worktrees kept</summary>
+
+```
+▶ wipe slot 3 — this will remove:
+    containers + volumes: docker compose -p soa-s3 down -v (project soa-s3)
+    state dir:            /tmp/sds-synthetic-s3  (pids, logs, cookies, claim.json)
+    snapshots:            KEPT — ~/.saga-mesh/snapshots-s3 (pass --snapshots to remove)
+
+  This DESTROYS slot 3's containers, volumes, and state. Continue? [y/N] y
+✓ services stopped (2 from /tmp/sds-synthetic-s3)
+✓ containers + volumes removed (soa-s3)
+✓ state dir removed (/tmp/sds-synthetic-s3)
+✓ slot 3 wiped — `ss stack slots` now reports it unused
+```
+</details>
+
+Notes:
+
+- **An explicit `--slot 1..9` (or `--set`) is required.** Slot 0 is refused — the shared
+  baseline's clean-slate reset is [`ss stack cold-start`](./cold-start.md), which also
+  re-bases the checkouts; `wipe` is the isolated per-slot counterpart.
+- **Source is never touched.** `wipe` runs **no git operations** — a set-bound slot's
+  worktrees survive (the confirmation says so explicitly); removing worktrees stays
+  `ss set rm --and-worktrees`.
+- **Live-claim guard.** If the slot's claim is live (another driver's `ss` process is
+  still running), `wipe` refuses; `--yes` overrides. A stale claim never blocks.
+- `--dry-run` prints the same enumeration and exits 0 without writing a claim;
+  `--output-json` reports `{slot, project, stateDir, stopped, volumesRemoved,
+  stateDirRemoved, snapshotsRemoved}`.
+
 ## Who's on what slot — `ss stack slots` and claim files
 
 With several humans and agents multiplexing one box, `ss stack slots` is the one-glance
@@ -129,8 +175,10 @@ task is driving.
 process that launched it, so the claim's pid is usually dead by the time anyone looks —
 that is exactly what "**last driven by**" means. `stack slots` probes pid-liveness when it
 *reads*: a live pid renders plain, a dead one gets the dim `(stale)` suffix. **Nothing
-ever deletes `claim.json`** — a stale claim on an inactive slot is ordinary history, not
-an error.
+ever deletes `claim.json` in the normal lifecycle** — a stale claim on an inactive slot is
+ordinary history, not an error. (The one exception is [`stack wipe`](#wiping-a-slot-pristine),
+which removes the slot's whole state dir — claim included — precisely so the slot vanishes
+from this report.)
 
 **Advisory, not exclusive.** A claim never blocks anything: two actors can drive one slot
 back-to-back and the file simply records the most recent driver. It's a coordination
@@ -144,7 +192,8 @@ running stack was built from code its checkout has since moved past.
 
 ## Notes
 
-- `--slot N` works on `up` / `status` / `verify` / `down` / `reset` / `seed` / `snapshot` / `e2e run`.
+- `--slot N` works on `up` / `status` / `verify` / `down` / `reset` / `seed` / `snapshot` / `e2e run` —
+  and on `wipe`, where it is *required* (slots 1–9 only; slot 0's reset is `cold-start`).
 - Slot ceiling is **9** (slot 10 would collide the rabbitmq-management port with slot 0).
 - Slot > 0 is a backend + saga-dash/coach + **full Connect** (`connect-api` + `connect-web`) sub-stack (soa#271); only the literal-port playback trio (transcripts/insights/chat, optional) stays excluded. AV is SHARED — a slot's Connect session opens its own rooms on the single slot-0 livekit (keyed by session id), and its browser CRDT dials the slot's own rtsm via a per-slot fleet file.
 - Cloud/tunnel modes (`--sandbox`/`--tunnel`) are slot-0 only (they front fixed ports).

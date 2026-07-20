@@ -40,12 +40,16 @@ export function relativeAge(atIso: string, nowMs: number = Date.now()): string {
 }
 
 /**
- * The injectable slot-dir removal seam (`stack wipe` steps c/d). One verb:
- * `rm -rf` a single absolute dir. Production wires `makeSlotWipe()`
- * (the only place this module's real `rmSync` runs); tests pass a recording
- * fake so the removal PLAN (which paths, in what order) is asserted with no fs.
+ * The injectable slot-dir removal seam (`stack wipe` steps c/d). Two verbs:
+ * `rm -rf` a single absolute dir, and the existence probe `--slot all` uses to
+ * decide which slots are non-empty candidates (soa#351). Production wires
+ * `makeSlotWipe()` (the only place this module's real `rmSync` runs); tests pass
+ * a recording fake so the removal PLAN (which paths, in what order) is asserted
+ * with no fs.
  */
 export interface SlotWipe {
+  /** Does the dir exist? (candidate detection for `--slot all`; folds errors to `false`). */
+  exists(dir: string): boolean;
   /** `rm -rf dir`; `true` iff the dir existed and was removed, `false` otherwise (best-effort — never throws). */
   remove(dir: string): boolean;
 }
@@ -81,6 +85,9 @@ export function makeSlotWipe(deps: RealSlotWipeDeps = {}): SlotWipe {
     });
 
   return {
+    exists(dir: string): boolean {
+      return exists(dir);
+    },
     remove(dir: string): boolean {
       if (!exists(dir)) return false;
       try {

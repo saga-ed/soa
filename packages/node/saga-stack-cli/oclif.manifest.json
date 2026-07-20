@@ -4874,13 +4874,15 @@
     "stack:wipe": {
       "aliases": [],
       "args": {},
-      "description": "Pristine-reset ONE slot (1..9): stop its native services, docker compose -p soa-s<N> down -v (containers + volumes), rm -rf its state dir; --snapshots also removes ~/.saga-mesh/snapshots-s<N>. Never touches source checkouts. Destructive; requires an explicit --slot 1..9 or --set.",
+      "description": "Pristine-reset ONE slot (1..9) or --slot all (every non-empty slot): stop its native services, docker compose -p soa-s<N> down -v (containers + volumes), rm -rf its state dir; --snapshots also removes ~/.saga-mesh/snapshots-s<N>. Never touches source checkouts. Destructive; requires an explicit --slot 1..9, --slot all, or --set.",
       "enableJsonFlag": false,
       "examples": [
         "<%= config.bin %> <%= command.id %> --slot 2 --dry-run",
         "<%= config.bin %> <%= command.id %> --slot 2",
         "<%= config.bin %> <%= command.id %> --set my-set --yes",
-        "<%= config.bin %> <%= command.id %> --slot 3 --snapshots --yes"
+        "<%= config.bin %> <%= command.id %> --slot 3 --snapshots --yes",
+        "<%= config.bin %> <%= command.id %> --slot all --dry-run",
+        "<%= config.bin %> <%= command.id %> --slot all --yes"
       ],
       "flags": {
         "coach": {
@@ -4974,7 +4976,7 @@
         },
         "slot": {
           "default": 0,
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "description": "slot to wipe: 1..9 (an isolated soa-s<N> sub-stack), or 'all' to wipe every non-empty slot 1..9. Slot 0 (the default) is refused — the shared baseline resets via `stack cold-start`.",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "slot",
@@ -5002,7 +5004,7 @@
         },
         "yes": {
           "allowNo": false,
-          "description": "non-interactive: skip the destructive-action prompt AND override the live-claim guard (CI / agents).",
+          "description": "non-interactive: skip the destructive-action prompt AND override the live-claim guard (CI / agents). With --slot all, also INCLUDES live-claimed slots the sweep would otherwise skip.",
           "name": "yes",
           "type": "boolean"
         }

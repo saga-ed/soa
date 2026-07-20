@@ -23,6 +23,12 @@
  * the live-claim guard (refuses without `--yes`, proceeds with it, stale claims
  * never block); the set-binding "worktrees are NOT touched" notice; a declined
  * prompt tearing down nothing; and the pinned `--output-json` shape.
+ *
+ * `--slot all` (soa#351): candidacy (state dir / live activity / snapshots-only
+ * under `--snapshots`), slot-ordered sweep with PER-SLOT claims (the central hook
+ * — which would resolve `all` to slot 0 — must stay suppressed), live-claimed
+ * slots skipped without `--yes` and included with it, `--state-dir`/`--set`
+ * rejected, and the all-mode `--output-json` shape {mode, wiped[], skipped[]}.
  */
 
 import { homedir } from 'node:os';
@@ -126,8 +132,9 @@ function installDockerWipe(ok = true): void {
  * prototype, `vi.spyOn` throws in beforeEach — failing FAST before any real
  * rm could run.
  */
-function installSlotWipe(): void {
+function installSlotWipe(existing: string[] = []): void {
   const fake: SlotWipe = {
+    exists: (dir: string) => existing.includes(dir),
     remove(dir: string): boolean {
       events.push(`rm:${dir}`);
       return true;
@@ -349,6 +356,149 @@ describe('stack wipe — set-bound slot', () => {
     expect(text).toMatch(/not touched|never touched|untouched|not removed|left (as-is|in place|alone)/i);
     // The wipe itself still ran — only the slot's runtime residue dies, never source.
     expect(events).toEqual(S3_TEARDOWN);
+  });
+});
+
+describe('stack wipe --slot all (soa#351) — sweep every non-empty slot 1..9', () => {
+  const STATE_S2 = '/tmp/sds-synthetic-s2';
+  const STATE_S5 = '/tmp/sds-synthetic-s5';
+  const S2_TEARDOWN = [`stop:${STATE_S2}`, 'docker-down-v:soa-s2', `rm:${STATE_S2}`];
+  const S5_TEARDOWN = [`stop:${STATE_S5}`, 'docker-down-v:soa-s5', `rm:${STATE_S5}`];
+
+  it('--dry-run enumerates ONLY the non-empty slots, tears down and claims NOTHING', async () => {
+    installSlotWipe([STATE_S2, STATE_S5]);
+
+    await expect(StackWipe.run(['--slot', 'all', '--dry-run', ...WS], config)).resolves.toBeUndefined();
+
+    const text = out.join('\n');
+    expect(text).toContain('soa-s2');
+    expect(text).toContain('soa-s5');
+    expect(text).not.toContain('soa-s3'); // empty slots are not candidates.
+    expect(events).toEqual([]);
+    expect(claimWrites).toHaveLength(0); // NO claim in all-mode dry-run — including slot 0.
+    expect(prompts).toHaveLength(0);
+  });
+
+  it('--yes wipes each candidate in slot order with a PER-SLOT claim (never slot 0)', async () => {
+    installSlotWipe([STATE_S2, STATE_S5]);
+
+    await expect(StackWipe.run(['--slot', 'all', '--yes', ...WS], config)).resolves.toBeUndefined();
+
+    expect(events).toEqual([...S2_TEARDOWN, ...S5_TEARDOWN]);
+    expect(events).not.toContain('system-prune');
+    expect(prompts).toHaveLength(0);
+    // One advisory claim per wiped slot — the central hook (which would resolve
+    // `all` to slot 0) stayed suppressed.
+    expect(claimWrites.map((c) => c.slot)).toEqual([2, 5]);
+    expect(claimWrites.map((c) => c.stateDir)).toEqual([STATE_S2, STATE_S5]);
+  });
+
+  it('an ACTIVE slot with no state dir is still a candidate (live containers count)', async () => {
+    installSlotWipe([]);
+    spySlotActive(['soa-s4']);
+
+    await expect(StackWipe.run(['--slot', 'all', '--yes', ...WS], config)).resolves.toBeUndefined();
+
+    expect(events).toEqual(['stop:/tmp/sds-synthetic-s4', 'docker-down-v:soa-s4', 'rm:/tmp/sds-synthetic-s4']);
+  });
+
+  it('a live-claimed slot is SKIPPED (sweep continues) without --yes; one prompt covers the rest', async () => {
+    installSlotWipe([STATE_S2, STATE_S3]);
+    installClaimReader({ [STATE_S3]: claimResult({}, true) });
+    installConfirm(true);
+
+    await expect(StackWipe.run(['--slot', 'all', ...WS], config)).resolves.toBeUndefined();
+
+    expect(prompts).toHaveLength(1);
+    expect(events).toEqual(S2_TEARDOWN); // slot 3 skipped, slot 2 wiped.
+    expect(claimWrites.map((c) => c.slot)).toEqual([2]);
+  });
+
+  it('--yes INCLUDES the live-claimed slot in the sweep', async () => {
+    installSlotWipe([STATE_S2, STATE_S3]);
+    installClaimReader({ [STATE_S3]: claimResult({}, true) });
+
+    await expect(StackWipe.run(['--slot', 'all', '--yes', ...WS], config)).resolves.toBeUndefined();
+
+    expect(events).toEqual([...S2_TEARDOWN, ...S3_TEARDOWN]);
+    expect(claimWrites.map((c) => c.slot)).toEqual([2, 3]);
+  });
+
+  it('--snapshots widens candidacy to snapshot-only slots and removes their roots', async () => {
+    const SNAP_S7 = join(homedir(), '.saga-mesh', 'snapshots-s7');
+    installSlotWipe([SNAP_S7]);
+
+    await expect(
+      StackWipe.run(['--slot', 'all', '--snapshots', '--yes', ...WS], config),
+    ).resolves.toBeUndefined();
+
+    expect(events).toContain(`rm:${SNAP_S7}`);
+  });
+
+  it('no non-empty slots ⇒ clean exit 0, nothing executed, nothing claimed', async () => {
+    installSlotWipe([]);
+
+    await expect(StackWipe.run(['--slot', 'all', '--yes', ...WS], config)).resolves.toBeUndefined();
+
+    expect(events).toEqual([]);
+    expect(claimWrites).toHaveLength(0);
+    expect(out.join('\n')).toContain('nothing to wipe');
+  });
+
+  it('a declined prompt tears down NOTHING across the whole sweep', async () => {
+    installSlotWipe([STATE_S2, STATE_S5]);
+    installConfirm(false);
+
+    await StackWipe.run(['--slot', 'all', ...WS], config).catch(() => undefined);
+
+    expect(prompts).toHaveLength(1);
+    expect(events).toEqual([]);
+    expect(claimWrites).toHaveLength(0);
+  });
+
+  it('--state-dir is rejected as ambiguous with --slot all', async () => {
+    installSlotWipe([STATE_S2]);
+
+    await expect(
+      StackWipe.run(['--slot', 'all', '--state-dir', '/tmp/x', '--yes', ...WS], config),
+    ).rejects.toThrow(/ambiguous/);
+    expect(events).toEqual([]);
+  });
+
+  it('--set is rejected with --slot all (the set owns ONE slot)', async () => {
+    spySetStore({
+      version: 1,
+      sets: { 'journey-fix': { slot: 3, repos: { 'saga-dash': '/wt/dash-j' } } },
+    });
+    installSlotWipe([STATE_S3]);
+
+    await expect(
+      StackWipe.run(['--slot', 'all', '--set', 'journey-fix', '--yes', ...WS], config),
+    ).rejects.toThrow(/bound to slot 3/);
+    expect(events).toEqual([]);
+  });
+
+  it('--output-json emits the pinned all-mode shape {mode, wiped[], skipped[]}', async () => {
+    installSlotWipe([STATE_S2]);
+
+    await expect(
+      StackWipe.run(['--slot', 'all', '--yes', '--output-json', ...WS], config),
+    ).resolves.toBeUndefined();
+
+    const json = emittedJson();
+    expect(Object.keys(json).sort()).toEqual(['mode', 'skipped', 'wiped']);
+    expect(json.mode).toBe('all');
+    expect(json.skipped).toEqual([]);
+    const wiped = json.wiped as Record<string, unknown>[];
+    expect(wiped).toHaveLength(1);
+    expect(wiped[0]).toMatchObject({
+      slot: 2,
+      project: 'soa-s2',
+      stateDir: STATE_S2,
+      volumesRemoved: true,
+      stateDirRemoved: true,
+      snapshotsRemoved: false,
+    });
   });
 });
 

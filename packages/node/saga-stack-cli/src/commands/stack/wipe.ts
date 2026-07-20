@@ -1,5 +1,6 @@
 /**
- * `saga-stack stack wipe` — pristine-reset ONE slot 1..9 (soa#340).
+ * `saga-stack stack wipe` — pristine-reset ONE slot 1..9 (soa#340), or every
+ * non-empty slot at once via `--slot all` (soa#351).
  *
  * Where `stack down` stops a slot's services (volumes preserved) and `stack cold-start`
  * factory-resets the WHOLE slot-0 baseline, `wipe` makes a single isolated slot vanish:
@@ -22,10 +23,21 @@
  * NEVER touches source checkouts/worktrees — no git operations at all (worktree removal
  * stays `ss set rm --and-worktrees`).
  *
+ * `--slot all` (soa#351) sweeps slots 1..9 and runs the same per-slot teardown on every
+ * NON-EMPTY one — a slot is a candidate iff its state dir exists, the slot is live
+ * (pids/containers — the SlotActiveProbe), or (`--snapshots` only) its snapshot root
+ * exists. Slot 0 is never a candidate. A live-claimed candidate is SKIPPED with a
+ * warning instead of aborting the sweep (the single-slot hard refusal would strand the
+ * rest); `--yes` includes it. `--set` and `--state-dir` are ambiguous with `all` and
+ * rejected. CLAIM WRINKLE: BaseCommand's central claim hook resolves a non-numeric
+ * `--slot` to slot 0 — in all-mode it is suppressed (`claimsSlot()` ⇒ false) and run()
+ * writes a per-slot claim itself before each teardown, so a failed wipe still records
+ * who attempted it and slot 0's claim is never clobbered.
+ *
  * GUARDS:
  *   - slot 0 (including a bare invocation — `--slot` defaults to 0) is REFUSED with a
- *     pointer to `stack cold-start`; an explicit `--slot 1..9` or `--set <name>` (the set
- *     owns its slot) is required. Non-zero exit.
+ *     pointer to `stack cold-start`; an explicit `--slot 1..9`, `--slot all`, or
+ *     `--set <name>` (the set owns its slot) is required. Non-zero exit.
  *   - live-claim guard: if the slot's PRIOR `claim.json` records a pid that is still alive
  *     (and isn't this process's own claim), another driver is running — refuse ("claimed by
  *     <actor> <age> ago and still running"); `--yes` overrides. Stale claims never block.
@@ -40,6 +52,8 @@
  *   ss stack wipe --slot 2                 # prompt, then wipe slot 2 (snapshots kept)
  *   ss stack wipe --set my-set --yes       # non-interactive (agent/CI); set supplies the slot
  *   ss stack wipe --slot 3 --snapshots     # also drop ~/.saga-mesh/snapshots-s3
+ *   ss stack wipe --slot all --dry-run     # enumerate every non-empty slot 1..9
+ *   ss stack wipe --slot all --yes         # wipe them all (live-claimed slots included)
  */
 
 import { Flags } from '@oclif/core';
@@ -47,30 +61,67 @@ import type { Interfaces } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
-import type { WorktreeSet } from '../../core/set/index.js';
+import { SET_REPO_KEYS } from '../../core/set/index.js';
+import type { SetRepoKey, WorktreeSet } from '../../core/set/index.js';
 import {
   composeDownVArgs,
   relativeAge,
   repoContextFromFlags,
   resolveRepoRoot,
+  REPO_ENV_VAR,
 } from '../../runtime/index.js';
 import type { ClaimReadResult, StopServiceResult } from '../../runtime/index.js';
 
+/**
+ * `--slot` for wipe ONLY: the base integer 0..9 (`shared-flags.ts` semantics) OR the
+ * literal `all` (soa#351). Overriding here keeps the shared flag an integer everywhere
+ * else — no other command accepts `all`.
+ */
+const slotOrAll = Flags.custom<number | 'all'>({
+  default: 0,
+  description:
+    "slot to wipe: 1..9 (an isolated soa-s<N> sub-stack), or 'all' to wipe every non-empty " +
+    'slot 1..9. Slot 0 (the default) is refused — the shared baseline resets via `stack cold-start`.',
+  parse: async (input: string) => {
+    if (input === 'all') return 'all';
+    const n = Number(input);
+    if (!Number.isInteger(n) || n < 0 || n > 9) {
+      throw new Error("--slot must be an integer 0..9 or 'all'");
+    }
+    return n;
+  },
+});
+
+/** The per-slot outcome record shared by the single-slot emit and the all-mode summary. */
+interface WipeOutcome {
+  slot: number;
+  project: string;
+  stateDir: string;
+  stopped: number;
+  volumesRemoved: boolean;
+  stateDirRemoved: boolean;
+  snapshotsRemoved: boolean;
+}
+
 export default class StackWipe extends BaseCommand {
   static description =
-    'Pristine-reset ONE slot (1..9): stop its native services, docker compose -p soa-s<N> down -v ' +
-    '(containers + volumes), rm -rf its state dir; --snapshots also removes ~/.saga-mesh/snapshots-s<N>. ' +
-    'Never touches source checkouts. Destructive; requires an explicit --slot 1..9 or --set.';
+    'Pristine-reset ONE slot (1..9) or --slot all (every non-empty slot): stop its native services, ' +
+    'docker compose -p soa-s<N> down -v (containers + volumes), rm -rf its state dir; --snapshots also ' +
+    'removes ~/.saga-mesh/snapshots-s<N>. Never touches source checkouts. Destructive; requires an ' +
+    'explicit --slot 1..9, --slot all, or --set.';
 
   static examples = [
     '<%= config.bin %> <%= command.id %> --slot 2 --dry-run',
     '<%= config.bin %> <%= command.id %> --slot 2',
     '<%= config.bin %> <%= command.id %> --set my-set --yes',
     '<%= config.bin %> <%= command.id %> --slot 3 --snapshots --yes',
+    '<%= config.bin %> <%= command.id %> --slot all --dry-run',
+    '<%= config.bin %> <%= command.id %> --slot all --yes',
   ];
 
   static flags = {
     ...BaseCommand.baseFlags,
+    slot: slotOrAll(),
     'dry-run': Flags.boolean({
       description:
         'print exactly what would die (containers/volumes, state dir, snapshots posture) and exit 0 without touching anything — no claim is written.',
@@ -78,7 +129,8 @@ export default class StackWipe extends BaseCommand {
     }),
     yes: Flags.boolean({
       description:
-        'non-interactive: skip the destructive-action prompt AND override the live-claim guard (CI / agents).',
+        'non-interactive: skip the destructive-action prompt AND override the live-claim guard (CI / agents). ' +
+        'With --slot all, also INCLUDES live-claimed slots the sweep would otherwise skip.',
       default: false,
     }),
     snapshots: Flags.boolean({
@@ -100,11 +152,16 @@ export default class StackWipe extends BaseCommand {
 
   /**
    * Slot claims: a wipe DRIVES the slot — a FAILED wipe usefully records who attempted;
-   * a successful one deletes the claim along with the state dir (step c).
+   * a successful one deletes the claim along with the state dir (step c). SUPPRESSED in
+   * all-mode: the central hook resolves a non-numeric `--slot` to slot 0 and would
+   * clobber slot 0's claim; `runAll` writes a per-slot claim itself instead.
    */
   protected claimsSlot(): boolean {
-    return true;
+    return !this.allMode;
   }
+
+  /** `--slot all` detected from the raw argv in `parse` (before flag parsing). */
+  private allMode = false;
 
   /**
    * The prior driver's claim per state dir, captured BEFORE BaseCommand's claim hook
@@ -119,7 +176,9 @@ export default class StackWipe extends BaseCommand {
    * claim, and the prior driver's claim (the one the live-claim guard needs) would
    * already be destroyed. Capture the pre-existing claims here, before delegating to
    * super.parse. The candidate state dirs are deterministic (slots 1..9) plus any raw
-   * `--state-dir` token, so no flag parsing is needed to enumerate them.
+   * `--state-dir` token, so no flag parsing is needed to enumerate them. The same raw
+   * scan detects `--slot all` (soa#351) so `claimsSlot()` can suppress the central
+   * hook before it runs.
    */
   protected async parse<
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,8 +191,20 @@ export default class StackWipe extends BaseCommand {
     options?: Interfaces.Input<F, B, A>,
     argv?: string[],
   ): Promise<Interfaces.ParserOutput<F, B, A>> {
-    this.capturePriorClaims(argv ?? this.argv);
+    const raw = argv ?? this.argv;
+    this.allMode = StackWipe.hasAllToken(raw);
+    this.capturePriorClaims(raw);
     return super.parse<F, B, A>(options, argv);
+  }
+
+  /** Raw-argv detection of `--slot all` / `--slot=all` (runs before oclif parsing). */
+  private static hasAllToken(rawArgv: readonly string[]): boolean {
+    for (let i = 0; i < rawArgv.length; i++) {
+      const token = rawArgv[i];
+      if (token === '--slot' && rawArgv[i + 1] === 'all') return true;
+      if (token === '--slot=all') return true;
+    }
+    return false;
   }
 
   /** Read (and remember) the current claim of every candidate state dir. Reads only — never writes. */
@@ -162,17 +233,35 @@ export default class StackWipe extends BaseCommand {
     // output stays parseable; warnings still go to stderr via this.warn.
     const human = !flags['output-json'] && !flags.porcelain;
 
+    // oclif infers the parsed flag bag from `flags` AND the inherited `baseFlags`,
+    // and the base integer `slot` collapses the union to `number` (overriding
+    // `static baseFlags` is a TS2417 static-side violation) — re-widen once here;
+    // the runtime value is exactly what slotOrAll's parser returned.
+    const slot = flags.slot as number | 'all';
+
+    if (slot === 'all') {
+      // `--set` + `--slot all` already died in the central set-injection guard
+      // (a typed --slot that disagrees with the set's slot is a hard error).
+      if (flags['state-dir'] !== undefined) {
+        this.error(
+          "--state-dir pins ONE slot's state and is ambiguous with --slot all — drop one of them.",
+        );
+      }
+      await this.runAll(flags, dry, human);
+      return;
+    }
+
     // ── GUARD: slot 0 / bare invocation refused (non-zero). `--slot` defaults to 0, so a
     // bare `ss stack wipe` lands here too; `--set` always passes (a set is bound to 1..9,
     // and its slot was injected into flags.slot during parse — "the set owns its slot").
-    if (flags.slot === 0) {
+    if (slot === 0) {
       this.error(
-        'stack wipe pristine-resets ONE isolated slot and requires an explicit --slot 1..9 ' +
-          'or --set <name>. Slot 0 is the shared baseline — use `ss stack cold-start` to reset it.',
+        'stack wipe pristine-resets isolated slots and requires an explicit --slot 1..9, ' +
+          '--slot all, or --set <name>. Slot 0 is the shared baseline — use `ss stack cold-start` to reset it.',
       );
     }
 
-    const profile = deriveInstance({ slot: flags.slot });
+    const profile = deriveInstance({ slot });
     // Mirror down/up's resolution: an EXPLICIT --state-dir wins (that's where up recorded
     // the pids), otherwise the slot's canonical /tmp/sds-synthetic-s<N>.
     const stateDir = flags['state-dir'] ?? profile.stateDir;
@@ -237,10 +326,159 @@ export default class StackWipe extends BaseCommand {
       for (const line of plan) this.log(line);
     }
 
+    const outcome = await this.teardownSlot(profile, stateDir, withSnapshots, flags, human, '');
+
+    this.emit(
+      flags,
+      { ...outcome },
+      `✓ slot ${profile.slot} wiped — ${profile.project} down -v'd, ${stateDir} removed` +
+        (withSnapshots ? ', snapshots removed.' : ' (snapshots kept).'),
+    );
+  }
+
+  /**
+   * `--slot all` (soa#351): sweep slots 1..9 and wipe every non-empty one. Candidacy is
+   * cheap and local — state dir on disk, live activity (the same probe `stack slots`
+   * trusts), or (only when they are in scope via `--snapshots`) a snapshot root. A
+   * live-claimed candidate is skipped with a warning rather than aborting the sweep;
+   * `--yes` includes it.
+   */
+  private async runAll(
+    flags: {
+      yes: boolean;
+      snapshots: boolean;
+      porcelain: boolean;
+      'output-json': boolean;
+      [k: string]: unknown;
+    },
+    dry: boolean,
+    human: boolean,
+  ): Promise<void> {
+    const remover = this.getSlotWipe();
+    const probe = this.getSlotActiveProbe();
+    const withSnapshots = flags.snapshots;
+
+    const candidates: InstanceProfile[] = [];
+    const skipped: { profile: InstanceProfile; prior: ClaimReadResult }[] = [];
+    for (let slot = 1; slot <= 9; slot++) {
+      const profile = deriveInstance({ slot });
+      const nonEmpty =
+        remover.exists(profile.stateDir) ||
+        (await probe.isActive(profile.stateDir, profile.project)) ||
+        (withSnapshots && profile.snapshotsDir !== undefined && remover.exists(profile.snapshotsDir));
+      if (!nonEmpty) continue;
+      const prior = this.priorClaims.get(profile.stateDir);
+      const foreignLive = prior !== undefined && prior.live && prior.claim.pid !== process.pid;
+      if (foreignLive && !flags.yes) {
+        skipped.push({ profile, prior });
+        continue;
+      }
+      candidates.push(profile);
+    }
+
+    const skipLine = ({ profile, prior }: { profile: InstanceProfile; prior: ClaimReadResult }): string =>
+      `slot ${profile.slot}: live-claimed by ${prior.claim.actor} (${relativeAge(prior.claim.at)} ago, ` +
+      `pid ${prior.claim.pid} still running) — skipped; pass --yes to include it.`;
+
+    if (candidates.length === 0) {
+      for (const s of skipped) this.warn(skipLine(s));
+      const message =
+        skipped.length === 0
+          ? '✓ nothing to wipe — no non-empty slots (1..9).'
+          : `✓ nothing wiped — ${skipped.length} non-empty slot(s) live-claimed (--yes includes them).`;
+      if (dry) {
+        this.log(message);
+        return;
+      }
+      this.emit(flags, { mode: 'all', wiped: [], skipped: skipped.map((s) => s.profile.slot) }, message);
+      return;
+    }
+
+    // ── the sweep enumeration: every candidate's full plan, then the skips ──
+    const header = dry
+      ? `▶ stack wipe DRY RUN — ALL non-empty slots (nothing will be changed):`
+      : `▶ stack wipe — ALL non-empty slots (pristine reset${flags.yes ? ', --yes' : ''}):`;
+    if (human || !flags.yes || dry) this.log(header);
+    for (const profile of candidates) {
+      this.log(`  slot ${profile.slot}:`);
+      const set = this.ownerSet(profile.slot);
+      for (const line of this.planLines(profile, profile.stateDir, withSnapshots, set)) this.log(line);
+    }
+    for (const s of skipped) {
+      if (dry) this.log(`  note: ${skipLine(s)}`);
+      else this.warn(skipLine(s));
+    }
+
+    if (dry) {
+      this.log('✓ wipe dry run complete — no changes made.');
+      return;
+    }
+
+    if (!flags.yes) {
+      const ok = await this.getConfirm().prompt(
+        `\n  This DESTROYS ${candidates.length} slot(s) (${candidates.map((p) => p.slot).join(', ')}): ` +
+          `containers, DB volumes, and run state${withSnapshots ? ' AND snapshots' : ''}. Continue? [y/N] `,
+      );
+      if (!ok) {
+        this.log('wipe aborted — nothing changed.');
+        return;
+      }
+    }
+
+    // Per-slot advisory claim (the central hook is suppressed in all-mode — it would
+    // resolve `all` to slot 0): written before each teardown so a failed wipe still
+    // records who attempted it; a successful one deletes it with the state dir.
+    const ctx = repoContextFromFlags(flags as unknown as Record<string, unknown>);
+    const repoRoots: Partial<Record<SetRepoKey, string>> = {};
+    for (const repo of SET_REPO_KEYS) repoRoots[repo] = resolveRepoRoot(REPO_ENV_VAR[repo], ctx);
+    const command = [this.config.bin, this.id, ...this.argv].join(' ');
+
+    const wiped: WipeOutcome[] = [];
+    for (const profile of candidates) {
+      await this.getClaimWriter().write({
+        slot: profile.slot,
+        stateDir: profile.stateDir,
+        command,
+        repoRoots,
+      });
+      wiped.push(
+        await this.teardownSlot(
+          profile,
+          profile.stateDir,
+          withSnapshots,
+          flags,
+          human,
+          `slot ${profile.slot} · `,
+        ),
+      );
+    }
+
+    this.emit(
+      flags,
+      { mode: 'all', wiped, skipped: skipped.map((s) => s.profile.slot) },
+      `✓ ${wiped.length} slot(s) wiped — ${wiped.map((w) => w.project).join(', ')} down -v'd, state dirs removed` +
+        (withSnapshots ? ', snapshots removed' : ' (snapshots kept)') +
+        (skipped.length > 0 ? `; ${skipped.length} live-claimed slot(s) skipped.` : '.'),
+    );
+  }
+
+  /**
+   * Steps a–d for ONE slot — the shared teardown behind both the single-slot path and
+   * the `--slot all` sweep. `tag` prefixes the human step lines (`''` single-slot,
+   * `slot <N> · ` in a sweep) so single-slot output stays byte-identical to soa#340.
+   */
+  private async teardownSlot(
+    profile: InstanceProfile,
+    stateDir: string,
+    withSnapshots: boolean,
+    flags: { [k: string]: unknown },
+    human: boolean,
+    tag: string,
+  ): Promise<WipeOutcome> {
     const total = withSnapshots ? 4 : 3;
 
     // ── (a) stop the slot's services natively (down's exact runtime path) ──
-    if (human) this.log(`▶ 1/${total} services — stop natives recorded under ${stateDir} (kill-by-pidfile)`);
+    if (human) this.log(`▶ ${tag}1/${total} services — stop natives recorded under ${stateDir} (kill-by-pidfile)`);
     const stopResults: StopServiceResult[] = await this.getServiceStopper()(stateDir);
     const stoppedList = stopResults.filter((s) => s.outcome === 'term' || s.outcome === 'kill');
     const survived = stopResults.filter((s) => s.outcome === 'alive');
@@ -265,7 +503,7 @@ export default class StackWipe extends BaseCommand {
 
     // ── (b) docker compose -p soa-s<N> down -v (containers + volumes) — the existing
     // project-scoped DockerWipe seam; NEVER systemPrune (host-global) from here. ──
-    if (human) this.log(`▶ 2/${total} docker — compose -p ${profile.project} down -v (containers + volumes)`);
+    if (human) this.log(`▶ ${tag}2/${total} docker — compose -p ${profile.project} down -v (containers + volumes)`);
     const ctx = repoContextFromFlags(flags as unknown as Record<string, unknown>);
     const soaRoot = resolveRepoRoot('SOA', ctx);
     const down = await this.getDockerWipe().composeDownVolumes({
@@ -283,7 +521,7 @@ export default class StackWipe extends BaseCommand {
     }
 
     // ── (c) rm -rf the slot's state dir (pids/logs/cookies/claim.json) ──
-    if (human) this.log(`▶ 3/${total} state — rm -rf ${stateDir}`);
+    if (human) this.log(`▶ ${tag}3/${total} state — rm -rf ${stateDir}`);
     const remover = this.getSlotWipe();
     const stateDirRemoved = remover.remove(stateDir);
     if (human) {
@@ -297,7 +535,7 @@ export default class StackWipe extends BaseCommand {
     // ── (d) --snapshots only: rm -rf ~/.saga-mesh/snapshots-s<N> (default keeps them) ──
     let snapshotsRemoved = false;
     if (withSnapshots && profile.snapshotsDir !== undefined) {
-      if (human) this.log(`▶ 4/${total} snapshots — rm -rf ${profile.snapshotsDir}`);
+      if (human) this.log(`▶ ${tag}4/${total} snapshots — rm -rf ${profile.snapshotsDir}`);
       snapshotsRemoved = remover.remove(profile.snapshotsDir);
       if (human) {
         this.log(
@@ -308,20 +546,15 @@ export default class StackWipe extends BaseCommand {
       }
     }
 
-    this.emit(
-      flags,
-      {
-        slot: profile.slot,
-        project: profile.project,
-        stateDir,
-        stopped: stoppedList.length,
-        volumesRemoved,
-        stateDirRemoved,
-        snapshotsRemoved,
-      },
-      `✓ slot ${profile.slot} wiped — ${profile.project} down -v'd, ${stateDir} removed` +
-        (withSnapshots ? ', snapshots removed.' : ' (snapshots kept).'),
-    );
+    return {
+      slot: profile.slot,
+      project: profile.project,
+      stateDir,
+      stopped: stoppedList.length,
+      volumesRemoved,
+      stateDirRemoved,
+      snapshotsRemoved,
+    };
   }
 
   /**

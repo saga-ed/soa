@@ -206,6 +206,10 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADM_ALLOW_ROSTER_MODE_OVERRIDE');
   });
 
+  it('connect-api: the sessions dial is adoption-guarded (a stale slot-0-dialing process is refused, not adopted)', () => {
+    expect(manifest.services['connect-api'].adoptEnv).toContain('SESSIONS_API_URL');
+  });
+
   it('ads-adm-api: the session-data provider is adoption-guarded (a stale legacy-provider process is refused, not adopted)', () => {
     expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADS_ADM_SESSION_DATA_PROVIDER');
     expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADS_ADM_MOCK_SESSION_DATA_ENABLED');
@@ -233,6 +237,9 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       // #222 port: dash joins the CORS allowlist; rtsm wired for private-convos.
       ALLOWED_ORIGINS: 'http://localhost:6210,http://localhost:8900',
       SESSIONS_API_BASE_URL: 'http://localhost:3007',
+      // soa#348: the WINNING config alias (qboard .env bakes the slot-0
+      // literal; real env must out-rank dotenv at every slot).
+      SESSIONS_API_URL: 'http://localhost:3007',
       SAGA_API_TARGET: 'https://wootmath.com',
       CONTENT_API_URL: 'http://localhost:3009',
       PUBLIC_API_URL: 'http://localhost:6106',

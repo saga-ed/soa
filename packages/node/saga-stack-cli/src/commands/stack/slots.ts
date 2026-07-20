@@ -28,6 +28,7 @@
  *   node bin/dev.js stack slots --output-json
  */
 
+import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { cyan, dim, yellow } from '../../color.js';
 import { deriveInstance } from '../../core/derive-instance.js';
@@ -55,11 +56,19 @@ export default class StackSlots extends BaseCommand {
 
   static examples = [
     '<%= config.bin %> <%= command.id %>',
+    '<%= config.bin %> <%= command.id %> --porcelain',
     '<%= config.bin %> <%= command.id %> --output-json',
   ];
 
   static flags = {
     ...BaseCommand.baseFlags,
+    // Same universal flag, slots-specific help: document THIS command's TSV shape.
+    porcelain: Flags.boolean({
+      description:
+        'machine-readable TSV, one line per row-worthy slot (active, claimed, or set-bound): ' +
+        'slot ⇥ active|- ⇥ set|- ⇥ actor|- ⇥ live|stale|- ⇥ at (ISO-8601)',
+      default: false,
+    }),
   };
 
   /** Accepting --slot is harmless — the report ALWAYS covers all slots 0-9. */
@@ -204,32 +213,66 @@ export default class StackSlots extends BaseCommand {
 
     const setW = Math.max(3, ...rows.map((r) => (r.set?.name ?? '—').length));
     const actorW = Math.max(5, ...rows.map((r) => actorText(r).length));
-    this.log(`SLOT  ACTIVE  ${'SET'.padEnd(setW)}  ${'ACTOR'.padEnd(actorW)}  SINCE`);
-    this.log('─'.repeat(setW + actorW + 40));
-    for (const r of rows) {
+    const header = `SLOT  ACTIVE  ${'SET'.padEnd(setW)}  ${'ACTOR'.padEnd(actorW)}  LAST DRIVEN`;
+    this.log(header);
+    this.log('─'.repeat(header.length));
+    const now = Date.now();
+    rows.forEach((r, i) => {
+      if (i > 0) this.log(''); // one blank line between slot blocks
       this.log(
         `${String(r.slot).padEnd(4)}  ${(r.active ? '● up' : '—').padEnd(6)}  ` +
-          `${(r.set?.name ?? '—').padEnd(setW)}  ${renderActor(r, actorW)}  ${r.claim?.claim.at ?? '—'}`,
+          `${(r.set?.name ?? '—').padEnd(setW)}  ${renderActor(r, actorW)}  ` +
+          `${r.claim === null ? '—' : relativeAge(r.claim.claim.at, now)}`,
       );
       if (r.postureSkipped !== undefined) this.log(dim(`      · posture: ${r.postureSkipped}`));
+      // Pad branches per slot so the annotation column aligns down the block.
+      const branchW = Math.max(
+        0,
+        ...r.posture.filter((p) => p.notCheckout !== true).map((p) => p.branch.length),
+      );
       for (const p of r.posture) {
         if (p.notCheckout === true) {
-          this.log(`      ${p.repo.padEnd(12)} ${yellow('(not a git checkout)')}`);
+          this.log(`      ${p.repo.padEnd(12)} ${yellow('not a git checkout')}`);
           continue;
         }
-        const dirtiness = p.dirty ? yellow('(dirty)') : dim('(clean)');
-        const behind =
-          p.behind !== null && p.behind > 0
-            ? `  ${yellow(`[⚠ behind ${p.mainRef} by ${p.behind}]`)}`
-            : '';
-        const drifted = p.driftedSinceLaunch ? `  ${yellow('⚠ drifted since launch')}` : '';
-        this.log(`      ${p.repo.padEnd(12)} @ ${cyan(p.branch)}  ${dirtiness}${behind}${drifted}`);
+        const notes = [
+          p.dirty ? yellow('dirty') : dim('clean'),
+          ...(p.behind !== null && p.behind > 0 ? [yellow(`behind by ${p.behind}`)] : []),
+          ...(p.driftedSinceLaunch ? [yellow('⚠ drifted since launch')] : []),
+        ];
+        this.log(`      ${p.repo.padEnd(12)} @ ${cyan(p.branch.padEnd(branchW))}   ${notes.join('  ')}`);
       }
-    }
+    });
     if (unused.length > 0) {
-      this.log(dim(`slots ${unused.join(', ')}: unused — no live activity, no claim, no set`));
+      if (rows.length > 0) this.log('');
+      this.log(dim(`slot${unused.length === 1 ? '' : 's'} ${collapseRuns(unused)}: unused`));
     }
   }
+}
+
+/** Human age of an ISO timestamp ("2h ago"); the raw string when unparseable. */
+function relativeAge(at: string, now: number): string {
+  const t = Date.parse(at);
+  if (!Number.isFinite(t)) return at;
+  const s = Math.max(0, Math.floor((now - t) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+/** Collapse sorted slot numbers into range text: [1, 3, 5, 6, 7] → "1, 3, 5-7". */
+function collapseRuns(slots: number[]): string {
+  const parts: string[] = [];
+  for (let i = 0; i < slots.length; ) {
+    let j = i;
+    while (j + 1 < slots.length && slots[j + 1] === (slots[j] ?? Number.NaN) + 1) j++;
+    parts.push(i === j ? String(slots[i]) : `${slots[i]}-${slots[j]}`);
+    i = j + 1;
+  }
+  return parts.join(', ');
 }
 
 /** One per-repo posture reading for an active slot (set/show's currency recipe). */

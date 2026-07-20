@@ -170,6 +170,15 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   it('ads-adm-api (tokenized env resolves to exactly up.sh literals at base ports, + PROGRAMS_API_CLIENT_BASEURL)', () => {
     expect(env('ads-adm-api')).toEqual({
       ADS_ADM_SCHEDULE_PROVIDER: 'program-hub',
+      // NOT an up.sh literal — session layer via sessions-api (sds e693d82);
+      // the legacy program-hub provider's ars bridge never runs in the mesh,
+      // so without this live SESSION rows lose their SLS linkage and render
+      // ungrouped (saga-dash gh_560 manual pass).
+      ADS_ADM_SESSION_DATA_PROVIDER: 'sessions-api',
+      // Companion gate: the mock policy provider's per-program
+      // sessionDataEnabled default is false — without this the collator
+      // ignores the session layer regardless of the provider binding.
+      ADS_ADM_MOCK_SESSION_DATA_ENABLED: 'true',
       SESSIONS_API_CLIENT_BASEURL: 'http://localhost:3007',
       // NOT an up.sh literal — a deliberate post-up.sh addition (sds#275). ads-adm
       // resolves program display names from programs-api because sessions-api
@@ -191,6 +200,15 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       CORS_ORIGIN: 'http://localhost:8900',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
     });
+  });
+
+  it('ads-adm-api: the override gate is adoption-guarded (a stale gate-less process is refused, not adopted)', () => {
+    expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADM_ALLOW_ROSTER_MODE_OVERRIDE');
+  });
+
+  it('ads-adm-api: the session-data provider is adoption-guarded (a stale legacy-provider process is refused, not adopted)', () => {
+    expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADS_ADM_SESSION_DATA_PROVIDER');
+    expect(manifest.services['ads-adm-api'].adoptEnv).toContain('ADS_ADM_MOCK_SESSION_DATA_ENABLED');
   });
 
   it('saga-dash', () => {

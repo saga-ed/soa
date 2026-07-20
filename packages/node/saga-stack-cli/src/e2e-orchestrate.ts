@@ -71,6 +71,7 @@ import {
 import type {
   CoachWebFs,
   DashFs,
+  GitRunner,
   HealthProber,
   MeshExec,
   PgProbe,
@@ -884,8 +885,11 @@ export function tunnelAuthMisconfigMessage(email: string, iamUrl: string): strin
  * Callers gate on `deps.tunnelDomain !== undefined`; a flow with no declared
  * personas skips with a warning (nothing trustworthy to probe — the seed-alias
  * personas exist even in torn dumps).
+ *
+ * EXPORTED (soa#329): `develop connect --bootstrap` runs the SAME probe as its
+ * phase-2 'persona-preflight' step, right after the tunnel-connect restore.
  */
-async function tunnelPersonaPreflight(flow: FlowDef, deps: ExecDeps): Promise<void> {
+export async function tunnelPersonaPreflight(flow: FlowDef, deps: ExecDeps): Promise<void> {
   const domain = deps.tunnelDomain as string;
   const personas = flow.settlePersonas ?? [];
   if (personas.length === 0) {
@@ -1346,5 +1350,53 @@ export async function executeResolvedFlow(
     }
   }
   return 0;
+}
+
+/**
+ * The `--refresh-snapshot` prerequisite bake, shared by the develop concierges
+ * (`connect`, `session-adm`): a headless stage-by-stage replay of the flow's
+ * prerequisite with `--snapshot-stages`, so the just-made checkpoint is what the
+ * main run restores. ONE copy on purpose — the two commands' near-verbatim
+ * twins drifted apart in review (soa session-adm fix pass), and the SETTLE
+ * BARRIER is REQUIRED in the deps type so dropping it (the soa#327 torn-
+ * checkpoint regression) fails typecheck, not a demo.
+ *
+ * The bake stamps the SPA checkout HEAD (M14 §2.3, advisory) so a later restore
+ * can WARN on drift; a '' sha (not a git checkout) omits the stamp. `deps` must
+ * carry the SAME slot-offset `ports` as the caller's main run — a bake driven
+ * against the base iam would bake slot-0 data into the slot-N checkpoint root.
+ * `io.fail` is the caller's `this.error` (returns never); a non-FlowExecError
+ * rethrows untouched.
+ */
+export async function bakePrerequisiteCheckpoints(
+  prereq: ResolvedFlow,
+  spaAppDir: string,
+  deps: ExecDeps & { settleBarrier: SettleBarrier },
+  io: { git: GitRunner; log: (line: string) => void; fail: (msg: string) => never },
+): Promise<void> {
+  // M14 §2.3 (advisory): stamp the SPA checkout HEAD into the bake so a later
+  // restore can WARN on drift. '' sha (not a git checkout) ⇒ omitted.
+  let spaHead: { sha: string; dirty: boolean } | undefined;
+  const spaRepoRoot = deps.appCwd.slice(0, deps.appCwd.length - spaAppDir.length - 1);
+  const sha = await io.git.headSha(spaRepoRoot);
+  if (sha !== '') spaHead = { sha, dirty: (await io.git.statusPorcelain(spaRepoRoot)).trim() !== '' };
+
+  io.log(
+    `==> refresh-snapshot: baking ${prereq.flow.name}@${prereq.stages.at(-1)?.id} checkpoints (headless replay, --snapshot-stages)…`,
+  );
+  try {
+    const bakeCode = await executeResolvedFlow(prereq, deps, {
+      lane: 'stack',
+      skipReset: false,
+      passthrough: [],
+      snapshotStages: true,
+      prereqFromSnapshot: false,
+      spaHead,
+    });
+    if (bakeCode !== 0) io.fail(`--refresh-snapshot: prerequisite bake failed (exit ${bakeCode}).`);
+  } catch (err) {
+    if (err instanceof FlowExecError) io.fail(`--refresh-snapshot: ${err.message}`);
+    throw err;
+  }
 }
 

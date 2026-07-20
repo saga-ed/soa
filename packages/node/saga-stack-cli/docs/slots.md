@@ -118,18 +118,21 @@ ss stack slots --porcelain       # one TSV line per row-worthy slot (active, cla
 ss stack slots --output-json     # full claim + per-repo posture detail
 ```
 
-<details><summary>Columns SLOT · ACTIVE · SET · ACTOR · SINCE, per-repo posture under active slots, unused slots collapsed</summary>
+<details><summary>Columns SLOT · ACTIVE · SET · ACTOR · LAST DRIVEN (relative age), per-repo posture under active slots, unused slots collapsed</summary>
 
 ```
-SLOT  ACTIVE  SET          ACTOR                          SINCE
-──────────────────────────────────────────────────────────────────────────────
-0     ● up    —            skelly@devbox:pts/4            2026-07-16T09:12:31Z
-      soa          @ main  (clean)
-      saga-dash    @ main  (dirty)
-1     ● up    journey-fix  claude:41234                   2026-07-16T10:02:07Z
-      saga-dash    @ feat/journey-weekends  (clean)  ⚠ drifted since launch
-2     —       —            coach-aug3-training (stale)    2026-07-15T18:40:11Z
-slots 3, 4, 5, 6, 7, 8, 9: unused — no live activity, no claim, no set
+SLOT  ACTIVE  SET          ACTOR                        LAST DRIVEN
+───────────────────────────────────────────────────────────────────
+0     ● up    —            skelly@devbox:pts/4          2h ago
+      soa          @ main   clean
+      saga-dash    @ main   dirty  behind by 2
+
+1     ● up    journey-fix  claude:41234                 45m ago
+      saga-dash    @ feat/journey-weekends   clean  ⚠ drifted since launch
+
+2     —       —            coach-aug3-training (stale)  1d ago
+
+slots 3-9: unused
 ```
 
 A slot earns a row when it's **active, claimed, or set-bound**; the rest collapse into one

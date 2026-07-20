@@ -10,7 +10,7 @@ It is the sibling of [`ss e2e …`](./e2e.md), and the two split by intent:
 
 | Topic | Intent | Commands |
 | --- | --- | --- |
-| **`develop`** | **set up + hand off** a developable stack for an app/workflow | `connect`, `coach` (more coming) |
+| **`develop`** | **set up + hand off** a developable stack for an app/workflow | `connect`, `coach`, `session-adm` (more coming) |
 | **`e2e`** | **run test flows** (assertions, CI, traces) against a stack | `run`, `list`, `traces` |
 
 Reach for `develop` when you want to *use* the app; reach for `e2e` when you want to
@@ -47,6 +47,18 @@ ss develop connect --refresh-snapshot   # rebake the journey prerequisite, then 
   `--student-login <0-2>` leaves some students OPEN for remote peers to take — pair with
   `--tunnel` to invite coworkers. → [tunnel.md](./tunnel.md)
 - Anything after `--` passes straight through to Playwright.
+
+### Deprecation note: `e2e connect` → `develop connect`
+
+`connect` moved from the `e2e` topic to `develop` (dev-setup, not a test flow). The old id
+still works for one cycle via a deprecating alias — `ss e2e connect` dispatches to
+`ss develop connect` and prints:
+
+```
+The "e2e connect" command has been deprecated. Use "develop connect" instead.
+```
+
+Update scripts to `ss develop connect`; the alias is removed in a later release.
 
 ## `develop coach` — a running, logged-in coach
 
@@ -86,16 +98,49 @@ ss develop coach --reuse -- --debug       # against the current stack, playwrigh
 > Requires the `COACH` repo checked out (`$COACH` / `--coach`). coach-web signs in against the local
 > iam via the soa#300 manifest wiring (`PUBLIC_IAM_API_URL` + iam CORS), landed with this topic.
 
-### Deprecation note: `e2e connect` → `develop connect`
+## `develop session-adm` — the live SESSION-attendance ADM demo
 
-`connect` moved from the `e2e` topic to `develop` (dev-setup, not a test flow). The old id
-still works for one cycle via a deprecating alias — `ss e2e connect` dispatches to
-`ss develop connect` and prints:
-
-```
-The "e2e connect" command has been deprecated. Use "develop connect" instead.
+```bash
+ss develop session-adm
 ```
 
-Update scripts to `ss develop connect`; the alias is removed in a later release.
+The 3-student staggered self-report demo as one durable command (promoted from saga-dash's
+`telemetry-demo-multi.sh`): a tutor + Alex's 3 pod-A students (`ann.lee` / `cara.diaz` /
+`gina.park`) join a real Connect room **staggered 15s apart**, each running the real
+connectv3 `SessionHeartbeat`; ads-adm accrues **TELEMETRY dosage** live; closing one
+student's window freezes **only that** counter. The command: `stack down` → relaunch with
+the demo env (live dash polling + 3s heartbeat; the `ADS_ADM_*` session-source gates are
+baked into the manifest since soa#346) → journey@attendance prerequisite (checkpoint
+restore when baked) → **auto-open a logged-in admin browser** at
+`/dashboard/attendance?mode=session` (as `empty@saga.org`; `$ADMIN_EMAIL` overrides) →
+the held headed demo. The admin dash opens **before** the students join — the demo's
+pre-join hold exists so you watch the counters climb from zero. Pick
+**"E2E Journey Program"** in the dash. Resume (▶) in the Playwright Inspector ends the
+run; the stack stays up (`ss stack down` when done).
+
+```bash
+ss develop session-adm                       # full: down → demo env → prereq → admin dash → held demo
+ss develop session-adm --reuse --no-admin    # against the current stack, no admin browser
+ss develop session-adm --stagger-ms 6000     # faster joins (DEMO_STAGGER_MS)
+ss develop session-adm --refresh-snapshot    # rebake journey@attendance, then run the demo
+```
+
+- `--no-admin` skips the admin browser and prints the manual login one-liner (script parity;
+  at `--slot N` the one-liner carries `--slot N` so the jar mints against the right iam).
+- `--no-hold` drops `DEMO_HOLD` (no pre-join pause, no Inspector hold) — a straight-through
+  run; the auto-opened admin browser is closed at the end instead of holding the terminal.
+- `--stagger-ms <n>` pins `DEMO_STAGGER_MS` (default **15000** — pinned explicitly; the spec's
+  own fallback is 6s).
+- `--reuse` skips the down + prerequisite + reset. **Caveat:** the demo VITE env only reaches
+  services *this run launches* — an already-up saga-dash/connect-web keeps its stale env, so
+  `--reuse` presumes a previous `session-adm` bring-up.
+- `--refresh-snapshot` / `--` passthrough: as `develop connect`. Media is **always synthetic**:
+  the demo's Playwright project hardcodes Chromium's fake cam/mic (+ mute) in its
+  launchOptions, so a camera-less box needs nothing — `--fake-media` is accepted as a no-op
+  for family muscle-memory only (unlike `connect`, nothing here reads `FAKE_MEDIA`).
+- **AV stays on slot 0**: `--slot N` runs all non-AV mechanics on slot N, but LiveKit/coturn
+  are the shared slot-0 containers (started by `ss stack up`, not this command) — without them
+  heartbeats never start and dosage never lands. Multi-only v1: the single-student sibling
+  stays reachable via `ss e2e run saga-dash/connect-session-dosage`.
 
 ← [snapshots](./snapshots.md) · [e2e](./e2e.md) · [integration →](./integration.md)

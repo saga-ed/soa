@@ -483,6 +483,14 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // the one cross-slot literal that made connect-api un-slottable; the
         // remaining literals (livekit/FLEEK ws:7880) are AV and stay slot-0-pinned.
         SESSIONS_API_BASE_URL: 'http://localhost:${SESSIONS_PORT}',
+        // soa#348: SESSIONS_API_URL is the WINNING alias in connectv3-api's
+        // config (SESSIONS_API_URL || SESSIONS_API_BASE_URL), and the qboard
+        // repo .env bakes it to the slot-0 literal :3007. dotenv never
+        // overrides real env — so set the winner here too, or every slot>0
+        // connect-api silently dials slot-0 sessions-api, whose iam keys
+        // reject the other slot's JWTs ("Authentication required to view a
+        // session" on every telemetry ping; no dosage accrues off slot 0).
+        SESSIONS_API_URL: 'http://localhost:${SESSIONS_PORT}',
         SAGA_API_TARGET: '${SAGA_API_TARGET}',
         CONTENT_API_URL: '${CONTENT_API_URL}',
         PUBLIC_API_URL: '${CONNECT_API_URL}',
@@ -505,6 +513,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'connect-api',
     isFrontend: false,
     optional: false,
+    // soa#348 adoption guard (soa#305 pattern): a connect-api launched before
+    // SESSIONS_API_URL was stamped dials slot-0 sessions via the .env alias —
+    // refuse to adopt it so slot>0 telemetry can't silently mis-dial.
+    adoptEnv: ['SESSIONS_API_URL'],
   },
   'connect-web': {
     id: 'connect-web',

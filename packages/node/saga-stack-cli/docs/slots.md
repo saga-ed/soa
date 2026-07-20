@@ -74,6 +74,8 @@ ss stack wipe --slot 3              # prompts, enumerating exactly what dies
 ss stack wipe --set journey-fix --yes   # non-interactive; the set's slot
 ss stack wipe --slot 3 --dry-run    # the same enumeration; changes nothing
 ss stack wipe --slot 3 --snapshots --yes  # also remove ~/.saga-mesh/snapshots-s3
+ss stack wipe --slot all --dry-run  # enumerate EVERY non-empty slot 1..9
+ss stack wipe --slot all --yes      # wipe them all in one sweep
 ```
 
 <details><summary>✓ slot 3 wiped — containers + volumes + state dir gone; snapshots and worktrees kept</summary>
@@ -105,6 +107,14 @@ Notes:
 - `--dry-run` prints the same enumeration and exits 0 without writing a claim;
   `--output-json` reports `{slot, project, stateDir, stopped, volumesRemoved,
   stateDirRemoved, snapshotsRemoved}`.
+- **`--slot all` sweeps slots 1–9.** A slot is a candidate iff it left something behind:
+  its state dir exists, it is live (pids/containers), or — only under `--snapshots` —
+  its snapshot root exists. Slot 0 is never a candidate. A **live-claimed** candidate is
+  *skipped with a warning* instead of aborting the sweep; `--yes` includes it. `--set`
+  and `--state-dir` are ambiguous with `all` and rejected. One confirmation covers the
+  whole sweep, and each wiped slot gets its own advisory claim (a failed wipe still
+  records who attempted it). `--output-json` reports `{mode: "all", wiped: [...per-slot
+  records], skipped: [...slot numbers]}`.
 
 ## Who's on what slot — `ss stack slots` and claim files
 

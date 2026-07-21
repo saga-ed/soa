@@ -14,10 +14,19 @@ import { generate_compose } from './compose-generator.js';
 import { allocate_port, register_port, release_port, get_allocated_ports } from './ports.js';
 import { create_volume, attach_and_mount, cleanup_volume, get_instance_metadata } from './volumes.js';
 import { register, deregister } from './cloudmap.js';
-import { snapshot_db, download_profile_seed, seed_after_start, list_s3_profiles, read_profile_registry, write_active_profile } from './profiles.js';
+import { snapshot_db, download_profile_seed, seed_after_start, list_s3_profiles, read_profile_registry, write_active_profile, check_schema_rev_gate } from './profiles.js';
 
 const SEEDS_BASE = '/mnt/seeds';
 const SEED_BUCKET = process.env.SEED_BUCKET || 'saga-db-seeds-dev';
+
+// v1 refuse-loudly gate (default OFF). 'off' never gates; 'warn' logs the
+// verdict and always proceeds; 'enforce' refuses on no-sidecar/ahead/behind.
+// Read live (not cached at module load) so it can be toggled without a
+// restart in tests and, if ever needed, via a config reload. See profiles.js
+// check_schema_rev_gate and services/switchboard/docs/snapshot-schema-versioning.md.
+function schema_gate_mode() {
+    return process.env.SNAPSHOT_SCHEMA_GATE || 'off';
+}
 
 function sync_seeds(name) {
     const seeds_dir = resolve(SEEDS_BASE, name);
@@ -743,6 +752,47 @@ export function create_ec2_router(config = {}) {
             const project_dir = resolve(projects_dir, name);
             if (!existsSync(project_dir)) {
                 return res.status(404).json({ ok: false, error: `Project ${name} not found` });
+            }
+
+            // Schema-rev compatibility gate — postgres only (see profiles.js
+            // check_schema_rev_gate). Runs BEFORE anything is stopped/wiped so an
+            // enforce-mode refusal never touches the live container. Every
+            // evaluation (including proceed cases) is logged as one structured
+            // line carrying the same fields the response would carry on refusal.
+            if (entry.engine === 'postgres') {
+                const config_before = get_compose_config(projects_dir, name, entry.engine);
+                const db_name_before = get_db_name(projects_dir, name, entry.engine);
+                const container_before = spawnSync('docker', ['compose', 'ps', '--format', '{{.Name}}'], {
+                    cwd: project_dir, encoding: 'utf8', stdio: 'pipe',
+                }).stdout.trim().split('\n')[0] || name;
+
+                const gate = check_schema_rev_gate({
+                    name,
+                    profile,
+                    bucket: SEED_BUCKET,
+                    source_name: seedFrom,
+                    mode: schema_gate_mode(),
+                    container: container_before,
+                    db_name: db_name_before,
+                    db_user: config_before.user,
+                });
+
+                console.log(
+                    `schema-gate: ${action} ${name} profile=${profile} verdict=${gate.verdict} ` +
+                    `snapshotSchemaRev=${gate.snapshotSchemaRev} dbSchemaRev=${gate.dbSchemaRev} ` +
+                    `gateMode=${gate.gateMode} refuse=${gate.refuse} — ${gate.message}`,
+                );
+
+                if (gate.refuse) {
+                    return res.status(409).json({
+                        ok: false,
+                        error: gate.message,
+                        verdict: gate.verdict,
+                        snapshotSchemaRev: gate.snapshotSchemaRev,
+                        dbSchemaRev: gate.dbSchemaRev,
+                        gateMode: gate.gateMode,
+                    });
+                }
             }
 
             // Stop container

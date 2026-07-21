@@ -89,6 +89,18 @@ never both stored-and-owned and contextually-injected without that being an expl
 - One object identity per real-world entity (a rostering group is `group:<id>` — no parallel
   scope-type shadows).
 
+### 5. The ADR-0005 worker converges into this design — it is not removed on merge
+
+The concrete instance of "the ADR-0005 sync worker" is the **live** `authz-sync` service
+(rostering `apps/node/authz-sync`, in dev + prod today), the sole writer of the shared
+`/openfga/<env>/main` store, consumed only by iam-api's staff-plane gates. This ADR *supersedes its
+mechanism* but does not retire the running service: its staff-role facts become **authored-in
+delegation grants** (§2) and its group-membership / district-org facts become **ingest-API domain
+facts** (§3), exactly the two paths above. The full sunset criteria — the five iam-api gates to
+re-point, staff-plane parity, no-other-reader verification, and the SEC-CRIT-2 re-assertion — live
+in the north star's **§8 (single source of truth; not duplicated here)**. Until those hold,
+`authz-sync` is a *named transitional coexistence*, not an accepted second authz brain.
+
 ## Consequences
 
 **Positive:** the revocation-resurrection/backfill/reconcile failure class is closed by

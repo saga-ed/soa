@@ -24,7 +24,7 @@ let sidecarCpResult = { status: 0, stdout: '', stderr: '' };
 let revQueryResult = { status: 0, stdout: '20260603120000_add_session_index\n', stderr: '' };
 
 function isSidecarCp(cmd, args) {
-    return cmd === 'aws' && args[0] === 's3' && args[1] === 'cp' && args[2].endsWith('.meta.json');
+    return cmd === 'aws' && args[0] === 's3' && args[1] === 'cp' && args[3] === '-';
 }
 function isRevQuery(cmd, args) {
     return cmd === 'docker' && args[0] === 'exec' && args.includes('psql')
@@ -53,31 +53,14 @@ vi.mock('child_process', () => ({
     spawn: vi.fn(),
 }));
 
-let sidecarFileContent = null;
-vi.mock('fs', async (importOriginal) => {
-    const actual = await importOriginal();
-    return {
-        ...actual,
-        readFileSync: vi.fn((path, ...rest) => {
-            if (typeof path === 'string' && path.includes('schema-gate-') && path.endsWith('.meta.json')) {
-                if (sidecarFileContent === null) throw new Error('ENOENT (test stub)');
-                return sidecarFileContent;
-            }
-            return actual.readFileSync(path, ...rest);
-        }),
-    };
-});
-
 import { create_ec2_router } from '../../src/ec2/ec2-router.js';
 import { download_profile_seed } from '../../src/ec2/profiles.js';
 
 function setSidecar(schemaRev) {
-    sidecarCpResult = { status: 0, stdout: '', stderr: '' };
-    sidecarFileContent = JSON.stringify({ schemaRev });
+    sidecarCpResult = { status: 0, stdout: JSON.stringify({ schemaRev }), stderr: '' };
 }
 function setNoSidecar() {
     sidecarCpResult = { status: 1, stdout: '', stderr: 'NoSuchKey' };
-    sidecarFileContent = null;
 }
 function setDbHead(rev) {
     revQueryResult = rev === null

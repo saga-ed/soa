@@ -326,16 +326,19 @@ export function check_schema_rev_gate({ name, profile, bucket, source_name, mode
     const object_stem = at ? `profile-${base_profile}-v${at[2]}` : `profile-${base_profile}`;
     const meta_s3_path = `s3://${bucket}/${src}/${object_stem}.meta.json`;
 
-    // Fetch the sidecar to a scratch path; a non-zero exit (key missing, or any
-    // other S3 error) is read as "no sidecar" — the gate degrades safely rather
-    // than throwing, matching the spec's "Missing sidecar" verdict.
-    const meta_tmp = `/tmp/schema-gate-${name}-${process.pid}.meta.json`;
-    const dl = spawnSync('aws', ['s3', 'cp', meta_s3_path, meta_tmp], { encoding: 'utf8', stdio: 'pipe' });
+    // Fetch the sidecar straight to stdout (`aws s3 cp <src> -`) rather than a
+    // /tmp scratch file: this runs in a long-lived server process (stable
+    // pid), so a per-call tmp file would never get cleaned up and would
+    // accumulate one per distinct db name forever. A non-zero exit (key
+    // missing, or any other S3 error) is read as "no sidecar" — the gate
+    // degrades safely rather than throwing, matching the spec's "Missing
+    // sidecar" verdict.
+    const dl = spawnSync('aws', ['s3', 'cp', meta_s3_path, '-'], { encoding: 'utf8', stdio: 'pipe' });
 
     let sidecar_schema_rev = null;
     if (dl.status === 0) {
         try {
-            const meta = JSON.parse(readFileSync(meta_tmp, 'utf8'));
+            const meta = JSON.parse(dl.stdout);
             sidecar_schema_rev = meta.schemaRev ?? null; // null schemaRev in sidecar -> treated like no-sidecar below
         } catch {
             sidecar_schema_rev = null;

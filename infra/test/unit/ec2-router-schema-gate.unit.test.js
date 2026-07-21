@@ -124,12 +124,14 @@ describe('POST /dbs/:name/restore — schemaRev compatibility gate', () => {
         rmSync(data_dir, { recursive: true, force: true });
     });
 
-    it('default mode (off): proceeds and never 409s even on an ahead sidecar', async () => {
+    it('default mode (off): skips gate evaluation entirely — no sidecar fetch, proceeds', async () => {
         setSidecar('20260701000000_later_migration');
         const { status, data } = await api(test_server.base_url, 'POST', `/dbs/${name}/restore`, { profile: 'canonical' });
         expect(status).toBe(200);
         expect(data.ok).toBe(true);
         expect(download_profile_seed).toHaveBeenCalled();
+        // off = disabled, not shadow mode: the sidecar must never even be fetched
+        expect(spawnSync_calls.some(([cmd, args]) => isSidecarCp(cmd, args))).toBe(false);
     });
 
     it('enforce: 409s with structured body on a missing sidecar, and never calls download_profile_seed', async () => {

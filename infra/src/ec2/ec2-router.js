@@ -755,11 +755,16 @@ export function create_ec2_router(config = {}) {
             }
 
             // Schema-rev compatibility gate — postgres only (see profiles.js
-            // check_schema_rev_gate). Runs BEFORE anything is stopped/wiped so an
-            // enforce-mode refusal never touches the live container. Every
-            // evaluation (including proceed cases) is logged as one structured
-            // line carrying the same fields the response would carry on refusal.
-            if (entry.engine === 'postgres') {
+            // check_schema_rev_gate). `off` (the default) skips evaluation
+            // entirely: no S3 sidecar fetch, no docker calls, no added latency
+            // or failure surface while the gate is disabled — shadow visibility
+            // is what `warn` is for. In warn/enforce the gate runs BEFORE
+            // anything is stopped/wiped so an enforce-mode refusal never
+            // touches the live container. Every evaluation (including proceed
+            // cases) is logged as one structured line carrying the same fields
+            // the response would carry on refusal.
+            const gate_mode = schema_gate_mode();
+            if (entry.engine === 'postgres' && gate_mode !== 'off') {
                 const config_before = get_compose_config(projects_dir, name, entry.engine);
                 const db_name_before = get_db_name(projects_dir, name, entry.engine);
                 const container_before = spawnSync('docker', ['compose', 'ps', '--format', '{{.Name}}'], {
@@ -771,7 +776,7 @@ export function create_ec2_router(config = {}) {
                     profile,
                     bucket: SEED_BUCKET,
                     source_name: seedFrom,
-                    mode: schema_gate_mode(),
+                    mode: gate_mode,
                     container: container_before,
                     db_name: db_name_before,
                     db_user: config_before.user,

@@ -69,7 +69,6 @@ import {
   makeRealJarWriter,
   makeRealLauncher,
   makeRealMeshExec,
-  makeRealOrphanScanner,
   makeRealPgProbe,
   makeRealOverlayFs,
   makeRealPortProbe,
@@ -115,7 +114,6 @@ import type {
   JarWriter,
   LockHolder,
   MeshExec,
-  OrphanScanner,
   OverlayFs,
   PgProbe,
   PortProbe,
@@ -490,16 +488,6 @@ export abstract class BaseCommand extends Command {
    */
   protected getServiceStopper(): ServiceStopper {
     return (stateDir: string) => stopServices(stateDir);
-  }
-
-  /**
-   * The post-down orphan-audit seam (saga-ed/soa#249) — production is the ONLY
-   * place `ss -lptnH` / `lsof` run to find sockets still LISTENing on the slot's
-   * resolved service-port band after a teardown. `down` uses it to turn a
-   * silently-surviving watch child (a stale-build server) into a loud warning.
-   */
-  protected getOrphanScanner(): OrphanScanner {
-    return makeRealOrphanScanner();
   }
 
   /**

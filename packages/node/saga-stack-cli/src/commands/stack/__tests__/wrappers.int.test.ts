@@ -24,8 +24,12 @@ import { resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
+import { foreignCheckTargets } from '../../../core/foreign-procs.js';
+import { manifest } from '../../../core/manifest/index.js';
 import type {
-  OrphanListener,
+  FindForeignOptions,
+  ForeignProc,
+  ReapedProc,
   RunResult,
   ScriptInvocation,
   StopServiceResult,
@@ -83,22 +87,37 @@ function installFakeStopper(result: StopServiceResult[]): { stopCalls: string[] 
 }
 
 /**
- * Install a fake post-down orphan scanner on the BaseCommand prototype
- * (saga-ed/soa#249). Records the port band each audit scanned and returns the
- * canned survivors — so no real `ss`/`lsof` ever runs under test.
+ * Install a fake post-down foreign-process reap (saga-ed/soa#249, soa#361) on the
+ * BaseCommand prototype: `find` records each call's options (the resolved band is
+ * `foreignCheckTargets(manifest, opts.services, opts.portOverrides)`) and returns the
+ * canned survivors; `reap` records what it was asked to kill and reports each
+ * `killed` per the predicate. No real `lsof`/`ss`/`ps`/kill ever runs under test.
  */
-function installFakeScanner(survivors: OrphanListener[]): { scanCalls: number[][] } {
-  const scanCalls: number[][] = [];
+function installFakeForeignProcs(
+  survivors: ForeignProc[],
+  killed: (f: ForeignProc) => boolean = () => true,
+): { findOpts: FindForeignOptions[]; reapCalls: ForeignProc[][] } {
+  const findOpts: FindForeignOptions[] = [];
+  const reapCalls: ForeignProc[][] = [];
   vi.spyOn(
-    BaseCommand.prototype as unknown as { getOrphanScanner: () => unknown },
-    'getOrphanScanner',
+    BaseCommand.prototype as unknown as { getForeignProcs: () => unknown },
+    'getForeignProcs',
   ).mockReturnValue({
-    async scan(ports: number[]): Promise<OrphanListener[]> {
-      scanCalls.push(ports);
+    async find(opts: FindForeignOptions): Promise<ForeignProc[]> {
+      findOpts.push(opts);
       return survivors;
     },
+    async reap(foreign: ForeignProc[]): Promise<ReapedProc[]> {
+      reapCalls.push(foreign);
+      return foreign.map((f) => ({ ...f, killed: killed(f) }));
+    },
   });
-  return { scanCalls };
+  return { findOpts, reapCalls };
+}
+
+/** The resolved port band a recorded `find` scanned (services × slot port overrides). */
+function bandOf(opts: FindForeignOptions): number[] {
+  return foreignCheckTargets(manifest, opts.services, opts.portOverrides).map((t) => t.port);
 }
 
 /** Capture (and suppress) every `this.log` line — the audit warnings assert on these. */
@@ -162,11 +181,11 @@ describe('stack up — FULLY NATIVE (Phase 2: --sandbox/--tunnel/--record/--work
 describe('stack down — native slot-safe teardown at every slot (no up.sh)', () => {
   const INFRA_DIR = resolve(SOA_ROOT, 'infra');
 
-  // Every down run performs the post-down orphan audit (saga-ed/soa#249); fake
-  // it CLEAN by default so no real `ss`/`lsof` runs. The survivor cases below
-  // re-spy with canned survivors (re-vi.spyOn replaces the fake cleanly).
+  // Every down run performs the post-down orphan reap (saga-ed/soa#249, soa#361);
+  // fake it CLEAN by default so no real `lsof`/`ss`/`ps`/kill runs. The survivor
+  // cases below re-spy with canned foreign procs (re-vi.spyOn replaces cleanly).
   beforeEach(() => {
-    installFakeScanner([]);
+    installFakeForeignProcs([]);
   });
 
   it('slot 0 (bare) stops services NATIVELY against /tmp/sds-synthetic (never up.sh)', async () => {
@@ -251,52 +270,65 @@ describe('stack down — native slot-safe teardown at every slot (no up.sh)', ()
     expect(calls[0].env).toEqual({ COMPOSE_PROJECT_NAME: 'soa-s1' });
   });
 
-  // ── post-down orphan audit (saga-ed/soa#249) ──
+  // ── post-down orphan REAP (saga-ed/soa#249, soa#361) ──
 
-  it('post-down audit scans the slot band and warns LOUD per survivor (pid + port + kill hint)', async () => {
+  it('post-down REAPS survivors on the slot band by live pgid (not just warns)', async () => {
     installFakeStopper([{ id: 'programs-api', pid: 200, outcome: 'term' }]);
-    const { scanCalls } = installFakeScanner([
-      { port: 4006, pid: 873122, command: 'node' }, // the issue's exact scenario: orphaned watch child
-      { port: 4010 }, // survivor whose holder isn't visible
-    ]);
+    const foreign: ForeignProc[] = [
+      // the issue's exact scenario: a vite/tsup watch child that outlived its leader.
+      { id: 'programs-api', port: 4006, pid: 873122, pgid: 873100, command: 'node vite.js dev' },
+      { id: 'iam-api', port: 4010, pid: 873200, pgid: 873150, command: 'node dist/main.js' },
+    ];
+    const { findOpts, reapCalls } = installFakeForeignProcs(foreign);
     const out = captureLog();
 
     await StackDown.run(['--slot', '1', ...WS], config);
 
-    // The audited band is slot 1's RESOLVED service ports (base + 1000) for every
-    // service the slot's closure could launch: programs-api 3006→4006, iam-api
-    // 3010→4010, connect-api 6106→7106 AND connect-web 6210→7210 — all slottable as
-    // of soa#271. (Only the literal-port playback trio stays out of the slot band.)
-    expect(scanCalls).toHaveLength(1);
-    expect(scanCalls[0]).toContain(4006);
-    expect(scanCalls[0]).toContain(4010);
-    expect(scanCalls[0]).toContain(7106);
-    expect(scanCalls[0]).toContain(7210);
+    // The scanned band is slot 1's RESOLVED service ports (base + 1000) for every
+    // service the slot could launch: programs-api 3006→4006, iam-api 3010→4010,
+    // connect-api 6106→7106 AND connect-web 6210→7210 — all slottable as of soa#271.
+    // (Only the literal-port playback trio stays out of the slot band.)
+    expect(findOpts).toHaveLength(1);
+    expect(bandOf(findOpts[0])).toEqual(expect.arrayContaining([4006, 4010, 7106, 7210]));
+    expect(findOpts[0].stateDir).toBe('/tmp/sds-synthetic-s1');
+
+    // The whole point of soa#361: the survivors are REAPED, not merely reported.
+    expect(reapCalls).toEqual([foreign]);
 
     const warnings = out.filter((l) => l.startsWith('⚠'));
-    expect(warnings).toHaveLength(3); // 1 header + 2 survivors
-    expect(warnings[0]).toContain('ORPHANS SURVIVED down — 2 listener(s)');
-    expect(warnings[1]).toContain(
-      'port 4006 (programs-api): pid 873122 (node) — kill it:  kill -9 873122',
-    );
-    expect(warnings[2]).toContain(
-      'port 4010 (iam-api): holder not visible — find it:  sudo lsof -iTCP:4010 -sTCP:LISTEN',
-    );
+    expect(warnings[0]).toContain("2 orphan(s) still held slot 1's service ports");
+    expect(out.some((l) => l.includes('programs-api :4006 pid 873122 (pgid 873100)'))).toBe(true);
+    expect(out.some((l) => l.startsWith('✓ reaped 2 orphan(s)'))).toBe(true);
   });
 
-  it('post-down audit is SILENT when the band is clean (slot 0 scans base ports)', async () => {
+  it('post-down reap reports a survivor it could NOT kill (permission / already gone)', async () => {
+    installFakeStopper([{ id: 'programs-api', pid: 200, outcome: 'term' }]);
+    const foreign: ForeignProc[] = [
+      { id: 'programs-api', port: 4006, pid: 873122, pgid: 873100, command: 'node' },
+    ];
+    installFakeForeignProcs(foreign, () => false); // kill does not confirm
+    const out = captureLog();
+
+    await StackDown.run(['--slot', '1', ...WS], config);
+
+    expect(out.some((l) => l.includes('4006') && l.includes('STILL ALIVE'))).toBe(true);
+    expect(out.some((l) => l.startsWith('⚠ 1 orphan(s) could not be killed'))).toBe(true);
+    expect(out.some((l) => l.startsWith('✓ reaped'))).toBe(false);
+  });
+
+  it('post-down reap is SILENT when the band is clean (slot 0 scans base ports)', async () => {
     installFakeStopper([{ id: 'iam-api', pid: 200, outcome: 'term' }]);
-    const { scanCalls } = installFakeScanner([]);
+    const { findOpts, reapCalls } = installFakeForeignProcs([]);
     const out = captureLog();
 
     await StackDown.run([...WS], config);
 
-    // The audit RAN — against slot 0's base ports (offset 0; nothing excluded at slot 0).
-    expect(scanCalls).toHaveLength(1);
-    expect(scanCalls[0]).toContain(3006); // programs-api base
-    expect(scanCalls[0]).toContain(6106); // connect-api included at slot 0
-    // …but stayed silent: no orphan warning lines.
-    expect(out.some((l) => l.includes('ORPHAN'))).toBe(false);
+    // The scan RAN — against slot 0's base ports (offset 0; nothing excluded at slot 0)…
+    expect(findOpts).toHaveLength(1);
+    expect(bandOf(findOpts[0])).toEqual(expect.arrayContaining([3006, 6106]));
+    // …found nothing, so reap was never called and no lines were emitted.
+    expect(reapCalls).toEqual([]);
+    expect(out.some((l) => l.startsWith('⚠') || l.startsWith('✓ reaped'))).toBe(false);
   });
 });
 

@@ -120,7 +120,7 @@ describe('storePlan — manifest-driven db set (the 6→10-pg + mongo extension)
   it('--with-playback adds the transcripts/insights/chat trio', () => {
     const plan = storePlan(manifest, { fixtureId: 'x', profile: 'roster', withPlayback: true });
     const dbs = plan.databases.map((d) => d.db);
-    expect(plan.databases.filter((d) => d.engine === 'postgres')).toHaveLength(13);
+    expect(plan.databases.filter((d) => d.engine === 'postgres')).toHaveLength(14);
     for (const pb of PLAYBACK_DBS) expect(dbs).toContain(pb);
   });
 

@@ -86,6 +86,8 @@ export interface LaunchTokens {
   REDIS_PORT: string;
   /** authz-sync port — opt-in service (`--with authz`), no up.sh precedent (new). */
   AUTHZ_SYNC_PORT: string;
+  /** authz-api port — opt-in service (`--with authz`), no up.sh precedent (new). */
+  AUTHZ_API_PORT: string;
 
   // ── lane base URLs (local/stack lane: http://localhost:<port>) ──
   /** up.sh `IAM_URL`. */
@@ -106,6 +108,10 @@ export interface LaunchTokens {
   SAGA_API_TARGET: string;
   /** up.sh `COACH_API_URL` — `http://localhost:$COACH_API_PORT` (coach-web PUBLIC_COACH_API_URL). */
   COACH_API_URL: string;
+  /** authz-api base URL — `http://localhost:${AUTHZ_API_PORT}`. Provided so a future
+   *  caller's `AUTHZ_API_URL` env can reference it (the S2S seam programs-api#403 /
+   *  program-hub's AUTHZ_API_URL will consume); no mesh app reads it yet. */
+  AUTHZ_API_URL: string;
   /** up.sh `COACH_WEB_HOST` — bare hostname for coach-api's CORS allow-list (`localhost`). */
   COACH_WEB_HOST: string;
   /** up.sh `SAGA_API_TARGET_COACH` — coach's frontend upstream-saga config (default https://staging.wootmath.com). */
@@ -155,6 +161,9 @@ export interface LaunchTokens {
   ADS_ADM_DB_URL: string;
   /** authz-sync dedup-table DB URL — `postgresql://authz_sync:authz_sync@localhost:<pg>/authz_sync_local`. */
   AUTHZ_SYNC_DB_URL: string;
+  /** authz-api prisma DB URL — `postgresql://authz_api:authz_api@localhost:<pg>/authz_api_local`
+   *  (fed to authz-api's AUTHZ_DATABASE_URL + the R3 migrate step's migrateEnvVar). */
+  AUTHZ_API_DB_URL: string;
 
   // ── misc scalars ──
   /** up.sh `RECORDING_TOKEN` — shared fleek bearer (`local-dev-token`). */
@@ -653,6 +662,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     CONNECT_MONGO_PORT: String(mongoPort),
     REDIS_PORT: String(redisPort),
     AUTHZ_SYNC_PORT: String(ports['authz-sync']),
+    AUTHZ_API_PORT: String(ports['authz-api']),
 
     // lane base URLs (local/stack lane)
     IAM_URL: `http://localhost:${ports['iam-api']}`,
@@ -664,6 +674,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     RTSM_URL: `http://localhost:${ports['rtsm-api']}`,
     SAGA_API_TARGET: inputs.sagaApiTarget ?? 'https://wootmath.com',
     COACH_API_URL: `http://localhost:${ports['coach-api']}`,
+    AUTHZ_API_URL: `http://localhost:${ports['authz-api']}`,
     COACH_WEB_HOST: 'localhost',
     SAGA_API_TARGET_COACH: 'https://staging.wootmath.com',
     IAM_ISSUER: 'https://iam.wootdev.com',
@@ -681,6 +692,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     COACH_DB_URL: pgUrl('coach_api', pgPort, m),
     ADS_ADM_DB_URL: pgUrl('ads_adm_local', pgPort, m),
     AUTHZ_SYNC_DB_URL: pgUrl('authz_sync_local', pgPort, m),
+    AUTHZ_API_DB_URL: pgUrl('authz_api_local', pgPort, m),
 
     // misc scalars (up.sh hardcodes these verbatim)
     RECORDING_TOKEN: 'local-dev-token',

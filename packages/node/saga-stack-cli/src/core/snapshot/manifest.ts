@@ -50,6 +50,7 @@ const DB_IDS = [
   'connectv3',
   'openfga',
   'authz_sync_local',
+  'authz_api_local',
 ] as const;
 const _dbIdsAreDbIds: readonly DbId[] = DB_IDS;
 void _dbIdsAreDbIds;
@@ -73,6 +74,7 @@ const SERVICE_IDS = [
   'insights-api',
   'chat-api',
   'authz-sync',
+  'authz-api',
 ] as const;
 const _serviceIdsAreServiceIds: readonly ServiceId[] = SERVICE_IDS;
 void _serviceIdsAreServiceIds;

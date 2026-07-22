@@ -838,4 +838,57 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     isFrontend: false,
     optional: true,
   },
+  'authz-api': {
+    id: 'authz-api',
+    repo: 'ROSTERING',
+    subpath: 'apps/node/authz-api',
+    // 3200 % 1000 = 200, clear of every other manifest port's `% 1000` across
+    // slots 0..8 (nearest is rtsm-api 6210 → 210) — derive-instance's no-collision
+    // property test enumerates this, same rule that forced authz-sync off 3110.
+    port: 3200,
+    portEnvVar: 'PORT',
+    // /health/ready is the honest readiness gate the ALB uses (main.ts
+    // mountReadinessRoutes). It gates ONLY on `!!authzPrismaClient` (authz_db
+    // connected) — NOT on iam-projection catch-up — so it goes green as soon as
+    // the DB is up + migrated, without waiting on the iam.* event backfill.
+    healthPath: '/health/ready',
+    // authz_api_local is prisma-migrated (@saga-ed/authz-db) — see databases.ts.
+    // No openfga here: authz-api reads FGA facts from authz-sync-projected tuples
+    // + its own iam.* projection, and holds no OPENFGA_* config of its own.
+    databases: ['authz_api_local'],
+    // iam-api is a `url` dep only for LAUNCH ORDERING + JWKS reachability: authz-api
+    // NEVER calls iam-api live on the request path (that would be circular — it
+    // replaces personas.getMyPermissions). It validates iam-minted JWTs OFFLINE
+    // against iam's JWKS and hydrates iam facts via the iam.* RabbitMQ projection.
+    dependsOn: ['iam-api'],
+    depKinds: { 'iam-api': 'url' },
+    mesh: ['postgres', 'rabbitmq'],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        NODE_ENV: 'development',
+        PORT: '${AUTHZ_API_PORT}',
+        // Own prisma DB (read directly off env, bypassing the AUTHZ_ prefix — see
+        // inversify.config.ts). RABBITMQ_URL is the fleet-wide shared name.
+        AUTHZ_DATABASE_URL: '${AUTHZ_API_DB_URL}',
+        RABBITMQ_URL: '${MESH_MQ}',
+        // ---- iam-api S2S validation (env prefix IAM_ via DotenvConfigManager) ----
+        // The app's config defaults point at prod hosts / :3000 and WILL 401 every
+        // locally-minted token unless repointed at the stack iam (:3010) and the
+        // issuer iam actually mints (${IAM_ISSUER} = https://iam.wootdev.com, NOT
+        // the schema's https://iam.saga.org default). Same JWT-issuer drift class
+        // the manifest guards for programs-api's JWT_ISSUER above.
+        IAM_JWKSURL: '${IAM_URL}/.well-known/services/jwks.json',
+        IAM_USERJWKSURL: '${IAM_URL}/.well-known/jwks.json',
+        IAM_SERVICETOKENISSUER: '${IAM_ISSUER}',
+        IAM_USERTOKENISSUER: '${IAM_ISSUER}',
+      },
+    },
+    // No fixture seed of its own — iam.* projection hydrates authz_db at runtime.
+    seed: [],
+    lane: lanes(3200, 'authz-api'),
+    tunnelSlug: 'authz-api',
+    isFrontend: false,
+    optional: true,
+  },
 };

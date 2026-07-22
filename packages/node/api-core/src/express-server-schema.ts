@@ -28,6 +28,10 @@ export const ExpressServerSchema = z.object({
   allowedHeaders: z
     .array(z.string())
     .optional(),
+  // Max request body size for the built-in JSON parser (any `bytes`-parsable
+  // string, e.g. '5mb'). Consumers that mount their own parser first are
+  // unaffected. Defaults to '5mb' (see ExpressServer) when omitted.
+  jsonBodyLimit: z.string().optional(),
 });
 
 // Use the INPUT type, not `z.infer` (the output): this config is bound directly

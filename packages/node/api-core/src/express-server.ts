@@ -8,6 +8,7 @@ import type { ILogger } from '@saga-ed/soa-logger';
 import { useContainer, useExpressServer, getMetadataArgsStorage } from 'routing-controllers';
 import { Container } from 'inversify';
 import { SectorsController } from './sectors-controller.js';
+import { payloadTooLargeHandler } from './payload-too-large-handler.js';
 
 // Default CORS `Access-Control-Allow-Headers`: the baseline request headers
 // every Saga API accepts, plus the Datadog browser-RUM distributed-tracing
@@ -18,6 +19,10 @@ import { SectorsController } from './sectors-controller.js';
 // their ExpressServerConfig (spread `DATADOG_RUM_TRACING_HEADERS` to keep RUM
 // working). See hipponot/iac#358.
 const DEFAULT_ALLOWED_HEADERS: string[] = ['Content-Type', 'Authorization', ...DATADOG_RUM_TRACING_HEADERS];
+
+// Default max JSON request body size (express's own default is a silent
+// 100kb). Consumers override via the `jsonBodyLimit` config field.
+const DEFAULT_JSON_BODY_LIMIT = '5mb';
 
 @injectable()
 export class ExpressServer {
@@ -87,7 +92,7 @@ export class ExpressServer {
     // parsers — re-read the consumed stream and 500 every JSON POST with
     // "stream is not readable" (saga-ed/program-hub#306). Marking req._body
     // restores the 1.x contract for those route-scoped parsers too.
-    const jsonParser = express.json();
+    const jsonParser = express.json({ limit: this.config.jsonBodyLimit ?? DEFAULT_JSON_BODY_LIMIT });
     this.app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
       if (req.body !== undefined) {
         (req as { _body?: boolean })._body = true;
@@ -96,6 +101,9 @@ export class ExpressServer {
       }
       jsonParser(req, res, next);
     });
+
+    // Catch the JSON parser's oversized-body (413) error and advertise the limit.
+    this.app.use(payloadTooLargeHandler());
 
     // Ensure routing-controllers uses Inversify for controller resolution
     useContainer(container);

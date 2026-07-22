@@ -522,4 +522,48 @@ describe('ExpressServer (integration)', () => {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   });
+
+  it('advertises the configured limit on an oversized JSON body (413)', async () => {
+    const container = new Container();
+    const mockLogger: ILogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    };
+
+    const port = getRandomPort();
+    const config = {
+      configType: 'EXPRESS_SERVER' as const,
+      port,
+      logLevel: 'info' as const,
+      name: 'Body Limit Test',
+      jsonBodyLimit: '1kb',
+    };
+
+    container.bind('ExpressServerConfig').toConstantValue(config);
+    container.bind('ILogger').toConstantValue(mockLogger);
+    container.bind(ExpressServer).toSelf();
+
+    const server = container.get(ExpressServer);
+    await server.init(container, [InheritedParamController]);
+    server.start();
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    try {
+      const resp = await fetch(`http://localhost:${port}/inherit/echo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msg: 'x'.repeat(5000) }),
+      });
+      expect(resp.status).toBe(413);
+      const maxBodyBytesHeader = resp.headers.get('x-max-body-bytes');
+      expect(maxBodyBytesHeader).toMatch(/^\d+$/);
+      const data = await resp.json() as any;
+      expect(data).toEqual({ error: 'payload_too_large', maxBodyBytes: Number(maxBodyBytesHeader) });
+    } finally {
+      server.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  });
 });

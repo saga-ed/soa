@@ -69,6 +69,7 @@
     "@apollo/server": "^4.10.0",
     "@graphql-tools/schema": "^10.0.0",
     "@saga-ed/soa-api-util": "workspace:*",
+    "compression": "^1.7.4",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "fast-glob": "^3.3.3",
@@ -83,6 +84,7 @@
   },
   "devDependencies": {
     "@saga-ed/soa-typescript-config": "workspace:*",
+    "@types/compression": "^1.7.5",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/figlet": "^1.7.0",

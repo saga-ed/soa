@@ -37,6 +37,16 @@ abstract class AbstractEchoController {
 @JsonController('/inherit')
 export class InheritedParamController extends AbstractEchoController {}
 
+// Test controller with a large payload route for compression testing
+@injectable()
+@JsonController('/compression-test')
+export class CompressionTestController {
+  @Get('/large')
+  getLargePayload() {
+    return { data: 'x'.repeat(5000) };
+  }
+}
+
 describe('ExpressServer (integration)', () => {
   it('should start and stop correctly', async () => {
     const container = new Container();
@@ -461,6 +471,52 @@ describe('ExpressServer (integration)', () => {
       expect(resp.status).toBe(200);
       const data = await resp.json() as any;
       expect(data.received).toBe('once');
+    } finally {
+      server.stop();
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  });
+
+  it('compresses responses with gzip when Accept-Encoding is present', async () => {
+    const container = new Container();
+    const mockLogger: ILogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      debug: () => {},
+    };
+
+    const port = getRandomPort();
+    const config = {
+      configType: 'EXPRESS_SERVER' as const,
+      port,
+      logLevel: 'info' as const,
+      name: 'Compression Test',
+    };
+
+    container.bind('ExpressServerConfig').toConstantValue(config);
+    container.bind('ILogger').toConstantValue(mockLogger);
+    container.bind(ExpressServer).toSelf();
+
+    const server = container.get(ExpressServer);
+    await server.init(container, [CompressionTestController]);
+    server.start();
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    try {
+      // Fetch the large payload with gzip compression requested
+      const resp = await fetch(`http://localhost:${port}/compression-test/large`, {
+        headers: { 'Accept-Encoding': 'gzip' },
+      });
+      expect(resp.status).toBe(200);
+
+      // Verify the response is compressed
+      const contentEncoding = resp.headers.get('content-encoding');
+      expect(contentEncoding?.toLowerCase()).toBe('gzip');
+
+      // Verify the decompressed body is correct (undici auto-decompresses)
+      const data = await resp.json() as any;
+      expect(data.data).toBe('x'.repeat(5000));
     } finally {
       server.stop();
       await new Promise(resolve => setTimeout(resolve, 100));

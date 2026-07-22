@@ -41,7 +41,7 @@ importers:
         version: 5.8.2
       vitest:
         specifier: ^1.5.0
-        version: 1.6.1(@types/node@26.1.1)(jsdom@25.0.1)
+        version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
 
   apps/node/gql-api:
     dependencies:
@@ -59,7 +59,7 @@ importers:
         version: link:../../../packages/node/logger
       '@types/mongodb':
         specifier: ^4.0.7
-        version: 4.0.7(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+        version: 4.0.7(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       express:
         specifier: ^4.18.2
         version: 4.22.1
@@ -126,7 +126,7 @@ importers:
         version: link:../../../packages/node/logger
       '@types/mongodb':
         specifier: ^4.0.7
-        version: 4.0.7(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+        version: 4.0.7(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       express:
         specifier: ^4.18.2
         version: 4.22.1
@@ -187,7 +187,7 @@ importers:
         version: link:../../../packages/node/logger
       '@types/mongodb':
         specifier: ^4.0.7
-        version: 4.0.7(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+        version: 4.0.7(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       express:
         specifier: ^4.18.2
         version: 4.22.1
@@ -315,7 +315,7 @@ importers:
         version: 11.8.0(typescript@5.9.3)
       '@types/mongodb':
         specifier: ^4.0.7
-        version: 4.0.7(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+        version: 4.0.7(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       express:
         specifier: ^4.18.2
         version: 4.22.1
@@ -490,7 +490,7 @@ importers:
         version: 4.22.1
       mongodb:
         specifier: ^6.0.0
-        version: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+        version: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       mysql2:
         specifier: ^3.0.0
         version: 3.20.0(@types/node@26.1.1)
@@ -755,6 +755,9 @@ importers:
       '@saga-ed/soa-api-util':
         specifier: workspace:*
         version: link:../api-util
+      compression:
+        specifier: ^1.7.4
+        version: 1.8.1
       cors:
         specifier: ^2.8.5
         version: 2.8.5
@@ -795,6 +798,9 @@ importers:
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
         version: link:../../core/typescript-config
+      '@types/compression':
+        specifier: ^1.7.5
+        version: 1.8.1
       '@types/cors':
         specifier: ^2.8.19
         version: 2.8.19
@@ -935,10 +941,10 @@ importers:
         version: 6.2.2(reflect-metadata@0.2.2)
       mongodb:
         specifier: ^6.12.0
-        version: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+        version: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       mongodb-memory-server:
         specifier: ^10.1.4
-        version: 10.4.2(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+        version: 10.4.2(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -1157,7 +1163,7 @@ importers:
         version: 6.2.2(reflect-metadata@0.2.2)
       mongodb:
         specifier: ^6.0.0
-        version: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+        version: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -1558,7 +1564,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.5.0
-        version: 1.6.1(@types/node@26.1.1)(jsdom@25.0.1)
+        version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
 
   packages/node/pubsub-server:
     dependencies:
@@ -1669,7 +1675,7 @@ importers:
         version: 8.5.1(@swc/core@1.15.7(@swc/helpers@0.5.17))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
       vitest:
         specifier: ^1.5.0
-        version: 1.6.1(@types/node@26.1.1)(jsdom@25.0.1)
+        version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
 
   packages/node/saga-stack-cli:
     dependencies:
@@ -1738,7 +1744,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^1.5.0
-        version: 1.6.1(@types/node@26.1.1)(jsdom@25.0.1)
+        version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
 
   packages/web/ui:
     dependencies:
@@ -4992,6 +4998,9 @@ packages:
   '@types/bunyan@1.8.11':
     resolution: {integrity: sha512-758fRH7umIMk5qt5ELmRMff4mLDlN+xyYzC+dkPTdKwbSkJFvz6xwyScrytPU0QIBbRRwbiE8/BIg8bpajerNQ==}
 
+  '@types/compression@1.8.1':
+    resolution: {integrity: sha512-kCFuWS0ebDbmxs0AXYn6e2r2nrGAb5KwQhknjSPSPgJcGd8+HVSILlUyFhGqML2gk39HcG7D1ydW9/qpYkN00Q==}
+
   '@types/connect@3.4.38':
     resolution: {integrity: sha512-K6uROf1LD88uDQqJCktA4yzL1YYAK6NgfsI0v/mTgyPKWsX1CnJ0XPSDhViejru1GcRkLWb8RlzFYJRqGUbaug==}
 
@@ -6023,6 +6032,14 @@ packages:
   compress-commons@6.0.2:
     resolution: {integrity: sha512-6FqVXeETqWPoGcfzrXb37E50NP0LXT8kAMu5ooZayhWWdgEY4lBEEcbQNXtkuKQsGduxiIcI4gOTsxTmuq/bSg==}
     engines: {node: '>= 14'}
+
+  compressible@2.0.18:
+    resolution: {integrity: sha512-AF3r7P5dWxL8MxyITRMlORQNaOA2IkAFaTr4k7BUumjPtRpGDTZpl0Pb1XCO6JeDCBdp126Cgs9sMxqSjgYyRg==}
+    engines: {node: '>= 0.6'}
+
+  compression@1.8.1:
+    resolution: {integrity: sha512-9mAqGPHLakhCLeNyxPkK4xVo746zQ/czLH1Ky+vkitMnWfWZps8r0qXuwhwizagCRttsL4lfG4pIOvaWLpAP0w==}
+    engines: {node: '>= 0.8.0'}
 
   concat-map@0.0.1:
     resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
@@ -14726,6 +14743,11 @@ snapshots:
     dependencies:
       '@types/node': 24.0.12
 
+  '@types/compression@1.8.1':
+    dependencies:
+      '@types/express': 5.0.6
+      '@types/node': 24.0.12
+
   '@types/connect@3.4.38':
     dependencies:
       '@types/node': 24.0.12
@@ -14818,9 +14840,9 @@ snapshots:
     dependencies:
       minimatch: 10.2.5
 
-  '@types/mongodb@4.0.7(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)':
+  '@types/mongodb@4.0.7(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)':
     dependencies:
-      mongodb: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+      mongodb: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
     transitivePeerDependencies:
       - '@aws-sdk/credential-providers'
       - '@mongodb-js/zstd'
@@ -16034,6 +16056,22 @@ snapshots:
       normalize-path: 3.0.0
       readable-stream: 4.7.0
 
+  compressible@2.0.18:
+    dependencies:
+      mime-db: 1.54.0
+
+  compression@1.8.1:
+    dependencies:
+      bytes: 3.1.2
+      compressible: 2.0.18
+      debug: 2.6.9
+      negotiator: 0.6.4
+      on-headers: 1.1.0
+      safe-buffer: 5.2.1
+      vary: 1.1.2
+    transitivePeerDependencies:
+      - supports-color
+
   concat-map@0.0.1: {}
 
   concat-stream@2.0.0:
@@ -16194,10 +16232,6 @@ snapshots:
       ms: 2.0.0
 
   debug@3.2.7:
-    dependencies:
-      ms: 2.1.3
-
-  debug@4.4.3:
     dependencies:
       ms: 2.1.3
 
@@ -16636,11 +16670,11 @@ snapshots:
       tinyglobby: 0.2.15
       unrs-resolver: 1.11.1
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1):
+  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1))(eslint@8.57.1):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
@@ -16651,7 +16685,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1):
+  eslint-module-utils@2.12.1(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1))(eslint@8.57.1):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
@@ -16673,7 +16707,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 8.57.1
       eslint-import-resolver-node: 0.3.9
-      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
+      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1))(eslint@8.57.1)
       hasown: 2.0.2
       is-core-module: 2.16.1
       is-glob: 4.0.3
@@ -16702,7 +16736,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 8.57.1
       eslint-import-resolver-node: 0.3.9
-      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
+      eslint-module-utils: 2.12.1(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-node@0.3.9)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1))(eslint@8.57.1)
       hasown: 2.0.2
       is-core-module: 2.16.1
       is-glob: 4.0.3
@@ -17647,7 +17681,7 @@ snapshots:
   http-proxy-agent@7.0.2:
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@8.1.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -17659,7 +17693,7 @@ snapshots:
   https-proxy-agent@7.0.6:
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@8.1.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -18342,8 +18376,7 @@ snapshots:
 
   mime-db@1.52.0: {}
 
-  mime-db@1.54.0:
-    optional: true
+  mime-db@1.54.0: {}
 
   mime-types@2.1.35:
     dependencies:
@@ -18413,7 +18446,7 @@ snapshots:
       '@types/whatwg-url': 11.0.5
       whatwg-url: 14.2.0
 
-  mongodb-memory-server-core@10.4.2(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7):
+  mongodb-memory-server-core@10.4.2(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7):
     dependencies:
       async-mutex: 0.5.0
       camelcase: 6.3.0
@@ -18421,7 +18454,7 @@ snapshots:
       find-cache-dir: 3.3.2
       follow-redirects: 1.15.11(debug@4.4.3)
       https-proxy-agent: 7.0.6
-      mongodb: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+      mongodb: 6.21.0(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       new-find-package-json: 2.0.0
       semver: 7.7.3
       tar-stream: 3.1.7
@@ -18439,9 +18472,9 @@ snapshots:
       - socks
       - supports-color
 
-  mongodb-memory-server@10.4.2(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7):
+  mongodb-memory-server@10.4.2(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7):
     dependencies:
-      mongodb-memory-server-core: 10.4.2(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7)
+      mongodb-memory-server-core: 10.4.2(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7)
       tslib: 2.8.1
     transitivePeerDependencies:
       - '@aws-sdk/credential-providers'
@@ -18464,13 +18497,14 @@ snapshots:
       '@aws-sdk/credential-providers': 3.1054.0
       '@mongodb-js/saslprep': 1.4.4
 
-  mongodb@6.21.0(@aws-sdk/credential-providers@3.1054.0)(socks@2.8.7):
+  mongodb@6.21.0(@aws-sdk/credential-providers@3.1054.0)(gcp-metadata@6.1.1)(socks@2.8.7):
     dependencies:
       '@mongodb-js/saslprep': 1.4.4
       bson: 6.10.4
       mongodb-connection-string-url: 3.0.2
     optionalDependencies:
       '@aws-sdk/credential-providers': 3.1054.0
+      gcp-metadata: 6.1.1
       socks: 2.8.7
 
   ms@2.0.0: {}
@@ -18720,8 +18754,7 @@ snapshots:
     dependencies:
       ee-first: 1.1.1
 
-  on-headers@1.1.0:
-    optional: true
+  on-headers@1.1.0: {}
 
   once@1.4.0:
     dependencies:
@@ -20532,7 +20565,7 @@ snapshots:
   vite-node@1.6.1(@types/node@26.1.1):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@8.1.1)
       pathe: 1.1.2
       picocolors: 1.1.1
       vite: 5.4.21(@types/node@26.1.1)
@@ -20636,7 +20669,7 @@ snapshots:
       '@vitest/utils': 1.6.1
       acorn-walk: 8.3.4
       chai: 4.5.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@8.1.1)
       execa: 8.0.1
       local-pkg: 0.5.1
       magic-string: 0.30.21

@@ -283,6 +283,134 @@ export function seed_after_start({ container, engine, seeds_dir, profile, db_use
     }
 }
 
+// --- Schema-rev compatibility gate (restore/switch, postgres only) ---
+//
+// Compares a snapshot's sidecar `schemaRev` (its migration state at capture
+// time) against the CURRENT DB's live migration head (read fresh via
+// extract_prisma_rev, BEFORE the caller wipes/reloads it) — see
+// services/switchboard/docs/snapshot-schema-versioning.md in the microservices
+// repo. This uses the live DB as the app-expectation proxy rather than a
+// separate `db-requirements.yaml` declaration (still future-work per the spec's
+// "Open questions"), so the gate is self-contained and needs no new plumbing.
+//
+// v1 scope (spec: "v1 ships hard-fail-on-any-drift; auto-heal stays OFF until
+// the destructive gate exists"): this NEVER runs `migrate deploy`. Any drift
+// (ahead OR behind) is a refuse-in-enforce condition. No auto-heal, no one-shot
+// ECS task, no destructive-migration detection — those remain future work.
+export const SCHEMA_GATE_VERDICTS = Object.freeze({
+    CLEAN: 'clean',
+    NO_SIDECAR: 'no-sidecar',
+    UNVERIFIED_FRESH_DB: 'unverified-fresh-db',
+    AHEAD: 'ahead',
+    BEHIND: 'behind',
+});
+
+/**
+ * Evaluate the schemaRev compatibility gate for a restore/switch onto
+ * `profile` (optionally version-pinned `@vN`, optionally sourced from another
+ * DB's prefix via `source_name`/seedFrom — same S3 resolution as the dump).
+ *
+ * Returns `{ verdict, snapshotSchemaRev, dbSchemaRev, refuse, message }`.
+ * `refuse` reflects what `mode` dictates the caller should do; the verdict
+ * itself is mode-independent (same classification regardless of off/warn/
+ * enforce — only the action taken on it differs).
+ *
+ * Postgres-only: callers must skip this entirely for mongo/mysql (mirrors the
+ * sidecar-write gate in snapshot_db — there is no schemaRev to compare for
+ * engines with no Prisma migration history).
+ */
+export function check_schema_rev_gate({ name, profile, bucket, source_name, mode, container, db_name, db_user }) {
+    const src = source_name || name;
+    const at = profile.match(/^(.+)@v(\d+)$/);
+    const base_profile = at ? at[1] : profile;
+    const object_stem = at ? `profile-${base_profile}-v${at[2]}` : `profile-${base_profile}`;
+    const meta_s3_path = `s3://${bucket}/${src}/${object_stem}.meta.json`;
+
+    // Fetch the sidecar straight to stdout (`aws s3 cp <src> -`) rather than a
+    // /tmp scratch file: this runs in a long-lived server process (stable
+    // pid), so a per-call tmp file would never get cleaned up and would
+    // accumulate one per distinct db name forever. A non-zero exit (key
+    // missing, or any other S3 error) is read as "no sidecar" — the gate
+    // degrades safely rather than throwing, matching the spec's "Missing
+    // sidecar" verdict.
+    const dl = spawnSync('aws', ['s3', 'cp', meta_s3_path, '-'], { encoding: 'utf8', stdio: 'pipe' });
+
+    let sidecar_schema_rev = null;
+    if (dl.status === 0) {
+        try {
+            const meta = JSON.parse(dl.stdout);
+            sidecar_schema_rev = meta.schemaRev ?? null; // null schemaRev in sidecar -> treated like no-sidecar below
+        } catch {
+            sidecar_schema_rev = null;
+        }
+    }
+
+    const db_schema_rev = extract_prisma_rev({ container, db_name, db_user });
+
+    // extract_prisma_rev collapses two very different situations to the same
+    // null: a genuinely fresh DB with zero applied migrations (expected,
+    // benign — the app runs its own migrate deploy after this restore), and
+    // the container being unreachable/stopped so the exec never even ran
+    // (extract_prisma_rev never throws, so this degrades the same way). Both
+    // proceed identically in every mode — refusing here would break routine
+    // provisioning onto a not-yet-started container — but a warn-soak
+    // operator reading logs needs to tell them apart, so probe reachability
+    // separately just for the log message; it does not change `refuse`.
+    const container_reachable = db_schema_rev !== null
+        || spawnSync('docker', ['inspect', '--format', '{{.State.Running}}', container], { encoding: 'utf8', stdio: 'pipe' }).stdout.trim() === 'true';
+
+    const base = { snapshotSchemaRev: sidecar_schema_rev, dbSchemaRev: db_schema_rev, gateMode: mode };
+
+    if (sidecar_schema_rev === null) {
+        return {
+            ...base,
+            verdict: SCHEMA_GATE_VERDICTS.NO_SIDECAR,
+            refuse: mode === 'enforce',
+            message: `no schema sidecar found at ${meta_s3_path} (or schemaRev is null) — cannot verify compatibility`,
+        };
+    }
+
+    // Fresh provision: _prisma_migrations absent/empty on the CURRENT db means
+    // there's nothing to compare against yet (the app boots and runs its own
+    // `migrate deploy` after this restore). Comparison is impossible, not
+    // failed — proceed in every mode (enforce still required a sidecar to
+    // exist, which it does at this point).
+    if (db_schema_rev === null) {
+        const cause = container_reachable
+            ? 'current DB has no applied migrations yet (fresh provision)'
+            : `current DB container (${container}) is unreachable/stopped — head could not be read`;
+        return {
+            ...base,
+            verdict: SCHEMA_GATE_VERDICTS.UNVERIFIED_FRESH_DB,
+            refuse: false,
+            message: `${cause} — proceeding with snapshot schemaRev ${sidecar_schema_rev}, comparison deferred to the app's own migrate deploy`,
+        };
+    }
+
+    if (sidecar_schema_rev === db_schema_rev) {
+        return { ...base, verdict: SCHEMA_GATE_VERDICTS.CLEAN, refuse: false, message: `snapshot schemaRev matches DB head (${db_schema_rev})` };
+    }
+
+    // Prisma migration names are timestamp-prefixed and the history is linear
+    // (see snapshot-schema-versioning.md "version token MUST be the latest
+    // migration name") — a plain lexical compare orders them correctly.
+    if (sidecar_schema_rev > db_schema_rev) {
+        return {
+            ...base,
+            verdict: SCHEMA_GATE_VERDICTS.AHEAD,
+            refuse: mode === 'enforce',
+            message: `snapshot schemaRev ${sidecar_schema_rev} is ahead of DB head ${db_schema_rev} — rollback not supported; use a snapshot at or behind the app schema`,
+        };
+    }
+
+    return {
+        ...base,
+        verdict: SCHEMA_GATE_VERDICTS.BEHIND,
+        refuse: mode === 'enforce',
+        message: `snapshot schemaRev ${sidecar_schema_rev} is behind DB head ${db_schema_rev} and auto-heal is not enabled — re-snapshot canonical to advance the baseline (see snapshot-schema-versioning.md Flow B)`,
+    };
+}
+
 // --- Download profile seed from S3 ---
 
 export function download_profile_seed({ name, profile, engine, bucket, seeds_base, source_name }) {

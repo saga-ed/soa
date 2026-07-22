@@ -1178,6 +1178,13 @@ export abstract class BaseCommand extends Command {
        * rejection is the CALLER's own close request — swallowed, never warned.
        */
       signal?: AbortSignal;
+      /**
+       * Extra Chromium launch flags for browser-login.mjs to spread onto its own
+       * `['--start-maximized']` (soa#363). Today this carries the fake-media capture
+       * flags (`--use-file-for-fake-video-capture=…` etc.) built by the pure
+       * `fakeMediaChromiumArgs`; passed as a JSON array via `CHROMIUM_EXTRA_ARGS`.
+       */
+      chromiumExtraArgs?: string[];
     },
   ): Promise<void> {
     const script = resolveVendorScript('browser-login.mjs');
@@ -1214,6 +1221,11 @@ export abstract class BaseCommand extends Command {
       // browser-login.mjs reads this as its playwright-resolution dir (name historical).
       SAGA_DASH_DASH: spaAppDir,
     };
+    // soa#363: extra Chromium flags (today: fake-media file capture) — browser-login.mjs
+    // JSON-parses this and spreads it onto its launch args. Omitted when empty.
+    if (ctx.chromiumExtraArgs && ctx.chromiumExtraArgs.length > 0) {
+      env.CHROMIUM_EXTRA_ARGS = JSON.stringify(ctx.chromiumExtraArgs);
+    }
     try {
       await this.runVendor(
         { cwd: spaAppDir, command: 'node', args: [script], env, signal: ctx.signal },

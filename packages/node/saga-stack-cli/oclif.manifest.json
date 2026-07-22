@@ -2464,7 +2464,8 @@
       "examples": [
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> teacher@saga.org",
-        "<%= config.bin %> <%= command.id %> --browser"
+        "<%= config.bin %> <%= command.id %> --browser",
+        "<%= config.bin %> <%= command.id %> empty@saga.org --browser --fake-video ~/clips/student.mp4"
       ],
       "flags": {
         "browser": {
@@ -2486,6 +2487,20 @@
           "multiple": false,
           "name": "dev",
           "noCacheDefault": true,
+          "type": "option"
+        },
+        "fake-audio": {
+          "description": "feed a LOCAL audio file into the --browser Chromium's fake mic. Auto-transcoded to PCM WAV via ffmpeg (a .wav file is used as-is). Overrides the audio derived from --fake-video. Requires --browser.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fake-audio",
+          "type": "option"
+        },
+        "fake-video": {
+          "description": "feed a LOCAL video file into the --browser Chromium's fake camera (AV flows on a box with no real device). Auto-transcoded to Y4M via ffmpeg (a .y4m file is used as-is); also derives the mic track from this file unless --fake-audio is given. Requires --browser.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fake-video",
           "type": "option"
         },
         "fleek": {

@@ -264,6 +264,22 @@ describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => 
     expect(FATAL_BUILD_REPOS.has('COACH')).toBe(true);
   });
 
+  it('soa#359: a ROSTERING build failure is FATAL — iam-api imports @saga-ed/iam-db from dist/ at launch', async () => {
+    // Regression for the "iam-api never became healthy" mystery: a swallowed rostering
+    // build failure must ABORT with the real build error, not launch a broken stack.
+    const { runner } = runnerFailingWhen((s) => s.cwd === '/dev/rostering' && s.args[0] === 'build');
+    const res = await prepClosure({
+      services: ['iam-api'] as ServiceId[],
+      dbs: [] as DbId[],
+      repoRoots: REPO_ROOTS,
+      runner,
+      isFresh: NEVER_FRESH,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.failed).toMatchObject({ repo: 'ROSTERING', kind: 'build' });
+    expect(FATAL_BUILD_REPOS.has('ROSTERING')).toBe(true);
+  });
+
   it('FLIP 4: a 401 install failure triggers `pnpm co:login` + ONE retry, then proceeds', async () => {
     // install #1 answers a CodeArtifact 401 (unauthorized), co:login succeeds, install
     // #2 (the retry) succeeds → the pass proceeds to build.
@@ -476,7 +492,7 @@ describe('prepClosure — soa#260 build-failure repair escalation', () => {
     };
     const stamped: string[] = [];
     const res = await prepClosure({
-      services: ['iam-api'] as ServiceId[], // ROSTERING — non-fatal build
+      services: ['iam-api'] as ServiceId[], // ROSTERING (soa#359 fatal), but repair heals before the fatal check
       dbs: [] as DbId[],
       repoRoots: REPO_ROOTS,
       runner,
@@ -493,12 +509,12 @@ describe('prepClosure — soa#260 build-failure repair escalation', () => {
     expect(res.steps.map((s) => s.kind)).toEqual(['install', 'build', 'repair', 'install', 'build']);
   });
 
-  it('a build failure with NO repairable signature ⇒ normal non-fatal warning, no wipe, not stamped', async () => {
+  it('a build failure with NO repairable signature ⇒ the repo\'s normal handling (FATAL for ROSTERING), no wipe, not stamped', async () => {
     const { runner } = runnerFailingWhen((s) => s.args[0] === 'build');
     const stamped: string[] = [];
     let asked = 0;
     const res = await prepClosure({
-      services: ['iam-api'] as ServiceId[],
+      services: ['iam-api'] as ServiceId[], // ROSTERING — FATAL build (soa#359)
       dbs: [] as DbId[],
       repoRoots: REPO_ROOTS,
       runner,
@@ -509,9 +525,12 @@ describe('prepClosure — soa#260 build-failure repair escalation', () => {
         return false; // no corruption signature ⇒ do not escalate
       },
     });
-    expect(res.ok).toBe(true);
+    // soa#359: ROSTERING build is fatal, so the un-repairable failure ABORTS the pass
+    // (surfaced via `failed`, not a warning) instead of silently continuing to launch.
+    expect(res.ok).toBe(false);
+    expect(res.failed).toMatchObject({ repo: 'ROSTERING', kind: 'build' });
     expect(asked).toBe(1); // consulted once, found nothing repairable
-    expect(res.warnings.map((w) => w.kind)).toEqual(['build']); // normal non-fatal warning
+    expect(res.warnings).toHaveLength(0); // fatal abort ⇒ no non-fatal warning
     expect(stamped).not.toContain('/dev/rostering'); // failed build ⇒ no stamp
     expect(res.steps.filter((s) => s.kind === 'repair')).toHaveLength(0); // no wipe
     expect(res.steps.filter((s) => s.kind === 'install')).toHaveLength(1); // no reinstall

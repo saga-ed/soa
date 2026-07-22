@@ -1,5 +1,6 @@
 import express, { Application } from 'express';
 import cors from 'cors';
+import compression from 'compression';
 import { injectable, inject } from 'inversify';
 import { DATADOG_RUM_TRACING_HEADERS } from '@saga-ed/soa-api-util';
 import type { ExpressServerConfig } from './express-server-schema.js';
@@ -77,6 +78,7 @@ export class ExpressServer {
     }
 
     this.app.use(cors(corsOptions));
+    this.app.use(compression());
     // Parse JSON bodies for routing-controllers' @Body() params — guarded so
     // this layer never re-reads a body a consumer-mounted parser already
     // consumed. express 5's parsers (body-parser 2.x) set req.body but not

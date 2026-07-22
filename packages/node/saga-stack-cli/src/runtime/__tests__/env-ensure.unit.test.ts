@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { classifyEnv, ensureEnv, shouldPrune } from '../env-ensure.js';
+import { classifyEnv, ensureEnv, parseEnvKeys, shouldPrune } from '../env-ensure.js';
 import type { EnvFs } from '../env-ensure.js';
 import type { EnsureRepo } from '../ensure-repos.js';
 
@@ -29,6 +29,11 @@ describe('pure helpers', () => {
     expect(shouldPrune('dist')).toBe(true);
     expect(shouldPrune('apps')).toBe(false);
   });
+  it('parseEnvKeys: extracts KEY names, ignoring comments/blanks/export prefix; null ⇒ []', () => {
+    expect(parseEnvKeys('A=1\n# c\n\nexport B=2\n  C = 3\nnot a line\n')).toEqual(['A', 'B', 'C']);
+    expect(parseEnvKeys(null)).toEqual([]);
+    expect(parseEnvKeys('')).toEqual([]);
+  });
 });
 
 /** A fake EnvFs over an in-memory tree. `dirsChildren` maps a dir → its entries. */
@@ -36,6 +41,7 @@ function makeFakeEnvFs(
   files: Set<string>,
   dirsChildren: Record<string, { name: string; isDir: boolean }[]>,
   copies: Array<[string, string]>,
+  contents: Record<string, string> = {},
 ): EnvFs {
   return {
     list: (dir) => dirsChildren[dir] ?? [],
@@ -44,6 +50,7 @@ function makeFakeEnvFs(
       copies.push([from, to]);
       files.add(to); // reflect the write so a later check sees it
     },
+    read: (p) => contents[p] ?? null,
   };
 }
 
@@ -117,5 +124,62 @@ describe('ensureEnv — fake-fs discovery + scaffold', () => {
     const res = ensureEnv([repo('ghost')], { fs: makeFakeEnvFs(files, {}, copies) });
     expect(res.results).toEqual([]);
     expect(copies).toEqual([]);
+  });
+});
+
+describe('ensureEnv — soa#359 key reconcile', () => {
+  /** A repo root holding `.env.example` + whatever root files are listed. */
+  const rootTree = (
+    rootFiles: string[],
+  ): { files: Set<string>; children: Record<string, { name: string; isDir: boolean }[]> } => ({
+    files: new Set<string>(['/dev/rostering/.git', '/dev/rostering/.env.example', ...rootFiles]),
+    children: {
+      '/dev/rostering': [
+        { name: '.git', isDir: false },
+        { name: '.env.example', isDir: false },
+        ...rootFiles.map((f) => ({ name: f.split('/').pop() as string, isDir: false })),
+      ],
+    },
+  });
+
+  it('a PRESENT .env missing an example key (also absent from .env.local) is flagged, never copied', () => {
+    const { files, children } = rootTree(['/dev/rostering/.env', '/dev/rostering/.env.local']);
+    const copies: Array<[string, string]> = [];
+    const res = ensureEnv([repo('rostering')], {
+      fs: makeFakeEnvFs(files, children, copies, {
+        '/dev/rostering/.env.example': 'DATABASE_URL=x\nAUTHZ_DATABASE_URL=y\n',
+        '/dev/rostering/.env': 'DATABASE_URL=real\n',
+        '/dev/rostering/.env.local': 'REDIS_URL=r\n',
+      }),
+    });
+    const root = res.results.find((r) => r.relPath === '.env');
+    expect(root?.action).toBe('present');
+    expect(root?.missingKeys).toEqual(['AUTHZ_DATABASE_URL']);
+    expect(root?.message).toContain('AUTHZ_DATABASE_URL');
+    expect(copies).toEqual([]); // reported, never appended/overwritten
+  });
+
+  it('a key provided by .env.local (not .env) is NOT flagged — union of sources', () => {
+    const { files, children } = rootTree(['/dev/rostering/.env', '/dev/rostering/.env.local']);
+    const res = ensureEnv([repo('rostering')], {
+      fs: makeFakeEnvFs(files, children, [], {
+        '/dev/rostering/.env.example': 'AUTHZ_DATABASE_URL=y\n',
+        '/dev/rostering/.env': '# nothing here\n',
+        '/dev/rostering/.env.local': 'AUTHZ_DATABASE_URL=mine\n',
+      }),
+    });
+    expect(res.results.find((r) => r.relPath === '.env')?.missingKeys).toEqual([]);
+  });
+
+  it('a freshly SCAFFOLDED .env is never key-checked (it is a verbatim copy of the template)', () => {
+    const { files, children } = rootTree([]); // no .env yet ⇒ scaffold
+    const res = ensureEnv([repo('rostering')], {
+      fs: makeFakeEnvFs(files, children, [], {
+        '/dev/rostering/.env.example': 'AUTHZ_DATABASE_URL=y\n',
+      }),
+    });
+    const root = res.results.find((r) => r.relPath === '.env');
+    expect(root?.action).toBe('scaffolded');
+    expect(root?.missingKeys).toEqual([]);
   });
 });

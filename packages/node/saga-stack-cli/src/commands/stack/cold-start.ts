@@ -326,6 +326,18 @@ export default class StackColdStart extends BaseCommand {
       if (scaffolded.length > 0 && !dry) {
         this.log(`✓ scaffolded ${scaffolded.length} .env file(s) — REVIEW their values before the tutorial`);
       }
+      // soa#359: an EXISTING .env/.env.local that predates a template gaining a new required
+      // var is silently stale — surface it here (an unset required var can fail that repo's
+      // build, e.g. rostering AUTHZ_DATABASE_URL → authz-db, and read as an "unhealthy" launch).
+      const stale = result.results.filter((r) => r.missingKeys.length > 0);
+      if (stale.length > 0) {
+        this.log(
+          `⚠ ${stale.length} existing .env file(s) are MISSING key(s) declared in .env.example — add them (set your own values):`,
+        );
+        for (const r of stale) {
+          this.log(`    ${r.repo}/${r.relPath}: ${r.missingKeys.join(', ')}`);
+        }
+      }
       // NOTE: this only covers repos that SHIP a .env.example. Any service whose .env is
       // gitignored with no template must still be created by hand (see cold-start.md).
     });

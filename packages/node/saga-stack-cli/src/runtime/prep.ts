@@ -29,11 +29,12 @@
  *     distinction isn't expressible from the manifest yet (see the report).
  *   - FATAL MAP (MAJOR-C): up.sh's `build_step` defaults NON-fatal (warn+continue)
  *     and is fatal only for QBOARD/RTSM/COACH (their services import workspace
- *     `dist/` at launch); ROSTERING/PROGRAM_HUB/SDS builds
- *     and ALL `db:generate` (`|| true`) are NON-fatal. R1
- *     mirrors this: a non-fatal build/db:generate failure is recorded as a WARNING
- *     and the pass continues; only a FATAL_BUILD_REPOS build (or any `pnpm install`,
- *     which up.sh's `pnpm_install` also aborts on) stops the pass.
+ *     `dist/` at launch); PROGRAM_HUB/SDS builds and ALL `db:generate` (`|| true`)
+ *     are NON-fatal. soa#359 ADDS ROSTERING to the fatal set (iam-api imports
+ *     `@saga-ed/iam-db` from `dist/` at launch — a deliberate divergence from up.sh;
+ *     see FATAL_BUILD_REPOS). R1 mirrors this: a non-fatal build/db:generate failure
+ *     is recorded as a WARNING and the pass continues; only a FATAL_BUILD_REPOS build
+ *     (or any `pnpm install`, which up.sh's `pnpm_install` also aborts on) stops the pass.
  *   - Repos are ordered by up.sh's canonical prep order for determinism.
  *
  * `--skip-prep` (up.sh `SKIP_PREP=1`): short-circuits R1 ONLY (this pass). Unlike
@@ -76,8 +77,21 @@ export const INSTALL_ONLY_REPOS: ReadonlySet<RepoKey> = new Set<RepoKey>(['SAGA_
  * import workspace `dist/` at launch, so an unbuilt tree is a guaranteed crash
  * (up.sh: `build_step … 1`). Every other repo's build is
  * NON-fatal (warn + continue), matching up.sh's default `build_step`.
+ *
+ * ROSTERING (soa#359): iam-api imports `@saga-ed/iam-db` (and `iam-pii-db`) from
+ * their built `dist/` at launch, so a failed rostering build lands exactly the
+ * "iam-api never became healthy" crash this set exists to prevent. It was NON-fatal
+ * only because the classification is a stale port of up.sh's — from before iam-api
+ * depended on a workspace `*-db` package. Swallowed, a rostering build failure
+ * surfaces as a mystery launch failure instead of the real build error.
+ * (PROGRAM_HUB/SDS may warrant the same by the same criterion — see soa#359.)
  */
-export const FATAL_BUILD_REPOS: ReadonlySet<RepoKey> = new Set<RepoKey>(['QBOARD', 'RTSM', 'COACH']);
+export const FATAL_BUILD_REPOS: ReadonlySet<RepoKey> = new Set<RepoKey>([
+  'ROSTERING',
+  'QBOARD',
+  'RTSM',
+  'COACH',
+]);
 
 /** up.sh's canonical prep order. Non-built repos (SOA/FLEEK) omitted. */
 const PREP_REPO_ORDER: readonly RepoKey[] = [

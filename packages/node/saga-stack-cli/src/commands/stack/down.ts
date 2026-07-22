@@ -23,11 +23,12 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
+import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import { meshDown, repoContextFromFlags, resolveRepoRoot } from '../../runtime/index.js';
 import type {
   MeshDownResult,
-  OrphanListener,
+  ReapedProc,
   ScriptContext,
   StopServiceResult,
 } from '../../runtime/index.js';
@@ -90,14 +91,17 @@ export default class StackDown extends BaseCommand {
     const stopped = await stopper(stateDir);
     this.reportStopped(profile, stateDir, stopped);
 
-    // ── POST-DOWN ORPHAN AUDIT (saga-ed/soa#249). ──
-    // The group-kill above reaps every RECORDED pid's whole subtree, but a watch
-    // child orphaned by an older build (or a pidfile lost to a crashed up) survives
-    // invisibly — and then serves a STALE build to the next bring-up. Scan the
-    // slot's resolved service-port band for sockets still LISTENing and warn LOUD,
-    // naming pid + port + a paste-ready kill hint. Silent when clean; never fails
+    // ── POST-DOWN ORPHAN REAP (saga-ed/soa#249, soa#361). ──
+    // The pidfile group-kill above reaps every RECORDED pid's whole subtree, but a
+    // watch child orphaned from its recorded group leader (leader already exited, or
+    // a vite/tsup child reparented into a NEW process group) survives invisibly —
+    // stopServices sees the dead leader, marks it `stale`, and never signals the
+    // orphan. It then keeps a slot port with a STALE launch env, so the next
+    // `up`/`up --tunnel` refuses to adopt it ("contract can't be verified"). Scan the
+    // slot's resolved service-port band and REAP any survivor by its LIVE pgid (the
+    // same ForeignProcs primitive cold-start uses). Silent when clean; never fails
     // the teardown.
-    await this.auditOrphans(profile);
+    await this.reapOrphans(profile, stateDir);
 
     if (!flags.mesh) return;
 
@@ -131,43 +135,34 @@ export default class StackDown extends BaseCommand {
   }
 
   /**
-   * Post-down orphan audit (saga-ed/soa#249): scan the slot's RESOLVED
-   * service-port band — every service the slot's closure could launch (the
-   * profile's `portOverrides`, minus the slot's `excludedServices`) — for sockets
-   * still LISTENing after the teardown, and warn loudly per survivor with pid +
-   * port + a paste-ready kill hint. The scan runs through the injectable
-   * `OrphanScanner` seam (no raw exec here); any scanner failure degrades open
-   * (reports nothing), so the audit can never fail `down` itself.
+   * Post-down orphan REAP (saga-ed/soa#249, soa#361): after `stopServices` has
+   * killed+unlinked this slot's recorded pidfiles, find any process STILL listening
+   * on the slot's resolved service-port band (`reapScanServices` — every service the
+   * slot could launch, minus its `excludedServices`) and group-kill it by its LIVE
+   * pgid. This is the same `ForeignProcs` primitive `cold-start` reaps with, run at
+   * `down` time so a reparented watch child (which the pidfile group-kill can't
+   * reach) can't survive to block the next `up --tunnel`'s contract check. Every
+   * shell-out degrades OPEN (a missing `lsof`/`ss`/`ps` ⇒ "nothing found"), so the
+   * reap can never fail `down` itself. Silent when the teardown was clean.
+   *
+   * Scanned AFTER `stopServices` (unlike cold-start, which scans first): our own
+   * pidfiles are already gone, so anything still on the band is by definition a
+   * survivor of the teardown — no ownership disambiguation needed.
    */
-  private async auditOrphans(profile: InstanceProfile): Promise<void> {
-    const excluded = new Set<ServiceId>(profile.excludedServices);
-    const portToService = new Map<number, ServiceId>();
-    for (const [id, port] of Object.entries(profile.portOverrides) as [ServiceId, number][]) {
-      if (!excluded.has(id)) portToService.set(port, id);
-    }
+  private async reapOrphans(profile: InstanceProfile, stateDir: string): Promise<void> {
+    const services = reapScanServices(profile);
+    if (services.length === 0) return;
 
-    const survivors = await this.getOrphanScanner().scan([...portToService.keys()]);
-    if (survivors.length === 0) return; // clean teardown — stay silent.
+    const foreign = await this.getForeignProcs().find({
+      manifest,
+      services,
+      stateDir,
+      portOverrides: profile.portOverrides,
+    });
+    if (foreign.length === 0) return; // clean teardown — stay silent.
 
-    this.log(
-      `⚠ ORPHANS SURVIVED down — ${survivors.length} listener(s) still on slot ` +
-        `${profile.slot}'s service ports (likely watch children of an older build; ` +
-        'they will serve STALE code to the next up):',
-    );
-    for (const s of survivors) {
-      this.log(`⚠   ${this.describeOrphan(s, portToService.get(s.port))}`);
-    }
-  }
-
-  /** One survivor line: `port 4011 (programs-api): pid 873122 (node) — kill it:  kill -9 873122`. */
-  private describeOrphan(s: OrphanListener, service: ServiceId | undefined): string {
-    const who = service ?? 'unknown service';
-    const hint =
-      s.pid !== undefined
-        ? `kill it:  kill -9 ${s.pid}`
-        : `find it:  sudo lsof -iTCP:${s.port} -sTCP:LISTEN`;
-    const holder = s.pid !== undefined ? `pid ${s.pid}${s.command ? ` (${s.command})` : ''}` : 'holder not visible';
-    return `port ${s.port} (${who}): ${holder} — ${hint}`;
+    const reaped = await this.getForeignProcs().reap(foreign);
+    for (const line of describeReap(reaped, profile.slot)) this.log(line);
   }
 
   /**
@@ -208,4 +203,49 @@ export default class StackDown extends BaseCommand {
       this.log(`stale pidfiles (already gone): ${stale.map((s) => s.id).join(', ')}`);
     }
   }
+}
+
+/**
+ * PURE: the services whose ports a post-down reap scans — every service the slot
+ * carries a resolved port for (`portOverrides`), minus the slot's
+ * `excludedServices` (e.g. the literal-port playback trio a slot-N stack does not
+ * own). Order-preserving over `portOverrides`. Empty ⇒ nothing to scan.
+ */
+export function reapScanServices(profile: InstanceProfile): ServiceId[] {
+  const excluded = new Set<ServiceId>(profile.excludedServices);
+  return (Object.keys(profile.portOverrides) as ServiceId[]).filter((id) => !excluded.has(id));
+}
+
+/** Clip a long command label for a one-line orphan report. */
+function clipReapCommand(command: string, max = 60): string {
+  return command.length > max ? `${command.slice(0, max - 1)}…` : command;
+}
+
+/**
+ * PURE: the report lines for a post-down reap. Empty in ⇒ empty out (a clean
+ * teardown stays silent). Otherwise a loud header, one line per reaped orphan
+ * (pid + pgid + command, flagged when the kill did NOT confirm), and a trailing
+ * summary — `✓` when every orphan is confirmed gone, `⚠` naming any that survived
+ * (already gone, or not permitted to signal).
+ */
+export function describeReap(reaped: ReapedProc[], slot: number): string[] {
+  if (reaped.length === 0) return [];
+  const lines = [
+    `⚠ ${reaped.length} orphan(s) still held slot ${slot}'s service ports after down ` +
+      '(a watch child the pidfile group-kill could not reach) — reaping by live pgid:',
+  ];
+  for (const r of reaped) {
+    lines.push(
+      `⚠   ${r.id} :${r.port} pid ${r.pid} (pgid ${r.pgid})  ${clipReapCommand(r.command)}` +
+        (r.killed ? '' : '  — STILL ALIVE'),
+    );
+  }
+  const survived = reaped.filter((r) => !r.killed);
+  lines.push(
+    survived.length === 0
+      ? `✓ reaped ${reaped.length} orphan(s) — the next up starts clean`
+      : `⚠ ${survived.length} orphan(s) could not be killed (already gone, or not permitted): ` +
+          survived.map((s) => `${s.id}(pid ${s.pid})`).join(', '),
+  );
+  return lines;
 }

@@ -21,6 +21,9 @@
 //   PROFILE_DIR      persistent profile (default /tmp/sds-synthetic/browser-profile)
 //   SAGA_DASH_DASH   path to saga-dash apps/web/dash (for playwright resolution)
 //   HEADLESS=1       run headless (verification only; default headful)
+//   CHROMIUM_EXTRA_ARGS  JSON array of extra Chromium flags to spread onto the launch
+//                    args (soa#363: fake-media file capture, e.g.
+//                    --use-file-for-fake-video-capture=<abs .y4m>). Ignored if unparseable.
 //
 // Prints one sentinel line for up.sh to grep:
 //   AUTOLOGIN_OK <email> <userId> <finalUrl>
@@ -35,6 +38,13 @@ const EMAIL    = process.env.LOGIN_EMAIL || 'dev@saga.org';
 const PROFILE  = process.env.PROFILE_DIR || '/tmp/sds-synthetic/browser-profile';
 const DASH_DIR = process.env.SAGA_DASH_DASH;
 const HEADLESS = process.env.HEADLESS === '1';
+// soa#363: extra Chromium flags (fake-media file capture) built by the CLI. A malformed
+// value must never break login, so parse defensively and fall back to none.
+let EXTRA_ARGS = [];
+try {
+  const parsed = JSON.parse(process.env.CHROMIUM_EXTRA_ARGS || '[]');
+  if (Array.isArray(parsed)) EXTRA_ARGS = parsed.filter((a) => typeof a === 'string');
+} catch { /* unparseable ⇒ no extra args */ }
 
 const fail = (reason) => { console.log(`AUTOLOGIN_FAIL ${reason}`); process.exit(1); };
 
@@ -53,7 +63,7 @@ try {
   ctx = await chromium.launchPersistentContext(PROFILE, {
     headless: HEADLESS,
     viewport: null,
-    args: ['--start-maximized'],
+    args: ['--start-maximized', ...EXTRA_ARGS],
   });
 } catch (e) {
   fail(`could not launch Chromium (profile in use? missing DISPLAY?): ${e.message}`);

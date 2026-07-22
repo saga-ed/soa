@@ -54,6 +54,7 @@ export * from './lock.js';
 export * from './checkpoint-store.js';
 export * from './trace-preserve.js';
 export * from './foreign-procs.js';
+export * from './fake-media.js';
 export * from './claim.js';
 export * from './cli-version.js';
 export * from './slot-wipe.js';

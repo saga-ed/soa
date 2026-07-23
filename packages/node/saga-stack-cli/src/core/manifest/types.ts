@@ -29,7 +29,8 @@ export type ServiceId =
   | 'transcripts-api' // optional: true (--with-playback)
   | 'insights-api' //    optional: true (--with-playback)
   | 'chat-api' //        optional: true (--with-playback)
-  | 'authz-sync'; //     optional: true (--with authz) — RabbitMQ-only OpenFGA tuple projector
+  | 'authz-sync' //      optional: true (--with authz) — RabbitMQ-only OpenFGA tuple projector
+  | 'authz-api'; //      optional: true (--with authz) — OpenFGA PDP (check/require); own prisma DB, iam.* projection
 
 /** Mesh infra units, started as a single `make up PROFILE=empty`. */
 export type MeshId = 'postgres' | 'redis' | 'rabbitmq' | 'connect-mongo' | 'openfga';
@@ -75,7 +76,8 @@ export type DbId =
   | 'chat_local'
   | 'connectv3'
   | 'openfga'
-  | 'authz_sync_local';
+  | 'authz_sync_local'
+  | 'authz_api_local';
 
 /** Canonical SeedStep ids (see §4). Referenced by `ServiceDef.seed`. */
 export type SeedStepRef =

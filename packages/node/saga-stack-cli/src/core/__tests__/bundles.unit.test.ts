@@ -41,7 +41,7 @@ describe('bundle registry', () => {
     expect(SERVICE_BUNDLES.coach).toEqual(['coach-api', 'coach-web']);
     expect(SERVICE_BUNDLES.playback).toEqual(['transcripts-api', 'insights-api', 'chat-api']);
     expect(SERVICE_BUNDLES.qtf).toEqual([]);
-    expect(SERVICE_BUNDLES.authz).toEqual(['authz-sync']);
+    expect(SERVICE_BUNDLES.authz).toEqual(['authz-sync', 'authz-api']);
   });
 
   it('derives BUNDLE_SEED_ADDONS only for the seed-bearing bundles', () => {

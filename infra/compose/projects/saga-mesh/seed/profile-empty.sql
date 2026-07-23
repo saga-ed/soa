@@ -19,6 +19,7 @@ CREATE USER ledger         WITH PASSWORD 'ledger';
 CREATE USER sis            WITH PASSWORD 'sis';
 CREATE USER coach_api_app  WITH PASSWORD 'dev-password-coach-api-app';
 CREATE USER authz_sync     WITH PASSWORD 'authz_sync';
+CREATE USER authz_api      WITH PASSWORD 'authz_api';
 
 -- ── Databases ───────────────────────────────────────────────────────
 -- Owner set at creation time so prisma migrate deploy can CREATE SCHEMA.
@@ -39,8 +40,12 @@ CREATE DATABASE coach_api       OWNER coach_api_app;
 -- ../../../services/openfga/compose.yml's `profiles: ["authz"]`).
 -- `openfga` stays owned by the mesh superuser — its schema is (re)created by
 -- the `openfga_migrate` one-shot job, not by app-level `CREATE SCHEMA`.
+-- `authz_api_local` is owned by authz_api so the CLI's prisma migrate deploy
+-- (R3, meshProvisioned:true) can CREATE SCHEMA — same owner-at-creation pattern
+-- as the sis_db/programs app DBs above.
 CREATE DATABASE openfga          OWNER postgres_admin;
 CREATE DATABASE authz_sync_local OWNER authz_sync;
+CREATE DATABASE authz_api_local  OWNER authz_api;
 
 -- ── Grants (belt-and-suspenders; owner already has these) ──────────
 GRANT ALL PRIVILEGES ON DATABASE iam_local     TO iam;
@@ -55,6 +60,7 @@ GRANT ALL PRIVILEGES ON DATABASE sis_db        TO sis;
 GRANT ALL PRIVILEGES ON DATABASE coach_api     TO coach_api_app;
 GRANT ALL PRIVILEGES ON DATABASE openfga          TO postgres_admin;
 GRANT ALL PRIVILEGES ON DATABASE authz_sync_local TO authz_sync;
+GRANT ALL PRIVILEGES ON DATABASE authz_api_local  TO authz_api;
 
 -- The sentinel row in _profile_meta.seeded is written by
 -- services/postgres/seed/init-and-seed.sh after this file completes.

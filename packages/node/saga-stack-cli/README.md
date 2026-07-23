@@ -69,9 +69,14 @@ plus tab-completion work at every level.
 
 ### Bundles — common shapes in one word
 
-`--with dash|connect|coach|playback|qtf` expand to a set of `--only` includes (sugar over
-the closure, composable: `--with dash --with coach`). Shared across `up`/`status`/`verify`/
-`seed`/`reset`/`snapshot store`. See `ss stack bundle list`.
+`--with dash|connect|coach|playback|qtf|authz` expand to a set of `--only` includes (sugar
+over the closure, composable: `--with dash --with coach`). Shared across `up`/`status`/
+`verify`/`seed`/`reset`/`snapshot store`. See `ss stack bundle list`.
+
+`--with authz` brings up the OpenFGA authorization stack: the `openfga` mesh unit, iam-api
+with `FGA_ENABLED=true`, the `fga-bootstrap` seed (model + canonical tuples), the `authz-sync`
+RabbitMQ tuple projector, and **`authz-api`** — the PDP that serves check/require over its own
+prisma-migrated `authz_db`, hydrated from the iam.* event projection (:3200, `/health/ready`).
 
 ### Slots — multiple stacks on one box
 

@@ -1086,6 +1086,1015 @@
       "slotClaimWritten": false,
       "strict": true
     },
+    "env:connect": {
+      "aliases": [],
+      "args": {
+        "store": {
+          "description": "store key (iam | programs | scheduling | sessions | ads-adm | coach)",
+          "name": "store",
+          "required": true
+        }
+      },
+      "description": "Open an SSM port-forward to a shared environment's Postgres, resolved from the service's live ECS task definition, and print a ready DATABASE_URL. Holds until Ctrl-C; --print-only resolves without connecting.",
+      "enableJsonFlag": false,
+      "examples": [
+        "<%= config.bin %> <%= command.id %> iam --env dev --profile dev_admin",
+        "<%= config.bin %> <%= command.id %> programs --env dev --local-port 15433",
+        "<%= config.bin %> <%= command.id %> iam --host mydb.dbs-v2.local --remote-port 5440 --database rostering-iam-canonical --print-only"
+      ],
+      "flags": {
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "coach",
+          "type": "option"
+        },
+        "database": {
+          "description": "override the resolved database name.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "database",
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "dev",
+          "noCacheDefault": true,
+          "type": "option"
+        },
+        "env": {
+          "default": "dev",
+          "description": "target environment (dev | training)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "env",
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fleek",
+          "type": "option"
+        },
+        "host": {
+          "description": "remote DB endpoint (skips task-definition resolution).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "host",
+          "type": "option"
+        },
+        "local-port": {
+          "default": 15432,
+          "description": "local end of the tunnel",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "local-port",
+          "type": "option"
+        },
+        "output-json": {
+          "allowNo": false,
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "type": "boolean"
+        },
+        "porcelain": {
+          "allowNo": false,
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "type": "boolean"
+        },
+        "print-only": {
+          "allowNo": false,
+          "description": "resolve and print everything, but do not open the tunnel.",
+          "name": "print-only",
+          "type": "boolean"
+        },
+        "profile": {
+          "description": "AWS profile to use (defaults to the ambient credential chain).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "profile",
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "program-hub",
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "qboard",
+          "type": "option"
+        },
+        "remote-port": {
+          "default": 5432,
+          "description": "remote DB port (with --host)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "remote-port",
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rostering",
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rtsm",
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "saga-dash",
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "sds",
+          "type": "option"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "set",
+          "type": "option"
+        },
+        "slot": {
+          "default": 0,
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "slot",
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "soa",
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "state-dir",
+          "type": "option"
+        },
+        "username": {
+          "description": "override the resolved user (URL carries no password then).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "username",
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "env:connect",
+      "isESM": true,
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "relativePath": [
+        "dist",
+        "commands",
+        "env",
+        "connect.js"
+      ],
+      "slotClaimWritten": false,
+      "strict": true
+    },
+    "env:discover": {
+      "aliases": [],
+      "args": {},
+      "description": "Discover a shared environment's data-plane wiring: SSM params under its discovery roots (filtered to data-store names) and the Online SSM jump host. Read-only.",
+      "enableJsonFlag": false,
+      "examples": [
+        "<%= config.bin %> <%= command.id %> --env dev --profile dev_admin",
+        "<%= config.bin %> <%= command.id %> --env dev --filter mongodb"
+      ],
+      "flags": {
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "coach",
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "dev",
+          "noCacheDefault": true,
+          "type": "option"
+        },
+        "env": {
+          "default": "dev",
+          "description": "target environment (dev | training)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "env",
+          "type": "option"
+        },
+        "filter": {
+          "default": "postgres|mongo|mongodb|db-host|rabbit|redis|rds|secret",
+          "description": "case-insensitive regex over parameter names",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "filter",
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fleek",
+          "type": "option"
+        },
+        "output-json": {
+          "allowNo": false,
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "type": "boolean"
+        },
+        "porcelain": {
+          "allowNo": false,
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "type": "boolean"
+        },
+        "profile": {
+          "description": "AWS profile to use (defaults to the ambient credential chain).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "profile",
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "program-hub",
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "qboard",
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rostering",
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rtsm",
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "saga-dash",
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "sds",
+          "type": "option"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "set",
+          "type": "option"
+        },
+        "slot": {
+          "default": 0,
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "slot",
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "soa",
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "state-dir",
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "env:discover",
+      "isESM": true,
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "relativePath": [
+        "dist",
+        "commands",
+        "env",
+        "discover.js"
+      ],
+      "slotClaimWritten": false,
+      "strict": true
+    },
+    "env:list": {
+      "aliases": [],
+      "args": {},
+      "description": "List deployed shared environments (dev, training) and their dev-platform ledger footprint. Read-only.",
+      "enableJsonFlag": false,
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --profile dev_admin --output-json"
+      ],
+      "flags": {
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "coach",
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "dev",
+          "noCacheDefault": true,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fleek",
+          "type": "option"
+        },
+        "output-json": {
+          "allowNo": false,
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "type": "boolean"
+        },
+        "porcelain": {
+          "allowNo": false,
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "type": "boolean"
+        },
+        "profile": {
+          "description": "AWS profile to use (defaults to the ambient credential chain).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "profile",
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "program-hub",
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "qboard",
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rostering",
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rtsm",
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "saga-dash",
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "sds",
+          "type": "option"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "set",
+          "type": "option"
+        },
+        "slot": {
+          "default": 0,
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "slot",
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "soa",
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "state-dir",
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "env:list",
+      "isESM": true,
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "relativePath": [
+        "dist",
+        "commands",
+        "env",
+        "list.js"
+      ],
+      "slotClaimWritten": false,
+      "strict": true
+    },
+    "env:org:reset": {
+      "aliases": [],
+      "args": {},
+      "description": "DELETE a fixture org's data across the shared environment's Postgres stores, back to the seeded skeleton (org row + admin + seeded personas survive). Destructive; slug-only targeting, identity-asserted, one confirm, per-store transactions, post-verified.",
+      "enableJsonFlag": false,
+      "examples": [
+        "<%= config.bin %> <%= command.id %> --org emptyOrg --url iam=postgres://…15432/iam --url programs=postgres://…15433/programs --dry-run",
+        "<%= config.bin %> <%= command.id %> --org emptyOrg --url iam=… --url programs=… --url sessions=… --url scheduling=… --yes",
+        "<%= config.bin %> <%= command.id %> --org emptyOrg --url iam=… --url programs=… --snapshot --profile dev_admin"
+      ],
+      "flags": {
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "coach",
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "dev",
+          "noCacheDefault": true,
+          "type": "option"
+        },
+        "dry-run": {
+          "allowNo": false,
+          "description": "resolve id-sets, run the identity assertion, and print exactly what would be deleted (per-table counts) — then exit 0 without deleting anything.",
+          "name": "dry-run",
+          "type": "boolean"
+        },
+        "env": {
+          "default": "dev",
+          "description": "target environment (dev | training)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "env",
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fleek",
+          "type": "option"
+        },
+        "org": {
+          "description": "fixture org slug (emptyOrg)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "org",
+          "required": true,
+          "type": "option"
+        },
+        "output-json": {
+          "allowNo": false,
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "type": "boolean"
+        },
+        "porcelain": {
+          "allowNo": false,
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "type": "boolean"
+        },
+        "profile": {
+          "description": "AWS profile for the --snapshot Lambda call (defaults to the ambient chain).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "profile",
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "program-hub",
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "qboard",
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rostering",
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rtsm",
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "saga-dash",
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "sds",
+          "type": "option"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "set",
+          "type": "option"
+        },
+        "slot": {
+          "default": 0,
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "slot",
+          "type": "option"
+        },
+        "snapshot": {
+          "allowNo": false,
+          "description": "best-effort pre-delete snapshot per store via the db-host-v2 orchestrator (profile 'pre-org-reset', versioned). Unreachable orchestrator ⇒ warn and proceed; an unknown registry name skips that store (see --snapshot-service).",
+          "name": "snapshot",
+          "type": "boolean"
+        },
+        "snapshot-service": {
+          "description": "db-host-v2 registry serviceName override as <store>=<serviceName> (repeatable, with --snapshot).",
+          "hasDynamicHelp": false,
+          "multiple": true,
+          "name": "snapshot-service",
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "soa",
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "state-dir",
+          "type": "option"
+        },
+        "url": {
+          "description": "store connection as <store>=<connString> (repeatable; store keys: sessions, scheduling, programs, ads-adm, coach, iam-pii, iam). iam AND programs are mandatory anchors; other stores without a --url are skipped with a warning.",
+          "hasDynamicHelp": false,
+          "multiple": true,
+          "name": "url",
+          "type": "option"
+        },
+        "yes": {
+          "allowNo": false,
+          "description": "non-interactive: skip the destructive-action prompt (CI / agents).",
+          "name": "yes",
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "env:org:reset",
+      "isESM": true,
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "relativePath": [
+        "dist",
+        "commands",
+        "env",
+        "org",
+        "reset.js"
+      ],
+      "slotClaimWritten": false,
+      "strict": true
+    },
+    "env:org:status": {
+      "aliases": [],
+      "args": {},
+      "description": "Show a fixture org's data footprint across the mesh's Postgres stores (per-table row counts, projections marked). Read-only; targets orgs by catalog slug only.",
+      "enableJsonFlag": false,
+      "examples": [
+        "<%= config.bin %> <%= command.id %> --org emptyOrg --url iam=postgres://…15432/iam --url programs=postgres://…15433/programs",
+        "<%= config.bin %> <%= command.id %> --org emptyOrg --offline"
+      ],
+      "flags": {
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "coach",
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "dev",
+          "noCacheDefault": true,
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fleek",
+          "type": "option"
+        },
+        "offline": {
+          "allowNo": false,
+          "description": "catalog-derived ids only — no live id resolution even if anchor URLs are given.",
+          "name": "offline",
+          "type": "boolean"
+        },
+        "org": {
+          "description": "fixture org slug (emptyOrg)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "org",
+          "required": true,
+          "type": "option"
+        },
+        "output-json": {
+          "allowNo": false,
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "type": "boolean"
+        },
+        "porcelain": {
+          "allowNo": false,
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "type": "boolean"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "program-hub",
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "qboard",
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rostering",
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rtsm",
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "saga-dash",
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "sds",
+          "type": "option"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "set",
+          "type": "option"
+        },
+        "slot": {
+          "default": 0,
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "slot",
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "soa",
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "state-dir",
+          "type": "option"
+        },
+        "url": {
+          "description": "store connection as <store>=<connString> (repeatable; store keys: iam, programs, scheduling, sessions, ads-adm, coach)",
+          "hasDynamicHelp": false,
+          "multiple": true,
+          "name": "url",
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "env:org:status",
+      "isESM": true,
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "relativePath": [
+        "dist",
+        "commands",
+        "env",
+        "org",
+        "status.js"
+      ],
+      "slotClaimWritten": false,
+      "strict": true
+    },
+    "env:verify": {
+      "aliases": [],
+      "args": {},
+      "description": "Health-gate a deployed shared environment (dev/training): probe every service's health endpoint and judge it by RESPONSE BODY (the shared ALB answers 200 for unrouted hosts). Non-zero exit if a required service is unhealthy. --org additionally asserts a fixture org's seed skeleton.",
+      "enableJsonFlag": false,
+      "examples": [
+        "<%= config.bin %> <%= command.id %> --env dev",
+        "<%= config.bin %> <%= command.id %> --env training --tolerate connect-api,rtsm-api",
+        "<%= config.bin %> <%= command.id %> --env dev --org emptyOrg --url iam=postgres://…15432/iam"
+      ],
+      "flags": {
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "coach",
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "dev",
+          "noCacheDefault": true,
+          "type": "option"
+        },
+        "ecs": {
+          "allowNo": false,
+          "description": "ALSO check the ECS platform state (running/desired tasks, rollout) — the truth HTTP cannot see (crash-loops behind a healthy target, stuck deploys). Covers services with no public route. Needs dev-account AWS credentials.",
+          "name": "ecs",
+          "type": "boolean"
+        },
+        "env": {
+          "default": "dev",
+          "description": "target environment (dev | training)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "env",
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fleek",
+          "type": "option"
+        },
+        "org": {
+          "description": "also assert this fixture org's seed skeleton (emptyOrg); needs --url iam=<conn>.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "org",
+          "type": "option"
+        },
+        "output-json": {
+          "allowNo": false,
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "type": "boolean"
+        },
+        "porcelain": {
+          "allowNo": false,
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "type": "boolean"
+        },
+        "profile": {
+          "description": "AWS profile for --ecs (defaults to the ambient chain).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "profile",
+          "type": "option"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "program-hub",
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "qboard",
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rostering",
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rtsm",
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "saga-dash",
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "sds",
+          "type": "option"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "set",
+          "type": "option"
+        },
+        "slot": {
+          "default": 0,
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "slot",
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "soa",
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "state-dir",
+          "type": "option"
+        },
+        "tolerate": {
+          "description": "comma-separated service ids whose being down does NOT fail the gate.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "tolerate",
+          "type": "option"
+        },
+        "url": {
+          "description": "store connection as <store>=<connString> (only iam is used, for --org).",
+          "hasDynamicHelp": false,
+          "multiple": true,
+          "name": "url",
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "env:verify",
+      "isESM": true,
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "relativePath": [
+        "dist",
+        "commands",
+        "env",
+        "verify.js"
+      ],
+      "slotClaimWritten": false,
+      "strict": true
+    },
     "set:check": {
       "aliases": [],
       "args": {

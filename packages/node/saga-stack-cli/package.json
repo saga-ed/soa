@@ -43,6 +43,12 @@
             },
             "set": {
                 "description": "Worktree sets (M13): named repo\u2192path maps bound to slots \u2014 list, show, and check the parallel dev contexts --set runs against."
+            },
+            "env": {
+                "description": "Deployed shared environments (dev *.wootdev.com, training *.saga-training.org): list, discover data-plane wiring, and open SSM tunnels to the underlying stores."
+            },
+            "env:org": {
+                "description": "Org-scoped operations against a shared environment's data stores \u2014 fixture orgs only (catalog-slug targeting)."
             }
         },
         "hooks": {

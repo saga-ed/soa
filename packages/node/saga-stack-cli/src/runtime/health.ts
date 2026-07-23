@@ -28,7 +28,17 @@ export interface ProbeResult {
   ok: boolean;
   /** HTTP status code when a response was received; omitted on a transport/timeout error. */
   status?: number;
+  /**
+   * Response body, truncated to `BODY_LIMIT`. Required by `ss env verify`:
+   * deployed envs sit behind a wildcard ALB whose default action answers 200
+   * for any unmatched host, so ONLY the body distinguishes a real service from
+   * "nothing is routed here". Local callers (`stack verify`) ignore it.
+   */
+  body?: string;
 }
+
+/** Cap on the captured body — health payloads are tiny; frontends are not. */
+const BODY_LIMIT = 512;
 
 /**
  * The injectable HTTP seam. One method: GET a URL, resolve to a `ProbeResult`.
@@ -59,7 +69,13 @@ export function makeRealProber(opts: RealProberOptions = {}): HealthProber {
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const res = await fetch(url, { method: 'GET', signal: controller.signal });
-        return { ok: res.ok, status: res.status };
+        let body: string | undefined;
+        try {
+          body = (await res.text()).slice(0, BODY_LIMIT);
+        } catch {
+          body = undefined; // a body that won't read never invalidates the status
+        }
+        return { ok: res.ok, status: res.status, body };
       } catch {
         return { ok: false };
       } finally {

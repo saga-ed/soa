@@ -83,6 +83,8 @@ import {
   makeRealSnapshotIO,
   makeRealViteClear,
   makeSettleBarrier,
+  makeRealEnvAws,
+  makeRealEnvPsql,
   makeSlotWipe,
   realSleep,
   makeRealDockerWipe,
@@ -127,6 +129,8 @@ import type {
   ServiceStopper,
   SettleBarrier,
   SleepFn,
+  EnvAws,
+  EnvPsql,
   SlotWipe,
   SnapshotIO,
   ViteClear,
@@ -836,6 +840,24 @@ export abstract class BaseCommand extends Command {
    */
   protected getSlotWipe(): SlotWipe {
     return makeSlotWipe();
+  }
+
+  /**
+   * The AWS CLI seam (`ss env` — soa#355) — production is the only place `aws` is
+   * shelled out to (captured JSON calls + SSM port-forward sessions). Injected so
+   * env commands are tested against canned AWS responses with no credentials.
+   */
+  protected getEnvAws(): EnvAws {
+    return makeRealEnvAws();
+  }
+
+  /**
+   * The psql seam (`ss env org` — soa#355) — production is the only place `psql`
+   * runs against a (port-forwarded) shared-environment database. Injected so
+   * footprint/reset SQL is asserted byte-for-byte with no live database.
+   */
+  protected getEnvPsql(): EnvPsql {
+    return makeRealEnvPsql();
   }
 
   /**

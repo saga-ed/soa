@@ -34,3 +34,6 @@ export * from './set/index.js';
 
 // Native snapshot fast-path — per-snapshot manifest + pure planners (plan §4.3, M3).
 export * from './snapshot/index.js';
+
+// ss env — deployed shared-environment registry + org footprint model (soa#355).
+export * from './env/index.js';

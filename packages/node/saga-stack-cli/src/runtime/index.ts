@@ -57,3 +57,5 @@ export * from './foreign-procs.js';
 export * from './claim.js';
 export * from './cli-version.js';
 export * from './slot-wipe.js';
+export * from './env-aws.js';
+export * from './env-psql.js';

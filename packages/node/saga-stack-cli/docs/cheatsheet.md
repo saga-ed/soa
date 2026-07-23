@@ -152,6 +152,7 @@ ss stack overlay apply --prs 165 saga-dash   # overlay in-flight PR(s) onto name
 ss stack overlay reset saga-dash             # drop the overlay, back to main
 ss stack login teacher@saga.org              # mint a persona cookie jar (defaults to dev@saga.org)
 ss stack login --browser                     # …also open an auto-logged-in Chromium
+ss stack login --browser --fake-video clip.mp4  # …feed a local clip to its fake camera/mic (auto-transcodes)
 ss stack tunnel                              # share the running stack
 ```
 

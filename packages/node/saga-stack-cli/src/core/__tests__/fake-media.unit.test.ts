@@ -16,7 +16,7 @@ describe('planFakeMedia', () => {
       derived: false,
     });
     expect(plan.video?.argv).toEqual([
-      '-y', '-i', '/clips/student.mp4', '-pix_fmt', 'yuv420p', '/state/fake-av/student.fake-video.y4m',
+      '-nostdin', '-y', '-i', '/clips/student.mp4', '-pix_fmt', 'yuv420p', '/state/fake-av/student.fake-video.y4m',
     ]);
     // audio derived from the SAME file (mp4 carries both), marked derived ⇒ non-fatal.
     expect(plan.audio).toMatchObject({
@@ -27,6 +27,9 @@ describe('planFakeMedia', () => {
     });
     expect(plan.audio?.argv).toContain('-vn');
     expect(plan.audio?.argv).toContain('pcm_s16le');
+    // -nostdin so a backgrounded transcode can't SIGTTIN-freeze on ffmpeg's stdin read.
+    expect(plan.video?.argv[0]).toBe('-nostdin');
+    expect(plan.audio?.argv[0]).toBe('-nostdin');
   });
 
   it('a .y4m video is passthrough (no transcode) and does NOT derive audio', () => {

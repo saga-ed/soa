@@ -70,6 +70,10 @@ district-agnostic, and one flip changes every holder fleet-wide.
   write **no** pod tuple and no direct `host` tuples; otherwise the default pod.
   ⚠️ The sessionId encodes the **default** podId and the override row is keyed on
   it independent of any SWAP — resolve the pod, never parse it out of the id.
+- **`pod.parent`** is a two-hop lookup, not a column: a pod carries `periodId`/`cohortId`
+  and the program comes via `PeriodProjection.programId` (non-null, but soft-deletable
+  via `deletedAt`). Re-resolve it when `Pod.rotation` changes re-point `PodAssignment` —
+  a missing `pod.parent` tuple silently denies `can_create_session`.
 - **`pod.tutor`** comes from `pod_tutor_projection` (1:N, **interval-modeled**), not
   programs-api's `PodTutor` table (1:1 — using it silently loses multi-tutor pods).
   FGA tuples are at-now, so the writer must re-run on interval boundaries (a timer,

@@ -36,11 +36,26 @@ type user
 
 # A group of users. Used for sections, cohorts, ad-hoc rosters.
 # Membership is tenant-scoped via `parent`.
+#
+# `pgrant` + the capability relations carry the delegation spine (see the
+# persona/pgrant types below).
+#
+# NO ancestor cascade here — deliberately. program-hub resolves grant scope as a
+# FLAT two-source enumeration (`programGrantGroupIds` = organizationId + the
+# program's schoolGroupIds) and then a flat `groupId IN (...)` membership test;
+# `resolved-membership.service.ts` calls it "a bounded membership pick (not a
+# hierarchy crawl)", and `authz_group_hierarchy` has no runtime reader in the
+# authorization path. A `from parent_group` cascade here would grant edit rights
+# that `callerHoldsGrant` denies. `program.grant_group` (below) mirrors the real
+# flat enumeration instead.
 type group
   relations
     define parent: [tenant]
     define member: [user]
     define admin: [user] or admin from parent
+    define pgrant: [pgrant]
+    define edit_non_hosted: edit_non_hosted from pgrant
+    define observe: observe from pgrant
 
 # A role assignment carrier. Roles are per-tenant; a user assigned a role
 # inherits the role's permissions on the resources the role grants.
@@ -48,6 +63,66 @@ type role
   relations
     define parent: [tenant]
     define holder: [user, group#member]
+
+# ---------------------------------------------------------------------------
+# Delegation spine (persona -> pgrant -> group -> program)
+# ---------------------------------------------------------------------------
+#
+# Session write delegation is NOT a program relation. program-hub resolves it
+# as a GROUP-scoped persona capability:
+#
+#   callerHoldsGrant -> holdsPermissionOnPeriod(periodId) -> program
+#     -> programGrantGroupIds(programId)
+#          = program_projection.organizationId  (the district/org group)
+#          + N program_school_mapping_projection.schoolGroupId
+#     -> a LIVE authz_persona_assignment in one of those groups
+#     -> authz_persona_definition.permissions[]
+#
+# `persona` is a first-class TYPE (rather than baking the permission set into
+# the projected tuples) precisely BECAUSE `authz_persona_definition.permissions`
+# is MUTABLE: editing one persona's permissions would otherwise invalidate
+# every derived tuple fleet-wide. Here it is one tuple on the persona object.
+#
+# Permission strings these mirror (sessions-api):
+#   edit_non_hosted -> 'sessions:edit_non_hosted_sessions'
+#   observe         -> 'sessions:observe_sessions'
+
+# TENANT-CONTAINMENT EXEMPTION: `persona` and `pgrant` deliberately have NO
+# `parent: [tenant]` edge, unlike the resource types above. A persona is a
+# fleet-wide DEFINITION (not tenant-owned), and a pgrant is scoped by the group
+# it hangs off — containment comes from the `group.pgrant` edge, so the
+# projector, not the model, is what keeps grants inside a tenant.
+#
+# A persona definition. The `grants_*` relations use the [user:*] public
+# wildcard: the persona either confers the capability on its holders, or it
+# does not. Written from authz_persona_definition.permissions[].
+#
+# ⚠️ Writing `persona.grants_*` is the highest-privilege tuple write in this
+# model — it is district-agnostic by virtue of [user:*], and flipping one tuple
+# changes the capability for EVERY holder fleet-wide. `saga_platform`'s
+# `can_admin_personas` is the staff capability that corresponds to it; the tuple
+# writer must treat these writes as privileged.
+type persona
+  relations
+    define grants_edit_non_hosted: [user:*]
+    define grants_observe: [user:*]
+
+# A persona ASSIGNMENT carrier — ONE OBJECT PER `authz_persona_assignment` ROW
+# (key on the assignment row id, NEVER on `(user, persona)`: one object reused
+# across groups would leak a grant between groups/tenants). It binds a subject
+# to a persona within a group.
+#
+# ⚠️ The `and` here is load-bearing and MUST NOT become `or`. `grants_*` is a
+# [user:*] public wildcard, so the union form would confer the capability on
+# EVERY user in the store — cascading pgrant -> group -> program -> session
+# .can_edit and pod.can_create_session. The intersection with `subject` is the
+# only thing binding the capability to this assignment's user.
+type pgrant
+  relations
+    define subject: [user]
+    define persona: [persona]
+    define edit_non_hosted: subject and grants_edit_non_hosted from persona
+    define observe: subject and grants_observe from persona
 
 # ---------------------------------------------------------------------------
 # Resource types
@@ -74,6 +149,14 @@ type program
     define admin: [user, group#member, role#holder] or owner or admin from parent
     define editor: [user, group#member, role#holder] or admin
     define viewer: [user, group#member, role#holder] or editor
+    # A program's grant groups are its district group AND its school groups —
+    # edges to the SAME group objects the capability relations run on. Mirrors
+    # `programGrantGroupIds` = program_projection.organizationId +
+    # program_school_mapping_projection.schoolGroupId[]. FLAT by construction:
+    # the projector writes one edge per grant group, no ancestor walk.
+    define grant_group: [group]
+    define edit_non_hosted: edit_non_hosted from grant_group
+    define observe: observe from grant_group
 
 # An enrollment links a user to a program/cohort.
 # Used by program-hub's enrollment-tree read path.
@@ -85,14 +168,70 @@ type enrollment
     define tutor: [user]
     define viewer: [user, group#member, role#holder] or admin from program or editor from program or student or tutor
 
+# A pod — the level a TUTOR is actually attached at. A session has no owner
+# column of its own (program-hub's `tutoring_session` has no hostId/ownerId),
+# so session hosting resolves THROUGH the pod.
+#
+# `tutor` is written by a projector from program-hub's `pod_tutor_projection`
+# (1:N, INTERVAL-modeled: valid_from/valid_until queried at an `asOf`). FGA
+# tuples are at-now, so the projector writes only rows live NOW and must
+# re-run on interval boundaries — a timer, not only an event handler.
+#
+# PROJECTOR NOTE: read `pod_tutor_projection` (1:N), NOT programs-api's
+# `PodTutor` table (1:1, podId as PK) — the latter silently loses multi-tutor
+# pods.
+#
+# `can_create_session` is the AD-HOC create gate: an ad-hoc create has no
+# session object yet, so it cannot be a session-level check. Mirrors
+# sessions-api `assertCanCreateAdhoc` ("host of podId OR an edit grant").
+type pod
+  relations
+    # Projector-derived edge: a Pod row carries periodId/cohortId, not a
+    # programId — the program resolves via period -> PeriodProjection.programId.
+    # Pod.rotation changes re-point PodAssignment, so this edge is MUTABLE.
+    define parent: [program]
+    define tutor: [user]
+    define can_create_session: tutor or edit_non_hosted from parent
+
 # A scheduled session (a tutoring session, a class meeting). Lives under
 # a program; participants get session-level permissions.
+#
+# HOSTING (see the `pod` type above): `host` is the RELATIONSHIP branch and
+# `edit_grant`/`observe_grant` are the DELEGATION branch. They stay SEPARABLE
+# relations on purpose so `checkDetailed` can attribute D19 actor HOST vs
+# ADMIN (`cancellationActor`); never collapse them into one OR'd relation.
+#
+# The `pod` edge is the EFFECTIVE pod for the occurrence, resolved by the
+# projector from `pod_assignment_override(slotId, date)`:
+#   SWAP   -> write the swapped-in effectivePodId
+#   ABSENT -> write NO pod tuple AND no direct `host` tuples ("an ABSENT
+#             effective pod admits no host at all")
+#   DEFAULT/no row -> the session's default pod
+# FOOTGUN: the sessionId encodes the DEFAULT podId and the override row is
+# keyed on it "independent of any SWAP" — a projector that parses podId out
+# of the sessionId writes the WRONG pod on every SWAP. Resolve it, don't
+# parse it.
+#
+# The direct `[user]` branch of `host` is the per-occurrence override host
+# (`session_instance_override.hostIds` + `hostOverridden`). It is ADDITIVE —
+# it never revokes the base pod tutor. The projector must gate it on the
+# user's LIVE period membership AND retract on whole-user deactivation,
+# because `period_membership` does NOT close on deactivation.
+#
+# Note ABSENT suppresses only the HOST branch: a grant holder still passes
+# `can_edit` via `edit_grant`, matching sessions-api checking `holdsGrant`
+# outside its effective-pod guard.
 type session
   relations
     define parent: [program]
-    define host: [user]
+    define pod: [pod]
+    define host: [user] or tutor from pod
     define participant: [user, group#member]
     define observer: [user, group#member, role#holder]
+    define edit_grant: edit_non_hosted from parent
+    define observe_grant: observe from parent
+    define can_edit: host or edit_grant
+    define can_observe: host or observe_grant
     define viewer: host or participant or observer or admin from parent
     define can_join: host or participant or admin from parent
 

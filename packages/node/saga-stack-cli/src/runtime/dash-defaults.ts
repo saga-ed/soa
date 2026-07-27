@@ -70,7 +70,12 @@ export const DASH_LOCAL_SERVICES: Readonly<Record<string, ServiceId>> = {
   'sessions-api': 'sessions-api',
   'sis-api': 'sis-api',
   'content-api': 'content-api',
-  connect: 'connect-api',
+  // Dash's `connect` service key is the connect WEB SPA origin (deployed:
+  // connect.wootdev.com; checked-in local default 6210 = connectv3 web dev) —
+  // observe/join links navigate there. Mapping it to connect-api wrote the
+  // API port into the browser-navigation key, so every slot>0 dash connect
+  // link landed on Express's "Cannot GET /" (found live on slot 1).
+  connect: 'connect-web',
   // The browser dials these two for REAL (the dash's attendance/transcripts tRPC
   // clients), so a slot's config.local.json MUST offset them too — else a slot > 0
   // dash keeps the base config.json ports (ads-adm 5005 / transcripts 6302 = SLOT
@@ -82,6 +87,11 @@ export const DASH_LOCAL_SERVICES: Readonly<Record<string, ServiceId>> = {
   // refused) instead of writing cross-slot — the corruption gate.
   'ads-adm': 'ads-adm-api',
   'transcripts-api': 'transcripts-api',
+  // saga-dash#779: the dash authz client (affordances). Without this entry a
+  // slot>0 dash falls back to the checked-in localhost:3200 (slot 0), fails
+  // the fetch, and silently runs its permission-derived fallback — i.e. the
+  // authz path is never exercised on a slot.
+  'authz-api': 'authz-api',
 };
 
 /** Inputs to the dash-defaults prelaunch hook. */

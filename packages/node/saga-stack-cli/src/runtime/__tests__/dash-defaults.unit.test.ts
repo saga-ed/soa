@@ -123,6 +123,8 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
     'sis-api': 3100 + offset,
     'content-api': 3009 + offset,
     'connect-api': 6106 + offset,
+    'connect-web': 6210 + offset,
+    'authz-api': 3200 + offset,
     'ads-adm-api': 5005 + offset,
     'transcripts-api': 6302 + offset,
   });
@@ -152,7 +154,10 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
     expect(parsed.localDefaults.iam).toEqual({ type: 'url', url: 'http://localhost:4010' });
     expect(parsed.localDefaults['program-hub']).toEqual({ type: 'url', url: 'http://localhost:4006' });
     expect(parsed.localDefaults['enrollment-api']).toEqual({ type: 'url', url: 'http://localhost:4006' });
-    expect(parsed.localDefaults.connect).toEqual({ type: 'url', url: 'http://localhost:7106' });
+    // connect = the WEB SPA origin (browser navigation target), not the API.
+    expect(parsed.localDefaults.connect).toEqual({ type: 'url', url: 'http://localhost:7210' });
+    // authz-api backs the dash affordances client (saga-dash#779).
+    expect(parsed.localDefaults['authz-api']).toEqual({ type: 'url', url: 'http://localhost:4200' });
     // ads-adm + transcripts-api MUST offset too (the browser dials them for real —
     // the split-brain BLOCKER). Base config.json ports (5005 / 6302 = slot 0) must
     // NOT leak through: slot 1 ⇒ 6005 / 7302.

@@ -53,6 +53,16 @@ const d = await fga.checkDetailed(
 them in priority order: `['host', 'edit_grant']` makes HOST win when a caller
 is both.
 
+> **Caller obligation — keep `relations[]` exhaustive.** The array you pass must
+> be exactly the branches of the corresponding `can_*` union.
+> `checkDetailed(u, ['host', 'edit_grant'], o)` is caller-side duplication of
+> `can_edit: host or edit_grant`. If a branch is ever added to that union in the
+> model, an enumerating caller **denies access the model would allow**. The
+> drift fails closed (under-authorization, not a hole), and it is silent — so
+> when you add a branch to a `can_*` union, grep for its `checkDetailed`
+> callers. The capability catalog codegens these shapes, so branch growth is
+> anticipated.
+
 ## Contextual tuples
 
 Ephemeral objects are never materialized as stored tuples. A session id decodes

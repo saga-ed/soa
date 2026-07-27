@@ -872,16 +872,20 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // inversify.config.ts). RABBITMQ_URL is the fleet-wide shared name.
         AUTHZ_DATABASE_URL: '${AUTHZ_API_DB_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
-        // ---- iam-api S2S validation (env prefix IAM_ via DotenvConfigManager) ----
+        // ---- iam-api S2S validation ----
         // The app's config defaults point at prod hosts / :3000 and WILL 401 every
         // locally-minted token unless repointed at the stack iam (:3010) and the
         // issuer iam actually mints (${IAM_ISSUER} = https://iam.wootdev.com, NOT
         // the schema's https://iam.saga.org default). Same JWT-issuer drift class
         // the manifest guards for programs-api's JWT_ISSUER above.
-        IAM_JWKSURL: '${IAM_URL}/.well-known/services/jwks.json',
-        IAM_USERJWKSURL: '${IAM_URL}/.well-known/jwks.json',
-        IAM_SERVICETOKENISSUER: '${IAM_ISSUER}',
-        IAM_USERTOKENISSUER: '${IAM_ISSUER}',
+        // Env names: DotenvConfigManager prefixes with the schema's configType
+        // ('IAM_AUTH'), so the vars are IAM_AUTH_<FIELD> — plain IAM_<FIELD>
+        // never reaches the config and the service silently keeps its prod
+        // defaults (verified live: every cookie 401'd until the rename).
+        IAM_AUTH_JWKSURL: '${IAM_URL}/.well-known/services/jwks.json',
+        IAM_AUTH_USERJWKSURL: '${IAM_URL}/.well-known/jwks.json',
+        IAM_AUTH_SERVICETOKENISSUER: '${IAM_ISSUER}',
+        IAM_AUTH_USERTOKENISSUER: '${IAM_ISSUER}',
       },
     },
     // No fixture seed of its own — iam.* projection hydrates authz_db at runtime.

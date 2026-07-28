@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DEPLOYED_ENVS, DEV_ACCOUNT_ID, ENV_NAMES, accountMismatchError, resolveEnv } from '../index.js';
+import { DEPLOYED_ENVS, DEV_ACCOUNT_ID, ENV_NAMES, PROD_ACCOUNT_ID, accountMismatchError, resolveEnv } from '../index.js';
 
 describe('registry — the built-in envs, pinned field for field', () => {
   it('pins dev', () => {
@@ -171,17 +171,26 @@ describe('accountMismatchError — actionable, and never wrong about WHICH accou
     );
   });
 
-  it('says NOTHING dev-specific when a non-dev account is expected', () => {
+  it('names the PROD account and a prod profile when prod is what is expected', () => {
     // The dev wording is a lie for any other account: telling someone who needs
-    // production credentials to pass `dev_admin` sends them the wrong way.
+    // production credentials to pass `dev_admin` sends them the wrong way. But
+    // degrading to a bare "<a matching profile>" is barely better — I#375
+    // requires prod's message to be as actionable as dev's, so it names one.
     const msg = accountMismatchError('396913734878', ['531314149529'], "'prod'")!;
     expect(msg).toBe(
       'AWS account mismatch — your credentials resolve to account 396913734878, but ' + "'prod' " +
-        'lives in 531314149529. Pass --profile <a matching profile> or set AWS_PROFILE, then retry.',
+        'lives in 531314149529 (the production account). Pass --profile <a prod-account profile> ' +
+        '(e.g. prod_admin) or set AWS_PROFILE, then retry.',
     );
     expect(msg).not.toContain('dev_admin');
     expect(msg).not.toContain('the dev account');
     expect(msg).not.toContain('dev-account profile');
+  });
+
+  it('still degrades to generic wording for an account it has no hint for', () => {
+    const msg = accountMismatchError('396913734878', ['999999999999'], "'someday'")!;
+    expect(msg).toContain('lives in 999999999999. Pass --profile <a matching profile>');
+    expect(msg).not.toContain('e.g.');
   });
 
   it('degrades to generic wording when the expectation spans several accounts', () => {

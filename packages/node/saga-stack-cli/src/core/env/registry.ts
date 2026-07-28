@@ -25,6 +25,9 @@
 /** The dev AWS account that hosts BOTH built-in shared environments. */
 export const DEV_ACCOUNT_ID = '396913734878';
 
+/** The production AWS account — a SECOND account, with no dev-platform ledger. */
+export const PROD_ACCOUNT_ID = '531314149529';
+
 export interface DeployedEnv {
   /** ss-facing name (`--env dev`). */
   name: string;
@@ -142,7 +145,7 @@ export const DEPLOYED_ENVS: Record<string, DeployedEnv> = {
     // so `verify` needs no curated prod host table.
     domain: 'saga.org',
     awsRegion: 'us-west-2',
-    awsAccountId: '531314149529',
+    awsAccountId: PROD_ACCOUNT_ID,
     ssmDiscoveryRoots: ['/shared/infra/prod'],
     jumpHostNameTag: 'prod-shared-ecs-instance',
     // One cluster only — there is no `prod-shared-arm` (the iac samconfig
@@ -179,6 +182,15 @@ const ACCOUNT_HINTS: Record<string, { accountLabel: string; profileNoun: string;
     accountLabel: 'the dev account',
     profileNoun: 'a dev-account profile',
     exampleProfile: 'dev_admin',
+  },
+  // I#375 requires prod's mismatch to be just as actionable as dev's. Without
+  // this entry the prod message degrades to "<a matching profile>" with no
+  // example — technically correct, useless to someone who does not already know
+  // the profile name.
+  [PROD_ACCOUNT_ID]: {
+    accountLabel: 'the production account',
+    profileNoun: 'a prod-account profile',
+    exampleProfile: 'prod_admin',
   },
 };
 

@@ -56,6 +56,8 @@ type group
     define pgrant: [pgrant]
     define edit_non_hosted: edit_non_hosted from pgrant
     define observe: observe from pgrant
+    define view_non_member: view_non_member from pgrant
+    define lifecycle_non_hosted: lifecycle_non_hosted from pgrant
 
 # A role assignment carrier. Roles are per-tenant; a user assigned a role
 # inherits the role's permissions on the resources the role grants.
@@ -84,8 +86,11 @@ type role
 # every derived tuple fleet-wide. Here it is one tuple on the persona object.
 #
 # Permission strings these mirror (sessions-api):
-#   edit_non_hosted -> 'sessions:edit_non_hosted_sessions'
-#   observe         -> 'sessions:observe_sessions'
+#   edit_non_hosted      -> 'sessions:edit_non_hosted_sessions'
+#   observe              -> 'sessions:observe_sessions'
+#   view_non_member      -> 'sessions:view_non_member_sessions' (see-all reads)
+#   lifecycle_non_hosted -> 'sessions:lifecycle_non_hosted_sessions'
+#                           (start/end/cancel takeover)
 
 # TENANT-CONTAINMENT EXEMPTION: `persona` and `pgrant` deliberately have NO
 # `parent: [tenant]` edge, unlike the resource types above. A persona is a
@@ -106,6 +111,8 @@ type persona
   relations
     define grants_edit_non_hosted: [user:*]
     define grants_observe: [user:*]
+    define grants_view_non_member: [user:*]
+    define grants_lifecycle_non_hosted: [user:*]
 
 # A persona ASSIGNMENT carrier — ONE OBJECT PER `authz_persona_assignment` ROW
 # (key on the assignment row id, NEVER on `(user, persona)`: one object reused
@@ -123,6 +130,8 @@ type pgrant
     define persona: [persona]
     define edit_non_hosted: subject and grants_edit_non_hosted from persona
     define observe: subject and grants_observe from persona
+    define view_non_member: subject and grants_view_non_member from persona
+    define lifecycle_non_hosted: subject and grants_lifecycle_non_hosted from persona
 
 # ---------------------------------------------------------------------------
 # Resource types
@@ -157,6 +166,8 @@ type program
     define grant_group: [group]
     define edit_non_hosted: edit_non_hosted from grant_group
     define observe: observe from grant_group
+    define view_non_member: view_non_member from grant_group
+    define lifecycle_non_hosted: lifecycle_non_hosted from grant_group
 
 # An enrollment links a user to a program/cohort.
 # Used by program-hub's enrollment-tree read path.
@@ -191,13 +202,21 @@ type pod
     # Pod.rotation changes re-point PodAssignment, so this edge is MUTABLE.
     define parent: [program]
     define tutor: [user]
+    # Student roster of the pod — pods carry rosters, so a SWAP day's
+    # membership resolves through the swapped-in pod
+    # (session_instance.override_pod below). Written from the RESOLVED
+    # pod-membership facts (programs-api's engine already applies the
+    # program inclusion/exclusion filters; the projector ingests
+    # conclusions, never the rules).
+    define member: [user]
     define can_create_session: tutor or edit_non_hosted from parent
 
 # A scheduled session (a tutoring session, a class meeting). Lives under
 # a program; participants get session-level permissions.
 #
 # HOSTING (see the `pod` type above): `host` is the RELATIONSHIP branch and
-# `edit_grant`/`observe_grant` are the DELEGATION branch. They stay SEPARABLE
+# the `*_grant` relations (`edit_grant`/`observe_grant`/`view_grant`/
+# `lifecycle_grant`) are the DELEGATION branch. They stay SEPARABLE
 # relations on purpose so `checkDetailed` can attribute D19 actor HOST vs
 # ADMIN (`cancellationActor`); never collapse them into one OR'd relation.
 #
@@ -230,10 +249,75 @@ type session
     define observer: [user, group#member, role#holder]
     define edit_grant: edit_non_hosted from parent
     define observe_grant: observe from parent
+    define view_grant: view_non_member from parent
+    define lifecycle_grant: lifecycle_non_hosted from parent
     define can_edit: host or edit_grant
     define can_observe: host or observe_grant
+    define can_view: host or participant or view_grant
+    define can_lifecycle: host or lifecycle_grant
     define viewer: host or participant or observer or admin from parent
     define can_join: host or participant or admin from parent
+
+# A DATED OCCURRENCE of a repeating session — the layer where program-hub's
+# per-day facts live (`pod_assignment_override` SWAP/ABSENT resolution,
+# `session_instance_override.hostIds`, participant deltas). The repeating
+# `session` above answers "who is attached to this series"; the instance
+# answers "who is host/member ON THIS DAY".
+#
+# Instances are LAZY: an object exists (and carries tuples) only when
+# instance-specific facts were AUTHORED for that date — a pod-swap override,
+# an occurrence host, or a participant delta. Default days resolve straight
+# through the `session` edge; no per-day fan-out of tuples.
+#
+# OVERRIDE **REPLACES** — it never unions with the base pod. The
+# `pod_overridden: [user:*]` wildcard marker is what removes the base arm:
+#   base_host = host from session BUT NOT pod_overridden
+# ⚠️ The marker and `override_pod` MUST be written in the SAME authoring
+# action (they represent one fact — "this day's pod is different"). A marker
+# without an override_pod is an ABSENT day (no host at all — mirrors the
+# session-level ABSENT rule); an override_pod without the marker would
+# silently UNION the swapped-in pod with the base one, which is exactly the
+# wrong-pod footgun the session comment warns about.
+#
+# `override_host` and `added_participant` are ADDITIVE per-occurrence facts —
+# they never revoke the resolved base (matching
+# `session_instance_override.hostIds` being additive). Same projector
+# liveness caveats as the session-level override-host note above.
+#
+# The `*_grant` relations pass through the `session` edge ONLY — never
+# through `override_pod` — so an overridden (or ABSENT) day still admits
+# grant holders, and `checkDetailed` D19 attribution (HOST vs ADMIN) keeps
+# working at the instance level. Arms stay separable here for the same
+# reason they do on `session`.
+#
+# TENANT-CONTAINMENT NOTE: like `room.session`, containment resolves through
+# the `session` edge (session -> parent program -> tenant); the instance has
+# no `parent` edge of its own.
+type session_instance
+  relations
+    define session: [session]
+    # Authored instance facts (durable rows). `pod_overridden` is the
+    # wildcard marker written in the SAME authoring action as `override_pod`.
+    define override_pod: [pod]
+    define override_host: [user]
+    define added_participant: [user]
+    define pod_overridden: [user:*]
+    # Resolution: instance-authored facts first; else the repeating session's
+    # (suppressed entirely on an overridden day); grants pass through the
+    # session either way.
+    define base_host: host from session but not pod_overridden
+    define host: override_host or tutor from override_pod or base_host
+    define base_member: participant from session but not pod_overridden
+    define member: added_participant or member from override_pod or base_member
+    define edit_grant: edit_grant from session
+    define observe_grant: observe_grant from session
+    define view_grant: view_grant from session
+    define lifecycle_grant: lifecycle_grant from session
+    # Composite gates (enforce form) — same arm structure as `session`.
+    define can_edit: host or edit_grant
+    define can_observe: host or observe_grant
+    define can_view: host or member or view_grant
+    define can_lifecycle: host or lifecycle_grant
 
 # A real-time room (rtsm). Tenant-scoped via parent. Used to lock down
 # socket joins; the `can_join` relation is what `RoomManager.joinRoom`

@@ -85,6 +85,56 @@ district-agnostic, and one flip changes every holder fleet-wide.
 - `ABSENT` suppresses only the **host** branch; a grant holder still passes `can_edit`,
   matching sessions-api checking `holdsGrant` outside its effective-pod guard.
 
+## The occurrence layer (`session_instance`)
+
+A `session_instance` is a **dated occurrence** of a repeating session — the layer
+program-hub's per-day facts live at (`pod_assignment_override` SWAP/ABSENT,
+`session_instance_override.hostIds`, participant deltas). Instances are **lazy**:
+an object carries tuples only when a per-day fact was *authored*; default days
+resolve straight through the `session` edge, so there is no per-day tuple fan-out.
+
+```
+base_host = host from session but not pod_overridden   # marker removes the base arm
+host      = override_host or tutor from override_pod or base_host
+member    = added_participant or member from override_pod or base_member
+```
+
+- **Override REPLACES, never unions.** The `pod_overridden: [user:*]` wildcard
+  marker suppresses the base arm; `override_pod` supplies the swap-day pod (pods
+  carry rosters via `pod.member`, so swap-day membership comes with it). ⚠️ The
+  marker and `override_pod` MUST be written in the **same authoring action** —
+  they are one fact. A marker alone is an ABSENT day; an `override_pod` alone
+  would silently union base ∪ swapped pods.
+- **`override_host` / `added_participant` are additive** — they never revoke the
+  resolved base, matching `session_instance_override.hostIds` semantics.
+- **Grants pass through the `session` edge only** — an overridden or ABSENT day
+  still admits grant holders, and the D19 arm separability (HOST vs ADMIN
+  attribution) holds at the instance level too. The gates mirror the session's
+  arm structure: `can_edit`/`can_observe`/`can_view`/`can_lifecycle`.
+
+These semantics have runnable-evidence backing: rostering's prototype slice
+(`scripts/fga/prototype/session-instance-slice.fga.yaml`, landed in
+[rostering#883](https://github.com/saga-ed/rostering/pull/883)) exercises the
+same shapes against a real store via `fga model test` — swap-day replacement,
+added-participant days, grant-vs-host separability, see-all reads — 8/8 green.
+This package pins the structure with transformer-based tests (no store harness
+ships in this repo).
+
+## View / lifecycle capabilities
+
+Two more capabilities ride the same persona → pgrant → group →
+`program.grant_group` spine, in the same shape as `edit_non_hosted`/`observe`:
+
+| Capability | Permission string (sessions-api) | Session gate |
+|---|---|---|
+| `view_non_member` | `sessions:view_non_member_sessions` (see-all reads) | `can_view = host or participant or view_grant` |
+| `lifecycle_non_hosted` | `sessions:lifecycle_non_hosted_sessions` (start/end/cancel takeover) | `can_lifecycle = host or lifecycle_grant` |
+
+Both inherit the spine's invariants (the `pgrant` intersection, the flat
+no-cascade rule) and stay separable from `host` for D19 attribution. The legacy
+`viewer`/`can_join` relations are untouched — `can_view` is the new
+vocabulary-aligned gate, not a replacement.
+
 ## Editing the model
 
 1. Open a PR editing `model.fga` and `src/types.ts` in lockstep.

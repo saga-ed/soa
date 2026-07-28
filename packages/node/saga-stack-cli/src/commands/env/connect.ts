@@ -17,6 +17,9 @@
  *      fetched (Secrets Manager or SSM parameter refs both handled).
  *   3. Jump host = newest running EC2 tagged `Name=dev-shared-ecs-instance`
  *      that is Online in SSM; CloudMap `.dbs-v2.local` names resolve THERE.
+ *      Every target — db-host container and shared RDS alike — is dialled as a
+ *      REMOTE host from that jump host (soa#370); `.dbs-v2.local` names first
+ *      resolve their CloudMap-registered port, which wins over the task def.
  *
  * `--host/--remote-port/--database/--username` skip resolution entirely;
  * `--print-only` stops before the tunnel. Once the session-manager plugin
@@ -116,28 +119,27 @@ export default class EnvConnect extends BaseCommand {
       }
     }
 
-    // ── route: db-host-v2 CloudMap targets tunnel via the container's OWN host
-    // instance with a 127.0.0.1 dial (the shared jump host's SG cannot reach the
-    // containers — task-SG allowlists); everything else via the shared jump host. ──
-    let ssmTarget: string;
-    let dialHost: string;
+    // ── route: EVERYTHING tunnels through the shared jump host, dialling the
+    // real endpoint as a REMOTE host (soa#370). The db-host containers publish
+    // on 0.0.0.0 and `dev-db-host-v2-sg` admits 5432-5499 from the whole VPC
+    // CIDR, so the jump host reaches them directly — the old special case
+    // SSM-targeted the container's own EC2 host and dialled 127.0.0.1 there,
+    // which added a hop that bought nothing and broke when the session to that
+    // host would not come up. CloudMap names still resolve their REGISTERED
+    // port, which is authoritative over whatever the task definition says. ──
+    const jump = await resolveJumpHost(this.getEnvAws(), JUMP_HOST_NAME_TAG, opts);
+    if (jump === undefined) {
+      this.error(`no running+Online SSM jump host tagged Name=${JUMP_HOST_NAME_TAG} — check tier/region/profile.`);
+    }
+    const ssmTarget: string = jump;
+    const dialHost: string = target.host;
     let dialPort = target.port;
-    let route: string;
+    let route = `jump host ${jump}`;
     if (target.host.endsWith(`.${DB_HOST_CLOUDMAP_NAMESPACE}`)) {
       const serviceName = target.host.slice(0, -(DB_HOST_CLOUDMAP_NAMESPACE.length + 1));
-      const found = await this.discoverDbHostInstance(serviceName, opts);
-      ssmTarget = found.instanceId;
-      dialHost = '127.0.0.1';
+      const found = await this.discoverDbHostEndpoint(serviceName, opts);
       dialPort = found.port ?? target.port;
-      route = `db-host ${found.instanceId} (CloudMap ${serviceName}, local dial :${dialPort})`;
-    } else {
-      const jump = await resolveJumpHost(this.getEnvAws(), JUMP_HOST_NAME_TAG, opts);
-      if (jump === undefined) {
-        this.error(`no running+Online SSM jump host tagged Name=${JUMP_HOST_NAME_TAG} — check tier/region/profile.`);
-      }
-      ssmTarget = jump;
-      dialHost = target.host;
-      route = `jump host ${jump}`;
+      route = `jump host ${jump} → CloudMap ${serviceName} (${found.ip}, remote dial :${dialPort})`;
     }
 
     const url = localUrl(target, flags['local-port']);
@@ -225,11 +227,15 @@ export default class EnvConnect extends BaseCommand {
     };
   }
 
-  /** CloudMap discover-instances → the db container's EC2 host + registered port. */
-  private async discoverDbHostInstance(
+  /**
+   * CloudMap discover-instances → the db container's host IP + REGISTERED port.
+   * The IP is reported for diagnostics only; the tunnel dials the CloudMap DNS
+   * name, which the jump host resolves through the VPC's private namespace.
+   */
+  private async discoverDbHostEndpoint(
     serviceName: string,
     opts: { profile?: string; region: string },
-  ): Promise<{ instanceId: string; port?: number }> {
+  ): Promise<{ ip: string; port?: number }> {
     const aws = this.getEnvAws();
     const discovered = (await aws.json(
       ['servicediscovery', 'discover-instances', '--namespace-name', DB_HOST_CLOUDMAP_NAMESPACE, '--service-name', serviceName],
@@ -240,21 +246,8 @@ export default class EnvConnect extends BaseCommand {
     if (ip === undefined) {
       this.error(`CloudMap has no instance for ${serviceName}.${DB_HOST_CLOUDMAP_NAMESPACE} — is the DB container up?`);
     }
-    const ids = (await aws.json(
-      [
-        'ec2',
-        'describe-instances',
-        '--filters',
-        `Name=private-ip-address,Values=${ip}`,
-        '--query',
-        'Reservations[].Instances[].InstanceId',
-      ],
-      opts,
-    )) as string[] | null;
-    const instanceId = (ids ?? [])[0];
-    if (instanceId === undefined) this.error(`no EC2 instance owns db-host IP ${ip} — CloudMap record stale?`);
     const port = attrs?.AWS_INSTANCE_PORT;
-    return { instanceId, port: port === undefined ? undefined : Number(port) };
+    return { ip, port: port === undefined ? undefined : Number(port) };
   }
 
   /** Fetch a container-secret reference: Secrets Manager value or SSM parameter. */

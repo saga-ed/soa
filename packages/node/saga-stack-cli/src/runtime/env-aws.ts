@@ -189,7 +189,16 @@ export function makeRealEnvAws(): EnvAws {
       });
       const ready = new Promise<void>((resolve, reject) => {
         const timer = setTimeout(() => {
-          reject(new Error(`port-forward to ${req.host}:${req.remotePort} not ready after ${READY_TIMEOUT_MS / 1000}s`));
+          // Name the WHOLE route (document + SSM target + remote endpoint), not
+          // just the local port — soa#370 was misdiagnosed for a day because the
+          // message named an endpoint without saying which host was dialling it.
+          reject(
+            new Error(
+              `port-forward not ready after ${READY_TIMEOUT_MS / 1000}s: ` +
+                `AWS-StartPortForwardingSessionToRemoteHost via ${req.target} → ${req.host}:${req.remotePort} ` +
+                `(local :${req.localPort})${output.trim() === '' ? ' — session produced no output' : `; last output: ${output.trim().slice(-300)}`}`,
+            ),
+          );
         }, READY_TIMEOUT_MS);
         const scan = (chunk: Buffer): void => {
           output += chunk.toString();

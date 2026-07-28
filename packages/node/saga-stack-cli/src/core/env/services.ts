@@ -22,8 +22,24 @@
  *    derived — a guessed host silently reads as an ALB "down".
  *
  * A service with no `host` cannot be verified over HTTP — it is reported as
- * such (never silently green) and covered by the `--ecs` platform check where
- * an ECS service exists. Today that is only `connect-web` (Amplify-hosted).
+ * such (never silently green). Where an ECS service exists, the `--ecs`
+ * platform check is the substitute signal: `coach-api` / `connect-api` in prod
+ * run on prod-shared but publish no DNS record (I#375), and `--ecs` greens
+ * them. Where NO signal exists at all — an Amplify SPA in an env whose branch
+ * is not known (`connect-web` on prod) — there is nothing to check, so the
+ * service is reported unverifiable and declared `optionalEnvs` for that env:
+ * a gate that can never go green is a gate that gets ignored.
+ *
+ * The list is ONE global fleet, so the set differs per env in three declared
+ * ways (I#375): `envs` scopes a service OUT of an env it is not deployed to at
+ * all, `optionalEnvs` un-gates (but still reports) a service that has NO
+ * verification signal in an env, and `ecsServiceByEnv` overrides the
+ * `<ecsService>-<identifier>` name for the one prod service that does not
+ * follow its env's suffix convention.
+ *
+ * NOTE `ALB_DEFAULT_MARKER` below is DEV-specific. Prod has no wildcard DNS —
+ * an unrouted prod host NXDOMAINs rather than answering a 200 — so there is no
+ * confirmed prod analogue and none should be assumed.
  */
 
 /**
@@ -40,6 +56,17 @@ export type ServiceKind = 'api' | 'frontend' | 'plain';
 export interface DeployedServiceDef {
   /** Manifest service id (kept aligned with core/manifest for cross-reference). */
   id: string;
+  /**
+   * The envs this service is DEPLOYED TO. ABSENT means every env (the common
+   * case). Present means the service does not exist elsewhere and must be
+   * SKIPPED there — not probed and not gated. `optional` is the wrong tool for
+   * that: it would weaken the gate in the envs where the service DOES run.
+   *
+   * Only for services genuinely ABSENT from an env (confirmed by BOTH an ECS
+   * miss and NXDOMAIN). A service that is deployed but unrouted belongs in
+   * `noPublicRouteEnvs` instead — dropping it would hide a real outage.
+   */
+  envs?: readonly string[];
   /** Subdomain under the env's domain, or undefined when there is no public route. */
   host?: string;
   /**
@@ -57,17 +84,45 @@ export interface DeployedServiceDef {
    * `<branch>.<amplify-app-id>.amplifyapp.com` (qboard/CLAUDE.md "Web main").
    */
   fqdnByEnv?: Record<string, string>;
+  /**
+   * Envs where this service IS deployed but has NO public DNS record, so HTTP
+   * cannot verify it there. It is reported as "no public route" (never green
+   * on its own) and judged by the `--ecs` pass — exactly connect-web's case.
+   * Distinct from `envs`: scoping a running service OUT would hide an outage.
+   */
+  noPublicRouteEnvs?: readonly string[];
   /** Path probed for health (APIs `/health`; frontends `/`). */
   healthPath: string;
   kind: ServiceKind;
   /** A down/unroutable OPTIONAL service does not fail the gate. */
   optional?: boolean;
   /**
+   * Envs where this service does not fail the gate — the PER-ENV analogue of
+   * `optional`, so un-gating it in one env cannot weaken the others.
+   *
+   * ONLY for a service that has NO verification signal in that env: no HTTP
+   * route AND no ECS service to fall back on (an Amplify SPA whose branch for
+   * that env is not established — `connect-web` on prod). It is still probed,
+   * still listed, and still reported as unverifiable; it just cannot turn a
+   * healthy fleet red. NOT a way to silence a service that CAN be checked —
+   * a real signal that is failing must fail the gate.
+   */
+  optionalEnvs?: readonly string[];
+  /**
    * ECS service-name prefix in the shared cluster (`<ecsService>-<identifier>`)
    * for the platform check. Undefined where the name is not yet confirmed —
    * that check is then skipped with a note rather than guessed.
    */
   ecsService?: string;
+  /**
+   * Per-ENV ABSOLUTE ECS service name, keyed by env name — used INSTEAD of
+   * `<ecsService>-<identifier>` (the ECS-side mirror of `fqdnByEnv`). For the
+   * one-off that does not follow its env's suffix convention: prod's coach is
+   * `coach-coach-api-canary`, not `-main`. Overriding per service rather than
+   * per env is deliberate — prod's other six shared-mesh services DO use
+   * `-main`, so a global suffix override would break them.
+   */
+  ecsServiceByEnv?: Record<string, string>;
   note?: string;
 }
 
@@ -82,29 +137,65 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
   { id: 'programs-api', host: 'programs-api', healthPath: '/health', kind: 'api', ecsService: 'program-hub-programs-api' },
   { id: 'scheduling-api', host: 'scheduling-api', healthPath: '/health', kind: 'api', ecsService: 'program-hub-scheduling-api' },
   { id: 'sessions-api', host: 'sessions-api', healthPath: '/health', kind: 'api', ecsService: 'program-hub-sessions-api' },
-  { id: 'content-api', host: 'content-api', healthPath: '/health', kind: 'api', ecsService: 'program-hub-content-api' },
   {
+    // Absent from prod: no `program-hub-content-api-*` on prod-shared AND
+    // content-api.saga.org NXDOMAINs (live 2026-07-28) — not deployed there.
+    id: 'content-api',
+    envs: ['dev', 'training'],
+    host: 'content-api',
+    healthPath: '/health',
+    kind: 'api',
+    ecsService: 'program-hub-content-api',
+  },
+  {
+    // Absent from prod (no ECS service on prod-shared + NXDOMAIN).
     id: 'ads-adm-api',
+    envs: ['dev', 'training'],
     host: 'ads-adm-api',
     healthPath: '/health',
     kind: 'api',
     ecsService: 'sds-ads-adm-api',
     note: 'also answers on ads-adm.<domain> (sds#288 multi-host ALB rule)',
   },
-  { id: 'coach-api', host: 'coach-api', healthPath: '/health', kind: 'api', ecsService: 'coach-coach-api' },
+  {
+    // DEPLOYED to prod (`coach-coach-api-canary` on prod-shared) but with no
+    // public DNS — coach-api.saga.org NXDOMAINs even though the prod ALB
+    // carries a host-header rule for it. HTTP-unverifiable there, so `--ecs`
+    // is the only signal; it must NOT be scoped out, or a real prod outage
+    // would go unreported.
+    id: 'coach-api',
+    host: 'coach-api',
+    noPublicRouteEnvs: ['prod'],
+    healthPath: '/health',
+    kind: 'api',
+    ecsService: 'coach-coach-api',
+    ecsServiceByEnv: { prod: 'coach-coach-api-canary' },
+  },
   { id: 'saga-dash', host: 'dash', healthPath: '/', kind: 'frontend', note: 'Amplify-hosted SPA (not an ECS service)' },
   { id: 'coach-web', host: 'coach', healthPath: '/', kind: 'frontend', note: 'Amplify-hosted SPA, not ECS (the API is coach-api)' },
   {
     // Host is connectv3-api.<domain> (NOT connect-api/connect) — confirmed from
     // the ALB host-header rules and live on both envs. Its body carries no
     // `service` key: {"status":"ok","mongo":"ok"}.
+    // Prod runs it (`qboard-connectv3-api-main` on prod-shared) but publishes
+    // no DNS record for it — ECS-only there, same reading as coach-api.
     id: 'connect-api',
     host: 'connectv3-api',
+    noPublicRouteEnvs: ['prod'],
     healthPath: '/connectv3/v1/health',
     kind: 'api',
     ecsService: 'qboard-connectv3-api',
   },
-  { id: 'transcripts-api', host: 'transcripts-api', healthPath: '/health', kind: 'api', optional: true, ecsService: 'sds-transcripts-api' },
+  {
+    // Absent from prod (no ECS service on prod-shared + NXDOMAIN).
+    id: 'transcripts-api',
+    envs: ['dev', 'training'],
+    host: 'transcripts-api',
+    healthPath: '/health',
+    kind: 'api',
+    optional: true,
+    ecsService: 'sds-transcripts-api',
+  },
   {
     // fleek is the recording fleet — its OWN Caddy cluster (`*.fleek.<domain>`,
     // nodes chi-1/nyc-1/phx-1/vet-1 + recorder-*/recordings-* aliases), not the
@@ -120,7 +211,15 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     fqdn: 'chi-1.fleek.wootdev.com',
     healthPath: '/health',
     kind: 'plain',
-    note: 'shared Caddy recording fleet (*.fleek.wootdev.com) — BOTH envs use it',
+    // dev+training ONLY. `fqdn` pins this to the *.wootdev.com fleet, which is a
+    // DEV-account fleet — prod runs its own recording clusters
+    // (`recorder_cluster_prod`, `av-recorder-cluster-prod-v3`, live 2026-07-28).
+    // Probing the dev host during a prod run is a FALSE SIGNAL in both
+    // directions: green while prod's recorder is down, red while dev's is down
+    // and prod is fine. Scoped out until prod's recorder hostnames are
+    // established; adding them is follow-on work, not a guess.
+    envs: ['dev', 'training'],
+    note: 'shared Caddy recording fleet (*.fleek.wootdev.com) — dev+training only; prod has its own fleet',
   },
   {
     // The second half of fleek health per fleek/OPS.md:93 — the livekit
@@ -130,21 +229,36 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     fqdn: 'recorder-chi-1.fleek.wootdev.com',
     healthPath: '/v1/health',
     kind: 'plain',
-    note: 'livekit recorder (fleek/OPS.md:93); shared fleet — BOTH envs use it',
+    // dev+training ONLY, for the same reason as `fleek` above — this is the
+    // wootdev.com fleet. Scoping it out supersedes the earlier
+    // `optionalEnvs: ['prod']`, which still probed the dev host and merely
+    // declined to gate on the result: a reported-but-wrong signal, not a fix.
+    envs: ['dev', 'training'],
+    note: 'livekit recorder (fleek/OPS.md:93); shared fleet — dev+training only; prod has its own fleet',
   },
   {
     // The connectv3 SPA is on Amplify with NO custom domain (unlike dash/coach),
     // which is why connect.<domain> hits the shared-ALB default. Its real home is
     // <branch>.<app-id>.amplifyapp.com — app `connectv3` = d2ezd4i8b4uexc, with a
     // branch per env (qboard/CLAUDE.md documents the shape).
+    //
+    // PROD: no branch of that app is established for prod, and an Amplify app
+    // has no ECS service, so `--ecs` cannot stand in for HTTP the way it does
+    // for coach-api/connect-api. With NO signal available in either direction,
+    // gating on it would make `verify --env prod` permanently red on a healthy
+    // fleet — hence `optionalEnvs: ['prod']`: still probed, still reported as
+    // unverifiable, never silently green, but not a false red either. Declare
+    // the prod branch in `fqdnByEnv` (or an `ecsService`, if it ever gets one)
+    // and delete the entry — that is the fix, not a `--tolerate` habit.
     id: 'connect-web',
     fqdnByEnv: {
       dev: 'dev.d2ezd4i8b4uexc.amplifyapp.com',
       training: 'training.d2ezd4i8b4uexc.amplifyapp.com',
     },
+    optionalEnvs: ['prod'],
     healthPath: '/',
     kind: 'frontend',
-    note: 'Amplify app connectv3 (d2ezd4i8b4uexc), branch per env; no custom domain',
+    note: 'Amplify app connectv3 (d2ezd4i8b4uexc), branch per env; no custom domain — no prod branch known, so prod is unverifiable (reported, not gated)',
   },
   {
     // RTSM runs on its OWN geo-distributed cluster, not the shared ECS/ALB:
@@ -158,7 +272,9 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     fqdn: 'chi-1.rtsm.wootdev.com',
     healthPath: '/health',
     kind: 'api',
-    note: 'shared geo cluster (*.rtsm.wootdev.com) — BOTH envs use it; not shared ECS/ALB',
+    // dev+training ONLY — same wootdev.com-pinned reasoning as the fleek pair.
+    envs: ['dev', 'training'],
+    note: 'shared geo cluster (*.rtsm.wootdev.com) — dev+training only; not shared ECS/ALB',
   },
 ];
 
@@ -169,12 +285,23 @@ export interface EnvHealthProbe {
   optional: boolean;
   /** Absolute URL, or null when the service has no public route. */
   url: string | null;
+  /** ECS service-name PREFIX — composed with the env's ledger identifier. */
   ecsService?: string;
+  /**
+   * Fully-resolved ECS service name for this env (from `ecsServiceByEnv`),
+   * which takes precedence over `<ecsService>-<identifier>` when set.
+   */
+  ecsServiceName?: string;
   note?: string;
 }
 
 /**
- * Build the probe list for an env (pure). Host resolution, in precedence order:
+ * Build the probe list for an env (pure). Services out of the env's scope
+ * (`envs`) are OMITTED entirely — they are not deployed there, so probing or
+ * gating them would report a service that was never meant to exist.
+ *
+ * Host resolution, in precedence order:
+ *   `noPublicRouteEnvs`   deployed here but unrouted ⇒ null (ECS-only)
  *   `fqdnByEnv[envName]`  per-env absolute host (Amplify apps with no custom domain)
  *   `fqdn`                shared infra, same host for every env (rtsm/fleek)
  *   `<host>.<domain>`     the normal per-env case
@@ -184,18 +311,25 @@ export function buildEnvHealthProbes(
   envName = '',
   services: readonly DeployedServiceDef[] = DEPLOYED_SERVICES,
 ): EnvHealthProbe[] {
-  return services.map((s) => ({
+  return services.filter((s) => isInEnvScope(s, envName)).map((s) => ({
     id: s.id,
     kind: s.kind,
-    optional: s.optional === true,
+    optional: s.optional === true || s.optionalEnvs?.includes(envName) === true,
     url: resolveProbeUrl(s, domain, envName),
     ecsService: s.ecsService,
+    ecsServiceName: s.ecsServiceByEnv?.[envName],
     note: s.note,
   }));
 }
 
+/** Is this service deployed to `envName`? (`envs` absent = every env.) */
+export function isInEnvScope(s: DeployedServiceDef, envName: string): boolean {
+  return s.envs === undefined || s.envs.includes(envName);
+}
+
 /** Resolve a service's probe URL for one env (null when it has no HTTP route there). */
 function resolveProbeUrl(s: DeployedServiceDef, domain: string, envName: string): string | null {
+  if (s.noPublicRouteEnvs?.includes(envName) === true) return null;
   const perEnv = s.fqdnByEnv?.[envName];
   if (perEnv !== undefined) return `https://${perEnv}${s.healthPath}`;
   if (s.fqdnByEnv !== undefined) return null; // per-env service with no host for THIS env

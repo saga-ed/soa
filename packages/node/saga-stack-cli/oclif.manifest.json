@@ -1100,7 +1100,9 @@
       "examples": [
         "<%= config.bin %> <%= command.id %> iam --env dev --profile dev_admin",
         "<%= config.bin %> <%= command.id %> programs --env dev --local-port 15433",
-        "<%= config.bin %> <%= command.id %> iam --host mydb.dbs-v2.local --remote-port 5440 --database rostering-iam-canonical --print-only"
+        "<%= config.bin %> <%= command.id %> iam --host mydb.dbs-v2.local --remote-port 5440 --database rostering-iam-canonical --print-only",
+        "<%= config.bin %> <%= command.id %> iam --env prod --print-only",
+        "<%= config.bin %> <%= command.id %> iam --env prod --local-port 15442"
       ],
       "flags": {
         "coach": {
@@ -1127,7 +1129,7 @@
         },
         "env": {
           "default": "dev",
-          "description": "target environment (dev | training)",
+          "description": "target environment (dev | training | prod)",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "env",
@@ -1310,7 +1312,7 @@
         },
         "env": {
           "default": "dev",
-          "description": "target environment (dev | training)",
+          "description": "target environment (dev | training | prod)",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "env",
@@ -1441,7 +1443,7 @@
     "env:list": {
       "aliases": [],
       "args": {},
-      "description": "List deployed shared environments (dev, training) and their dev-platform ledger footprint. Read-only.",
+      "description": "List deployed shared environments (dev, training, prod) and their dev-platform ledger footprint. Read-only; an env with no ledger is listed without needing its account's credentials.",
       "enableJsonFlag": false,
       "examples": [
         "<%= config.bin %> <%= command.id %>",
@@ -1611,7 +1613,7 @@
         },
         "env": {
           "default": "dev",
-          "description": "target environment (dev | training)",
+          "description": "target environment (dev | training | prod)",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "env",
@@ -1923,11 +1925,12 @@
     "env:verify": {
       "aliases": [],
       "args": {},
-      "description": "Health-gate a deployed shared environment (dev/training): probe every service's health endpoint and judge it by RESPONSE BODY (the shared ALB answers 200 for unrouted hosts). Non-zero exit if a required service is unhealthy. --org additionally asserts a fixture org's seed skeleton.",
+      "description": "Health-gate a deployed shared environment (dev/training/prod): probe every service's health endpoint and judge it by RESPONSE BODY (the shared dev ALB answers 200 for unrouted hosts). Non-zero exit if a required service is unhealthy. --org additionally asserts a fixture org's seed skeleton.",
       "enableJsonFlag": false,
       "examples": [
         "<%= config.bin %> <%= command.id %> --env dev",
         "<%= config.bin %> <%= command.id %> --env training --tolerate connect-api,rtsm-api",
+        "<%= config.bin %> <%= command.id %> --env prod --ecs --profile prod_admin",
         "<%= config.bin %> <%= command.id %> --env dev --org emptyOrg --url iam=postgres://…15432/iam"
       ],
       "flags": {
@@ -1948,13 +1951,13 @@
         },
         "ecs": {
           "allowNo": false,
-          "description": "ALSO check the ECS platform state (running/desired tasks, rollout) — the truth HTTP cannot see (crash-loops behind a healthy target, stuck deploys). Covers services with no public route. Needs dev-account AWS credentials.",
+          "description": "ALSO check the ECS platform state (running/desired tasks, rollout) — the truth HTTP cannot see (crash-loops behind a healthy target, stuck deploys). Covers services with no public route (the ONLY signal for prod's coach-api/connect-api). Needs credentials for the target env's AWS account.",
           "name": "ecs",
           "type": "boolean"
         },
         "env": {
           "default": "dev",
-          "description": "target environment (dev | training)",
+          "description": "target environment (dev | training | prod)",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "env",

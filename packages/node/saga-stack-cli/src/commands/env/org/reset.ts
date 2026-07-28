@@ -11,6 +11,9 @@
  *
  * GUARD LADDER (all structural, none skippable by flags):
  *   1. slug-only targeting — orgs outside `RESETTABLE_ORGS` are untargetable.
+ *   1b. RESET-FORBIDDEN ENVS — an env declaring `resetForbidden` (prod) is
+ *      refused immediately after `resolveEnv`, before `--url` is even parsed,
+ *      so no production connection string is read, logged, or dialed.
  *   2. BOTH anchor stores connected (`--url iam=…` AND `--url programs=…`) —
  *      id-sets resolve live or not at all. Other stores without a `--url` are
  *      SKIPPED with loud warnings (their org rows survive).
@@ -151,6 +154,22 @@ export default class EnvOrgReset extends BaseCommand {
     }
     const env = resolveEnv(flags.env);
     if (env === undefined) this.error(`unknown --env '${flags.env}' — expected one of: ${ENV_NAMES.join(', ')}`);
+
+    // ── guard 1b: reset-forbidden environments (I#375) ──
+    // FIRST thing after the env resolves, and deliberately BEFORE --url parsing
+    // and the anchor guards: a refusal that happens after them would already
+    // have read (and, on a bad shape, echoed into an error) a production
+    // connection string. Nothing here is dialed, logged, or even parsed.
+    // A DECLARATION check, not `name === 'prod'` — env stays a parameter, so a
+    // future env inherits the posture by setting the field. There is no --force.
+    if (env.resetForbidden === true) {
+      this.error(
+        `env org reset does not operate on '${env.name}'. Fixture orgs (${Object.keys(RESETTABLE_ORGS).join(', ')}) are a ` +
+          'synthetic-dev construct with no analogue there, and this command deletes tenant data. ' +
+          'There is no --force. (I#375)',
+      );
+    }
+
     if (flags.snapshot && env.name !== 'dev') {
       // ORCHESTRATOR_LAMBDA is the DEV control plane; both envs share an
       // account+region, so a training run would "successfully" snapshot dev's

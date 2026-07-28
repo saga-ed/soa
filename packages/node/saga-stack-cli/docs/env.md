@@ -57,13 +57,19 @@ content · `running`: sis/ads-adm · `healthy`: coach), all allowlisted; a
 Deployed hostnames are **not** the manifest `tunnelSlug` — the map is explicit
 and body-verified (`core/env/services.ts`): `iam`/`sis` are short, the rest are
 the full service id (`programs-api`, `sessions-api`, …), and `coach.<domain>` is
-the coach **web** app (the API is `coach-api`). `connect-api`, `connect-web`, and
-`rtsm-api` have **no public route** on either env — they are reported as
-"not HTTP-verifiable" (optional, so they don't fail the gate) rather than
-silently green; an ECS platform check is the follow-up that covers them.
+the coach **web** app (the API is `coach-api`). Every service is routed on
+dev/training (`connect-web` at its Amplify branch URL; `rtsm`/`fleek` are shared
+fleets pinned to `*.wootdev.com`). **Prod** differs in three declared ways:
+`content-api`/`ads-adm-api`/`transcripts-api` are not deployed there and are
+skipped entirely; `coach-api`/`connect-api` run there with no DNS record, so
+they are reported "not HTTP-verifiable" and judged by the `--ecs` pass; and
+`connect-web` has no known prod Amplify branch *and* no ECS service, so it has
+no signal at all — reported unverifiable, but not gated (`optionalEnvs`), since
+a gate that can never go green gets ignored. Nothing is ever silently green.
 
 ```bash
-ss env verify --env dev                          # 10/13 healthy, 3 unroutable
+ss env verify --env dev                          # every service routed and body-checked
+ss env verify --env prod --ecs --profile prod_admin
 ss env verify --env training --tolerate sis-api  # accept a known-down service
 ss env verify --env dev --org emptyOrg --url iam=postgres://…:15432/iam
 ```

@@ -13,7 +13,7 @@ ADR 0005). Services only **check**.
 ```ts
 import { createFgaGate, enforceFgaRelation } from '@saga-ed/saga-fga';
 
-const fga = createFgaGate(); // from env: AUTHZ_FGA_ENFORCE, OPENFGA_API_URL, OPENFGA_STORE_ID, OPENFGA_MODEL_ID
+const fga = createFgaGate(); // from env: AUTHZ_FGA_ENFORCE, OPENFGA_API_URL, OPENFGA_STORE_ID, OPENFGA_MODEL_ID, OPENFGA_API_TOKEN
 
 // In a resolver / handler:
 await enforceFgaRelation(
@@ -116,3 +116,22 @@ checks stay authoritative until the flag flips on.
 | `OPENFGA_API_URL` | OpenFGA HTTP API | `http://localhost:8080` |
 | `OPENFGA_STORE_ID` | store id (required once enforcing) | — |
 | `OPENFGA_MODEL_ID` | authorization model id | store's latest |
+| `OPENFGA_API_TOKEN` | preshared key, sent as `Authorization: Bearer` | — (no credentials) |
+
+> **The shared dev and prod OpenFGA servers run `authn=preshared`** — the
+> `openfga-shared-<env>` task definition sets `OPENFGA_AUTHN_METHOD=preshared`.
+> Against those, `OPENFGA_API_TOKEN` is **required**: without it every call is a
+> 401, which the gate surfaces as `FgaUnavailableError`. That's the right
+> failure *direction* (never a silent deny), but the gate answers nothing. Leave
+> it unset only for a local/CI OpenFGA started with no authn.
+
+> 🪤 **Supply ONE key.** The server-side var is `OPENFGA_AUTHN_PRESHARED_KEYS`
+> (*plural* — OpenFGA accepts a comma-separated list). If `OPENFGA_API_TOKEN` is
+> pointed at a secret holding `key1,key2` or a JSON blob, the client sends
+> `Bearer key1,key2` and gets a 401 → `FgaUnavailableError` — a symptom
+> **identical to having no token at all**, and easily misread as "the token
+> wiring didn't land". Resolve to a single opaque key (use a `:jsonKey::`
+> selector on the secret ARN if it holds JSON).
+
+`FgaGateConfig` is secret-bearing once `apiToken` is set — never log or
+`JSON.stringify` it; enumerate the non-secret fields instead.

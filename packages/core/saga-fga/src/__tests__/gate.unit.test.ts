@@ -8,9 +8,16 @@ import {
 } from '../index.js';
 
 const checkMock = vi.hoisted(() => vi.fn());
+// Capture constructor args so we can assert on the CLIENT CONFIG, not just on
+// calls — a token that never reaches the constructor never reaches the wire.
+const clientConfigs = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock('@openfga/sdk', () => ({
+  CredentialsMethod: { None: 'none', ApiToken: 'api_token', ClientCredentials: 'client_credentials' },
   OpenFgaClient: class {
     check = checkMock;
+    constructor(config: Record<string, unknown>) {
+      clientConfigs.push(config);
+    }
   },
 }));
 
@@ -33,6 +40,45 @@ describe('saga-fga gate config', () => {
     expect(c.apiUrl).toBe('http://localhost:8080');
     expect(c.storeId).toBe('s1');
     expect(c.modelId).toBe('m1');
+  });
+
+  it('reads the preshared key from OPENFGA_API_TOKEN, undefined when absent or empty', () => {
+    expect(loadFgaGateConfig({ OPENFGA_API_TOKEN: 'k1' }).apiToken).toBe('k1');
+    expect(loadFgaGateConfig({}).apiToken).toBeUndefined();
+    // An empty env var is "unset", not a token — an empty Bearer would 401.
+    expect(loadFgaGateConfig({ OPENFGA_API_TOKEN: '' }).apiToken).toBeUndefined();
+  });
+});
+
+describe('preshared-key credentials', () => {
+  // The shared dev/prod OpenFGA run authn=preshared. A gate that never puts the
+  // token on the client 401s every call — which surfaces as unavailability, not
+  // a deny, so it fails in the right DIRECTION but answers nothing.
+  it('configures ApiToken credentials on the client when a token is set', async () => {
+    clientConfigs.length = 0;
+    checkMock.mockResolvedValue({ allowed: true });
+    const gate = createFgaGate({
+      enforce: true,
+      apiUrl: 'http://fga.test',
+      storeId: 's1',
+      apiToken: 'preshared-abc',
+    });
+    await gate.check('user:u1', 'viewer', 'session:s1');
+
+    expect(clientConfigs).toHaveLength(1);
+    expect(clientConfigs[0]?.credentials).toEqual({
+      method: 'api_token',
+      config: { token: 'preshared-abc' },
+    });
+  });
+
+  it('omits credentials entirely when no token is configured', async () => {
+    clientConfigs.length = 0;
+    checkMock.mockResolvedValue({ allowed: true });
+    await gateWithStore().check('user:u1', 'viewer', 'session:s1');
+
+    expect(clientConfigs).toHaveLength(1);
+    expect(clientConfigs[0]).not.toHaveProperty('credentials');
   });
 });
 

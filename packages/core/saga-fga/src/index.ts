@@ -1,4 +1,4 @@
-import { OpenFgaClient } from '@openfga/sdk';
+import { CredentialsMethod, OpenFgaClient } from '@openfga/sdk';
 
 /**
  * @saga-ed/saga-fga — Tier-2 (per-resource) OpenFGA authorization gate.
@@ -22,6 +22,23 @@ export interface FgaGateConfig {
   storeId?: string | undefined;
   /** Authorization model id; when unset OpenFGA uses the store's latest. */
   modelId?: string | undefined;
+  /**
+   * Preshared key sent as `Authorization: Bearer <token>` (SEC-REQ-5).
+   *
+   * Required against any OpenFGA running `authn=preshared` — which the SHARED
+   * dev and prod servers do (`OPENFGA_AUTHN_METHOD=preshared` on the
+   * `openfga-shared-<env>` task definition). Without it every call is a 401,
+   * which surfaces as `FgaUnavailableError` — correctly NOT a deny, but the
+   * gate answers nothing.
+   *
+   * Optional so a local/CI OpenFGA started with no authn still works: when
+   * unset no credentials are configured and the header is never sent.
+   *
+   * ⚠️ This makes `FgaGateConfig` SECRET-BEARING. Never `JSON.stringify` or
+   * log the config object — enumerate the non-secret fields explicitly
+   * (`enforce`/`apiUrl`/`storeId`/`modelId`) as authz-api's bootstrap does.
+   */
+  apiToken?: string | undefined;
 }
 
 export function loadFgaGateConfig(
@@ -32,6 +49,7 @@ export function loadFgaGateConfig(
     apiUrl: env.OPENFGA_API_URL ?? 'http://localhost:8080',
     storeId: env.OPENFGA_STORE_ID || undefined,
     modelId: env.OPENFGA_MODEL_ID || undefined,
+    apiToken: env.OPENFGA_API_TOKEN || undefined,
   };
 }
 
@@ -136,6 +154,17 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
       apiUrl: config.apiUrl,
       storeId: config.storeId,
       ...(config.modelId ? { authorizationModelId: config.modelId } : {}),
+      // Omit `credentials` entirely when no token is configured — passing
+      // method `none` and passing nothing are equivalent to the SDK, but an
+      // absent key keeps "this deployment has no auth" visible in the shape.
+      ...(config.apiToken
+        ? {
+            credentials: {
+              method: CredentialsMethod.ApiToken,
+              config: { token: config.apiToken },
+            },
+          }
+        : {}),
     });
     return client;
   };

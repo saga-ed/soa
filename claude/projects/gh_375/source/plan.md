@@ -15,16 +15,16 @@ meaningful command works — not that a destructive fixture-reset gets pointed a
 
 ## Status (2026-07-28)
 
-- 🔵 **Planning. No code written.** Branch `gh_375` off `origin/main` (4079d53), worktree
-  `/home/skelly/dev/soa/.claude/worktrees/gh375-env-prod`.
-- ✅ **Four of the issue's five open questions answered live** against account `531314149529` with
-  `prod_admin` (read-only). See below — one answer (Q4) **changes the shape of Phase 2 materially**.
-- ✅ **Prod's host shape established by live HTTPS probing** (no AWS creds needed), which **refuted
-  the issue's multi-apex premise** — prod is single-apex `saga.org` on dev's exact
-  `<host>.<domain>` convention. This retired the plan's highest risk. See Q6.
-- ⏳ **One hard blocker left:** the ECS service names on `prod-shared`. Secondary: the prod ALB
-  host-header rules, now needed only to resolve five services that NXDOMAIN at the dev-convention
-  hostname.
+- ✅ **Phases 0–3 implemented** — commit `3d22388`. Gate: `pnpm check-types` clean,
+  **1577 tests pass**, lint 0 errors. (Note: the package script is `check-types`, not
+  `typecheck` as the root CLAUDE.md claims.)
+- ✅ All five of the issue's open questions resolved, plus a sixth the issue got wrong
+  (prod is single-apex `saga.org`, not multi-apex).
+- ⏳ **Not verified here:** a live prod `connect` tunnel. Built and unit-covered; the
+  `SELECT 1` round-trip needs an attended run against prod.
+- ⏳ **Follow-on, deliberately not guessed:** prod's own recorder-fleet hostnames
+  (`recorder_cluster_prod`, `av-recorder-cluster-prod-v3`) and whether a prod Amplify
+  branch exists for `connect-web`.
 
 ---
 

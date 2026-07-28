@@ -21,6 +21,10 @@ export const FGA_TYPES = [
     'enrollment',
     'pod',
     'session',
+    // Dated occurrence of a repeating session — lazy; carries tuples only
+    // when per-day facts (pod swap, occurrence host, participant delta)
+    // were authored.
+    'session_instance',
     'room',
     'whiteboard',
     // Staff control-plane (namespace: staff) — distinct from the resource
@@ -43,10 +47,22 @@ export interface FgaRelationsByType {
         | 'admin'
         | 'pgrant'
         | 'edit_non_hosted'
-        | 'observe';
+        | 'observe'
+        | 'view_non_member'
+        | 'lifecycle_non_hosted';
     role: 'parent' | 'holder';
-    persona: 'grants_edit_non_hosted' | 'grants_observe';
-    pgrant: 'subject' | 'persona' | 'edit_non_hosted' | 'observe';
+    persona:
+        | 'grants_edit_non_hosted'
+        | 'grants_observe'
+        | 'grants_view_non_member'
+        | 'grants_lifecycle_non_hosted';
+    pgrant:
+        | 'subject'
+        | 'persona'
+        | 'edit_non_hosted'
+        | 'observe'
+        | 'view_non_member'
+        | 'lifecycle_non_hosted';
     school: 'parent' | 'admin' | 'editor' | 'viewer';
     cohort: 'parent' | 'admin' | 'editor' | 'viewer';
     program:
@@ -57,20 +73,46 @@ export interface FgaRelationsByType {
         | 'viewer'
         | 'grant_group'
         | 'edit_non_hosted'
-        | 'observe';
+        | 'observe'
+        | 'view_non_member'
+        | 'lifecycle_non_hosted';
     enrollment: 'parent' | 'program' | 'student' | 'tutor' | 'viewer';
-    pod: 'parent' | 'tutor' | 'can_create_session';
+    pod: 'parent' | 'tutor' | 'member' | 'can_create_session';
     session:
         | 'parent'
         | 'pod'
         | 'host'
         | 'participant'
+        | 'member'
         | 'observer'
         | 'edit_grant'
         | 'observe_grant'
+        | 'view_grant'
+        | 'lifecycle_grant'
         | 'can_edit'
         | 'can_observe'
+        | 'can_view'
+        | 'can_lifecycle'
         | 'viewer'
+        | 'can_join';
+    session_instance:
+        | 'session'
+        | 'override_pod'
+        | 'override_host'
+        | 'added_participant'
+        | 'pod_overridden'
+        | 'base_host'
+        | 'host'
+        | 'base_member'
+        | 'member'
+        | 'edit_grant'
+        | 'observe_grant'
+        | 'view_grant'
+        | 'lifecycle_grant'
+        | 'can_edit'
+        | 'can_observe'
+        | 'can_view'
+        | 'can_lifecycle'
         | 'can_join';
     room: 'parent' | 'session' | 'member' | 'moderator' | 'can_join';
     whiteboard: 'parent' | 'editor' | 'viewer';
@@ -110,10 +152,31 @@ export type FgaRelation<T extends FgaType> = FgaRelationsByType[T];
 export const FGA_RELATIONS = {
     tenant: ['admin', 'member', 'support'],
     user: [],
-    group: ['parent', 'member', 'admin', 'pgrant', 'edit_non_hosted', 'observe'],
+    group: [
+        'parent',
+        'member',
+        'admin',
+        'pgrant',
+        'edit_non_hosted',
+        'observe',
+        'view_non_member',
+        'lifecycle_non_hosted',
+    ],
     role: ['parent', 'holder'],
-    persona: ['grants_edit_non_hosted', 'grants_observe'],
-    pgrant: ['subject', 'persona', 'edit_non_hosted', 'observe'],
+    persona: [
+        'grants_edit_non_hosted',
+        'grants_observe',
+        'grants_view_non_member',
+        'grants_lifecycle_non_hosted',
+    ],
+    pgrant: [
+        'subject',
+        'persona',
+        'edit_non_hosted',
+        'observe',
+        'view_non_member',
+        'lifecycle_non_hosted',
+    ],
     school: ['parent', 'admin', 'editor', 'viewer'],
     cohort: ['parent', 'admin', 'editor', 'viewer'],
     program: [
@@ -125,20 +188,47 @@ export const FGA_RELATIONS = {
         'grant_group',
         'edit_non_hosted',
         'observe',
+        'view_non_member',
+        'lifecycle_non_hosted',
     ],
     enrollment: ['parent', 'program', 'student', 'tutor', 'viewer'],
-    pod: ['parent', 'tutor', 'can_create_session'],
+    pod: ['parent', 'tutor', 'member', 'can_create_session'],
     session: [
         'parent',
         'pod',
         'host',
         'participant',
+        'member',
         'observer',
         'edit_grant',
         'observe_grant',
+        'view_grant',
+        'lifecycle_grant',
         'can_edit',
         'can_observe',
+        'can_view',
+        'can_lifecycle',
         'viewer',
+        'can_join',
+    ],
+    session_instance: [
+        'session',
+        'override_pod',
+        'override_host',
+        'added_participant',
+        'pod_overridden',
+        'base_host',
+        'host',
+        'base_member',
+        'member',
+        'edit_grant',
+        'observe_grant',
+        'view_grant',
+        'lifecycle_grant',
+        'can_edit',
+        'can_observe',
+        'can_view',
+        'can_lifecycle',
         'can_join',
     ],
     room: ['parent', 'session', 'member', 'moderator', 'can_join'],

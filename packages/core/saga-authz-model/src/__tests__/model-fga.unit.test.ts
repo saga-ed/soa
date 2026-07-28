@@ -141,7 +141,12 @@ describe('session hosting model', () => {
      * A substring assertion cannot catch this (`subject or grants_x from persona`
      * contains the same tokens), so assert the STRUCTURE.
      */
-    it.each(['edit_non_hosted', 'observe'] as const)(
+    it.each([
+        'edit_non_hosted',
+        'observe',
+        'view_non_member',
+        'lifecycle_non_hosted',
+    ] as const)(
         'pgrant.%s is an INTERSECTION with subject, never a union',
         (rel) => {
             const def = byType.pgrant.relations[rel];
@@ -177,9 +182,14 @@ describe('session hosting model', () => {
     it('has no group ancestor cascade on the capability relations', () => {
         const groupRels = byType.group.relations ?? {};
         expect(groupRels).not.toHaveProperty('parent_group');
-        // group.edit_non_hosted/observe must resolve ONLY through pgrant —
+        // group's capability relations must resolve ONLY through pgrant —
         // every tupleset they traverse must be the `pgrant` edge.
-        for (const rel of ['edit_non_hosted', 'observe'] as const) {
+        for (const rel of [
+            'edit_non_hosted',
+            'observe',
+            'view_non_member',
+            'lifecycle_non_hosted',
+        ] as const) {
             const serialized = JSON.stringify(groupRels[rel]);
             expect(serialized).toContain('pgrant');
             const tuplesets = [
@@ -197,6 +207,292 @@ describe('session hosting model', () => {
         expect(JSON.stringify(byType.session.relations.edit_grant)).not.toContain(
             'pod',
         );
+    });
+});
+
+/**
+ * View / lifecycle capabilities. Same delegation spine as edit/observe —
+ * persona -> pgrant -> group -> program(grant_group) -> session — mirroring
+ * sessions-api's 'sessions:view_non_member_sessions' (see-all reads) and
+ * 'sessions:lifecycle_non_hosted_sessions' (start/end/cancel takeover).
+ */
+describe('view / lifecycle capability spine', () => {
+    const json = transformer.transformDSLToJSONObject(modelText);
+    const byType = Object.fromEntries(
+        json.type_definitions.map((t) => [t.type, t]),
+    );
+
+    it.each([
+        ['view_grant', 'view_non_member', 'grants_view_non_member'],
+        [
+            'lifecycle_grant',
+            'lifecycle_non_hosted',
+            'grants_lifecycle_non_hosted',
+        ],
+    ] as const)(
+        'routes session.%s through the program grant-group spine',
+        (grantRel, capRel, personaRel) => {
+            // Grants are group-scoped persona capabilities; a direct [user]
+            // grant here would bypass persona revocation.
+            expect(
+                JSON.stringify(byType.session.relations[grantRel]),
+            ).toContain(capRel);
+            expect(
+                JSON.stringify(byType.program.relations[capRel]),
+            ).toContain('grant_group');
+            expect(
+                JSON.stringify(byType.pgrant.relations[capRel]),
+            ).toContain(personaRel);
+        },
+    );
+
+    it('gates can_view on host OR participant OR member OR view_grant', () => {
+        const arms = (
+            JSON.stringify(byType.session.relations.can_view).match(
+                /"relation":"([^"]+)"/g,
+            ) ?? []
+        ).sort();
+        expect(arms).toEqual([
+            '"relation":"host"',
+            '"relation":"member"',
+            '"relation":"participant"',
+            '"relation":"view_grant"',
+        ]);
+    });
+
+    it('session.member is the pod-derived roster (ingest-fed source)', () => {
+        // programs.pod_membership.* -> pod.member -> session.member. The
+        // legacy `participant` relation stays direct-assignment and separate.
+        const def = byType.session.relations.member;
+        expect(def.tupleToUserset?.tupleset?.relation).toBe('pod');
+        expect(def.tupleToUserset?.computedUserset?.relation).toBe('member');
+    });
+
+    it('gates can_lifecycle on host OR lifecycle_grant', () => {
+        const arms = (
+            JSON.stringify(byType.session.relations.can_lifecycle).match(
+                /"relation":"([^"]+)"/g,
+            ) ?? []
+        ).sort();
+        expect(arms).toEqual([
+            '"relation":"host"',
+            '"relation":"lifecycle_grant"',
+        ]);
+    });
+
+    it('keeps host and lifecycle_grant SEPARABLE (D19 attribution)', () => {
+        // Lifecycle takeover must attribute HOST vs ADMIN just like edit —
+        // checkDetailed(['host','lifecycle_grant']). Same rule as edit_grant.
+        // NB: relation-NAME matching, never substrings ("lifecycle_non_hosted"
+        // contains "host").
+        expect(JSON.stringify(byType.session.relations.host)).not.toContain(
+            'lifecycle_grant',
+        );
+        const grantRefs = JSON.stringify(
+            byType.session.relations.lifecycle_grant,
+        ).match(/"relation":"([^"]+)"/g);
+        expect(grantRefs).not.toContain('"relation":"host"');
+    });
+
+    it.each(['view_grant', 'lifecycle_grant'] as const)(
+        'leaves session.%s OUTSIDE the pod path (ABSENT still admits grants)',
+        (rel) => {
+            expect(
+                JSON.stringify(byType.session.relations[rel]),
+            ).not.toContain('pod');
+        },
+    );
+
+    it.each(['viewer', 'can_join'] as const)(
+        'leaves legacy session.%s untouched by the new grants (additive change)',
+        (rel) => {
+            const serialized = JSON.stringify(byType.session.relations[rel]);
+            expect(serialized).not.toContain('view_grant');
+            expect(serialized).not.toContain('lifecycle_grant');
+        },
+    );
+});
+
+/**
+ * The occurrence layer. A `session_instance` is a dated occurrence of a
+ * repeating session; it exists (and carries tuples) only when per-day facts
+ * were authored — a pod-swap override, an occurrence host, or a participant
+ * delta. The invariants here mirror program-hub's host-resolution semantics
+ * (pod_assignment_override SWAP/ABSENT + additive session_instance_override)
+ * and were exercised against a real store in rostering's runnable prototype
+ * (scripts/fga/prototype/session-instance-slice.fga.yaml, rostering#883).
+ */
+describe('session occurrence layer (session_instance)', () => {
+    const json = transformer.transformDSLToJSONObject(modelText);
+    const byType = Object.fromEntries(
+        json.type_definitions.map((t) => [t.type, t]),
+    );
+    const instance = byType.session_instance;
+
+    it('declares the instance with its session edge and authored facts', () => {
+        expect(instance).toBeDefined();
+        for (const rel of [
+            'session',
+            'override_pod',
+            'override_host',
+            'added_participant',
+            'pod_overridden',
+        ]) {
+            expect(instance.relations).toHaveProperty(rel);
+        }
+    });
+
+    it('types pod_overridden as the [user:*] public wildcard marker', () => {
+        const restrictions =
+            instance.metadata?.relations?.pod_overridden
+                ?.directly_related_user_types ?? [];
+        expect(
+            restrictions.some(
+                (r) => r.type === 'user' && r.wildcard !== undefined,
+            ),
+        ).toBe(true);
+    });
+
+    /**
+     * Override REPLACES — the marker is what removes the base arm. Assert
+     * the STRUCTURE: `base_host` must be a difference whose base resolves
+     * `host` through the `session` edge and whose subtrahend is the
+     * `pod_overridden` marker. A well-meaning rewrite to a plain union
+     * (`host from session or tutor from override_pod`) would silently turn
+     * every SWAP day into base-pod ∪ swapped-pod — the exact wrong-pod
+     * footgun the session-level comment warns about.
+     */
+    it.each([
+        ['base_host', 'host'],
+        ['base_member', 'member'],
+    ] as const)(
+        '%s subtracts the pod_overridden marker from the session\'s %s',
+        (baseRel, sessionRel) => {
+            const def = instance.relations[baseRel];
+            expect(def).toHaveProperty('difference');
+            expect(def).not.toHaveProperty('union');
+            expect(
+                def.difference?.base?.tupleToUserset?.tupleset?.relation,
+            ).toBe('session');
+            expect(
+                def.difference?.base?.tupleToUserset?.computedUserset
+                    ?.relation,
+            ).toBe(sessionRel);
+            expect(
+                def.difference?.subtract?.computedUserset?.relation,
+            ).toBe('pod_overridden');
+        },
+    );
+
+    it('resolves host as override_host or override_pod tutor or base_host', () => {
+        const children = instance.relations.host?.union?.child ?? [];
+        expect(
+            children.some(
+                (c) => c.computedUserset?.relation === 'override_host',
+            ),
+        ).toBe(true);
+        expect(
+            children.some(
+                (c) =>
+                    c.tupleToUserset?.tupleset?.relation === 'override_pod' &&
+                    c.tupleToUserset?.computedUserset?.relation === 'tutor',
+            ),
+        ).toBe(true);
+        expect(
+            children.some((c) => c.computedUserset?.relation === 'base_host'),
+        ).toBe(true);
+        // The base pod must ONLY be reachable through base_host (which the
+        // marker suppresses) — never via a direct `host from session` arm.
+        expect(
+            children.some(
+                (c) => c.tupleToUserset?.tupleset?.relation === 'session',
+            ),
+        ).toBe(false);
+    });
+
+    it('resolves member with the same override/delta mechanics', () => {
+        const children = instance.relations.member?.union?.child ?? [];
+        expect(
+            children.some(
+                (c) => c.computedUserset?.relation === 'added_participant',
+            ),
+        ).toBe(true);
+        expect(
+            children.some(
+                (c) =>
+                    c.tupleToUserset?.tupleset?.relation === 'override_pod' &&
+                    c.tupleToUserset?.computedUserset?.relation === 'member',
+            ),
+        ).toBe(true);
+        expect(
+            children.some(
+                (c) => c.computedUserset?.relation === 'base_member',
+            ),
+        ).toBe(true);
+        expect(
+            children.some(
+                (c) => c.tupleToUserset?.tupleset?.relation === 'session',
+            ),
+        ).toBe(false);
+    });
+
+    it.each([
+        'edit_grant',
+        'observe_grant',
+        'view_grant',
+        'lifecycle_grant',
+    ] as const)(
+        'passes %s through the session edge ONLY (override day still admits grants)',
+        (rel) => {
+            // Grants never route through override_pod, so a SWAP (or ABSENT)
+            // day cannot suppress a grant holder — the instance-level twin of
+            // the session-level "ABSENT still admits grants" rule.
+            const serialized = JSON.stringify(instance.relations[rel]);
+            const tuplesets = [
+                ...serialized.matchAll(/"tupleset":\{"relation":"([^"]+)"\}/g),
+            ].map((m) => m[1]);
+            expect(tuplesets.length).toBeGreaterThan(0);
+            expect([...new Set(tuplesets)]).toEqual(['session']);
+        },
+    );
+
+    /**
+     * D19 separability, instance level. The gates mirror the session's arm
+     * structure exactly, and the relationship/delegation branches stay
+     * separable so checkDetailed can attribute HOST vs ADMIN on a dated
+     * occurrence too. NB: relation-NAME matching, never substrings.
+     */
+    it.each([
+        ['can_edit', ['host', 'edit_grant']],
+        ['can_observe', ['host', 'observe_grant']],
+        ['can_view', ['host', 'member', 'view_grant']],
+        ['can_lifecycle', ['host', 'lifecycle_grant']],
+    ] as const)(
+        'gates %s on exactly the separable arms %j',
+        (gate, expected) => {
+            const arms = (
+                JSON.stringify(instance.relations[gate]).match(
+                    /"relation":"([^"]+)"/g,
+                ) ?? []
+            ).sort();
+            expect(arms).toEqual(
+                [...expected].sort().map((r) => `"relation":"${r}"`),
+            );
+        },
+    );
+
+    it('keeps host clear of every grant arm', () => {
+        const hostRefs = JSON.stringify(instance.relations.host).match(
+            /"relation":"([^"]+)"/g,
+        );
+        for (const grant of [
+            'edit_grant',
+            'observe_grant',
+            'view_grant',
+            'lifecycle_grant',
+        ]) {
+            expect(hostRefs).not.toContain(`"relation":"${grant}"`);
+        }
     });
 });
 
@@ -252,4 +548,44 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
         expect(serialized).not.toMatch(/"relation"\s*:\s*"parent"/);
         expect(byType.staff_org.relations).not.toHaveProperty('parent');
     });
+});
+
+describe('review-driven guards (2026-07-28)', () => {
+    const json = transformer.transformDSLToJSONObject(modelText);
+    const byType = Object.fromEntries(
+        json.type_definitions.map((t) => [t.type, t]),
+    );
+    const instance = byType.session_instance;
+
+    it('session_instance.can_join follows the v1 vocabulary (host OR member OR observe_grant)', () => {
+        const arms = (
+            JSON.stringify(instance.relations.can_join).match(
+                /"relation":"([^"]+)"/g,
+            ) ?? []
+        ).sort();
+        expect(arms).toEqual([
+            '"relation":"host"',
+            '"relation":"member"',
+            '"relation":"observe_grant"',
+        ]);
+    });
+
+    // D19 separability extended to ALL four grants at both levels: no can_*
+    // gate may inline pgrant/persona machinery — the grant arm must stay a
+    // named *_grant relation so checkDetailed can attribute HOST vs ADMIN.
+    it.each([
+        ['session', 'can_view', 'view_grant'],
+        ['session', 'can_lifecycle', 'lifecycle_grant'],
+        ['session_instance', 'can_view', 'view_grant'],
+        ['session_instance', 'can_lifecycle', 'lifecycle_grant'],
+        ['session_instance', 'can_join', 'observe_grant'],
+    ] as const)(
+        '%s.%s keeps its grant arm as the named %s relation',
+        (typeName, gate, grantRel) => {
+            const text = JSON.stringify(byType[typeName].relations[gate]);
+            expect(text).toContain(`"relation":"${grantRel}"`);
+            expect(text).not.toContain('pgrant');
+            expect(text).not.toContain('grants_');
+        },
+    );
 });

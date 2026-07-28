@@ -65,11 +65,16 @@ district-agnostic, and one flip changes every holder fleet-wide.
 
 ### Notes for whoever writes the tuples (not written today)
 
-- **`session.pod` is the EFFECTIVE pod**, resolved from
-  `pod_assignment_override(slotId, date)`: `SWAP` → the swapped-in pod; `ABSENT` →
-  write **no** pod tuple and no direct `host` tuples; otherwise the default pod.
+- **`session.pod` is the DEFAULT (series) pod — stable across days.** This
+  SUPERSEDES the earlier "effective pod" guidance, which predated the
+  occurrence layer: per-day `pod_assignment_override(slotId, date)`
+  SWAP/ABSENT resolution is written on that day's `session_instance`
+  (`override_pod` + the `pod_overridden` marker; a marker with no
+  `override_pod` is an ABSENT day). Never rewrite `session.pod` per-day —
+  `session_instance.base_host`/`base_member` resolve through it, so a per-day
+  rewrite corrupts every other day's resolution.
   ⚠️ The sessionId encodes the **default** podId and the override row is keyed on
-  it independent of any SWAP — resolve the pod, never parse it out of the id.
+  it independent of any SWAP — resolve the override pod, never parse it out of the id.
 - **`pod.parent`** is a two-hop lookup, not a column: a pod carries `periodId`/`cohortId`
   and the program comes via `PeriodProjection.programId` (non-null, but soft-deletable
   via `deletedAt`). Re-resolve it when `Pod.rotation` changes re-point `PodAssignment` —
@@ -78,12 +83,67 @@ district-agnostic, and one flip changes every holder fleet-wide.
   programs-api's `PodTutor` table (1:1 — using it silently loses multi-tutor pods).
   FGA tuples are at-now, so the writer must re-run on interval boundaries (a timer,
   not only an event handler).
-- **The direct `[user]` branch of `host`** is the per-occurrence override host
-  (`session_instance_override.hostIds`). It is *additive* — it never revokes the base
-  tutor. Gate it on live period membership **and retract on whole-user deactivation**,
-  because `period_membership` does not close on deactivation.
-- `ABSENT` suppresses only the **host** branch; a grant holder still passes `can_edit`,
-  matching sessions-api checking `holdsGrant` outside its effective-pod guard.
+- **Per-occurrence override hosts** (`session_instance_override.hostIds`) are
+  written on the day's `session_instance.override_host` (additive — never
+  revokes the base tutor); `session.host`'s direct `[user]` branch is reserved
+  for rare series-level explicit hosts. Gate override hosts on live period
+  membership **and retract on whole-user deactivation**, because
+  `period_membership` does not close on deactivation.
+- An ABSENT day suppresses the base pod entirely (marker, no `override_pod`);
+  only explicitly authored `override_host`/`added_participant` admit anyone —
+  and a grant holder still passes `can_edit` via the grant arm, matching
+  sessions-api checking `holdsGrant` outside its effective-pod guard.
+
+## The occurrence layer (`session_instance`)
+
+A `session_instance` is a **dated occurrence** of a repeating session — the layer
+program-hub's per-day facts live at (`pod_assignment_override` SWAP/ABSENT,
+`session_instance_override.hostIds`, participant ADDITIONS — removals ride the
+pod-swap path by disposition, no per-user negative tuples). Instances are **lazy**:
+an object carries tuples only when a per-day fact was *authored*; default days
+resolve straight through the `session` edge, so there is no per-day tuple fan-out.
+
+```
+base_host = host from session but not pod_overridden   # marker removes the base arm
+host      = override_host or tutor from override_pod or base_host
+member    = added_participant or member from override_pod or base_member
+```
+
+- **Override REPLACES, never unions.** The `pod_overridden: [user:*]` wildcard
+  marker suppresses the base arm; `override_pod` supplies the swap-day pod (pods
+  carry rosters via `pod.member`, so swap-day membership comes with it). ⚠️ The
+  marker and `override_pod` MUST be written in the **same authoring action** —
+  they are one fact. A marker alone is an ABSENT day; an `override_pod` alone
+  would silently union base ∪ swapped pods.
+- **`override_host` / `added_participant` are additive** — they never revoke the
+  resolved base, matching `session_instance_override.hostIds` semantics.
+- **Grants pass through the `session` edge only** — an overridden or ABSENT day
+  still admits grant holders, and the D19 arm separability (HOST vs ADMIN
+  attribution) holds at the instance level too. The gates mirror the session's
+  arm structure: `can_edit`/`can_observe`/`can_view`/`can_lifecycle`.
+
+These semantics have runnable-evidence backing: rostering's prototype slice
+(`scripts/fga/prototype/session-instance-slice.fga.yaml`, landed in
+[rostering#883](https://github.com/saga-ed/rostering/pull/883)) exercises the
+same shapes against a real store via `fga model test` — swap-day replacement,
+added-participant days, grant-vs-host separability, see-all reads — 8/8 green.
+This package pins the structure with transformer-based tests (no store harness
+ships in this repo).
+
+## View / lifecycle capabilities
+
+Two more capabilities ride the same persona → pgrant → group →
+`program.grant_group` spine, in the same shape as `edit_non_hosted`/`observe`:
+
+| Capability | Permission string (sessions-api) | Session gate |
+|---|---|---|
+| `view_non_member` | `sessions:view_non_member_sessions` (see-all reads) | `can_view = host or participant or view_grant` |
+| `lifecycle_non_hosted` | `sessions:lifecycle_non_hosted_sessions` (start/end/cancel takeover) | `can_lifecycle = host or lifecycle_grant` |
+
+Both inherit the spine's invariants (the `pgrant` intersection, the flat
+no-cascade rule) and stay separable from `host` for D19 attribution. The legacy
+`viewer`/`can_join` relations are untouched — `can_view` is the new
+vocabulary-aligned gate, not a replacement.
 
 ## Editing the model
 

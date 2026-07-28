@@ -150,6 +150,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       DATABASE_URL: 'postgresql://saga_user:password123@localhost:5432/sessions',
       IAM_API_URL: 'http://localhost:3010',
       SCHEDULING_API_URL: 'http://localhost:3008',
+      AUTHZ_API_URL: 'http://localhost:3200',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       CORS_ORIGIN: 'http://localhost:8900',
       JWT_ISSUER: 'https://iam.wootdev.com',

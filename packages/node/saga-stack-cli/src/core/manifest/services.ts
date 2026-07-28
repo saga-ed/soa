@@ -259,6 +259,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // slot 0's scheduling-api, so slot>0 time/adhoc S2S writes dialed the
         // wrong slot without this (live ECONNREFUSED on slot 1).
         SCHEDULING_API_URL: '${SCHEDULING_URL}',
+        // sessions-api authz cutover: grant evaluation via authz-api
+        // capabilities (cookie-relay). Slot-offset like every other URL.
+        AUTHZ_API_URL: '${AUTHZ_API_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         CORS_ORIGIN: '${DASH_URL}',
         // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.

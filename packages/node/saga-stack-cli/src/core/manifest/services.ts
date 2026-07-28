@@ -255,6 +255,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         NODE_ENV: 'development',
         DATABASE_URL: '${SESSIONS_DB_URL}',
         IAM_API_URL: '${IAM_URL}',
+        // No up.sh precedent: sessions-api's own default (localhost:3008) is
+        // slot 0's scheduling-api, so slot>0 time/adhoc S2S writes dialed the
+        // wrong slot without this (live ECONNREFUSED on slot 1).
+        SCHEDULING_API_URL: '${SCHEDULING_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         CORS_ORIGIN: '${DASH_URL}',
         // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.

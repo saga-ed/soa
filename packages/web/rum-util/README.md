@@ -88,6 +88,11 @@ Per-app, per-account, region `us-west-2`:
 `application-id` or `client-token` empty to disable RUM entirely for that
 account — `initRum` returns `false` and every other call no-ops.
 
+> **Non-prod only.** A build with `RUM_ENV_DEFAULT=prod` rejects empty or
+> malformed credentials outright — see [Production builds fail
+> loud](#production-builds-fail-loud). "Leave it empty to disable" is a dev/preview
+> affordance, not a way to ship prod without RUM.
+
 Seed once out-of-band (or as a one-shot CFN/Terraform stack) — the values are
 account-scoped, not per-branch, so they live longer than any single deploy.
 

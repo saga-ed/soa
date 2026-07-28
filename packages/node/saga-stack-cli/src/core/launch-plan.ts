@@ -92,6 +92,12 @@ export interface LaunchTokens {
   // ── lane base URLs (local/stack lane: http://localhost:<port>) ──
   /** up.sh `IAM_URL`. */
   IAM_URL: string;
+  /** scheduling-api base URL — no up.sh precedent (single-slot up.sh relied on
+   *  sessions-api's own localhost:3008 default, which is slot 0's port; a
+   *  slot>0 sessions-api needs the offset URL or every time/adhoc S2S write
+   *  dials the wrong slot — found live: sessions.time.set ECONNREFUSED :3008
+   *  on slot 1). */
+  SCHEDULING_URL: string;
   /** up.sh `DASH_URL` (saga-dash, :8900). */
   DASH_URL: string;
   /** up.sh `CONNECT_WEB_URL`. */
@@ -666,6 +672,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
 
     // lane base URLs (local/stack lane)
     IAM_URL: `http://localhost:${ports['iam-api']}`,
+    SCHEDULING_URL: `http://localhost:${ports['scheduling-api']}`,
     DASH_URL: `http://localhost:${ports['saga-dash']}`,
     CONNECT_WEB_URL: `http://localhost:${ports['connect-web']}`,
     COACH_WEB_URL: `http://localhost:${ports['coach-web']}`,

@@ -185,9 +185,12 @@ reset with the orchestrator's `switch`/`restore` against that profile.
   re-run).
 - **Never touched anywhere**: `outbox_event`, `consumed_events`,
   `snapshot_metadata`, `audit_logs` (DB-rule append-only), sessions'
-  `projection_readiness` + `authz_persona_definition`, coach's authored
-  content + `persona_definition`, programs' `content_item`, and the whole
-  content-api database (no org-reachable column exists).
+  `projection_readiness`, coach's authored content + `persona_definition`,
+  programs' `content_item`, and the whole content-api database (no
+  org-reachable column exists). Sessions' former authz mirror tables
+  (`authz_group_membership` / `authz_group_hierarchy` /
+  `authz_persona_assignment` / `authz_persona_definition`) were dropped by
+  the authz cutover (program-hub#454) — the plan no longer references them.
 - **Known residue**: `session_alias` rows minted before their lazily-written
   session row (unreachable via sessionIds), and journey-test-added attributes
   on the org row itself (kept with the seeded ones).

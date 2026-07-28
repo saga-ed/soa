@@ -33,6 +33,10 @@ export interface FgaGateConfig {
    *
    * Optional so a local/CI OpenFGA started with no authn still works: when
    * unset no credentials are configured and the header is never sent.
+   *
+   * ⚠️ This makes `FgaGateConfig` SECRET-BEARING. Never `JSON.stringify` or
+   * log the config object — enumerate the non-secret fields explicitly
+   * (`enforce`/`apiUrl`/`storeId`/`modelId`) as authz-api's bootstrap does.
    */
   apiToken?: string | undefined;
 }

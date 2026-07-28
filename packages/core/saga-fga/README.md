@@ -13,7 +13,7 @@ ADR 0005). Services only **check**.
 ```ts
 import { createFgaGate, enforceFgaRelation } from '@saga-ed/saga-fga';
 
-const fga = createFgaGate(); // from env: AUTHZ_FGA_ENFORCE, OPENFGA_API_URL, OPENFGA_STORE_ID, OPENFGA_MODEL_ID
+const fga = createFgaGate(); // from env: AUTHZ_FGA_ENFORCE, OPENFGA_API_URL, OPENFGA_STORE_ID, OPENFGA_MODEL_ID, OPENFGA_API_TOKEN
 
 // In a resolver / handler:
 await enforceFgaRelation(
@@ -116,3 +116,11 @@ checks stay authoritative until the flag flips on.
 | `OPENFGA_API_URL` | OpenFGA HTTP API | `http://localhost:8080` |
 | `OPENFGA_STORE_ID` | store id (required once enforcing) | — |
 | `OPENFGA_MODEL_ID` | authorization model id | store's latest |
+| `OPENFGA_API_TOKEN` | preshared key, sent as `Authorization: Bearer` | — (no credentials) |
+
+> **The shared dev and prod OpenFGA servers run `authn=preshared`** — the
+> `openfga-shared-<env>` task definition sets `OPENFGA_AUTHN_METHOD=preshared`.
+> Against those, `OPENFGA_API_TOKEN` is **required**: without it every call is a
+> 401, which the gate surfaces as `FgaUnavailableError`. That's the right
+> failure *direction* (never a silent deny), but the gate answers nothing. Leave
+> it unset only for a local/CI OpenFGA started with no authn.

@@ -19,9 +19,12 @@ meaningful command works — not that a destructive fixture-reset gets pointed a
   `/home/skelly/dev/soa/.claude/worktrees/gh375-env-prod`.
 - ✅ **Four of the issue's five open questions answered live** against account `531314149529` with
   `prod_admin` (read-only). See below — one answer (Q4) **changes the shape of Phase 2 materially**.
-- ⏳ Two facts still unverified because further prod reads were blocked in this session (permission
-  classifier): the `postgres-endpoint` parameter *value*, and the ECS **service** names on
-  `prod-shared`. Both are cheap one-command confirmations; Phase 1 opens with them.
+- ✅ **Prod's host shape established by live HTTPS probing** (no AWS creds needed), which **refuted
+  the issue's multi-apex premise** — prod is single-apex `saga.org` on dev's exact
+  `<host>.<domain>` convention. This retired the plan's highest risk. See Q6.
+- ⏳ **One hard blocker left:** the ECS service names on `prod-shared`. Secondary: the prod ALB
+  host-header rules, now needed only to resolve five services that NXDOMAIN at the dev-convention
+  hostname.
 
 ---
 
@@ -33,7 +36,8 @@ meaningful command works — not that a destructive fixture-reset gets pointed a
 | 2 | Live prod ECS cluster names — is there an arm cluster? | **`prod-shared` exists; there is no `prod-shared-arm`.** The iac samconfig asymmetry is real, not an omission. (A legacy `prod-apis` cluster also exists and is *not* the shared mesh.) | `ecs list-clusters` |
 | 3 | Prod SSM jump host Name tag | **`prod-shared-ecs-instance` — confirmed.** Four running instances carry the tag. Symmetry held. | `ec2 describe-instances`, running only |
 | 4 | db-host-v2 in prod, or RDS? | **No db-host-v2.** Prod has **no `dbs-v2.local` namespace** — its DNS_PRIVATE namespaces are `dbs.internal` and `db_temp`. Dev has both `dbs` and `dbs-v2.local`. Prod exposes `/shared/infra/prod/postgres-{endpoint,port,resource-id,master-secret-arn,sg-id}`, which is the RDS parameter shape. **Prod Postgres is RDS.** | `servicediscovery list-namespaces` (both accounts); `ssm describe-parameters` under `/shared/infra/prod` |
-| 5 | Floor credential tier for prod `connect` | Not settled by discovery — it is a **policy decision**, proposed in Phase 2 below. | — |
+| 5 | Floor credential tier for prod `connect` | **Decided:** Observer reads (`list`/`discover`/`verify`); `connect` requires a prod-capable profile. | policy decision, 2026-07-28 |
+| 6 | *(not in the issue)* Prod apex + host shape | **Single-apex `saga.org`, same `<host>.<domain>` convention as dev.** `iam.saga.org/health` answers `{"status":"ok","service":"IAM API"}`. Prod has **no wildcard DNS**, so dev's false-green ALB problem is absent. Five services NXDOMAIN at the dev-convention name. | live HTTPS probes, no AWS creds |
 
 ### Why Q4 is the load-bearing finding
 
@@ -92,14 +96,14 @@ Add the `prod` entry:
 prod: {
     name: 'prod',
     ledgerIdentifier: 'prod',        // identity, NOT a ledger key — prod is not ledger-tracked
-    domain: 'my.saga.org',
+    domain: 'saga.org',                // single apex, confirmed live — NOT my.saga.org
     awsRegion: 'us-west-2',
     awsAccountId: '531314149529',
     ssmDiscoveryRoots: ['/shared/infra/prod'],
     jumpHostNameTag: 'prod-shared-ecs-instance',
     ecsClusters: ['prod-shared'],
     // ledgerTable and dbHostNamespace deliberately absent
-    description: 'Production (my.saga.org / my.sagaeducation.org) — not dev-platform ledger-tracked; RDS Postgres.',
+    description: 'Production (*.saga.org) — not dev-platform ledger-tracked; RDS Postgres.',
 }
 ```
 
@@ -114,17 +118,35 @@ narrows to the account set of the envs that *have* a ledger table.
 **`discover`** should work with only the registry change — it walks `ssmDiscoveryRoots` and resolves
 the jump host by tag, both now per-env and both confirmed live.
 
-**`verify` — the multi-apex problem.** Prod is not a single-apex wildcard fleet, so
-`buildEnvHealthProbes(env.domain, env.name)` cannot derive prod hosts by `<host>.<domain>`. The
-mechanism already exists: `DeployedServiceDef.fqdnByEnv` (`services.ts:59`), added for connect-web.
-Populate `fqdnByEnv.prod` per service with the **live, confirmed** hostname, and rely on
-`resolveProbeUrl`'s existing rule (`services.ts:201`) that a service with `fqdnByEnv` but no entry for
-this env returns `null` → reported as "no public route", never silently green. That default is
-exactly right for prod: unmapped services stay honestly unverifiable rather than guessed.
+**`verify` — the multi-apex problem does not exist.** The issue's premise here was wrong, and live
+probing refuted it (see `../research/prod-facts.md`, Q6). Prod serves the **same** `<host>.<domain>`
+convention as dev, on the single apex `saga.org`: `iam.saga.org/health` answers
+`{"status":"ok","service":"IAM API"}`. `my.saga.org` is a user-facing SPA, not the API apex — that is
+what made prod *look* multi-apex. `sagaeducation.org` is not a service apex at all (every probed
+subdomain NXDOMAINs).
 
-Do **not** guess a single prod host. `services.ts:22` already warns that a wrong host silently
-becomes an ALB-default "down"; the prod map must come from the prod ALB host-header rules plus a live
-body check, the same way dev's did.
+So `buildEnvHealthProbes(env.domain, env.name)` works **unchanged** with `domain: 'saga.org'`. No
+`fqdnByEnv.prod` entries are needed for the core fleet, no ALB-rule discovery, no curated prod host
+table. This deletes what was the plan's highest risk.
+
+Two consequences still need code:
+
+1. **Prod runs a smaller service set.** Five services NXDOMAIN at the dev-convention hostname —
+   `content-api`, `ads-adm-api`, `coach-api`, `transcripts-api`, `connectv3-api` — while
+   `coach.saga.org` (the SPA) does serve. `DEPLOYED_SERVICES` is one global list, so
+   `verify --env prod` would fail the gate on five services that may never be meant to be there.
+   Add a per-service **env scope** — `envs?: readonly string[]`, absent meaning "all envs" — and have
+   `buildEnvHealthProbes` skip services out of scope for the target env. Do *not* just mark them
+   `optional`: that would weaken the dev gate too.
+   Whether those five are genuinely absent from prod or deployed under different hostnames is the
+   one open question the ALB host-header rules still need to answer. The
+   `/shared/infra/prod/internal-services-alb-*` parameters suggest a public/internal split, in which
+   case some are internal-only and HTTP-unverifiable *by design*.
+2. **Prod has no wildcard DNS**, so dev's false-green problem is absent — an unrouted prod host
+   NXDOMAINs rather than returning `200 dev-account-alb`. Keep body judgment (it is still correct,
+   and `HEALTHY_STATUSES` already covers prod's vocabulary — `sis` answers `running`), but note that
+   `ALB_DEFAULT_MARKER` is dev-specific and has no confirmed prod analogue. It should not be
+   generalized to prod on the assumption that one exists.
 
 **`--ecs` in prod.** `verify.ts:140` builds the service name as `${ecsService}-${env.ledgerIdentifier}`.
 Prod's suffix is currently a guess — this is the second unverified fact. Confirm with `aws ecs
@@ -225,13 +247,16 @@ that no psql invocation and no AWS call is made; the dev/training reset paths ar
 
 ## Risks
 
-1. **The prod `verify` host map is the highest-risk artifact.** A guessed host reads as a false
-   "down" at best and a false green at worst; the mitigation is the `fqdnByEnv`-returns-`null`
-   default, which fails honest.
-2. **Two facts remain unconfirmed** (postgres-endpoint value, prod ECS service names). Phase 1 opens
-   by confirming them. The RDS conclusion in Q4 is a strong inference from parameter shape plus the
-   *absence* of `dbs-v2.local` — not yet a read of the endpoint itself.
-3. **`list`'s account-preflight restructure** is the one place Phases 0/1 can regress existing
+1. ~~The prod `verify` host map is the highest-risk artifact.~~ **Retired.** Live probing showed prod
+   uses dev's `<host>.<domain>` convention on a single apex, so there is no map to curate and no
+   guessing to do.
+2. **The five absent services** are the live unknown: genuinely not in prod, or deployed under
+   different hostnames? Handling them as "out of env scope" when they are actually deployed-but-
+   renamed would mean `verify --env prod` silently skips real services. The ALB host-header rules
+   settle it; until then, prefer reporting them as unverifiable over dropping them.
+3. **ECS service naming on `prod-shared`** is unconfirmed and decides a code branch in
+   `verify --ecs`. Guessing it would silently skip the platform check.
+4. **`list`'s account-preflight restructure** is the one place Phases 0/1 can regress existing
    behavior. The Phase 0 registry test plus a `list`-specific test pinning dev+training output are
    the net.
 

@@ -94,32 +94,89 @@ has plenty to find.)
 port-forward from the jump host straight to the RDS endpoint. Prod is not a port of the dev path —
 it is a second, shorter one.
 
-## Q5 — Floor credential tier for prod `connect`. **Unresolved — a policy decision.**
+## Q6 (not in the issue) — The prod apex and host shape. **Single-apex `saga.org`.** ⚠️ *refutes an issue premise*
 
-Discovery cannot answer this. Known prod profiles from `~/.aws/config`: `prod_admin`
-(AdministratorAccess), `saga-runtime-prod` (AppRuntime), `saga` (Observer).
+The issue states prod "is not a single-apex fleet the way `wootdev.com` and `saga-training.org` are,
+which affects how `verify` enumerates service hosts". **That is not what prod does.** Probed live
+2026-07-28 over plain HTTPS, no AWS credentials involved:
 
-The proposal on the table (see `../source/plan.md`, Phase 2): read-only commands accept Observer;
-`connect` requires an explicitly prod-capable profile and refuses Observer with an actionable
-message; `--print-only` becomes the documented default habit for prod.
+| Host | Result |
+|---|---|
+| `iam.saga.org/health` | `{"status":"ok","service":"IAM API"}` |
+| `sis.saga.org/health` | `{"status":"running","service":"SIS API","sisDb":"connected"}` |
+| `programs-api.saga.org/health` | `{"status":"ok","service":"Programs API"}` |
+| `scheduling-api.saga.org/health` | `{"status":"ok","service":"Scheduling API"}` |
+| `sessions-api.saga.org/health` | `{"status":"ok","service":"Sessions API"}` |
+| `dash.saga.org/` | HTML document |
+| `coach.saga.org/` | HTML document |
+
+That is **exactly** the dev `<host>.<domain>` convention with `domain: 'saga.org'`. `my.saga.org`
+serves its own HTML app and is a *user-facing* SPA, not the API apex — which is what made the issue
+read prod as multi-apex.
+
+`sagaeducation.org` is **not a service apex at all**: `iam.sagaeducation.org`,
+`coach-api.sagaeducation.org` and `ads-adm-api.sagaeducation.org` all NXDOMAIN. Treat it as an
+apex-level alias, not something `verify` enumerates.
+
+### Prod has no wildcard DNS — the dev false-green problem does not exist here
+
+```
+zzz-unrouted-test.wootdev.com/health          → 200, body `dev-account-alb`
+definitely-not-a-real-service-xyz.saga.org    → NXDOMAIN (does not resolve)
+```
+
+Dev's wildcard DNS onto the shared ALB is the entire reason `classifyProbeBody` exists — a
+status-code-only probe reports non-existent dev services as healthy. **Prod has no wildcard**, so an
+unrouted prod host fails at DNS and surfaces as a transport error. Body judgment should stay (it is
+still correct, and `HEALTHY_STATUSES` already covers prod's words — `sis` answers `running`, which is
+allowlisted), but prod's failure mode is strictly *safer* than dev's, not more dangerous.
+
+> Not established: what a host that *resolves* but is unrouted returns in prod. No such host was
+> found, so `ALB_DEFAULT_MARKER` (`dev-account-alb`) has no confirmed prod analogue.
+
+### Five services are absent at the dev-convention hostname
+
+`content-api`, `ads-adm-api`, `coach-api`, `transcripts-api`, and `connectv3-api` **all NXDOMAIN**
+under `saga.org` (and under `sagaeducation.org`). Note `coach.saga.org` (the web SPA) *does* serve —
+so coach's frontend is in prod while `coach-api` is not reachable at the dev-convention name.
+
+Do **not** conclude "not deployed to prod". Two readings fit — genuinely absent, or deployed under a
+different prod hostname — and they need different handling. This is the one thing the prod ALB
+host-header rules are still needed for:
+
+```sh
+LARN=$(aws ssm get-parameter --name /shared/infra/prod/app-alb-443-listener-arn \
+  --profile prod_admin --region us-west-2 --query Parameter.Value --output text)
+aws elbv2 describe-rules --listener-arn "$LARN" --profile prod_admin --region us-west-2 \
+  --query 'Rules[].Conditions[?Field==`host-header`].Values[]' --output text
+```
+
+The `/shared/infra/prod/internal-services-alb-*` parameters hint at a public/internal ALB split, so
+some of the five may be internal-only in prod — which would mean HTTP-unverifiable-by-design, not
+unhealthy.
+
+## Q5 — Floor credential tier for prod `connect`. **Decided: Observer reads, higher tier connects.**
+
+Read-only commands (`list`, `discover`, `verify`) accept the Observer tier (`saga`). `connect` opens
+a live tunnel to production tenant data and requires a prod-capable profile, refusing Observer with
+an actionable message. `--print-only` is the documented default habit for prod.
+
+Known prod profiles from `~/.aws/config`: `prod_admin` (AdministratorAccess), `saga-runtime-prod`
+(AppRuntime), `saga` (Observer).
 
 ---
 
 ## Still unverified
 
-Two prod reads were blocked by the session's permission classifier and remain open. Both are
-one-command confirmations that Phase 1 should run first:
-
-1. **The `postgres-endpoint` parameter value.**
-   `aws ssm get-parameter --name /shared/infra/prod/postgres-endpoint --profile prod_admin`
-   The RDS conclusion in Q4 rests on parameter *shape* plus the absence of `dbs-v2.local` — strong,
-   but not yet a read of the endpoint itself.
-2. **ECS service names on `prod-shared`.**
+1. **ECS service names on `prod-shared`** — the one hard blocker.
    `aws ecs list-services --cluster prod-shared --profile prod_admin`
-   `verify --ecs` builds service names as `${ecsService}-${env.ledgerIdentifier}`; whether prod
-   follows that suffix convention is unknown, and guessing it would silently skip the platform check.
-
-Also unconfirmed: the prod ALB host-header rules that `verify`'s per-service host map must be built
-from. Prod serves `my.saga.org` / `my.sagaeducation.org` rather than a single wildcard apex, so that
-map cannot be derived — it has to be read off the listener rules and confirmed by live body check,
-exactly as dev's was.
+   `verify --ecs` builds names as `${ecsService}-${env.ledgerIdentifier}`; whether prod follows that
+   suffix convention decides a code branch, and guessing it would silently skip the platform check.
+2. **Prod ALB host-header rules** — narrowed scope. No longer needed to build the whole host map
+   (the `<host>.saga.org` convention supplies it); needed only to resolve the five absent services
+   above.
+3. **The `postgres-endpoint` parameter value** — *not* blocking. Endpoints are discovered at runtime
+   and never hardcoded, so Phase 2's code does not embed it. Reading it would only raise confidence
+   in the RDS inference, which already rests on parameter shape plus the absence of `dbs-v2.local`.
+4. **Jump host SSM `Online` status** — *not* blocking. `resolveJumpHost` already treats "no running +
+   Online instance" as an error path, so the code is the same either way.

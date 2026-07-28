@@ -40,6 +40,8 @@ export interface PortForwardRequest {
   localPort: number;
   region: string;
   profile?: string;
+  /** Override the readiness deadline (tests only; defaults to READY_TIMEOUT_MS). */
+  readyTimeoutMs?: number;
 }
 
 export interface PortForwardHandle {
@@ -184,13 +186,35 @@ export function makeRealEnvAws(): EnvAws {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let output = '';
+      const readyTimeoutMs = req.readyTimeoutMs ?? READY_TIMEOUT_MS;
       const exited = new Promise<number | null>((resolve) => {
         child.on('exit', (code) => resolve(code));
       });
       const ready = new Promise<void>((resolve, reject) => {
+        // A session that never signals READY must be REAPED, not abandoned
+        // (soa#370). `aws ssm start-session` keeps running after we give up —
+        // and the session-manager-plugin under it holds the local port — so an
+        // un-killed child silently poisons that port for every later run. The
+        // next attempt then times out too and orphans another, which is how one
+        // transient failure turned into "the tunnel is permanently broken".
+        const fail = (err: Error): void => {
+          clearTimeout(timer);
+          child.kill('SIGTERM');
+          reject(err);
+        };
         const timer = setTimeout(() => {
-          reject(new Error(`port-forward to ${req.host}:${req.remotePort} not ready after ${READY_TIMEOUT_MS / 1000}s`));
-        }, READY_TIMEOUT_MS);
+          // Name the WHOLE route (document + SSM target + remote endpoint), not
+          // just the local port — soa#370 was misdiagnosed for a day because the
+          // message named an endpoint without saying which host was dialling it.
+          fail(
+            new Error(
+              `port-forward not ready after ${readyTimeoutMs / 1000}s: ` +
+                `AWS-StartPortForwardingSessionToRemoteHost via ${req.target} → ${req.host}:${req.remotePort} ` +
+                `(local :${req.localPort})${output.trim() === '' ? ' — session produced no output' : `; last output: ${output.trim().slice(-300)}`}` +
+                `. If this repeats, a previous tunnel may still hold :${req.localPort} — check \`pgrep -af session-manager-plugin\`.`,
+            ),
+          );
+        }, readyTimeoutMs);
         const scan = (chunk: Buffer): void => {
           output += chunk.toString();
           if (output.includes(READY_MARKER)) {
@@ -201,8 +225,8 @@ export function makeRealEnvAws(): EnvAws {
         child.stdout?.on('data', scan);
         child.stderr?.on('data', scan);
         void exited.then((code) => {
-          clearTimeout(timer);
-          reject(new Error(`port-forward exited early (${code}): ${output.trim().slice(-500)}`));
+          // Already dead — kill() here is a no-op, but keeps one reject path.
+          fail(new Error(`port-forward exited early (${code}): ${output.trim().slice(-500)}`));
         });
       });
       // A never-awaited ready must not crash the process on early exit.

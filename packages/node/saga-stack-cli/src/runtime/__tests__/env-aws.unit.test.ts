@@ -5,8 +5,11 @@
  * IO is exercised through the command int tests' fakes.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { awsArgs, lambdaInvokeArgs, portForwardArgs } from '../env-aws.js';
+import { awsArgs, lambdaInvokeArgs, makeRealEnvAws, portForwardArgs } from '../env-aws.js';
 
 describe('awsArgs — profile/region threading', () => {
   it('appends --profile and --region only when given', () => {
@@ -69,5 +72,54 @@ describe('lambdaInvokeArgs — orchestrator invoke', () => {
       '--region',
       'us-west-2',
     ]);
+  });
+});
+
+/**
+ * soa#370 — the readiness deadline must REAP the child, not abandon it.
+ * `aws ssm start-session` keeps running (and the session-manager-plugin under
+ * it keeps holding the local port) after we stop waiting, so an un-killed
+ * child poisons that port for every later run: the next attempt times out too
+ * and orphans another. That cascade is what made one transient failure look
+ * like a permanently broken tunnel. Uses a stub `aws` on PATH that never
+ * prints the readiness banner.
+ */
+describe('portForward — a timed-out session is killed, never orphaned', () => {
+  const alive = (pid: number): boolean => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it('SIGTERMs the child when the readiness deadline passes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-env-aws-stub-'));
+    const stub = join(dir, 'aws');
+    // Silent and long-lived: exactly the shape that stranded a real session.
+    writeFileSync(stub, '#!/bin/sh\nsleep 60\n', { mode: 0o755 });
+    const realPath = process.env.PATH;
+    process.env.PATH = `${dir}:${realPath ?? ''}`;
+    try {
+      const handle = makeRealEnvAws().portForward({
+        target: 'i-0abc',
+        host: 'db.dbs-v2.local',
+        remotePort: 5440,
+        localPort: 15432,
+        region: 'us-west-2',
+        readyTimeoutMs: 250,
+      });
+      const pid = handle.pid;
+      expect(pid).toBeTypeOf('number');
+      await expect(handle.ready).rejects.toThrow(/not ready after/);
+      // The message must point at the port-holding culprit, not just the port.
+      await expect(handle.ready).rejects.toThrow(/session-manager-plugin/);
+      await handle.exited;
+      expect(alive(pid!)).toBe(false);
+    } finally {
+      process.env.PATH = realPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

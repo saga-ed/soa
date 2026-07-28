@@ -210,6 +210,7 @@ describe('env connect — task-definition resolution + tunnel', () => {
     if (args[0] === 'servicediscovery') {
       return { Instances: [{ Attributes: { AWS_INSTANCE_IPV4: '10.3.0.9', AWS_INSTANCE_PORT: '5440' } }] };
     }
+    if (args[0] === 'ec2' && args.some((a) => a.includes('private-ip-address'))) return ['i-0dbhost'];
     if (args[0] === 'ec2') return ['i-0jump'];
     if (args[1] === 'describe-instance-information') return ['i-0jump'];
     return null;
@@ -222,13 +223,13 @@ describe('env connect — task-definition resolution + tunnel', () => {
 
     expect(text()).toContain('service candidate dev-shared-arm/rostering-iam-api-main: arn:td/iam:251');
     expect(text()).toContain('rostering-iam-canonical.dbs-v2.local:5440/rostering-iam-canonical');
-    // .dbs-v2.local ⇒ still the shared jump host, dialling the container remotely.
-    expect(text()).toContain('jump host i-0jump → CloudMap rostering-iam-canonical (10.3.0.9, remote dial :5440)');
+    // .dbs-v2.local ⇒ the CloudMap route via the container's own host instance.
+    expect(text()).toContain('db-host i-0dbhost (CloudMap rostering-iam-canonical, local dial :5440)');
     expect(text()).toContain('DATABASE_URL=postgres://postgres_admin:p%40ss@127.0.0.1:15432/rostering-iam-canonical');
     expect(portForwards).toHaveLength(0);
   });
 
-  it('resolves a split POSTGRES_* service (second cluster) and tunnels via the jump host with a remote dial', async () => {
+  it('resolves a split POSTGRES_* service (second cluster) and tunnels via the db-host with a local dial', async () => {
     installEnvAws(awsForConnect);
 
     await expect(EnvConnect.run(['ads-adm', '--local-port', '15433'], config)).resolves.toBeUndefined();
@@ -236,8 +237,8 @@ describe('env connect — task-definition resolution + tunnel', () => {
     expect(text()).toContain('service candidate dev-shared-arm/sds-ads-adm-api-main: not found');
     expect(portForwards).toEqual([
       {
-        target: 'i-0jump', // the shared jump host, NOT the container's own EC2 host (soa#370)
-        host: 'ads-adm-postgres.dbs-v2.local', // dialled remotely, never rewritten to loopback
+        target: 'i-0dbhost',
+        host: '127.0.0.1',
         remotePort: 5440, // the CloudMap-registered port wins over the env var
         localPort: 15433,
         region: 'us-west-2',
@@ -256,10 +257,8 @@ describe('env connect — task-definition resolution + tunnel', () => {
 
   it('--host skips task-def resolution but still routes .dbs-v2.local via CloudMap', async () => {
     installEnvAws((args) => {
-      // no AWS_INSTANCE_PORT ⇒ the --remote-port value stands.
       if (args[0] === 'servicediscovery') return { Instances: [{ Attributes: { AWS_INSTANCE_IPV4: '10.3.0.9' } }] };
-      if (args[0] === 'ec2') return ['i-0jump'];
-      if (args[1] === 'describe-instance-information') return ['i-0jump'];
+      if (args[0] === 'ec2' && args.some((a) => a.includes('private-ip-address'))) return ['i-0dbhost'];
       throw new Error(`unexpected aws call: ${args.join(' ')}`);
     });
 
@@ -267,7 +266,7 @@ describe('env connect — task-definition resolution + tunnel', () => {
       EnvConnect.run(['iam', '--host', 'x.dbs-v2.local', '--remote-port', '5440', '--database', 'iamdb', '--print-only'], config),
     ).resolves.toBeUndefined();
     expect(text()).toContain('x.dbs-v2.local:5440/iamdb (--host)');
-    expect(text()).toContain('jump host i-0jump → CloudMap x (10.3.0.9, remote dial :5440)');
+    expect(text()).toContain('db-host i-0dbhost (CloudMap x, local dial :5440)');
   });
 
   it('a non-CloudMap host (shared RDS) routes via the shared jump host', async () => {

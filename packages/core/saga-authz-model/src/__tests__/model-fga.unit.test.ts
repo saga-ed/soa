@@ -246,7 +246,7 @@ describe('view / lifecycle capability spine', () => {
         },
     );
 
-    it('gates can_view on host OR participant OR view_grant', () => {
+    it('gates can_view on host OR participant OR member OR view_grant', () => {
         const arms = (
             JSON.stringify(byType.session.relations.can_view).match(
                 /"relation":"([^"]+)"/g,
@@ -254,9 +254,18 @@ describe('view / lifecycle capability spine', () => {
         ).sort();
         expect(arms).toEqual([
             '"relation":"host"',
+            '"relation":"member"',
             '"relation":"participant"',
             '"relation":"view_grant"',
         ]);
+    });
+
+    it('session.member is the pod-derived roster (ingest-fed source)', () => {
+        // programs.pod_membership.* -> pod.member -> session.member. The
+        // legacy `participant` relation stays direct-assignment and separate.
+        const def = byType.session.relations.member;
+        expect(def.tupleToUserset?.tupleset?.relation).toBe('pod');
+        expect(def.tupleToUserset?.computedUserset?.relation).toBe('member');
     });
 
     it('gates can_lifecycle on host OR lifecycle_grant', () => {
@@ -355,7 +364,7 @@ describe('session occurrence layer (session_instance)', () => {
      */
     it.each([
         ['base_host', 'host'],
-        ['base_member', 'participant'],
+        ['base_member', 'member'],
     ] as const)(
         '%s subtracts the pod_overridden marker from the session\'s %s',
         (baseRel, sessionRel) => {
@@ -539,4 +548,44 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
         expect(serialized).not.toMatch(/"relation"\s*:\s*"parent"/);
         expect(byType.staff_org.relations).not.toHaveProperty('parent');
     });
+});
+
+describe('review-driven guards (2026-07-28)', () => {
+    const json = transformer.transformDSLToJSONObject(modelText);
+    const byType = Object.fromEntries(
+        json.type_definitions.map((t) => [t.type, t]),
+    );
+    const instance = byType.session_instance;
+
+    it('session_instance.can_join follows the v1 vocabulary (host OR member OR observe_grant)', () => {
+        const arms = (
+            JSON.stringify(instance.relations.can_join).match(
+                /"relation":"([^"]+)"/g,
+            ) ?? []
+        ).sort();
+        expect(arms).toEqual([
+            '"relation":"host"',
+            '"relation":"member"',
+            '"relation":"observe_grant"',
+        ]);
+    });
+
+    // D19 separability extended to ALL four grants at both levels: no can_*
+    // gate may inline pgrant/persona machinery — the grant arm must stay a
+    // named *_grant relation so checkDetailed can attribute HOST vs ADMIN.
+    it.each([
+        ['session', 'can_view', 'view_grant'],
+        ['session', 'can_lifecycle', 'lifecycle_grant'],
+        ['session_instance', 'can_view', 'view_grant'],
+        ['session_instance', 'can_lifecycle', 'lifecycle_grant'],
+        ['session_instance', 'can_join', 'observe_grant'],
+    ] as const)(
+        '%s.%s keeps its grant arm as the named %s relation',
+        (typeName, gate, grantRel) => {
+            const text = JSON.stringify(byType[typeName].relations[gate]);
+            expect(text).toContain(`"relation":"${grantRel}"`);
+            expect(text).not.toContain('pgrant');
+            expect(text).not.toContain('grants_');
+        },
+    );
 });

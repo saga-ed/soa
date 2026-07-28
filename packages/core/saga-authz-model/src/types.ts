@@ -83,6 +83,7 @@ export interface FgaRelationsByType {
         | 'pod'
         | 'host'
         | 'participant'
+        | 'member'
         | 'observer'
         | 'edit_grant'
         | 'observe_grant'
@@ -111,7 +112,8 @@ export interface FgaRelationsByType {
         | 'can_edit'
         | 'can_observe'
         | 'can_view'
-        | 'can_lifecycle';
+        | 'can_lifecycle'
+        | 'can_join';
     room: 'parent' | 'session' | 'member' | 'moderator' | 'can_join';
     whiteboard: 'parent' | 'editor' | 'viewer';
     // Staff control-plane. `saga_platform` carries the role grants
@@ -196,6 +198,7 @@ export const FGA_RELATIONS = {
         'pod',
         'host',
         'participant',
+        'member',
         'observer',
         'edit_grant',
         'observe_grant',
@@ -226,6 +229,7 @@ export const FGA_RELATIONS = {
         'can_observe',
         'can_view',
         'can_lifecycle',
+        'can_join',
     ],
     room: ['parent', 'session', 'member', 'moderator', 'can_join'],
     whiteboard: ['parent', 'editor', 'viewer'],

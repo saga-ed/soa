@@ -220,32 +220,37 @@ type pod
 # relations on purpose so `checkDetailed` can attribute D19 actor HOST vs
 # ADMIN (`cancellationActor`); never collapse them into one OR'd relation.
 #
-# The `pod` edge is the EFFECTIVE pod for the occurrence, resolved by the
-# projector from `pod_assignment_override(slotId, date)`:
-#   SWAP   -> write the swapped-in effectivePodId
-#   ABSENT -> write NO pod tuple AND no direct `host` tuples ("an ABSENT
-#             effective pod admits no host at all")
-#   DEFAULT/no row -> the session's default pod
-# FOOTGUN: the sessionId encodes the DEFAULT podId and the override row is
-# keyed on it "independent of any SWAP" — a projector that parses podId out
-# of the sessionId writes the WRONG pod on every SWAP. Resolve it, don't
-# parse it.
-#
-# The direct `[user]` branch of `host` is the per-occurrence override host
-# (`session_instance_override.hostIds` + `hostOverridden`). It is ADDITIVE —
-# it never revokes the base pod tutor. The projector must gate it on the
-# user's LIVE period membership AND retract on whole-user deactivation,
-# because `period_membership` does NOT close on deactivation.
-#
-# Note ABSENT suppresses only the HOST branch: a grant holder still passes
-# `can_edit` via `edit_grant`, matching sessions-api checking `holdsGrant`
-# outside its effective-pod guard.
+# TUPLE-WRITER CONTRACT — SUPERSEDES the pre-instance-layer guidance that
+# previously lived here (which wrote per-day facts onto this series-level
+# object): `session` is the SERIES.
+#   - `pod` = the session's DEFAULT pod, stable across days. NEVER rewrite
+#     it per-day: `session_instance.base_host`/`base_member` resolve through
+#     it, so a per-day rewrite corrupts every OTHER day's resolution.
+#   - Per-day facts — `pod_assignment_override(slotId, date)` SWAP/ABSENT
+#     resolution, `session_instance_override.hostIds`, participant
+#     additions — are written on that day's `session_instance`, never here.
+#   - The direct `[user]` branch of `host` is for series-level explicit
+#     hosts only (rare; additive). Per-day override hosts go on the
+#     instance's `override_host`.
+# FOOTGUN (still applies, now at the instance): the sessionId encodes the
+# DEFAULT podId and the override row is keyed on it "independent of any
+# SWAP" — a writer that parses podId out of the sessionId writes the WRONG
+# `override_pod` on every SWAP. Resolve it, don't parse it.
+# Liveness caveats apply wherever host facts are written: gate override
+# hosts on LIVE period membership and retract on whole-user deactivation
+# (`period_membership` does NOT close on deactivation).
 type session
   relations
     define parent: [program]
     define pod: [pod]
     define host: [user] or tutor from pod
     define participant: [user, group#member]
+    # `member` is the resolved pod roster (ingest: programs.pod_membership.*
+    # -> pod.member) — the event-fed membership source the instance layer
+    # resolves through. `participant` is the legacy direct-assignment
+    # relation (no event writer today); it stays honored by viewer/can_join
+    # and by can_view.
+    define member: member from pod
     define observer: [user, group#member, role#holder]
     define edit_grant: edit_non_hosted from parent
     define observe_grant: observe from parent
@@ -253,16 +258,18 @@ type session
     define lifecycle_grant: lifecycle_non_hosted from parent
     define can_edit: host or edit_grant
     define can_observe: host or observe_grant
-    define can_view: host or participant or view_grant
+    define can_view: host or participant or member or view_grant
     define can_lifecycle: host or lifecycle_grant
     define viewer: host or participant or observer or admin from parent
     define can_join: host or participant or admin from parent
 
 # A DATED OCCURRENCE of a repeating session — the layer where program-hub's
 # per-day facts live (`pod_assignment_override` SWAP/ABSENT resolution,
-# `session_instance_override.hostIds`, participant deltas). The repeating
+# `session_instance_override.hostIds`, participant ADDITIONS). The repeating
 # `session` above answers "who is attached to this series"; the instance
-# answers "who is host/member ON THIS DAY".
+# answers "who is host/member ON THIS DAY". Per-day REMOVALS are not
+# expressible as per-user negative tuples by design — they ride the
+# pod-swap path (disposition 2026-07-27).
 #
 # Instances are LAZY: an object exists (and carries tuples) only when
 # instance-specific facts were AUTHORED for that date — a pod-swap override,
@@ -274,8 +281,9 @@ type session
 #   base_host = host from session BUT NOT pod_overridden
 # ⚠️ The marker and `override_pod` MUST be written in the SAME authoring
 # action (they represent one fact — "this day's pod is different"). A marker
-# without an override_pod is an ABSENT day (no host at all — mirrors the
-# session-level ABSENT rule); an override_pod without the marker would
+# without an `override_pod` is an ABSENT day: the base pod is suppressed
+# entirely and only explicitly authored `override_host`/`added_participant`
+# facts admit anyone (grants still pass through); an override_pod without the marker would
 # silently UNION the swapped-in pod with the base one, which is exactly the
 # wrong-pod footgun the session comment warns about.
 #
@@ -293,6 +301,12 @@ type session
 # TENANT-CONTAINMENT NOTE: like `room.session`, containment resolves through
 # the `session` edge (session -> parent program -> tenant); the instance has
 # no `parent` edge of its own.
+#
+# JOIN PATH: the instance defines `can_join` below, but `room.can_join` and
+# the `whiteboard` relations still resolve through the SERIES session today —
+# wiring the realtime types to instances is DEFERRED (like the period hop)
+# until the connect surface adopts the PDP. Consequence to own explicitly:
+# on a swap day the room gate still admits the base pod until that lands.
 type session_instance
   relations
     define session: [session]
@@ -307,7 +321,7 @@ type session_instance
     # session either way.
     define base_host: host from session but not pod_overridden
     define host: override_host or tutor from override_pod or base_host
-    define base_member: participant from session but not pod_overridden
+    define base_member: member from session but not pod_overridden
     define member: added_participant or member from override_pod or base_member
     define edit_grant: edit_grant from session
     define observe_grant: observe_grant from session
@@ -318,6 +332,9 @@ type session_instance
     define can_observe: host or observe_grant
     define can_view: host or member or view_grant
     define can_lifecycle: host or lifecycle_grant
+    # v1 vocabulary join gate (observe grant admits observers). The legacy
+    # series-level `can_join` keeps its `admin from parent` arm untouched.
+    define can_join: host or member or observe_grant
 
 # A real-time room (rtsm). Tenant-scoped via parent. Used to lock down
 # socket joins; the `can_join` relation is what `RoomManager.joinRoom`

@@ -68,9 +68,27 @@ export function initTracing(
         // to the backend trace. fs is excluded — noisy and rarely actionable.
         // RuntimeNodeInstrumentation feeds DD APM's Runtime Metrics panel
         // (heap, event-loop lag, GC).
+        //
+        // dns + net are excluded for the same reason as fs: they emit a span per
+        // socket/lookup (tcp.connect, dns.lookup, tls.connect) that describes
+        // transport plumbing, not application work. The useful latency is already
+        // on the parent HTTP/pg span that triggered the connection.
+        //
+        // pg uses requireParentSpan so it only emits inside an existing trace.
+        // Connection-pool churn happens on background reconnects with no active
+        // parent, which produced a standing ~44 KB/s of `pg - pool.connect` spans
+        // in dev — ~65% of the whole dev APM ingest baseline, and the largest
+        // single contributor to the APM per-host density monitor firing
+        // (2026-07-28). Query + connect spans raised inside a real request or
+        // amqplib consumer still have a parent, so they are unaffected; only the
+        // parentless churn is dropped. See instrumentation-pg's
+        // shouldSkipInstrumentation(), which gates POOL_CONNECT/CONNECT/query.
         instrumentations: [
             getNodeAutoInstrumentations({
                 '@opentelemetry/instrumentation-fs': { enabled: false },
+                '@opentelemetry/instrumentation-dns': { enabled: false },
+                '@opentelemetry/instrumentation-net': { enabled: false },
+                '@opentelemetry/instrumentation-pg': { requireParentSpan: true },
             }),
             new RuntimeNodeInstrumentation(),
         ],

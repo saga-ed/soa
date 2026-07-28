@@ -890,6 +890,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_AUTH_USERJWKSURL: '${IAM_URL}/.well-known/jwks.json',
         IAM_AUTH_SERVICETOKENISSUER: '${IAM_ISSUER}',
         IAM_AUTH_USERTOKENISSUER: '${IAM_ISSUER}',
+        // Browser leg (#881): authz-api's credentialed CORS allowlist covers the
+        // wildcard prod/dev hosts + localhost:8900 only — a slot>0 dash (:9900)
+        // is blocked (no ACAO echoed → browser "Failed to fetch" → dash silently
+        // runs its permission-derived fallback; found live on slot 1).
+        CORS_ORIGIN: '${DASH_URL}',
       },
     },
     // No fixture seed of its own — iam.* projection hydrates authz_db at runtime.

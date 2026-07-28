@@ -166,17 +166,45 @@ Known prod profiles from `~/.aws/config`: `prod_admin` (AdministratorAccess), `s
 
 ---
 
-## Still unverified
+## Resolved since first capture
 
-1. **ECS service names on `prod-shared`** — the one hard blocker.
-   `aws ecs list-services --cluster prod-shared --profile prod_admin`
-   `verify --ecs` builds names as `${ecsService}-${env.ledgerIdentifier}`; whether prod follows that
-   suffix convention decides a code branch, and guessing it would silently skip the platform check.
-2. **Prod ALB host-header rules** — narrowed scope. No longer needed to build the whole host map
-   (the `<host>.saga.org` convention supplies it); needed only to resolve the five absent services
-   above.
-3. **The `postgres-endpoint` parameter value** — *not* blocking. Endpoints are discovered at runtime
-   and never hardcoded, so Phase 2's code does not embed it. Reading it would only raise confidence
-   in the RDS inference, which already rests on parameter shape plus the absence of `dbs-v2.local`.
-4. **Jump host SSM `Online` status** — *not* blocking. `resolveJumpHost` already treats "no running +
-   Online instance" as an error path, so the code is the same either way.
+Both blockers cleared 2026-07-28 with read-only calls:
+
+**ECS service names on `prod-shared`** — prod uses the **`-main`** suffix, same as dev:
+`rostering-iam-api-main`, `rostering-sis-api-main`, `program-hub-{programs,scheduling,sessions}-api-main`,
+`qboard-connectv3-api-main`, `sds-sds-api-main`. Also present: `coach-coach-api-**canary**`,
+`saga-image-service-api-prod`, `openfga-shared-prod`, `prod-datadog-agent-daemon`.
+⇒ prod's `ledgerIdentifier` must be **`'main'`**, and coach needs a per-service override.
+
+**The five absent services split three ways** — `content-api`, `ads-adm-api` and `transcripts-api`
+are absent from `prod-shared` (genuinely not deployed); `connect-api` and `coach-api` **are**
+deployed (`qboard-connectv3-api-main`, `coach-coach-api-canary`) but have no public DNS record.
+
+### ALB host-header rules are not a host map
+
+The prod ALB carries rules for `coach-api.saga.org` and `connectv3-api.saga.org`, yet neither
+resolves. A routing rule without a DNS record is not a reachable host. Full host-header set on
+`prod-app-stack-lb`:
+
+```
+api-coach.saga.org          canary-api-coach.saga.org   chat-api.saga.org
+coach-api.saga.org          coach-assistant-api.saga.org connectv3-api.saga.org
+iam.saga.org                programs-api.saga.org        rostering-api.saga.org
+scheduling-api.saga.org     sds-api.saga.org             sessions-api.saga.org
+sis.saga.org                comms{0..5}.wootmath.com     non-traffic.wootmath.com
+```
+
+Probed: `rostering-api.saga.org` is an **alias** for `iam.saga.org` (identical IAM API body);
+`api-coach.saga.org` and `canary-api-coach.saga.org` resolve but **503**;
+`coach-assistant-api.saga.org` answers `404 {"error": "Route not found"}` (no `/health` route);
+`sds-api.saga.org`, `chat-api.saga.org`, `coach-api.saga.org`, `connectv3-api.saga.org` do not
+resolve.
+
+## Still not established
+
+- What a host that *resolves but is unrouted* returns in prod — no such host was found, so
+  `ALB_DEFAULT_MARKER` (`dev-account-alb`) has no confirmed prod analogue.
+- The `postgres-endpoint` **value**. Not blocking: endpoints are discovered at runtime, never
+  hardcoded, so Phase 2's code does not embed it.
+- Jump host SSM `Online` status. Not blocking: `resolveJumpHost` already treats "no running + Online
+  instance" as an error path.

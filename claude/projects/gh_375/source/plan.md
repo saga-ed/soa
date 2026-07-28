@@ -95,7 +95,8 @@ Add the `prod` entry:
 ```ts
 prod: {
     name: 'prod',
-    ledgerIdentifier: 'prod',        // identity, NOT a ledger key — prod is not ledger-tracked
+    ledgerIdentifier: 'main',        // NOT 'prod' — prod ECS services are `<svc>-main`, confirmed live.
+                                     // Not a ledger key either: prod is not ledger-tracked at all.
     domain: 'saga.org',                // single apex, confirmed live — NOT my.saga.org
     awsRegion: 'us-west-2',
     awsAccountId: '531314149529',
@@ -148,11 +149,53 @@ Two consequences still need code:
    `ALB_DEFAULT_MARKER` is dev-specific and has no confirmed prod analogue. It should not be
    generalized to prod on the assumption that one exists.
 
-**`--ecs` in prod.** `verify.ts:140` builds the service name as `${ecsService}-${env.ledgerIdentifier}`.
-Prod's suffix is currently a guess — this is the second unverified fact. Confirm with `aws ecs
-list-services --cluster prod-shared` before writing anything; if prod's naming does not follow the
-`-<identifier>` suffix, add an explicit `ecsServiceSuffix?: string` to `DeployedEnv` rather than
-overloading `ledgerIdentifier` to mean two different things.
+**`--ecs` in prod — confirmed, with one exception.** `aws ecs list-services --cluster prod-shared`
+(2026-07-28) shows prod uses the **`-main`** suffix, exactly like dev:
+
+```
+rostering-iam-api-main         program-hub-scheduling-api-main   qboard-connectv3-api-main
+rostering-sis-api-main         program-hub-sessions-api-main     sds-sds-api-main
+program-hub-programs-api-main
+```
+
+So `${probe.ecsService}-${env.ledgerIdentifier}` works unchanged **provided prod's
+`ledgerIdentifier` is `'main'`** — hence the entry above. No `ecsServiceSuffix` field is needed.
+
+The exception: **`coach-coach-api-canary`**, not `-main`. Two other prod services use `-prod`
+(`saga-image-service-api-prod`, `openfga-shared-prod`) but neither is in `DEPLOYED_SERVICES`, so they
+do not matter here. Add a per-service `ecsServiceByEnv?: Record<string, string>` override (mirroring
+`fqdnByEnv`) and set coach's prod value; do **not** special-case the suffix globally, which would
+break the other six.
+
+### The five "missing" services split three ways
+
+Cross-referencing the ECS list against the HTTPS probes resolves this cleanly — and confirms it was
+right not to conclude "not deployed to prod":
+
+| Service | ECS on `prod-shared` | Public DNS | Reading |
+|---|---|---|---|
+| `content-api` | absent | NXDOMAIN | **Not deployed to prod.** Out of env scope. |
+| `ads-adm-api` | absent | NXDOMAIN | **Not deployed to prod.** Out of env scope. |
+| `transcripts-api` | absent | NXDOMAIN | **Not deployed to prod.** Out of env scope. |
+| `connect-api` | `qboard-connectv3-api-main` | NXDOMAIN | **Deployed, not publicly routed.** |
+| `coach-api` | `coach-coach-api-canary` | NXDOMAIN | **Deployed, not publicly routed.** |
+
+The last two need `host: undefined` for prod — HTTP-unverifiable, judged by the `--ecs` pass only,
+which is precisely the case `services.ts:26` already describes for connect-web. They must **not** be
+scoped out of prod: they are running, and dropping them would hide a real outage.
+
+### ALB host-header rules are NOT a host map
+
+An important negative result. The prod ALB *does* carry rules for `coach-api.saga.org` and
+`connectv3-api.saga.org` — but neither hostname resolves. A routing rule without a DNS record is not
+a reachable host, so the ALB rules cannot be used to derive what `verify` probes. Related findings
+from the same read:
+
+- `rostering-api.saga.org` is an **alias** for `iam.saga.org` — same `{"status":"ok","service":"IAM API"}`
+  body. Probe one, not both.
+- `api-coach.saga.org` and `canary-api-coach.saga.org` resolve but answer **503**.
+- Prod runs services dev's list has no entry for: `sds-api`, `saga-image-service-api`,
+  `openfga-shared`. Out of scope for this issue, but worth an eventual `DEPLOYED_SERVICES` entry.
 
 **Exit criteria:** `ss env list` shows three envs with dev creds and no error; `ss env discover --env
 prod --profile prod_admin` resolves the jump host and data-store params; `ss env verify --env prod`

@@ -5,7 +5,7 @@
  * The registry deliberately hardcodes no endpoint that can drift; this command
  * is how the live values are found: it pages `ssm get-parameters-by-path` under
  * the env's discovery roots, filters to data-store-shaped names, and resolves
- * the SSM jump host (EC2 tag `Name=dev-shared-ecs-instance`, Online only) that
+ * the SSM jump host (EC2 tag `Name=<env.jumpHostNameTag>`, Online only) that
  * `env connect` tunnels through. Use it once per session to fill/verify the
  * values `env connect` needs.
  */
@@ -13,7 +13,7 @@
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { bold, cyan, dim, green, red } from '../../color.js';
-import { ENV_NAMES, JUMP_HOST_NAME_TAG, accountMismatchError, resolveEnv } from '../../core/env/index.js';
+import { ENV_NAMES, accountMismatchError, resolveEnv } from '../../core/env/index.js';
 import { resolveCallerAccount, resolveJumpHost } from '../../runtime/index.js';
 
 const DEFAULT_FILTER = 'postgres|mongo|mongodb|db-host|rabbit|redis|rds|secret';
@@ -79,15 +79,15 @@ export default class EnvDiscover extends BaseCommand {
     params.sort((a, b) => a.name.localeCompare(b.name));
 
     // ── the SSM jump host (running + Online) ──
-    const jump = await resolveJumpHost(aws, JUMP_HOST_NAME_TAG, opts);
+    const jump = await resolveJumpHost(aws, env.jumpHostNameTag, opts);
 
     const lines: string[] = [
       `${bold('▶ env discover')} — ${bold(cyan(env.name))} ${dim(`(roots: ${env.ssmDiscoveryRoots.join(', ')}; filter: /${flags.filter}/i)`)}`,
       ...params.map((p) => `  ${p.name}  ${dim(`[${p.type}]`)}`),
       params.length === 0 ? dim('  (no matching parameters — check tier/filter)') : '',
       jump === undefined
-        ? `  ${dim('jump host:')} ${red(`✗ no running+Online instance tagged Name=${JUMP_HOST_NAME_TAG}`)}`
-        : `  ${dim('jump host:')} ${green(jump)} ${dim(`(tag Name=${JUMP_HOST_NAME_TAG}, Online)`)}`,
+        ? `  ${dim('jump host:')} ${red(`✗ no running+Online instance tagged Name=${env.jumpHostNameTag}`)}`
+        : `  ${dim('jump host:')} ${green(jump)} ${dim(`(tag Name=${env.jumpHostNameTag}, Online)`)}`,
     ].filter((l) => l !== '');
     this.emit(flags, { env: env.name, parameters: params, jumpHost: jump ?? null }, lines);
   }

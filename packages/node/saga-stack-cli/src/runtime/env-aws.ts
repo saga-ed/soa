@@ -237,6 +237,24 @@ export async function resolveCallerAccount(aws: EnvAws, opts: { profile?: string
 }
 
 /**
+ * The full STS caller ARN (`sts get-caller-identity --query Arn`) — the
+ * credential-tier half of the identity, where `resolveCallerAccount` reads the
+ * account half. `ss env connect` uses it on a production data plane to refuse
+ * the read-only Observer tier (`core/env/credentials.ts` owns the judgment;
+ * this is only the read). Returns undefined when the identity can't be read —
+ * the gate then lets the caller through and a real AWS call surfaces the auth
+ * problem, exactly as the account preflight does.
+ */
+export async function resolveCallerArn(aws: EnvAws, opts: { profile?: string; region: string }): Promise<string | undefined> {
+  try {
+    const arn = (await aws.json(['sts', 'get-caller-identity', '--query', 'Arn'], opts)) as string | null;
+    return arn ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Resolve the SSM jump host: newest running instance carrying the Name tag that
  * is ALSO Online in SSM (the exact recipe iac's postgres-mirror workflow uses).
  * Returns undefined when none qualifies.

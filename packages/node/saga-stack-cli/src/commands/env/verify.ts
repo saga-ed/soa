@@ -1,6 +1,6 @@
 /**
  * `saga-stack env verify` — health gate for a DEPLOYED shared environment
- * (soa#355): the `stack verify` analogue for dev / training.
+ * (soa#355): the `stack verify` analogue for dev / training / prod.
  *
  * Where `stack verify` probes the local mesh from the manifest, this probes the
  * deployed hosts — and it judges health from the RESPONSE BODY, not the status
@@ -8,7 +8,10 @@
  * wildcard DNS onto the shared ALB, whose default action answers **200 with the
  * body `dev-account-alb`** for any unmatched host, so a status-only gate reports
  * services that do not exist as healthy (verified live 2026-07-21). The body
- * classifier in `core/env/services.ts` is the actual gate.
+ * classifier in `core/env/services.ts` is the actual gate. (Prod has no
+ * wildcard DNS, so that trap is dev-only there — but body judgment stays
+ * correct, and the service set/ECS names differ per env by DECLARATION, never
+ * by branching on the env name here.)
  *
  *   default            probe every deployed service; NON-ZERO exit if a required
  *                      one is unhealthy. Services with no public route are
@@ -28,7 +31,6 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { bold, cyan, dim, green, red, yellow } from '../../color.js';
 import {
-  ECS_CLUSTERS,
   ENV_NAMES,
   RESETTABLE_ORGS,
   RESET_GUARD_SQL,
@@ -59,11 +61,12 @@ interface ServiceReport {
 
 export default class EnvVerify extends BaseCommand {
   static description =
-    "Health-gate a deployed shared environment (dev/training): probe every service's health endpoint and judge it by RESPONSE BODY (the shared ALB answers 200 for unrouted hosts). Non-zero exit if a required service is unhealthy. --org additionally asserts a fixture org's seed skeleton.";
+    `Health-gate a deployed shared environment (${ENV_NAMES.join('/')}): probe every service's health endpoint and judge it by RESPONSE BODY (the shared dev ALB answers 200 for unrouted hosts). Non-zero exit if a required service is unhealthy. --org additionally asserts a fixture org's seed skeleton.`;
 
   static examples = [
     '<%= config.bin %> <%= command.id %> --env dev',
     '<%= config.bin %> <%= command.id %> --env training --tolerate connect-api,rtsm-api',
+    '<%= config.bin %> <%= command.id %> --env prod --ecs --profile prod_admin',
     '<%= config.bin %> <%= command.id %> --env dev --org emptyOrg --url iam=postgres://…15432/iam',
   ];
 
@@ -79,7 +82,7 @@ export default class EnvVerify extends BaseCommand {
     url: Flags.string({ description: 'store connection as <store>=<connString> (only iam is used, for --org).', multiple: true }),
     ecs: Flags.boolean({
       description:
-        'ALSO check the ECS platform state (running/desired tasks, rollout) — the truth HTTP cannot see (crash-loops behind a healthy target, stuck deploys). Covers services with no public route. Needs dev-account AWS credentials.',
+        "ALSO check the ECS platform state (running/desired tasks, rollout) — the truth HTTP cannot see (crash-loops behind a healthy target, stuck deploys). Covers services with no public route (the ONLY signal for prod's coach-api/connect-api). Needs credentials for the target env's AWS account.",
       default: false,
     }),
     profile: Flags.string({ description: 'AWS profile for --ecs (defaults to the ambient chain).' }),
@@ -136,10 +139,14 @@ export default class EnvVerify extends BaseCommand {
       if (mismatch !== null) this.error(mismatch);
       for (const report of reports) {
         const probe = probes.find((p) => p.id === report.id);
-        if (probe?.ecsService === undefined) continue; // Amplify frontends / not deployed
-        const serviceName = `${probe.ecsService}-${env.ledgerIdentifier}`;
+        if (probe === undefined) continue;
+        if (probe.ecsService === undefined && probe.ecsServiceName === undefined) continue; // Amplify frontends / not deployed
+        // `<prefix>-<identifier>` is the convention in EVERY env (prod's mesh
+        // uses `-main` too, hence its ledgerIdentifier); ecsServiceByEnv is the
+        // per-service escape hatch for the one name that does not follow it.
+        const serviceName = probe.ecsServiceName ?? `${probe.ecsService}-${env.ledgerIdentifier}`;
         let state: EcsServiceState | undefined;
-        for (const cluster of ECS_CLUSTERS) {
+        for (const cluster of env.ecsClusters) {
           const found = (await aws.json(
             [
               'ecs',

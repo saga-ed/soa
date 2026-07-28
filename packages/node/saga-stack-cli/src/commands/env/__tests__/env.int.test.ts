@@ -36,15 +36,28 @@ type PsqlHandler = (conn: string, sql: string) => string[][];
 
 /** Account the sts preflight resolves to (default: the dev account; a test flips it to simulate a mismatch). */
 const DEV_ACCOUNT = '396913734878';
+const PROD_ACCOUNT = '531314149529';
 let callerAccount = DEV_ACCOUNT;
+/**
+ * ARN the CREDENTIAL-TIER gate resolves to (`env connect` on a production data
+ * plane only — nothing else asks). Default: an admin permission set, i.e. the
+ * gate passes; the Observer test swaps in the read-only one.
+ */
+const ssoArn = (role: string, account: string): string =>
+  `arn:aws:sts::${account}:assumed-role/AWSReservedSSO_${role}_1a2b3c4d5e6f7a8b/skelly@saga.org`;
+let callerArn = ssoArn('AdministratorAccess', PROD_ACCOUNT);
 
 function installEnvAws(handler: AwsHandler): void {
   const fake: EnvAws = {
     async json(args, opts): Promise<unknown> {
       awsCalls.push({ args, opts });
-      // The account preflight (env list/discover/connect) — answered here so no
-      // per-test handler needs to know about it; a test sets callerAccount to flip it.
-      if (args[0] === 'sts' && args[1] === 'get-caller-identity') return callerAccount;
+      // The account preflight (env list/discover/connect) and the connect
+      // credential gate (--query Arn, production envs only) — answered here so
+      // no per-test handler needs to know about them; a test sets
+      // callerAccount/callerArn to flip either.
+      if (args[0] === 'sts' && args[1] === 'get-caller-identity') {
+        return args.includes('Arn') ? callerArn : callerAccount;
+      }
       return handler(args);
     },
     async lambdaInvoke(): Promise<unknown> {
@@ -81,6 +94,7 @@ beforeEach(async () => {
   portForwards = [];
   psqlCalls = [];
   callerAccount = DEV_ACCOUNT;
+  callerArn = ssoArn('AdministratorAccess', PROD_ACCOUNT);
   vi.spyOn(
     BaseCommand.prototype as unknown as { log: (msg?: string) => void },
     'log',
@@ -96,6 +110,18 @@ afterEach(() => {
 });
 
 const text = (): string => out.join('\n');
+
+/**
+ * Every `Name=tag:Name,Values=…` filter that actually reached `ec2
+ * describe-instances`. The jump-host tag is PER-ENV (dev and prod tag their
+ * shared ECS instances differently), and a fake that answers any `ec2` call
+ * would let a hardcoded dev tag pass in prod — where it matches nothing and
+ * every tunnel dies with "no running+Online SSM jump host".
+ */
+const ec2NameTagFilters = (): string[] =>
+  awsCalls
+    .filter((c) => c.args[0] === 'ec2')
+    .flatMap((c) => c.args.filter((a) => a.startsWith('Name=tag:Name,Values=')));
 
 describe('env list — ledger summary', () => {
   it('summarizes resource kinds per environment from the ledger query', async () => {
@@ -115,6 +141,41 @@ describe('env list — ledger summary', () => {
     expect(text()).toContain('db×1  ecs×2');
     // One ledger query per registered env.
     expect(awsCalls.filter((c) => c.args[0] === 'dynamodb')).toHaveLength(2);
+  });
+
+  it('lists a ledger-less env explicitly, with NO query and NO credential demand of its own', async () => {
+    // prod is in no dev-platform ledger (I#375). That must read as a stated
+    // fact, not as an error and not as a blank that looks like "zero
+    // resources" — and listing it must not require prod credentials, so its
+    // account never joins the preflight expectation.
+    installEnvAws((args) => {
+      if (args[0] === 'dynamodb') {
+        const values = args[args.indexOf('--expression-attribute-values') + 1] ?? '';
+        // Only the two dev-ledger envs may ever be queried.
+        expect(values).toMatch(/ENV#(main|training)/);
+        return { Items: [{ sk: { S: 'RES#ecs#svc-a' } }] };
+      }
+      return null;
+    });
+
+    await expect(EnvList.run([], config)).resolves.toBeUndefined();
+
+    expect(text()).toMatch(/prod\s+\*\.saga\.org\s+\(main\)/);
+    expect(text()).toContain('not ledger-tracked (prod is not a dev-platform environment)');
+    // Two ledger queries, not three — prod's account is never touched.
+    expect(awsCalls.filter((c) => c.args[0] === 'dynamodb')).toHaveLength(2);
+    expect(awsCalls.some((c) => c.opts?.region === 'us-west-2' && c.args[0] === 'dynamodb')).toBe(true);
+  });
+
+  it('a dev-account caller is NOT rejected just because a prod env is in the registry', async () => {
+    // The preflight expectation narrows to the accounts of LEDGER-TRACKED envs;
+    // if prod's account leaked into it, every dev-credentialed `ss env list`
+    // would fail on an account "mismatch" against an env it never queries.
+    installEnvAws((args) => (args[0] === 'dynamodb' ? { Items: [] } : null));
+    callerAccount = DEV_ACCOUNT;
+    await expect(EnvList.run([], config)).resolves.toBeUndefined();
+    expect(text()).toContain('(no resource rows)');
+    expect(text()).toContain('not ledger-tracked');
   });
 
   it('wrong AWS account is refused up front with the switch-profile hint (not a cryptic ledger error)', async () => {
@@ -155,7 +216,9 @@ describe('env discover — SSM walk + jump host', () => {
         if (paged) return { Parameters: [{ Name: '/shared/infra/dev/mongodb-hosts', Type: 'StringList' }] };
         return { Parameters: [] };
       }
-      if (args[0] === 'ec2') return ['i-0abc'];
+      // Tag-sensitive on purpose: the instance only comes back for the tag the
+      // registry declares for THIS env.
+      if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=dev-shared-ecs-instance') ? ['i-0abc'] : [];
       if (args[1] === 'describe-instance-information') return ['i-0abc'];
       return null;
     });
@@ -166,6 +229,34 @@ describe('env discover — SSM walk + jump host', () => {
     expect(text()).toContain('/shared/infra/dev/mongodb-hosts');
     expect(text()).not.toContain('app-alb-443-listener-arn');
     expect(text()).toContain('jump host: i-0abc');
+    expect(ec2NameTagFilters()).toEqual(['Name=tag:Name,Values=dev-shared-ecs-instance']);
+    expect(text()).toContain('tag Name=dev-shared-ecs-instance');
+  });
+
+  it('--env prod walks the PROD root and filters EC2 by the PROD jump-host tag', async () => {
+    // Both values are per-env registry fields (I#375). The tag is the one that
+    // is silently substitutable: a dev tag in the prod account matches nothing,
+    // so `discover` and every `connect` tunnel would die on "no jump host".
+    callerAccount = PROD_ACCOUNT;
+    installEnvAws((args) => {
+      if (args[1] === 'get-parameters-by-path') {
+        expect(args[args.indexOf('--path') + 1]).toBe('/shared/infra/prod');
+        return { Parameters: [{ Name: '/shared/infra/prod/postgres-endpoint', Type: 'String' }] };
+      }
+      if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=prod-shared-ecs-instance') ? ['i-0prodjump'] : [];
+      if (args[1] === 'describe-instance-information') return ['i-0prodjump'];
+      return null;
+    });
+
+    await expect(EnvDiscover.run(['--env', 'prod'], config)).resolves.toBeUndefined();
+
+    expect(text()).toContain('/shared/infra/prod/postgres-endpoint');
+    expect(ec2NameTagFilters()).toEqual(['Name=tag:Name,Values=prod-shared-ecs-instance']);
+    expect(text()).toContain('jump host: i-0prodjump');
+    expect(text()).toContain('tag Name=prod-shared-ecs-instance');
+    // Prod declares ONE discovery root — dev's legacy roots must not leak in.
+    const paths = awsCalls.filter((c) => c.args[1] === 'get-parameters-by-path').map((c) => c.args[c.args.indexOf('--path') + 1]);
+    expect(paths).toEqual(['/shared/infra/prod']);
   });
 });
 
@@ -211,7 +302,7 @@ describe('env connect — task-definition resolution + tunnel', () => {
       return { Instances: [{ Attributes: { AWS_INSTANCE_IPV4: '10.3.0.9', AWS_INSTANCE_PORT: '5440' } }] };
     }
     if (args[0] === 'ec2' && args.some((a) => a.includes('private-ip-address'))) return ['i-0dbhost'];
-    if (args[0] === 'ec2') return ['i-0jump'];
+    if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=dev-shared-ecs-instance') ? ['i-0jump'] : [];
     if (args[1] === 'describe-instance-information') return ['i-0jump'];
     return null;
   };
@@ -271,7 +362,7 @@ describe('env connect — task-definition resolution + tunnel', () => {
 
   it('a non-CloudMap host (shared RDS) routes via the shared jump host', async () => {
     installEnvAws((args) => {
-      if (args[0] === 'ec2') return ['i-0jump'];
+      if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=dev-shared-ecs-instance') ? ['i-0jump'] : [];
       if (args[1] === 'describe-instance-information') return ['i-0jump'];
       throw new Error(`unexpected aws call: ${args.join(' ')}`);
     });
@@ -280,6 +371,147 @@ describe('env connect — task-definition resolution + tunnel', () => {
       EnvConnect.run(['coach', '--host', 'shared.rds.amazonaws.com', '--database', 'coach', '--print-only'], config),
     ).resolves.toBeUndefined();
     expect(text()).toContain('route:     jump host i-0jump');
+    expect(ec2NameTagFilters()).toEqual(['Name=tag:Name,Values=dev-shared-ecs-instance']);
+  });
+});
+
+describe('env connect --env prod — the RDS data-plane style (I#375)', () => {
+  const RDS = 'prod-shared-pg.cluster-abc123.us-west-2.rds.amazonaws.com';
+
+  /**
+   * Prod's shape, live-verified 2026-07-28: ONE cluster (`prod-shared`), the
+   * same `-main` service suffix as dev, NO db-host-v2 fleet, and a Postgres
+   * endpoint that exists only in SSM. The task def deliberately names a
+   * DIFFERENT (private-alias) host so the substitution is observable.
+   */
+  const awsForProd = (args: string[]): unknown => {
+    if (args[1] === 'describe-services') {
+      const cluster = args[args.indexOf('--cluster') + 1];
+      const service = args[args.indexOf('--services') + 1];
+      return cluster === 'prod-shared' && service === 'rostering-iam-api-main' ? 'arn:td/prod-iam:9' : null;
+    }
+    if (args[1] === 'describe-task-definition') {
+      return [
+        {
+          name: 'iam-api',
+          secrets: [{ name: 'DATABASE_URL', valueFrom: 'arn:aws:secretsmanager:us-west-2:531314149529:secret:rostering/prod/database-url' }],
+        },
+      ];
+    }
+    if (args[0] === 'secretsmanager') return 'postgresql://iam_app:pw@iam.dbs.internal:5432/iam';
+    if (args[1] === 'get-parameter') {
+      const name = args[args.indexOf('--name') + 1];
+      if (name === '/shared/infra/prod/postgres-endpoint') return RDS;
+      if (name === '/shared/infra/prod/postgres-port') return '5432';
+      return null;
+    }
+    // Only the PROD tag matches — dev's tag finds nothing in this account.
+    if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=prod-shared-ecs-instance') ? ['i-0prodjump'] : [];
+    if (args[1] === 'describe-instance-information') return ['i-0prodjump'];
+    if (args[0] === 'servicediscovery') throw new Error('prod has no CloudMap db-host fleet — must never be asked');
+    return null;
+  };
+
+  beforeEach(() => {
+    callerAccount = PROD_ACCOUNT;
+  });
+
+  it('--print-only resolves the endpoint LIVE from SSM, banners production, and opens nothing', async () => {
+    installEnvAws(awsForProd);
+
+    await expect(EnvConnect.run(['iam', '--env', 'prod', '--print-only'], config)).resolves.toBeUndefined();
+
+    expect(text()).toContain('this is PRODUCTION');
+    expect(text()).toContain('Resolving only (--print-only)');
+    // The task def still supplies database + user…
+    expect(text()).toContain('service candidate prod-shared/rostering-iam-api-main: arn:td/prod-iam:9');
+    // …but the ADDRESS comes from SSM, and the substitution is stated, not silent.
+    expect(text()).toContain(`endpoint:  ${RDS}:5432`);
+    expect(text()).toContain('SSM /shared/infra/prod/postgres-endpoint; task def named iam.dbs.internal:5432');
+    expect(text()).toContain(`target:    ${RDS}:5432/iam`);
+    // Straight from the PROD jump host — no CloudMap, no 127.0.0.1 dial. The
+    // tag is the registry's, not dev's constant (which matches nothing here).
+    expect(text()).toContain('route:     jump host i-0prodjump');
+    expect(ec2NameTagFilters()).toEqual(['Name=tag:Name,Values=prod-shared-ecs-instance']);
+    expect(text()).not.toContain('db-host');
+    expect(text()).toContain('DATABASE_URL=postgres://iam_app:pw@127.0.0.1:15432/iam');
+    expect(portForwards).toHaveLength(0);
+    // The endpoint is NEVER a registry literal — it was read at run time.
+    const reads = awsCalls.filter((c) => c.args[1] === 'get-parameter').map((c) => c.args[c.args.indexOf('--name') + 1]);
+    expect(reads).toEqual(['/shared/infra/prod/postgres-endpoint', '/shared/infra/prod/postgres-port']);
+  });
+
+  it('tunnels from the jump host STRAIGHT to the discovered endpoint', async () => {
+    installEnvAws(awsForProd);
+
+    await expect(EnvConnect.run(['iam', '--env', 'prod', '--local-port', '15442'], config)).resolves.toBeUndefined();
+
+    expect(portForwards).toEqual([
+      {
+        target: 'i-0prodjump',
+        host: RDS, // the endpoint itself, NOT 127.0.0.1
+        remotePort: 5432,
+        localPort: 15442,
+        region: 'us-west-2',
+        profile: undefined,
+      },
+    ]);
+    expect(awsCalls.some((c) => c.args[0] === 'servicediscovery')).toBe(false);
+  });
+
+  it('REFUSES the read-only Observer tier before resolving or connecting anything', async () => {
+    callerArn = ssoArn('Observer', PROD_ACCOUNT);
+    installEnvAws(awsForProd);
+
+    await expect(EnvConnect.run(['iam', '--env', 'prod', '--print-only'], config)).rejects.toThrow(
+      /credential tier too low.*Observer.*Pass --profile <a prod-capable profile>/s,
+    );
+    // Nothing beyond the two identity reads happened — no ECS lookup, no secret
+    // fetch, no endpoint read, and certainly no tunnel.
+    expect(awsCalls.every((c) => c.args[0] === 'sts')).toBe(true);
+    expect(portForwards).toHaveLength(0);
+  });
+
+  it('--host stays the escape hatch: no task def, no SSM endpoint read', async () => {
+    installEnvAws((args) => {
+      if (args[1] === 'get-parameter') throw new Error('--host must skip endpoint discovery');
+      if (args[1] === 'describe-services') throw new Error('--host must skip task-def resolution');
+      if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=prod-shared-ecs-instance') ? ['i-0prodjump'] : [];
+      if (args[1] === 'describe-instance-information') return ['i-0prodjump'];
+      return null;
+    });
+
+    await expect(
+      EnvConnect.run(
+        ['iam', '--env', 'prod', '--host', 'other.rds.amazonaws.com', '--remote-port', '6543', '--database', 'iam', '--print-only'],
+        config,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(text()).toContain('other.rds.amazonaws.com:6543/iam (--host)');
+    expect(text()).toContain('route:     jump host i-0prodjump');
+  });
+});
+
+describe('env connect --env dev — the db-host style is untouched by the prod work', () => {
+  it('asks for NO endpoint parameter and runs NO credential-tier check', async () => {
+    // dev declares a db-host fleet and no production posture, so neither the
+    // SSM endpoint read nor the `--query Arn` identity read may appear. Both
+    // showing up would mean the style branch leaked into the dev path.
+    installEnvAws((args) => {
+      if (args[0] === 'servicediscovery') return { Instances: [{ Attributes: { AWS_INSTANCE_IPV4: '10.3.0.9' } }] };
+      if (args[0] === 'ec2') return ['i-0dbhost'];
+      return null;
+    });
+
+    await expect(
+      EnvConnect.run(['iam', '--host', 'x.dbs-v2.local', '--remote-port', '5440', '--database', 'iamdb', '--print-only'], config),
+    ).resolves.toBeUndefined();
+
+    expect(awsCalls.some((c) => c.args[1] === 'get-parameter')).toBe(false);
+    expect(awsCalls.some((c) => c.args.includes('Arn'))).toBe(false);
+    expect(text()).not.toContain('this is PRODUCTION');
+    expect(text()).toContain('db-host i-0dbhost (CloudMap x, local dial :5440)');
   });
 });
 

@@ -13,6 +13,7 @@ import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import { buildEnvHealthProbes, classifyEcsState, classifyProbeBody } from '../../../core/env/index.js';
+import type { DeployedServiceDef } from '../../../core/env/index.js';
 import type { EnvPsql, HealthProber, ProbeResult } from '../../../runtime/index.js';
 import EnvVerify from '../verify.js';
 
@@ -161,39 +162,64 @@ describe('per-env service scope (I#375)', () => {
     expect(dev['transcripts-api']!.optional).toBe(true);
   });
 
-  it('keeps DEPLOYED-but-unrouted prod services, reporting them as no-public-route', () => {
-    // coach-api and connect-api run on prod-shared but publish no DNS record.
-    // Dropping them would hide a real prod outage, so they stay in the list
-    // with url null and are judged by --ecs.
+  it('gives EVERY prod service an HTTP route — no stale no-public-route entries', () => {
+    // Regression for the three services recorded as unrouted in prod that were
+    // in fact routed the whole time (Seth, 2026-07-29). A stale "no public
+    // route" is not a harmless omission: coach-api/connect-api FAILED the gate
+    // outright, so `verify --env prod` was red on a healthy fleet.
     const prod = Object.fromEntries(buildEnvHealthProbes('saga.org', 'prod').map((p) => [p.id, p]));
-    expect(prod['coach-api']!.url).toBeNull();
-    expect(prod['connect-api']!.url).toBeNull();
-    // …while both keep a real HTTP route in dev/training.
+    expect(prod['coach-api']!.url).toBe('https://coach-api.saga.org/health');
+    expect(prod['connect-api']!.url).toBe('https://connectv3-api.saga.org/connectv3/v1/health');
+    // Prod has a custom domain (connectv3., NOT connect.); dev/training do not.
+    expect(prod['connect-web']!.url).toBe('https://connectv3.saga.org/');
+    // Nothing in prod is unroutable or un-gated any more.
+    for (const p of buildEnvHealthProbes('saga.org', 'prod')) {
+      expect(p.url, `${p.id} has no prod URL`).not.toBeNull();
+      expect(p.optional, `${p.id} is un-gated in prod`).toBe(false);
+    }
+    // …while dev/training keep their own distinct hosts.
     const dev = Object.fromEntries(buildEnvHealthProbes('wootdev.com', 'dev').map((p) => [p.id, p.url]));
     expect(dev['coach-api']).toBe('https://coach-api.wootdev.com/health');
     expect(dev['connect-api']).toBe('https://connectv3-api.wootdev.com/connectv3/v1/health');
+    expect(dev['connect-web']).toBe('https://dev.d2ezd4i8b4uexc.amplifyapp.com/');
+  });
+
+  it('reports a DEPLOYED-but-unrouted service instead of dropping it (noPublicRouteEnvs)', () => {
+    // No live service needs this today, so it is pinned against a fixture: the
+    // mechanism must keep working for the next host that loses its DNS record.
+    // Dropping such a service (via `envs`) would hide a real outage — it stays
+    // listed with url null, still REQUIRED, judged by --ecs.
+    const svc: DeployedServiceDef[] = [
+      { id: 'x-api', host: 'x-api', noPublicRouteEnvs: ['prod'], healthPath: '/health', kind: 'api', ecsService: 'x' },
+    ];
+    const prod = buildEnvHealthProbes('saga.org', 'prod', svc)[0]!;
+    expect(prod.url).toBeNull();
+    expect(prod.optional).toBe(false);
+    expect(prod.ecsService).toBe('x');
+    expect(buildEnvHealthProbes('wootdev.com', 'dev', svc)[0]!.url).toBe('https://x-api.wootdev.com/health');
   });
 
   it('un-gates a service ONLY in the env where it has no signal at all (optionalEnvs)', () => {
-    // connect-web is Amplify-hosted: no prod branch is known AND an Amplify app
-    // has no ECS service, so neither the HTTP pass nor `--ecs` can ever judge it
-    // on prod. Left required it would make `verify --env prod` permanently red
-    // on a healthy fleet, which is how a gate gets ignored.
-    const prod = Object.fromEntries(buildEnvHealthProbes('saga.org', 'prod').map((p) => [p.id, p]));
-    expect(prod['connect-web']!.url).toBeNull();
-    expect(prod['connect-web']!.optional).toBe(true);
-    expect(prod['connect-web']!.ecsService).toBeUndefined();
-    expect(prod['connect-web']!.ecsServiceName).toBeUndefined();
-    // The contrast: coach-api/connect-api are unrouted in prod too, but `--ecs`
-    // CAN judge them — so they stay REQUIRED and a real outage still fails.
-    expect(prod['coach-api']!.optional).toBe(false);
-    expect(prod['connect-api']!.optional).toBe(false);
-    // …and un-gating prod must not touch the envs where connect-web IS checkable.
-    const dev = Object.fromEntries(buildEnvHealthProbes('wootdev.com', 'dev').map((p) => [p.id, p]));
-    const training = Object.fromEntries(buildEnvHealthProbes('saga-training.org', 'training').map((p) => [p.id, p]));
-    expect(dev['connect-web']!.optional).toBe(false);
-    expect(dev['connect-web']!.url).toBe('https://dev.d2ezd4i8b4uexc.amplifyapp.com/');
-    expect(training['connect-web']!.optional).toBe(false);
+    // Also fixture-pinned now that prod's connect-web is checkable. The rule:
+    // un-gating one env must never weaken the envs where the service IS
+    // verifiable, or a real outage there passes silently.
+    const svc: DeployedServiceDef[] = [
+      {
+        id: 'x-web',
+        fqdnByEnv: { dev: 'dev.example.amplifyapp.com' },
+        optionalEnvs: ['prod'],
+        healthPath: '/',
+        kind: 'frontend',
+      },
+    ];
+    const prod = buildEnvHealthProbes('saga.org', 'prod', svc)[0]!;
+    expect(prod.url).toBeNull();
+    expect(prod.optional).toBe(true);
+    expect(prod.ecsService).toBeUndefined();
+    expect(prod.ecsServiceName).toBeUndefined();
+    const dev = buildEnvHealthProbes('wootdev.com', 'dev', svc)[0]!;
+    expect(dev.optional).toBe(false);
+    expect(dev.url).toBe('https://dev.example.amplifyapp.com/');
   });
 
   it('carries the per-env ABSOLUTE ECS name only where one is declared', () => {
@@ -339,16 +365,18 @@ describe('env verify --ecs', () => {
     expect(asked).not.toContain('coach-coach-api-canary-main');
     // Services scoped out of prod are never asked about at all.
     expect(asked.some((s) => s.includes('content-api') || s.includes('ads-adm') || s.includes('transcripts'))).toBe(false);
-    // The two unrouted-but-running services go green on the ECS pass alone.
-    expect(text()).toMatch(/coach-api\s+no public route/);
-    // connect-web has NO signal in prod (no branch, no ECS service) — it is
-    // reported as unverifiable, marked optional, and never asked about on ECS.
-    expect(text()).toMatch(/connect-web\s+no public route.*\(optional\)/);
+    // Nothing in prod reads as unroutable any more — the three services that
+    // once did are probed over HTTP like the rest.
+    expect(text()).not.toContain('no public route');
+    expect(probed).toContain('https://coach-api.saga.org/health');
+    expect(probed).toContain('https://connectv3-api.saga.org/connectv3/v1/health');
+    expect(probed).toContain('https://connectv3.saga.org/');
+    // connect-web is an Amplify SPA — HTTP is its only signal, never ECS.
     expect(asked.some((s) => s.includes('connect-web'))).toBe(false);
     expect(text()).toContain('verify passed');
   });
 
-  it('--env prod does NOT green an unrouted service whose ECS is bad', async () => {
+  it('--env prod does NOT green a service whose HTTP is fine but whose ECS is bad', async () => {
     const fake = {
       async json(args: string[]): Promise<unknown> {
         if (args[0] === 'sts') return '531314149529';
@@ -366,19 +394,23 @@ describe('env verify --ecs', () => {
     };
     vi.spyOn(BaseCommand.prototype as unknown as { getEnvAws: () => unknown }, 'getEnvAws').mockReturnValue(fake);
 
+    // A healthy /health cannot cover for a missing ECS service: the platform
+    // pass is the truth HTTP cannot see (stale target behind a dead service).
     await expect(EnvVerify.run(['--env', 'prod', '--ecs'], config)).rejects.toThrow(/env verify FAILED.*coach-api/s);
     expect(text()).toContain('no such ECS service');
-    // coach-api is the ONLY failure — the un-gated connect-web must not pad it.
     expect(text()).toContain('1 required service(s) unhealthy');
   });
 
-  it('--env prod WITHOUT --ecs leaves the unrouted services unverifiable, never green', async () => {
-    await expect(EnvVerify.run(['--env', 'prod'], config)).rejects.toThrow(/env verify FAILED.*coach-api/s);
-    expect(text()).toContain('no public route (not HTTP-verifiable)');
-    // No prod host was ever probed for them (nothing to probe).
-    expect(probed.some((u) => u.includes('coach-api.saga.org'))).toBe(false);
-    expect(probed.some((u) => u.includes('connectv3-api.saga.org'))).toBe(false);
-    // …but the routed prod services WERE probed on the plain apex.
+  it('--env prod passes on HTTP alone — every prod service is routed', async () => {
+    // The bug this replaces: coach-api/connect-api carried a stale "no public
+    // route", so a plain `ss env verify --env prod` FAILED on a healthy fleet
+    // and could only be worked around with --tolerate.
+    await expect(EnvVerify.run(['--env', 'prod'], config)).resolves.toBeUndefined();
+    expect(text()).not.toContain('no public route');
+    expect(probed).toContain('https://coach-api.saga.org/health');
+    expect(probed).toContain('https://connectv3-api.saga.org/connectv3/v1/health');
+    expect(probed).toContain('https://connectv3.saga.org/');
+    // …alongside the services that were already probed on the plain apex.
     expect(probed).toContain('https://iam.saga.org/health');
   });
 

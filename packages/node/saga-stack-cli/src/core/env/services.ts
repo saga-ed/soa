@@ -23,12 +23,19 @@
  *
  * A service with no `host` cannot be verified over HTTP — it is reported as
  * such (never silently green). Where an ECS service exists, the `--ecs`
- * platform check is the substitute signal: `coach-api` / `connect-api` in prod
- * run on prod-shared but publish no DNS record (I#375), and `--ecs` greens
- * them. Where NO signal exists at all — an Amplify SPA in an env whose branch
- * is not known (`connect-web` on prod) — there is nothing to check, so the
- * service is reported unverifiable and declared `optionalEnvs` for that env:
- * a gate that can never go green is a gate that gets ignored.
+ * platform check is the substitute signal. Where NO signal exists at all,
+ * there is nothing to check, so the service is reported unverifiable and
+ * declared `optionalEnvs` for that env: a gate that can never go green is a
+ * gate that gets ignored.
+ *
+ * As of 2026-07-29 NO service is in either bucket on prod. `coach-api`,
+ * `connect-api` and `connect-web` were all recorded here as unrouted in prod
+ * (I#375); all three are in fact routed and healthy — coach-api.saga.org,
+ * connectv3-api.saga.org and connectv3.saga.org — so the entire prod fleet is
+ * HTTP-verifiable. That is the standing hazard of this file: a host that gains
+ * (or loses) a public route turns the gate into a lie in one direction or the
+ * other, and a stale "no public route" reads as a hard FAIL on a healthy
+ * fleet. Entries are confirmed live, never inferred from an older run.
  *
  * The list is ONE global fleet, so the set differs per env in three declared
  * ways (I#375): `envs` scopes a service OUT of an env it is not deployed to at
@@ -158,14 +165,15 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     note: 'also answers on ads-adm.<domain> (sds#288 multi-host ALB rule)',
   },
   {
-    // DEPLOYED to prod (`coach-coach-api-canary` on prod-shared) but with no
-    // public DNS — coach-api.saga.org NXDOMAINs even though the prod ALB
-    // carries a host-header rule for it. HTTP-unverifiable there, so `--ecs`
-    // is the only signal; it must NOT be scoped out, or a real prod outage
-    // would go unreported.
+    // Routed in EVERY env, prod included: coach-api.saga.org/health answers
+    // {"status":"healthy","service":"Coach API"} (live 2026-07-29). The earlier
+    // `noPublicRouteEnvs: ['prod']` recorded an NXDOMAIN that is no longer true
+    // — prod now publishes real A records — and it made the gate report a
+    // healthy service as unverifiable. `/coach/v1/*` is the AUTHENTICATED API
+    // surface (401 {"realms":["iam"]} unauthenticated); `/health` is the
+    // unauthenticated probe and the only path this gate may use.
     id: 'coach-api',
     host: 'coach-api',
-    noPublicRouteEnvs: ['prod'],
     healthPath: '/health',
     kind: 'api',
     ecsService: 'coach-coach-api',
@@ -175,13 +183,14 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
   { id: 'coach-web', host: 'coach', healthPath: '/', kind: 'frontend', note: 'Amplify-hosted SPA, not ECS (the API is coach-api)' },
   {
     // Host is connectv3-api.<domain> (NOT connect-api/connect) — confirmed from
-    // the ALB host-header rules and live on both envs. Its body carries no
-    // `service` key: {"status":"ok","mongo":"ok"}.
-    // Prod runs it (`qboard-connectv3-api-main` on prod-shared) but publishes
-    // no DNS record for it — ECS-only there, same reading as coach-api.
+    // the ALB host-header rules and live on EVERY env, prod included: the prod
+    // host resolves and /connectv3/v1/health answers {"status":"ok","mongo":"ok"}
+    // (live 2026-07-29). Its body carries no `service` key.
+    // The former `noPublicRouteEnvs: ['prod']` recorded a stale NXDOMAIN.
+    // NOTE health lives UNDER the /connectv3/v1 prefix — bare /health is the
+    // authenticated app surface (401 NEEDS_IAM), not a probe.
     id: 'connect-api',
     host: 'connectv3-api',
-    noPublicRouteEnvs: ['prod'],
     healthPath: '/connectv3/v1/health',
     kind: 'api',
     ecsService: 'qboard-connectv3-api',
@@ -237,28 +246,28 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     note: 'livekit recorder (fleek/OPS.md:93); shared fleet — dev+training only; prod has its own fleet',
   },
   {
-    // The connectv3 SPA is on Amplify with NO custom domain (unlike dash/coach),
-    // which is why connect.<domain> hits the shared-ALB default. Its real home is
-    // <branch>.<app-id>.amplifyapp.com — app `connectv3` = d2ezd4i8b4uexc, with a
-    // branch per env (qboard/CLAUDE.md documents the shape).
+    // The connectv3 SPA is on Amplify. On dev/training it has NO custom domain
+    // (which is why connect.<domain> hits the shared-ALB default) and lives at
+    // <branch>.<app-id>.amplifyapp.com — app `connectv3` = d2ezd4i8b4uexc, with
+    // a branch per env (qboard/CLAUDE.md documents the shape).
     //
-    // PROD: no branch of that app is established for prod, and an Amplify app
-    // has no ECS service, so `--ecs` cannot stand in for HTTP the way it does
-    // for coach-api/connect-api. With NO signal available in either direction,
-    // gating on it would make `verify --env prod` permanently red on a healthy
-    // fleet — hence `optionalEnvs: ['prod']`: still probed, still reported as
-    // unverifiable, never silently green, but not a false red either. Declare
-    // the prod branch in `fqdnByEnv` (or an `ecsService`, if it ever gets one)
-    // and delete the entry — that is the fix, not a `--tolerate` habit.
+    // PROD DOES have a custom domain: connectv3.saga.org (CloudFront, serving
+    // the "Saga Connect" document — live 2026-07-29). Note it is connectv3.,
+    // NOT connect. — connect.saga.org NXDOMAINs. That domain is the prod signal
+    // this entry previously lacked, so the `optionalEnvs: ['prod']` un-gate is
+    // gone: prod is now checkable and therefore gated like every other env.
+    // Per-env hosts stay in `fqdnByEnv` because the three envs genuinely differ
+    // (a custom domain here, Amplify branch URLs there) — an env with no entry
+    // still resolves to null rather than a guessed host.
     id: 'connect-web',
     fqdnByEnv: {
       dev: 'dev.d2ezd4i8b4uexc.amplifyapp.com',
       training: 'training.d2ezd4i8b4uexc.amplifyapp.com',
+      prod: 'connectv3.saga.org',
     },
-    optionalEnvs: ['prod'],
     healthPath: '/',
     kind: 'frontend',
-    note: 'Amplify app connectv3 (d2ezd4i8b4uexc), branch per env; no custom domain — no prod branch known, so prod is unverifiable (reported, not gated)',
+    note: 'Amplify app connectv3 (d2ezd4i8b4uexc); prod on the connectv3.saga.org custom domain, dev/training on per-branch Amplify URLs',
   },
   {
     // RTSM runs on its OWN geo-distributed cluster, not the shared ECS/ALB:

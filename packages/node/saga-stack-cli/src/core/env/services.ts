@@ -123,11 +123,15 @@ export interface DeployedServiceDef {
   ecsService?: string;
   /**
    * Per-ENV ABSOLUTE ECS service name, keyed by env name — used INSTEAD of
-   * `<ecsService>-<identifier>` (the ECS-side mirror of `fqdnByEnv`). For the
-   * one-off that does not follow its env's suffix convention: prod's coach is
-   * `coach-coach-api-canary`, not `-main`. Overriding per service rather than
-   * per env is deliberate — prod's other six shared-mesh services DO use
-   * `-main`, so a global suffix override would break them.
+   * `<ecsService>-<identifier>` (the ECS-side mirror of `fqdnByEnv`), for a
+   * service that does not follow its env's suffix convention. Overriding per
+   * service rather than per env is deliberate: prod's shared-mesh services all
+   * use `-main`, so a global suffix override would break them.
+   *
+   * Currently unused — every known service follows the convention. Verify an
+   * override against `aws ecs list-services` before adding one; a stale pin
+   * here turns a healthy service into a hard FAIL, which is what happened to
+   * coach-api on prod.
    */
   ecsServiceByEnv?: Record<string, string>;
   note?: string;
@@ -176,8 +180,14 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     host: 'coach-api',
     healthPath: '/health',
     kind: 'api',
+    // No `ecsServiceByEnv` override: prod's coach-api follows the standard
+    // `<ecsService>-<ledgerIdentifier>` convention like every other shared-mesh
+    // service. It was previously pinned to `coach-coach-api-canary`, which was
+    // true when the canary was the only coach service on `prod-shared` and it
+    // was INACTIVE. `aws ecs list-services --cluster prod-shared` now lists
+    // `coach-coach-api-main` and no canary at all, so the override made
+    // `env verify --env prod --ecs` report a healthy service as a hard FAIL.
     ecsService: 'coach-coach-api',
-    ecsServiceByEnv: { prod: 'coach-coach-api-canary' },
   },
   { id: 'saga-dash', host: 'dash', healthPath: '/', kind: 'frontend', note: 'Amplify-hosted SPA (not an ECS service)' },
   { id: 'coach-web', host: 'coach', healthPath: '/', kind: 'frontend', note: 'Amplify-hosted SPA, not ECS (the API is coach-api)' },

@@ -3,11 +3,13 @@ import {
   loadFgaGateConfig,
   enforceFgaRelation,
   createFgaGate,
+  fgaBatchKey,
   FgaUnavailableError,
   type FgaGate,
 } from '../index.js';
 
 const checkMock = vi.hoisted(() => vi.fn());
+const batchCheckMock = vi.hoisted(() => vi.fn());
 // Capture constructor args so we can assert on the CLIENT CONFIG, not just on
 // calls — a token that never reaches the constructor never reaches the wire.
 const clientConfigs = vi.hoisted(() => [] as Record<string, unknown>[]);
@@ -15,11 +17,25 @@ vi.mock('@openfga/sdk', () => ({
   CredentialsMethod: { None: 'none', ApiToken: 'api_token', ClientCredentials: 'client_credentials' },
   OpenFgaClient: class {
     check = checkMock;
+    batchCheck = batchCheckMock;
     constructor(config: Record<string, unknown>) {
       clientConfigs.push(config);
     }
   },
 }));
+
+/** Echo back an `allowed` verdict per requested item, in request order. */
+const respondAllowing = (allow: (item: { object: string; relation: string }) => boolean) =>
+  batchCheckMock.mockReset().mockImplementation(
+    (body: { checks: { user: string; relation: string; object: string; correlationId: string }[] }) =>
+      Promise.resolve({
+        result: body.checks.map((c) => ({
+          allowed: allow(c),
+          request: c,
+          correlationId: c.correlationId,
+        })),
+      }),
+  );
 
 const gateWithStore = () =>
   createFgaGate({ enforce: true, apiUrl: 'http://fga.test', storeId: 's1' });
@@ -164,6 +180,133 @@ describe('checkDetailed attribution', () => {
     for (const call of checkMock.mock.calls) {
       expect(call[0]).toMatchObject({ contextualTuples: tuples });
     }
+  });
+});
+
+describe('batchCheck — the authorization-filtered-list primitive', () => {
+  const districts = ['staff_org:d1', 'staff_org:d2', 'staff_org:d3'];
+  const asChecks = (objects: string[]) =>
+    objects.map((object) => ({ user: 'user:a', relation: 'can_view', object }));
+
+  it('returns one verdict per item, keyed by fgaBatchKey', async () => {
+    respondAllowing((c) => c.object !== 'staff_org:d2');
+    const verdicts = await gateWithStore().batchCheck(asChecks(districts));
+
+    expect(verdicts.size).toBe(3);
+    expect(verdicts.get(fgaBatchKey('user:a', 'can_view', 'staff_org:d1'))).toBe(true);
+    expect(verdicts.get(fgaBatchKey('user:a', 'can_view', 'staff_org:d2'))).toBe(false);
+    expect(verdicts.get(fgaBatchKey('user:a', 'can_view', 'staff_org:d3'))).toBe(true);
+  });
+
+  it('short-circuits an empty request without touching the client', async () => {
+    batchCheckMock.mockReset();
+    await expect(gateWithStore().batchCheck([])).resolves.toEqual(new Map());
+    expect(batchCheckMock).not.toHaveBeenCalled();
+  });
+
+  it('sends wire correlation ids OpenFGA will accept (≤36 chars, [A-Za-z0-9-])', async () => {
+    // The natural key `user:<uuid>|can_view|staff_org:<uuid>` violates BOTH the
+    // charset and the length cap, so it can never be the wire id.
+    respondAllowing(() => true);
+    const uuid = '11111111-2222-3333-4444-555555555555';
+    await gateWithStore().batchCheck([
+      { user: `user:${uuid}`, relation: 'can_view', object: `staff_org:${uuid}` },
+    ]);
+
+    const sent = batchCheckMock.mock.calls[0]?.[0] as {
+      checks: { correlationId: string }[];
+    };
+    for (const c of sent.checks) {
+      expect(c.correlationId).toMatch(/^[A-Za-z0-9-]{1,36}$/);
+    }
+  });
+
+  it('correlates by correlationId, not response order', async () => {
+    // A server that answers out of order must not shuffle the verdicts.
+    batchCheckMock.mockReset().mockImplementation(
+      (body: { checks: { relation: string; object: string; correlationId: string }[] }) =>
+        Promise.resolve({
+          result: [...body.checks]
+            .reverse()
+            .map((c) => ({
+              allowed: c.object === 'staff_org:d1',
+              request: c,
+              correlationId: c.correlationId,
+            })),
+        }),
+    );
+    const verdicts = await gateWithStore().batchCheck(asChecks(districts));
+
+    expect(verdicts.get(fgaBatchKey('user:a', 'can_view', 'staff_org:d1'))).toBe(true);
+    expect(verdicts.get(fgaBatchKey('user:a', 'can_view', 'staff_org:d3'))).toBe(false);
+  });
+
+  it('passes >50 items through in one call and lets the SDK chunk them', async () => {
+    respondAllowing(() => true);
+    const many = asChecks(Array.from({ length: 120 }, (_, i) => `staff_org:d${i}`));
+    const verdicts = await gateWithStore().batchCheck(many);
+
+    expect(verdicts.size).toBe(120);
+    // Chunking is the SDK's job (maxBatchSize 50) — we must not pre-split, or we
+    // lose its parallelism control.
+    expect(batchCheckMock).toHaveBeenCalledTimes(1);
+    expect((batchCheckMock.mock.calls[0]?.[0] as { checks: unknown[] }).checks).toHaveLength(120);
+  });
+
+  it('collapses duplicate questions to a single entry', async () => {
+    respondAllowing(() => true);
+    const verdicts = await gateWithStore().batchCheck(asChecks(['staff_org:d1', 'staff_org:d1']));
+    expect(verdicts.size).toBe(1);
+  });
+});
+
+describe('batchCheck — a per-item failure is NOT a deny', () => {
+  const one = [{ user: 'user:a', relation: 'can_view', object: 'staff_org:d1' }];
+
+  it('throws when any item carries an error, rather than reporting it false', async () => {
+    // The whole reason this method belongs in this package: a silent `false` here
+    // would hide an outage as a permission denial on a list surface.
+    batchCheckMock.mockReset().mockResolvedValue({
+      result: [
+        {
+          allowed: false,
+          request: { user: 'user:a', relation: 'can_view', object: 'staff_org:d1' },
+          correlationId: 'c0',
+          error: { input_error: 'validation_error', message: 'boom' },
+        },
+      ],
+    });
+    await expect(gateWithStore().batchCheck(one)).rejects.toThrow(FgaUnavailableError);
+  });
+
+  it('throws when the response omits a requested item', async () => {
+    batchCheckMock.mockReset().mockResolvedValue({ result: [] });
+    await expect(gateWithStore().batchCheck(one)).rejects.toThrow(FgaUnavailableError);
+  });
+
+  it('throws on an unrecognized correlationId rather than guessing', async () => {
+    batchCheckMock.mockReset().mockResolvedValue({
+      result: [
+        {
+          allowed: true,
+          request: { user: 'user:a', relation: 'can_view', object: 'staff_org:d1' },
+          correlationId: 'not-ours',
+        },
+      ],
+    });
+    await expect(gateWithStore().batchCheck(one)).rejects.toThrow(FgaUnavailableError);
+  });
+
+  it('surfaces a transport failure as FgaUnavailableError', async () => {
+    batchCheckMock.mockReset().mockRejectedValue(new Error('ECONNREFUSED'));
+    await expect(gateWithStore().batchCheck(one)).rejects.toThrow(FgaUnavailableError);
+  });
+
+  it('surfaces a missing store id without reaching the client', async () => {
+    batchCheckMock.mockReset();
+    const gate = createFgaGate({ enforce: true, apiUrl: 'http://fga.test' });
+    await expect(gate.batchCheck(one)).rejects.toThrow(FgaUnavailableError);
+    expect(batchCheckMock).not.toHaveBeenCalled();
   });
 });
 

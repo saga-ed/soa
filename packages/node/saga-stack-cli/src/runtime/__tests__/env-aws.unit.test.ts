@@ -6,10 +6,12 @@
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
+import type { Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { awsArgs, lambdaInvokeArgs, makeRealEnvAws, portForwardArgs } from '../env-aws.js';
+import { awsArgs, lambdaInvokeArgs, makeRealEnvAws, portForwardArgs, probeLocalPort } from '../env-aws.js';
 
 describe('awsArgs — profile/region threading', () => {
   it('appends --profile and --region only when given', () => {
@@ -122,4 +124,61 @@ describe('portForward — a timed-out session is killed, never orphaned', () => 
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+/**
+ * soa#370 — a local port held by an EARLIER process (one that predates the
+ * reaping fix, a SIGKILLed run, a concurrent `ss env connect`, a stray local
+ * postgres) must be named as the cause immediately. Reaping cannot free such a
+ * port, and without the preflight the run burns the full readiness deadline and
+ * then blames the SSM route — the misdiagnosis soa#370 was filed on.
+ */
+describe('portForward — a local port already in use is diagnosed, not blamed on the route', () => {
+  const listenOn = (): Promise<{ server: Server; port: number }> =>
+    new Promise((resolve) => {
+      const server = createServer();
+      server.listen(0, '127.0.0.1', () => {
+        resolve({ server, port: (server.address() as { port: number }).port });
+      });
+    });
+
+  it('probeLocalPort reports the errno for a bound port and undefined for a free one', async () => {
+    const { server, port } = await listenOn();
+    try {
+      expect(await probeLocalPort(port)).toBe('EADDRINUSE');
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+    // Same port, now released.
+    expect(await probeLocalPort(port)).toBeUndefined();
+  });
+
+  it('fails fast naming the port — not the document/target — and reaps the child', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ss-env-aws-stub-'));
+    const stub = join(dir, 'aws');
+    writeFileSync(stub, '#!/bin/sh\nsleep 60\n', { mode: 0o755 });
+    const realPath = process.env.PATH;
+    process.env.PATH = `${dir}:${realPath ?? ''}`;
+    const { server, port } = await listenOn();
+    try {
+      const handle = makeRealEnvAws().portForward({
+        target: 'i-0abc',
+        host: 'coach-api-runtime.dbs-v2.local',
+        remotePort: 5445,
+        localPort: port,
+        region: 'us-west-2',
+        // Generous vs. the probe: if the deadline is what rejects, the
+        // preflight did not do its job and this test must fail.
+        readyTimeoutMs: 10_000,
+      });
+      await expect(handle.ready).rejects.toThrow(/already in use \(EADDRINUSE\)/);
+      await expect(handle.ready).rejects.toThrow(/NOT a routing problem/);
+      await expect(handle.ready).rejects.not.toThrow(/not ready after/);
+      expect(await handle.exited).not.toBeUndefined();
+    } finally {
+      await new Promise((r) => server.close(r));
+      process.env.PATH = realPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 15_000);
 });

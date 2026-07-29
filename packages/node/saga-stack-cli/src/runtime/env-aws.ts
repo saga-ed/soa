@@ -22,6 +22,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -133,6 +134,36 @@ export function lambdaInvokeArgs(req: LambdaInvokeRequest, outfile: string): str
 const READY_MARKER = 'Waiting for connections';
 const READY_TIMEOUT_MS = 30_000;
 
+/**
+ * Is the tunnel's LOCAL end already taken? Resolves the errno when 127.0.0.1
+ * `port` cannot be bound, undefined when it is free (soa#370).
+ *
+ * Reaping our own timed-out children stops this CLI from creating new orphans,
+ * but it cannot free a port some EARLIER process is still holding — a run that
+ * predates the reaping fix, one killed with SIGKILL, a second concurrent
+ * `ss env connect`, or an unrelated local postgres. Without this probe every
+ * one of those spends the full 30s readiness deadline and then reports a
+ * message naming the SSM document, target and remote endpoint — i.e. it
+ * describes the ROUTE, which is exactly the wrong layer. That is the misread
+ * that cost soa#370 a day of investigation, and the reaping fix alone does not
+ * prevent a repeat.
+ *
+ * Deliberately advisory, not a lock: it races the spawn below rather than
+ * gating it, so `portForward` keeps its synchronous handle (and a real `pid`).
+ * A bind test takes ~1ms while the plugin needs a round trip to AWS before it
+ * touches the port, so the probe always settles first in practice. Losing the
+ * race costs nothing — the session-manager-plugin then fails its own bind and
+ * the early-exit path reports that instead.
+ */
+export function probeLocalPort(port: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once('error', (err: NodeJS.ErrnoException) => resolve(err.code ?? 'EADDRINUSE'));
+    probe.once('listening', () => probe.close(() => resolve(undefined)));
+    probe.listen(port, '127.0.0.1');
+  });
+}
+
 export function makeRealEnvAws(): EnvAws {
   return {
     async json(args, opts): Promise<unknown> {
@@ -215,6 +246,21 @@ export function makeRealEnvAws(): EnvAws {
             ),
           );
         }, readyTimeoutMs);
+        // Name the LOCAL bind as the cause the moment we can prove it, and say
+        // outright that the route was never dialled — otherwise the deadline
+        // message above (document + target + remote endpoint) reads as a
+        // routing failure and sends the next reader to the wrong layer.
+        void probeLocalPort(req.localPort).then((errno) => {
+          if (errno === undefined) return;
+          fail(
+            new Error(
+              `local port :${req.localPort} is already in use (${errno}) — the tunnel cannot bind it. ` +
+                `The route ${req.target} → ${req.host}:${req.remotePort} was never attempted, so this is NOT a routing problem. ` +
+                `An earlier tunnel may still hold the port: check \`pgrep -af session-manager-plugin\` and kill any stragglers, ` +
+                `or rerun with --local-port <other>.`,
+            ),
+          );
+        });
         const scan = (chunk: Buffer): void => {
           output += chunk.toString();
           if (output.includes(READY_MARKER)) {

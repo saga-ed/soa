@@ -155,6 +155,36 @@ const READY_TIMEOUT_MS = 30_000;
  * race costs nothing — the session-manager-plugin then fails its own bind and
  * the early-exit path reports that instead.
  */
+/**
+ * Tear down a port-forward session — the whole process GROUP, not just `aws`
+ * (soa#370).
+ *
+ * `aws ssm start-session` is a launcher: it execs `session-manager-plugin`, and
+ * THAT grandchild is what binds the local port. SIGTERM to the `aws` child kills
+ * the launcher only; the plugin is reparented to init and keeps the port held
+ * forever. Confirmed live against dev — a completed `coach-concierge reset`
+ * left `session-manager-plugin` (PPID 4056) still listening on 127.0.0.1:15432,
+ * which is why the very next reset failed. Since concierge pins dev to 15432,
+ * that made every run after the first fail, matching the "reads work, every
+ * write fails" report exactly.
+ *
+ * Spawning `detached` makes the child a group leader, so a negative pid signals
+ * the launcher and the plugin together. Falls back to the plain child kill if
+ * the group is already gone (ESRCH) or the platform refuses the negative pid.
+ */
+function killGroup(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // Already reaped — nothing left to signal.
+    }
+  }
+}
+
 export function probeLocalPort(port: number): Promise<string | undefined> {
   return new Promise((resolve) => {
     const probe = createServer();
@@ -213,8 +243,12 @@ export function makeRealEnvAws(): EnvAws {
     },
 
     portForward(req): PortForwardHandle {
+      // `detached` puts the session in its OWN process group so teardown can
+      // signal the GROUP (see killGroup). Without it we can only reach `aws`
+      // itself, which is not the process holding the port (soa#370).
       const child: ChildProcess = spawn('aws', portForwardArgs(req), {
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
       });
       let output = '';
       const readyTimeoutMs = req.readyTimeoutMs ?? READY_TIMEOUT_MS;
@@ -225,12 +259,12 @@ export function makeRealEnvAws(): EnvAws {
         // A session that never signals READY must be REAPED, not abandoned
         // (soa#370). `aws ssm start-session` keeps running after we give up —
         // and the session-manager-plugin under it holds the local port — so an
-        // un-killed child silently poisons that port for every later run. The
+        // un-killed session silently poisons that port for every later run. The
         // next attempt then times out too and orphans another, which is how one
         // transient failure turned into "the tunnel is permanently broken".
         const fail = (err: Error): void => {
           clearTimeout(timer);
-          child.kill('SIGTERM');
+          killGroup(child);
           reject(err);
         };
         const timer = setTimeout(() => {
@@ -282,7 +316,7 @@ export function makeRealEnvAws(): EnvAws {
         ready,
         exited,
         stop: () => {
-          child.kill('SIGTERM');
+          killGroup(child);
         },
       };
     },

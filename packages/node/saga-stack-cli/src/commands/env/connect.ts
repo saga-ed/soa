@@ -171,10 +171,19 @@ export default class EnvConnect extends BaseCommand {
     }
 
     // ── route: under the 'db-host-cloudmap' style a `.<namespace>` target
-    // tunnels via the container's OWN host instance with a 127.0.0.1 dial (the
-    // shared jump host's SG cannot reach the containers — task-SG allowlists).
+    // tunnels via the container's OWN host instance with a 127.0.0.1 dial.
     // Everything else — including EVERY 'rds-endpoint' target, which has no
-    // namespace and no SG problem — dials from the shared jump host. ──
+    // namespace — dials from the shared jump host.
+    //
+    // This detour is not load-bearing. It used to be justified here with "the
+    // shared jump host's SG cannot reach the containers — task-SG allowlists",
+    // which soa#370 disproved against live dev: the container publishes on
+    // 0.0.0.0 (docker-proxy) and dev-db-host-v2-sg admits 5432-5499 from the
+    // whole 10.3.0.0/16 VPC CIDR, so the jump host reaches these containers
+    // directly. The branch survives only because collapsing it is a ROUTING
+    // change (it would also delete discoverDbHostInstance and its
+    // container-moved-hosts failure mode) and does not belong in a bugfix —
+    // tracked separately. Do not re-derive the old claim from this code. ──
     let ssmTarget: string;
     let dialHost: string;
     let dialPort = target.port;

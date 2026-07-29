@@ -26,10 +26,16 @@
 #   VITE_DD_ENV
 #   VITE_APP_VERSION
 #
-# ParameterNotFound is tolerated — initRum() no-ops on empty applicationId, so
-# a freshly bootstrapped account that hasn't seeded SSM yet still ships. Other
-# AWS errors (AccessDenied, Throttling, wrong region) fail the build loudly so
-# an IAM regression can't silently ship prod without RUM.
+# ParameterNotFound is tolerated on NON-prod — initRum() no-ops on empty
+# applicationId, so a freshly bootstrapped account that hasn't seeded SSM yet
+# still ships. Other AWS errors (AccessDenied, Throttling, wrong region) fail
+# the build loudly so an IAM regression can't silently ship prod without RUM.
+#
+# When RUM_ENV_DEFAULT=prod the script additionally HARD-FAILS the build if
+# application-id or client-token is empty, or if either is present but
+# malformed (see the shape check below). Rationale: a green prod build that
+# ships no RUM is indistinguishable from a healthy one until someone notices
+# the dashboard is empty — which took weeks in saga-dash.
 #
 # Heredoc-delimiter form prevents a multi-line SSM value from injecting extra
 # entries into $GITHUB_ENV.
@@ -72,6 +78,27 @@ if [ -n "$TOKEN" ]; then
   echo "::add-mask::$TOKEN"
 fi
 
+# Shape-check both values before they reach the build. Presence alone is not
+# enough: a malformed value sails past an is-it-empty test, the build goes green,
+# and initRum() then calls Datadog with a credential it will reject — prod stays
+# dark in exactly the way this script is supposed to prevent, but harder to spot.
+# This is not hypothetical: saga-dash's /dash/rum/client-token was once seeded as
+# the literal placeholder "<same as dev>" copied out of a runbook.
+#
+# Datadog formats: application-id is a UUID; client tokens are "pub" + 32 hex.
+# Only enforced on prod builds — non-prod may legitimately be unset/partial.
+if [ "$RUM_ENV_DEFAULT" = "prod" ]; then
+  if [ -n "$APP_ID" ] && ! printf '%s' "$APP_ID" | grep -qiE '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'; then
+    echo "::error::${SSM_PREFIX}/application-id is not a valid UUID (got ${#APP_ID} chars starting '${APP_ID:0:4}'). Check the value in the production account, region ${AWS_REGION:-us-west-2}."
+    exit 1
+  fi
+  if [ -n "$TOKEN" ] && ! printf '%s' "$TOKEN" | grep -qE '^pub[0-9a-f]{32}$'; then
+    # Never echo the token itself — report only its shape.
+    echo "::error::${SSM_PREFIX}/client-token is not a valid Datadog client token (expected 'pub' + 32 hex chars, got ${#TOKEN} chars starting '${TOKEN:0:3}'). A placeholder was likely copied verbatim from a runbook."
+    exit 1
+  fi
+fi
+
 {
   echo "VITE_DD_RUM_APPLICATION_ID<<EOF_RUM"
   echo "$APP_ID"
@@ -85,6 +112,18 @@ fi
   echo "VITE_APP_VERSION=${GITHUB_SHA:0:7}"
 } >> "$GITHUB_ENV"
 
-if [ -z "$APP_ID" ]; then
-  echo "::warning::Datadog RUM not configured (${SSM_PREFIX}/application-id empty) — initRum() will no-op in this build"
+if [ -z "$APP_ID" ] || [ -z "$TOKEN" ]; then
+  # On a production build a missing application-id OR client-token means the
+  # deploy ships with no observability at all — initRum() no-ops and prod goes
+  # dark silently. That is exactly how saga-dash's prod ran unmonitored for
+  # weeks: ParameterNotFound is tolerated above, so the build stayed green.
+  # Non-prod keeps warning (local/preview builds legitimately run without RUM).
+  missing=""
+  [ -z "$APP_ID" ] && missing="${SSM_PREFIX}/application-id"
+  [ -z "$TOKEN" ] && missing="${missing:+$missing and }${SSM_PREFIX}/client-token"
+  if [ "$RUM_ENV_DEFAULT" = "prod" ]; then
+    echo "::error::Datadog RUM is not configured for a PRODUCTION build ($missing empty or missing). Seed it in the production account (region ${AWS_REGION:-us-west-2})."
+    exit 1
+  fi
+  echo "::warning::Datadog RUM not configured ($missing empty) — initRum() will no-op in this build"
 fi

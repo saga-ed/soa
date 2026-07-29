@@ -224,7 +224,10 @@ describe('per-env service scope (I#375)', () => {
 
   it('carries the per-env ABSOLUTE ECS name only where one is declared', () => {
     const prod = Object.fromEntries(buildEnvHealthProbes('saga.org', 'prod').map((p) => [p.id, p]));
-    expect(prod['coach-api']!.ecsServiceName).toBe('coach-coach-api-canary');
+    // No service declares an override today — coach-api used to pin
+    // `coach-coach-api-canary`, but prod-shared runs `coach-coach-api-main`.
+    expect(prod['coach-api']!.ecsServiceName).toBeUndefined();
+    expect(prod['coach-api']!.ecsService).toBe('coach-coach-api');
     // Everything else composes from the prefix — no global suffix override.
     expect(prod['iam-api']!.ecsServiceName).toBeUndefined();
     expect(prod['iam-api']!.ecsService).toBe('rostering-iam-api');
@@ -331,7 +334,7 @@ describe('env verify --ecs', () => {
     expect(text()).toContain('ECS: under-running 0/2');
   });
 
-  it('--env prod asks ECS for the right service names, canary override included', async () => {
+  it('--env prod asks ECS for the right service names — all on the -main suffix', async () => {
     const asked: string[] = [];
     const fake = {
       async json(args: string[]): Promise<unknown> {
@@ -359,10 +362,10 @@ describe('env verify --ecs', () => {
     // prod's shared mesh uses the SAME `-main` suffix as dev's…
     expect(asked).toContain('rostering-iam-api-main');
     expect(asked).toContain('qboard-connectv3-api-main');
-    // …except coach, which is the absolute override — NOT suffixed again.
-    expect(asked).toContain('coach-coach-api-canary');
-    expect(asked).not.toContain('coach-coach-api-main');
-    expect(asked).not.toContain('coach-coach-api-canary-main');
+    // …and coach is no exception: `aws ecs list-services --cluster prod-shared`
+    // lists `coach-coach-api-main` and no canary, so it composes like the rest.
+    expect(asked).toContain('coach-coach-api-main');
+    expect(asked).not.toContain('coach-coach-api-canary');
     // Services scoped out of prod are never asked about at all.
     expect(asked.some((s) => s.includes('content-api') || s.includes('ads-adm') || s.includes('transcripts'))).toBe(false);
     // Nothing in prod reads as unroutable any more — the three services that
@@ -381,7 +384,7 @@ describe('env verify --ecs', () => {
       async json(args: string[]): Promise<unknown> {
         if (args[0] === 'sts') return '531314149529';
         if (args[1] === 'describe-services') {
-          return args.includes('coach-coach-api-canary') ? null : { running: 1, desired: 1, status: 'ACTIVE', rollout: 'COMPLETED' };
+          return args.includes('coach-coach-api-main') ? null : { running: 1, desired: 1, status: 'ACTIVE', rollout: 'COMPLETED' };
         }
         return null;
       },

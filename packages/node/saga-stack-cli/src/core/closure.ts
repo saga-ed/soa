@@ -79,7 +79,7 @@ export function computeClosure(
   // every opt-in flag, which would cross-admit (e.g. `--with authz` alone must
   // not also resolve the playback trio).
   const admitsOptional = (id: ServiceId): boolean =>
-    id === 'authz-sync' ? withAuthz : withPlayback;
+    id === 'authz-sync' || id === 'authz-api' ? withAuthz : withPlayback;
 
   const inClosure = new Set<ServiceId>();
   const reasons = new Map<ServiceId, string[]>();

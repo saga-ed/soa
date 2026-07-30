@@ -220,4 +220,31 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     // NOT part of default mesh-up — see the `openfga` entry above.
     meshProvisioned: false,
   },
+  authz_api_local: {
+    name: 'authz_api_local',
+    engine: 'postgres',
+    // authz-api owns a PRISMA-migrated DB (@saga-ed/authz-db). Its prisma.config.ts
+    // loads AUTHZ_DATABASE_URL directly and THROWS if unset, so R3 injects it via
+    // migrateEnvVar (same shape as sis_db's SIS_DATABASE_URL). cmd `prisma migrate
+    // deploy` applies packages/node/authz-db/src/prisma/migrations.
+    migrate: {
+      dir: 'packages/node/authz-db',
+      cmd: 'prisma migrate deploy',
+      migrateEnvVar: 'AUTHZ_DATABASE_URL',
+    },
+    ownerRole: 'authz_api',
+    ownerPw: 'authz_api',
+    resettable: true,
+    resetMode: 'truncate',
+    // meshProvisioned:true UNLIKE its authz_sync/openfga bundle-siblings: the
+    // provision (R2) AND migrate (R3) runners BOTH gate on `meshProvisioned`
+    // (provision.ts:118, migrate.ts:207), so a prisma-migrated DB MUST be true or
+    // its schema is never applied (the app then breaks on first query). No
+    // always-on cost: provision/migrate/reset all iterate the CLOSURE's DBs
+    // (migrate.ts:195 `closure.has(d)`), so authz_api_local is only touched when
+    // it's in the `--with authz` closure — opt-in in practice despite `true`.
+    // profile-empty.sql creates the role+DB unconditionally on a fresh volume
+    // (cheap empty DB), mirroring the authz_sync "created unconditionally" note.
+    meshProvisioned: true,
+  },
 };

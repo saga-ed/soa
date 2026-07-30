@@ -39,6 +39,7 @@ const SERVICE_IDS = [
   'insights-api',
   'chat-api',
   'authz-sync',
+  'authz-api',
 ] as const;
 
 // Compile guard: every literal above must be a real ServiceId (catches typos /

@@ -63,13 +63,17 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
     description: 'Seed-only: QTF observation-notes demo on an Ended session (no extra services).',
   },
   authz: {
-    services: ['authz-sync'],
+    services: ['authz-sync', 'authz-api'],
     seedAddOn: 'authz',
     description:
       'OpenFGA authz stack: brings up the openfga mesh unit, flips iam-api FGA_ENABLED=true, ' +
-      'runs the fga-bootstrap seed step (model + canonical tuples), and starts the authz-sync ' +
-      'RabbitMQ consumer. First run bootstraps a fresh store (FGA checks fail closed); rerun ' +
-      '`stack up --with authz` once more to pick up the persisted store id.',
+      'runs the fga-bootstrap seed step (model + canonical tuples), starts the authz-sync ' +
+      'RabbitMQ consumer, and launches authz-api (the OpenFGA PDP that serves check/require ' +
+      'over its own prisma-migrated authz_db, hydrated from the iam.* event projection). ' +
+      'First run bootstraps a fresh store (FGA checks fail closed); rerun `stack up --with ' +
+      'authz` once more to pick up the persisted store id. NB: authz-api itself reads NO ' +
+      'OPENFGA_* env — it lives in this bundle because it is the authorization PDP, not ' +
+      'because it talks to OpenFGA directly (its FGA reads go through authz-sync-projected tuples).',
   },
 };
 

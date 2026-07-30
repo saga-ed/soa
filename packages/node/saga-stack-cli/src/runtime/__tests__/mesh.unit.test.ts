@@ -67,7 +67,18 @@ describe('meshMakeArgs', () => {
       'RABBITMQ_PORT=5672',
       'RABBITMQ_MGMT_PORT=15672',
       'CONNECT_MONGO_PORT=27037',
+      'OPENFGA_HTTP_PORT=8180',
+      'OPENFGA_GRPC_PORT=8181',
     ]);
+  });
+
+  it('offsets the openfga ports like every other mesh unit (slot isolation)', () => {
+    // Before this, openfga was absent from the argv, so compose fell through to
+    // infra/.env.defaults' FIXED 8180/8181 and EVERY slot published openfga on the
+    // same host ports — a collision between two slots running `--with authz`.
+    const args = meshMakeArgs(manifest, { offset: 1000 });
+    expect(args).toContain('OPENFGA_HTTP_PORT=9180');
+    expect(args).toContain('OPENFGA_GRPC_PORT=9181');
   });
 
   it('M7 slot 0 (no opts / project+offset 0) is byte-identical', () => {
@@ -85,6 +96,8 @@ describe('meshMakeArgs', () => {
       'RABBITMQ_PORT=6672',
       'RABBITMQ_MGMT_PORT=16672',
       'CONNECT_MONGO_PORT=28037',
+      'OPENFGA_HTTP_PORT=9180',
+      'OPENFGA_GRPC_PORT=9181',
     ]);
   });
 

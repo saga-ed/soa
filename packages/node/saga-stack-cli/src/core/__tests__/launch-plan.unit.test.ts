@@ -102,7 +102,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       // env, but FGA_ENABLED only flips 'true' when the bundle is selected —
       // absent selection here, so fail-closed defaults.
       FGA_ENABLED: 'false',
-      FGA_API_URL: 'http://localhost:8080',
+      // 8180 (the HOST port from infra/.env.defaults), NOT 8080 (in-container).
+      FGA_API_URL: 'http://localhost:8180',
       FGA_STORE_ID: '',
     });
   });

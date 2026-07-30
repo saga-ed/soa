@@ -156,6 +156,7 @@ export function meshMakeArgs(
   const redis = getMesh('redis', m);
   const rabbit = getMesh('rabbitmq', m);
   const mongo = getMesh('connect-mongo', m);
+  const openfga = getMesh('openfga', m);
   return [
     'up',
     ...(opts.project ? [`COMPOSE_PROJECT_NAME=${opts.project}`] : []),
@@ -166,6 +167,13 @@ export function meshMakeArgs(
     `RABBITMQ_PORT=${rabbit.port + offset}`,
     `RABBITMQ_MGMT_PORT=${(rabbit.mgmtPort ?? 15672) + offset}`,
     `CONNECT_MONGO_PORT=${mongo.port + offset}`,
+    // Exported like every other mesh port so the slot offset actually reaches
+    // compose. Omitting them let compose fall through to infra/.env.defaults'
+    // FIXED 8180/8181, which meant every slot published openfga on the SAME host
+    // ports — two slots running `--with authz` would collide, and the offset the
+    // rest of the mesh honours was silently ignored for this unit.
+    `OPENFGA_HTTP_PORT=${openfga.port + offset}`,
+    `OPENFGA_GRPC_PORT=${(openfga.mgmtPort ?? 8181) + offset}`,
   ];
 }
 

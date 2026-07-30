@@ -44,8 +44,16 @@ export const MESH: Readonly<Record<MeshId, MeshDef>> = {
   openfga: {
     id: 'openfga',
     container: 'soa-openfga-1',
-    port: 8080, // HTTP API
-    mgmtPort: 8081, // gRPC (used for the health probe, not an HTTP mgmt UI)
+    // HOST ports, and deliberately NOT 8080/8081 (the IN-CONTAINER ports).
+    // `infra/.env.defaults` pins OPENFGA_HTTP_PORT=8180 / OPENFGA_GRPC_PORT=8181
+    // to keep 8080 free on the host, and compose publishes `${OPENFGA_HTTP_PORT}:8080`.
+    // These must match that mapping: they feed the check_ports preflight, the
+    // OPENFGA_*_PORT values exported to compose by meshMakeArgs, and
+    // OPENFGA_API_URL in launch-plan. Declaring 8080 here made the CLI hand
+    // authz-sync + iam-api a URL nothing listened on, so authz-sync never went
+    // healthy on ANY slot.
+    port: 8180, // HTTP API (host) → 8080 in-container
+    mgmtPort: 8181, // gRPC (host) → 8081 in-container; health probe runs IN-container on 8081
     readinessCmd: '/usr/local/bin/grpc_health_probe -addr=:8081',
     // openfga/openfga is a distroless-style image with no `sh` — `docker exec
     // ... sh -c '<cmd>'` fails with "sh: executable file not found" before the

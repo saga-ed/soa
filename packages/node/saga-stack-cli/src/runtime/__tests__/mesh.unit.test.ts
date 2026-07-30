@@ -69,6 +69,7 @@ describe('meshMakeArgs', () => {
       'CONNECT_MONGO_PORT=27037',
       'OPENFGA_HTTP_PORT=8180',
       'OPENFGA_GRPC_PORT=8181',
+      'OPENFGA_PLAYGROUND_PORT=3105',
     ]);
   });
 
@@ -79,6 +80,16 @@ describe('meshMakeArgs', () => {
     const args = meshMakeArgs(manifest, { offset: 1000 });
     expect(args).toContain('OPENFGA_HTTP_PORT=9180');
     expect(args).toContain('OPENFGA_GRPC_PORT=9181');
+  });
+
+  it('offsets the PLAYGROUND port too — the third published openfga port', () => {
+    // Regression: the HTTP/gRPC ports were fixed but the playground port was
+    // missed, so it still fell through to compose's fixed 3105 on every slot.
+    // Observed failure: `ss stack up --with authz --slot 3` beside a running
+    // slot 0 dies with "Bind for 0.0.0.0:3105 failed: port is already
+    // allocated" — the whole `make up` fails, so it reads as a broken authz
+    // bundle rather than a port clash.
+    expect(meshMakeArgs(manifest, { offset: 3000 })).toContain('OPENFGA_PLAYGROUND_PORT=6105');
   });
 
   it('M7 slot 0 (no opts / project+offset 0) is byte-identical', () => {
@@ -98,11 +109,17 @@ describe('meshMakeArgs', () => {
       'CONNECT_MONGO_PORT=28037',
       'OPENFGA_HTTP_PORT=9180',
       'OPENFGA_GRPC_PORT=9181',
+      'OPENFGA_PLAYGROUND_PORT=4105',
     ]);
   });
 
   it('two slots (1 vs 2) emit non-colliding mesh port args', () => {
-    const portsOf = (a: string[]): string[] => a.filter((x) => x.endsWith('_PORT') === false && /_PORT=/.test(x));
+    // `_PORT=` matches the KEY=value entries; the `endsWith('_PORT')` clause this
+    // replaced was a no-op (a `KEY=value` string never ends in `_PORT`), so the
+    // filter silently depended on the regex alone. Spelled out so this test
+    // genuinely covers EVERY published port — it is the guard that should have
+    // caught the playground-port collision.
+    const portsOf = (a: string[]): string[] => a.filter((x) => /_PORT=/.test(x));
     const s1 = portsOf(meshMakeArgs(manifest, { project: 'soa-s1', offset: 1000 }));
     const s2 = portsOf(meshMakeArgs(manifest, { project: 'soa-s2', offset: 2000 }));
     const vals1 = s1.map((x) => x.split('=')[1]);

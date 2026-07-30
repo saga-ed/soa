@@ -454,6 +454,24 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
         '--store-name',
         'saga-mesh-dev',
         '--reuse',
+        // Pin the model to the CHECKED-OUT copy, matching what rostering's own
+        // deploy workflow passes (`run-fga-bootstrap.yml` → `--model ./model.fga`
+        // with WORKDIR /app/scripts/fga).
+        //
+        // Without this, bootstrap.mjs's `defaultModelPath()` prefers the
+        // PUBLISHED @saga-ed/saga-authz-model package and only falls back to the
+        // vendored file when that package is absent — so a local bootstrap
+        // silently ignores every edit to rostering's scripts/fga/model.fga. That
+        // is not hypothetical: the published 0.1.0-dev.3 is missing THREE
+        // already-shipped relations (can_force_clever_sync,
+        // can_configure_district, can_force_oneroster_ingest), so every local
+        // `--with authz` store was being built unable to evaluate sis-api's
+        // staff gates — and the bootstrap still reports success.
+        //
+        // `cwd` below is `scripts/fga`, so this relative path resolves the same
+        // way `--tuples canonical-tuples.json` already does.
+        '--model',
+        'model.fga',
         '--tuples',
         'canonical-tuples.json',
         '--out-file',

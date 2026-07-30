@@ -105,6 +105,34 @@ describe('ConnectionManager.connect — failureMode', () => {
         expect(cm.state()).toBe('CIRCUIT_OPEN');
     });
 
+    it('LOGS THE ACTUAL CAUSE, not "{}"', async () => {
+        // Regression guard for the real defect: the connect catch used
+        // `JSON.stringify(error)`, which is "{}" for an Error (message/name/
+        // stack are non-enumerable). Every failure logged
+        // `Error connecting to RabbitMQ: {}` — auth rejection, DNS miss and TLS
+        // failure were indistinguishable, which cost a prod debugging session.
+        //
+        // Asserted at the CALL SITE deliberately: a describeError() unit test
+        // alone still passes if someone reverts this line, because nothing
+        // would tie the helper to the logger.
+        vi.mocked(mockConnect).mockRejectedValue(
+            Object.assign(new Error('ACCESS_REFUSED - Login was refused'), { code: 403 }),
+        );
+        // NOOP_LOGGER is module-level and never reset, so earlier tests' calls
+        // are still in .mock.calls — clear it or we assert on their 'boom'.
+        vi.mocked(NOOP_LOGGER.error).mockClear();
+
+        const cm = makeFailingManager('log-and-continue');
+        await cm.connect();
+
+        const logged = vi.mocked(NOOP_LOGGER.error).mock.calls.map(c => String(c[0]));
+        const connectLine = logged.find(l => l.includes('Error connecting to RabbitMQ'));
+        expect(connectLine).toBeDefined();
+        expect(connectLine).toContain('ACCESS_REFUSED');
+        expect(connectLine).toContain('code=403');
+        expect(connectLine).not.toContain('{}');
+    });
+
     it('returns + logs warn when failureMode=log-and-continue', async () => {
         const cm = makeFailingManager('log-and-continue');
         await expect(cm.connect()).resolves.toBeUndefined();

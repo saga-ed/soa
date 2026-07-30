@@ -4,6 +4,44 @@ import { inject, injectable } from 'inversify';
 import type { ILogger } from '@saga-ed/soa-logger';
 import { QueueDefinition } from './queue';
 
+/**
+ * Render a thrown value for a log line.
+ *
+ * 🪤 `JSON.stringify(new Error('boom'))` is `"{}"` — an Error's `message`,
+ * `name` and `stack` are all NON-ENUMERABLE, so stringify sees no own
+ * enumerable properties and emits an empty object. Every connect failure
+ * therefore logged `Error connecting to RabbitMQ: {}` and the actual cause was
+ * invisible: an auth rejection, a DNS failure and a TLS handshake error were
+ * indistinguishable. (Cost a full prod debugging session on authz-sync, where
+ * the broker was reachable and the credentials were the open question.)
+ *
+ * Errors from `amqplib`/Node's net stack carry the diagnostically useful bits
+ * as extra own properties — `code` (e.g. `ENOTFOUND`, `ECONNREFUSED`,
+ * `ECONNRESET`), `errno`, `syscall` — so surface those explicitly alongside
+ * the message.
+ *
+ * Deliberately does NOT include the stack: these lines are emitted once per
+ * retry with backoff, and a stack per attempt buries the signal. The message +
+ * code is what identifies the failure mode.
+ */
+export function describeError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    // A non-Error throw (string, object). stringify is right here — and can
+    // legitimately return undefined for e.g. a thrown symbol, so guard it.
+    return typeof error === 'string' ? error : (JSON.stringify(error) ?? String(error));
+  }
+  const extra = error as Error & { code?: unknown; errno?: unknown; syscall?: unknown };
+  const parts = [`${error.name}: ${error.message}`];
+  if (extra.code !== undefined) parts.push(`code=${String(extra.code)}`);
+  if (extra.errno !== undefined) parts.push(`errno=${String(extra.errno)}`);
+  if (extra.syscall !== undefined) parts.push(`syscall=${String(extra.syscall)}`);
+  // amqplib wraps the underlying socket/auth failure in `cause`; without it an
+  // auth rejection reads only as a generic connection close.
+  const cause = (error as Error & { cause?: unknown }).cause;
+  if (cause !== undefined) parts.push(`cause=${describeError(cause)}`);
+  return parts.join(' ');
+}
+
 export interface RabbitMQConfig {
   url: string; // eg. amqp://user:password@host:port
 
@@ -180,7 +218,7 @@ export class ConnectionManager {
         return;
       } catch (error) {
         this.failureCount++;
-        this.logger.error(`[MQConnectionManager] Error connecting to RabbitMQ: ${JSON.stringify(error)}`);
+        this.logger.error(`[MQConnectionManager] Error connecting to RabbitMQ: ${describeError(error)}`);
 
         const delay = this.backoff(this.failureCount);
         console.warn(`[ConnectionManager] Retry in ${delay}ms`);
@@ -243,7 +281,7 @@ export class ConnectionManager {
      * 'close' will be emitted immediately after this event
      */
     model.on("error", err => {
-      this.logger.error(`[MQConnectionManager] Connection error: ${JSON.stringify(err)}`);
+      this.logger.error(`[MQConnectionManager] Connection error: ${describeError(err)}`);
     });
 
     /**

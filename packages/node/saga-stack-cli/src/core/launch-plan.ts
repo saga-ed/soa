@@ -177,9 +177,13 @@ export interface LaunchTokens {
    * off every default `stack up` (opt-in design decision).
    */
   FGA_ENABLED: string;
-  /** OpenFGA HTTP API — `http://localhost:8080` (single-slot only; no meshOffset
-   *  port-shifting support for openfga in this pass). Feeds both iam-api's
-   *  `FGA_API_URL` and authz-sync's `OPENFGA_API_URL`. */
+  /**
+   * OpenFGA HTTP API — `http://localhost:<openfga host port + meshOffset>`
+   * (8180 at slot 0; 8080 is the IN-CONTAINER port and is deliberately not used
+   * here). Feeds both iam-api's `FGA_API_URL` and authz-sync's
+   * `OPENFGA_API_URL`, and is slot-correct because `meshMakeArgs` exports the
+   * matching `OPENFGA_HTTP_PORT` to compose.
+   */
   OPENFGA_API_URL: string;
   /**
    * The bootstrapped OpenFGA store id, or `''` before the `fga-bootstrap` seed
@@ -633,6 +637,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
   const mqPort = getMesh('rabbitmq', m).port + meshOffset; // 5672
   const mongoPort = getMesh('connect-mongo', m).port + meshOffset; // 27037
   const redisPort = getMesh('redis', m).port + meshOffset; // 6379
+  const openfgaPort = getMesh('openfga', m).port + meshOffset; // 8180 (host; 8080 in-container)
 
   const recorderControlPort = inputs.recorderControlPort ?? 7890;
   const recordingsApiPort = inputs.recordingsApiPort ?? 8444;
@@ -690,7 +695,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
 
     // OpenFGA authz (opt-in — see LaunchTokens' FGA_ENABLED/OPENFGA_* docs)
     FGA_ENABLED: inputs.withAuthz ? 'true' : 'false',
-    OPENFGA_API_URL: 'http://localhost:8080',
+    OPENFGA_API_URL: `http://localhost:${openfgaPort}`,
     OPENFGA_STORE_ID: inputs.openfgaStoreId ?? '',
 
     // global launch env (up.sh `:-` defaults; runtime may pass ambient overrides)

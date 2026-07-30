@@ -133,7 +133,12 @@ export function installCoreSeams(opts: CoreSeamsOptions): CoreSeams {
       if (
         opts.playwrightFail !== undefined &&
         spec.args.includes('playwright') &&
-        spec.args.includes(opts.playwrightFail)
+        // Callers pass a bare project name ('stage-1-roster'). The argv binds it
+        // as `--project=<name>` (see playwrightArgv — the space-separated form
+        // let Playwright's variadic --project swallow the positional spec), so
+        // match either shape and keep call sites reading as plain project names.
+        (spec.args.includes(opts.playwrightFail) ||
+          spec.args.includes(`--project=${opts.playwrightFail}`))
       ) {
         return { code: 1 };
       }

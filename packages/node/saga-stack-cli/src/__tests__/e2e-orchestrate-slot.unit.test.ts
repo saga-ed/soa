@@ -245,8 +245,7 @@ describe('playwrightArgv — spec scoping (single-spawn only, never on a stage o
       'playwright',
       'test',
       '--config=playwright.config.ts',
-      '--project',
-      'chromium',
+      '--project=chromium',
       'dashboard/dashboard-authenticated.e2e.smoke.test.ts',
     ]);
   });
@@ -258,11 +257,25 @@ describe('playwrightArgv — spec scoping (single-spawn only, never on a stage o
       'playwright',
       'test',
       '--config=playwright.config.ts',
-      '--project',
-      'stage-2-program',
+      '--project=stage-2-program',
       '--no-deps',
     ]);
     expect(argv).not.toContain('dashboard/dashboard-authenticated.e2e.smoke.test.ts');
+  });
+
+  it('binds the project with `--project=<name>` so a positional spec cannot be eaten by it', () => {
+    // Playwright's `--project` is VARIADIC. With the space-separated form the
+    // argv `--project chromium <spec>` parses as TWO project names, and the run
+    // dies with "Project(s) '<spec-file>' not found" — the spec never runs as a
+    // spec. It only bit flows where nothing separated the two tokens; any flow
+    // carrying --no-deps / --grep-invert / --headed masked it, which is why it
+    // survived this long. Assert the shape, not just the contents.
+    const argv = playwrightArgv(specResolved);
+    expect(argv).not.toContain('--project');
+    expect(argv.filter((a) => a.startsWith('--project='))).toHaveLength(1);
+    // The spec is the LAST token and is a bare positional, not the value of a flag.
+    expect(argv.at(-1)).toBe('dashboard/dashboard-authenticated.e2e.smoke.test.ts');
+    expect(argv.at(-2)!.startsWith('--')).toBe(true);
   });
 
   it('a flow with no spec (progressive saga-dash flows omit it) never pushes an extra positional arg', () => {
@@ -270,6 +283,6 @@ describe('playwrightArgv — spec scoping (single-spawn only, never on a stage o
       playwright: { config: 'playwright.stack.config.ts', project: 'stage-4-pods', headed: false },
     } as unknown as ResolvedFlow;
     const argv = playwrightArgv(noSpecResolved);
-    expect(argv).toEqual(['exec', 'playwright', 'test', '--config=playwright.stack.config.ts', '--project', 'stage-4-pods']);
+    expect(argv).toEqual(['exec', 'playwright', 'test', '--config=playwright.stack.config.ts', '--project=stage-4-pods']);
   });
 });

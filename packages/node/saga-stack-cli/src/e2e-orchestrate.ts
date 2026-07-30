@@ -384,8 +384,14 @@ export function playwrightArgv(
     'playwright',
     'test',
     `--config=${resolved.playwright.config}`,
-    '--project',
-    stage?.project ?? resolved.playwright.project,
+    // `--project=<name>`, NOT `--project <name>`. Playwright's `--project` is
+    // VARIADIC — the space-separated form keeps consuming following tokens as
+    // extra project names. The spec pushed positionally below then lands inside
+    // it, and the run dies with "Project(s) '<spec-file>' not found". The equals
+    // form binds exactly one value, so the positional stays a positional.
+    // Only bit when nothing separated the two (no --no-deps/--grep-invert/--headed),
+    // which is why it survived: the flows that carry those flags mask it.
+    `--project=${stage?.project ?? resolved.playwright.project}`,
   ];
   if (stage?.noDeps) argv.push('--no-deps');
   if (resolved.playwright.grepInvert) argv.push('--grep-invert', resolved.playwright.grepInvert);

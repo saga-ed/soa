@@ -12,7 +12,7 @@
  *   resolve flow → recurse prerequisite (headless, skip-reset) → StackApi.up(closure)
  *   → reset+seed (unless --skip-reset) → verify({tolerate:[spa.system]})
  *   → computeEnv(flow, now)  [now = new Date() AT THE COMMAND LAYER → the PURE clamp]
- *   → spawn `pnpm exec playwright test --config … --project <terminal stage>
+ *   → spawn `pnpm exec playwright test --config … --project=<terminal stage>
  *      [--grep-invert @interactive] [--headed]` in the SPA's appDir via the Runner.
  *
  * `--dry-run` is the safe, testable smoke: it prints the resolved flow + closure

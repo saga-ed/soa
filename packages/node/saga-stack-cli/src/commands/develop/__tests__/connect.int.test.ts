@@ -85,7 +85,7 @@ function playwrightRuns(): ScriptInvocation[] {
 
 /** The headed live-session spawn (the flow's terminal stage). */
 function liveRun(): ScriptInvocation | undefined {
-  return playwrightRuns().find((r) => r.args.includes('interactive-connect'));
+  return playwrightRuns().find((r) => r.args.includes('--project=interactive-connect'));
 }
 
 /** The state dir the command pointed the launcher at. */
@@ -136,7 +136,7 @@ describe('develop connect — slot awareness (slot > 0)', () => {
 
     // The prerequisite is a separate ResolvedFlow built through `schedule`; it seeds
     // the room's data, so a slot-0 prerequisite behind a slot-2 room is a split brain.
-    const prereq = playwrightRuns().find((r) => r.args.includes('stage-5-schedule'));
+    const prereq = playwrightRuns().find((r) => r.args.includes('--project=stage-5-schedule'));
     expect(prereq?.env?.PLAYWRIGHT_IAM_URL).toBe('http://localhost:5010');
   });
 
@@ -256,7 +256,7 @@ describe('develop connect — per-slot checkpoint root (the cross-slot corruptio
     // so stage-1-roster appears only here — the main run's prerequisite enters at
     // stage-5). It needs the offset ports independently of the main run: a bake driven
     // against the base iam would bake slot-0 data INTO the slot-2 checkpoint root.
-    const bake = playwrightRuns().find((r) => r.args.includes('stage-1-roster'));
+    const bake = playwrightRuns().find((r) => r.args.includes('--project=stage-1-roster'));
     expect(bake).toBeDefined();
     expect(bake?.env?.PLAYWRIGHT_IAM_URL).toBe('http://localhost:5010');
   });

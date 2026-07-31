@@ -1,8 +1,11 @@
 export {
     mountHealthRoutes,
+    buildIdentity,
     type HealthRouter,
     type HealthResponse,
     type MountHealthOptions,
+    type BuildIdentity,
+    type EnvLike,
 } from './health.js';
 
 export {

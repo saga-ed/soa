@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mountHealthRoutes, type HealthRouter } from '../health.js';
+import { mountHealthRoutes, buildIdentity, type HealthRouter } from '../health.js';
 
 /**
  * Captures the route handlers a service would register, so we can invoke them
@@ -73,12 +73,13 @@ describe('mountHealthRoutes', () => {
     expect(body.dependencies.postgres.latencyMs).toBeUndefined();
   });
 
-  // dev.1 -> dev.2 superset guard: adding mountReadinessRoutes must NOT alter
-  // the existing two-arg mountHealthRoutes contract. program-hub is exact-pinned
-  // to dev.1 and must see byte-identical /health + /health/details output, so a
-  // future repin to dev.2 is a no-op. (timestamp is the only non-deterministic
-  // field; asserted by shape, the rest by exact value.)
-  it('dev.1 superset: the two-arg mountHealthRoutes output is unchanged', async () => {
+  // Superset guard, updated for build identity. The original form asserted an
+  // EXACT top-level key set so a repin was a byte-identical no-op. Build
+  // identity intentionally adds keys, so the invariant is now narrower but still
+  // load-bearing: with NO deploy env set (local, tests, any undeployed run) the
+  // body must be byte-identical to the pre-identity contract. Consumers pinned
+  // to an older version therefore see no change until they actually deploy.
+  it('superset: with no deploy env, the output is unchanged from the pre-identity contract', async () => {
     const { app, call, paths } = fakeApp();
     mountHealthRoutes(app, { serviceName: 'Programs API', pingDb: async () => undefined });
     expect(paths().sort()).toEqual(['/health', '/health/details']);
@@ -90,7 +91,97 @@ describe('mountHealthRoutes', () => {
     expect(details.service).toBe('Programs API');
     expect(typeof details.timestamp).toBe('string');
     expect((details.dependencies as { postgres: { status: string } }).postgres.status).toBe('healthy');
-    // exact key set — no new top-level fields leaked into the dev.1 body
     expect(Object.keys(details).sort()).toEqual(['dependencies', 'service', 'status', 'timestamp']);
+  });
+});
+
+describe('buildIdentity', () => {
+  it('parses the colour out of the comma-joined OTEL attribute string', () => {
+    expect(
+      buildIdentity({
+        OTEL_RESOURCE_ATTRIBUTES:
+          'deployment.environment=prod,deployment.environment.name=prod,deployment.identifier=blue',
+      }).colour,
+    ).toBe('blue');
+  });
+
+  it('reads version, environment and deploy time from their own vars', () => {
+    expect(
+      buildIdentity({
+        DD_VERSION: '3b436235b8ecd8eb395396e938690985b48ef554',
+        EXEC_ENV: 'prod',
+        DEPLOYMENT_DATETIME: '2026-07-31T01:08:45Z',
+      }),
+    ).toEqual({
+      version: '3b436235b8ecd8eb395396e938690985b48ef554',
+      environment: 'prod',
+      deployedAt: '2026-07-31T01:08:45Z',
+    });
+  });
+
+  // The whole point of D10: blue and green must be distinguishable. Same image,
+  // same env — only the colour differs, which is exactly the live prod shape.
+  it('distinguishes two colours running the identical image', () => {
+    const base = { DD_VERSION: 'abc123', EXEC_ENV: 'prod' };
+    const blue = buildIdentity({
+      ...base,
+      OTEL_RESOURCE_ATTRIBUTES: 'deployment.environment=prod,deployment.identifier=blue',
+    });
+    const green = buildIdentity({
+      ...base,
+      OTEL_RESOURCE_ATTRIBUTES: 'deployment.environment=prod,deployment.identifier=green',
+    });
+    expect(blue.colour).toBe('blue');
+    expect(green.colour).toBe('green');
+    expect(blue).not.toEqual(green);
+  });
+
+  it('omits absent fields rather than emitting undefined or a placeholder', () => {
+    expect(buildIdentity({})).toEqual({});
+    expect(Object.keys(buildIdentity({ DD_VERSION: 'abc' }))).toEqual(['version']);
+  });
+
+  it('tolerates a malformed or identifier-free OTEL string', () => {
+    expect(buildIdentity({ OTEL_RESOURCE_ATTRIBUTES: '' }).colour).toBeUndefined();
+    expect(buildIdentity({ OTEL_RESOURCE_ATTRIBUTES: 'novalue' }).colour).toBeUndefined();
+    expect(buildIdentity({ OTEL_RESOURCE_ATTRIBUTES: 'deployment.identifier=' }).colour).toBeUndefined();
+    expect(
+      buildIdentity({ OTEL_RESOURCE_ATTRIBUTES: 'deployment.environment=prod' }).colour,
+    ).toBeUndefined();
+  });
+
+  // deployment.environment.name CONTAINS "deployment.environment" as a prefix;
+  // a substring match would return the wrong value for the wrong key.
+  it('matches the identifier key exactly, not by prefix', () => {
+    expect(
+      buildIdentity({
+        OTEL_RESOURCE_ATTRIBUTES: 'deployment.identifier.suffix=wrong,deployment.identifier=right',
+      }).colour,
+    ).toBe('right');
+  });
+
+  it('surfaces identity on both routes when the deploy env is present', async () => {
+    const { app, call } = fakeApp();
+    const env = {
+      DD_VERSION: 'abc123',
+      EXEC_ENV: 'prod',
+      OTEL_RESOURCE_ATTRIBUTES: 'deployment.identifier=green',
+    };
+    vi.stubGlobal('process', { env });
+    try {
+      mountHealthRoutes(app, { serviceName: 'Programs API', pingDb: async () => undefined });
+      expect(await call('/health')).toEqual({
+        status: 'ok',
+        service: 'Programs API',
+        colour: 'green',
+        version: 'abc123',
+        environment: 'prod',
+      });
+      const details = (await call('/health/details')) as Record<string, unknown>;
+      expect(details.colour).toBe('green');
+      expect(details.version).toBe('abc123');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

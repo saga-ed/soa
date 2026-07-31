@@ -2,31 +2,17 @@
 
 Shared libraries organized by runtime compatibility.
 
-**Parent Context:** Part of [soa](../CLAUDE.md), the shared-infrastructure monorepo for Saga platform applications.
-
 ## Runtime Categories
 
-| Tier | Runtime | Description |
+| Tier | Runtime | Import rule |
 |------|---------|-------------|
-| `web/` | Browser | Browser-only packages (React UI) |
-| `node/` | Node.js | Server-side packages (Express, DB, messaging) |
-| `core/` | Agnostic | Work in any runtime (config, types, tRPC base) |
-
-## Import Guidelines
-
-```typescript
-// Node packages: Import only in server-side code
-import { db } from '@saga-ed/soa-db';
-import { logger } from '@saga-ed/soa-logger';
-
-// Web packages: Import only in client-side code
-import { Button } from '@saga-ed/soa-ui';
-
-// Core packages: Safe to import anywhere
-import { Config } from '@saga-ed/soa-config';
-```
+| `web/` | Browser | Import only in client-side code (e.g. `@saga-ed/soa-ui`) |
+| `node/` | Node.js | Import only in server-side code (e.g. `@saga-ed/soa-db`, `@saga-ed/soa-logger`) |
+| `core/` | Agnostic | Safe to import anywhere (e.g. `@saga-ed/soa-config`) |
 
 ## Key Packages
+
+Curated highlights, not exhaustive — `ls packages/*/` is the full set:
 
 | Package | Tier | Description |
 |---------|------|-------------|
@@ -41,7 +27,3 @@ import { Config } from '@saga-ed/soa-config';
 - `web/CLAUDE.md` - Browser runtime details
 - `node/CLAUDE.md` - Node.js runtime details
 - `core/CLAUDE.md` - Runtime-agnostic details
-
----
-
-*Last updated: 2026-02*

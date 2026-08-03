@@ -9,7 +9,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { closureDatabases } from '../../../commands/stack/snapshot/store.js';
-import { AUTHZ_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from '../../bundles.js';
+import {
+  AUTHZ_IDS,
+  PLAYBACK_IDS,
+  STAFF_ADMIN_IDS,
+  closureOptsFor,
+  closureOptsForIds,
+} from '../../bundles.js';
 import { computeClosure } from '../../closure.js';
 import { manifest } from '../index.js';
 
@@ -57,6 +63,29 @@ describe('staff-admin manifest entries', () => {
   it('brings the BFF up before the SPA that proxies to it', () => {
     expect(spa.dependsOn).toContain('staff-admin-bff');
     expect(bff.dependsOn).toEqual(['iam-api', 'programs-api', 'sis-api']);
+  });
+
+  it('keeps the BFF off the contested :3000', () => {
+    // `deriveInstance` builds portOverrides over EVERY service (optional too),
+    // and `stack down`'s orphan reap group-kills whatever sits on the resulting
+    // band — for every user, including those who never pass --with staff-admin.
+    // On :3000 that means SIGKILLing a stray Next/Rails dev server.
+    expect(bff.port).not.toBe(3000);
+    expect(bff.port).toBe(3011);
+    expect(bff.lane.stack).toBe('http://localhost:3011');
+  });
+
+  it('makes the SPA→BFF edge survive followBrowserEdges:false', () => {
+    // A 'browser' edge is skipped in flow/e2e closures, which would resolve the
+    // SPA WITHOUT its only upstream — every page then fails at the /api proxy.
+    expect(spa.depKinds['staff-admin-bff']).toBe('url');
+  });
+
+  it('fingerprints BOTH processes against adoption of a stray dev server', () => {
+    // Both sides of the proxy can be mis-adopted: a `dev:mock` BFF serves fixture
+    // data, and a stray vite never receives BFF_URL (so it proxies to :3000).
+    expect(bff.adoptEnv).toContain('IAM_API_URL');
+    expect(spa.adoptEnv).toContain('BFF_URL');
   });
 });
 
@@ -122,6 +151,64 @@ describe('optional-service id sets (derived from BUNDLES)', () => {
   });
 });
 
+describe('closureOptsFor / closureOptsForIds', () => {
+  it('derives every flag from one --with list', () => {
+    expect(closureOptsFor(['staff-admin'])).toEqual({
+      withPlayback: false,
+      withAuthz: false,
+      withStaffAdmin: true,
+    });
+    expect(closureOptsFor(undefined)).toEqual({
+      withPlayback: false,
+      withAuthz: false,
+      withStaffAdmin: false,
+    });
+  });
+
+  it('derives the same flags from wanted ids (workspace run-set / flow systems)', () => {
+    expect(closureOptsForIds(['staff-admin-console'])).toEqual({
+      withPlayback: false,
+      withAuthz: false,
+      withStaffAdmin: true,
+    });
+    expect(closureOptsForIds(['iam-api'])).toEqual({
+      withPlayback: false,
+      withAuthz: false,
+      withStaffAdmin: false,
+    });
+  });
+
+  it('never cross-admits between families', () => {
+    expect(closureOptsFor(['authz']).withStaffAdmin).toBe(false);
+    expect(closureOptsFor(['playback']).withAuthz).toBe(false);
+    expect(closureOptsFor(['staff-admin']).withPlayback).toBe(false);
+  });
+});
+
+describe('admitsOptional is exhaustive', () => {
+  it('throws on an optional id with no opt-in flag rather than silently dropping it', () => {
+    // The whole bug class: an unmapped optional id used to inherit `withPlayback`
+    // and resolve an EMPTY closure with exit 0. It must now fail loudly.
+    const fake = {
+      ...manifest,
+      services: {
+        ...manifest.services,
+        'ghost-api': { ...manifest.services['iam-api'], id: 'ghost-api', optional: true },
+      },
+    } as unknown as typeof manifest;
+    expect(() => computeClosure(fake, ['ghost-api'] as never, {})).toThrow(/no opt-in flag/);
+  });
+
+  it('still admits every real optional family from its own flag', () => {
+    expect(computeClosure(manifest, ['authz-sync'], { withAuthz: true }).services).toEqual([
+      'authz-sync',
+    ]);
+    expect(computeClosure(manifest, ['chat-api'], { withPlayback: true }).services).toContain(
+      'chat-api',
+    );
+  });
+});
+
 describe('snapshot store — closureDatabases', () => {
   const fail = (m: string): never => {
     throw new Error(m);
@@ -132,13 +219,13 @@ describe('snapshot store — closureDatabases', () => {
     // to an EMPTY db list — and `storePlan` honours a defined-but-empty `only`
     // as "dump exactly these", writing a zero-database snapshot that exits 0.
     // The pair owns no DBs itself; the upstreams it pulls in do.
-    const dbs = closureDatabases([...STAFF_ADMIN_IDS], { withStaffAdmin: true }, fail);
+    const dbs = closureDatabases([...STAFF_ADMIN_IDS], closureOptsFor(['staff-admin']), fail);
     expect(dbs).not.toEqual([]);
     expect(dbs).toContain('iam_local');
   });
 
   it('still fails loudly on an unknown service id', () => {
-    expect(() => closureDatabases(['nope' as never], { withStaffAdmin: true }, fail)).toThrow(
+    expect(() => closureDatabases(['nope' as never], closureOptsFor(['staff-admin']), fail)).toThrow(
       /unknown service id/,
     );
   });

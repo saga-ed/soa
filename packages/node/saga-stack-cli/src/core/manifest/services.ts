@@ -850,10 +850,19 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     id: 'staff-admin-bff',
     repo: 'SAGA_DASH',
     subpath: 'apps/web/staff-admin-console/backend',
-    port: 3000,
+    // 3011, NOT the app's own default of 3000 — same reason content-api runs on
+    // 3009 instead of its default. :3000 is the most contested port on a dev box
+    // (every default Next/Express/Rails app), and `deriveInstance` builds
+    // `portOverrides` over EVERY manifest service including optional ones, so
+    // `stack down`'s orphan reap (`reapScanServices`) would group-kill whatever
+    // sits on :3000 for EVERY user — including people who never pass
+    // `--with staff-admin`. Registering an unrelated dev server's port into a
+    // SIGKILL band is not a cost this opt-in bundle gets to impose.
+    port: 3011,
     // `pnpm dev` = `JANUS_REQUIRED=false tsx watch src/local.ts`, so the janus
     // (JumpCloud) perimeter bypass rides along for free — a local operator has
-    // no janus_session to present. src/local.ts reads `PORT`.
+    // no janus_session to present. src/local.ts reads `PORT`, so the launcher
+    // injects 3011 (and the slot offset) rather than the app's baked default.
     portEnvVar: 'PORT',
     healthPath: '/health/ready',
     databases: [],
@@ -883,7 +892,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       },
     },
     seed: [],
-    lane: lanes(3000, 'staff-admin-api'),
+    lane: lanes(3011, 'staff-admin-api'),
     tunnelSlug: 'staff-admin-api',
     isFrontend: false,
     optional: true,
@@ -912,9 +921,15 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     healthPath: '/',
     databases: [],
     dependsOn: ['staff-admin-bff'],
-    // The browser calls the BFF (same-origin via vite's /api proxy), so the SPA
-    // needs it merely reachable — the `browser` kind, like saga-dash's deps.
-    depKinds: { 'staff-admin-bff': 'browser' },
+    // 'url', NOT 'browser' — deliberately unlike saga-dash's deps. A `browser`
+    // edge is skipped under `followBrowserEdges:false` (flow/e2e closures), which
+    // would resolve a closure containing the SPA and NOT its BFF: every page then
+    // fails at the /api proxy with connection errors that read as a broken test
+    // rather than a missing service. And the distinction a `browser` edge encodes
+    // — "the SPA MAY call this backend from SOME page" — does not apply here: the
+    // console has exactly ONE upstream and cannot render a single page without
+    // it, so it is a hard dependency in every closure.
+    depKinds: { 'staff-admin-bff': 'url' },
     mesh: [],
     launch: {
       cmd: 'pnpm dev',
@@ -931,5 +946,14 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'staff-admin',
     isFrontend: true,
     optional: true,
+    // Same soa#305 guard as the BFF, for the same reason on the other side of the
+    // proxy. `healthPath: '/'` means a bare `pnpm dev` vite left running in the
+    // app dir answers 200, and an unguarded launcher ADOPTS it — never applying
+    // BFF_URL, so the console's /api proxy falls back to vite.config.ts's
+    // `http://localhost:3000` default and the browser reads whatever happens to
+    // be on 3000 instead of this stack's BFF. Fingerprinting the key refuses that
+    // process instead (one-time "stop and re-run"), which is precisely the
+    // mixed-stack condition BFF_URL exists to prevent.
+    adoptEnv: ['BFF_URL'],
   },
 };

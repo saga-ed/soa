@@ -76,6 +76,17 @@ export default class StackRestart extends BaseCommand {
     }
     if (up.av) this.log(up.av.message);
     for (const s of up.skipped) this.log(`⚠ ${s.message}`);
+    // Overlay-bound optionals were stopped by the reap but deliberately not
+    // relaunched (restart builds no overlay — relaunching would misconfigure
+    // them). Say so loudly: a silent drop here is what makes an operator think
+    // authz is still live after a bounce.
+    for (const id of outcome.notRelaunched ?? []) {
+      this.log(
+        `⚠ ${id} was stopped but NOT relaunched — it needs its overlay. Re-run: ss stack up --with ${
+          id === 'authz-sync' ? 'authz' : id
+        }`,
+      );
+    }
 
     this.emit(
       flags,

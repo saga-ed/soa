@@ -76,7 +76,12 @@ includes (sugar over the closure, composable: `--with dash --with coach`). Share
 #### `--with staff-admin` — the staff-admin console
 
 Brings up saga-dash's **second** app: the staff-only SvelteKit SPA (`:8910`) plus its own
-Express BFF (`:3000`), and the iam/programs/sis closure they read.
+Express BFF (`:3011`), and the iam/programs/sis closure they read.
+
+The BFF runs on **3011, not the app's own default of 3000** — `stack down`'s orphan reap
+group-kills whatever sits on the manifest's port band, and claiming `:3000` would put every
+unrelated Next/Rails dev server on the box in a SIGKILL path. The launcher injects the port
+via `PORT`, so no repo change is needed.
 
 ```bash
 ss stack up --with staff-admin   # → iam-api, sis-api, programs-api, staff-admin-bff, staff-admin-console

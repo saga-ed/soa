@@ -81,10 +81,31 @@ export function computeClosure(
   // Each optional service is admitted by its OWN flag — never a blanket OR of
   // every opt-in flag, which would cross-admit (e.g. `--with authz` alone must
   // not also resolve the playback trio).
+  //
+  // EXHAUSTIVE BY CONSTRUCTION: there is deliberately no `return withPlayback`
+  // fallthrough. That default is what silently handed every unmapped optional id
+  // the playback flag — so a newly-added optional service resolved an EMPTY
+  // closure (exit 0, no error) until someone noticed. An unmapped id now THROWS,
+  // which surfaces at the first test that touches it rather than in the field.
+  // `bundles.ts` cannot be imported here (it imports this module's types), so the
+  // map is local; `optional-families.unit.test.ts` asserts it matches BUNDLES.
   const admitsOptional = (id: ServiceId): boolean => {
-    if (id === 'authz-sync') return withAuthz;
-    if (id === 'staff-admin-bff' || id === 'staff-admin-console') return withStaffAdmin;
-    return withPlayback;
+    switch (id) {
+      case 'transcripts-api':
+      case 'insights-api':
+      case 'chat-api':
+        return withPlayback;
+      case 'authz-sync':
+        return withAuthz;
+      case 'staff-admin-bff':
+      case 'staff-admin-console':
+        return withStaffAdmin;
+      default:
+        throw new Error(
+          `closure: optional service '${id}' has no opt-in flag — add it to admitsOptional ` +
+            `(and to a BUNDLES entry), or it will silently resolve an empty closure.`,
+        );
+    }
   };
 
   const inClosure = new Set<ServiceId>();

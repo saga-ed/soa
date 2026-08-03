@@ -14,6 +14,7 @@
  * PURE: this module carries zero IO.
  */
 
+import type { ClosureOpts } from './closure.js';
 import type { ServiceId } from './manifest/index.js';
 
 /** The named features a `--with` value may select (services, a seed add-on, or both). */
@@ -211,6 +212,45 @@ export function effectiveWithStaffAdmin(withBundles: string[] | undefined): bool
 export const PLAYBACK_IDS: readonly ServiceId[] = BUNDLES.playback.services;
 export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
 export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
+
+/**
+ * Every optional-service opt-in flag, derived from one `--with` list.
+ *
+ * THE point of this helper: each `optional:true` family needs its OWN flag, and
+ * every flag defaults to FALSE — so a `computeClosure` caller that forgets one
+ * silently resolves an EMPTY closure (exit 0, no error, no compiler help). That
+ * failure has now been shipped three times (snapshot store, snapshot restore,
+ * flow resolution). Deriving all flags in ONE place means adding a bundle is a
+ * single edit here rather than a hand-sweep of every call site.
+ *
+ * Returns a `Required<…>` shape so a caller cannot partially spread it. PURE.
+ */
+export function closureOptsFor(
+  withBundles: string[] | undefined,
+): Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>> {
+  return {
+    withPlayback: effectiveWithPlayback(withBundles),
+    withAuthz: effectiveWithAuthz(withBundles),
+    withStaffAdmin: effectiveWithStaffAdmin(withBundles),
+  };
+}
+
+/**
+ * The opt-in flags implied by a set of service ids already known to be wanted
+ * (a workspace run-set, a flow's `requiredSystems`) — the id→flag direction of
+ * `closureOptsFor`. Derived from the same `BUNDLES`-backed id sets, so it cannot
+ * drift. PURE.
+ */
+export function closureOptsForIds(
+  ids: readonly ServiceId[],
+): Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>> {
+  const has = (family: readonly ServiceId[]): boolean => ids.some((id) => family.includes(id));
+  return {
+    withPlayback: has(PLAYBACK_IDS),
+    withAuthz: has(AUTHZ_IDS),
+    withStaffAdmin: has(STAFF_ADMIN_IDS),
+  };
+}
 
 /**
  * The ordered, deduped seed add-ons the `--with` features contribute (via

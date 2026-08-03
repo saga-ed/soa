@@ -429,6 +429,15 @@ export interface RestartOutcome {
   reaped?: StopServiceResult[];
   /** The vite-cache clear (absent when no viteClear seam was wired). */
   vite?: ViteClearResult;
+  /**
+   * Optional services that were reaped but deliberately NOT relaunched, because
+   * their correct launch env depends on an overlay `restart` does not build
+   * (`authz-sync` needs `--with authz`'s FGA_ENABLED + OPENFGA_STORE_ID).
+   * Relaunching them here would start them MISCONFIGURED while reporting
+   * success; the command surfaces this list so the operator re-`up`s them
+   * explicitly. Empty on a normal bounce.
+   */
+  notRelaunched?: ServiceId[];
   /** The fresh bring-up (mesh + prep + launch + auto-pull + AV). */
   up: UpResult;
 }
@@ -446,6 +455,20 @@ export interface StackApi {
 // ── helpers (pure) ───────────────────────────────────────────────────────────
 
 /** Matches a `${NAME}` token (uppercase / digits / underscore). */
+/**
+ * Optional services whose CORRECT launch env depends on an overlay that only
+ * `up` builds — so a context without that overlay would start them
+ * misconfigured rather than not at all.
+ *
+ * `authz-sync` is the case today: without `--with authz`'s overlay the tokens
+ * resolve to `FGA_ENABLED='false'` and an EMPTY `OPENFGA_STORE_ID`, i.e. a
+ * consumer projecting tuples into nowhere while iam-api runs with FGA off.
+ * `restart` uses this to leave such a service visibly down instead of silently
+ * wrong. The staff-admin pair is deliberately NOT here — its launch env is
+ * fully token-resolved with no overlay, so it restores cleanly.
+ */
+const OVERLAY_BOUND_SERVICES = new Set<ServiceId>(['authz-sync']);
+
 const TOKEN_RE = /\$\{([A-Z0-9_]+)\}/g;
 
 /** Expand every `${NAME}` in `value` from `tokens`; throws on an unset token. */
@@ -1098,20 +1121,27 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       //    browser tab just dies with connection-refused). Reaped ids are what was
       //    actually running, so this restores exactly the previous shape — and it is
       //    generic, so it covers `authz-sync` and any future optional too.
-      const optionalIds = new Set<string>(
-        (Object.values(manifest.services) as { id: ServiceId; optional: boolean }[])
-          .filter((s) => s.optional)
-          .map((s) => s.id),
-      );
+      //
+      //    ⚠️ OVERLAY-FREE OPTIONALS ONLY. `restart` builds its runtime with NO
+      //    overlays (`buildNativeRuntime(flags, profile)`, `overlays = {}`), so
+      //    `launchContext` here carries `withAuthz: undefined` /
+      //    `openfgaStoreId: undefined` ⇒ tokens `FGA_ENABLED='false'` and
+      //    `OPENFGA_STORE_ID=''`. Relaunching an overlay-DEPENDENT service under
+      //    that context is WORSE than leaving it down: authz-sync would come back
+      //    projecting tuples into an empty store id while iam-api runs with FGA
+      //    off, and the operator — told "restart: OK, relaunched authz-sync" —
+      //    would believe authz is live. Down is at least visibly down. So those
+      //    are reported as needing an explicit re-`up` instead.
+      const defs = manifest.services as Record<string, { id: ServiceId; optional: boolean }>;
       const reapedOptional = (reaped ?? [])
         .map((r) => r.id)
-        .filter((id): id is ServiceId => optionalIds.has(id));
+        .filter((id): id is ServiceId => defs[id]?.optional === true);
+      const restorable = reapedOptional.filter((id) => !OVERLAY_BOUND_SERVICES.has(id));
+      const overlayBound = reapedOptional.filter((id) => OVERLAY_BOUND_SERVICES.has(id));
       const relaunch =
-        reapedOptional.length > 0
-          ? [...new Set<ServiceId>([...services, ...reapedOptional])]
-          : services;
+        restorable.length > 0 ? [...new Set<ServiceId>([...services, ...restorable])] : services;
       const up = await this.up(relaunch);
-      return { down, reaped, vite, up };
+      return { down, reaped, vite, up, notRelaunched: overlayBound };
     },
 
     async reset(services: ServiceId[], opts: ResetOpts = {}): Promise<ResetOutcome> {

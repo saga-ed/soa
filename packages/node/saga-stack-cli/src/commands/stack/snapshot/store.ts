@@ -23,13 +23,7 @@ import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
-import {
-  BUNDLE_NAMES,
-  combineRequested,
-  effectiveWithAuthz,
-  effectiveWithPlayback,
-  effectiveWithStaffAdmin,
-} from '../../../core/bundles.js';
+import { BUNDLE_NAMES, closureOptsFor, combineRequested } from '../../../core/bundles.js';
 import { computeClosure, type ClosureOpts } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { DbId, ServiceId } from '../../../core/manifest/index.js';
@@ -117,15 +111,13 @@ export default class SnapshotStore extends BaseCommand {
     // an excluded service back in (a dependency edge from a non-excluded service
     // into an excluded one), and it applies AFTER the --with union so `--with playback --slot N`
     // degrades gracefully rather than dumping absent playback DBs.
-    const withPlayback = effectiveWithPlayback(flags.with);
-    const withAuthz = effectiveWithAuthz(flags.with);
-    const withStaffAdmin = effectiveWithStaffAdmin(flags.with);
+    const closureOpts = closureOptsFor(flags.with);
     const excluded = new Set<ServiceId>(instance.excludedServices);
     let only: DbId[] | undefined;
     if (flags.only) {
       only = closureDatabases(
         combineRequested(flags.only, flags.with, (m) => this.error(m)),
-        { withPlayback, withAuthz, withStaffAdmin },
+        closureOpts,
         (m) => this.error(m),
       );
     } else if (instance.slot > 0) {
@@ -134,11 +126,9 @@ export default class SnapshotStore extends BaseCommand {
         .map((s) => s.id);
       const bundleServices = combineRequested(undefined, flags.with, (m) => this.error(m));
       const requested = [...new Set<ServiceId>([...fullNonOptional, ...bundleServices])];
-      const kept = computeClosure(manifest, requested, {
-        withPlayback,
-        withAuthz,
-        withStaffAdmin,
-      }).services.filter((id) => !excluded.has(id));
+      const kept = computeClosure(manifest, requested, closureOpts).services.filter(
+        (id) => !excluded.has(id),
+      );
       only = [...new Set<DbId>(kept.flatMap((id) => manifest.services[id].databases))];
     }
 
@@ -146,8 +136,8 @@ export default class SnapshotStore extends BaseCommand {
       fixtureId,
       profile: flags.profile,
       only,
-      withPlayback,
-      withAuthz,
+      withPlayback: closureOpts.withPlayback,
+      withAuthz: closureOpts.withAuthz,
     });
 
     const io = this.getSnapshotIO();
@@ -225,16 +215,19 @@ export default class SnapshotStore extends BaseCommand {
  * Mirrors `status`'s `resolveServiceSet`: unknown ids fail with a friendly oclif
  * error.
  *
- * Takes the opt-in flags as a ClosureOpts-shaped OBJECT rather than positionals:
+ * Takes the opt-in flags as a `Required<…>` OBJECT rather than positionals:
  * every `optional:true` service needs its OWN flag (see `admitsOptional`), and a
- * missing positional silently yields an EMPTY db list here — which `storePlan`
- * then honours as "dump exactly these", writing a zero-database snapshot that
- * exits 0. Spreading one object keeps a new optional service from re-opening
- * that hole.
+ * missing flag silently yields an EMPTY db list here — which `storePlan` then
+ * honours as "dump exactly these", writing a zero-database snapshot that exits 0.
+ *
+ * `Required` is load-bearing: every `ClosureOpts` field is declared `?:`, so a
+ * bare `Pick` would leave them all optional and `closureDatabases(ids, {}, fail)`
+ * would typecheck — re-opening the exact hole this signature exists to close.
+ * Callers should pass `closureOptsFor(flags.with)` rather than hand-building it.
  */
 export function closureDatabases(
   requested: ServiceId[],
-  opts: Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>,
+  opts: Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>>,
   fail: (msg: string) => never,
 ): DbId[] {
   const known = new Set(Object.keys(manifest.services));

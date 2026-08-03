@@ -17,7 +17,14 @@
 import type { ServiceId } from './manifest/index.js';
 
 /** The named features a `--with` value may select (services, a seed add-on, or both). */
-export type BundleName = 'dash' | 'connect' | 'coach' | 'playback' | 'qtf' | 'authz';
+export type BundleName =
+  | 'dash'
+  | 'connect'
+  | 'coach'
+  | 'playback'
+  | 'qtf'
+  | 'authz'
+  | 'staff-admin';
 
 /** A seed add-on a bundle may layer onto the composed seed plan. */
 export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz';
@@ -70,6 +77,14 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
       'runs the fga-bootstrap seed step (model + canonical tuples), and starts the authz-sync ' +
       'RabbitMQ consumer. First run bootstraps a fresh store (FGA checks fail closed); rerun ' +
       '`stack up --with authz` once more to pick up the persisted store id.',
+  },
+  'staff-admin': {
+    services: ['staff-admin-bff', 'staff-admin-console'],
+    description:
+      'Staff-admin console: the staff-only SPA (:8910) + its own BFF (:3000), plus the ' +
+      'iam/programs/sis closure they read. Log in with `ss stack login` — the console ' +
+      'reads that operator cookie. Impersonate is HIDDEN (the synthetic seed mints no ' +
+      'staff:* claims) and the COACH pages 401 (coach-api verifies a janus_session).',
   },
 };
 
@@ -171,6 +186,17 @@ export function effectiveWithPlayback(withBundles: string[] | undefined): boolea
  */
 export function effectiveWithAuthz(withBundles: string[] | undefined): boolean {
   return (withBundles ?? []).includes('authz');
+}
+
+/**
+ * Whether the closure should keep the `optional:true` staff-admin pair
+ * (`staff-admin-bff` + `staff-admin-console`): true iff the `staff-admin`
+ * bundle was requested via `--with`. Same shape as `effectiveWithAuthz` —
+ * `computeClosure` drops both unless this is set, keeping the operator console
+ * out of every default `stack up`. PURE.
+ */
+export function effectiveWithStaffAdmin(withBundles: string[] | undefined): boolean {
+  return (withBundles ?? []).includes('staff-admin');
 }
 
 /**

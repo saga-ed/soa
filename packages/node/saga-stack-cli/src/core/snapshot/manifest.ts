@@ -73,6 +73,8 @@ const SERVICE_IDS = [
   'insights-api',
   'chat-api',
   'authz-sync',
+  'staff-admin-bff',
+  'staff-admin-console',
 ] as const;
 const _serviceIdsAreServiceIds: readonly ServiceId[] = SERVICE_IDS;
 void _serviceIdsAreServiceIds;

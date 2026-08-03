@@ -33,6 +33,7 @@ import {
   combineRequested,
   effectiveWithAuthz,
   effectiveWithPlayback,
+  effectiveWithStaffAdmin,
   seedAddOnsFor,
 } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
@@ -138,6 +139,7 @@ export default class StackSeed extends BaseCommand {
     // the services are assumed already up.
     const withPlayback = effectiveWithPlayback(flags.with);
     const withAuthz = effectiveWithAuthz(flags.with);
+    const withStaffAdmin = effectiveWithStaffAdmin(flags.with);
     const fullNonOptional = (Object.values(manifest.services) as { id: ServiceId; optional: boolean }[])
       .filter((s) => !s.optional)
       .map((s) => s.id);
@@ -148,7 +150,11 @@ export default class StackSeed extends BaseCommand {
     // subtract them from the active set exactly like `reset` does, so their
     // seed steps degrade to service-inactive skips instead of failing.
     const excluded = new Set(instance.excludedServices);
-    const closureServices = computeClosure(manifest, requested, { withPlayback, withAuthz }).services;
+    const closureServices = computeClosure(manifest, requested, {
+      withPlayback,
+      withAuthz,
+      withStaffAdmin,
+    }).services;
     const active = new Set(closureServices.filter((id) => !excluded.has(id)));
     const droppedForSlot = closureServices.filter((id) => excluded.has(id));
     if (droppedForSlot.length > 0) {

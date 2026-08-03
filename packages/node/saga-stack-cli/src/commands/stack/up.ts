@@ -44,6 +44,7 @@ import {
   combineRequested,
   effectiveWithAuthz,
   effectiveWithPlayback,
+  effectiveWithStaffAdmin,
   seedAddOnsFor,
 } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
@@ -194,11 +195,14 @@ export default class StackUp extends BaseCommand {
     // Workspace files carry no authz axis (mirrors playback's `ws.playback`, but
     // `--with authz` is a `--only`/`--with` concept only, not modeled in workspace JSON).
     const withAuthz = ws ? false : effectiveWithAuthz(flags.with);
+    // Same shape as `withAuthz` — `--with staff-admin` is a `--only`/`--with` concept
+    // only, not modeled in workspace JSON.
+    const withStaffAdmin = ws ? false : effectiveWithStaffAdmin(flags.with);
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the
     // launch path applies (BLOCKER-1) so the dry-run reflects what actually launches. ──
     if (flags['dry-run']) {
-      this.runDryRun(flags, requested, isOnly, withPlayback, withAuthz, {
+      this.runDryRun(flags, requested, isOnly, withPlayback, withAuthz, withStaffAdmin, {
         sandboxHybrid: flags.sandbox !== undefined,
         sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
         sandboxName: ws?.iamSandbox ?? flags.sandbox,
@@ -249,7 +253,7 @@ export default class StackUp extends BaseCommand {
     //    deps the closure pulled in — iam-api et al. live at the cloud sandbox).
     //  - `--workspace`: subtract EVERY mode:sandbox service id (`ws.sandboxServices`).
     const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz);
-    await this.runNative(flags, requested, withPlayback, withAuthz, overlays, {
+    await this.runNative(flags, requested, withPlayback, withAuthz, withStaffAdmin, overlays, {
       sandboxHybrid: flags.sandbox !== undefined,
       sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
       sandboxName,
@@ -369,6 +373,7 @@ export default class StackUp extends BaseCommand {
     isOnly: boolean,
     withPlayback: boolean,
     withAuthz: boolean,
+    withStaffAdmin: boolean,
     prune: LaunchPrune = {},
   ): void {
     const resolvedRequest: ServiceId[] = isOnly
@@ -383,7 +388,7 @@ export default class StackUp extends BaseCommand {
       this.error(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
     }
 
-    const closure = computeClosure(manifest, resolvedRequest, { withPlayback, withAuthz });
+    const closure = computeClosure(manifest, resolvedRequest, { withPlayback, withAuthz, withStaffAdmin });
 
     // M7: at slot > 0 the bring-up would EXCLUDE the literal-port services; surface
     // that in the preview so the dry-run matches what a real `--slot N` up launches.
@@ -466,6 +471,7 @@ export default class StackUp extends BaseCommand {
     requested: ServiceId[],
     withPlayback: boolean,
     withAuthz: boolean,
+    withStaffAdmin: boolean,
     overlays: NativeOverlays = {},
     prune: LaunchPrune = {},
   ): Promise<void> {
@@ -489,7 +495,7 @@ export default class StackUp extends BaseCommand {
     // THIS slot's rtsm, not slot 0's) is generated in `buildRuntime`, the seam BOTH
     // `stack up` and `e2e run` share; it need not be repeated here.
 
-    const fullClosure = computeClosure(manifest, requested, { withPlayback, withAuthz });
+    const fullClosure = computeClosure(manifest, requested, { withPlayback, withAuthz, withStaffAdmin });
 
     // Exclude the still-un-slottable services from a slot > 0 bring-up: only the
     // literal-port playback trio (transcripts/insights/chat) carries literal cross-slot

@@ -838,4 +838,99 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     isFrontend: false,
     optional: true,
   },
+  // ── staff-admin console (saga-dash's SECOND app) ────────────────────────
+  // A staff-only SPA + its OWN Express/Lambda BFF. Modeled as TWO entries, the
+  // coach-web/coach-api precedent — `ServiceDef` is one id → one launch.cmd →
+  // one port, so a single entry cannot start both processes. `--with
+  // staff-admin` brings the pair up together (bundles.ts).
+  //
+  // Both are `optional: true`: this is an operator console, not part of the
+  // default closure, so a bare `ss stack up` is byte-identical to before.
+  'staff-admin-bff': {
+    id: 'staff-admin-bff',
+    repo: 'SAGA_DASH',
+    subpath: 'apps/web/staff-admin-console/backend',
+    port: 3000,
+    // `pnpm dev` = `JANUS_REQUIRED=false tsx watch src/local.ts`, so the janus
+    // (JumpCloud) perimeter bypass rides along for free — a local operator has
+    // no janus_session to present. src/local.ts reads `PORT`.
+    portEnvVar: 'PORT',
+    healthPath: '/health/ready',
+    databases: [],
+    dependsOn: ['iam-api', 'programs-api', 'sis-api'],
+    // All plain URL reads — the BFF proxies the operator's forwarded cookie to
+    // each. No S2S: access rides on the `iam_session` `ss stack login` mints.
+    depKinds: { 'iam-api': 'url', 'programs-api': 'url', 'sis-api': 'url' },
+    mesh: [],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        // 🪤 BARE ORIGINS — NOT `${IAM_URL}/trpc`. The BFF's tRPC clients append
+        // `/trpc` themselves (iam-client.ts, programs-client.ts, sis-client.ts),
+        // so ads-adm-api's `${IAM_URL}/trpc` form would double the segment and
+        // 404 in a way that reads like a broken feature.
+        //
+        // Also note the BFF's built-in IAM_API_URL default is localhost:3000 —
+        // its OWN port — so leaving this unset makes it proxy to itself.
+        IAM_API_URL: '${IAM_URL}',
+        // No PROGRAMS_URL / SIS_URL tokens exist (only the ports), so these
+        // compose the origin from the port tokens and slot correctly.
+        PROGRAMS_API_URL: 'http://localhost:${PROGRAMS_PORT}',
+        SIS_API_URL: 'http://localhost:${SIS_PORT}',
+        // Impersonation hands off to the local dash. Slot-correct via the token
+        // rather than the BFF's own localhost:8900 default.
+        IMPERSONATION_MOCK_DASH_ORIGIN: '${DASH_URL}',
+      },
+    },
+    seed: [],
+    lane: lanes(3000, 'staff-admin-api'),
+    tunnelSlug: 'staff-admin-api',
+    isFrontend: false,
+    optional: true,
+    // soa#305 adoption guard. The DOCUMENTED local path for this app is
+    // `pnpm dev:mock`, which pins IAM_API_URL at the e2e mock (127.0.0.1:4610).
+    // Without this fingerprint the launcher adopts such a process and the
+    // console then serves MOCK FIXTURE data while claiming to be on the ss
+    // stack — 200s all the way down, which is exactly how it misleads. Refuse
+    // it loudly instead (one-time "stop and re-run" for a pre-existing process).
+    adoptEnv: ['IAM_API_URL'],
+  },
+  'staff-admin-console': {
+    id: 'staff-admin-console',
+    repo: 'SAGA_DASH',
+    subpath: 'apps/web/staff-admin-console',
+    port: 8910,
+    // ⚠️ SLOT-0 ONLY, and deliberately so. The dev script is
+    // `vite dev --port 8910` and vite.config.ts hardcodes `server.port: 8910`;
+    // vite does NOT read $PORT (verified: with PORT=8913 set it still took the
+    // config's 8910, then auto-incremented to 8911 when that was busy). So
+    // `portEnvVar` cannot steer it and at --slot N this entry keeps its base
+    // port. This is the SAME pre-existing limitation as saga-dash (:8900,
+    // `vite dev --port 8900`, portEnvVar: null) — not a new regression.
+    // Fixing it properly is a saga-dash-side change (make the dev script and
+    // `server.port` env-driven), i.e. a second PR in a second repo.
+    portEnvVar: null,
+    healthPath: '/',
+    databases: [],
+    dependsOn: ['staff-admin-bff'],
+    // The browser calls the BFF (same-origin via vite's /api proxy), so the SPA
+    // needs it merely reachable — the `browser` kind, like saga-dash's deps.
+    depKinds: { 'staff-admin-bff': 'browser' },
+    mesh: [],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        // vite.config.ts's proxy target is `process.env.BFF_URL ??
+        // 'http://localhost:3000'`, so this IS slot-correct even though the
+        // SPA's own listen port is not: at slot > 0 the SPA still reaches ITS
+        // slot's BFF rather than silently proxying to slot 0's.
+        BFF_URL: 'http://localhost:${STAFF_ADMIN_BFF_PORT}',
+      },
+    },
+    seed: [],
+    lane: lanes(8910, 'staff-admin'),
+    tunnelSlug: 'staff-admin',
+    isFrontend: true,
+    optional: true,
+  },
 };

@@ -25,8 +25,16 @@ const throwFail = (msg: string): never => {
 };
 
 describe('bundle registry', () => {
-  it('exposes the six bundle names in registry order', () => {
-    expect(BUNDLE_NAMES).toEqual(['dash', 'connect', 'coach', 'playback', 'qtf', 'authz']);
+  it('exposes the seven bundle names in registry order', () => {
+    expect(BUNDLE_NAMES).toEqual([
+      'dash',
+      'connect',
+      'coach',
+      'playback',
+      'qtf',
+      'authz',
+      'staff-admin',
+    ]);
   });
 
   it('every bundle carries a non-empty description', () => {
@@ -42,6 +50,8 @@ describe('bundle registry', () => {
     expect(SERVICE_BUNDLES.playback).toEqual(['transcripts-api', 'insights-api', 'chat-api']);
     expect(SERVICE_BUNDLES.qtf).toEqual([]);
     expect(SERVICE_BUNDLES.authz).toEqual(['authz-sync']);
+    // BFF before SPA: the console's vite proxy is useless without it.
+    expect(SERVICE_BUNDLES['staff-admin']).toEqual(['staff-admin-bff', 'staff-admin-console']);
   });
 
   it('derives BUNDLE_SEED_ADDONS only for the seed-bearing bundles', () => {

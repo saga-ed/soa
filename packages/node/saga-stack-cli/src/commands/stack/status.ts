@@ -32,6 +32,7 @@ import {
   combineRequested,
   effectiveWithAuthz,
   effectiveWithPlayback,
+  effectiveWithStaffAdmin,
 } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
@@ -194,6 +195,7 @@ export function resolveServiceSet(
   return computeClosure(manifest, requested, {
     withPlayback: effectiveWithPlayback(withBundles),
     withAuthz: effectiveWithAuthz(withBundles),
+    withStaffAdmin: effectiveWithStaffAdmin(withBundles),
   }).services;
 }
 

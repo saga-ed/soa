@@ -47,6 +47,8 @@ export interface ClosureOpts {
   withPlayback?: boolean;
   /** Keep the `optional:true` `authz-sync` service. */
   withAuthz?: boolean;
+  /** Keep the `optional:true` staff-admin console pair (SPA + its BFF). */
+  withStaffAdmin?: boolean;
   /**
    * Whether to traverse `depKind: 'browser'` edges (default `true`).
    *
@@ -73,13 +75,17 @@ export function computeClosure(
 ): Closure {
   const withPlayback = opts.withPlayback ?? false;
   const withAuthz = opts.withAuthz ?? false;
+  const withStaffAdmin = opts.withStaffAdmin ?? false;
   const followBrowserEdges = opts.followBrowserEdges ?? true;
 
   // Each optional service is admitted by its OWN flag — never a blanket OR of
   // every opt-in flag, which would cross-admit (e.g. `--with authz` alone must
   // not also resolve the playback trio).
-  const admitsOptional = (id: ServiceId): boolean =>
-    id === 'authz-sync' ? withAuthz : withPlayback;
+  const admitsOptional = (id: ServiceId): boolean => {
+    if (id === 'authz-sync') return withAuthz;
+    if (id === 'staff-admin-bff' || id === 'staff-admin-console') return withStaffAdmin;
+    return withPlayback;
+  };
 
   const inClosure = new Set<ServiceId>();
   const reasons = new Map<ServiceId, string[]>();

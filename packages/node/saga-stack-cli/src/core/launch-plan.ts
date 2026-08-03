@@ -75,7 +75,7 @@ export interface LaunchTokens {
   /** coach-web port — up.sh `COACH_WEB_PORT` (8800). */
   COACH_WEB_PORT: string;
   /**
-   * staff-admin-console BFF port (3000) — the SPA's vite `/api` proxy target
+   * staff-admin-console BFF port (3011) — the SPA's vite `/api` proxy target
    * (`BFF_URL`). Needed because the SPA's own listen port cannot slot (vite
    * ignores $PORT) but its proxy target CAN, so a slot > 0 console still talks
    * to ITS slot's BFF instead of slot 0's.

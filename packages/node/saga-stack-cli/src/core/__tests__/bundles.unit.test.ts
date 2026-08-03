@@ -9,10 +9,14 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AUTHZ_IDS,
   BUNDLES,
   BUNDLE_NAMES,
   BUNDLE_SEED_ADDONS,
+  PLAYBACK_IDS,
   SERVICE_BUNDLES,
+  STAFF_ADMIN_IDS,
+  bundleForService,
   combineRequested,
   effectiveWithPlayback,
   expandBundles,
@@ -150,6 +154,30 @@ describe('effectiveWithPlayback', () => {
     expect(effectiveWithPlayback(['qtf'])).toBe(false);
     expect(effectiveWithPlayback([])).toBe(false);
     expect(effectiveWithPlayback(undefined)).toBe(false);
+  });
+});
+
+describe('bundleForService', () => {
+  it('maps a service id back to the bundle that contributes it', () => {
+    // The id and the bundle name deliberately DIFFER here — this is the case a
+    // hand-rolled `id === 'authz-sync' ? 'authz' : id` ternary got right by luck
+    // and every other overlay-bound service would have got wrong.
+    expect(bundleForService('authz-sync')).toBe('authz');
+    expect(bundleForService('staff-admin-bff')).toBe('staff-admin');
+    expect(bundleForService('staff-admin-console')).toBe('staff-admin');
+    expect(bundleForService('coach-api')).toBe('coach');
+  });
+
+  it('undefined for a service no bundle contributes', () => {
+    expect(bundleForService('sessions-api')).toBeUndefined();
+  });
+
+  it('every bundle name it returns is invokable as `--with <name>`', () => {
+    for (const id of [...AUTHZ_IDS, ...STAFF_ADMIN_IDS, ...PLAYBACK_IDS]) {
+      const name = bundleForService(id);
+      expect(name).toBeDefined();
+      expect(BUNDLE_NAMES).toContain(name);
+    }
   });
 });
 

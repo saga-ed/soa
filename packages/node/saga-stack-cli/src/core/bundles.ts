@@ -82,7 +82,7 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
   'staff-admin': {
     services: ['staff-admin-bff', 'staff-admin-console'],
     description:
-      'Staff-admin console: the staff-only SPA (:8910) + its own BFF (:3000), plus the ' +
+      'Staff-admin console: the staff-only SPA (:8910) + its own BFF (:3011), plus the ' +
       'iam/programs/sis closure they read. Log in with `ss stack login` — the console ' +
       'reads that operator cookie. Impersonate is HIDDEN (the synthetic seed mints no ' +
       'staff:* claims) and the COACH pages 401 (coach-api verifies a janus_session).',
@@ -214,6 +214,20 @@ export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
 export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
 
 /**
+ * The fully-resolved opt-in flags for every `optional:true` family — one field
+ * per flag, none omittable.
+ *
+ * `Required` is load-bearing: every `ClosureOpts` field is declared `?:`, so a
+ * bare `Pick` would leave them all optional and a caller could pass `{}` — which
+ * typechecks and then silently resolves an EMPTY closure (exit 0, no error). The
+ * alias exists so adding a fourth family is ONE edit here rather than a hand-sweep
+ * of every signature that spells the shape out.
+ */
+export type ResolvedClosureOpts = Required<
+  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>
+>;
+
+/**
  * Every optional-service opt-in flag, derived from one `--with` list.
  *
  * THE point of this helper: each `optional:true` family needs its OWN flag, and
@@ -227,7 +241,7 @@ export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].serv
  */
 export function closureOptsFor(
   withBundles: string[] | undefined,
-): Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>> {
+): ResolvedClosureOpts {
   return {
     withPlayback: effectiveWithPlayback(withBundles),
     withAuthz: effectiveWithAuthz(withBundles),
@@ -243,13 +257,27 @@ export function closureOptsFor(
  */
 export function closureOptsForIds(
   ids: readonly ServiceId[],
-): Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>> {
+): ResolvedClosureOpts {
   const has = (family: readonly ServiceId[]): boolean => ids.some((id) => family.includes(id));
   return {
     withPlayback: has(PLAYBACK_IDS),
     withAuthz: has(AUTHZ_IDS),
     withStaffAdmin: has(STAFF_ADMIN_IDS),
   };
+}
+
+/**
+ * The `--with` bundle name that contributes a given service id, or `undefined`
+ * when no bundle does.
+ *
+ * For "re-run `ss stack up --with <X>`" advice: the bundle name and the service
+ * id are NOT interchangeable (`authz-sync` lives in the `authz` bundle, and the
+ * staff-admin pair in `staff-admin`), so a message that prints the id is telling
+ * the operator to run a command that fails on an unknown bundle. Derived from
+ * `BUNDLES` in registry order, so it cannot drift as families are added. PURE.
+ */
+export function bundleForService(id: ServiceId): BundleName | undefined {
+  return BUNDLE_NAMES.find((name) => BUNDLES[name].services.includes(id));
 }
 
 /**

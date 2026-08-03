@@ -18,7 +18,7 @@
  *  - version != "1" warns (proceeds); missing/empty `.services` throws.
  */
 
-import { AUTHZ_IDS, STAFF_ADMIN_IDS } from './bundles.js';
+import { PLAYBACK_IDS } from './bundles.js';
 import type { ServiceId } from './manifest/index.js';
 
 /** One service entry in a workspace manifest. */
@@ -49,28 +49,11 @@ export interface WorkspaceSelection {
   sandboxServices: ServiceId[];
   /** True iff any playback API (insights/transcripts/chat) is in the run set (up.sh `DO_PLAYBACK`). */
   playback: boolean;
-  /**
-   * True iff `authz-sync` is in the run set. Same derivation as `playback`: a
-   * workspace names services DIRECTLY, so naming `authz-sync` is the workspace's
-   * way of asking for it — without this the closure's `withAuthz` gate drops the
-   * service and `up --workspace` reports success while authz-sync never starts.
-   */
-  authz: boolean;
-  /**
-   * True iff either staff-admin service is in the run set. Same derivation as
-   * `playback`: a workspace names services DIRECTLY, so naming the console is
-   * the workspace's way of asking for it — without this the closure's
-   * `withStaffAdmin` gate drops the pair and `up --workspace` reports success
-   * while the console never starts.
-   */
-  staffAdmin: boolean;
   /** Per-service DB-restore profiles (up.sh `SVC_DBPROFILE`) for local-source services. */
   dbProfiles: Record<string, string>;
   /** Non-fatal notes (recorded-but-unwired sandbox deps, version mismatch). */
   warnings: string[];
 }
-
-const PLAYBACK_APIS = new Set<ServiceId>(['insights-api', 'transcripts-api', 'chat-api']);
 
 /**
  * Parse an already-`JSON.parse`d workspace manifest into a `WorkspaceSelection`.
@@ -151,9 +134,12 @@ export function parseWorkspace(manifest: WorkspaceManifest): WorkspaceSelection 
     );
   }
 
-  const playback = runSet.some((s) => PLAYBACK_APIS.has(s));
-  const authz = runSet.some((s) => AUTHZ_IDS.includes(s));
-  const staffAdmin = runSet.some((s) => STAFF_ADMIN_IDS.includes(s));
+  // Registry-derived (bundles.ts) rather than a local hand-list, so it cannot
+  // drift from BUNDLES. Only `playback` is surfaced: it has a real consumer (the
+  // `DO_PLAYBACK` launch token). The other optional families are derived where
+  // they are USED, via `closureOptsForIds(ws.runSet)` in `up.ts` — one derivation
+  // on the same registry, rather than a second set of fields to keep in sync.
+  const playback = runSet.some((s) => PLAYBACK_IDS.includes(s));
 
-  return { runSet, iamSandbox, sandboxServices, playback, authz, staffAdmin, dbProfiles, warnings };
+  return { runSet, iamSandbox, sandboxServices, playback, dbProfiles, warnings };
 }

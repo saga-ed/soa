@@ -46,8 +46,8 @@ import {
   combineRequested,
   seedAddOnsFor,
 } from '../../core/bundles.js';
+import type { ResolvedClosureOpts } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
-import type { ClosureOpts } from '../../core/closure.js';
 import { deriveInstance, slotExcludedServices } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
 import * as flagMap from '../../core/flag-map.js';
@@ -193,13 +193,13 @@ export default class StackUp extends BaseCommand {
     let isOnly = requested.length > 0 || ws !== undefined;
     // When a workspace is set, its flags come from the run set — a workspace
     // names services DIRECTLY, so naming e.g. `authz-sync` is the workspace's way
-    // of asking for it, NOT from flags.with. `closureOptsForIds(ws.runSet)` derives
-    // all three the SAME way `WorkspaceSelection.playback`/`.authz`/`.staffAdmin`
-    // do (id-family membership) — using it here (rather than reading those fields)
-    // means a future bundle only needs a registry edit in bundles.ts, not a second
-    // hand-listed derivation here. Hard-coding withAuthz to false previously
-    // dropped a workspace-named `authz-sync` silently.
-    const closureOpts: Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>> =
+    // of asking for it, NOT from flags.with. `closureOptsForIds` derives every
+    // flag from the BUNDLES-backed id sets, so a future bundle needs only a
+    // registry edit in bundles.ts rather than a hand-listed derivation here (which
+    // is why `parseWorkspace` exposes no per-family booleans of its own).
+    // Hard-coding withAuthz to false previously dropped a workspace-named
+    // `authz-sync` silently.
+    const closureOpts: ResolvedClosureOpts =
       ws ? closureOptsForIds(ws.runSet) : closureOptsFor(flags.with);
     const { withAuthz } = closureOpts;
 
@@ -375,7 +375,7 @@ export default class StackUp extends BaseCommand {
     flags: DryRunFlags,
     requested: ServiceId[],
     isOnly: boolean,
-    closureOpts: Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>>,
+    closureOpts: ResolvedClosureOpts,
     prune: LaunchPrune = {},
   ): void {
     const resolvedRequest: ServiceId[] = isOnly
@@ -471,7 +471,7 @@ export default class StackUp extends BaseCommand {
   private async runNative(
     flags: NativeFlags,
     requested: ServiceId[],
-    closureOpts: Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>>,
+    closureOpts: ResolvedClosureOpts,
     overlays: NativeOverlays = {},
     prune: LaunchPrune = {},
   ): Promise<void> {

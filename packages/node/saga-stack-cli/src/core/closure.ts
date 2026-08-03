@@ -28,6 +28,7 @@
  * would wrongly resolve transcripts-api), so the gate dispatches per service id.
  */
 
+import { AUTHZ_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from './bundles.js';
 import { launchOrder } from './launch-order.js';
 import type { DbId, Manifest, MeshId, ServiceId } from './manifest/index.js';
 
@@ -82,30 +83,24 @@ export function computeClosure(
   // every opt-in flag, which would cross-admit (e.g. `--with authz` alone must
   // not also resolve the playback trio).
   //
+  // The id→family sets come from `bundles.ts` (derived from BUNDLES) rather than
+  // being hand-listed here, so adding a family is a registry edit only. Importing
+  // bundles.ts is safe: its only dependency on this module is `import type
+  // { ClosureOpts }`, which is erased at compile time — there is no runtime cycle.
+  //
   // EXHAUSTIVE BY CONSTRUCTION: there is deliberately no `return withPlayback`
   // fallthrough. That default is what silently handed every unmapped optional id
   // the playback flag — so a newly-added optional service resolved an EMPTY
   // closure (exit 0, no error) until someone noticed. An unmapped id now THROWS,
   // which surfaces at the first test that touches it rather than in the field.
-  // `bundles.ts` cannot be imported here (it imports this module's types), so the
-  // map is local; `optional-families.unit.test.ts` asserts it matches BUNDLES.
   const admitsOptional = (id: ServiceId): boolean => {
-    switch (id) {
-      case 'transcripts-api':
-      case 'insights-api':
-      case 'chat-api':
-        return withPlayback;
-      case 'authz-sync':
-        return withAuthz;
-      case 'staff-admin-bff':
-      case 'staff-admin-console':
-        return withStaffAdmin;
-      default:
-        throw new Error(
-          `closure: optional service '${id}' has no opt-in flag — add it to admitsOptional ` +
-            `(and to a BUNDLES entry), or it will silently resolve an empty closure.`,
-        );
-    }
+    if (PLAYBACK_IDS.includes(id)) return withPlayback;
+    if (AUTHZ_IDS.includes(id)) return withAuthz;
+    if (STAFF_ADMIN_IDS.includes(id)) return withStaffAdmin;
+    throw new Error(
+      `closure: optional service '${id}' has no opt-in flag — add it to a BUNDLES entry ` +
+        `(and its *_IDS export), or it will silently resolve an empty closure.`,
+    );
   };
 
   const inClosure = new Set<ServiceId>();

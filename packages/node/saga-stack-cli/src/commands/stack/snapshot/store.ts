@@ -24,7 +24,8 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
 import { BUNDLE_NAMES, closureOptsFor, combineRequested } from '../../../core/bundles.js';
-import { computeClosure, type ClosureOpts } from '../../../core/closure.js';
+import type { ResolvedClosureOpts } from '../../../core/bundles.js';
+import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { DbId, ServiceId } from '../../../core/manifest/index.js';
 import { storePlan, CURRENT_SNAPSHOT_SCHEMA_VERSION } from '../../../core/snapshot/index.js';
@@ -227,7 +228,7 @@ export default class SnapshotStore extends BaseCommand {
  */
 export function closureDatabases(
   requested: ServiceId[],
-  opts: Required<Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>>,
+  opts: ResolvedClosureOpts,
   fail: (msg: string) => never,
 ): DbId[] {
   const known = new Set(Object.keys(manifest.services));

@@ -101,11 +101,10 @@ Two things are expected to be missing, and are upstream gaps rather than wiring 
 Districts/Roster start empty — the seed creates personas and permissions but no district
 groups; create one from the console's Districts page.
 
-⚠️ **Slot-0 only.** `staff-admin-console`'s port is baked into `vite.config.ts` + its dev
-script and vite ignores `$PORT`, so at `--slot N` the SPA keeps `:8910` (the same
-pre-existing limitation as `saga-dash`'s `:8900`). Its BFF *does* slot, and the SPA's proxy
-target follows it, so a slot >0 console still reads its own slot's data — it just can't run
-concurrently with slot 0's console.
+Both slot normally under `--slot N`: the BFF takes its offset port via `PORT`, and the SPA
+rides the same `--port <base+offset>` argv append every `isFrontend` service uses (vite
+ignores `$PORT`, but honours the last `--port`). The SPA's proxy target follows its own
+slot's BFF, so concurrent consoles never mix stacks.
 
 ### Slots — multiple stacks on one box
 

@@ -23,8 +23,14 @@ import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
-import { BUNDLE_NAMES, combineRequested, effectiveWithAuthz, effectiveWithPlayback } from '../../../core/bundles.js';
-import { computeClosure } from '../../../core/closure.js';
+import {
+  BUNDLE_NAMES,
+  combineRequested,
+  effectiveWithAuthz,
+  effectiveWithPlayback,
+  effectiveWithStaffAdmin,
+} from '../../../core/bundles.js';
+import { computeClosure, type ClosureOpts } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { DbId, ServiceId } from '../../../core/manifest/index.js';
 import { storePlan, CURRENT_SNAPSHOT_SCHEMA_VERSION } from '../../../core/snapshot/index.js';
@@ -113,13 +119,13 @@ export default class SnapshotStore extends BaseCommand {
     // degrades gracefully rather than dumping absent playback DBs.
     const withPlayback = effectiveWithPlayback(flags.with);
     const withAuthz = effectiveWithAuthz(flags.with);
+    const withStaffAdmin = effectiveWithStaffAdmin(flags.with);
     const excluded = new Set<ServiceId>(instance.excludedServices);
     let only: DbId[] | undefined;
     if (flags.only) {
       only = closureDatabases(
         combineRequested(flags.only, flags.with, (m) => this.error(m)),
-        withPlayback,
-        withAuthz,
+        { withPlayback, withAuthz, withStaffAdmin },
         (m) => this.error(m),
       );
     } else if (instance.slot > 0) {
@@ -128,9 +134,11 @@ export default class SnapshotStore extends BaseCommand {
         .map((s) => s.id);
       const bundleServices = combineRequested(undefined, flags.with, (m) => this.error(m));
       const requested = [...new Set<ServiceId>([...fullNonOptional, ...bundleServices])];
-      const kept = computeClosure(manifest, requested, { withPlayback, withAuthz }).services.filter(
-        (id) => !excluded.has(id),
-      );
+      const kept = computeClosure(manifest, requested, {
+        withPlayback,
+        withAuthz,
+        withStaffAdmin,
+      }).services.filter((id) => !excluded.has(id));
       only = [...new Set<DbId>(kept.flatMap((id) => manifest.services[id].databases))];
     }
 
@@ -215,13 +223,18 @@ export default class SnapshotStore extends BaseCommand {
  * Resolve a requested service set (`--only <svc,…>` ∪ `--with <bundle>` services,
  * already combined by `combineRequested`) to its closure's DB set (`DbId[]`).
  * Mirrors `status`'s `resolveServiceSet`: unknown ids fail with a friendly oclif
- * error. `withPlayback`/`withAuthz` keep their respective optional services in
- * the closure.
+ * error.
+ *
+ * Takes the opt-in flags as a ClosureOpts-shaped OBJECT rather than positionals:
+ * every `optional:true` service needs its OWN flag (see `admitsOptional`), and a
+ * missing positional silently yields an EMPTY db list here — which `storePlan`
+ * then honours as "dump exactly these", writing a zero-database snapshot that
+ * exits 0. Spreading one object keeps a new optional service from re-opening
+ * that hole.
  */
 export function closureDatabases(
   requested: ServiceId[],
-  withPlayback: boolean,
-  withAuthz: boolean,
+  opts: Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>,
   fail: (msg: string) => never,
 ): DbId[] {
   const known = new Set(Object.keys(manifest.services));
@@ -230,5 +243,5 @@ export function closureDatabases(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  return computeClosure(manifest, requested, { withPlayback, withAuthz }).databases;
+  return computeClosure(manifest, requested, opts).databases;
 }

@@ -195,9 +195,11 @@ export default class StackUp extends BaseCommand {
     // Workspace files carry no authz axis (mirrors playback's `ws.playback`, but
     // `--with authz` is a `--only`/`--with` concept only, not modeled in workspace JSON).
     const withAuthz = ws ? false : effectiveWithAuthz(flags.with);
-    // Same shape as `withAuthz` — `--with staff-admin` is a `--only`/`--with` concept
-    // only, not modeled in workspace JSON.
-    const withStaffAdmin = ws ? false : effectiveWithStaffAdmin(flags.with);
+    // Unlike `withAuthz`, workspaces DO model this: a workspace names services
+    // directly, so `ws.staffAdmin` (derived from the run set, exactly like
+    // `ws.playback`) is how a workspace asks for the console. Hard-coding false
+    // here would drop the pair and report a successful `up` that never started it.
+    const withStaffAdmin = ws ? ws.staffAdmin : effectiveWithStaffAdmin(flags.with);
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the
     // launch path applies (BLOCKER-1) so the dry-run reflects what actually launches. ──

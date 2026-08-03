@@ -900,15 +900,14 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     repo: 'SAGA_DASH',
     subpath: 'apps/web/staff-admin-console',
     port: 8910,
-    // ⚠️ SLOT-0 ONLY, and deliberately so. The dev script is
-    // `vite dev --port 8910` and vite.config.ts hardcodes `server.port: 8910`;
-    // vite does NOT read $PORT (verified: with PORT=8913 set it still took the
-    // config's 8910, then auto-incremented to 8911 when that was busy). So
-    // `portEnvVar` cannot steer it and at --slot N this entry keeps its base
-    // port. This is the SAME pre-existing limitation as saga-dash (:8900,
-    // `vite dev --port 8900`, portEnvVar: null) — not a new regression.
-    // Fixing it properly is a saga-dash-side change (make the dev script and
-    // `server.port` env-driven), i.e. a second PR in a second repo.
+    // `null` because vite does NOT read $PORT — the dev script is
+    // `vite dev --port 8910` and vite.config.ts hardcodes `server.port: 8910`
+    // (verified: with PORT=8913 set it still took the config's 8910, then
+    // auto-incremented to 8911 when that was busy). It still SLOTS: like every
+    // `isFrontend` service, stack-api appends `--port <base+offset>` to the
+    // launch argv at slot > 0 and vite/cac honours the LAST `--port`. Same seam
+    // saga-dash (:8900, portEnvVar: null, isFrontend: true) rides — so do NOT
+    // add this to SLOT_EXCLUDED_SERVICES.
     portEnvVar: null,
     healthPath: '/',
     databases: [],
@@ -921,9 +920,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         // vite.config.ts's proxy target is `process.env.BFF_URL ??
-        // 'http://localhost:3000'`, so this IS slot-correct even though the
-        // SPA's own listen port is not: at slot > 0 the SPA still reaches ITS
-        // slot's BFF rather than silently proxying to slot 0's.
+        // 'http://localhost:3000'`, so the proxy target slots too: at slot > 0
+        // the SPA reaches ITS slot's BFF rather than silently proxying to
+        // slot 0's (which would mix two stacks' data behind one console).
         BFF_URL: 'http://localhost:${STAFF_ADMIN_BFF_PORT}',
       },
     },

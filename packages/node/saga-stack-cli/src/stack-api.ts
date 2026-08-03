@@ -1088,7 +1088,29 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
 
       // 3. up — the SAME native bring-up (mesh + prep + launch + auto-pull + AV). NO
       //    reset (restart never truncates data); the caller passes only the closure.
-      const up = await this.up(services);
+      //
+      //    RESTORE THE OPTIONALS WE JUST REAPED. The caller's closure is built from
+      //    NON-OPTIONAL services (restart takes no `--with`, so it cannot know which
+      //    opt-ins were used at `up` time), but step 1's reap is dir-scoped and stops
+      //    EVERY pidfile — including `--with`-launched optional services. Without this
+      //    union a bounce silently DELETES them: `up --with staff-admin` then `restart`
+      //    left the console and its BFF dead while reporting a successful restart (the
+      //    browser tab just dies with connection-refused). Reaped ids are what was
+      //    actually running, so this restores exactly the previous shape — and it is
+      //    generic, so it covers `authz-sync` and any future optional too.
+      const optionalIds = new Set<string>(
+        (Object.values(manifest.services) as { id: ServiceId; optional: boolean }[])
+          .filter((s) => s.optional)
+          .map((s) => s.id),
+      );
+      const reapedOptional = (reaped ?? [])
+        .map((r) => r.id)
+        .filter((id): id is ServiceId => optionalIds.has(id));
+      const relaunch =
+        reapedOptional.length > 0
+          ? [...new Set<ServiceId>([...services, ...reapedOptional])]
+          : services;
+      const up = await this.up(relaunch);
       return { down, reaped, vite, up };
     },
 

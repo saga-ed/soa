@@ -76,6 +76,26 @@ describe('parseWorkspace — mode mapping → run-set / iam-sandbox / playback',
     expect(sel.playback).toBe(true);
   });
 
+  it('a staff-admin service in the run-set flips staffAdmin on', () => {
+    // Same derivation as `playback` above: a workspace names services DIRECTLY,
+    // so naming the console IS the ask. `up --workspace` previously hard-coded
+    // this false, so the closure dropped the pair and reported a successful
+    // bring-up while the console never started.
+    const sel = parseWorkspace({
+      version: '1',
+      services: { 'staff-admin-console': { mode: 'local-source' } },
+    });
+    expect(sel.staffAdmin).toBe(true);
+  });
+
+  it('leaves staffAdmin off when no staff-admin service is named', () => {
+    const sel = parseWorkspace({
+      version: '1',
+      services: { 'iam-api': { mode: 'local-source' } },
+    });
+    expect(sel.staffAdmin).toBe(false);
+  });
+
   it('records per-service dbProfiles for local-source services', () => {
     const sel = parseWorkspace({
       version: '1',

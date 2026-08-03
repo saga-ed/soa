@@ -200,6 +200,19 @@ export function effectiveWithStaffAdmin(withBundles: string[] | undefined): bool
 }
 
 /**
+ * The `optional:true` service ids each opt-in flag admits, derived from the
+ * bundle registry so they cannot drift from `BUNDLES`.
+ *
+ * Consumers that must map an optional id BACK to its flag (flow resolution,
+ * workspace run-sets) use these instead of hand-listing ids — every optional
+ * service needs its OWN flag (see `admitsOptional`), and a stale hand-list is
+ * exactly how one gets silently dropped into an empty closure.
+ */
+export const PLAYBACK_IDS: readonly ServiceId[] = BUNDLES.playback.services;
+export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
+export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
+
+/**
  * The ordered, deduped seed add-ons the `--with` features contribute (via
  * `BUNDLE_SEED_ADDONS`): `--with playback` ⇒ `['playback']`, `--with qtf` ⇒
  * `['qtf']`, `--with playback --with qtf` ⇒ both. Service-only features

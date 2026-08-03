@@ -24,6 +24,7 @@
  * only shapes the orchestration inputs.
  */
 
+import { AUTHZ_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from '../bundles.js';
 import { computeClosure } from '../closure.js';
 import type { Closure } from '../closure.js';
 import { getService, manifest as defaultManifest } from '../manifest/index.js';
@@ -289,16 +290,29 @@ export function resolveFlow(
   const requiredSystems = unionRequiredSystems(stages, manifest.spa);
   const seedSelection = effectiveSeed(flow, terminal);
 
-  // Admit playback services into the closure iff a selected stage requires one
-  // (optional in the manifest) or the seed layers the playback add-on.
-  const requiresOptional = requiredSystems.some((id) => getService(id, sm).optional);
+  // Admit optional services into the closure iff a selected stage requires one
+  // (optional in the manifest) or the seed layers the matching add-on.
+  //
+  // Dispatch PER FAMILY, mirroring `admitsOptional` in closure.ts: each optional
+  // service has its OWN opt-in flag, so a blanket `requiresOptional → withPlayback`
+  // silently drops every non-playback optional a flow names (an empty closure,
+  // whose stages then fail against a service that was never launched — pointing
+  // at the browser rather than at the gate that dropped it).
+  const requiresOptional = (ids: readonly ServiceId[]): boolean =>
+    requiredSystems.some((id) => getService(id, sm).optional && ids.includes(id));
   const withPlayback =
-    opts.withPlayback ?? (requiresOptional || (seedSelection?.addOns?.includes('playback') ?? false));
+    opts.withPlayback ??
+    (requiresOptional(PLAYBACK_IDS) || (seedSelection?.addOns?.includes('playback') ?? false));
+  const withStaffAdmin = requiresOptional(STAFF_ADMIN_IDS);
+  const withAuthz =
+    requiresOptional(AUTHZ_IDS) || (seedSelection?.addOns?.includes('authz') ?? false);
   // followBrowserEdges:false — a flow's requiredSystems explicitly list the
   // backends its stages touch; we must NOT auto-expand the SPA's browser deps
   // (which would drag in every backend and defeat the N-of-M payoff, §5.2).
   const closure = computeClosure(sm, requiredSystems, {
     withPlayback,
+    withAuthz,
+    withStaffAdmin,
     followBrowserEdges: false,
   });
 

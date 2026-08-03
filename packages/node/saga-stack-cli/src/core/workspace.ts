@@ -18,6 +18,7 @@
  *  - version != "1" warns (proceeds); missing/empty `.services` throws.
  */
 
+import { STAFF_ADMIN_IDS } from './bundles.js';
 import type { ServiceId } from './manifest/index.js';
 
 /** One service entry in a workspace manifest. */
@@ -48,6 +49,14 @@ export interface WorkspaceSelection {
   sandboxServices: ServiceId[];
   /** True iff any playback API (insights/transcripts/chat) is in the run set (up.sh `DO_PLAYBACK`). */
   playback: boolean;
+  /**
+   * True iff either staff-admin service is in the run set. Same derivation as
+   * `playback`: a workspace names services DIRECTLY, so naming the console is
+   * the workspace's way of asking for it — without this the closure's
+   * `withStaffAdmin` gate drops the pair and `up --workspace` reports success
+   * while the console never starts.
+   */
+  staffAdmin: boolean;
   /** Per-service DB-restore profiles (up.sh `SVC_DBPROFILE`) for local-source services. */
   dbProfiles: Record<string, string>;
   /** Non-fatal notes (recorded-but-unwired sandbox deps, version mismatch). */
@@ -136,6 +145,7 @@ export function parseWorkspace(manifest: WorkspaceManifest): WorkspaceSelection 
   }
 
   const playback = runSet.some((s) => PLAYBACK_APIS.has(s));
+  const staffAdmin = runSet.some((s) => STAFF_ADMIN_IDS.includes(s));
 
-  return { runSet, iamSandbox, sandboxServices, playback, dbProfiles, warnings };
+  return { runSet, iamSandbox, sandboxServices, playback, staffAdmin, dbProfiles, warnings };
 }

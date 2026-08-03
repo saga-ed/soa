@@ -8,6 +8,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { closureDatabases } from '../../../commands/stack/snapshot/store.js';
+import { AUTHZ_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from '../../bundles.js';
 import { computeClosure } from '../../closure.js';
 import { manifest } from '../index.js';
 
@@ -43,11 +45,13 @@ describe('staff-admin manifest entries', () => {
   });
 
   it('routes the SPA proxy at its OWN slot BFF', () => {
-    // The SPA's listen port cannot slot (vite ignores $PORT; the port is baked
-    // into vite.config.ts + the dev script), but its proxy target CAN — so a
-    // slot > 0 console must not silently read slot 0's BFF.
+    // A slot > 0 console must not silently read slot 0's BFF — that would mix
+    // two stacks' data behind one console.
     expect(spa.launch.env.BFF_URL).toBe('http://localhost:${STAFF_ADMIN_BFF_PORT}');
+    // vite ignores $PORT (hence null), but the SPA still slots: `isFrontend`
+    // services get `--port <base+offset>` appended to argv by stack-api.
     expect(spa.portEnvVar).toBeNull();
+    expect(spa.isFrontend).toBe(true);
   });
 
   it('brings the BFF up before the SPA that proxies to it', () => {
@@ -94,5 +98,48 @@ describe('staff-admin closure admission', () => {
     );
     const c = computeClosure(manifest, all as never, {});
     for (const id of ids) expect(c.services).not.toContain(id);
+  });
+});
+
+describe('optional-service id sets (derived from BUNDLES)', () => {
+  it('maps each opt-in flag to its own bundle services', () => {
+    // Consumers that map an optional id BACK to its flag (flow resolution,
+    // workspace run-sets) read these instead of hand-listing ids, so they
+    // cannot drift from the bundle registry.
+    expect(STAFF_ADMIN_IDS).toEqual(['staff-admin-bff', 'staff-admin-console']);
+    expect(AUTHZ_IDS).toEqual(['authz-sync']);
+    expect(PLAYBACK_IDS).toEqual(['transcripts-api', 'insights-api', 'chat-api']);
+  });
+
+  it('every optional manifest service belongs to exactly one opt-in set', () => {
+    // The gap this whole class of bug came from: an optional service with no
+    // flag mapping silently resolves to an EMPTY closure at every caller.
+    const mapped = new Set<string>([...PLAYBACK_IDS, ...AUTHZ_IDS, ...STAFF_ADMIN_IDS]);
+    const optional = Object.values(manifest.services)
+      .filter((s) => s.optional)
+      .map((s) => s.id);
+    for (const id of optional) expect(mapped.has(id)).toBe(true);
+  });
+});
+
+describe('snapshot store — closureDatabases', () => {
+  const fail = (m: string): never => {
+    throw new Error(m);
+  };
+
+  it('resolves the staff-admin closure DBs when the flag is set', () => {
+    // Regression: this call site omitted `withStaffAdmin`, so the ids resolved
+    // to an EMPTY db list — and `storePlan` honours a defined-but-empty `only`
+    // as "dump exactly these", writing a zero-database snapshot that exits 0.
+    // The pair owns no DBs itself; the upstreams it pulls in do.
+    const dbs = closureDatabases([...STAFF_ADMIN_IDS], { withStaffAdmin: true }, fail);
+    expect(dbs).not.toEqual([]);
+    expect(dbs).toContain('iam_local');
+  });
+
+  it('still fails loudly on an unknown service id', () => {
+    expect(() => closureDatabases(['nope' as never], { withStaffAdmin: true }, fail)).toThrow(
+      /unknown service id/,
+    );
   });
 });

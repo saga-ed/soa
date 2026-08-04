@@ -21,9 +21,12 @@ import type { ServiceId } from '../manifest/index.js';
 describe('computeClosure — {scheduling-api, sessions-api}', () => {
   const closure = computeClosure(manifest, ['scheduling-api', 'sessions-api']);
 
-  it('pulls in iam-api + programs-api, topo-ordered', () => {
+  it('pulls in iam-api + programs-api + authz-api, topo-ordered', () => {
     expect(closure.services).toEqual([
       'iam-api',
+      // soa#402: a hard `url` dep of sessions-api, so the transitive closure
+      // pulls it into every set containing sessions-api.
+      'authz-api',
       'programs-api',
       'scheduling-api',
       'sessions-api',
@@ -37,6 +40,7 @@ describe('computeClosure — {scheduling-api, sessions-api}', () => {
       'programs',
       'scheduling',
       'sessions',
+      'authz_local', // soa#402 — last in manifest declaration order
     ]);
   });
 
@@ -62,12 +66,14 @@ describe('computeClosure — {scheduling-api, sessions-api}', () => {
 describe('computeClosure — saga-dash', () => {
   const closure = computeClosure(manifest, ['saga-dash']);
 
-  it('resolves to 8 services (NOT the full stack)', () => {
-    expect(closure.services).toHaveLength(8);
+  it('resolves to 9 services (NOT the full stack)', () => {
+    expect(closure.services).toHaveLength(9);
     expect(new Set(closure.services)).toEqual(
       new Set<ServiceId>([
         'iam-api',
         'sis-api',
+        // soa#402 — reached transitively through sessions-api.
+        'authz-api',
         'programs-api',
         'scheduling-api',
         'sessions-api',

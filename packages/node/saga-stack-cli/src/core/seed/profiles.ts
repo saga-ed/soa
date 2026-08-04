@@ -20,6 +20,7 @@ export type SeedStepId =
   | 'iam-registry' //         soa#253: iam seed:registry (Permission/Policy catalog) — MUST precede iam-dev-user
   | 'iam-dev-user'
   | 'iam'
+  | 'authz-projection-backfill' // soa#402: warm authz-api's iam projection (offline iam seed emits no events)
   | 'sessions'
   | 'qtf-demo'
   | 'programs'
@@ -38,11 +39,21 @@ export type SeedStepId =
 export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>> = {
   // soa#253: `iam-registry` FIRST — the Permission/Policy catalog that iam-dev-user's
   // dev-admin grant depends on (registry-gated view_rosters_tab/view_sessions_tab).
-  roster: ['iam-registry', 'iam-dev-user', 'iam', 'sessions'],
+  roster: ['iam-registry', 'iam-dev-user', 'iam', 'authz-projection-backfill', 'sessions'],
   // coach is SINGLE-STORE now: mongo is retired (curriculum reads come from
   // Postgres content_release), so `coach-mongo` is gone and `coach-pg` — which
   // also seeds the group_track_map projection — is the whole coach seed.
-  full: ['iam-registry', 'iam-dev-user', 'iam', 'sessions', 'programs', 'scheduling', 'content', 'coach-pg'],
+  full: [
+    'iam-registry',
+    'iam-dev-user',
+    'iam',
+    'authz-projection-backfill',
+    'sessions',
+    'programs',
+    'scheduling',
+    'content',
+    'coach-pg',
+  ],
 };
 
 /** Add-on → the seed-step ids it contributes (plan §4.1). */
@@ -81,6 +92,9 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
   'iam-registry',
   'iam-dev-user',
   'iam',
+  // soa#402: must follow 'iam' (it re-emits what that seed wrote) and precede
+  // every online step whose reads traverse sessions-api's authz gate (qtf-demo).
+  'authz-projection-backfill',
   'sessions',
   'qtf-demo',
   'programs',
@@ -315,6 +329,45 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       command: ['pnpm', 'db:seed'],
       env: inlineDatabaseUrl(getDb('sessions', m)),
       requiresServiceUp: [],
+      failureMode: 'fatal',
+    },
+    /**
+     * soa#402 — warm authz-api's `iam.*` projection.
+     *
+     * WHY THIS EXISTS: the stack's iam seeding is OFFLINE (direct DB writes), so
+     * it never publishes `iam.*` events. authz-api's projection consumer therefore
+     * never hydrates, `projection_readiness` stays empty, and it fails closed with
+     * `SERVICE_UNAVAILABLE` ("iam-projection is not yet warm") on every capabilities
+     * call — which sessions-api maps to tRPC TIMEOUT → HTTP 408 on EVERY sessions
+     * read. Onboarding authz-api into the manifest is necessary but NOT sufficient
+     * without this step; verified on a live slot, where the identical
+     * `sessions.dayList` went 408 → 200 once the projection warmed.
+     *
+     * Re-drives iam's normal event path (`writeOutbox` + the running OutboxRelay)
+     * rather than a bulk-hydrate API — iam-api's own script, whose docstring names
+     * authz-api's projection as its motivating consumer. Every `iam.*` consumer
+     * upserts on the wire id, so re-running is idempotent, just noisy. The script's
+     * "run off-peak" warning is about deployed environments with live traffic; a
+     * local slot has no peak.
+     *
+     * ONLINE and needs BOTH services: iam-api runs the relay that ships the rows,
+     * authz-api must be consuming to project them. `cwd` is iam-api's (the script
+     * lives there) — same ROSTERING repo root as the owning service. DATABASE_URL
+     * points at iam_local: the script only writes iam's outbox.
+     */
+    'authz-projection-backfill': {
+      id: 'authz-projection-backfill',
+      // Owned by authz-api: the step exists to hydrate ITS read model, so it drops
+      // out with authz-api on a partial stack and is snapshot-skipped when authz-api
+      // was restored (a restored projection is already warm).
+      service: 'authz-api',
+      databases: ['authz_local'],
+      cwd: getService('iam-api', m).subpath,
+      command: ['npx', 'tsx', 'src/scripts/backfill-outbox-reemit.ts'],
+      env: inlineDatabaseUrl(getDb('iam_local', m)),
+      requiresServiceUp: ['iam-api', 'authz-api'],
+      // fatal: without a warm projection every sessions read 408s, so a silent
+      // failure here reproduces exactly the bug soa#402 is about.
       failureMode: 'fatal',
     },
     // QTF + observation-notes demo on an Ended session. Add-on, online: only

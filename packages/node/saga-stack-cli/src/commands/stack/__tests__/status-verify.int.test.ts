@@ -199,7 +199,7 @@ describe('stack status — native, manifest-derived, read-only', () => {
   it('probes every non-optional service INCLUDING content-api :3009 (the closed gap)', async () => {
     await StackStatus.run([...WS], config);
     expect(probed).toContain(CONTENT_URL);
-    expect(probed).toHaveLength(13); // 10 core + rtsm-api + coach-api/coach-web; no playback
+    expect(probed).toHaveLength(14); // 10 core + rtsm-api + coach-api/coach-web + authz-api (soa#402); no playback
   });
 
   it('--only scopes the probes to the dependency closure', async () => {
@@ -233,7 +233,7 @@ describe('stack status — native, manifest-derived, read-only', () => {
 
   it('--with qtf is seed-only ⇒ no service scope ⇒ probes the full non-optional stack', async () => {
     await StackStatus.run(['--with', 'qtf', ...WS], config);
-    expect(probed).toHaveLength(13);
+    expect(probed).toHaveLength(14);
   });
 
   it('NEVER exits non-zero even when services are down (read-only)', async () => {
@@ -241,7 +241,7 @@ describe('stack status — native, manifest-derived, read-only', () => {
     await expect(StackStatus.run([...WS, '--output-json'], config)).resolves.toBeUndefined();
     const json = JSON.parse(out.join(''));
     expect(json.healthy).toBe(false);
-    expect(json.summary).toMatchObject({ total: 13, down: 2 });
+    expect(json.summary).toMatchObject({ total: 14, down: 2 });
   });
 
   it('porcelain emits one key=value per service plus healthy=', async () => {
@@ -475,14 +475,14 @@ describe('stack verify --slot N — backend + saga-dash/coach gate on offset por
       expect(url).toContain(`:${manifest.services[id].port + 1000}`);
     }
 
-    // the full non-optional set is slottable now: all 13 are probed.
-    expect(probed).toHaveLength(13);
+    // the full non-optional set is slottable now: all 14 are probed.
+    expect(probed).toHaveLength(14);
   });
 
   it('slot 0 verify is byte-identical: probes every non-optional service on base ports', async () => {
     await StackVerify.run([...WS], config);
     expect(probed).toContain(DASH_URL); // frontends gated at slot 0
-    expect(probed).toHaveLength(13);
+    expect(probed).toHaveLength(14);
   });
 });
 

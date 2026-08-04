@@ -153,6 +153,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       CORS_ORIGIN: 'http://localhost:8900',
       JWT_ISSUER: 'https://iam.wootdev.com',
+      // soa#402 — tokenized, never authz-api's literal :3200 default.
+      AUTHZ_API_URL: 'http://localhost:3200',
     });
   });
 
@@ -334,6 +336,7 @@ describe('launchPlan — ordered native specs for a closure', () => {
   it('orders the closure by launchOrder (deps first)', () => {
     expect(plan.map((s) => s.id)).toEqual([
       'iam-api',
+      'authz-api', // soa#402
       'programs-api',
       'scheduling-api',
       'sessions-api',

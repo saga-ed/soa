@@ -144,6 +144,7 @@ describe('connectv3 connect-smoke — resolves through the SAME resolveFlow/clos
         'iam-api',
         'programs-api',
         'scheduling-api',
+        'authz-api', // soa#402 — sessions-api's hard authz dep
       ]),
     );
   });

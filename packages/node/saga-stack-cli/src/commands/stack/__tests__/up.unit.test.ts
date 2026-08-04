@@ -41,6 +41,7 @@ describe('stack up --dry-run — closure planning path', () => {
 
     expect(closure.services).toEqual([
       'iam-api',
+      'authz-api', // soa#402 — transitive through sessions-api
       'programs-api',
       'scheduling-api',
       'sessions-api',
@@ -51,6 +52,7 @@ describe('stack up --dry-run — closure planning path', () => {
       'programs',
       'scheduling',
       'sessions',
+      'authz_local', // soa#402
     ]);
     expect(closure.mesh).toEqual(['postgres', 'redis', 'rabbitmq']); // redis via iam-api
   });
@@ -60,8 +62,9 @@ describe('stack up --dry-run — closure planning path', () => {
       .filter((s) => !s.optional)
       .map((s) => s.id);
     const closure = computeClosure(manifest, fullRequest);
-    // 13 non-optional services (10 core + rtsm-api + coach-api/coach-web); no playback.
-    expect(closure.services).toHaveLength(13);
+    // 14 non-optional services (10 core + rtsm-api + coach-api/coach-web + authz-api,
+    // soa#402); no playback.
+    expect(closure.services).toHaveLength(14);
     expect(closure.services).not.toContain('transcripts-api');
     expect(closure.mesh).toContain('connect-mongo'); // connect-api in the full set
   });

@@ -220,4 +220,23 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     // NOT part of default mesh-up — see the `openfga` entry above.
     meshProvisioned: false,
   },
+  authz_local: {
+    name: 'authz_local',
+    engine: 'postgres',
+    // @saga-ed/authz-db owns the schema (decision log + the local iam.* event
+    // projection tables). Same shape as sis_db: prisma.config.ts reads
+    // AUTHZ_DATABASE_URL directly (and throws if unset), so the migrate step
+    // must inject THAT var, not DATABASE_URL.
+    migrate: { dir: 'packages/node/authz-db', cmd: 'db:deploy', migrateEnvVar: 'AUTHZ_DATABASE_URL' },
+    ownerRole: 'authz',
+    ownerPw: 'authz',
+    resettable: true,
+    resetMode: 'truncate',
+    // UNCONDITIONAL, unlike the two entries above: authz-api is a hard
+    // dependency of sessions-api (soa#402), not part of the `--with authz`
+    // OpenFGA opt-in that merely shares the prefix. `meshProvisioned:true` also
+    // means runtime/provision.ts's R2 pass creates the role + DB idempotently
+    // on PRE-EXISTING mesh volumes, whose profile-empty.sql predates this entry.
+    meshProvisioned: true,
+  },
 };

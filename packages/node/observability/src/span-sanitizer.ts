@@ -70,6 +70,14 @@ const NPM_SCOPE_SEGMENT = /^@[A-Za-z0-9_-]+$/;
  * route, which is user data and was previously redacted by the email rule.
  * Encoding must not decide PII exposure — `/@bob` and `/%40bob` have to behave
  * identically on a request URL.
+ *
+ * A token inside free text has no inherent context, so it is classified by
+ * POSITIVE evidence that it names a code location (see `pathContextOf`) and
+ * treated as a request URL otherwise. Shape alone cannot make that call: this
+ * is the third defect of the form "something `@`-shaped escaped redaction",
+ * and each previous attempt to narrow the scope pattern left a neighbouring
+ * leak (`/@bob` when the rule required no dot, `/@bob/posts` if it required
+ * `@scope/name`). Provenance is the boundary that closes the class.
  */
 type PathContext = 'url' | 'stack';
 
@@ -192,16 +200,75 @@ function sanitizeToken(token: string): string {
     if (core === '') {
         return token;
     }
-    // `indexOf` first: the anchored email test only runs on tokens that could
-    // possibly be one, so prose never pays for it.
-    if (core.indexOf('@') !== -1 && BARE_EMAIL_TOKEN.test(core)) {
-        return lead + ':email' + trail;
+    const emailRedacted = redactEmails(core);
+    if (emailRedacted !== null) {
+        return lead + emailRedacted + trail;
     }
     if (!isPathShaped(core)) {
         return token;
     }
-    return lead + sanitizeUrl(core, 'stack') + trail;
+    return lead + sanitizeUrl(core, pathContextOf(core)) + trail;
 }
+
+/**
+ * Redact every address in an email-shaped token, or `null` if it holds none.
+ *
+ * Whitespace is not the only delimiter that packs addresses together: a
+ * recipient list serializes as `a@b.com;c@d.com` or `a@b.com,c@d.com`, which is
+ * ONE whitespace token, matches the anchored whole-token pattern at neither
+ * address, is not path-shaped, and so shipped both verbatim. The comma-SPACE
+ * form did redact, so the split is what hid this — the delimiter, not the
+ * shape, decided exposure.
+ *
+ * Splitting on those two separators keeps each piece anchored (the property
+ * that makes the scan linear — see `BARE_EMAIL_TOKEN`) while covering the
+ * packed forms. Rejoining with the original separators preserves the text for
+ * the non-email pieces of a mixed token.
+ */
+function redactEmails(core: string): string | null {
+    // `indexOf` first: the anchored tests only run on tokens that could
+    // possibly hold an address, so prose never pays for them. NB: probe for
+    // `%40` with a substring search, not `PERCENT_ENCODED_AT` — that regex is
+    // `g`-flagged for the replace below, and a `g` regex carries `lastIndex`
+    // across `.test()` calls.
+    if (core.indexOf('@') === -1 && !core.toLowerCase().includes('%40')) {
+        return null;
+    }
+
+    let redactedAny = false;
+    const pieces = core.split(EMAIL_LIST_SEPARATOR).map((piece) => {
+        // `%40` is the percent-encoded `@`. `EMAIL_SEGMENT` already treats the
+        // two as equivalent for path segments; free text has to agree, or an
+        // encoded address in prose survives while its literal form is redacted.
+        const decoded = piece.replace(PERCENT_ENCODED_AT, '@');
+        if (!BARE_EMAIL_TOKEN.test(decoded)) {
+            return piece;
+        }
+        redactedAny = true;
+        return ':email';
+    });
+
+    return redactedAny ? pieces.join('') : null;
+}
+
+// Capturing, so `split` keeps the separators and the token rejoins verbatim.
+const EMAIL_LIST_SEPARATOR = /([,;]+)/;
+const PERCENT_ENCODED_AT = /%40/gi;
+
+/**
+ * Classify a free-text token by POSITIVE evidence that it names a code
+ * location. Anything else — including a bare `/@bob` echoed out of a router's
+ * "Cannot GET" message — is treated as a request URL, so the npm-scope
+ * exemption can never un-redact user data. Erring toward `'url'` costs at most
+ * an over-redacted stack frame; erring toward `'stack'` ships PII.
+ */
+function pathContextOf(token: string): PathContext {
+    return FILE_SCHEME.test(token) || token.includes('node_modules/')
+        ? 'stack'
+        : 'url';
+}
+
+const FILE_SCHEME = /^file:\/\//i;
 
 function isPathShaped(token: string): boolean {
     if (HAS_SCHEME.test(token)) return true;

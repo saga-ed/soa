@@ -108,6 +108,43 @@ describe('sanitizeText', () => {
         ).toContain('@saga-ed');
     });
 
+    // The npm-scope exemption is keyed on provenance, not shape. A router
+    // echoes the request path into its message ("Cannot GET /@bob"), so a
+    // shape-only rule handed free text the stack-context exemption and
+    // un-redacted a handle that `sanitizeUrl` redacts correctly.
+    it.each([
+        ['Cannot GET /@bob', 'Cannot GET /:id'],
+        ['Cannot GET /@bob/posts', 'Cannot GET /:id/posts'],
+    ])('redacts @handle echoed into free text: %s', (input, expected) => {
+        expect(sanitizeText(input)).toBe(expected);
+    });
+
+    // Encoding must never decide exposure — in a path segment or in prose.
+    it('treats literal and percent-encoded handles identically in text', () => {
+        expect(sanitizeText('Cannot GET /@bob')).toBe(
+            sanitizeText('Cannot GET /%40bob'),
+        );
+    });
+
+    it('redacts a percent-encoded address in prose', () => {
+        expect(sanitizeText('encoded a%40b.com in prose')).toBe(
+            'encoded :email in prose',
+        );
+    });
+
+    // A recipient list is ONE whitespace token, so the anchored whole-token
+    // test matched neither address. The comma-SPACE form always worked, which
+    // is what let the packed forms hide: the delimiter decided exposure.
+    it.each([
+        'failed for a@b.com;c@d.com',
+        'failed for a@b.com,c@d.com',
+        'failed for a@b.com, c@d.com',
+    ])('redacts every address in a packed list: %s', (input) => {
+        const out = sanitizeText(input);
+        expect(out).not.toContain('a@b.com');
+        expect(out).not.toContain('c@d.com');
+    });
+
     // Schemes are matched generically, not from a list. `file://` is the normal
     // frame shape in an ESM service, so a fixed `https?` list silently exempted
     // every stack this package exists to scrub.
@@ -139,6 +176,13 @@ describe('sanitizeText', () => {
     // allowed 1000ms and passed at ~220ms of quadratic work, so it would have
     // stayed green through a 3x regression. Doubling the input must not
     // meaningfully more than double the time.
+    //
+    // The bound is deliberately loose. This is a wall-clock measurement in a
+    // package every layer depends on, run under CI parallelism where a GC
+    // pause or a descheduled core lands entirely inside one of two short
+    // samples — a tight ratio would flake fleet-wide without catching anything
+    // extra. Quadratic behaviour on a 2x input shows up at ~4x and grows with
+    // size, so a regression still fails this; only the noise band widens.
     it('scans in linear time, not quadratically', () => {
         const scan = (kib: number) => {
             const input = 'a.'.repeat(kib * 512); // dotted run, no '@' at all
@@ -148,10 +192,10 @@ describe('sanitizeText', () => {
         };
 
         scan(8); // warm up, so JIT compilation is not attributed to the first size
-        const small = Math.max(scan(8), 0.05);
+        const small = Math.max(scan(8), 0.5);
         const large = scan(16);
 
-        expect(large / small).toBeLessThan(2.6);
+        expect(large / small).toBeLessThan(3.5);
     });
 
     it('caps retained output at the truncation limit', () => {

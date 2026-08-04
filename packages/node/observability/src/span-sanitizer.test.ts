@@ -8,6 +8,8 @@ import {
 } from './span-sanitizer.js';
 import { resolveResourceAttributes } from './tracing.js';
 import { recordSpanException } from './record-exception.js';
+import type { SpanExporter, ReadableSpan } from '@opentelemetry/sdk-trace-base';
+import { ExportResultCode, type ExportResult } from '@opentelemetry/core';
 
 describe('sanitizeUrl', () => {
     it('strips query strings', () => {
@@ -486,6 +488,71 @@ describe('PiiSanitizingSpanExporter', () => {
             expect.stringContaining('span attribute sanitization failed'),
             expect.anything(),
         );
+    });
+});
+
+describe('PiiSanitizingSpanExporter degradation granularity', () => {
+    const noopInner = {
+        export: () => {},
+        shutdown: async () => {},
+    } as unknown as SpanExporter;
+
+    // The degrade-safe contract was per SPAN, which is too coarse to hold the
+    // PII guarantee: one unwritable entry aborted the shared loop and shipped
+    // every remaining entry verbatim.
+    it('a frozen event does not skip a later event on the same span', () => {
+        const later: Record<string, unknown> = {
+            'exception.message': 'y for c@d.com',
+        };
+        const span = {
+            attributes: {},
+            events: [
+                { attributes: Object.freeze({ 'exception.message': 'x' }) },
+                { attributes: later },
+            ],
+        } as unknown as ReadableSpan;
+
+        new PiiSanitizingSpanExporter(noopInner).export([span], () => {});
+
+        expect(later['exception.message']).toBe('y for :email');
+    });
+
+    it('an unwritable attribute does not skip a later key on the same span', () => {
+        const attrs: Record<string, unknown> = { 'url.path': '/students/42' };
+        Object.defineProperty(attrs, 'http.url', {
+            value: 'https://h.com/students/1',
+            writable: false,
+            configurable: false,
+            enumerable: true,
+        });
+        const span = { attributes: attrs, events: [] } as unknown as ReadableSpan;
+
+        new PiiSanitizingSpanExporter(noopInner).export([span], () => {});
+
+        expect(attrs['url.path']).toBe('/students/:id');
+    });
+
+    // BatchSpanProcessor wraps export() in a promise that settles ONLY via
+    // resultCallback, so a synchronous throw would leave it pending forever and
+    // wedge every later flush behind the in-flight guard.
+    it('reports a failed result when the inner exporter throws synchronously', () => {
+        const throwingInner = {
+            export: () => {
+                throw new Error('boom');
+            },
+            shutdown: async () => {},
+        } as unknown as SpanExporter;
+        const results: ExportResult[] = [];
+
+        expect(() =>
+            new PiiSanitizingSpanExporter(throwingInner).export(
+                [{ attributes: {}, events: [] } as unknown as ReadableSpan],
+                (r) => results.push(r),
+            ),
+        ).not.toThrow();
+
+        expect(results).toHaveLength(1);
+        expect(results[0]!.code).toBe(ExportResultCode.FAILED);
     });
 });
 

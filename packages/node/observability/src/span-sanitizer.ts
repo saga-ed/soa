@@ -1,6 +1,6 @@
 import { diag, type Attributes } from '@opentelemetry/api';
 import type { SpanExporter, ReadableSpan } from '@opentelemetry/sdk-trace-base';
-import type { ExportResult } from '@opentelemetry/core';
+import { ExportResultCode, type ExportResult } from '@opentelemetry/core';
 
 /**
  * PII span sanitizer.
@@ -339,18 +339,45 @@ export function sanitizeUrl(value: string): string {
     return prefix + sanitizedPath;
 }
 
+// PER-ENTRY ISOLATION. The degrade-safe contract is per SPAN at the export
+// loop, but that granularity is too coarse to hold the PII guarantee: a single
+// non-writable key (a frozen attributes object, a getter-backed value) threw
+// out of the shared loop and skipped EVERY REMAINING KEY on that span. The
+// entries are independent, so one unwritable one must cost only itself.
+//
+// Isolating them must not make them SILENT, though: the first failure still has
+// to reach the throttled sink, or a read-only-attributes regression disables
+// sanitization fleet-wide with no signal. So the first error is captured and
+// rethrown once the remaining entries have been processed — the caller's
+// existing per-span catch reports it at its normal cadence, and later entries
+// no longer pay for an earlier one.
 function sanitizeAttributes(attributes: Attributes): void {
+    let firstError: unknown;
+    const record = (err: unknown) => {
+        if (firstError === undefined) firstError = err;
+    };
+
     for (const key of DROP_ATTR_KEYS) {
-        if (key in attributes) delete attributes[key];
-    }
-    for (const key of URL_ATTR_KEYS) {
-        const val = attributes[key];
-        // Only string-valued URL attrs are rewritten; numeric/boolean/array
-        // attribute values (e.g. http.status_code) are left untouched.
-        if (typeof val === 'string') {
-            attributes[key] = sanitizeUrl(val);
+        try {
+            if (key in attributes) delete attributes[key];
+        } catch (err) {
+            record(err);
         }
     }
+    for (const key of URL_ATTR_KEYS) {
+        try {
+            const val = attributes[key];
+            // Only string-valued URL attrs are rewritten; numeric/boolean/array
+            // attribute values (e.g. http.status_code) are left untouched.
+            if (typeof val === 'string') {
+                attributes[key] = sanitizeUrl(val);
+            }
+        } catch (err) {
+            record(err);
+        }
+    }
+
+    if (firstError !== undefined) throw firstError;
 }
 
 // Free-text attributes on an `exception` span event. Scrubbing these at the
@@ -369,15 +396,28 @@ function sanitizeEvents(span: ReadableSpan): void {
     // path against spans from any SDK version — a missing array must degrade to
     // "nothing to scrub", not throw and skip attribute sanitization too.
     if (!Array.isArray(span.events)) return;
+
+    let firstError: unknown;
     for (const event of span.events) {
         if (!event.attributes) continue;
         for (const key of EXCEPTION_TEXT_ATTR_KEYS) {
-            const val = event.attributes[key];
-            if (typeof val === 'string') {
-                event.attributes[key] = sanitizeText(val);
+            // Per-KEY, per-EVENT isolation — see `sanitizeAttributes`. A frozen
+            // event[0] used to abort the loop and ship event[1]'s message
+            // verbatim, which is the highest-PII payload on the span (the
+            // instrumentations record it from the RAW error). The first error
+            // is rethrown after the loop so the failure still reaches the sink.
+            try {
+                const val = event.attributes[key];
+                if (typeof val === 'string') {
+                    event.attributes[key] = sanitizeText(val);
+                }
+            } catch (err) {
+                if (firstError === undefined) firstError = err;
             }
         }
     }
+
+    if (firstError !== undefined) throw firstError;
 }
 
 // Detectability of a persistent sanitize failure must NOT depend on whether a
@@ -430,12 +470,17 @@ const SANITIZE_WARN_EVERY = 1000;
  * that was supposed to be guaranteed. "First occurrence always fires" is only
  * true if each source counts its own.
  */
-type WarnChannel = 'attributes' | 'events' | 'record-exception';
+type WarnChannel =
+    | 'attributes'
+    | 'events'
+    | 'record-exception'
+    | 'inner-export';
 
 const failureCounts: Record<WarnChannel, number> = {
     attributes: 0,
     events: 0,
     'record-exception': 0,
+    'inner-export': 0,
 };
 
 /**
@@ -501,7 +546,27 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
                 );
             }
         }
-        this.inner.export(spans, resultCallback);
+        // A synchronous throw out of the inner exporter must still produce a
+        // RESULT. `BatchSpanProcessor` wraps this call in a promise that only
+        // settles via `resultCallback`, so letting the throw escape leaves that
+        // promise pending forever: the batch is never retried, never dropped,
+        // and the processor's in-flight-export guard blocks every subsequent
+        // flush — tracing stops for the life of the process. Reporting a failed
+        // result instead keeps the wrapper transparent, since a well-behaved
+        // exporter signals failure exactly this way.
+        try {
+            this.inner.export(spans, resultCallback);
+        } catch (err) {
+            warnSanitizeFailure(
+                'inner-export',
+                '[pii-sanitizer] inner exporter threw synchronously; reporting export failure',
+                err,
+            );
+            resultCallback({
+                code: ExportResultCode.FAILED,
+                error: err instanceof Error ? err : new Error(String(err)),
+            });
+        }
     }
 
     shutdown(): Promise<void> {

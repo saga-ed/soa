@@ -161,6 +161,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     // launch order is the topo flatten: iam-api → programs-api → scheduling-api → sessions-api.
     expect(fakes.launches.map((s) => s.id)).toEqual([
       'iam-api',
+      'authz-api', // soa#402
       'programs-api',
       'scheduling-api',
       'sessions-api',

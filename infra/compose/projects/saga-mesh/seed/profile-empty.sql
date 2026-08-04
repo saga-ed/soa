@@ -19,6 +19,7 @@ CREATE USER ledger         WITH PASSWORD 'ledger';
 CREATE USER sis            WITH PASSWORD 'sis';
 CREATE USER coach_api_app  WITH PASSWORD 'dev-password-coach-api-app';
 CREATE USER authz_sync     WITH PASSWORD 'authz_sync';
+CREATE USER authz          WITH PASSWORD 'authz';
 
 -- ── Databases ───────────────────────────────────────────────────────
 -- Owner set at creation time so prisma migrate deploy can CREATE SCHEMA.
@@ -32,6 +33,12 @@ CREATE DATABASE ads_adm_local   OWNER ads_adm;
 CREATE DATABASE ledger_local    OWNER ledger;
 CREATE DATABASE sis_db          OWNER sis;
 CREATE DATABASE coach_api       OWNER coach_api_app;
+
+-- rostering authz-api (soa#402). NOT the `--with authz` opt-in below: that
+-- bundle is the OpenFGA stack (openfga + authz-sync), a different subsystem
+-- that merely shares the prefix. authz-api is the tRPC capabilities service
+-- sessions-api hard-requires on every read, so its DB is unconditional.
+CREATE DATABASE authz_local     OWNER authz;
 
 -- Opt-in (rostering `authz` bundle, `--with authz`): created unconditionally
 -- here like every other app DB above (a few KB, harmless if unused), but only
@@ -53,6 +60,7 @@ GRANT ALL PRIVILEGES ON DATABASE ads_adm_local TO ads_adm;
 GRANT ALL PRIVILEGES ON DATABASE ledger_local  TO ledger;
 GRANT ALL PRIVILEGES ON DATABASE sis_db        TO sis;
 GRANT ALL PRIVILEGES ON DATABASE coach_api     TO coach_api_app;
+GRANT ALL PRIVILEGES ON DATABASE authz_local   TO authz;
 GRANT ALL PRIVILEGES ON DATABASE openfga          TO postgres_admin;
 GRANT ALL PRIVILEGES ON DATABASE authz_sync_local TO authz_sync;
 

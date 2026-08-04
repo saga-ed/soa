@@ -15,6 +15,7 @@
 export type ServiceId =
   | 'iam-api'
   | 'sis-api'
+  | 'authz-api' //      rostering authz capabilities service (:3200) — hard dep of sessions-api (soa#402)
   | 'programs-api'
   | 'scheduling-api'
   | 'sessions-api'
@@ -77,12 +78,14 @@ export type DbId =
   | 'chat_local'
   | 'connectv3'
   | 'openfga'
-  | 'authz_sync_local';
+  | 'authz_sync_local'
+  | 'authz_local';
 
 /** Canonical SeedStep ids (see §4). Referenced by `ServiceDef.seed`. */
 export type SeedStepRef =
   | 'iam-dev-user'
   | 'iam'
+  | 'authz-projection-backfill'
   | 'sessions'
   | 'qtf-demo'
   | 'programs'

@@ -187,6 +187,7 @@ describe('stack up --only — native partial-stack', () => {
     // launched the full closure in topo order — NOT via up.sh.
     expect(launches.map((s) => s.id)).toEqual([
       'iam-api',
+      'authz-api', // soa#402
       'programs-api',
       'scheduling-api',
       'sessions-api',

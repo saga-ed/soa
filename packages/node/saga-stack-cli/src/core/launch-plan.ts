@@ -51,6 +51,10 @@ export interface LaunchTokens {
   IAM_PORT: string;
   /** sis-api port — up.sh `SIS_PORT` (3100). */
   SIS_PORT: string;
+  /** authz-api port (3200) — sessions-api's `AUTHZ_API_URL` (soa#402). authz-api's
+   *  own default is a LITERAL `:3200`, so without this token a slot > 0 sessions-api
+   *  would dial slot 0's authz-api — the exact cross-slot braid this file prevents. */
+  AUTHZ_PORT: string;
   /** sessions-api port (3007) — ads-adm-api's SESSIONS_API_CLIENT_BASEURL (was a
    *  literal `:3007` in up.sh; tokenized for M13 ads-adm slottability). */
   SESSIONS_PORT: string;
@@ -146,6 +150,8 @@ export interface LaunchTokens {
   IAM_PII_DB_URL: string;
   /** up.sh `SIS_DB_URL`. */
   SIS_DB_URL: string;
+  /** authz-api DB URL — `postgresql://authz:authz@localhost:<pg>/authz_local` (soa#402). */
+  AUTHZ_DB_URL: string;
   /** up.sh `PROGRAMS_DB_URL`. */
   PROGRAMS_DB_URL: string;
   /** up.sh `SCHEDULING_DB_URL`. */
@@ -653,6 +659,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     // ports (string form)
     IAM_PORT: String(ports['iam-api']),
     SIS_PORT: String(ports['sis-api']),
+    AUTHZ_PORT: String(ports['authz-api']),
     SESSIONS_PORT: String(ports['sessions-api']),
     PROGRAMS_PORT: String(ports['programs-api']),
     CONTENT_PORT: String(ports['content-api']),
@@ -687,6 +694,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     IAM_DB_URL: pgUrl('iam_local', pgPort, m),
     IAM_PII_DB_URL: pgUrl('iam_pii_local', pgPort, m),
     SIS_DB_URL: pgUrl('sis_db', pgPort, m),
+    AUTHZ_DB_URL: pgUrl('authz_local', pgPort, m),
     PROGRAMS_DB_URL: pgUrl('programs', pgPort, m),
     SCHEDULING_DB_URL: pgUrl('scheduling', pgPort, m),
     SESSIONS_DB_URL: pgUrl('sessions', pgPort, m),

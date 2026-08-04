@@ -50,6 +50,7 @@ const DB_IDS = [
   'connectv3',
   'openfga',
   'authz_sync_local',
+  'authz_local',
 ] as const;
 const _dbIdsAreDbIds: readonly DbId[] = DB_IDS;
 void _dbIdsAreDbIds;
@@ -58,6 +59,7 @@ void _dbIdsAreDbIds;
 const SERVICE_IDS = [
   'iam-api',
   'sis-api',
+  'authz-api',
   'programs-api',
   'scheduling-api',
   'sessions-api',

@@ -173,6 +173,74 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     isFrontend: false,
     optional: false,
   },
+  /**
+   * rostering authz-api — the tRPC capabilities/values service (soa#402).
+   *
+   * NOT `authz-sync`: that is the OpenFGA tuple projector behind `--with authz`
+   * (core/bundles.ts), a different subsystem that only shares the prefix. This
+   * one is a HARD dependency of sessions-api — since program-hub#454 (2026-07-28)
+   * sessions-api's read pipeline calls it on every request with no bypass flag,
+   * so an absent authz-api means SERVICE_UNAVAILABLE → tRPC TIMEOUT → HTTP 408
+   * on every sessions read, on a stack whose health checks all report green.
+   * Hence `optional: false`.
+   *
+   * ENV DERIVATION (from authz-api's config/schemas.ts + inversify.config.ts —
+   * nothing invented; the audit diffs resolved env against what the app reads):
+   *  - `AUTHZ_DATABASE_URL` / `RABBITMQ_URL` are read STRAIGHT off process.env,
+   *    deliberately bypassing DotenvConfigManager's `AUTHZ_` prefixing, because
+   *    they are fleet-wide names shared with authz-db's prisma.config.ts and
+   *    every other event consumer.
+   *  - The `IAM_AUTH_*` block is DotenvConfigManager-prefixed
+   *    (`configType.toUpperCase() + '_' + FIELDNAME`, no inner underscores).
+   *    Every one of these has a default, and EVERY default is wrong here:
+   *      · the JWKS defaults point at `localhost:3000`, but this stack runs
+   *        iam-api on ${IAM_PORT} (3010 at slot 0) — wrong even at slot 0, and
+   *        cross-slot at slot > 0.
+   *      · `userTokenIssuer` defaults to `https://iam.saga.org` while local
+   *        iam-api stamps `${IAM_ISSUER}` (https://iam.wootdev.com). That exact
+   *        mismatch is what made coach-api 401 every locally-minted session —
+   *        see the IAM_ISSUER note in core/launch-plan.ts.
+   *    sessions-api reaches authz-api by relaying the caller's `iam_session`
+   *    cookie (authz-api's `cookieOrServiceProcedure`), so the USER token leg is
+   *    the one on the critical path; the SERVICE leg is pinned alongside it so
+   *    the two can't drift.
+   *  - `audience` is left at its default: iam-api and authz-api already agree on
+   *    `saga-platform`.
+   */
+  'authz-api': {
+    id: 'authz-api',
+    repo: 'ROSTERING',
+    subpath: 'apps/node/authz-api',
+    port: 3200,
+    portEnvVar: 'PORT',
+    healthPath: '/health',
+    databases: ['authz_local'],
+    // iam-api is BOTH an s2s edge (authz-api fetches its JWKS to verify the
+    // relayed cookie) and an event source (the iam.* projection over rabbitmq
+    // fills authz_local's projection tables). Declared `s2s` because that is the
+    // synchronous, request-path coupling; the async edge is covered by `mesh`.
+    dependsOn: ['iam-api'],
+    depKinds: { 'iam-api': 's2s' },
+    mesh: ['postgres', 'rabbitmq'],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        NODE_ENV: 'development',
+        PORT: '${AUTHZ_PORT}',
+        AUTHZ_DATABASE_URL: '${AUTHZ_DB_URL}',
+        RABBITMQ_URL: '${MESH_MQ}',
+        IAM_AUTH_JWKSURL: '${IAM_URL}/.well-known/services/jwks.json',
+        IAM_AUTH_USERJWKSURL: '${IAM_URL}/.well-known/jwks.json',
+        IAM_AUTH_SERVICETOKENISSUER: '${IAM_ISSUER}',
+        IAM_AUTH_USERTOKENISSUER: '${IAM_ISSUER}',
+      },
+    },
+    seed: ['authz-projection-backfill'],
+    lane: lanes(3200, 'authz'),
+    tunnelSlug: 'authz',
+    isFrontend: false,
+    optional: false,
+  },
   'programs-api': {
     id: 'programs-api',
     repo: 'PROGRAM_HUB',
@@ -245,9 +313,17 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     portEnvVar: 'PORT',
     healthPath: '/health',
     databases: ['sessions'],
-    dependsOn: ['iam-api', 'programs-api', 'scheduling-api'],
+    dependsOn: ['iam-api', 'programs-api', 'scheduling-api', 'authz-api'],
     // iam-api is a required url dep; programs/scheduling are event (projections converge async).
-    depKinds: { 'iam-api': 'url', 'programs-api': 'event', 'scheduling-api': 'event' },
+    // authz-api is a HARD url dep (soa#402): SessionsAuthzGate calls it on every
+    // read with no bypass. Because the closure is transitive, this one edge pulls
+    // authz-api into EVERY flow that contains sessions-api — no per-flow edits.
+    depKinds: {
+      'iam-api': 'url',
+      'programs-api': 'event',
+      'scheduling-api': 'event',
+      'authz-api': 'url',
+    },
     mesh: ['postgres', 'rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
@@ -259,6 +335,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         CORS_ORIGIN: '${DASH_URL}',
         // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
         JWT_ISSUER: '${IAM_ISSUER}',
+        // soa#402. authz-api's client default is a LITERAL http://localhost:3200,
+        // so at slot > 0 an unset var would dial SLOT 0's authz-api — the
+        // cross-slot braid this manifest exists to prevent.
+        AUTHZ_API_URL: 'http://localhost:${AUTHZ_PORT}',
       },
     },
     // qtf-demo runs `db:seed:qtf-demo` against the sessions DB (up.sh seed_qtf_demo); add-on, online.

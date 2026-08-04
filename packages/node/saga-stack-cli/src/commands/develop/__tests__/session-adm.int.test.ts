@@ -153,12 +153,12 @@ function playwrightRuns(): ScriptInvocation[] {
 
 /** The held demo spawn (the flow's single stage). */
 function demoRun(): ScriptInvocation | undefined {
-  return playwrightRuns().find((r) => r.args.includes('connect-session-demo'));
+  return playwrightRuns().find((r) => r.args.includes('--project=connect-session-demo'));
 }
 
 /** The journey prerequisite's terminal-stage spawn (the replay's signature). */
 function prereqRun(): ScriptInvocation | undefined {
-  return playwrightRuns().find((r) => r.args.includes('stage-7-attendance'));
+  return playwrightRuns().find((r) => r.args.includes('--project=stage-7-attendance'));
 }
 
 /** The vendored browser-login.mjs child invocation (the admin hand-off). */
@@ -369,7 +369,7 @@ describe('develop session-adm — the --refresh-snapshot bake path (shared helpe
     // against the base iam would bake slot-0 data into the slot-2 checkpoint
     // root (the connect.int twin, pinned HERE because the wiring is this
     // command's own call into the shared bakePrerequisiteCheckpoints).
-    const bake = playwrightRuns().find((r) => r.args.includes('stage-1-roster'));
+    const bake = playwrightRuns().find((r) => r.args.includes('--project=stage-1-roster'));
     expect(bake).toBeDefined();
     expect(bake?.env?.PLAYWRIGHT_IAM_URL).toBe('http://localhost:5010');
 

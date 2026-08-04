@@ -67,7 +67,8 @@ export interface CoreSeamsOptions {
   /** Service ids whose launch reports health-down (`ok: false`). */
   launchFail?: Set<string>;
   /**
-   * Fail (exit 1) any Playwright child whose args include this token —
+   * Fail (exit 1) any Playwright child targeting this token — matched either as
+   * a bare arg (a `spec` positional) or as the `--project=` value.
    * checkpoint.int's RED-stage lever. Non-Playwright runs still exit 0.
    */
   playwrightFail?: string;
@@ -133,7 +134,10 @@ export function installCoreSeams(opts: CoreSeamsOptions): CoreSeams {
       if (
         opts.playwrightFail !== undefined &&
         spec.args.includes('playwright') &&
-        spec.args.includes(opts.playwrightFail)
+        // Match the token as a standalone arg (a `spec` positional) OR as the
+        // value of `--project=` — since soa#401 the project is bound to the flag
+        // with `=`, so a bare `includes` no longer sees a project name.
+        spec.args.some((a) => a === opts.playwrightFail || a === `--project=${opts.playwrightFail}`)
       ) {
         return { code: 1 };
       }

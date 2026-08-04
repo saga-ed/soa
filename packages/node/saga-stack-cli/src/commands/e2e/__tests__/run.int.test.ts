@@ -145,7 +145,7 @@ describe('e2e run — --dry-run plan (touches no seam)', () => {
     // purpose — do NOT rebuild it with helpers/pw.ts's pwArgv, so a drift in
     // the printed argv shape can never be masked by the builder drifting too.
     expect(text).toContain(
-      'pnpm exec playwright test --config=playwright.stack.config.ts --project stage-4-pods --grep-invert @interactive',
+      'pnpm exec playwright test --config=playwright.stack.config.ts --project=stage-4-pods --grep-invert @interactive',
     );
     expect(text).not.toContain('--headed');
   });
@@ -155,7 +155,7 @@ describe('e2e run — --dry-run plan (touches no seam)', () => {
     expect(runs).toEqual([]);
     const text = logged.join('\n');
     expect(text).toContain('prerequisite: saga-dash/journey (through schedule, headless)');
-    expect(text).toContain('--project interactive-connect');
+    expect(text).toContain('--project=interactive-connect');
     // The terminal stage IS @interactive — the main run must NOT --grep-invert it.
     expect(text).not.toMatch(/interactive-connect.*--grep-invert/);
   });
@@ -205,8 +205,7 @@ describe('e2e run — native orchestration (stack lane)', () => {
       'playwright',
       'test',
       '--config=playwright.stack.config.ts',
-      '--project',
-      'stage-4-pods',
+      '--project=stage-4-pods',
       '--grep-invert',
       '@interactive',
       'journey/pods.e2e.test.ts',
@@ -232,10 +231,10 @@ describe('e2e run — native orchestration (stack lane)', () => {
     const pw = playwrightRuns();
     expect(pw).toHaveLength(2);
     // 1) the prerequisite: journey through schedule, headless.
-    expect(pw[0].args).toContain('stage-5-schedule');
+    expect(pw[0].args).toContain('--project=stage-5-schedule');
     expect(pw[0].args).not.toContain('--headed');
     // 2) the live session: interactive-connect, headed, tag not inverted.
-    expect(pw[1].args).toContain('interactive-connect');
+    expect(pw[1].args).toContain('--project=interactive-connect');
     expect(pw[1].args).toContain('--headed');
     expect(pw[1].args).not.toContain('--grep-invert');
   });
@@ -401,8 +400,8 @@ describe('e2e run — --to window (Plan 13)', () => {
     const pw = playwrightRuns();
     expect(pw).toHaveLength(1);
     // the terminal project is enrollment (the last RUN stage), never pods.
-    expect(pw[0].args).toContain('stage-3-enrollment-periods');
-    expect(pw[0].args).not.toContain('stage-4-pods');
+    expect(pw[0].args).toContain('--project=stage-3-enrollment-periods');
+    expect(pw[0].args).not.toContain('--project=stage-4-pods');
   });
 
   it('--to the FIRST stage is an empty window: reset+seed baseline, ZERO Playwright', async () => {
@@ -434,7 +433,7 @@ describe('e2e run — --hold manual-testing handoff (Plan 13)', () => {
     // window ran roster only (stops before program); then the hold epilogue fired.
     const pw = playwrightRuns();
     expect(pw).toHaveLength(1);
-    expect(pw[0].args).toContain('stage-1-roster');
+    expect(pw[0].args).toContain('--project=stage-1-roster');
 
     // dev-persona jar minted at slot-0 iam, written to the state dir.
     expect(posts).toHaveLength(1);

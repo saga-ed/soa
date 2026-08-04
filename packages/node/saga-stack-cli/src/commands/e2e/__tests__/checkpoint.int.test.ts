@@ -125,10 +125,10 @@ describe('--snapshot-stages (bake)', () => {
     const pw = playwrightRuns();
     expect(pw).toHaveLength(2);
     // Stage 1 keeps its config deps (the stage-0-coherence gate rides along).
-    expect(pw[0]!.args).toContain('stage-1-roster');
+    expect(pw[0]!.args).toContain('--project=stage-1-roster');
     expect(pw[0]!.args).not.toContain('--no-deps');
     // Stage 2 breaks the chain — no replay of stage 1.
-    expect(pw[1]!.args).toContain('stage-2-program-creation');
+    expect(pw[1]!.args).toContain('--project=stage-2-program-creation');
     expect(pw[1]!.args).toContain('--no-deps');
 
     // The date env is computed ONCE for the whole ladder — every stage spawn
@@ -215,7 +215,7 @@ describe('--from (restore)', () => {
     // Exactly the window stage ran, chain broken.
     const pw = playwrightRuns();
     expect(pw).toHaveLength(1);
-    expect(pw[0]!.args).toContain('stage-2-program-creation');
+    expect(pw[0]!.args).toContain('--project=stage-2-program-creation');
     expect(pw[0]!.args).toContain('--no-deps');
 
     // §2.2: the child env carries ALL THREE baked dates, not today's clamp.
@@ -356,7 +356,7 @@ describe('prerequisite-via-checkpoint (M14-C)', () => {
     // Exactly ONE Playwright child (the connect room) — no journey replay spawn.
     const pw = playwrightRuns();
     expect(pw).toHaveLength(1);
-    expect(pw[0]!.args).toContain('interactive-connect');
+    expect(pw[0]!.args).toContain('--project=interactive-connect');
 
     // The PARENT spawn exports the checkpoint's baked dates (they crossed the
     // frame because the restore ran in the parent, not the recursion).
@@ -446,14 +446,14 @@ describe('e2e connect --refresh-snapshot (bake the prerequisite fresh, then rest
     // 5 bake spawns (journey stages 1..5, headless) + 1 live interactive-connect.
     expect(pw).toHaveLength(6);
     // The bake ladder: stage-1 keeps its config deps, stages 2..5 break the chain.
-    expect(pw[0]!.args).toContain('stage-1-roster');
-    expect(pw[4]!.args).toContain('stage-5-schedule');
+    expect(pw[0]!.args).toContain('--project=stage-1-roster');
+    expect(pw[4]!.args).toContain('--project=stage-5-schedule');
     expect(pw[4]!.args).not.toContain('--headed');
     // The live session is LAST, headed, and the prerequisite was RESTORED (not
     // replayed) — so there is exactly one stage-5-schedule spawn (the bake's).
-    expect(pw[5]!.args).toContain('interactive-connect');
+    expect(pw[5]!.args).toContain('--project=interactive-connect');
     expect(pw[5]!.args).toContain('--headed');
-    expect(pw.filter((r) => r.args.includes('stage-5-schedule'))).toHaveLength(1);
+    expect(pw.filter((r) => r.args.includes('--project=stage-5-schedule'))).toHaveLength(1);
 
     const out = logged.join('\n');
     expect(out).toContain('refresh-snapshot: baking journey@schedule');
@@ -665,7 +665,7 @@ describe('tunnel post-restore persona preflight (soa#327)', () => {
     expect(posts[0]!.url).toBe('https://iam.testmoniker.vms.test/trpc/auth.devLogin');
     expect(posts[0]!.opts.origin).toBe('https://iam.testmoniker.vms.test');
     expect(posts[0]!.opts.body).toContain('alex.tutor@example.org');
-    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
+    expect(playwrightRuns().some((r) => r.args.includes('--project=interactive-connect'))).toBe(true);
   });
 
   it('poster 401: TORN checkpoint — loud error naming the persona + the recipe; no browser launches', async () => {
@@ -684,7 +684,7 @@ describe('tunnel post-restore persona preflight (soa#327)', () => {
     fakeMoniker();
     await E2eConnect.run(['--tunnel', ...ws()], config);
     expect(posts).toHaveLength(3);
-    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
+    expect(playwrightRuns().some((r) => r.args.includes('--project=interactive-connect'))).toBe(true);
   });
 
   it('persistently unreachable iam: capped retries then the loud torn error', async () => {
@@ -730,7 +730,7 @@ describe('tunnel post-restore persona preflight (soa#327)', () => {
     installPoster([200]);
     await E2eConnect.run([...ws()], config);
     expect(posts).toHaveLength(0);
-    expect(playwrightRuns().some((r) => r.args.includes('interactive-connect'))).toBe(true);
+    expect(playwrightRuns().some((r) => r.args.includes('--project=interactive-connect'))).toBe(true);
   });
 });
 

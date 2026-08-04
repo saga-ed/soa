@@ -364,9 +364,18 @@ function joinPath(root: string, sub: string): string {
 /**
  * The `pnpm exec playwright test …` argv for a resolved flow. The CLI never
  * parses the SPA's Playwright config — it passes `--config` (verbatim,
- * appDir-relative), `--project` (the terminal stage), an optional
+ * appDir-relative), `--project=` (the terminal stage), an optional
  * `--grep-invert @interactive` (pipeline runs exclude the interactive harness),
  * `--headed` (foreground flows), then any user passthrough (after `--`).
+ *
+ * `--project=<name>` uses the EQUALS form deliberately (soa#401). Playwright
+ * declares `--project <name...>` variadic, so with the separated form any bare
+ * token later in the argv — the `spec` positional below, or anything the user
+ * passes after `--` — is parsed as a SECOND project name and the run dies with
+ * `Project(s) "<that token>" not found` before a single test executes. The
+ * equals form binds the value to the flag and disarms the whole class. Do not
+ * "simplify" this back to `'--project', name`; `pwArgv` (src/__tests__/helpers/
+ * pw.ts) and the argv-shape guard in e2e-orchestrate-slot.unit.test.ts pin it.
  */
 export function playwrightArgv(
   resolved: ResolvedFlow,
@@ -384,8 +393,7 @@ export function playwrightArgv(
     'playwright',
     'test',
     `--config=${resolved.playwright.config}`,
-    '--project',
-    stage?.project ?? resolved.playwright.project,
+    `--project=${stage?.project ?? resolved.playwright.project}`,
   ];
   if (stage?.noDeps) argv.push('--no-deps');
   if (resolved.playwright.grepInvert) argv.push('--grep-invert', resolved.playwright.grepInvert);

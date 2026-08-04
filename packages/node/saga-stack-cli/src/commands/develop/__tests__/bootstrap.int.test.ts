@@ -101,12 +101,12 @@ function playwrightRuns(): ScriptInvocation[] {
 
 /** The phase-1 journey replay spawns (terminal project stage-5-schedule). */
 function journeyRuns(): ScriptInvocation[] {
-  return playwrightRuns().filter((r) => r.args.includes('stage-5-schedule'));
+  return playwrightRuns().filter((r) => r.args.includes('--project=stage-5-schedule'));
 }
 
 /** The headed live-session spawn (the hand-off's terminal stage). */
 function liveRun(): ScriptInvocation | undefined {
-  return playwrightRuns().find((r) => r.args.includes('interactive-connect'));
+  return playwrightRuns().find((r) => r.args.includes('--project=interactive-connect'));
 }
 
 function ledgerPath(): string {
@@ -454,7 +454,7 @@ describe('develop connect --bootstrap — prerequisite retry-once (stage-flake c
     vi.spyOn(proto as unknown as Record<string, () => unknown>, 'getRunner').mockReturnValue({
       run: async (spec: ScriptInvocation) => {
         const res = await base.run(spec);
-        if (left > 0 && spec.args.includes('playwright') && spec.args.includes('stage-5-schedule')) {
+        if (left > 0 && spec.args.includes('playwright') && spec.args.includes('--project=stage-5-schedule')) {
           left -= 1;
           return { code: 1 };
         }

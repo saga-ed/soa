@@ -110,7 +110,7 @@ describe('e2e run — --dry-run (pure planner, touches no seam)', () => {
     // purpose — do NOT rebuild it with helpers/pw.ts's pwArgv, so a drift in
     // the printed argv shape can never be masked by the builder drifting too.
     expect(text).toContain(
-      'pnpm exec playwright test --config=playwright.stack.config.ts --project stage-4-pods --grep-invert @interactive --headed',
+      'pnpm exec playwright test --config=playwright.stack.config.ts --project=stage-4-pods --grep-invert @interactive --headed',
     );
   });
 
@@ -119,14 +119,14 @@ describe('e2e run — --dry-run (pure planner, touches no seam)', () => {
     const text = logged.join('\n');
     expect(text).toContain('prerequisite: saga-dash/journey (through schedule');
     // The terminal stage IS @interactive-tagged, so the main run does NOT invert it.
-    expect(text).toContain('--project interactive-connect');
+    expect(text).toContain('--project=interactive-connect');
     expect(text).not.toMatch(/interactive-connect.*--grep-invert/);
   });
 
   it('--headless flips a foreground flow off headed', async () => {
     await E2eRun.run(['journey', '--through', '1', '--headless', '--dry-run', ...ws()], config);
     const text = logged.join('\n');
-    expect(text).toContain('--project stage-1-roster');
+    expect(text).toContain('--project=stage-1-roster');
     expect(text).not.toContain('--headed');
   });
 });
@@ -228,10 +228,10 @@ describe('e2e connect — foreground connect-session entry', () => {
     const pw = playwrightRuns();
     expect(pw).toHaveLength(2);
     // prerequisite first: journey through schedule, headless (no --headed).
-    expect(pw[0].args).toContain('stage-5-schedule');
+    expect(pw[0].args).toContain('--project=stage-5-schedule');
     expect(pw[0].args).not.toContain('--headed');
     // then the live session: interactive-connect, headed.
-    expect(pw[1].args).toContain('interactive-connect');
+    expect(pw[1].args).toContain('--project=interactive-connect');
     expect(pw[1].args).toContain('--headed');
   });
 
@@ -239,7 +239,7 @@ describe('e2e connect — foreground connect-session entry', () => {
     await E2eConnect.run(['--reuse', ...ws(), '--', '--debug'], config);
     const pw = playwrightRuns();
     expect(pw).toHaveLength(1);
-    expect(pw[0].args).toContain('interactive-connect');
+    expect(pw[0].args).toContain('--project=interactive-connect');
     expect(pw[0].args).toContain('--headed');
     // passthrough forwarded.
     expect(pw[0].args).toContain('--debug');
@@ -253,17 +253,17 @@ describe('e2e connect — foreground connect-session entry', () => {
     const pw = playwrightRuns();
     expect(pw).toHaveLength(2);
     // journey prerequisite (a separate ResolvedFlow) must NOT get FAKE_MEDIA.
-    expect(pw[0].args).toContain('stage-5-schedule');
+    expect(pw[0].args).toContain('--project=stage-5-schedule');
     expect(pw[0].env?.FAKE_MEDIA).toBeUndefined();
     // the headed live session does.
-    expect(pw[1].args).toContain('interactive-connect');
+    expect(pw[1].args).toContain('--project=interactive-connect');
     expect(pw[1].env?.FAKE_MEDIA).toBe('1');
   });
 
   it('bare (no --fake-media): interactive-connect runs with real media (no FAKE_MEDIA)', async () => {
     await E2eConnect.run([...ws()], config);
     const pw = playwrightRuns();
-    expect(pw[1].args).toContain('interactive-connect');
+    expect(pw[1].args).toContain('--project=interactive-connect');
     expect(pw[1].env?.FAKE_MEDIA).toBeUndefined();
   });
 
@@ -279,7 +279,7 @@ describe('e2e connect — foreground connect-session entry', () => {
     await E2eConnect.run(['--tunnel', '--reuse', ...ws()], config);
     // The live session's env carries the tunnel URLs — proving tunnelDomain reached the
     // executeResolvedFlow deps (and buildStackContext) for the headed interactive run.
-    const live = playwrightRuns().find((r) => r.args.includes('interactive-connect'));
+    const live = playwrightRuns().find((r) => r.args.includes('--project=interactive-connect'));
     // dash is the non-derivable rename for saga-dash; <label>.<moniker>.<VMS_BASE>.
     expect(live?.env?.PLAYWRIGHT_BASE_URL).toMatch(/^https:\/\/dash\.testmoniker\./);
     expect(live?.env?.PLAYWRIGHT_BASE_URL).not.toContain('localhost');

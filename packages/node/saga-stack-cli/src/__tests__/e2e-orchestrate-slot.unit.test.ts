@@ -245,8 +245,7 @@ describe('playwrightArgv — spec scoping (single-spawn only, never on a stage o
       'playwright',
       'test',
       '--config=playwright.config.ts',
-      '--project',
-      'chromium',
+      '--project=chromium',
       'dashboard/dashboard-authenticated.e2e.smoke.test.ts',
     ]);
   });
@@ -258,8 +257,7 @@ describe('playwrightArgv — spec scoping (single-spawn only, never on a stage o
       'playwright',
       'test',
       '--config=playwright.config.ts',
-      '--project',
-      'stage-2-program',
+      '--project=stage-2-program',
       '--no-deps',
     ]);
     expect(argv).not.toContain('dashboard/dashboard-authenticated.e2e.smoke.test.ts');
@@ -270,6 +268,42 @@ describe('playwrightArgv — spec scoping (single-spawn only, never on a stage o
       playwright: { config: 'playwright.stack.config.ts', project: 'stage-4-pods', headed: false },
     } as unknown as ResolvedFlow;
     const argv = playwrightArgv(noSpecResolved);
-    expect(argv).toEqual(['exec', 'playwright', 'test', '--config=playwright.stack.config.ts', '--project', 'stage-4-pods']);
+    expect(argv).toEqual(['exec', 'playwright', 'test', '--config=playwright.stack.config.ts', '--project=stage-4-pods']);
+  });
+
+  /**
+   * soa#401 argv-shape guard. Playwright declares `--project <name...>`
+   * VARIADIC: with the separated form (`'--project', name`) any bare token
+   * later in the argv is swallowed as a second project name and the run dies
+   * with `Project(s) "<token>" not found` before executing a single test. Two
+   * bare tokens can legitimately appear after the project: the `spec`
+   * positional, and anything the user passes through after `--`.
+   *
+   * These assert the EQUALS form is what ships, and that no separated
+   * `--project` token survives anywhere in the argv — including the case that
+   * actually broke (`@interactive` + forced `--headless` + a spec, where
+   * neither `--grep-invert` nor `--headed` is present to absorb the variadic).
+   */
+  describe('soa#401 — `--project=` equals form disarms the variadic flag', () => {
+    // No spec, no grep-invert, not headed — i.e. NOTHING optional sits between
+    // the project and whatever comes next. This is the shape that made the bug
+    // reachable, so it is the shape the guard has to cover.
+    const noFlagsResolved = {
+      playwright: { config: 'playwright.stack.config.ts', project: 'stage-4-pods', headed: false },
+    } as unknown as ResolvedFlow;
+
+    const cases: Array<[string, string[]]> = [
+      ['spec positional directly after the project', playwrightArgv(specResolved)],
+      ['user passthrough directly after the project', playwrightArgv(noFlagsResolved, ['--workers=1', 'some-filter'])],
+      ['nothing after the project', playwrightArgv(noFlagsResolved)],
+      ['stage override', playwrightArgv(specResolved, [], { project: 'stage-2-program', noDeps: true })],
+    ];
+
+    it.each(cases)('%s: no bare `--project` token, value bound with `=`', (_label, argv) => {
+      expect(argv).not.toContain('--project');
+      const flags = argv.filter((a) => a.startsWith('--project'));
+      expect(flags).toHaveLength(1);
+      expect(flags[0]).toMatch(/^--project=.+/);
+    });
   });
 });

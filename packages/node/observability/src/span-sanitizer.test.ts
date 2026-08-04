@@ -81,6 +81,27 @@ describe('sanitizeUrl', () => {
     it('redacts an id fused to a file extension', () => {
         expect(sanitizeUrl('/exports/98765.csv')).toBe('/exports/:id');
     });
+
+    // The authority was split off as an opaque prefix and never examined, so
+    // userinfo shipped verbatim — an address, or a password on a connection
+    // string that reaches `http.url`.
+    it.each([
+        ['http://a@b.com/x', 'http://:userinfo@b.com/x'],
+        ['https://user:pw@host.com/path', 'https://:userinfo@host.com/path'],
+        [
+            'postgres://admin:s3cret@db.internal:5432/main',
+            'postgres://:userinfo@db.internal:5432/main',
+        ],
+        ['https://alice%40saga.org@host.com/p', 'https://:userinfo@host.com/p'],
+    ])('redacts userinfo in %s', (input, expected) => {
+        expect(sanitizeUrl(input)).toBe(expected);
+    });
+
+    // The host is operational data, not user data — it must survive, or the
+    // attribute stops telling you which service was called.
+    it('leaves an authority without userinfo untouched', () => {
+        expect(sanitizeUrl('https://host.com/path')).toBe('https://host.com/path');
+    });
 });
 
 describe('sanitizeText', () => {
@@ -139,6 +160,15 @@ describe('sanitizeText', () => {
             expect(sanitizeText(input)).not.toContain('a@b.com');
         },
     );
+
+    // Credentials in an authority reach free text too — a driver echoes the
+    // connection string into its error message.
+    it.each([
+        ['at http://alice@saga.org/profile', 'alice@saga.org'],
+        ['connect failed: postgres://admin:s3cret@db.internal:5432/main', 's3cret'],
+    ])('redacts userinfo echoed into free text: %s', (input, leaked) => {
+        expect(sanitizeText(input)).not.toContain(leaked);
+    });
 
     // Encoding must never decide exposure — in a path segment or in prose.
     it('treats literal and percent-encoded handles identically in text', () => {

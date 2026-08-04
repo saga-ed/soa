@@ -259,6 +259,26 @@ const PERCENT_ENCODED_AT = /%40/gi;
 // `mailto:`, `MAILTO:` — a scheme with no `//`, so HAS_SCHEME does not match it.
 const URI_SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i;
 
+/**
+ * Redact the userinfo component of an authority (`user:pw@host` → `:userinfo@host`).
+ *
+ * Everything before the `@` in an authority is a credential, and it was shipping
+ * VERBATIM: `sanitizeUrl` split `scheme://host` off as an opaque prefix and only
+ * ever rewrote the path, so nothing examined the authority. That leaked an
+ * address on `http://alice@saga.org/p` and, worse, a password on a connection
+ * string — `postgres://admin:s3cret@db.internal:5432/main` reached `http.url`
+ * with the secret intact.
+ *
+ * The host is deliberately KEPT: it is the operational half of the attribute
+ * (which service was called) and carries no user data. Only the credential is
+ * replaced, and the last `@` is the delimiter — an unencoded `@` may appear
+ * inside the userinfo itself.
+ */
+function redactUserinfo(authority: string): string {
+    const at = authority.lastIndexOf('@');
+    return at === -1 ? authority : ':userinfo' + authority.slice(at);
+}
+
 function isPathShaped(token: string): boolean {
     if (HAS_SCHEME.test(token)) return true;
 
@@ -289,10 +309,10 @@ export function sanitizeUrl(value: string): string {
     let prefix = '';
     let rest = value;
 
-    const schemeMatch = /^([a-z][a-z0-9+.-]*:\/\/[^/]*)(\/.*)?$/i.exec(value);
+    const schemeMatch = /^([a-z][a-z0-9+.-]*:\/\/)([^/]*)(\/.*)?$/i.exec(value);
     if (schemeMatch && schemeMatch[1] !== undefined) {
-        prefix = schemeMatch[1];
-        rest = schemeMatch[2] ?? '';
+        prefix = schemeMatch[1] + redactUserinfo(schemeMatch[2] ?? '');
+        rest = schemeMatch[3] ?? '';
     }
 
     // Drop query string + fragment.

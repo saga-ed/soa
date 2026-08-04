@@ -163,14 +163,18 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     ecsService: 'program-hub-content-api',
   },
   {
-    // Deployed to dev/training; on prod it is a deploy IN FLIGHT, not an
-    // absence to hide (sds#369). ads-adm-api.saga.org still NXDOMAINs and
-    // prod-shared has no ECS service (live 2026-08-04) — exactly what the
-    // former `envs: ['dev', 'training']` scope-out recorded — but prod
-    // deploys of this service are being actively dispatched, so
-    // `verify --env prod` must REPORT the miss: the gate is the acceptance
-    // signal for the deploy being debugged. Until the first prod deploy
-    // lands, accept the red with `--tolerate ads-adm-api`.
+    // Deployed to dev/training; on prod it is DEPLOYED BUT UNROUTABLE
+    // (sds#369, measured 2026-08-04): `sds-ads-adm-api-main` reached ECS
+    // steady state on prod-shared (deploy runs 30674907653/30908836441 —
+    // `aws ecs wait services-stable` in the prod account), but
+    // ads-adm-api.saga.org NXDOMAINs because deploy-ads-adm-api.yml
+    // hardcodes wootdev.com host-headers AND health-checks the dev URL, so
+    // prod dispatches route nothing and still report success. The former
+    // `envs: ['dev', 'training']` scope-out predates the first successful
+    // prod dispatch (2026-08-01) and would hide exactly this state:
+    // `verify --env prod` must REPORT the unreachable service (HTTP red even
+    // when --ecs sees it running — routing is part of health). Until the
+    // routing lands, accept the red with `--tolerate ads-adm-api`.
     id: 'ads-adm-api',
     host: 'ads-adm-api',
     healthPath: '/health',

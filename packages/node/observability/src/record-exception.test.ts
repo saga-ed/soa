@@ -317,18 +317,31 @@ describe('recordSpanException PII scrubbing', () => {
         expect(recordedError(span).message).not.toContain(leaked);
     });
 
+    // The npm scope redacts to `:id` — there is no exemption for it, because
+    // every attempt to carve one out leaked a `/@handle` route (see the note in
+    // span-sanitizer.ts). What must survive is enough of the frame to LOCATE
+    // the code: the unscoped package name, the path, and the filename.
     it.each([
-        '/app/node_modules/@saga-ed/soa-observability/dist/index.js',
-        '/app/node_modules/@opentelemetry/api/build/src/trace.js',
-    ])('keeps the scoped package name in %s', (frame) => {
+        [
+            '/app/node_modules/@saga-ed/soa-observability/dist/index.js',
+            ['node_modules', 'soa-observability', 'index.js'],
+        ],
+        [
+            '/app/node_modules/@opentelemetry/api/build/src/trace.js',
+            ['node_modules', 'api', 'trace.js'],
+        ],
+    ])('keeps the frame diagnosable in %s', (frame, mustSurvive) => {
         const span = fakeSpan();
         const err = new Error('boom');
         err.stack = `Error: boom\n    at handler (${frame}:1:1)`;
 
         recordSpanException(err, span);
 
-        const scope = frame.split('/')[3];
-        expect(recordedError(span).stack).toContain(scope);
+        const stack = recordedError(span).stack;
+        for (const part of mustSurvive) {
+            expect(stack).toContain(part);
+        }
+        expect(stack).toContain(':id'); // the scope itself is redacted
     });
 
     // Scrubbing runs synchronously on the Express error path and the input is

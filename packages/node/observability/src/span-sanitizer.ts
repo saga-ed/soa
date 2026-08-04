@@ -57,29 +57,25 @@ const LONG_TOKEN_SEGMENT = /^[A-Za-z0-9_-]{20,}$/; // hex/base64-ish opaque ids
 // percent-encoded, so matching only the literal `@` would leak encoded emails.
 const EMAIL_SEGMENT = /@|%40/i;
 
-// A scoped npm package (`@saga-ed/soa-observability`) is a path segment
-// containing `@`, so the email rule would redact it — erasing the package name
-// from every stack frame in this monorepo's traces, degrading the very field
-// `recordSpanException` exists to populate. A scope is `@name` with no dot and
-// no second `@`, which no email can satisfy.
-const NPM_SCOPE_SEGMENT = /^@[A-Za-z0-9_-]+$/;
-
-/**
- * Where a path came from. The npm-scope exemption is only ever correct for
- * code locations: applying it to request URLs would un-redact a `/@handle`
- * route, which is user data and was previously redacted by the email rule.
- * Encoding must not decide PII exposure — `/@bob` and `/%40bob` have to behave
- * identically on a request URL.
- *
- * A token inside free text has no inherent context, so it is classified by
- * POSITIVE evidence that it names a code location (see `pathContextOf`) and
- * treated as a request URL otherwise. Shape alone cannot make that call: this
- * is the third defect of the form "something `@`-shaped escaped redaction",
- * and each previous attempt to narrow the scope pattern left a neighbouring
- * leak (`/@bob` when the rule required no dot, `/@bob/posts` if it required
- * `@scope/name`). Provenance is the boundary that closes the class.
- */
-type PathContext = 'url' | 'stack';
+// NO NPM-SCOPE EXEMPTION — deliberately, after three attempts.
+//
+// A scoped package (`@saga-ed/soa-observability`) is an `@`-bearing path
+// segment, so the email rule redacts the scope to `:id`. An exemption for it
+// was tried three times and each revision leaked a `/@handle` route one step to
+// the side of the last: first when the rule required no dot, then for
+// `/@bob/posts` under an `@scope/name` rule, and finally — after the exemption
+// was gated on "does this token look like a code location" — for any request
+// path containing the literal `node_modules/` or a `file://` prefix. That last
+// attempt is the one that settles it: this text is ATTACKER-INFLUENCEABLE
+// (routers echo the request path into the message), so any marker used to
+// prove provenance can simply be included in the request. Shape cannot
+// establish provenance.
+//
+// The cost is one token per frame: `/app/node_modules/@saga-ed/pkg/index.js`
+// ships as `/app/node_modules/:id/pkg/index.js` — the package name, path, and
+// filename all survive, so the frame stays diagnosable. Unscoped packages are
+// untouched. That is a cheap price for closing a leak class that reopened
+// three times.
 
 // An id fused to a file extension ("12345.json") fails every anchored test
 // below, because `.` sits outside their character classes. Test the stem
@@ -87,28 +83,14 @@ type PathContext = 'url' | 'stack';
 // extension is structure, the stem is the identifier.
 const FILE_EXTENSION = /\.[A-Za-z0-9]{1,8}$/;
 
-function looksLikeIdentifier(
-    segment: string,
-    context: PathContext = 'url',
-): boolean {
-    if (context === 'stack' && NPM_SCOPE_SEGMENT.test(segment)) {
-        return false;
-    }
+function looksLikeIdentifier(segment: string): boolean {
     if (matchesIdentifierRule(segment)) {
         return true;
     }
 
-    // Retry without a trailing extension, but never let the stem's `@` trigger
-    // the email rule — "user@corp.com" would otherwise be caught here anyway by
-    // the full-segment test above, and a scoped package must not match via its
-    // stem either.
+    // Retry without a trailing extension, so an id fused to one still redacts.
     const stem = segment.replace(FILE_EXTENSION, '');
-    return (
-        stem !== segment &&
-        stem !== '' &&
-        !(context === 'stack' && NPM_SCOPE_SEGMENT.test(stem)) &&
-        matchesIdentifierRule(stem)
-    );
+    return stem !== segment && stem !== '' && matchesIdentifierRule(stem);
 }
 
 function matchesIdentifierRule(segment: string): boolean {
@@ -163,8 +145,11 @@ const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
  * labels did not help, because the local part has the same shape.
  *
  * Tokens are already whitespace-delimited, and an email cannot contain
- * whitespace, so per-token anchoring loses nothing and makes the work linear:
- * each token is examined once, and only if it contains an `@` at all.
+ * whitespace, so anchoring makes the work linear: each piece is examined once,
+ * and only if it could hold an address at all. Anchoring alone would miss the
+ * forms whitespace does not separate, so `redactEmails` splits a token on
+ * `,`/`;` and `isBareEmail` retries without a `scheme:` prefix — both keep
+ * every test anchored rather than reintroducing a scanning pattern.
  */
 const EMAIL_LABEL = String.raw`[A-Za-z0-9_%+-]+`;
 const BARE_EMAIL_TOKEN = new RegExp(
@@ -207,7 +192,7 @@ function sanitizeToken(token: string): string {
     if (!isPathShaped(core)) {
         return token;
     }
-    return lead + sanitizeUrl(core, pathContextOf(core)) + trail;
+    return lead + sanitizeUrl(core) + trail;
 }
 
 /**
@@ -241,7 +226,7 @@ function redactEmails(core: string): string | null {
         // two as equivalent for path segments; free text has to agree, or an
         // encoded address in prose survives while its literal form is redacted.
         const decoded = piece.replace(PERCENT_ENCODED_AT, '@');
-        if (!BARE_EMAIL_TOKEN.test(decoded)) {
+        if (!isBareEmail(decoded)) {
             return piece;
         }
         redactedAny = true;
@@ -251,24 +236,28 @@ function redactEmails(core: string): string | null {
     return redactedAny ? pieces.join('') : null;
 }
 
+/**
+ * Anchored email test, retried once without a URI scheme prefix.
+ *
+ * `mailto:a@b.com` is the shape that motivated the retry: the prefix breaks the
+ * anchor so the address test fails, and it is not path-shaped either (no
+ * slash), so the token was returned verbatim — an address shipped in the
+ * clear. Stripping only a leading `scheme:` keeps each test anchored, which is
+ * the property that makes the scan linear.
+ */
+function isBareEmail(piece: string): boolean {
+    if (BARE_EMAIL_TOKEN.test(piece)) {
+        return true;
+    }
+    const withoutScheme = piece.replace(URI_SCHEME_PREFIX, '');
+    return withoutScheme !== piece && BARE_EMAIL_TOKEN.test(withoutScheme);
+}
+
 // Capturing, so `split` keeps the separators and the token rejoins verbatim.
 const EMAIL_LIST_SEPARATOR = /([,;]+)/;
 const PERCENT_ENCODED_AT = /%40/gi;
-
-/**
- * Classify a free-text token by POSITIVE evidence that it names a code
- * location. Anything else — including a bare `/@bob` echoed out of a router's
- * "Cannot GET" message — is treated as a request URL, so the npm-scope
- * exemption can never un-redact user data. Erring toward `'url'` costs at most
- * an over-redacted stack frame; erring toward `'stack'` ships PII.
- */
-function pathContextOf(token: string): PathContext {
-    return FILE_SCHEME.test(token) || token.includes('node_modules/')
-        ? 'stack'
-        : 'url';
-}
-
-const FILE_SCHEME = /^file:\/\//i;
+// `mailto:`, `MAILTO:` — a scheme with no `//`, so HAS_SCHEME does not match it.
+const URI_SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i;
 
 function isPathShaped(token: string): boolean {
     if (HAS_SCHEME.test(token)) return true;
@@ -293,7 +282,7 @@ const SIMPLE_RATIO = /^\d+\/[A-Za-z0-9]*$/;
  * tRPC method names (`/trpc/auth.getProvidersByEmail`) are method *names*, not
  * data, and are NOT identifier-shaped → preserved.
  */
-export function sanitizeUrl(value: string, context: PathContext = 'url'): string {
+export function sanitizeUrl(value: string): string {
     // Split scheme://host from the path so we only rewrite the path portion.
     // `file:///app/x` has an empty host, so the host part must be optional —
     // requiring `[^/]+` here is what made ESM stack frames fall through.
@@ -314,7 +303,7 @@ export function sanitizeUrl(value: string, context: PathContext = 'url'): string
 
     const sanitizedPath = rest
         .split('/')
-        .map((seg) => (looksLikeIdentifier(seg, context) ? ':id' : seg))
+        .map((seg) => (looksLikeIdentifier(seg) ? ':id' : seg))
         .join('/');
 
     return prefix + sanitizedPath;

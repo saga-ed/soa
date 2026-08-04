@@ -69,11 +69,13 @@ describe('sanitizeUrl', () => {
         );
     });
 
-    it('exempts npm scopes only in stack context', () => {
-        const frame = '/app/node_modules/@saga-ed/pkg/index.js';
-
-        expect(sanitizeUrl(frame, 'stack')).toContain('@saga-ed');
-        expect(sanitizeUrl(frame)).toContain(':id');
+    // There is NO npm-scope exemption: the scope is `@`-bearing, so it redacts
+    // like any other identifier. Three attempts to exempt it each leaked a
+    // `/@handle` route one step to the side — see the note in span-sanitizer.ts.
+    it('redacts an npm scope like any other @-bearing segment', () => {
+        expect(sanitizeUrl('/app/node_modules/@saga-ed/pkg/index.js')).toBe(
+            '/app/node_modules/:id/pkg/index.js',
+        );
     });
 
     it('redacts an id fused to a file extension', () => {
@@ -102,22 +104,41 @@ describe('sanitizeText', () => {
         expect(sanitizeText(text)).toBe(text);
     });
 
-    it('keeps scoped npm package names readable in stack frames', () => {
-        expect(
-            sanitizeText('at f (/app/node_modules/@saga-ed/soa-observability/x.js)'),
-        ).toContain('@saga-ed');
+    // The scope redacts (no exemption), but the frame must stay DIAGNOSABLE:
+    // path structure and filename survive, so the frame still locates the code.
+    // That is the guarantee we actually make, and the price of closing the
+    // /@handle class for good.
+    it('keeps stack frames diagnosable while redacting the scope', () => {
+        const out = sanitizeText(
+            'at f (/app/node_modules/@saga-ed/soa-observability/x.js)',
+        );
+
+        expect(out).toBe('at f (/app/node_modules/:id/soa-observability/x.js)');
     });
 
-    // The npm-scope exemption is keyed on provenance, not shape. A router
-    // echoes the request path into its message ("Cannot GET /@bob"), so a
-    // shape-only rule handed free text the stack-context exemption and
-    // un-redacted a handle that `sanitizeUrl` redacts correctly.
+    // A router echoes the request path into its message ("Cannot GET /@bob"),
+    // so free text is attacker-influenceable. Any marker used to prove a token
+    // is a code location can therefore be supplied BY the request — which is
+    // why there is no provenance gate. The last three entries are the spoof
+    // attempts that killed the gated design.
     it.each([
         ['Cannot GET /@bob', 'Cannot GET /:id'],
         ['Cannot GET /@bob/posts', 'Cannot GET /:id/posts'],
+        ['Cannot GET /files/node_modules/@bob', 'Cannot GET /files/node_modules/:id'],
+        ['Cannot GET /node_modules/@bob', 'Cannot GET /node_modules/:id'],
+        ['Error: file:///@bob', 'Error: file:///:id'],
     ])('redacts @handle echoed into free text: %s', (input, expected) => {
         expect(sanitizeText(input)).toBe(expected);
     });
+
+    // `mailto:a@b.com` fails the anchored whole-token test (the scheme breaks
+    // the anchor) and is not path-shaped (no slash), so it shipped verbatim.
+    it.each(['mailto:a@b.com', 'MAILTO:a@b.com', '<mailto:a@b.com>'])(
+        'redacts an address behind a URI scheme: %s',
+        (input) => {
+            expect(sanitizeText(input)).not.toContain('a@b.com');
+        },
+    );
 
     // Encoding must never decide exposure — in a path segment or in prose.
     it('treats literal and percent-encoded handles identically in text', () => {

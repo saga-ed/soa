@@ -24,6 +24,7 @@ import type { SeedSelection } from '../seed/index.js';
 const SERVICE_IDS = [
   'iam-api',
   'sis-api',
+  'authz-api',
   'programs-api',
   'scheduling-api',
   'sessions-api',

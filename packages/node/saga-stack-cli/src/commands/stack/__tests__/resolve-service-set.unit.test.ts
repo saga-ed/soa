@@ -57,7 +57,7 @@ describe('resolveServiceSet — --with is sugar over --only', () => {
 
   it('empty (no --only, no --with) ⇒ every NON-optional service (no playback)', () => {
     const ids = resolve(undefined, undefined);
-    expect(ids).toHaveLength(13); // 10 core + rtsm-api + coach-api/coach-web
+    expect(ids).toHaveLength(14); // 10 core + rtsm-api + coach-api/coach-web + authz-api (soa#402)
     expect(ids).not.toContain('transcripts-api');
   });
 

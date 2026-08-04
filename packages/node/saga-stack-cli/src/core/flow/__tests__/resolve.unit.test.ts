@@ -49,6 +49,8 @@ const sorted = (xs: readonly string[]): string[] => [...xs].sort();
 const JOURNEY_FULL_CLOSURE = sorted([
   'iam-api',
   'sis-api',
+  'authz-api', // soa#402 — sessions-api's hard authz dep
+
   'programs-api',
   'scheduling-api',
   'sessions-api',
@@ -127,7 +129,7 @@ describe('resolveFlow — journey (full, default)', () => {
     expect(r.closure.services).not.toContain('content-api');
   });
 
-  it('closure is the full-journey backend set (7 services, NOT content-api)', () => {
+  it('closure is the full-journey backend set (8 services, NOT content-api)', () => {
     expect(sorted(r.closure.services)).toEqual(JOURNEY_FULL_CLOSURE);
   });
 });

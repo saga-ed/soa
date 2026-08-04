@@ -838,4 +838,122 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     isFrontend: false,
     optional: true,
   },
+  // ── staff-admin console (saga-dash's SECOND app) ────────────────────────
+  // A staff-only SPA + its OWN Express/Lambda BFF. Modeled as TWO entries, the
+  // coach-web/coach-api precedent — `ServiceDef` is one id → one launch.cmd →
+  // one port, so a single entry cannot start both processes. `--with
+  // staff-admin` brings the pair up together (bundles.ts).
+  //
+  // Both are `optional: true`: this is an operator console, not part of the
+  // default closure, so a bare `ss stack up` is byte-identical to before.
+  'staff-admin-bff': {
+    id: 'staff-admin-bff',
+    repo: 'SAGA_DASH',
+    subpath: 'apps/web/staff-admin-console/backend',
+    // 3011, NOT the app's own default of 3000 — same reason content-api runs on
+    // 3009 instead of its default. :3000 is the most contested port on a dev box
+    // (every default Next/Express/Rails app), and `deriveInstance` builds
+    // `portOverrides` over EVERY manifest service including optional ones, so
+    // `stack down`'s orphan reap (`reapScanServices`) would group-kill whatever
+    // sits on :3000 for EVERY user — including people who never pass
+    // `--with staff-admin`. Registering an unrelated dev server's port into a
+    // SIGKILL band is not a cost this opt-in bundle gets to impose.
+    port: 3011,
+    // `pnpm dev` = `JANUS_REQUIRED=false tsx watch src/local.ts`, so the janus
+    // (JumpCloud) perimeter bypass rides along for free — a local operator has
+    // no janus_session to present. src/local.ts reads `PORT`, so the launcher
+    // injects 3011 (and the slot offset) rather than the app's baked default.
+    portEnvVar: 'PORT',
+    healthPath: '/health/ready',
+    databases: [],
+    dependsOn: ['iam-api', 'programs-api', 'sis-api'],
+    // All plain URL reads — the BFF proxies the operator's forwarded cookie to
+    // each. No S2S: access rides on the `iam_session` `ss stack login` mints.
+    depKinds: { 'iam-api': 'url', 'programs-api': 'url', 'sis-api': 'url' },
+    mesh: [],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        // 🪤 BARE ORIGINS — NOT `${IAM_URL}/trpc`. The BFF's tRPC clients append
+        // `/trpc` themselves (iam-client.ts, programs-client.ts, sis-client.ts),
+        // so ads-adm-api's `${IAM_URL}/trpc` form would double the segment and
+        // 404 in a way that reads like a broken feature.
+        //
+        // Also note the BFF's built-in IAM_API_URL default is localhost:3000 —
+        // its OWN port — so leaving this unset makes it proxy to itself.
+        IAM_API_URL: '${IAM_URL}',
+        // No PROGRAMS_URL / SIS_URL tokens exist (only the ports), so these
+        // compose the origin from the port tokens and slot correctly.
+        PROGRAMS_API_URL: 'http://localhost:${PROGRAMS_PORT}',
+        SIS_API_URL: 'http://localhost:${SIS_PORT}',
+        // Impersonation hands off to the local dash. Slot-correct via the token
+        // rather than the BFF's own localhost:8900 default.
+        IMPERSONATION_MOCK_DASH_ORIGIN: '${DASH_URL}',
+      },
+    },
+    seed: [],
+    lane: lanes(3011, 'staff-admin-api'),
+    tunnelSlug: 'staff-admin-api',
+    isFrontend: false,
+    optional: true,
+    // soa#305 adoption guard. The DOCUMENTED local path for this app is
+    // `pnpm dev:mock`, which pins IAM_API_URL at the e2e mock (127.0.0.1:4610).
+    // Without this fingerprint the launcher adopts such a process and the
+    // console then serves MOCK FIXTURE data while claiming to be on the ss
+    // stack — 200s all the way down, which is exactly how it misleads. Refuse
+    // it loudly instead (one-time "stop and re-run" for a pre-existing process).
+    adoptEnv: ['IAM_API_URL'],
+  },
+  'staff-admin-console': {
+    id: 'staff-admin-console',
+    repo: 'SAGA_DASH',
+    subpath: 'apps/web/staff-admin-console',
+    port: 8910,
+    // `null` because vite does NOT read $PORT — the dev script is
+    // `vite dev --port 8910` and vite.config.ts hardcodes `server.port: 8910`
+    // (verified: with PORT=8913 set it still took the config's 8910, then
+    // auto-incremented to 8911 when that was busy). It still SLOTS: like every
+    // `isFrontend` service, stack-api appends `--port <base+offset>` to the
+    // launch argv at slot > 0 and vite/cac honours the LAST `--port`. Same seam
+    // saga-dash (:8900, portEnvVar: null, isFrontend: true) rides — so do NOT
+    // add this to SLOT_EXCLUDED_SERVICES.
+    portEnvVar: null,
+    healthPath: '/',
+    databases: [],
+    dependsOn: ['staff-admin-bff'],
+    // 'url', NOT 'browser' — deliberately unlike saga-dash's deps. A `browser`
+    // edge is skipped under `followBrowserEdges:false` (flow/e2e closures), which
+    // would resolve a closure containing the SPA and NOT its BFF: every page then
+    // fails at the /api proxy with connection errors that read as a broken test
+    // rather than a missing service. And the distinction a `browser` edge encodes
+    // — "the SPA MAY call this backend from SOME page" — does not apply here: the
+    // console has exactly ONE upstream and cannot render a single page without
+    // it, so it is a hard dependency in every closure.
+    depKinds: { 'staff-admin-bff': 'url' },
+    mesh: [],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        // vite.config.ts's proxy target is `process.env.BFF_URL ??
+        // 'http://localhost:3000'`, so the proxy target slots too: at slot > 0
+        // the SPA reaches ITS slot's BFF rather than silently proxying to
+        // slot 0's (which would mix two stacks' data behind one console).
+        BFF_URL: 'http://localhost:${STAFF_ADMIN_BFF_PORT}',
+      },
+    },
+    seed: [],
+    lane: lanes(8910, 'staff-admin'),
+    tunnelSlug: 'staff-admin',
+    isFrontend: true,
+    optional: true,
+    // Same soa#305 guard as the BFF, for the same reason on the other side of the
+    // proxy. `healthPath: '/'` means a bare `pnpm dev` vite left running in the
+    // app dir answers 200, and an unguarded launcher ADOPTS it — never applying
+    // BFF_URL, so the console's /api proxy falls back to vite.config.ts's
+    // `http://localhost:3000` default and the browser reads whatever happens to
+    // be on 3000 instead of this stack's BFF. Fingerprinting the key refuses that
+    // process instead (one-time "stop and re-run"), which is precisely the
+    // mixed-stack condition BFF_URL exists to prevent.
+    adoptEnv: ['BFF_URL'],
+  },
 };

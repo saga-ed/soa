@@ -69,9 +69,47 @@ plus tab-completion work at every level.
 
 ### Bundles — common shapes in one word
 
-`--with dash|connect|coach|playback|qtf` expand to a set of `--only` includes (sugar over
-the closure, composable: `--with dash --with coach`). Shared across `up`/`status`/`verify`/
-`seed`/`reset`/`snapshot store`. See `ss stack bundle list`.
+`--with dash|connect|coach|playback|qtf|authz|staff-admin` expand to a set of `--only`
+includes (sugar over the closure, composable: `--with dash --with coach`). Shared across
+`up`/`status`/`verify`/`seed`/`reset`/`snapshot store`. See `ss stack bundle list`.
+
+#### `--with staff-admin` — the staff-admin console
+
+Brings up saga-dash's **second** app: the staff-only SvelteKit SPA (`:8910`) plus its own
+Express BFF (`:3011`), and the iam/programs/sis closure they read.
+
+The BFF runs on **3011, not the app's own default of 3000** — `stack down`'s orphan reap
+group-kills whatever sits on the manifest's port band, and claiming `:3000` would put every
+unrelated Next/Rails dev server on the box in a SIGKILL path. The launcher injects the port
+via `PORT`, so no repo change is needed.
+
+```bash
+ss stack up --with staff-admin   # → iam-api, sis-api, programs-api, staff-admin-bff, staff-admin-console
+ss stack login                   # the console reads THIS operator cookie
+open http://localhost:8910
+```
+
+Permissions, Personas, Policies, Templates and Roster all read (and write) live stack data —
+persona permission edits persist, because iam-api's `enforceIamAdmin` and CSRF gates are
+both no-ops locally (janus verification off, `SECURITY_ENFORCECSRF` unset). Don't infer
+deployed behavior from that: deployed, both enforce.
+
+Two things are expected to be missing, and are upstream gaps rather than wiring faults:
+
+- **Impersonate is hidden.** `canImpersonate` comes from iam-api's `staffAdmin.myCapabilities`,
+  which fails closed; the synthetic seed mints no `staff:*` claims (those are janus/JumpCloud
+  group-derived, never seeded).
+- **The COACH pages 401**, even with `coach-api` up: its `staffProcedure` locally verifies a
+  `janus_session`, which the `JANUS_REQUIRED=false` local bypass never mints. `coach-api` is
+  deliberately NOT in this bundle for that reason.
+
+Districts/Roster start empty — the seed creates personas and permissions but no district
+groups; create one from the console's Districts page.
+
+Both slot normally under `--slot N`: the BFF takes its offset port via `PORT`, and the SPA
+rides the same `--port <base+offset>` argv append every `isFrontend` service uses (vite
+ignores `$PORT`, but honours the last `--port`). The SPA's proxy target follows its own
+slot's BFF, so concurrent consoles never mix stacks.
 
 ### Slots — multiple stacks on one box
 

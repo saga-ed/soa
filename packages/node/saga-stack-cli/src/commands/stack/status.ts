@@ -27,12 +27,7 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import {
-  BUNDLE_NAMES,
-  combineRequested,
-  effectiveWithAuthz,
-  effectiveWithPlayback,
-} from '../../core/bundles.js';
+import { BUNDLE_NAMES, closureOptsFor, combineRequested } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { healthProbes } from '../../core/probe-plan.js';
@@ -191,10 +186,7 @@ export function resolveServiceSet(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  return computeClosure(manifest, requested, {
-    withPlayback: effectiveWithPlayback(withBundles),
-    withAuthz: effectiveWithAuthz(withBundles),
-  }).services;
+  return computeClosure(manifest, requested, closureOptsFor(withBundles)).services;
 }
 
 /** A service excluded from the health pass because its sibling repo isn't cloned. */

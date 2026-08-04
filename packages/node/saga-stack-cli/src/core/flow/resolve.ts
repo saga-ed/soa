@@ -24,9 +24,10 @@
  * only shapes the orchestration inputs.
  */
 
+import { closureOptsForIds } from '../bundles.js';
 import { computeClosure } from '../closure.js';
 import type { Closure } from '../closure.js';
-import { getService, manifest as defaultManifest } from '../manifest/index.js';
+import { manifest as defaultManifest } from '../manifest/index.js';
 import type { Lane, Manifest, ServiceId } from '../manifest/index.js';
 import type { SeedSelection } from '../seed/index.js';
 import type { FlowDef, FlowManifest, SpaDescriptor, StageDef } from './types.js';
@@ -289,16 +290,35 @@ export function resolveFlow(
   const requiredSystems = unionRequiredSystems(stages, manifest.spa);
   const seedSelection = effectiveSeed(flow, terminal);
 
-  // Admit playback services into the closure iff a selected stage requires one
-  // (optional in the manifest) or the seed layers the playback add-on.
-  const requiresOptional = requiredSystems.some((id) => getService(id, sm).optional);
+  // Admit optional services into the closure iff a selected stage requires one
+  // (optional in the manifest) or the seed layers the matching add-on.
+  //
+  // Dispatch PER FAMILY, mirroring `admitsOptional` in closure.ts: each optional
+  // service has its OWN opt-in flag, so a blanket `requiresOptional → withPlayback`
+  // silently drops every non-playback optional a flow names (an empty closure,
+  // whose stages then fail against a service that was never launched — pointing
+  // at the browser rather than at the gate that dropped it).
+  // `closureOptsForIds` is the shared id→flag mapping (derived from BUNDLES), so
+  // this cannot drift from `admitsOptional` as families are added.
+  const implied = closureOptsForIds(requiredSystems);
   const withPlayback =
-    opts.withPlayback ?? (requiresOptional || (seedSelection?.addOns?.includes('playback') ?? false));
+    opts.withPlayback ??
+    (implied.withPlayback || (seedSelection?.addOns?.includes('playback') ?? false));
+  const withStaffAdmin = implied.withStaffAdmin;
+  // ⚠️ authz stays SEED-DRIVEN ONLY, deliberately NOT `implied.withAuthz`. The
+  // flow/e2e path builds no authz overlay, so admitting authz-sync purely because
+  // a flow names it would launch it with an empty OPENFGA_STORE_ID against an
+  // iam-api running FGA_ENABLED=false — misconfigured, but reported as up (the
+  // same trap `restart` avoids via OVERLAY_BOUND_SERVICES). A flow that genuinely
+  // needs authz must come up under `stack up --with authz` first.
+  const withAuthz = seedSelection?.addOns?.includes('authz') ?? false;
   // followBrowserEdges:false — a flow's requiredSystems explicitly list the
   // backends its stages touch; we must NOT auto-expand the SPA's browser deps
   // (which would drag in every backend and defeat the N-of-M payoff, §5.2).
   const closure = computeClosure(sm, requiredSystems, {
     withPlayback,
+    withAuthz,
+    withStaffAdmin,
     followBrowserEdges: false,
   });
 

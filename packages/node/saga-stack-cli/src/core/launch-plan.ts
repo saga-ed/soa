@@ -74,6 +74,13 @@ export interface LaunchTokens {
   COACH_API_PORT: string;
   /** coach-web port — up.sh `COACH_WEB_PORT` (8800). */
   COACH_WEB_PORT: string;
+  /**
+   * staff-admin-console BFF port (3011) — the SPA's vite `/api` proxy target
+   * (`BFF_URL`). Needed because the SPA's own listen port cannot slot (vite
+   * ignores $PORT) but its proxy target CAN, so a slot > 0 console still talks
+   * to ITS slot's BFF instead of slot 0's.
+   */
+  STAFF_ADMIN_BFF_PORT: string;
   /** connect-mongo mesh port — up.sh `CONNECT_MONGO_PORT` (27037; coach-api's MONGO_PORT). */
   CONNECT_MONGO_PORT: string;
   /**
@@ -655,6 +662,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     RECORDINGS_API_PORT: String(recordingsApiPort),
     COACH_API_PORT: String(ports['coach-api']),
     COACH_WEB_PORT: String(ports['coach-web']),
+    STAFF_ADMIN_BFF_PORT: String(ports['staff-admin-bff']),
     CONNECT_MONGO_PORT: String(mongoPort),
     REDIS_PORT: String(redisPort),
     AUTHZ_SYNC_PORT: String(ports['authz-sync']),

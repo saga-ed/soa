@@ -3929,7 +3929,8 @@
             "coach",
             "playback",
             "qtf",
-            "authz"
+            "authz",
+            "staff-admin"
           ],
           "type": "option"
         }
@@ -4240,7 +4241,8 @@
             "coach",
             "playback",
             "qtf",
-            "authz"
+            "authz",
+            "staff-admin"
           ],
           "type": "option"
         }
@@ -4988,7 +4990,8 @@
             "coach",
             "playback",
             "qtf",
-            "authz"
+            "authz",
+            "staff-admin"
           ],
           "type": "option"
         }
@@ -5289,7 +5292,8 @@
             "coach",
             "playback",
             "qtf",
-            "authz"
+            "authz",
+            "staff-admin"
           ],
           "type": "option"
         }
@@ -5682,7 +5686,8 @@
             "coach",
             "playback",
             "qtf",
-            "authz"
+            "authz",
+            "staff-admin"
           ],
           "type": "option"
         },
@@ -5877,7 +5882,8 @@
             "coach",
             "playback",
             "qtf",
-            "authz"
+            "authz",
+            "staff-admin"
           ],
           "type": "option"
         }

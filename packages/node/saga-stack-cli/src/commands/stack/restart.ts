@@ -18,6 +18,7 @@
 
 import { BaseCommand } from '../../base-command.js';
 import type { NativeRuntimeFlags } from '../../base-command.js';
+import { bundleForService } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
@@ -76,6 +77,20 @@ export default class StackRestart extends BaseCommand {
     }
     if (up.av) this.log(up.av.message);
     for (const s of up.skipped) this.log(`⚠ ${s.message}`);
+    // Overlay-bound optionals were stopped by the reap but deliberately not
+    // relaunched (restart builds no overlay — relaunching would misconfigure
+    // them). Say so loudly: a silent drop here is what makes an operator think
+    // authz is still live after a bounce.
+    for (const id of outcome.notRelaunched ?? []) {
+      // Print the BUNDLE name, not the service id — `--with authz-sync` is not a
+      // valid bundle. Derived from the registry so a second overlay-bound service
+      // cannot silently start printing an uninvokable command.
+      const bundle = bundleForService(id);
+      this.log(
+        `⚠ ${id} was stopped but NOT relaunched — it needs its overlay.` +
+          (bundle ? ` Re-run: ss stack up --with ${bundle}` : ''),
+      );
+    }
 
     this.emit(
       flags,

@@ -9,10 +9,14 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AUTHZ_IDS,
   BUNDLES,
   BUNDLE_NAMES,
   BUNDLE_SEED_ADDONS,
+  PLAYBACK_IDS,
   SERVICE_BUNDLES,
+  STAFF_ADMIN_IDS,
+  bundleForService,
   combineRequested,
   effectiveWithPlayback,
   expandBundles,
@@ -25,8 +29,16 @@ const throwFail = (msg: string): never => {
 };
 
 describe('bundle registry', () => {
-  it('exposes the six bundle names in registry order', () => {
-    expect(BUNDLE_NAMES).toEqual(['dash', 'connect', 'coach', 'playback', 'qtf', 'authz']);
+  it('exposes the seven bundle names in registry order', () => {
+    expect(BUNDLE_NAMES).toEqual([
+      'dash',
+      'connect',
+      'coach',
+      'playback',
+      'qtf',
+      'authz',
+      'staff-admin',
+    ]);
   });
 
   it('every bundle carries a non-empty description', () => {
@@ -42,6 +54,8 @@ describe('bundle registry', () => {
     expect(SERVICE_BUNDLES.playback).toEqual(['transcripts-api', 'insights-api', 'chat-api']);
     expect(SERVICE_BUNDLES.qtf).toEqual([]);
     expect(SERVICE_BUNDLES.authz).toEqual(['authz-sync']);
+    // BFF before SPA: the console's vite proxy is useless without it.
+    expect(SERVICE_BUNDLES['staff-admin']).toEqual(['staff-admin-bff', 'staff-admin-console']);
   });
 
   it('derives BUNDLE_SEED_ADDONS only for the seed-bearing bundles', () => {
@@ -140,6 +154,30 @@ describe('effectiveWithPlayback', () => {
     expect(effectiveWithPlayback(['qtf'])).toBe(false);
     expect(effectiveWithPlayback([])).toBe(false);
     expect(effectiveWithPlayback(undefined)).toBe(false);
+  });
+});
+
+describe('bundleForService', () => {
+  it('maps a service id back to the bundle that contributes it', () => {
+    // The id and the bundle name deliberately DIFFER here — this is the case a
+    // hand-rolled `id === 'authz-sync' ? 'authz' : id` ternary got right by luck
+    // and every other overlay-bound service would have got wrong.
+    expect(bundleForService('authz-sync')).toBe('authz');
+    expect(bundleForService('staff-admin-bff')).toBe('staff-admin');
+    expect(bundleForService('staff-admin-console')).toBe('staff-admin');
+    expect(bundleForService('coach-api')).toBe('coach');
+  });
+
+  it('undefined for a service no bundle contributes', () => {
+    expect(bundleForService('sessions-api')).toBeUndefined();
+  });
+
+  it('every bundle name it returns is invokable as `--with <name>`', () => {
+    for (const id of [...AUTHZ_IDS, ...STAFF_ADMIN_IDS, ...PLAYBACK_IDS]) {
+      const name = bundleForService(id);
+      expect(name).toBeDefined();
+      expect(BUNDLE_NAMES).toContain(name);
+    }
   });
 });
 

@@ -19,7 +19,7 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import { BUNDLE_NAMES, effectiveWithAuthz, effectiveWithPlayback } from '../../core/bundles.js';
+import { BUNDLE_NAMES, closureOptsFor } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest } from '../../core/manifest/index.js';
@@ -62,8 +62,7 @@ export default class StackReset extends BaseCommand {
 
   async run(): Promise<void> {
     const { flags } = await this.parse(StackReset);
-    const withPlayback = effectiveWithPlayback(flags.with);
-    const withAuthz = effectiveWithAuthz(flags.with);
+    const closureOpts = closureOptsFor(flags.with);
 
     const profile = deriveInstance({ slot: flags.slot });
     const api = makeStackApi(manifest, this.buildNativeRuntime(flags, profile));
@@ -75,11 +74,11 @@ export default class StackReset extends BaseCommand {
       .filter((s) => !s.optional)
       .map((s) => s.id);
     const excluded = new Set(profile.excludedServices);
-    const services = computeClosure(manifest, requested, { withPlayback, withAuthz }).services.filter(
+    const services = computeClosure(manifest, requested, closureOpts).services.filter(
       (id) => !excluded.has(id),
     );
 
-    const res = await api.reset(services, { withPlayback, withAuthz });
+    const res = await api.reset(services, closureOpts);
 
     const truncated = res.native?.dbs.filter((d) => d.action === 'truncated').map((d) => d.db) ?? [];
     const migrateReset = res.native?.dbs.filter((d) => d.action === 'migrate-reset').map((d) => d.db) ?? [];

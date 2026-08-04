@@ -14,10 +14,18 @@
  * PURE: this module carries zero IO.
  */
 
+import type { ClosureOpts } from './closure.js';
 import type { ServiceId } from './manifest/index.js';
 
 /** The named features a `--with` value may select (services, a seed add-on, or both). */
-export type BundleName = 'dash' | 'connect' | 'coach' | 'playback' | 'qtf' | 'authz';
+export type BundleName =
+  | 'dash'
+  | 'connect'
+  | 'coach'
+  | 'playback'
+  | 'qtf'
+  | 'authz'
+  | 'staff-admin';
 
 /** A seed add-on a bundle may layer onto the composed seed plan. */
 export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz';
@@ -70,6 +78,14 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
       'runs the fga-bootstrap seed step (model + canonical tuples), and starts the authz-sync ' +
       'RabbitMQ consumer. First run bootstraps a fresh store (FGA checks fail closed); rerun ' +
       '`stack up --with authz` once more to pick up the persisted store id.',
+  },
+  'staff-admin': {
+    services: ['staff-admin-bff', 'staff-admin-console'],
+    description:
+      'Staff-admin console: the staff-only SPA (:8910) + its own BFF (:3011), plus the ' +
+      'iam/programs/sis closure they read. Log in with `ss stack login` — the console ' +
+      'reads that operator cookie. Impersonate is HIDDEN (the synthetic seed mints no ' +
+      'staff:* claims) and the COACH pages 401 (coach-api verifies a janus_session).',
   },
 };
 
@@ -171,6 +187,97 @@ export function effectiveWithPlayback(withBundles: string[] | undefined): boolea
  */
 export function effectiveWithAuthz(withBundles: string[] | undefined): boolean {
   return (withBundles ?? []).includes('authz');
+}
+
+/**
+ * Whether the closure should keep the `optional:true` staff-admin pair
+ * (`staff-admin-bff` + `staff-admin-console`): true iff the `staff-admin`
+ * bundle was requested via `--with`. Same shape as `effectiveWithAuthz` —
+ * `computeClosure` drops both unless this is set, keeping the operator console
+ * out of every default `stack up`. PURE.
+ */
+export function effectiveWithStaffAdmin(withBundles: string[] | undefined): boolean {
+  return (withBundles ?? []).includes('staff-admin');
+}
+
+/**
+ * The `optional:true` service ids each opt-in flag admits, derived from the
+ * bundle registry so they cannot drift from `BUNDLES`.
+ *
+ * Consumers that must map an optional id BACK to its flag (flow resolution,
+ * workspace run-sets) use these instead of hand-listing ids — every optional
+ * service needs its OWN flag (see `admitsOptional`), and a stale hand-list is
+ * exactly how one gets silently dropped into an empty closure.
+ */
+export const PLAYBACK_IDS: readonly ServiceId[] = BUNDLES.playback.services;
+export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
+export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
+
+/**
+ * The fully-resolved opt-in flags for every `optional:true` family — one field
+ * per flag, none omittable.
+ *
+ * `Required` is load-bearing: every `ClosureOpts` field is declared `?:`, so a
+ * bare `Pick` would leave them all optional and a caller could pass `{}` — which
+ * typechecks and then silently resolves an EMPTY closure (exit 0, no error). The
+ * alias exists so adding a fourth family is ONE edit here rather than a hand-sweep
+ * of every signature that spells the shape out.
+ */
+export type ResolvedClosureOpts = Required<
+  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>
+>;
+
+/**
+ * Every optional-service opt-in flag, derived from one `--with` list.
+ *
+ * THE point of this helper: each `optional:true` family needs its OWN flag, and
+ * every flag defaults to FALSE — so a `computeClosure` caller that forgets one
+ * silently resolves an EMPTY closure (exit 0, no error, no compiler help). That
+ * failure has now been shipped three times (snapshot store, snapshot restore,
+ * flow resolution). Deriving all flags in ONE place means adding a bundle is a
+ * single edit here rather than a hand-sweep of every call site.
+ *
+ * Returns a `Required<…>` shape so a caller cannot partially spread it. PURE.
+ */
+export function closureOptsFor(
+  withBundles: string[] | undefined,
+): ResolvedClosureOpts {
+  return {
+    withPlayback: effectiveWithPlayback(withBundles),
+    withAuthz: effectiveWithAuthz(withBundles),
+    withStaffAdmin: effectiveWithStaffAdmin(withBundles),
+  };
+}
+
+/**
+ * The opt-in flags implied by a set of service ids already known to be wanted
+ * (a workspace run-set, a flow's `requiredSystems`) — the id→flag direction of
+ * `closureOptsFor`. Derived from the same `BUNDLES`-backed id sets, so it cannot
+ * drift. PURE.
+ */
+export function closureOptsForIds(
+  ids: readonly ServiceId[],
+): ResolvedClosureOpts {
+  const has = (family: readonly ServiceId[]): boolean => ids.some((id) => family.includes(id));
+  return {
+    withPlayback: has(PLAYBACK_IDS),
+    withAuthz: has(AUTHZ_IDS),
+    withStaffAdmin: has(STAFF_ADMIN_IDS),
+  };
+}
+
+/**
+ * The `--with` bundle name that contributes a given service id, or `undefined`
+ * when no bundle does.
+ *
+ * For "re-run `ss stack up --with <X>`" advice: the bundle name and the service
+ * id are NOT interchangeable (`authz-sync` lives in the `authz` bundle, and the
+ * staff-admin pair in `staff-admin`), so a message that prints the id is telling
+ * the operator to run a command that fails on an unknown bundle. Derived from
+ * `BUNDLES` in registry order, so it cannot drift as families are added. PURE.
+ */
+export function bundleForService(id: ServiceId): BundleName | undefined {
+  return BUNDLE_NAMES.find((name) => BUNDLES[name].services.includes(id));
 }
 
 /**

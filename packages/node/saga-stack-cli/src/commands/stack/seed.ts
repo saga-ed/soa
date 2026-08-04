@@ -30,9 +30,8 @@ import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import {
   BUNDLE_NAMES,
+  closureOptsFor,
   combineRequested,
-  effectiveWithAuthz,
-  effectiveWithPlayback,
   seedAddOnsFor,
 } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
@@ -136,8 +135,6 @@ export default class StackSeed extends BaseCommand {
     // playback trio (transcripts/insights/chat) so their add-on seed steps compose
     // instead of being dropped as service-inactive. There is no prep/mesh/launch —
     // the services are assumed already up.
-    const withPlayback = effectiveWithPlayback(flags.with);
-    const withAuthz = effectiveWithAuthz(flags.with);
     const fullNonOptional = (Object.values(manifest.services) as { id: ServiceId; optional: boolean }[])
       .filter((s) => !s.optional)
       .map((s) => s.id);
@@ -148,7 +145,7 @@ export default class StackSeed extends BaseCommand {
     // subtract them from the active set exactly like `reset` does, so their
     // seed steps degrade to service-inactive skips instead of failing.
     const excluded = new Set(instance.excludedServices);
-    const closureServices = computeClosure(manifest, requested, { withPlayback, withAuthz }).services;
+    const closureServices = computeClosure(manifest, requested, closureOptsFor(flags.with)).services;
     const active = new Set(closureServices.filter((id) => !excluded.has(id)));
     const droppedForSlot = closureServices.filter((id) => excluded.has(id));
     if (droppedForSlot.length > 0) {

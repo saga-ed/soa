@@ -30,6 +30,7 @@ import { join } from 'node:path';
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
+import { closureOptsForIds } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { DbId, ServiceId } from '../../../core/manifest/index.js';
@@ -213,7 +214,12 @@ export function scopeSnapshot(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  const dbSet = new Set<DbId>(computeClosure(manifest, requested, { withPlayback: true }).databases);
+  // `scopeSnapshot` only has the requested service ids (`restore` carries no `--with`
+  // flag — only `--only`), so derive the opt-in flags from the ids themselves rather
+  // than hardcoding `withPlayback: true`: that hardcode is exactly the bug this fixes
+  // — `--only staff-admin-*` needs `withStaffAdmin`, not `withPlayback`, and resolved
+  // an EMPTY closure (silent "no database present in snapshot" failure) without it.
+  const dbSet = new Set<DbId>(computeClosure(manifest, requested, closureOptsForIds(requested)).databases);
   const databases = snapshot.databases.filter((d) => dbSet.has(d.db));
   if (databases.length === 0) {
     fail(

@@ -162,6 +162,58 @@ describe('recordSpanException PII scrubbing', () => {
             'database connection pool exhausted',
         );
     });
+
+    // A standalone slash in prose must not be treated as a path — over-matching
+    // here would redact ordinary error text into uselessness.
+    it.each([
+        'timeout after 30s / retrying',
+        'config value / missing',
+        'read/write conflict',
+        'rate limit 5/second exceeded',
+    ])('leaves prose containing a slash untouched: %s', (message) => {
+        const span = fakeSpan();
+
+        recordSpanException(new Error(message), span);
+
+        expect(recordedError(span).message).toBe(message);
+    });
+
+    // The stack is the whole point of the fix — templatizing its frames into
+    // ':id' soup would trade one unusable field for another.
+    it('keeps stack frames readable', () => {
+        const span = fakeSpan();
+        const err = new Error('boom');
+        err.stack = [
+            'Error: boom',
+            '    at handler (/app/apps/node/programs-api/dist/main.js:12:5)',
+            '    at next (/app/node_modules/express/lib/router/index.js:280:10)',
+        ].join('\n');
+
+        recordSpanException(err, span);
+
+        const recorded = recordedError(span);
+        expect(recorded.stack).toContain('programs-api/dist/main.js');
+        expect(recorded.stack).toContain('express/lib/router/index.js');
+        expect(recorded.stack).not.toContain(':id');
+    });
+
+    it('scrubs identifiers embedded in stack frames', () => {
+        const span = fakeSpan();
+        const err = new Error('boom');
+        err.stack = 'Error: boom\n    at load (/students/12345/grades:1:1)';
+
+        recordSpanException(err, span);
+
+        expect(recordedError(span).stack).not.toContain('12345');
+    });
+
+    it('records a real Error instance, not a plain object', () => {
+        const span = fakeSpan();
+
+        recordSpanException(new Error('failed for a@b.com'), span);
+
+        expect(recordedError(span)).toBeInstanceOf(Error);
+    });
 });
 
 describe('structuredErrorMiddleware', () => {

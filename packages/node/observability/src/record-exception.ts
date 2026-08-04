@@ -58,14 +58,22 @@ function sanitizeException(error: Error): Error {
         return error;
     }
 
-    // recordException reads only name/message/stack.
-    return { name: error.name, message, stack } as Error;
+    // A real Error, not a {name, message, stack} literal: recordException takes
+    // an `Exception` and implementations are free to branch on `instanceof
+    // Error`. A plain object could be silently dropped by a future SDK version.
+    const sanitized = new Error(message);
+    sanitized.name = error.name;
+    sanitized.stack = stack;
+    return sanitized;
 }
 
 // URL-ish runs inside free text. Deliberately narrow: over-matching would
 // redact the message into uselessness, and the goal is removing the obvious
-// identifier vector, not proving the text PII-free.
-const URL_IN_TEXT = /\bhttps?:\/\/\S+|(?<![\w/])\/[A-Za-z0-9_\-./%@]*/g;
+// identifier vector, not proving the text PII-free. The path branch requires a
+// non-empty first segment so a standalone slash in prose ("30s / retrying") is
+// never a match.
+const URL_IN_TEXT =
+    /\bhttps?:\/\/\S+|(?<![\w/])\/[A-Za-z0-9_\-.%@]+(?:\/[A-Za-z0-9_\-.%@]*)*/g;
 const BARE_EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
 function sanitizeMessage(text: string): string {

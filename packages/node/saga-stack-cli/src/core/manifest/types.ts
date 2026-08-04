@@ -85,6 +85,7 @@ export type DbId =
 export type SeedStepRef =
   | 'iam-dev-user'
   | 'iam'
+  | 'authz-projection-backfill'
   | 'sessions'
   | 'qtf-demo'
   | 'programs'

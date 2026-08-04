@@ -235,7 +235,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_AUTH_USERTOKENISSUER: '${IAM_ISSUER}',
       },
     },
-    seed: [],
+    seed: ['authz-projection-backfill'],
     lane: lanes(3200, 'authz'),
     tunnelSlug: 'authz',
     isFrontend: false,

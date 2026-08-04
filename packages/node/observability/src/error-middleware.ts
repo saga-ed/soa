@@ -18,14 +18,37 @@ import { recordSpanException } from './record-exception.js';
  */
 export function structuredErrorMiddleware(logger: ILogger): ErrorRequestHandler {
     return (err, req, res, _next) => {
-        recordSpanException(err);
-        logger.error(
-            `unhandled error on ${req.method} ${req.originalUrl}`,
-            err instanceof Error ? err : new Error(String(err)),
-        );
+        // Everything before the response is best-effort. A throw here would be
+        // a throw from inside an error handler, which Express hands to
+        // `finalhandler` — the client would get a raw stack trace instead of
+        // the opaque 500 below, and the error would never reach the log
+        // pipeline. `String(err)` alone can throw, for a null-prototype object
+        // or a poisoned `toString`, so the coercion must be guarded too.
+        try {
+            recordSpanException(err);
+            logger.error(
+                `unhandled error on ${req.method} ${req.originalUrl}`,
+                toError(err),
+            );
+        } catch {
+            // Nothing safe left to log with — the logger or the value itself is
+            // the thing that failed. Still send the response below.
+        }
+
         if (res.headersSent) {
             return;
         }
         res.status(500).json({ error: 'internal server error' });
     };
+}
+
+function toError(err: unknown): Error {
+    if (err instanceof Error) {
+        return err;
+    }
+    try {
+        return new Error(String(err));
+    } catch {
+        return new Error('unstringifiable thrown value');
+    }
 }

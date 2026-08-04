@@ -64,10 +64,46 @@ const EMAIL_SEGMENT = /@|%40/i;
 // no second `@`, which no email can satisfy.
 const NPM_SCOPE_SEGMENT = /^@[A-Za-z0-9_-]+$/;
 
-function looksLikeIdentifier(segment: string): boolean {
-    if (NPM_SCOPE_SEGMENT.test(segment)) {
+/**
+ * Where a path came from. The npm-scope exemption is only ever correct for
+ * code locations: applying it to request URLs would un-redact a `/@handle`
+ * route, which is user data and was previously redacted by the email rule.
+ * Encoding must not decide PII exposure — `/@bob` and `/%40bob` have to behave
+ * identically on a request URL.
+ */
+type PathContext = 'url' | 'stack';
+
+// An id fused to a file extension ("12345.json") fails every anchored test
+// below, because `.` sits outside their character classes. Test the stem
+// separately so `/exports/98765.csv` redacts like `/exports/98765` — the
+// extension is structure, the stem is the identifier.
+const FILE_EXTENSION = /\.[A-Za-z0-9]{1,8}$/;
+
+function looksLikeIdentifier(
+    segment: string,
+    context: PathContext = 'url',
+): boolean {
+    if (context === 'stack' && NPM_SCOPE_SEGMENT.test(segment)) {
         return false;
     }
+    if (matchesIdentifierRule(segment)) {
+        return true;
+    }
+
+    // Retry without a trailing extension, but never let the stem's `@` trigger
+    // the email rule — "user@corp.com" would otherwise be caught here anyway by
+    // the full-segment test above, and a scoped package must not match via its
+    // stem either.
+    const stem = segment.replace(FILE_EXTENSION, '');
+    return (
+        stem !== segment &&
+        stem !== '' &&
+        !(context === 'stack' && NPM_SCOPE_SEGMENT.test(stem)) &&
+        matchesIdentifierRule(stem)
+    );
+}
+
+function matchesIdentifierRule(segment: string): boolean {
     return (
         NUMERIC_SEGMENT.test(segment) ||
         UUID_SEGMENT.test(segment) ||
@@ -88,59 +124,101 @@ function looksLikeIdentifier(segment: string): boolean {
 const MAX_SCRUB_LENGTH = 16 * 1024;
 const TRUNCATION_MARKER = '… [truncated by pii-sanitizer]';
 
-// Identifier-ish runs inside free text. Deliberately narrow: over-matching
-// would redact the message into uselessness, and the goal is removing the
-// obvious identifier vector, not proving the text PII-free.
-//
-// The path branch requires a non-empty first segment, so a standalone slash in
-// prose ("30s / retrying") never matches. It also consumes an optional query
-// string so `sanitizeUrl` can drop it — without this a bare path carries
-// `?studentId=12345` straight through, since only the absolute-URL branch's
-// `\S+` would otherwise swallow a `?`.
-const PATH_CHARS = String.raw`[A-Za-z0-9_\-.%@~]`;
-// The absolute-URL branch excludes `,` `;` and quotes/brackets outright: unlike
-// `.` and `:` they never appear inside a real URL, so letting `\S+` swallow
-// them would fold prose punctuation into the final path segment and defeat
-// sanitizeUrl's anchored identifier tests.
-const URL_CHARS = String.raw`[^\s,;'"\]}>]`;
-const URL_IN_TEXT = new RegExp(
-    String.raw`\bhttps?://${URL_CHARS}+|(?<![\w/])/${PATH_CHARS}+(?:/${PATH_CHARS}*)*(?:\?\S*)?`,
-    'g',
+/**
+ * Free text is tokenized on whitespace rather than matched with one big
+ * pattern. Earlier revisions accreted a `\bhttps?://` branch, a `(?<![\w/])`
+ * lookbehind and a trailing-punctuation strip, and each addition left a gap a
+ * step to the side of the last one: `file:///` frames (the normal shape in an
+ * ESM service) matched no branch, and `baseUrl/students/12345` was skipped
+ * because a word character preceded the slash. Splitting first means every
+ * token is considered exactly once, whatever scheme or prefix it carries.
+ */
+const WHITESPACE_RUN = /(\s+)/;
+
+// Punctuation that can wrap or follow a path in prose but never belongs to it.
+// Stripped from both ends before sanitizing and restored after, so an id never
+// stays fused to a bracket or sentence period.
+const LEADING_PUNCTUATION = /^[('"[{<]+/;
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}'">]+$/;
+
+// A token is path-shaped if it carries a scheme (`file:///…`, `https://…`,
+// `prisma://…`) or contains a slash at all. Scheme-agnostic by design: matching
+// a fixed list is what let `file://` through.
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+/**
+ * Anchored, so it is applied to a single token rather than scanned across free
+ * text. Running a `g`-flagged email pattern over prose is what went quadratic:
+ * on a long dotted run (`a.a.a.…`) with no `@` anywhere, the engine matches the
+ * dotted labels, fails at `@`, then backtracks through every split point — and
+ * repeats that from every start offset. Splitting the domain into dot-free
+ * labels did not help, because the local part has the same shape.
+ *
+ * Tokens are already whitespace-delimited, and an email cannot contain
+ * whitespace, so per-token anchoring loses nothing and makes the work linear:
+ * each token is examined once, and only if it contains an `@` at all.
+ */
+const EMAIL_LABEL = String.raw`[A-Za-z0-9_%+-]+`;
+const BARE_EMAIL_TOKEN = new RegExp(
+    String.raw`^${EMAIL_LABEL}(?:\.${EMAIL_LABEL})*@${EMAIL_LABEL}(?:\.${EMAIL_LABEL})*\.[A-Za-z]{2,}$`,
 );
-
-// Trailing sentence punctuation must not be absorbed into the match: a segment
-// captured as "12345." fails the anchored ^\d+$ identifier test and the id then
-// ships verbatim. Stripped before sanitizing, re-appended after.
-const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
-
-// Domain part is split into dot-free labels so there is exactly one way to
-// match — `[A-Za-z0-9.-]+` followed by `\.` lets `.` belong to either side,
-// giving overlapping split points and quadratic scanning under the `g` flag.
-const BARE_EMAIL =
-    /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
 
 /**
  * Scrub PII out of free-form text (an exception message or stack trace).
  *
- * Unlike `sanitizeUrl`, which receives a whole attribute value, this extracts
- * URL/path-shaped runs from arbitrary prose and sanitizes each in place.
+ * Unlike `sanitizeUrl`, which receives a whole attribute value, this works on
+ * arbitrary prose: it sanitizes each path-shaped token in place and redacts
+ * bare email addresses anywhere in the text.
  */
 export function sanitizeText(text: string): string {
-    const truncated =
-        text.length > MAX_SCRUB_LENGTH
-            ? text.slice(0, MAX_SCRUB_LENGTH) + TRUNCATION_MARKER
-            : text;
+    // Scrub BEFORE truncating. Truncating first cuts the trailing context every
+    // anchored rule needs — an email loses its TLD, a UUID its final group — so
+    // the value stops matching and ships half-redacted. The cap then applies to
+    // already-scrubbed text, bounding what is retained rather than what is
+    // examined; the linear scanners above are what bound the work.
+    const scrubbed = text.split(WHITESPACE_RUN).map(sanitizeToken).join('');
 
-    return truncated
-        .replace(URL_IN_TEXT, (match) => {
-            const punctuation = TRAILING_PUNCTUATION.exec(match)?.[0] ?? '';
-            const trimmed = punctuation
-                ? match.slice(0, -punctuation.length)
-                : match;
-            return sanitizeUrl(trimmed) + punctuation;
-        })
-        .replace(BARE_EMAIL, ':email');
+    return scrubbed.length > MAX_SCRUB_LENGTH
+        ? scrubbed.slice(0, MAX_SCRUB_LENGTH) + TRUNCATION_MARKER
+        : scrubbed;
 }
+
+function sanitizeToken(token: string): string {
+    const lead = LEADING_PUNCTUATION.exec(token)?.[0] ?? '';
+    const withoutLead = token.slice(lead.length);
+    const trail = TRAILING_PUNCTUATION.exec(withoutLead)?.[0] ?? '';
+    const core = trail ? withoutLead.slice(0, -trail.length) : withoutLead;
+
+    if (core === '') {
+        return token;
+    }
+    // `indexOf` first: the anchored email test only runs on tokens that could
+    // possibly be one, so prose never pays for it.
+    if (core.indexOf('@') !== -1 && BARE_EMAIL_TOKEN.test(core)) {
+        return lead + ':email' + trail;
+    }
+    if (!isPathShaped(core)) {
+        return token;
+    }
+    return lead + sanitizeUrl(core, 'stack') + trail;
+}
+
+function isPathShaped(token: string): boolean {
+    if (HAS_SCHEME.test(token)) return true;
+
+    // A path must START at a slash (`/students/12345`) or contain one with a
+    // non-numeric side (`baseUrl/students/12345`, `dist/main.js`). Treating any
+    // slash as a path turns a ratio in prose — "rate limit 5/second" — into
+    // `:id/second`, redacting text that was never an identifier.
+    const slash = token.indexOf('/');
+    if (slash === -1) return false;
+    if (token.startsWith('/')) return token.length > 1;
+    return !SIMPLE_RATIO.test(token);
+}
+
+// `5/second`, `1/2`, `3/10s` — a bare number over a short word or number. These
+// are quantities in prose, not paths.
+const SIMPLE_RATIO = /^\d+\/[A-Za-z0-9]*$/;
 
 /**
  * Sanitize a URL/path string: drop the query string entirely and templatize
@@ -148,13 +226,15 @@ export function sanitizeText(text: string): string {
  * tRPC method names (`/trpc/auth.getProvidersByEmail`) are method *names*, not
  * data, and are NOT identifier-shaped → preserved.
  */
-export function sanitizeUrl(value: string): string {
+export function sanitizeUrl(value: string, context: PathContext = 'url'): string {
     // Split scheme://host from the path so we only rewrite the path portion.
+    // `file:///app/x` has an empty host, so the host part must be optional —
+    // requiring `[^/]+` here is what made ESM stack frames fall through.
     let prefix = '';
     let rest = value;
 
-    const schemeMatch = /^([a-z][a-z0-9+.-]*:\/\/[^/]+)(\/.*)?$/i.exec(value);
-    if (schemeMatch && schemeMatch[1]) {
+    const schemeMatch = /^([a-z][a-z0-9+.-]*:\/\/[^/]*)(\/.*)?$/i.exec(value);
+    if (schemeMatch && schemeMatch[1] !== undefined) {
         prefix = schemeMatch[1];
         rest = schemeMatch[2] ?? '';
     }
@@ -167,7 +247,7 @@ export function sanitizeUrl(value: string): string {
 
     const sanitizedPath = rest
         .split('/')
-        .map((seg) => (looksLikeIdentifier(seg) ? ':id' : seg))
+        .map((seg) => (looksLikeIdentifier(seg, context) ? ':id' : seg))
         .join('/');
 
     return prefix + sanitizedPath;
@@ -240,10 +320,12 @@ export function setSanitizerWarnSink(sink: WarnSink): void {
     warnSink = sink;
 }
 
-/** Restore the default failure-warning sink + reset the throttle (test seam). */
+/** Restore the default failure-warning sink + reset every throttle (test seam). */
 export function resetSanitizerWarnSink(): void {
     warnSink = defaultWarnSink;
-    sanitizeFailureCount = 0;
+    for (const channel of Object.keys(failureCounts) as WarnChannel[]) {
+        failureCounts[channel] = 0;
+    }
 }
 
 // `export()` is a hot path, so a persistent sanitize failure (e.g. a future
@@ -253,16 +335,35 @@ export function resetSanitizerWarnSink(): void {
 // without becoming a log storm. NOTE: count-based, so cadence scales with span
 // volume — acceptable here because the first occurrence always fires.
 const SANITIZE_WARN_EVERY = 1000;
-let sanitizeFailureCount = 0;
+
+/**
+ * Independent failure sources. Counters are PER CHANNEL: sharing one would let
+ * a high-volume failure (attribute rewrite, at span-export rate) advance the
+ * count past the point where an unrelated first failure in another channel
+ * lands on a multiple of the throttle — silently swallowing the one warning
+ * that was supposed to be guaranteed. "First occurrence always fires" is only
+ * true if each source counts its own.
+ */
+type WarnChannel = 'attributes' | 'events' | 'record-exception';
+
+const failureCounts: Record<WarnChannel, number> = {
+    attributes: 0,
+    events: 0,
+    'record-exception': 0,
+};
 
 /**
  * Report a swallowed sanitize/telemetry failure through the throttled sink.
  *
  * Shared so every degrade-safe catch in this package stays detectable through
- * one channel and one throttle, rather than each re-inventing (or omitting) it.
+ * one sink, while each channel keeps its own throttle.
  */
-export function warnSanitizeFailure(message: string, err: unknown): void {
-    if (sanitizeFailureCount++ % SANITIZE_WARN_EVERY === 0) {
+export function warnSanitizeFailure(
+    channel: WarnChannel,
+    message: string,
+    err: unknown,
+): void {
+    if (failureCounts[channel]++ % SANITIZE_WARN_EVERY === 0) {
         warnSink(message, err);
     }
 }
@@ -278,6 +379,12 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
         spans: ReadableSpan[],
         resultCallback: (result: ExportResult) => void,
     ): void {
+        // Attributes and events are sanitized under SEPARATE try blocks. Sharing
+        // one meant a throw in the attribute rewrite (which the class doc
+        // anticipates, if a future SDK makes `attributes` truly read-only)
+        // skipped event scrubbing entirely — and the exception event is the
+        // higher-PII payload, since instrumentations record it from the RAW
+        // error. Each failure must degrade only its own half.
         for (const span of spans) {
             try {
                 // `span.attributes` is declared `readonly` on ReadableSpan, but
@@ -285,19 +392,27 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
                 // object, so in-place rewrite works. If a future impl makes it
                 // truly read-only the assignment throws → caught below.
                 sanitizeAttributes(span.attributes);
-                sanitizeEvents(span);
             } catch (err) {
                 // Fail OPEN: leave this span untouched rather than dropping it
                 // or aborting the whole batch. Never rethrow. But surface a
                 // persistent failure (throttled) — a silent swallow would let a
                 // read-only-attributes regression disable PII sanitization
                 // fleet-wide with no signal.
-                if (sanitizeFailureCount++ % SANITIZE_WARN_EVERY === 0) {
-                    warnSink(
-                        '[pii-sanitizer] span sanitization failed; shipping span unmodified',
-                        err,
-                    );
-                }
+                warnSanitizeFailure(
+                    'attributes',
+                    '[pii-sanitizer] span attribute sanitization failed; shipping span unmodified',
+                    err,
+                );
+            }
+
+            try {
+                sanitizeEvents(span);
+            } catch (err) {
+                warnSanitizeFailure(
+                    'events',
+                    '[pii-sanitizer] span event sanitization failed; shipping events unmodified',
+                    err,
+                );
             }
         }
         this.inner.export(spans, resultCallback);

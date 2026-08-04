@@ -46,6 +46,7 @@ export function recordSpanException(err: unknown, span?: Span): void {
         // silently swallowing would let a regression revert every service to
         // `error: {}` with a green test suite and no signal.
         warnSanitizeFailure(
+            'record-exception',
             '[record-exception] failed to record exception on span',
             cause,
         );

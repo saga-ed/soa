@@ -7,6 +7,7 @@ import {
     resetSanitizerWarnSink,
 } from './span-sanitizer.js';
 import { resolveResourceAttributes } from './tracing.js';
+import { recordSpanException } from './record-exception.js';
 
 describe('sanitizeUrl', () => {
     it('strips query strings', () => {
@@ -54,6 +55,30 @@ describe('sanitizeUrl', () => {
         expect(sanitizeUrl('/')).toBe('/');
         expect(sanitizeUrl('http://host')).toBe('http://host');
     });
+
+    // The npm-scope exemption is only correct for code locations. Applied to a
+    // request URL it un-redacts a user handle, and worse, does so only for the
+    // literal form — making PII exposure depend on client encoding.
+    it('redacts @handle segments in request URLs', () => {
+        expect(sanitizeUrl('/@johndoe/profile')).toBe('/:id/profile');
+    });
+
+    it('treats literal and percent-encoded handles identically', () => {
+        expect(sanitizeUrl('/@johndoe/profile')).toBe(
+            sanitizeUrl('/%40johndoe/profile'),
+        );
+    });
+
+    it('exempts npm scopes only in stack context', () => {
+        const frame = '/app/node_modules/@saga-ed/pkg/index.js';
+
+        expect(sanitizeUrl(frame, 'stack')).toContain('@saga-ed');
+        expect(sanitizeUrl(frame)).toContain(':id');
+    });
+
+    it('redacts an id fused to a file extension', () => {
+        expect(sanitizeUrl('/exports/98765.csv')).toBe('/exports/:id');
+    });
 });
 
 describe('sanitizeText', () => {
@@ -83,14 +108,57 @@ describe('sanitizeText', () => {
         ).toContain('@saga-ed');
     });
 
-    it('caps pathological input instead of scanning it all', () => {
-        const hostile = 'x@' + 'a.'.repeat(30000);
+    // Schemes are matched generically, not from a list. `file://` is the normal
+    // frame shape in an ESM service, so a fixed `https?` list silently exempted
+    // every stack this package exists to scrub.
+    it.each([
+        ['file:///app/src/students/12345/x.js:1:1', '12345'],
+        ['prisma://db/students/12345', '12345'],
+        ['prefix/students/12345 tail', '12345'],
+        ['/students/12345.json failed', '12345'],
+        ['/exports/98765.csv', '98765'],
+    ])('redacts the id in %s', (input, leaked) => {
+        expect(sanitizeText(input)).not.toContain(leaked);
+    });
 
-        const started = performance.now();
-        const out = sanitizeText(hostile);
+    // Truncating before scrubbing removes the trailing context the anchored
+    // rules need, so a value at the boundary stops matching and ships partly
+    // intact — the cap must bound what is retained, not what is examined.
+    it.each([
+        ['email', 'p'.repeat(16374) + 'alice@saga.org', 'alice@saga'],
+        [
+            'UUID',
+            'q'.repeat(16350) + '/u/550e8400-e29b-41d4-a716-446655440000',
+            '550e8400-e29b-41',
+        ],
+    ])('redacts a %s straddling the truncation cap', (_label, input, leaked) => {
+        expect(sanitizeText(input)).not.toContain(leaked);
+    });
 
-        expect(performance.now() - started).toBeLessThan(1000);
+    // Assert the GROWTH RATE, not a wall-clock threshold. The previous test
+    // allowed 1000ms and passed at ~220ms of quadratic work, so it would have
+    // stayed green through a 3x regression. Doubling the input must not
+    // meaningfully more than double the time.
+    it('scans in linear time, not quadratically', () => {
+        const scan = (kib: number) => {
+            const input = 'a.'.repeat(kib * 512); // dotted run, no '@' at all
+            const started = performance.now();
+            sanitizeText(input);
+            return performance.now() - started;
+        };
+
+        scan(8); // warm up, so JIT compilation is not attributed to the first size
+        const small = Math.max(scan(8), 0.05);
+        const large = scan(16);
+
+        expect(large / small).toBeLessThan(2.6);
+    });
+
+    it('caps retained output at the truncation limit', () => {
+        const out = sanitizeText('x'.repeat(20000));
+
         expect(out).toContain('truncated');
+        expect(out.length).toBeLessThan(20000);
     });
 });
 
@@ -138,6 +206,64 @@ describe('PiiSanitizingSpanExporter', () => {
         expect(attrs['exception.stacktrace']).not.toContain('a@b.com');
         expect(attrs['exception.stacktrace']).not.toContain('12345');
         expect(attrs['exception.type']).toBe('Error');
+    });
+
+    // A throw in the attribute rewrite must not take the event scrub with it —
+    // the exception event is the higher-PII payload, recorded from the RAW
+    // error by instrumentations this package never touches.
+    it('still scrubs exception events when attribute sanitization throws', () => {
+        setSanitizerWarnSink(vi.fn());
+        const span = {
+            attributes: Object.freeze({ 'http.url': 'http://x/students/42?q=1' }),
+            events: [
+                {
+                    name: 'exception',
+                    attributes: { 'exception.message': 'no user for a@b.com' },
+                },
+            ],
+        } as never;
+
+        const inner = {
+            export: (_s: unknown, cb: (r: unknown) => void) => cb({ code: 0 }),
+            shutdown: () => Promise.resolve(),
+        };
+        expect(() =>
+            new PiiSanitizingSpanExporter(inner as never).export([span], () => {}),
+        ).not.toThrow();
+
+        const events = (span as unknown as { events: { attributes: Record<string, unknown> }[] })
+            .events;
+        expect(events[0]!.attributes['exception.message']).toBe('no user for :email');
+    });
+
+    it('throttles each failure channel independently', () => {
+        const warn = vi.fn();
+        setSanitizerWarnSink(warn);
+        const inner = {
+            export: (_s: unknown, cb: (r: unknown) => void) => cb({ code: 0 }),
+            shutdown: () => Promise.resolve(),
+        };
+        const exporter = new PiiSanitizingSpanExporter(inner as never);
+
+        // Drive many attribute failures so a shared counter would move well past
+        // the throttle boundary.
+        for (let i = 0; i < 50; i++) {
+            exporter.export(
+                [{ attributes: Object.freeze({ 'http.url': '/x/1' }), events: [] } as never],
+                () => {},
+            );
+        }
+        const afterAttributes = warn.mock.calls.length;
+
+        // A first failure in a DIFFERENT channel must still warn immediately.
+        recordSpanException(new Error('boom'), {
+            recordException: () => {
+                throw new Error('span is dead');
+            },
+            setStatus: () => {},
+        } as never);
+
+        expect(warn.mock.calls.length).toBe(afterAttributes + 1);
     });
 
     it('leaves non-exception events and spans without events alone', () => {
@@ -240,7 +366,7 @@ describe('PiiSanitizingSpanExporter', () => {
         // The failure is surfaced on the FIRST occurrence (count 0).
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn).toHaveBeenCalledWith(
-            expect.stringContaining('span sanitization failed'),
+            expect.stringContaining('span attribute sanitization failed'),
             expect.anything(),
         );
     });

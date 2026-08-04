@@ -395,6 +395,57 @@ describe('structuredErrorMiddleware', () => {
         expect(res.json).toHaveBeenCalledWith({ error: 'internal server error' });
     });
 
+    // A throw from inside an error handler goes to Express's finalhandler,
+    // which sends a raw stack trace to the client and loses the log entry.
+    it.each([
+        ['null-prototype object', () => Object.create(null) as unknown],
+        [
+            'poisoned toString',
+            () =>
+                ({
+                    toString() {
+                        throw new Error('nope');
+                    },
+                }) as unknown,
+        ],
+    ])('still responds 500 when the thrown value is a %s', (_label, make) => {
+        withActiveSpan(undefined);
+        const { logger, res, req, next } = harness();
+
+        expect(() =>
+            structuredErrorMiddleware(logger)(
+                make(),
+                req as never,
+                res as never,
+                next,
+            ),
+        ).not.toThrow();
+
+        expect(res.status).toHaveBeenCalledWith(500);
+        expect(res.json).toHaveBeenCalledWith({ error: 'internal server error' });
+    });
+
+    it('still responds 500 when the logger itself throws', () => {
+        withActiveSpan(undefined);
+        const { res, req, next } = harness();
+        const logger = {
+            error: () => {
+                throw new Error('logger is down');
+            },
+        } as never;
+
+        expect(() =>
+            structuredErrorMiddleware(logger)(
+                new Error('boom'),
+                req as never,
+                res as never,
+                next,
+            ),
+        ).not.toThrow();
+
+        expect(res.status).toHaveBeenCalledWith(500);
+    });
+
     it('does not write a response when headers were already sent', () => {
         withActiveSpan(fakeSpan());
         const { logger, res, req, next } = harness();

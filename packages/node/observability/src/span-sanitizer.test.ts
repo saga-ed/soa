@@ -485,7 +485,7 @@ describe('PiiSanitizingSpanExporter', () => {
         // The failure is surfaced on the FIRST occurrence (count 0).
         expect(warn).toHaveBeenCalledTimes(1);
         expect(warn).toHaveBeenCalledWith(
-            expect.stringContaining('span attribute sanitization failed'),
+            expect.stringContaining('span attributes could not be sanitized'),
             expect.anything(),
         );
     });

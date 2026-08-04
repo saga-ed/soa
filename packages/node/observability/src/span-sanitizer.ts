@@ -29,11 +29,16 @@ import { ExportResultCode, type ExportResult } from '@opentelemetry/core';
  * caught per the degrade-safe contract below, with a throttled diag warning.)
  *
  * DEGRADE-SAFE CONTRACT (fleet blast radius): sanitization must NEVER throw and
- * NEVER drop a span. Any error while rewriting one span is swallowed and that
- * span is passed through unmodified — we fail OPEN (ship a span that may retain
- * a path) rather than closed (lose the telemetry entirely). The alternative —
- * an exception escaping into the BatchSpanProcessor's export loop — would take
- * down tracing for the whole service.
+ * NEVER drop a span. We fail OPEN (ship a value that may retain a path) rather
+ * than closed (lose the telemetry entirely), because an exception escaping into
+ * the BatchSpanProcessor's export loop would take down tracing for the whole
+ * service.
+ *
+ * Failing open is scoped as NARROWLY as the failure: an unwritable entry costs
+ * only that entry, not its siblings, not the span, and not the batch (see the
+ * layering note on `export`). Swallowing is never silent — the first failure in
+ * each channel reaches a throttled sink, so a regression that disables
+ * sanitization is detectable rather than invisible.
  */
 
 // URL-ish attribute keys whose string values get path-segment sanitization.
@@ -510,12 +515,22 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
         spans: ReadableSpan[],
         resultCallback: (result: ExportResult) => void,
     ): void {
-        // Attributes and events are sanitized under SEPARATE try blocks. Sharing
-        // one meant a throw in the attribute rewrite (which the class doc
-        // anticipates, if a future SDK makes `attributes` truly read-only)
-        // skipped event scrubbing entirely — and the exception event is the
-        // higher-PII payload, since instrumentations record it from the RAW
-        // error. Each failure must degrade only its own half.
+        // DEGRADATION IS LAYERED, and each layer exists for a different reason:
+        //
+        //   per ENTRY (inside the helpers) — one unwritable attribute or event
+        //     costs only itself; every other entry on the span is still
+        //     scrubbed. Coarser granularity meant a single frozen entry shipped
+        //     all the rest verbatim.
+        //   per HALF (the two try blocks here) — attributes and events fail
+        //     independently, so a read-only `attributes` object cannot skip
+        //     event scrubbing. Events are the higher-PII payload, since the
+        //     instrumentations record them from the RAW error.
+        //   per SPAN (this loop) — a failure never aborts the batch.
+        //
+        // The helpers rethrow their FIRST error after finishing the remaining
+        // entries, which is what lets isolation coexist with detectability: the
+        // catches below still fire once per affected span, at the sink's normal
+        // throttled cadence.
         for (const span of spans) {
             try {
                 // `span.attributes` is declared `readonly` on ReadableSpan, but
@@ -524,14 +539,14 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
                 // truly read-only the assignment throws → caught below.
                 sanitizeAttributes(span.attributes);
             } catch (err) {
-                // Fail OPEN: leave this span untouched rather than dropping it
-                // or aborting the whole batch. Never rethrow. But surface a
-                // persistent failure (throttled) — a silent swallow would let a
-                // read-only-attributes regression disable PII sanitization
-                // fleet-wide with no signal.
+                // Fail OPEN: ship the span rather than dropping it or aborting
+                // the batch. Never rethrow. But surface a persistent failure
+                // (throttled) — a silent swallow would let a read-only-
+                // attributes regression disable PII sanitization fleet-wide
+                // with no signal.
                 warnSanitizeFailure(
                     'attributes',
-                    '[pii-sanitizer] span attribute sanitization failed; shipping span unmodified',
+                    '[pii-sanitizer] one or more span attributes could not be sanitized; shipping them unmodified',
                     err,
                 );
             }
@@ -541,7 +556,7 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
             } catch (err) {
                 warnSanitizeFailure(
                     'events',
-                    '[pii-sanitizer] span event sanitization failed; shipping events unmodified',
+                    '[pii-sanitizer] one or more span events could not be sanitized; shipping them unmodified',
                     err,
                 );
             }

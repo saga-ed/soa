@@ -185,30 +185,38 @@ function sanitizeToken(token: string): string {
     if (core === '') {
         return token;
     }
+    // ORDER MATTERS: path-shaped tokens go to `sanitizeUrl` FIRST. A URL can
+    // carry an address in its authority (`http://alice@saga.org/p`), and
+    // `sanitizeUrl` redacts just the credential while keeping the host — which
+    // is operational data worth keeping. Running the email pass first would
+    // match the whole `alice@saga.org` piece and destroy the host with it.
+    if (isPathShaped(core)) {
+        return lead + sanitizeUrl(core) + trail;
+    }
     const emailRedacted = redactEmails(core);
     if (emailRedacted !== null) {
         return lead + emailRedacted + trail;
     }
-    if (!isPathShaped(core)) {
-        return token;
-    }
-    return lead + sanitizeUrl(core) + trail;
+    return token;
 }
 
 /**
  * Redact every address in an email-shaped token, or `null` if it holds none.
  *
- * Whitespace is not the only delimiter that packs addresses together: a
- * recipient list serializes as `a@b.com;c@d.com` or `a@b.com,c@d.com`, which is
- * ONE whitespace token, matches the anchored whole-token pattern at neither
- * address, is not path-shaped, and so shipped both verbatim. The comma-SPACE
- * form did redact, so the split is what hid this — the delimiter, not the
- * shape, decided exposure.
+ * Whitespace is not the only delimiter that packs an address into a larger
+ * token, and enumerating the delimiters one at a time is what kept this leaking
+ * — first `a@b.com;c@d.com` (a recipient list), then `email='a@b.com'` and
+ * `to=a@b.com` (a driver echoing SQL or a query parameter into its message,
+ * which is precisely the exception-message vector this package creates).
  *
- * Splitting on those two separators keeps each piece anchored (the property
- * that makes the scan linear — see `BARE_EMAIL_TOKEN`) while covering the
- * packed forms. Rejoining with the original separators preserves the text for
- * the non-email pieces of a mixed token.
+ * So the split is defined by the COMPLEMENT of what an address can contain:
+ * anything outside `EMAIL_LABEL` plus `@` and `.` is a delimiter. That is a
+ * closed rule rather than a list to extend on the next report — a character
+ * that cannot appear in an address cannot be hiding one.
+ *
+ * Each piece stays anchored, which is the property that makes the scan linear
+ * (see `BARE_EMAIL_TOKEN`), and the separators are preserved by the capturing
+ * split so a mixed token rejoins with its non-address text intact.
  */
 function redactEmails(core: string): string | null {
     // `indexOf` first: the anchored tests only run on tokens that could
@@ -254,7 +262,9 @@ function isBareEmail(piece: string): boolean {
 }
 
 // Capturing, so `split` keeps the separators and the token rejoins verbatim.
-const EMAIL_LIST_SEPARATOR = /([,;]+)/;
+// The class is the complement of the address alphabet (`EMAIL_LABEL` + `@.`),
+// so it needs no extension when a new packing shape turns up.
+const EMAIL_LIST_SEPARATOR = /([^A-Za-z0-9_%+\-@.]+)/;
 const PERCENT_ENCODED_AT = /%40/gi;
 // `mailto:`, `MAILTO:` — a scheme with no `//`, so HAS_SCHEME does not match it.
 const URI_SCHEME_PREFIX = /^[a-z][a-z0-9+.-]*:/i;

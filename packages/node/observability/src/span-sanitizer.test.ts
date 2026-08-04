@@ -162,12 +162,34 @@ describe('sanitizeText', () => {
     );
 
     // Credentials in an authority reach free text too — a driver echoes the
-    // connection string into its error message.
+    // connection string into its error message. The HOST must survive: it is
+    // operational data, and it is why path-shaped tokens are routed to
+    // `sanitizeUrl` before the email pass.
     it.each([
-        ['at http://alice@saga.org/profile', 'alice@saga.org'],
-        ['connect failed: postgres://admin:s3cret@db.internal:5432/main', 's3cret'],
-    ])('redacts userinfo echoed into free text: %s', (input, leaked) => {
-        expect(sanitizeText(input)).not.toContain(leaked);
+        [
+            'at http://alice@saga.org/profile',
+            'at http://:userinfo@saga.org/profile',
+        ],
+        [
+            'connect failed: postgres://admin:s3cret@db.internal:5432/main',
+            'connect failed: postgres://:userinfo@db.internal:5432/main',
+        ],
+    ])('redacts userinfo echoed into free text: %s', (input, expected) => {
+        expect(sanitizeText(input)).toBe(expected);
+    });
+
+    // An address packed into a larger token by a NON-whitespace delimiter. A
+    // driver echoing SQL or a query parameter into its message is exactly the
+    // vector this package creates, and enumerating delimiters one at a time is
+    // what kept this leaking — the split is now the complement of the address
+    // alphabet.
+    it.each([
+        ["insert failed: email='a@b.com'", "insert failed: email=':email'"],
+        ['no recipient for to=a@b.com', 'no recipient for to=:email'],
+        ['user=a@b.com id=42', 'user=:email id=42'],
+        ['json {"email":"a@b.com"}', 'json {"email":":email"}'],
+    ])('redacts an address packed by a non-label delimiter: %s', (input, expected) => {
+        expect(sanitizeText(input)).toBe(expected);
     });
 
     // Encoding must never decide exposure — in a path segment or in prose.

@@ -70,8 +70,12 @@ export interface DeployedServiceDef {
    * that: it would weaken the gate in the envs where the service DOES run.
    *
    * Only for services genuinely ABSENT from an env (confirmed by BOTH an ECS
-   * miss and NXDOMAIN). A service that is deployed but unrouted belongs in
-   * `noPublicRouteEnvs` instead — dropping it would hide a real outage.
+   * miss and NXDOMAIN) — and only when that absence is the INTENDED state. A
+   * service whose deployment to an env is actively in flight stays in scope
+   * there, so the gate reports the miss and becomes the deploy's acceptance
+   * signal; `--tolerate` absorbs the red until it lands. A service that is
+   * deployed but unrouted belongs in `noPublicRouteEnvs` instead — dropping
+   * it would hide a real outage.
    */
   envs?: readonly string[];
   /** Subdomain under the env's domain, or undefined when there is no public route. */
@@ -159,9 +163,15 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     ecsService: 'program-hub-content-api',
   },
   {
-    // Absent from prod (no ECS service on prod-shared + NXDOMAIN).
+    // Deployed to dev/training; on prod it is a deploy IN FLIGHT, not an
+    // absence to hide (sds#369). ads-adm-api.saga.org still NXDOMAINs and
+    // prod-shared has no ECS service (live 2026-08-04) — exactly what the
+    // former `envs: ['dev', 'training']` scope-out recorded — but prod
+    // deploys of this service are being actively dispatched, so
+    // `verify --env prod` must REPORT the miss: the gate is the acceptance
+    // signal for the deploy being debugged. Until the first prod deploy
+    // lands, accept the red with `--tolerate ads-adm-api`.
     id: 'ads-adm-api',
-    envs: ['dev', 'training'],
     host: 'ads-adm-api',
     healthPath: '/health',
     kind: 'api',

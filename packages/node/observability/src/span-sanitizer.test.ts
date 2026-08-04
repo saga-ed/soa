@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
     sanitizeUrl,
+    sanitizeText,
     PiiSanitizingSpanExporter,
     setSanitizerWarnSink,
     resetSanitizerWarnSink,
@@ -55,12 +56,102 @@ describe('sanitizeUrl', () => {
     });
 });
 
+describe('sanitizeText', () => {
+    it.each([
+        ['no user for a@b.com', 'no user for :email'],
+        ['deep sub a@b.co.uk here', 'deep sub :email here'],
+        ['GET /students/12345/grades failed', 'GET /students/:id/grades failed'],
+        ['failed to load /students/12345.', 'failed to load /students/:id.'],
+        ['GET /students?studentId=12345 failed', 'GET /students failed'],
+    ])('scrubs %s', (input, expected) => {
+        expect(sanitizeText(input)).toBe(expected);
+    });
+
+    // Over-matching would redact ordinary error text into uselessness.
+    it.each([
+        'timeout after 30s / retrying',
+        'read/write conflict',
+        'rate limit 5/second exceeded',
+        'database connection pool exhausted',
+    ])('leaves prose untouched: %s', (text) => {
+        expect(sanitizeText(text)).toBe(text);
+    });
+
+    it('keeps scoped npm package names readable in stack frames', () => {
+        expect(
+            sanitizeText('at f (/app/node_modules/@saga-ed/soa-observability/x.js)'),
+        ).toContain('@saga-ed');
+    });
+
+    it('caps pathological input instead of scanning it all', () => {
+        const hostile = 'x@' + 'a.'.repeat(30000);
+
+        const started = performance.now();
+        const out = sanitizeText(hostile);
+
+        expect(performance.now() - started).toBeLessThan(1000);
+        expect(out).toContain('truncated');
+    });
+});
+
 describe('PiiSanitizingSpanExporter', () => {
-    function fakeSpan(attributes: Record<string, unknown>) {
-        return { attributes } as unknown as Parameters<
+    function fakeSpan(
+        attributes: Record<string, unknown>,
+        events: { name: string; attributes?: Record<string, unknown> }[] = [],
+    ) {
+        return { attributes, events } as unknown as Parameters<
             PiiSanitizingSpanExporter['export']
         >[0][number];
     }
+
+    function exportSpan(span: ReturnType<typeof fakeSpan>) {
+        const inner = {
+            export: (_spans: unknown, cb: (r: unknown) => void) => cb({ code: 0 }),
+            shutdown: () => Promise.resolve(),
+        };
+        new PiiSanitizingSpanExporter(inner as never).export([span], () => {});
+        return span as unknown as {
+            events: { attributes?: Record<string, unknown> }[];
+        };
+    }
+
+    // The auto-instrumentations record exceptions themselves — express calls
+    // recordException on the RAW error for every layer span — so scrubbing only
+    // at our own call site leaves the verbatim value on a sibling span in the
+    // same trace. This is the boundary that makes the guarantee hold.
+    it('scrubs PII from exception events recorded by instrumentations', () => {
+        const span = fakeSpan({}, [
+            {
+                name: 'exception',
+                attributes: {
+                    'exception.type': 'Error',
+                    'exception.message': 'no user for a@b.com',
+                    'exception.stacktrace':
+                        'Error: no user for a@b.com\n    at load (/students/12345/grades:1:1)',
+                },
+            },
+        ]);
+
+        const attrs = exportSpan(span).events[0]!.attributes!;
+
+        expect(attrs['exception.message']).toBe('no user for :email');
+        expect(attrs['exception.stacktrace']).not.toContain('a@b.com');
+        expect(attrs['exception.stacktrace']).not.toContain('12345');
+        expect(attrs['exception.type']).toBe('Error');
+    });
+
+    it('leaves non-exception events and spans without events alone', () => {
+        const span = fakeSpan({}, [
+            { name: 'custom', attributes: { detail: 'no user for a@b.com' } },
+        ]);
+
+        const attrs = exportSpan(span).events[0]!.attributes!;
+
+        expect(attrs.detail).toBe('no user for a@b.com');
+        expect(() =>
+            exportSpan({ attributes: {} } as ReturnType<typeof fakeSpan>),
+        ).not.toThrow();
+    });
 
     it('sanitizes url attrs + drops url.query, delegates to inner', () => {
         const seen: { attrs: Record<string, unknown> }[] = [];

@@ -57,13 +57,89 @@ const LONG_TOKEN_SEGMENT = /^[A-Za-z0-9_-]{20,}$/; // hex/base64-ish opaque ids
 // percent-encoded, so matching only the literal `@` would leak encoded emails.
 const EMAIL_SEGMENT = /@|%40/i;
 
+// A scoped npm package (`@saga-ed/soa-observability`) is a path segment
+// containing `@`, so the email rule would redact it — erasing the package name
+// from every stack frame in this monorepo's traces, degrading the very field
+// `recordSpanException` exists to populate. A scope is `@name` with no dot and
+// no second `@`, which no email can satisfy.
+const NPM_SCOPE_SEGMENT = /^@[A-Za-z0-9_-]+$/;
+
 function looksLikeIdentifier(segment: string): boolean {
+    if (NPM_SCOPE_SEGMENT.test(segment)) {
+        return false;
+    }
     return (
         NUMERIC_SEGMENT.test(segment) ||
         UUID_SEGMENT.test(segment) ||
         EMAIL_SEGMENT.test(segment) ||
         LONG_TOKEN_SEGMENT.test(segment)
     );
+}
+
+/**
+ * Longest message/stack scrubbed before truncation.
+ *
+ * Scrubbing runs synchronously on the Express error path, so its cost is
+ * request-blocking and the input is attacker-influenceable (frameworks echo the
+ * request path into the message). A hard cap makes the work bounded regardless
+ * of regex behaviour on pathological input. 16 KiB comfortably holds a deep
+ * Node stack; beyond that a marker is appended so truncation is never silent.
+ */
+const MAX_SCRUB_LENGTH = 16 * 1024;
+const TRUNCATION_MARKER = '… [truncated by pii-sanitizer]';
+
+// Identifier-ish runs inside free text. Deliberately narrow: over-matching
+// would redact the message into uselessness, and the goal is removing the
+// obvious identifier vector, not proving the text PII-free.
+//
+// The path branch requires a non-empty first segment, so a standalone slash in
+// prose ("30s / retrying") never matches. It also consumes an optional query
+// string so `sanitizeUrl` can drop it — without this a bare path carries
+// `?studentId=12345` straight through, since only the absolute-URL branch's
+// `\S+` would otherwise swallow a `?`.
+const PATH_CHARS = String.raw`[A-Za-z0-9_\-.%@~]`;
+// The absolute-URL branch excludes `,` `;` and quotes/brackets outright: unlike
+// `.` and `:` they never appear inside a real URL, so letting `\S+` swallow
+// them would fold prose punctuation into the final path segment and defeat
+// sanitizeUrl's anchored identifier tests.
+const URL_CHARS = String.raw`[^\s,;'"\]}>]`;
+const URL_IN_TEXT = new RegExp(
+    String.raw`\bhttps?://${URL_CHARS}+|(?<![\w/])/${PATH_CHARS}+(?:/${PATH_CHARS}*)*(?:\?\S*)?`,
+    'g',
+);
+
+// Trailing sentence punctuation must not be absorbed into the match: a segment
+// captured as "12345." fails the anchored ^\d+$ identifier test and the id then
+// ships verbatim. Stripped before sanitizing, re-appended after.
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/;
+
+// Domain part is split into dot-free labels so there is exactly one way to
+// match — `[A-Za-z0-9.-]+` followed by `\.` lets `.` belong to either side,
+// giving overlapping split points and quadratic scanning under the `g` flag.
+const BARE_EMAIL =
+    /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
+
+/**
+ * Scrub PII out of free-form text (an exception message or stack trace).
+ *
+ * Unlike `sanitizeUrl`, which receives a whole attribute value, this extracts
+ * URL/path-shaped runs from arbitrary prose and sanitizes each in place.
+ */
+export function sanitizeText(text: string): string {
+    const truncated =
+        text.length > MAX_SCRUB_LENGTH
+            ? text.slice(0, MAX_SCRUB_LENGTH) + TRUNCATION_MARKER
+            : text;
+
+    return truncated
+        .replace(URL_IN_TEXT, (match) => {
+            const punctuation = TRAILING_PUNCTUATION.exec(match)?.[0] ?? '';
+            const trimmed = punctuation
+                ? match.slice(0, -punctuation.length)
+                : match;
+            return sanitizeUrl(trimmed) + punctuation;
+        })
+        .replace(BARE_EMAIL, ':email');
 }
 
 /**
@@ -111,6 +187,33 @@ function sanitizeAttributes(attributes: Attributes): void {
     }
 }
 
+// Free-text attributes on an `exception` span event. Scrubbing these at the
+// exporter is what makes the guarantee hold fleet-wide: the auto-instrumentations
+// record exceptions themselves (@opentelemetry/instrumentation-express calls
+// recordException on the RAW error for every express.* layer span), so scrubbing
+// only at our own call site would leave the verbatim value on a sibling span in
+// the same trace. Applies to every span, however the event was produced.
+const EXCEPTION_TEXT_ATTR_KEYS = [
+    'exception.message',
+    'exception.stacktrace',
+] as const;
+
+function sanitizeEvents(span: ReadableSpan): void {
+    // `events` is non-optional on ReadableSpan, but this runs on the export hot
+    // path against spans from any SDK version — a missing array must degrade to
+    // "nothing to scrub", not throw and skip attribute sanitization too.
+    if (!Array.isArray(span.events)) return;
+    for (const event of span.events) {
+        if (!event.attributes) continue;
+        for (const key of EXCEPTION_TEXT_ATTR_KEYS) {
+            const val = event.attributes[key];
+            if (typeof val === 'string') {
+                event.attributes[key] = sanitizeText(val);
+            }
+        }
+    }
+}
+
 // Detectability of a persistent sanitize failure must NOT depend on whether a
 // service wired an OTel diag logger. The global `diag` defaults to a no-op with
 // NO console fallback (verified against @opentelemetry/api), so a bare
@@ -153,6 +256,18 @@ const SANITIZE_WARN_EVERY = 1000;
 let sanitizeFailureCount = 0;
 
 /**
+ * Report a swallowed sanitize/telemetry failure through the throttled sink.
+ *
+ * Shared so every degrade-safe catch in this package stays detectable through
+ * one channel and one throttle, rather than each re-inventing (or omitting) it.
+ */
+export function warnSanitizeFailure(message: string, err: unknown): void {
+    if (sanitizeFailureCount++ % SANITIZE_WARN_EVERY === 0) {
+        warnSink(message, err);
+    }
+}
+
+/**
  * Wraps a SpanExporter, sanitizing PII out of span attributes before delegating
  * to the inner exporter. See module doc for the degrade-safe contract.
  */
@@ -170,6 +285,7 @@ export class PiiSanitizingSpanExporter implements SpanExporter {
                 // object, so in-place rewrite works. If a future impl makes it
                 // truly read-only the assignment throws → caught below.
                 sanitizeAttributes(span.attributes);
+                sanitizeEvents(span);
             } catch (err) {
                 // Fail OPEN: leave this span untouched rather than dropping it
                 // or aborting the whole batch. Never rethrow. But surface a

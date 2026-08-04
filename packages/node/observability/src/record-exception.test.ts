@@ -2,6 +2,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SpanStatusCode, trace, type Span } from '@opentelemetry/api';
 import { recordSpanException } from './record-exception.js';
 import { structuredErrorMiddleware } from './error-middleware.js';
+import {
+    setSanitizerWarnSink,
+    resetSanitizerWarnSink,
+} from './span-sanitizer.js';
 
 type SpyingSpan = Span & {
     recordException: ReturnType<typeof vi.fn>;
@@ -30,6 +34,7 @@ function recordedError(span: SpyingSpan): Error {
 
 afterEach(() => {
     vi.restoreAllMocks();
+    resetSanitizerWarnSink();
 });
 
 describe('recordSpanException', () => {
@@ -95,6 +100,80 @@ describe('recordSpanException', () => {
         } as unknown as Span;
 
         expect(() => recordSpanException(new Error('boom'), span)).not.toThrow();
+    });
+
+    // The throwing-span test above only exercises code INSIDE the try. These
+    // cover the coercion, which sat above it and was the actual gap.
+    it.each([
+        ['null-prototype object', () => Object.create(null) as unknown],
+        [
+            'poisoned toString',
+            () =>
+                ({
+                    toString() {
+                        throw new Error('nope');
+                    },
+                }) as unknown,
+        ],
+        [
+            'throwing Symbol.toPrimitive',
+            () =>
+                ({
+                    [Symbol.toPrimitive]() {
+                        throw new Error('nope');
+                    },
+                }) as unknown,
+        ],
+        ['symbol', () => Symbol('sym') as unknown],
+    ])('never throws when coercing a %s', (_label, make) => {
+        const span = fakeSpan();
+
+        expect(() => recordSpanException(make(), span)).not.toThrow();
+    });
+
+    it('reports a swallowed failure instead of failing silently', () => {
+        const warn = vi.fn();
+        setSanitizerWarnSink(warn);
+        const span = {
+            recordException: vi.fn(() => {
+                throw new Error('span is dead');
+            }),
+            setStatus: vi.fn(),
+        } as unknown as Span;
+
+        recordSpanException(new Error('boom'), span);
+
+        expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('preserves `code` on the sanitized clone so exception.type survives', () => {
+        // The SDK reads exception.code BEFORE exception.name for exception.type,
+        // so losing it collapses ECONNREFUSED to a generic "Error" — and only
+        // when the message happened to contain PII, splitting one failure into
+        // two Error Tracking groups.
+        const span = fakeSpan();
+        const err = Object.assign(
+            new Error('connect ECONNREFUSED 10.0.1.5:5432 for a@b.com'),
+            { code: 'ECONNREFUSED' },
+        );
+
+        recordSpanException(err, span);
+
+        const recorded = recordedError(span) as Error & { code?: string };
+        expect(recorded.message).toContain(':email');
+        expect(recorded.code).toBe('ECONNREFUSED');
+    });
+
+    it('preserves `cause` on the sanitized clone', () => {
+        const span = fakeSpan();
+        const cause = new Error('root cause');
+        const err = new Error('wrapper for a@b.com', { cause });
+
+        recordSpanException(err, span);
+
+        expect((recordedError(span) as Error & { cause?: unknown }).cause).toBe(
+            cause,
+        );
     });
 
     it('does not mutate the caller-supplied Error', () => {
@@ -213,6 +292,58 @@ describe('recordSpanException PII scrubbing', () => {
         recordSpanException(new Error('failed for a@b.com'), span);
 
         expect(recordedError(span)).toBeInstanceOf(Error);
+    });
+
+    // sanitizeUrl's identifier tests are anchored (^\d+$), so an id that
+    // absorbed trailing punctuation into its segment silently fails them.
+    it.each([
+        ['sentence-final period', 'failed to load /students/12345.', '12345'],
+        [
+            'comma after an absolute URL',
+            'upstream https://iam.saga.org/students/12345, retrying',
+            '12345',
+        ],
+        ['bare-path query string', 'GET /students?studentId=12345 failed', '12345'],
+        [
+            'query string with an SSN',
+            'POST /api/lookup?ssn=123-45-6789 rejected',
+            '123-45-6789',
+        ],
+    ])('redacts an id despite %s', (_label, message, leaked) => {
+        const span = fakeSpan();
+
+        recordSpanException(new Error(message), span);
+
+        expect(recordedError(span).message).not.toContain(leaked);
+    });
+
+    it.each([
+        '/app/node_modules/@saga-ed/soa-observability/dist/index.js',
+        '/app/node_modules/@opentelemetry/api/build/src/trace.js',
+    ])('keeps the scoped package name in %s', (frame) => {
+        const span = fakeSpan();
+        const err = new Error('boom');
+        err.stack = `Error: boom\n    at handler (${frame}:1:1)`;
+
+        recordSpanException(err, span);
+
+        const scope = frame.split('/')[3];
+        expect(recordedError(span).stack).toContain(scope);
+    });
+
+    // Scrubbing runs synchronously on the Express error path and the input is
+    // attacker-influenceable, so its cost must stay bounded. Before the length
+    // cap this exact shape blocked the event loop for ~8s.
+    it('scrubs a pathological 64KB message in bounded time', () => {
+        const span = fakeSpan();
+        const hostile = 'Cannot GET user@' + '/api/' + 'a.'.repeat(30000);
+
+        const started = performance.now();
+        recordSpanException(new Error(hostile), span);
+        const elapsed = performance.now() - started;
+
+        expect(elapsed).toBeLessThan(1000);
+        expect(recordedError(span).message).toContain('truncated');
     });
 });
 

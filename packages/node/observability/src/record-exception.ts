@@ -1,5 +1,5 @@
 import { SpanStatusCode, trace, type Span } from '@opentelemetry/api';
-import { sanitizeUrl } from './span-sanitizer.js';
+import { sanitizeText, warnSanitizeFailure } from './span-sanitizer.js';
 
 /**
  * Attach exception data to a span so Datadog can populate `error.type`,
@@ -17,7 +17,12 @@ import { sanitizeUrl } from './span-sanitizer.js';
  * A span processor cannot substitute for calling this at the throw site: by
  * export time the Error object is out of scope, so the stack is unrecoverable.
  *
- * Safe to call when tracing is disabled or no span is active — it no-ops.
+ * PII is scrubbed here as defence in depth, but the authoritative scrub is at
+ * the exporter (`PiiSanitizingSpanExporter`), which also covers exception
+ * events recorded by the auto-instrumentations — see `sanitizeText`.
+ *
+ * Safe to call with any thrown value, when tracing is disabled, or when no span
+ * is active — it no-ops and never throws.
  */
 export function recordSpanException(err: unknown, span?: Span): void {
     const target = span ?? trace.getActiveSpan();
@@ -25,37 +30,47 @@ export function recordSpanException(err: unknown, span?: Span): void {
         return;
     }
 
-    const error = err instanceof Error ? err : new Error(String(err));
-
     try {
-        target.recordException(sanitizeException(error));
-        target.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: sanitizeMessage(error.message),
-        });
-    } catch {
-        // Never let telemetry break the error path that is already failing —
-        // this runs inside error middleware, so a throw here would replace a
-        // real 500 with an opaque one and lose the original error.
+        // Coercion is INSIDE the try: `String(err)` throws for a null-prototype
+        // object or a poisoned `toString`/`Symbol.toPrimitive`, and callers drop
+        // this into arbitrary catch blocks on the strength of the never-throw
+        // contract above.
+        const error = err instanceof Error ? err : new Error(String(err));
+        const { exception, message } = sanitizeException(error);
+
+        target.recordException(exception);
+        target.setStatus({ code: SpanStatusCode.ERROR, message });
+    } catch (cause) {
+        // Fail OPEN: the request is already failing, and a throw here would
+        // replace a real 500 with an opaque one. But surface it (throttled) —
+        // silently swallowing would let a regression revert every service to
+        // `error: {}` with a green test suite and no signal.
+        warnSanitizeFailure(
+            '[record-exception] failed to record exception on span',
+            cause,
+        );
     }
 }
 
+interface SanitizedException {
+    /** Scrubbed stand-in passed to `recordException`. */
+    exception: Error;
+    /** Scrubbed message, reused for `setStatus` so the text is scrubbed once. */
+    message: string;
+}
+
 /**
- * Exception messages and stacks bypass `PiiSanitizingSpanExporter` entirely —
- * it only rewrites URL-shaped span *attributes*, not the exception event's
- * payload. Errors routinely interpolate the offending value ("no user for
- * a@b.com", "GET /students/12345 failed"), so scrub before recording rather
- * than shipping student data to Datadog verbatim.
+ * Build a scrubbed stand-in for the caller's Error.
  *
- * Returns a shallow stand-in rather than mutating the caller's Error: the same
- * object is typically also logged and rethrown, and must reach those unchanged.
+ * Returns a stand-in rather than mutating the caller's Error: the same object
+ * is typically also logged and rethrown, and must reach those unchanged.
  */
-function sanitizeException(error: Error): Error {
-    const message = sanitizeMessage(error.message);
-    const stack = error.stack ? sanitizeMessage(error.stack) : undefined;
+function sanitizeException(error: Error): SanitizedException {
+    const message = sanitizeText(error.message);
+    const stack = error.stack ? sanitizeText(error.stack) : undefined;
 
     if (message === error.message && stack === error.stack) {
-        return error;
+        return { exception: error, message };
     }
 
     // A real Error, not a {name, message, stack} literal: recordException takes
@@ -64,20 +79,21 @@ function sanitizeException(error: Error): Error {
     const sanitized = new Error(message);
     sanitized.name = error.name;
     sanitized.stack = stack;
-    return sanitized;
+
+    // `code` and `cause` must survive the clone. The SDK reads `exception.code`
+    // BEFORE `exception.name` when deriving `exception.type`, so dropping it
+    // would collapse e.g. ECONNREFUSED to a generic "Error" — and only on the
+    // clone path, splitting one failure into two Error Tracking groups
+    // depending on whether the message happened to contain PII.
+    copyOwn(error, sanitized, 'code');
+    copyOwn(error, sanitized, 'cause');
+
+    return { exception: sanitized, message };
 }
 
-// URL-ish runs inside free text. Deliberately narrow: over-matching would
-// redact the message into uselessness, and the goal is removing the obvious
-// identifier vector, not proving the text PII-free. The path branch requires a
-// non-empty first segment so a standalone slash in prose ("30s / retrying") is
-// never a match.
-const URL_IN_TEXT =
-    /\bhttps?:\/\/\S+|(?<![\w/])\/[A-Za-z0-9_\-.%@]+(?:\/[A-Za-z0-9_\-.%@]*)*/g;
-const BARE_EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-
-function sanitizeMessage(text: string): string {
-    return text
-        .replace(URL_IN_TEXT, (match) => sanitizeUrl(match))
-        .replace(BARE_EMAIL, ':email');
+function copyOwn(from: Error, to: Error, key: 'code' | 'cause'): void {
+    const value = (from as unknown as Record<string, unknown>)[key];
+    if (value !== undefined) {
+        (to as unknown as Record<string, unknown>)[key] = value;
+    }
 }

@@ -2,7 +2,7 @@
  * Playwright child-argv builder (M15-C test-harness consolidation, T5).
  *
  * Mirrors the argv assembly in e2e-orchestrate.ts (`exec playwright test
- * --config=… --project <p> [--no-deps] [--grep-invert <tag>] [--headed]`) for
+ * --config=… --project=<p> [--no-deps] [--grep-invert <tag>] [--headed]`) for
  * VARIANT exact-array assertions — the ones that differ from the golden pin
  * only in project/flags. The config is pinned to the bundled example's
  * `playwright.stack.config.ts`, which is what every hermetic suite resolves.
@@ -28,7 +28,7 @@ export interface PwArgvOptions {
 
 /** Build the expected `pnpm` args array for a spawned Playwright child. */
 export function pwArgv(opts: PwArgvOptions): string[] {
-  const argv = ['exec', 'playwright', 'test', '--config=playwright.stack.config.ts', '--project', opts.project];
+  const argv = ['exec', 'playwright', 'test', '--config=playwright.stack.config.ts', `--project=${opts.project}`];
   if (opts.noDeps) argv.push('--no-deps');
   if (opts.grepInvert !== undefined) argv.push('--grep-invert', opts.grepInvert);
   if (opts.headed) argv.push('--headed');

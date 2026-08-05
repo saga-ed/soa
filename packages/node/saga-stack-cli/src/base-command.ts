@@ -90,6 +90,7 @@ import {
   makeRealBuildCleaner,
   makeRealEnvFs,
   makeRealForeignProcs,
+  makeRealProvenance,
   generateTunnelFleetConfig,
   generateSlotFleetConfig,
   resolveRepoRoot,
@@ -136,6 +137,7 @@ import type {
   BuildCleaner,
   EnvFs,
   ForeignProcs,
+  Provenance,
 } from './runtime/index.js';
 
 /**
@@ -520,6 +522,19 @@ export abstract class BaseCommand extends Command {
    */
   protected getForeignProcs(): ForeignProcs {
     return makeRealForeignProcs();
+  }
+
+  /**
+   * The listener-provenance seam — production is the only place `/proc`, `lsof
+   * -d cwd`, `ps -o lstart=` and the reflog stat run to answer "is the process
+   * answering this port still serving the code I think it is?". Complements
+   * `getForeignProcs` (which answers ownership) and posture (which answers
+   * whether the CHECKOUT is right); this one catches an owned process, in the
+   * right checkout, that predates the checkout's last HEAD movement. `stack
+   * status` uses `assess` (report-only). See `runtime/provenance`.
+   */
+  protected getProvenance(): Provenance {
+    return makeRealProvenance();
   }
 
   /**

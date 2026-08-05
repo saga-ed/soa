@@ -5217,6 +5217,12 @@
           "name": "program-hub",
           "type": "option"
         },
+        "provenance": {
+          "allowNo": true,
+          "description": "also check that each listener is serving the checkout ss resolves for it, and started after that checkout last moved (--no-provenance to skip). Reports problems only; --output-json carries every verdict.",
+          "name": "provenance",
+          "type": "boolean"
+        },
         "qboard": {
           "description": "override path to the qboard repo checkout",
           "hasDynamicHelp": false,

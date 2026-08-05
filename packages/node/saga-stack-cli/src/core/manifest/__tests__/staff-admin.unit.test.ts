@@ -196,7 +196,12 @@ describe('admitsOptional is exhaustive', () => {
         'ghost-api': { ...manifest.services['iam-api'], id: 'ghost-api', optional: true },
       },
     } as unknown as typeof manifest;
-    expect(() => computeClosure(fake, ['ghost-api'] as never, {})).toThrow(/no opt-in flag/);
+    // Message wording changed with the FeatureSet migration (the gate is now
+    // "belongs to no BUNDLES entry" rather than "has no opt-in flag"); the
+    // behavior under test — throw, never silently drop — is unchanged.
+    expect(() => computeClosure(fake, ['ghost-api'] as never, {})).toThrow(
+      /belongs to no BUNDLES entry/,
+    );
   });
 
   it('still admits every real optional family from its own flag', () => {

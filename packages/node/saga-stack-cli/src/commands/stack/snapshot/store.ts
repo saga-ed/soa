@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
-import { BUNDLE_NAMES, closureOptsFor, combineRequested } from '../../../core/bundles.js';
+import { BUNDLE_NAMES, combineRequested, featuresFor, toLegacy } from '../../../core/bundles.js';
 import type { ResolvedClosureOpts } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
@@ -112,7 +112,7 @@ export default class SnapshotStore extends BaseCommand {
     // an excluded service back in (a dependency edge from a non-excluded service
     // into an excluded one), and it applies AFTER the --with union so `--with playback --slot N`
     // degrades gracefully rather than dumping absent playback DBs.
-    const closureOpts = closureOptsFor(flags.with);
+    const closureOpts = toLegacy(featuresFor(flags.only, flags.with, (m) => this.error(m)));
     const excluded = new Set<ServiceId>(instance.excludedServices);
     let only: DbId[] | undefined;
     if (flags.only) {

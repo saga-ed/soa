@@ -41,12 +41,13 @@ import { BaseCommand } from '../../base-command.js';
 import type { NativeOverlays, WorkspaceFlags } from '../../base-command.js';
 import {
   BUNDLE_NAMES,
-  closureOptsFor,
-  closureOptsForIds,
+  featuresFor,
+  featuresForIds,
+  toLegacy,
   combineRequested,
   seedAddOnsFor,
 } from '../../core/bundles.js';
-import type { ResolvedClosureOpts } from '../../core/bundles.js';
+import type { FeatureSet, ResolvedClosureOpts } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance, slotExcludedServices } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
@@ -191,16 +192,23 @@ export default class StackUp extends BaseCommand {
       ? ws.runSet
       : combineRequested(flags.only, flags.with, (m) => this.error(m));
     let isOnly = requested.length > 0 || ws !== undefined;
-    // When a workspace is set, its flags come from the run set — a workspace
+    // When a workspace is set, its features come from the run set — a workspace
     // names services DIRECTLY, so naming e.g. `authz-sync` is the workspace's way
-    // of asking for it, NOT from flags.with. `closureOptsForIds` derives every
-    // flag from the BUNDLES-backed id sets, so a future bundle needs only a
+    // of asking for it, NOT from flags.with. Both derivations go through the
+    // BUNDLES-backed `BUNDLE_FOR_SERVICE` map, so a future bundle needs only a
     // registry edit in bundles.ts rather than a hand-listed derivation here (which
     // is why `parseWorkspace` exposes no per-family booleans of its own).
     // Hard-coding withAuthz to false previously dropped a workspace-named
     // `authz-sync` silently.
-    const closureOpts: ResolvedClosureOpts =
-      ws ? closureOptsForIds(ws.runSet) : closureOptsFor(flags.with);
+    //
+    // 🔑 `featuresFor` takes `flags.only` as well as `flags.with`: naming an
+    // optional service with `--only` now IMPLIES its feature. Previously only
+    // `--with` fed this, so `stack up --only transcripts-api` requested the id and
+    // then dropped it in `admitsOptional` — an empty closure, exit 0, no error.
+    const features: FeatureSet = ws
+      ? featuresForIds(ws.runSet)
+      : featuresFor(flags.only, flags.with, (m) => this.error(m));
+    const closureOpts: ResolvedClosureOpts = toLegacy(features);
     const { withAuthz } = closureOpts;
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the

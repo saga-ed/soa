@@ -47,6 +47,20 @@ const env = (id: ServiceId) => {
   return e;
 };
 
+describe('attach-mode profiling leaves the launch env UNTOUCHED', () => {
+  // `ss stack profile` attaches to a running process (SIGUSR1 + CDP) and injects
+  // nothing at launch. An earlier attempt DID preset `NODE_OPTIONS=--inspect-port`
+  // here and it failed in a way worth pinning: NODE_OPTIONS is inherited by the
+  // whole `pnpm dev → tsup → node dist/main.js` tree, so pnpm and tsup each
+  // reserved the port and the real service could not bind it. If NODE_OPTIONS ever
+  // reappears on a launch line, that regression is back.
+  it('injects no NODE_OPTIONS on any service', () => {
+    for (const id of Object.keys(manifest.services) as ServiceId[]) {
+      expect(rawEnv(id).NODE_OPTIONS).toBeUndefined();
+    }
+  });
+});
+
 describe('global PINO logger env (up.sh services_up export ~1384-1385)', () => {
   // soa-logger/soa-config validate these at startup with NO defaults, so every
   // node service crashes on boot without them — required on EVERY launched child.

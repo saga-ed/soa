@@ -4026,6 +4026,179 @@
       "slotClaimWritten": false,
       "strict": false
     },
+    "stack:profile": {
+      "aliases": [],
+      "args": {
+        "service": {
+          "description": "service to profile (a backend; frontends run a Vite dev server and are not profilable)",
+          "name": "service",
+          "options": [
+            "iam-api",
+            "sis-api",
+            "authz-api",
+            "programs-api",
+            "scheduling-api",
+            "sessions-api",
+            "content-api",
+            "ads-adm-api",
+            "connect-api",
+            "rtsm-api",
+            "coach-api",
+            "transcripts-api",
+            "insights-api",
+            "chat-api",
+            "authz-sync",
+            "staff-admin-bff"
+          ],
+          "required": true
+        }
+      },
+      "description": "Capture a CPU profile from a running service by attaching to it (SIGUSR1 + Chrome DevTools Protocol). Writes a .cpuprofile openable in Chrome DevTools or VS Code. Does not restart or modify the service.",
+      "enableJsonFlag": false,
+      "examples": [
+        "<%= config.bin %> <%= command.id %> iam-api",
+        "<%= config.bin %> <%= command.id %> sessions-api --duration 30s",
+        "<%= config.bin %> <%= command.id %> coach-api --out /tmp/coach.cpuprofile",
+        "<%= config.bin %> <%= command.id %> iam-api --slot 2 --output-json"
+      ],
+      "flags": {
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "coach",
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "dev",
+          "noCacheDefault": true,
+          "type": "option"
+        },
+        "duration": {
+          "default": "15s",
+          "description": "how long to sample for (e.g. 500ms, 30s, 2m); default 15s",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "duration",
+          "type": "option"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fleek",
+          "type": "option"
+        },
+        "out": {
+          "description": "artifact path; defaults to <state-dir>/<service>-<timestamp>.cpuprofile",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "out",
+          "type": "option"
+        },
+        "output-json": {
+          "allowNo": false,
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "type": "boolean"
+        },
+        "porcelain": {
+          "allowNo": false,
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "type": "boolean"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "program-hub",
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "qboard",
+          "type": "option"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rostering",
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rtsm",
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "saga-dash",
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "sds",
+          "type": "option"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "set",
+          "type": "option"
+        },
+        "slot": {
+          "default": 0,
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "slot",
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "soa",
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "state-dir",
+          "type": "option"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "stack:profile",
+      "isESM": true,
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "relativePath": [
+        "dist",
+        "commands",
+        "stack",
+        "profile.js"
+      ],
+      "slotClaimWritten": false,
+      "strict": true
+    },
     "stack:reset": {
       "aliases": [],
       "args": {},

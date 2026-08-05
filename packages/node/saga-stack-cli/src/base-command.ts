@@ -1016,6 +1016,10 @@ export abstract class BaseCommand extends Command {
         reclaimStopped: (holder) => this.reclaimStoppedPrepLock(flags, holder),
       }),
       repoDirExists: this.getRepoDirCheck(),
+      // The foreign-listener sweep native `restart` runs between its pidfile reap and
+      // the fresh bring-up: an orphan with no pidfile is invisible to the stopper, and
+      // `up` would adopt it and serve its stale code.
+      foreignProcs: this.getForeignProcs(),
       // M9: the ff-only sibling sync (up.sh `pull_repos`) + its mode, the vite-cache
       // clear (native `restart`), and best-effort Connect AV (slot-0 + connect-in-closure,
       // gated in the facade). All three no-op unless the relevant native path invokes them.

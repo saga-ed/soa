@@ -70,6 +70,17 @@ export default class StackRestart extends BaseCommand {
         );
       }
     }
+    // Orphans the pidfile reap could not see, because they had no pidfile. Worth a
+    // line even when the kill succeeded: a process holding a stack port that `ss` did
+    // not launch is a fact the operator wants, and a survivor means the fresh `up`
+    // below will adopt stale code.
+    for (const f of outcome.reapedForeign ?? []) {
+      this.log(
+        f.killed
+          ? `⚠ reaped FOREIGN ${f.id} :${f.port} (pid ${f.pid}, pgid ${f.pgid}) — held the port with no pidfile`
+          : `⚠ FOREIGN ${f.id} :${f.port} (pid ${f.pid}) SURVIVED the reap — restart will serve stale code`,
+      );
+    }
     const up = outcome.up;
     if (up.autoPull) {
       this.log(`sibling sync (ff-only — ${up.autoPull.mode}):`);
@@ -97,6 +108,12 @@ export default class StackRestart extends BaseCommand {
       {
         native: true,
         stopped,
+        reapedForeign: (outcome.reapedForeign ?? []).map((f) => ({
+          id: f.id,
+          port: f.port,
+          pid: f.pid,
+          killed: f.killed,
+        })),
         viteCleared: outcome.vite?.removed ?? [],
         launched: up.launched.map((r) => ({ id: r.id, ok: r.ok, alreadyUp: r.alreadyUp ?? false })),
         mesh: { ok: up.mesh.ok },

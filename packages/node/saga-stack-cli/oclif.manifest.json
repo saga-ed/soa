@@ -3477,9 +3477,23 @@
         "<%= config.bin %> <%= command.id %>",
         "<%= config.bin %> <%= command.id %> teacher@saga.org",
         "<%= config.bin %> <%= command.id %> --browser",
+        "<%= config.bin %> <%= command.id %> --browser --app coach-web",
+        "<%= config.bin %> <%= command.id %> --browser --url http://localhost:8800/reports?org=ist-sc",
         "<%= config.bin %> <%= command.id %> empty@saga.org --browser --fake-video ~/clips/student.mp4"
       ],
       "flags": {
+        "app": {
+          "description": "which SPA the --browser Chromium opens (default saga-dash). Also sources the Playwright cwd + clone gate from that SPA's own repo. The port is slot-aware. Requires --browser.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "app",
+          "options": [
+            "saga-dash",
+            "connectv3",
+            "coach-web"
+          ],
+          "type": "option"
+        },
         "browser": {
           "allowNo": false,
           "description": "ALSO open an auto-logged-in Chromium via the vendored browser-login.mjs (native headless jar + headful browser). The default mints only the native headless cookie jar.",
@@ -3603,6 +3617,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "url": {
+          "description": "open the --browser Chromium at this exact URL (deep links welcome). Beats --app and $LOGIN_DASH_URL; leaves Playwright resolution on --app (or saga-dash), so any URL works. Requires --browser.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "url",
           "type": "option"
         }
       },

@@ -14,7 +14,6 @@
  * PURE: this module carries zero IO.
  */
 
-import type { ClosureOpts } from './closure.js';
 import type { DbId, MeshId, ServiceId } from './manifest/index.js';
 
 /** The named features a `--with` value may select (services, a seed add-on, or both). */
@@ -181,52 +180,15 @@ export function combineRequested(
   return out;
 }
 
-/**
- * Whether the closure should keep the `optional:true` playback services: true
- * iff the `playback` bundle was requested via `--with`. `computeClosure`
- * (closure.ts) DROPS a requested optional service unless `withPlayback` is set,
- * so `--with playback` must flip this or the playback ids get filtered out. PURE.
- */
-export function effectiveWithPlayback(withBundles: string[] | undefined): boolean {
-  return (withBundles ?? []).includes('playback');
-}
-
-/**
- * Whether the closure should keep the `optional:true` `authz-sync` service AND
- * iam-api should get FGA_ENABLED=true + the openfga mesh unit: true iff the
- * `authz` bundle was requested via `--with`. Same shape as
- * `effectiveWithPlayback` — `computeClosure` drops `authz-sync` unless this is
- * set, and `defaultLaunchContext`/`resolveLaunchEnv` use it to gate iam-api's
- * FGA_ENABLED token and the `openfga` mesh unit's inclusion, keeping the
- * OpenFGA footprint opt-in rather than part of every default `stack up`. PURE.
- */
-export function effectiveWithAuthz(withBundles: string[] | undefined): boolean {
-  return (withBundles ?? []).includes('authz');
-}
-
-/**
- * Whether the closure should keep the `optional:true` staff-admin pair
- * (`staff-admin-bff` + `staff-admin-console`): true iff the `staff-admin`
- * bundle was requested via `--with`. Same shape as `effectiveWithAuthz` —
- * `computeClosure` drops both unless this is set, keeping the operator console
- * out of every default `stack up`. PURE.
- */
-export function effectiveWithStaffAdmin(withBundles: string[] | undefined): boolean {
-  return (withBundles ?? []).includes('staff-admin');
-}
-
-// ─── FeatureSet: the variable-arity replacement for the per-family booleans ───
+// ─── FeatureSet: the variable-arity selection value ───────────────────────────
 //
-// `ClosureOpts` carries one `withX?: boolean` per optional-service family. That
-// is a fixed-arity encoding of a variable-arity fact, and it costs: ~70 refs
-// across 13 files, a hand-sweep to add a family, and — because every field is
-// `?:` — a caller can pass `{}`, typecheck, and silently resolve an EMPTY
-// closure (exit 0, no error). That bug has shipped three times.
-//
-// A `FeatureSet` is one value threaded as a unit. The brand is what
-// `Required<Pick<…>>` was doing: it makes "forgot to thread it" a COMPILE error
-// instead of a silent empty stack, because `{}` and a bare `Set` are not
-// assignable to it — only `featureSet()` can mint one.
+// One value threaded as a unit, replacing a `withX?: boolean` per family — a
+// fixed-arity encoding of a variable-arity fact that cost ~70 refs across 13
+// files and a hand-sweep to add a family. Because every field was `?:`, a caller
+// could pass `{}`, typecheck, and silently resolve an EMPTY closure (exit 0, no
+// error); that bug shipped three times. The brand is what forecloses it: `{}`
+// and a bare `Set` are not assignable, so only `featureSet()` can mint one and
+// "forgot to thread it" is a COMPILE error.
 
 declare const FEATURE_SET_BRAND: unique symbol;
 
@@ -350,102 +312,6 @@ export function featuresOf(
 ): FeatureSet {
   const named = (withBundles ?? []).filter((n): n is BundleName => n in BUNDLES);
   return featureSet([...named, ...featuresForIds(ids)]);
-}
-
-/**
- * The `optional:true` service ids each opt-in flag admits, derived from the
- * bundle registry so they cannot drift from `BUNDLES`.
- *
- * Consumers that must map an optional id BACK to its flag (flow resolution,
- * workspace run-sets) use these instead of hand-listing ids — every optional
- * service needs its OWN flag (see `admitsOptional`), and a stale hand-list is
- * exactly how one gets silently dropped into an empty closure.
- */
-export const PLAYBACK_IDS: readonly ServiceId[] = BUNDLES.playback.services;
-export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
-export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
-
-/**
- * The fully-resolved opt-in flags for every `optional:true` family — one field
- * per flag, none omittable.
- *
- * `Required` is load-bearing: every `ClosureOpts` field is declared `?:`, so a
- * bare `Pick` would leave them all optional and a caller could pass `{}` — which
- * typechecks and then silently resolves an EMPTY closure (exit 0, no error). The
- * alias exists so adding a fourth family is ONE edit here rather than a hand-sweep
- * of every signature that spells the shape out.
- */
-export type ResolvedClosureOpts = Required<
-  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>
->;
-
-/**
- * Every optional-service opt-in flag, derived from one `--with` list.
- *
- * THE point of this helper: each `optional:true` family needs its OWN flag, and
- * every flag defaults to FALSE — so a `computeClosure` caller that forgets one
- * silently resolves an EMPTY closure (exit 0, no error, no compiler help). That
- * failure has now been shipped three times (snapshot store, snapshot restore,
- * flow resolution). Deriving all flags in ONE place means adding a bundle is a
- * single edit here rather than a hand-sweep of every call site.
- *
- * Returns a `Required<…>` shape so a caller cannot partially spread it. PURE.
- */
-export function closureOptsFor(
-  withBundles: string[] | undefined,
-): ResolvedClosureOpts {
-  return {
-    withPlayback: effectiveWithPlayback(withBundles),
-    withAuthz: effectiveWithAuthz(withBundles),
-    withStaffAdmin: effectiveWithStaffAdmin(withBundles),
-  };
-}
-
-/**
- * The opt-in flags implied by a set of service ids already known to be wanted
- * (a workspace run-set, a flow's `requiredSystems`) — the id→flag direction of
- * `closureOptsFor`. Derived from the same `BUNDLES`-backed id sets, so it cannot
- * drift. PURE.
- */
-export function closureOptsForIds(
-  ids: readonly ServiceId[],
-): ResolvedClosureOpts {
-  const has = (family: readonly ServiceId[]): boolean => ids.some((id) => family.includes(id));
-  return {
-    withPlayback: has(PLAYBACK_IDS),
-    withAuthz: has(AUTHZ_IDS),
-    withStaffAdmin: has(STAFF_ADMIN_IDS),
-  };
-}
-
-// ─── Legacy adapters (TEMPORARY — delete with the last `withX` call site) ─────
-//
-// These bridge the boolean-per-family world to `FeatureSet` so the ~64
-// pass-through sites keep compiling while the ~6 producers convert. They are
-// the ONLY thing that should reference both shapes; once the pass-throughs are
-// converted, `toLegacy`/`fromLegacy`, `ResolvedClosureOpts`, `effectiveWithX`
-// and the `*_IDS` exports all go together.
-//
-// ⚠️ Do not delete these before every pass-through is converted — a half-
-// converted site would silently fall back to a default-false flag, which is
-// exactly the empty-closure failure this refactor exists to kill.
-
-/** `FeatureSet` → the legacy three-boolean shape. PURE. */
-export function toLegacy(features: FeatureSet): ResolvedClosureOpts {
-  return {
-    withPlayback: features.has('playback'),
-    withAuthz: features.has('authz'),
-    withStaffAdmin: features.has('staff-admin'),
-  };
-}
-
-/** Legacy flags → `FeatureSet`. Accepts a partial `ClosureOpts`. PURE. */
-export function fromLegacy(opts: ClosureOpts): FeatureSet {
-  const names: BundleName[] = [];
-  if (opts.withPlayback) names.push('playback');
-  if (opts.withAuthz) names.push('authz');
-  if (opts.withStaffAdmin) names.push('staff-admin');
-  return featureSet(names);
 }
 
 /**

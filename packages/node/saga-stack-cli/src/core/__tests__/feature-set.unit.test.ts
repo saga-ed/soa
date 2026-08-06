@@ -23,8 +23,6 @@ import {
   featuresFor,
   featuresForIds,
   featuresOf,
-  fromLegacy,
-  toLegacy,
 } from '../bundles.js';
 import { computeClosure } from '../closure.js';
 import { manifest } from '../manifest/index.js';
@@ -148,38 +146,6 @@ describe('bundle-contributed mesh', () => {
         expect(closure.mesh).not.toContain(unit);
       }
     }
-  });
-});
-
-describe('legacy adapters round-trip (delete with the last withX call site)', () => {
-  it('toLegacy ∘ fromLegacy is identity on the three flags', () => {
-    for (const opts of [
-      { withPlayback: true, withAuthz: false, withStaffAdmin: false },
-      { withPlayback: false, withAuthz: true, withStaffAdmin: false },
-      { withPlayback: false, withAuthz: false, withStaffAdmin: true },
-      { withPlayback: true, withAuthz: true, withStaffAdmin: true },
-      { withPlayback: false, withAuthz: false, withStaffAdmin: false },
-    ]) {
-      expect(toLegacy(fromLegacy(opts))).toEqual(opts);
-    }
-  });
-
-  it('legacy flags and features resolve the SAME closure', () => {
-    const legacy = computeClosure(manifest, ['transcripts-api'], { withPlayback: true });
-    const modern = computeClosure(manifest, ['transcripts-api'], {
-      features: featureSet(['playback']),
-    });
-    expect(modern.services).toEqual(legacy.services);
-    expect(modern.mesh).toEqual(legacy.mesh);
-    expect(modern.databases).toEqual(legacy.databases);
-  });
-
-  it('features WINS over the legacy flags when both are passed', () => {
-    const closure = computeClosure(manifest, ['transcripts-api'], {
-      features: featureSet([]),
-      withPlayback: true,
-    });
-    expect(closure.services).not.toContain('transcripts-api');
   });
 });
 

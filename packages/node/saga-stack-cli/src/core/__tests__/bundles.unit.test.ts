@@ -3,23 +3,20 @@
  *
  * `--with <bundle>` is pure sugar over `--only`: `expandBundles` unions a
  * bundle's service-ids (deduped, registry-ordered), `combineRequested` unions
- * that with `--only`, and `effectiveWithPlayback` reports whether the optional
- * playback trio should survive the closure's optional filter. All PURE.
+ * that with `--only`, and `featuresFor` reports which bundles (incl. `playback`)
+ * should survive the closure's optional filter. All PURE.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import {
-  AUTHZ_IDS,
   BUNDLES,
   BUNDLE_NAMES,
   BUNDLE_SEED_ADDONS,
-  PLAYBACK_IDS,
   SERVICE_BUNDLES,
-  STAFF_ADMIN_IDS,
   bundleForService,
   combineRequested,
-  effectiveWithPlayback,
   expandBundles,
+  featuresFor,
   seedAddOnsFor,
 } from '../bundles.js';
 
@@ -143,17 +140,17 @@ describe('combineRequested — parseOnly(only) ∪ expandBundles(with)', () => {
   });
 });
 
-describe('effectiveWithPlayback', () => {
+describe('featuresFor — playback membership', () => {
   it('true iff the playback bundle is requested', () => {
-    expect(effectiveWithPlayback(['playback'])).toBe(true);
-    expect(effectiveWithPlayback(['dash', 'playback'])).toBe(true);
+    expect(featuresFor(undefined, ['playback'], throwFail).has('playback')).toBe(true);
+    expect(featuresFor(undefined, ['dash', 'playback'], throwFail).has('playback')).toBe(true);
   });
 
   it('false for other bundles / empty / undefined', () => {
-    expect(effectiveWithPlayback(['coach'])).toBe(false);
-    expect(effectiveWithPlayback(['qtf'])).toBe(false);
-    expect(effectiveWithPlayback([])).toBe(false);
-    expect(effectiveWithPlayback(undefined)).toBe(false);
+    expect(featuresFor(undefined, ['coach'], throwFail).has('playback')).toBe(false);
+    expect(featuresFor(undefined, ['qtf'], throwFail).has('playback')).toBe(false);
+    expect(featuresFor(undefined, [], throwFail).has('playback')).toBe(false);
+    expect(featuresFor(undefined, undefined, throwFail).has('playback')).toBe(false);
   });
 });
 
@@ -173,7 +170,11 @@ describe('bundleForService', () => {
   });
 
   it('every bundle name it returns is invokable as `--with <name>`', () => {
-    for (const id of [...AUTHZ_IDS, ...STAFF_ADMIN_IDS, ...PLAYBACK_IDS]) {
+    for (const id of [
+      ...BUNDLES.authz.services,
+      ...BUNDLES['staff-admin'].services,
+      ...BUNDLES.playback.services,
+    ]) {
       const name = bundleForService(id);
       expect(name).toBeDefined();
       expect(BUNDLE_NAMES).toContain(name);

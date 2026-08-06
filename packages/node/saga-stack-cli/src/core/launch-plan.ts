@@ -186,8 +186,8 @@ export interface LaunchTokens {
   // ── OpenFGA authz (opt-in — `--with authz`; new, no up.sh precedent) ──
   /**
    * iam-api's `FGA_ENABLED` — `'true'` only when the `authz` bundle was
-   * selected (`effectiveWithAuthz`), else `'false'`. Keeps the OpenFGA footprint
-   * off every default `stack up` (opt-in design decision).
+   * selected, else `'false'`. Keeps the OpenFGA footprint off every default
+   * `stack up` (opt-in design decision).
    */
   FGA_ENABLED: string;
   /**
@@ -624,9 +624,9 @@ export interface LaunchContextInputs {
   /** up.sh `${PINO_LOGGER_ISEXPRESSCONTEXT:-true}` — ambient override, else `true`. */
   pinoIsExpressContext?: string;
   /**
-   * Whether the `authz` bundle was selected (`effectiveWithAuthz(flags.with)`) —
-   * drives `FGA_ENABLED`. Default `false` (opt-in design decision — every
-   * default `stack up` keeps FGA off).
+   * Whether the `authz` bundle was selected (`features.has('authz')`) — drives
+   * `FGA_ENABLED`. Default `false` (opt-in design decision — every default
+   * `stack up` keeps FGA off).
    */
   withAuthz?: boolean;
   /**

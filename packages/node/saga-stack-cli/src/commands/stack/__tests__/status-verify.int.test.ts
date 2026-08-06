@@ -17,6 +17,7 @@ import { resolve } from 'node:path';
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
+import { featureSet } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
 import { manifest } from '../../../core/manifest/index.js';
@@ -225,7 +226,7 @@ describe('stack status — native, manifest-derived, read-only', () => {
   it('--with playback scopes to the 3 playback services (not the whole stack)', async () => {
     await StackStatus.run(['--with', 'playback', ...WS], config);
     const expected = computeClosure(manifest, ['transcripts-api', 'insights-api', 'chat-api'], {
-      withPlayback: true,
+      features: featureSet(['playback']),
     }).services.map((id) => `${manifest.services[id].lane.stack}${manifest.services[id].healthPath}`);
     expect(new Set(probed)).toEqual(new Set(expected));
     expect(probed).not.toContain(CONTENT_URL); // narrowed, not full-stack

@@ -16,19 +16,16 @@
  *    without connect-api never includes it.
  *  - `connectv3` (db) is reached only via `connect-api.databases`, likewise.
  *
- * Playback (`optional:true`) services — transcripts/insights/chat — are kept
- * ONLY when `opts.withPlayback` is set. Nothing in the graph `dependsOn` them,
- * so this gate is the only thing that admits them, and a requested playback
- * service is dropped (not launched) unless `--with-playback` is passed.
- *
- * `authz-sync` (`optional:true`) is the same shape, gated by `opts.withAuthz`
- * instead. Each optional service maps to its OWN opt-in flag (see
- * `admitsOptional` below) — a bare `withPlayback || withAuthz` OR would let
- * either flag admit BOTH families (e.g. `--only transcripts-api --with authz`
- * would wrongly resolve transcripts-api), so the gate dispatches per service id.
+ * `optional:true` services — the playback trio, `authz-sync`, the staff-admin
+ * pair — are kept ONLY when `opts.features` selects the bundle that owns them.
+ * Nothing in the graph `dependsOn` them, so this gate is the only thing that
+ * admits them, and a requested optional service is dropped (not launched)
+ * otherwise. Each maps to its OWN bundle (see `admitsOptional` below): a blanket
+ * "any feature selected" test would cross-admit, e.g. `--only transcripts-api
+ * --with authz` would wrongly resolve transcripts-api.
  */
 
-import { BUNDLE_FOR_SERVICE, BUNDLES, fromLegacy, type FeatureSet } from './bundles.js';
+import { BUNDLE_FOR_SERVICE, BUNDLES, featureSet, type FeatureSet } from './bundles.js';
 import { launchOrder } from './launch-order.js';
 import type { DbId, Manifest, MeshId, ServiceId } from './manifest/index.js';
 
@@ -45,20 +42,10 @@ export interface Closure {
 
 export interface ClosureOpts {
   /**
-   * The features selected for this run — the variable-arity replacement for the
-   * three `withX` booleans below.
-   *
-   * When present it WINS: the legacy flags are ignored entirely. Callers should
-   * migrate to this; the booleans are retained only until the last pass-through
-   * site converts (see `toLegacy`/`fromLegacy` in bundles.ts).
+   * The features selected for this run. Omitted ⇒ no `optional:true` service is
+   * admitted; mint one with `featureSet()` / `featuresFor()` in bundles.ts.
    */
   features?: FeatureSet;
-  /** @deprecated Pass `features` instead. Keep `optional:true` playback services. */
-  withPlayback?: boolean;
-  /** @deprecated Pass `features` instead. Keep the `optional:true` `authz-sync` service. */
-  withAuthz?: boolean;
-  /** @deprecated Pass `features` instead. Keep the `optional:true` staff-admin pair. */
-  withStaffAdmin?: boolean;
   /**
    * Whether to traverse `depKind: 'browser'` edges (default `true`).
    *
@@ -83,9 +70,7 @@ export function computeClosure(
   requested: ServiceId[],
   opts: ClosureOpts = {},
 ): Closure {
-  // `features` wins when present; otherwise fall back to the legacy booleans so
-  // un-migrated pass-through callers keep working unchanged.
-  const features = opts.features ?? fromLegacy(opts);
+  const features = opts.features ?? featureSet([]);
   const followBrowserEdges = opts.followBrowserEdges ?? true;
 
   // Each optional service is admitted by its OWN feature — never a blanket OR of

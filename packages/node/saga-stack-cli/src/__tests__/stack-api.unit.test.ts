@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { featureSet } from '../core/bundles.js';
 import { computeClosure } from '../core/closure.js';
 import { deriveInstance } from '../core/derive-instance.js';
 import { defaultLaunchContext } from '../core/launch-plan.js';
@@ -757,7 +758,7 @@ describe('StackApi.reset — native (M8 R4)', () => {
     );
   });
 
-  it('playback DBs are reset ONLY under withPlayback (idempotent gating)', async () => {
+  it('playback DBs are reset ONLY under the playback feature (idempotent gating)', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
     await api.reset(['transcripts-api', 'iam-api'] as ServiceId[]);
@@ -766,7 +767,9 @@ describe('StackApi.reset — native (M8 R4)', () => {
 
     const { runtime: rt2, fakes: fk2 } = makeRuntime();
     const api2 = makeStackApi(manifest, rt2);
-    await api2.reset(['transcripts-api', 'iam-api'] as ServiceId[], { withPlayback: true });
+    await api2.reset(['transcripts-api', 'iam-api'] as ServiceId[], {
+      features: featureSet(['playback']),
+    });
     expect(fk2.runs.some((r) => r.command === 'docker' && r.args.includes('transcripts_local'))).toBe(true);
   });
 

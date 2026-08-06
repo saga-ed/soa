@@ -9,16 +9,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { closureDatabases } from '../../../commands/stack/snapshot/store.js';
-import {
-  AUTHZ_IDS,
-  PLAYBACK_IDS,
-  STAFF_ADMIN_IDS,
-  closureOptsFor,
-  closureOptsForIds,
-  featureSet,
-} from '../../bundles.js';
+import { BUNDLES, featureSet, featuresFor, featuresForIds } from '../../bundles.js';
 import { computeClosure } from '../../closure.js';
 import { manifest } from '../index.js';
+
+const fail = (m: string): never => {
+  throw new Error(m);
+};
 
 const bff = manifest.services['staff-admin-bff'];
 const spa = manifest.services['staff-admin-console'];
@@ -93,8 +90,8 @@ describe('staff-admin manifest entries', () => {
 describe('staff-admin closure admission', () => {
   const ids = ['staff-admin-bff', 'staff-admin-console'] as const;
 
-  it('resolves the pair + its upstream closure under withStaffAdmin', () => {
-    const c = computeClosure(manifest, [...ids], { withStaffAdmin: true });
+  it('resolves the pair + its upstream closure under the staff-admin feature', () => {
+    const c = computeClosure(manifest, [...ids], { features: featureSet(['staff-admin']) });
     // The whole point of the bundle: one flag, and the upstreams the console
     // reads come along automatically.
     expect(c.services).toEqual([
@@ -106,18 +103,22 @@ describe('staff-admin closure admission', () => {
     ]);
   });
 
-  it('DROPS the pair without the flag (each optional service needs its own)', () => {
+  it('DROPS the pair without the feature (each optional service needs its own)', () => {
     // Regression: `admitsOptional` fell through to `withPlayback` for unknown
     // optional ids, so `--with staff-admin` silently resolved ZERO services
     // while every test still passed.
     expect(computeClosure(manifest, [...ids], {}).services).toEqual([]);
-    expect(computeClosure(manifest, [...ids], { withPlayback: true }).services).toEqual([]);
-    expect(computeClosure(manifest, [...ids], { withAuthz: true }).services).toEqual([]);
+    expect(
+      computeClosure(manifest, [...ids], { features: featureSet(['playback']) }).services,
+    ).toEqual([]);
+    expect(
+      computeClosure(manifest, [...ids], { features: featureSet(['authz']) }).services,
+    ).toEqual([]);
   });
 
   it('is not cross-admitted by, and does not cross-admit, other optionals', () => {
     const c = computeClosure(manifest, ['authz-sync', ...ids], {
-      withStaffAdmin: true,
+      features: featureSet(['staff-admin']),
     });
     expect(c.services).not.toContain('authz-sync');
   });
@@ -132,19 +133,23 @@ describe('staff-admin closure admission', () => {
 });
 
 describe('optional-service id sets (derived from BUNDLES)', () => {
-  it('maps each opt-in flag to its own bundle services', () => {
-    // Consumers that map an optional id BACK to its flag (flow resolution,
+  it('maps each opt-in feature to its own bundle services', () => {
+    // Consumers that map an optional id BACK to its feature (flow resolution,
     // workspace run-sets) read these instead of hand-listing ids, so they
     // cannot drift from the bundle registry.
-    expect(STAFF_ADMIN_IDS).toEqual(['staff-admin-bff', 'staff-admin-console']);
-    expect(AUTHZ_IDS).toEqual(['authz-sync']);
-    expect(PLAYBACK_IDS).toEqual(['transcripts-api', 'insights-api', 'chat-api']);
+    expect(BUNDLES['staff-admin'].services).toEqual(['staff-admin-bff', 'staff-admin-console']);
+    expect(BUNDLES.authz.services).toEqual(['authz-sync']);
+    expect(BUNDLES.playback.services).toEqual(['transcripts-api', 'insights-api', 'chat-api']);
   });
 
   it('every optional manifest service belongs to exactly one opt-in set', () => {
     // The gap this whole class of bug came from: an optional service with no
-    // flag mapping silently resolves to an EMPTY closure at every caller.
-    const mapped = new Set<string>([...PLAYBACK_IDS, ...AUTHZ_IDS, ...STAFF_ADMIN_IDS]);
+    // feature mapping silently resolves to an EMPTY closure at every caller.
+    const mapped = new Set<string>([
+      ...BUNDLES.playback.services,
+      ...BUNDLES.authz.services,
+      ...BUNDLES['staff-admin'].services,
+    ]);
     const optional = Object.values(manifest.services)
       .filter((s) => s.optional)
       .map((s) => s.id);
@@ -152,37 +157,21 @@ describe('optional-service id sets (derived from BUNDLES)', () => {
   });
 });
 
-describe('closureOptsFor / closureOptsForIds', () => {
-  it('derives every flag from one --with list', () => {
-    expect(closureOptsFor(['staff-admin'])).toEqual({
-      withPlayback: false,
-      withAuthz: false,
-      withStaffAdmin: true,
-    });
-    expect(closureOptsFor(undefined)).toEqual({
-      withPlayback: false,
-      withAuthz: false,
-      withStaffAdmin: false,
-    });
+describe('featuresFor / featuresForIds', () => {
+  it('derives every feature from one --with list', () => {
+    expect([...featuresFor(undefined, ['staff-admin'], fail)]).toEqual(['staff-admin']);
+    expect([...featuresFor(undefined, undefined, fail)]).toEqual([]);
   });
 
-  it('derives the same flags from wanted ids (workspace run-set / flow systems)', () => {
-    expect(closureOptsForIds(['staff-admin-console'])).toEqual({
-      withPlayback: false,
-      withAuthz: false,
-      withStaffAdmin: true,
-    });
-    expect(closureOptsForIds(['iam-api'])).toEqual({
-      withPlayback: false,
-      withAuthz: false,
-      withStaffAdmin: false,
-    });
+  it('derives the same features from wanted ids (workspace run-set / flow systems)', () => {
+    expect([...featuresForIds(['staff-admin-console'])]).toEqual(['staff-admin']);
+    expect([...featuresForIds(['iam-api'])]).toEqual([]);
   });
 
   it('never cross-admits between families', () => {
-    expect(closureOptsFor(['authz']).withStaffAdmin).toBe(false);
-    expect(closureOptsFor(['playback']).withAuthz).toBe(false);
-    expect(closureOptsFor(['staff-admin']).withPlayback).toBe(false);
+    expect(featuresFor(undefined, ['authz'], fail).has('staff-admin')).toBe(false);
+    expect(featuresFor(undefined, ['playback'], fail).has('authz')).toBe(false);
+    expect(featuresFor(undefined, ['staff-admin'], fail).has('playback')).toBe(false);
   });
 });
 
@@ -205,27 +194,27 @@ describe('admitsOptional is exhaustive', () => {
     );
   });
 
-  it('still admits every real optional family from its own flag', () => {
-    expect(computeClosure(manifest, ['authz-sync'], { withAuthz: true }).services).toEqual([
-      'authz-sync',
-    ]);
-    expect(computeClosure(manifest, ['chat-api'], { withPlayback: true }).services).toContain(
-      'chat-api',
-    );
+  it('still admits every real optional family from its own feature', () => {
+    expect(
+      computeClosure(manifest, ['authz-sync'], { features: featureSet(['authz']) }).services,
+    ).toEqual(['authz-sync']);
+    expect(
+      computeClosure(manifest, ['chat-api'], { features: featureSet(['playback']) }).services,
+    ).toContain('chat-api');
   });
 });
 
 describe('snapshot store — closureDatabases', () => {
-  const fail = (m: string): never => {
-    throw new Error(m);
-  };
-
-  it('resolves the staff-admin closure DBs when the flag is set', () => {
-    // Regression: this call site omitted `withStaffAdmin`, so the ids resolved
-    // to an EMPTY db list — and `storePlan` honours a defined-but-empty `only`
-    // as "dump exactly these", writing a zero-database snapshot that exits 0.
-    // The pair owns no DBs itself; the upstreams it pulls in do.
-    const dbs = closureDatabases([...STAFF_ADMIN_IDS], featureSet(['staff-admin']), fail);
+  it('resolves the staff-admin closure DBs when the feature is set', () => {
+    // Regression: this call site omitted the staff-admin feature, so the ids
+    // resolved to an EMPTY db list — and `storePlan` honours a defined-but-empty
+    // `only` as "dump exactly these", writing a zero-database snapshot that
+    // exits 0. The pair owns no DBs itself; the upstreams it pulls in do.
+    const dbs = closureDatabases(
+      [...BUNDLES['staff-admin'].services],
+      featureSet(['staff-admin']),
+      fail,
+    );
     expect(dbs).not.toEqual([]);
     expect(dbs).toContain('iam_local');
   });

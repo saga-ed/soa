@@ -276,13 +276,15 @@ describe('stack up --only — native partial-stack', () => {
       'getRepoDirCheck',
     ).mockReturnValue((dir: string) => !dir.endsWith('/coach'));
 
-    // closure(coach-web) = coach-web + coach-api (COACH, absent) + iam-api (present).
+    // closure(coach-web) = coach-web + coach-api (COACH, absent) + iam-api and
+    // programs-api (present — programs-api rides in on coach-web's `browser`
+    // edge for the Reports program filter, coach#329).
     await expect(
       StackUp.run(['--only', 'coach-web', '--seed', 'full', ...WS], config),
     ).resolves.toBeUndefined();
 
-    // only iam-api launched; the coach pair was skipped (repo not cloned).
-    expect(launches.map((s) => s.id)).toEqual(['iam-api']);
+    // only the present-repo services launched; the coach pair was skipped (repo not cloned).
+    expect(launches.map((s) => s.id)).toEqual(['iam-api', 'programs-api']);
 
     // the seed plan dropped coach-pg — NOTHING ran against the coach-db dir (which
     // would have spawn-crashed on the missing checkout with a real runner).

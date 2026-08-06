@@ -241,3 +241,46 @@ describe('rtsm-api per-slot fleet (soa#271) — browser CRDT reaches the SLOT rt
     expect(env.FLEET_CONFIG_PATH).toBe('/tmp/sds-synthetic-s2/rtsm-fleet-s2.json');
   });
 });
+
+describe('coach-web x programs-api slottability (coach#329) — the browser dials ITS slot', () => {
+  const slotCtx = (slot: number) => {
+    const p = deriveInstance({ slot });
+    return defaultLaunchContext({
+      ...baseInputs,
+      portOverrides: p.portOverrides,
+      meshOffset: p.meshOffset,
+    });
+  };
+
+  it('slot 0: PUBLIC_PROGRAMS_API_URL is the base programs-api port (byte-identity)', () => {
+    const env = resolveLaunchEnv('coach-web', 'stack', slotCtx(0));
+    expect(env.PUBLIC_PROGRAMS_API_URL).toBe('http://localhost:3006');
+    // and NOT the checked-in .env default it exists to displace.
+    expect(env.PUBLIC_PROGRAMS_API_URL).not.toContain('wootdev.com');
+  });
+
+  it('slot 2: it offsets with the slot — a slot-2 browser never dials slot 0', () => {
+    // Composed from ${PROGRAMS_PORT}, so it slots for free; a literal
+    // http://localhost:3006 would have pinned every slot's browser to slot 0's
+    // programs-api and silently read the wrong stack's programs.
+    const env = resolveLaunchEnv('coach-web', 'stack', slotCtx(2));
+    expect(env.PUBLIC_PROGRAMS_API_URL).toBe(
+      `http://localhost:${manifest.services['programs-api'].port + 2000}`,
+    );
+    for (const v of Object.values(env)) {
+      expect(v).not.toMatch(/localhost:(3006|3010|6105)\b/);
+    }
+  });
+
+  it("programs-api CORS admits the SLOT coach-web origin, not slot 0's", () => {
+    // The other half of the same bug: the URL can be right and the preflight
+    // still unlabeled. ${COACH_WEB_URL} offsets in lockstep with coach-web's own
+    // listen port (stack-api appends --port <base+offset> for frontends).
+    expect(resolveLaunchEnv('programs-api', 'stack', slotCtx(0)).CORS_ORIGIN).toBe(
+      'http://localhost:8900,http://localhost:8800',
+    );
+    expect(resolveLaunchEnv('programs-api', 'stack', slotCtx(2)).CORS_ORIGIN).toBe(
+      'http://localhost:10900,http://localhost:10800',
+    );
+  });
+});

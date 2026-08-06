@@ -222,6 +222,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     // base ports at slot 0: iam 3010, coach-api 6105, saga-dash 8900. No remote defaults.
     expect(contents).toContain('PUBLIC_IAM_API_URL=http://localhost:3010');
     expect(contents).toContain('PUBLIC_COACH_API_URL=http://localhost:6105');
+    expect(contents).toContain('PUBLIC_PROGRAMS_API_URL=http://localhost:3006');
     expect(contents).toContain('PUBLIC_DASHBOARD_URL=http://localhost:8900');
     expect(contents).toContain('PUBLIC_LOGIN_URL=http://localhost:3010');
     expect(contents).not.toContain('wootdev.com');
@@ -243,8 +244,10 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     // slot 1 = base + 1000: iam 4010, coach-api 7105, saga-dash 9900.
     expect(contents).toContain('PUBLIC_IAM_API_URL=http://localhost:4010');
     expect(contents).toContain('PUBLIC_COACH_API_URL=http://localhost:7105');
+    expect(contents).toContain('PUBLIC_PROGRAMS_API_URL=http://localhost:4006');
     expect(contents).toContain('PUBLIC_DASHBOARD_URL=http://localhost:9900');
     expect(contents).not.toContain(':6105'); // slot 0's coach-api must not leak
+    expect(contents).not.toContain(':3006'); // …nor slot 0's programs-api
   });
 
   it('soa#300: no coach-web .env.local write when coach-web is not in the closure', async () => {

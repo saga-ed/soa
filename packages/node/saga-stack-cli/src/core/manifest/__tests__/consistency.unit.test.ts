@@ -66,7 +66,14 @@ describe('manifest consistency — every edge resolves', () => {
     expect(manifest.services['coach-api'].databases).toEqual(['coach_api']);
     expect(manifest.services['coach-web'].repo).toBe('COACH');
     // iam-api too: coach-web's browser calls auth.whoami direct (session.ts).
-    expect(manifest.services['coach-web'].dependsOn).toEqual(['coach-api', 'iam-api']);
+    // programs-api too: its browser calls programs.list direct for the Reports
+    // program filter (coach#329) — all three are `browser` edges.
+    expect(manifest.services['coach-web'].dependsOn).toEqual([
+      'coach-api',
+      'iam-api',
+      'programs-api',
+    ]);
+    expect(manifest.services['coach-web'].depKinds['programs-api']).toBe('browser');
     expect(manifest.databases['coach_api'].ownerRole).toBe('coach_api_app');
   });
 

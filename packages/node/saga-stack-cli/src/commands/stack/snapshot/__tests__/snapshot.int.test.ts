@@ -164,7 +164,11 @@ describe('stack snapshot store — manifest-driven, all 11 pg + connectv3 mongo'
     // iam's own DBs + coach's coach_api, and nothing outside that scope.
     expect(pg).toContain('iam_local');
     expect(pg).toContain('coach_api');
-    expect(pg).not.toContain('programs');
+    // `programs` IS in scope: coach-web's `browser` edge pulls programs-api into
+    // the coach closure (coach#329), and snapshot scope follows the closure.
+    expect(pg).toContain('programs');
+    // still scoped — a service reachable from neither iam nor coach stays out.
+    expect(pg).not.toContain('scheduling');
     expect(dbsCalled('mongoDump')).toEqual([]);
   });
 

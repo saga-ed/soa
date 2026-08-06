@@ -69,13 +69,21 @@ describe('stack up --dry-run — closure planning path', () => {
     expect(closure.mesh).toContain('connect-mongo'); // connect-api in the full set
   });
 
-  it('--with coach (dry-run) plans the {iam-api, coach-api, coach-web} closure', () => {
+  it('--with coach (dry-run) plans the {iam-api, coach-api, coach-web, programs-api} closure', () => {
     // Mirrors StackUp.run: requested = combineRequested(only, with) → computeClosure.
     const requested = combineRequested(undefined, ['coach'], fail);
     const closure = computeClosure(manifest, requested, {
       withPlayback: effectiveWithPlayback(['coach']),
     });
-    expect(new Set(closure.services)).toEqual(new Set(['iam-api', 'coach-api', 'coach-web']));
+    // programs-api rides in on coach-web's `browser` edge (coach#329): the Reports
+    // program filter fetches programs.list from the browser, so an interactive
+    // `--with coach` that omitted it would hand coach-web a dead localhost:3006.
+    expect(new Set(closure.services)).toEqual(
+      new Set(['iam-api', 'coach-api', 'coach-web', 'programs-api']),
+    );
+    // …and the closure unions programs-api's own db + broker with it.
+    expect(closure.databases).toContain('programs');
+    expect(closure.mesh).toContain('rabbitmq');
   });
 
   it('--with playback (dry-run) plans the playback closure, not the full stack', () => {

@@ -259,7 +259,9 @@ describe('StackApi.up — skips a service whose sibling repo is not cloned (warn
     runtime.repoDirExists = (dir: string) => dir !== REPO_ROOTS.COACH;
     const api = makeStackApi(manifest, runtime);
 
-    // closure(coach-web) = coach-web + coach-api (COACH, absent) + iam-api (present).
+    // closure(coach-web) = coach-web + coach-api (COACH, absent) + iam-api and
+    // programs-api (present — programs-api rides in on coach-web's `browser`
+    // edge for the Reports program filter, coach#329).
     const closure = computeClosure(manifest, ['coach-web'] as ServiceId[]);
 
     const res = await api.up(closure.services);
@@ -267,8 +269,8 @@ describe('StackApi.up — skips a service whose sibling repo is not cloned (warn
     // the run does NOT fail — the missing repo is a warning, not an error.
     expect(res.ok).toBe(true);
 
-    // only iam-api (a present repo) launched; the coach pair was skipped, not spawned.
-    expect(fakes.launches.map((s) => s.id)).toEqual(['iam-api']);
+    // only the present-repo services launched; the coach pair was skipped, not spawned.
+    expect(fakes.launches.map((s) => s.id)).toEqual(['iam-api', 'programs-api']);
 
     // both coach services are reported skipped, with the repo dir + a clear message.
     expect(res.skipped.map((s) => s.id).sort()).toEqual(['coach-api', 'coach-web']);

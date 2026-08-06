@@ -215,10 +215,10 @@ export function scopeSnapshot(
   }
 
   // `scopeSnapshot` only has the requested service ids (`restore` carries no `--with`
-  // flag — only `--only`), so derive the opt-in flags from the ids themselves rather
-  // than hardcoding `withPlayback: true`: that hardcode is exactly the bug this fixes
-  // — `--only staff-admin-*` needs `withStaffAdmin`, not `withPlayback`, and resolved
-  // an EMPTY closure (silent "no database present in snapshot" failure) without it.
+  // flag — only `--only`), so derive the features from the ids themselves. Hardcoding
+  // one family is exactly the bug this fixes: `--only staff-admin-*` under a
+  // playback-only assumption resolved an EMPTY closure (a silent "no database present
+  // in snapshot" failure).
   const dbSet = new Set<DbId>(
     computeClosure(manifest, requested, { features: featuresForIds(requested) }).databases,
   );

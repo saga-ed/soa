@@ -111,7 +111,7 @@ export interface StorePlanOptions {
   /**
    * Scope to exactly these DBs (the command resolves `--only <svc,…>` →
    * `computeClosure().databases` and passes them here). When set, it fully
-   * determines the db set and `withPlayback` is ignored.
+   * determines the db set and `features` is ignored.
    */
   only?: DbId[];
   /**

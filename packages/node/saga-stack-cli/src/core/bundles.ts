@@ -57,9 +57,9 @@ export interface BundleDef {
 /**
  * The bundle registry — the ONE source of truth. A feature may contribute
  * services (`dash`/`connect`/`coach`/`playback`), a seed add-on (`playback`/
- * `qtf`), or both. `playback`'s services are the three `optional:true` APIs, so
- * they only resolve when the closure's `withPlayback` is set (see
- * `effectiveWithPlayback`). `qtf` is seed-only (no services).
+ * `qtf`), mesh units, or a combination. `playback`'s services are the three
+ * `optional:true` APIs, so they resolve only when the closure's `features`
+ * select `playback`. `qtf` is seed-only (no services).
  */
 export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
   dash: {
@@ -212,9 +212,8 @@ export function featureSet(names: Iterable<BundleName>): FeatureSet {
  * `optional:true` service-id → the bundle that admits it, inverted from
  * `BUNDLES` once.
  *
- * Replaces the hand-listed `PLAYBACK_IDS`/`AUTHZ_IDS`/`STAFF_ADMIN_IDS` trio and
- * the three-branch `if` in `admitsOptional`: adding a family becomes a registry
- * edit with no code change anywhere else.
+ * Adding a family is a registry edit here with no code change anywhere else —
+ * `admitsOptional` and every id→feature consumer read this map.
  *
  * Bundles MAY list `optional:false` ids (`dash`/`connect`/`coach` all do) — those
  * are pure `--only` sugar and need no gate, so a mapping for them is harmless.
@@ -258,12 +257,12 @@ export function bundleForDb(
  * The features implied by a run's selection flags — from BOTH `--only` and
  * `--with`.
  *
- * 🔑 Deriving from `--only` too is a BUG FIX. `combineRequested` unions the two
- * flags into the requested set, but only `--with` fed the old
- * `closureOptsFor` — so `stack up --only transcripts-api` resolved an EMPTY
- * closure (the id was requested, then dropped by `admitsOptional` because no
- * flag admitted it). You had to know to write `--only transcripts-api --with
- * playback`. Now naming an optional service implies its family.
+ * 🔑 Deriving from `--only` too is a BUG FIX. `combineRequested` unions both
+ * flags into the requested set, but only `--with` ever fed the feature
+ * derivation — so `stack up --only transcripts-api` resolved an EMPTY closure
+ * (the id was requested, then dropped by `admitsOptional` because nothing
+ * admitted it). You had to know to write `--only transcripts-api --with
+ * playback`. Naming an optional service now implies its family.
  *
  * No currently-working invocation changes meaning: this only ADMITS ids that
  * were previously dropped. PURE.

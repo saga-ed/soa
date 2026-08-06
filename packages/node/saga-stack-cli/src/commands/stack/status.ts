@@ -256,9 +256,9 @@ function provenanceDetail(p?: ProvenanceRow): string[] {
 
 /**
  * Turn the `--only`/`--with` flags into the ordered service-id list to probe.
- * The requested set is `parseOnly(only) ∪ expandBundles(with)`; `--with playback`
- * sets `withPlayback` and `--with authz` sets `withAuthz` so their optional
- * service ids survive the closure's optional filter.
+ * The requested set is `parseOnly(only) ∪ expandBundles(with)`; each `--with
+ * <bundle>` also selects that feature, so the bundle's optional service ids
+ * survive the closure's optional filter.
  *  - EMPTY requested (no `--only`, no `--with`) ⇒ every NON-optional service.
  *  - else ⇒ the dependency closure of the requested set (launch order).
  * `fail` renders a friendly oclif error and does not return. Shared by

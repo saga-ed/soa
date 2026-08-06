@@ -60,24 +60,29 @@ stack without profiling.
 ## One service at a time, per slot
 
 `SIGUSR1` always opens the inspector on Node's default port and gives no way to
-choose another, so within a slot only one service can be profiled at a time. The
-port carries the slot offset (`9229 + slot*1000`), so parallel slots don't
-interfere.
+choose another, so within a slot only one service can hold it. The port carries the
+slot offset (`9229 + slot*1000`), so parallel slots don't interfere.
 
-If the port is already held, `profile` **refuses**:
+Profiling the **same** service repeatedly is fine: Node leaves the inspector open
+after the client disconnects, so subsequent runs re-attach to it.
+
+Profiling a **different** service in that slot is refused while the first holds the
+port:
 
 ```
-Error: iam-api: inspector port 9229 is already in use. SIGUSR1 cannot choose a
-port, so the service would fail to open its inspector SILENTLY and this profile
-would attach to the wrong process.
+Error: coach-api: inspector port 9229 is held by pid 4242, not by the service.
+SIGUSR1 cannot choose a port, so the service could not open its own inspector and
+this profile would attach to the wrong process.
 ```
 
 That refusal is the point. Without it the service's failure to bind is invisible
 except as `Starting inspector on 127.0.0.1:9229 failed: address already in use` in
-its own log, while the profiler happily samples whatever *did* own the port.
+its own log, while the profiler happily samples whatever *did* own the port. To
+profile another service, use a different `--slot`, or `ss stack down` first.
 
-A service's inspector stays open once signalled, so a second `profile` of the same
-service in the same stack hits this. `ss stack down` clears it.
+`profile` also refuses when the process holding the service's port isn't Node —
+SIGUSR1 has no handler there, so signalling it would **kill** the process rather
+than open an inspector.
 
 ## Reading the result
 
@@ -88,7 +93,7 @@ captured 5665 samples → /tmp/sds-synthetic/iam-api-2026-08-05T20-30-30-279Z.cp
   contains frames from the service's own code.
 ```
 
-If it says `WARNING: no frames from <service>'s own dist`, the service was idle —
+If it says `WARNING: no frames from <service>'s own code`, the service was idle —
 the artifact is valid but uninformative. Re-run while driving traffic. This check
 exists because a wrapper-only profile (the `--cpu-prof` failure above) looks
 perfectly healthy until you open it.

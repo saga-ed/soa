@@ -1,24 +1,17 @@
 /**
  * `ss stack profile <service>` — capture a CPU profile from a RUNNING service.
  *
- * ATTACH MODE, and why it has to be. The app process is never a direct child of
- * `pnpm dev`: 14 backends nest it inside tsup's quoted `--onSuccess` string and 2
- * inside a `tsx watch` supervisor fork, so the real `node dist/main.js` sits 4
- * levels below the pid `ss` records. Nothing injected at launch reaches it —
- * `--inspect` as argv is rejected outright by tsup's cac, and via NODE_OPTIONS the
- * pnpm wrapper binds the port first. So this command touches the launch path not at
- * all: it finds the process that is actually LISTENING, opens its inspector with
- * SIGUSR1, and pulls the profile over CDP while the process runs.
- *
- * `stack up` presets each backend's inspector PORT (`--inspect-port`, which leaves
- * the inspector closed) so the attach is unambiguous and slot-isolated — see
- * `core/inspector.ts`.
+ * ATTACH MODE. The app is never a direct child of `pnpm dev` (backends nest it
+ * inside tsup's quoted `--onSuccess` or a `tsx watch` fork), so nothing injected
+ * at launch reaches it. This command leaves the launch path alone: find the
+ * LISTENING process, open its inspector with SIGUSR1, pull the profile over CDP.
+ * Port selection and its constraints: `core/inspector.ts`.
  */
 
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
-import { inspectorPort } from '../../core/inspector.js';
+import { assertInspectorBandFree, inspectorPort, profilableServices } from '../../core/inspector.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import {
@@ -48,9 +41,7 @@ export default class StackProfile extends BaseCommand {
     service: Args.string({
       description: 'service to profile (a backend; frontends run a Vite dev server and are not profilable)',
       required: true,
-      options: (Object.keys(manifest.services) as ServiceId[]).filter(
-        (id) => !manifest.services[id].isFrontend,
-      ),
+      options: profilableServices(),
     }),
   };
 
@@ -81,13 +72,16 @@ export default class StackProfile extends BaseCommand {
       this.error(`--duration ${flags.duration} is not a duration (try 500ms, 30s, 2m)`);
     }
 
+    // Fail loudly if a service has since been banded onto an inspector port —
+    // otherwise the collision surfaces only as a profile of the wrong service.
+    assertInspectorBandFree();
+
     const io: ForeignIo = makeRealForeignIo();
     const servicePort = profile.portOverrides[service] ?? manifest.services[service].port;
     const plan = await this.buildPlan(service, profile.slot, servicePort, stateDir, io);
 
     if (!plan.ok) {
       this.error(plan.reason);
-      return;
     }
 
     if (!flags['output-json'] && !flags.porcelain) {
@@ -105,11 +99,11 @@ export default class StackProfile extends BaseCommand {
       port: plan.port,
       durationMs,
       outPath,
+      alreadyOpen: plan.alreadyOpen,
     });
 
     if (!result.ok) {
       this.error(`${service}: ${result.reason}`);
-      return;
     }
 
     // A profile of pnpm/tsup has plenty of nodes but none from the service's own
@@ -131,7 +125,7 @@ export default class StackProfile extends BaseCommand {
     this.log(
       hasFrames
         ? '  contains frames from the service\'s own code.'
-        : `  WARNING: no frames from ${service}'s own dist — it may have been idle. Drive traffic while profiling.`,
+        : `  WARNING: no frames from ${service}'s own code — it may have been idle. Drive traffic while profiling.`,
     );
     this.log('  open in Chrome DevTools (Performance → Load profile) or VS Code.');
   }
@@ -148,11 +142,15 @@ export default class StackProfile extends BaseCommand {
     const proc = listenerPid === null ? null : await io.procInfo(listenerPid);
     const port = inspectorPort(service, slot);
     const busy = port === null ? false : await inspectorPortBusy(port);
+    // Who holds the inspector port decides refuse-vs-reattach, so resolve it
+    // rather than treating any held port as a conflict.
+    const inspectorPortPid = busy && port !== null ? await io.pidOnPort(port) : null;
     return planProfile(service, slot, {
       listenerPid,
       proc,
       ownedPgids: io.ownedPgids(stateDir),
       inspectorPortBusy: busy,
+      inspectorPortPid,
     });
   }
 }

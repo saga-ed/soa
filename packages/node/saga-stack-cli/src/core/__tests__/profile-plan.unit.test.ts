@@ -59,12 +59,47 @@ describe('planProfile', () => {
     if (!plan.ok) expect(plan.reason).toMatch(/no longer inspectable/i);
   });
 
-  it('HARD-refuses when the inspector port is already held', () => {
-    // The sharpest footgun: SIGUSR1 cannot pick a port, so the service would fail
-    // to open its inspector silently and we would attach to the squatter.
-    const plan = planProfile('iam-api', 0, target({ inspectorPortBusy: true }));
+  it('HARD-refuses when SOMEONE ELSE holds the inspector port', () => {
+    // SIGUSR1 cannot pick a port, so the service could not open its own inspector
+    // and we would attach to the squatter.
+    const plan = planProfile(
+      'iam-api',
+      0,
+      target({ inspectorPortBusy: true, inspectorPortPid: 777 }),
+    );
     expect(plan).toMatchObject({ ok: false });
-    if (!plan.ok) expect(plan.reason).toMatch(/already in use/i);
+    if (!plan.ok) expect(plan.reason).toMatch(/held by pid 777/i);
+  });
+
+  it('RE-ATTACHES when the target itself holds the port', () => {
+    // Node leaves the inspector open after the CDP client disconnects, so a second
+    // profile of the same service must not be refused — that made the command
+    // single-use per service lifetime.
+    const plan = planProfile(
+      'iam-api',
+      0,
+      target({ inspectorPortBusy: true, inspectorPortPid: 4242 }),
+    );
+    expect(plan).toMatchObject({ ok: true, pid: 4242, alreadyOpen: true });
+  });
+
+  it('refuses to signal a listener that is not a node process', () => {
+    // SIGUSR1 has no handler there, so the default disposition TERMINATES it.
+    const plan = planProfile(
+      'iam-api',
+      0,
+      target({ proc: { pgid: 4200, command: '/usr/bin/python3 -m http.server 3010' } }),
+    );
+    expect(plan).toMatchObject({ ok: false });
+    if (!plan.ok) expect(plan.reason).toMatch(/not a node process/i);
+  });
+
+  it('accepts the usual node command shapes', () => {
+    for (const command of ['node dist/main.js', '/usr/local/bin/node dist/main.js']) {
+      expect(planProfile('iam-api', 0, target({ proc: { pgid: 4200, command } }))).toMatchObject({
+        ok: true,
+      });
+    }
   });
 
   it('allows an unowned listener but reports it as not adopted', () => {
@@ -119,5 +154,30 @@ describe('profileHasServiceFrames', () => {
   it('handles an empty profile', () => {
     expect(profileHasServiceFrames({}, 'iam-api')).toBe(false);
     expect(profileHasServiceFrames({ nodes: [] }, 'iam-api')).toBe(false);
+  });
+
+  it('rejects frames that were never SAMPLED (hitCount 0)', () => {
+    // A profile's `nodes` is the whole call tree: parent and parse-time nodes
+    // exist with hitCount 0 even when the service never ran, so an idle service
+    // with a loaded module graph must not read as "has app frames".
+    const idle = {
+      nodes: [{ hitCount: 0, callFrame: { url: 'file:///r/apps/node/iam-api/dist/main.js' } }],
+    };
+    expect(profileHasServiceFrames(idle, 'iam-api')).toBe(false);
+  });
+
+  it('matches a tsx-watch service that runs from src/, not dist/', () => {
+    // staff-admin-bff is a profilable backend whose dev script is
+    // `tsx watch src/local.ts` — pinning `/dist` reported every valid capture
+    // of it as empty.
+    const profile = {
+      nodes: [
+        {
+          hitCount: 5,
+          callFrame: { url: 'file:///w/apps/web/staff-admin-console/backend/src/local.ts' },
+        },
+      ],
+    };
+    expect(profileHasServiceFrames(profile, 'staff-admin-bff')).toBe(true);
   });
 });

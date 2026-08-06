@@ -1,19 +1,12 @@
 /**
- * Attach-mode profiling: the PURE decision layer.
- *
- * Everything here is arithmetic + validation over already-gathered facts; the IO
- * (resolving the listening pid, signalling, speaking CDP, writing the artifact)
- * lives in `runtime/profiler.ts`. Splitting it this way keeps the parts that can
- * silently do the WRONG thing — attaching to a wrapper, profiling a stale port —
+ * Attach-mode profiling: the PURE decision layer. IO lives in
+ * `runtime/profiler.ts`, so the parts that can silently do the WRONG thing stay
  * unit-testable without spawning anything.
  *
- * The failure this module exists to prevent: a profile that succeeds against the
- * wrong process. `ss` records the `pnpm dev` WRAPPER pid in `<stateDir>/<id>.pid`,
- * while the real service is a `node dist/main.js` grandchild 4 levels deeper
- * (tsup re-spawns it on every rebuild, so its pid also churns). Profiling the
- * recorded pid would silently sample the package manager. Ownership is therefore
- * proven the way `classifyForeign` does it — resolve the pid LISTENING on the
- * service's port, then require its pgid to match a pidfile-recorded pid.
+ * The failure guarded against: a profile that succeeds against the wrong process.
+ * `<stateDir>/<id>.pid` holds the `pnpm dev` WRAPPER pid, not the service — so the
+ * target is the pid LISTENING on the service's port, with its pgid matched against
+ * the pidfiles for ownership (the `classifyForeign` approach). See `inspector.ts`.
  */
 
 import { inspectorPort } from './inspector.js';
@@ -30,10 +23,22 @@ export interface ProfileTarget {
   ownedPgids: number[];
   /** True when something already holds the inspector port (a stale/other session). */
   inspectorPortBusy: boolean;
+  /**
+   * The pid holding the inspector port, when it could be resolved. A held port is
+   * only an obstacle if someone ELSE holds it: Node keeps the inspector open after
+   * the CDP client disconnects, so the target's own inspector is a re-attach, not a
+   * conflict.
+   */
+  inspectorPortPid?: number | null;
+}
+
+/** SIGUSR1's default disposition is TERMINATE, so only signal a real node process. */
+function looksLikeNode(command: string): boolean {
+  return /(^|\/|\s)node(\s|$)|\bnode$/.test(command.split(/\s+/)[0] ?? '') || /(^|\/)node\b/.test(command);
 }
 
 export type ProfilePlan =
-  | { ok: true; pid: number; port: number; command: string; adopted: boolean }
+  | { ok: true; pid: number; port: number; command: string; adopted: boolean; alreadyOpen: boolean }
   | { ok: false; reason: string };
 
 /** Human-facing hint appended to every "service isn't up" refusal. */
@@ -86,13 +91,29 @@ export function planProfile(
     };
   }
 
-  if (target.inspectorPortBusy) {
+  // SIGUSR1 to a non-node process TERMINATES it (no handler ⇒ default disposition),
+  // so never signal a listener we can't identify as node.
+  if (!looksLikeNode(target.proc.command)) {
     return {
       ok: false,
       reason:
-        `${service}: inspector port ${port} is already in use. SIGUSR1 cannot choose a port, so the ` +
-        `service would fail to open its inspector SILENTLY and this profile would attach to the ` +
-        `wrong process. Close the existing inspector (or profile a different service) and re-run.`,
+        `${service}: pid ${target.listenerPid} holds port but is not a node process ` +
+        `(${target.proc.command}). Refusing — SIGUSR1 would kill it rather than open an inspector.`,
+    };
+  }
+
+  // A held inspector port blocks us only when someone ELSE holds it. Node leaves the
+  // inspector open after the CDP client disconnects, so the target's own inspector is
+  // a re-attach; refusing there would make the command single-use per service.
+  if (target.inspectorPortBusy && target.inspectorPortPid !== target.listenerPid) {
+    const who =
+      target.inspectorPortPid == null ? 'another process' : `pid ${target.inspectorPortPid}`;
+    return {
+      ok: false,
+      reason:
+        `${service}: inspector port ${port} is held by ${who}, not by the service. SIGUSR1 cannot ` +
+        `choose a port, so the service could not open its own inspector and this profile would ` +
+        `attach to the wrong process. Free the port (or profile in another slot) and re-run.`,
     };
   }
 
@@ -102,6 +123,9 @@ export function planProfile(
     port,
     command: target.proc.command,
     adopted: target.ownedPgids.includes(target.proc.pgid),
+    // Already listening ⇒ SIGUSR1 is unnecessary (and would be a no-op on an open
+    // inspector); the runtime skips the signal and attaches directly.
+    alreadyOpen: target.inspectorPortBusy && target.inspectorPortPid === target.listenerPid,
   };
 }
 
@@ -139,8 +163,13 @@ export function profileHasServiceFrames(
   service: ServiceId,
   m: Manifest = defaultManifest,
 ): boolean {
-  const needle = `${getService(service, m).subpath}/dist`;
+  // Match the service's DIRECTORY, not a build subdir: tsup services run from
+  // `<subpath>/dist` but tsx-watch ones (staff-admin-bff) run straight from
+  // `<subpath>/src`, and pinning `/dist` reports every valid tsx capture as empty.
+  const needle = `${getService(service, m).subpath}/`;
+  // hitCount > 0 — a profile's `nodes` is the whole call tree, so parent and
+  // parse-time nodes with hitCount 0 exist even when the service never ran.
   return (profile.nodes ?? []).some(
-    (n) => (n.hitCount ?? 0) >= 0 && (n.callFrame?.url ?? '').includes(needle),
+    (n) => (n.hitCount ?? 0) > 0 && (n.callFrame?.url ?? '').includes(needle),
   );
 }

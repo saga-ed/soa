@@ -5,21 +5,16 @@
  * decision logic is pure in `core/profile-plan.ts`. Every seam is injectable so
  * the command's wiring is testable without a real service.
  *
- * The capture sequence, and why each step is needed:
- *   1. SIGUSR1 the LISTENING pid — Node opens the V8 inspector on demand. No
- *      launch-time flag is involved, which is the whole point: the app process is
- *      a `node dist/main.js` grandchild nested inside tsup's quoted `--onSuccess`,
- *      so nothing injected at `pnpm dev` time ever reaches it.
- *   2. Poll `GET /json/list` until the inspector answers — SIGUSR1 is asynchronous.
- *   3. Speak CDP over the returned websocket: `Profiler.enable` → `.start` →
- *      wait → `.stop`, which RETURNS the profile inline.
+ * The capture sequence:
+ *   1. SIGUSR1 the LISTENING pid — Node opens the V8 inspector on demand, so no
+ *      launch-time flag is needed (see `core/inspector.ts` for why that matters).
+ *   2. Poll `GET /json/list` until it answers — SIGUSR1 is asynchronous.
+ *   3. `Profiler.enable` → `.start` → wait → `.stop`, which returns the profile.
  *
- * Because the artifact arrives over the wire while the process is alive, it does
- * NOT depend on a clean exit — unlike `--cpu-prof`, which writes only on graceful
- * shutdown and therefore produced nothing under `ss stack down`'s group-SIGKILL.
+ * The artifact arrives over the wire while the process is alive, so it survives
+ * the group-SIGKILL that `ss stack down` performs.
  *
- * No new dependency: Node 24 ships a global `WebSocket` (and `ws` is not resolvable
- * from this package anyway).
+ * Uses Node's global `WebSocket` — the `ws` package is not resolvable here.
  */
 
 import { writeFileSync } from 'node:fs';
@@ -62,8 +57,8 @@ export interface CaptureRequest {
   port: number;
   durationMs: number;
   outPath: string;
-  /** Invoked once the profiler is running, so the caller can drive load. */
-  onProfiling?: () => Promise<void> | void;
+  /** Skip SIGUSR1 — the target's inspector is already open (a re-attach). */
+  alreadyOpen?: boolean;
 }
 
 export type CaptureResult =
@@ -73,25 +68,52 @@ export type CaptureResult =
 /** Open a CDP session using Node's built-in global WebSocket (no `ws` dependency). */
 async function defaultConnect(wsUrl: string): Promise<CdpSession> {
   const socket = new WebSocket(wsUrl);
-  const pending = new Map<number, (result: Record<string, unknown>) => void>();
+  type Waiter = { resolve: (r: Record<string, unknown>) => void; reject: (e: Error) => void };
+  const pending = new Map<number, Waiter>();
   let nextId = 0;
 
-  // Bounded: an unreachable/half-open inspector must surface as an error, not a hang.
+  // Bounded, and the socket is closed on EVERY reject path — the caller's
+  // `finally { session.close() }` cannot run for a connect that never returned.
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`inspector websocket timed out: ${wsUrl}`)), 10_000);
+    const fail = (err: Error) => {
+      socket.close();
+      reject(err);
+    };
+    const timer = setTimeout(() => fail(new Error(`inspector websocket timed out: ${wsUrl}`)), 10_000);
     socket.onopen = () => {
       clearTimeout(timer);
       resolve();
     };
     socket.onerror = () => {
       clearTimeout(timer);
-      reject(new Error(`inspector websocket failed: ${wsUrl}`));
+      fail(new Error(`inspector websocket failed: ${wsUrl}`));
     };
   });
 
   socket.onmessage = (event: MessageEvent) => {
-    const msg = JSON.parse(String(event.data)) as { id?: number; result?: Record<string, unknown> };
-    if (typeof msg.id === 'number') pending.get(msg.id)?.(msg.result ?? {});
+    const msg = JSON.parse(String(event.data)) as {
+      id?: number;
+      result?: Record<string, unknown>;
+      error?: { message?: string; code?: number };
+    };
+    if (typeof msg.id !== 'number') return;
+    const waiter = pending.get(msg.id);
+    if (!waiter) return;
+    pending.delete(msg.id);
+    // A CDP `error` reply must REJECT — resolving it as {} let a failed
+    // Profiler.enable/start pass silently and produced a capture against a
+    // profiler that was never started.
+    if (msg.error) waiter.reject(new Error(`CDP error: ${msg.error.message ?? 'unknown'}`));
+    else waiter.resolve(msg.result ?? {});
+  };
+
+  // A mid-capture disconnect should surface immediately, not stall every
+  // outstanding request for the full send timeout.
+  socket.onclose = () => {
+    for (const [id, waiter] of pending) {
+      pending.delete(id);
+      waiter.reject(new Error('inspector connection closed mid-capture'));
+    }
   };
 
   // A socket that opens and THEN errors (or a command the target never answers)
@@ -107,9 +129,15 @@ async function defaultConnect(wsUrl: string): Promise<CdpSession> {
           pending.delete(id);
           reject(new Error(`${method} timed out after ${SEND_TIMEOUT_MS}ms`));
         }, SEND_TIMEOUT_MS);
-        pending.set(id, (result) => {
-          clearTimeout(timer);
-          resolve(result);
+        pending.set(id, {
+          resolve: (result) => {
+            clearTimeout(timer);
+            resolve(result);
+          },
+          reject: (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
         });
         socket.send(JSON.stringify({ id, method, params }));
       });
@@ -132,17 +160,23 @@ export async function captureCpuProfile(
   deps: ProfilerDeps = {},
 ): Promise<CaptureResult> {
   const signal = deps.signal ?? ((pid, sig) => process.kill(pid, sig));
-  const fetchJson = deps.fetchJson ?? (async (url: string) => (await fetch(url)).json());
+  // AbortSignal is mandatory here: a holder that accepts TCP but never answers HTTP
+  // makes a bare fetch() hang forever, defeating the poll loop's own attempt bound.
+  const fetchJson =
+    deps.fetchJson ??
+    (async (url: string) => (await fetch(url, { signal: AbortSignal.timeout(2000) })).json());
   const connect = deps.connect ?? defaultConnect;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const writeFile = deps.writeFile ?? ((p: string, b: string) => writeFileSync(p, b));
   const attempts = deps.attempts ?? 30;
   const intervalMs = deps.intervalMs ?? 100;
 
-  try {
-    signal(req.pid, 'SIGUSR1');
-  } catch (err) {
-    return { ok: false, reason: `could not signal pid ${req.pid}: ${(err as Error).message}` };
+  if (!req.alreadyOpen) {
+    try {
+      signal(req.pid, 'SIGUSR1');
+    } catch (err) {
+      return { ok: false, reason: `could not signal pid ${req.pid}: ${(err as Error).message}` };
+    }
   }
 
   // SIGUSR1 is async — poll until the inspector's HTTP endpoint answers.
@@ -151,8 +185,18 @@ export async function captureCpuProfile(
     try {
       const list = (await fetchJson(`http://127.0.0.1:${req.port}/json/list`)) as Array<{
         webSocketDebuggerUrl?: string;
+        type?: string;
+        title?: string;
       }>;
-      wsUrl = list?.[0]?.webSocketDebuggerUrl;
+      // Prefer the MAIN thread: a service using worker_threads publishes a target
+      // per worker, and taking list[0] blindly can profile a worker while
+      // reporting success for the service.
+      const targets = (list ?? []).filter((t) => t.webSocketDebuggerUrl !== undefined);
+      const main =
+        targets.find((t) => t.type === 'node' && !/worker/i.test(t.title ?? '')) ??
+        targets.find((t) => t.type === 'node') ??
+        targets[0];
+      wsUrl = main?.webSocketDebuggerUrl;
       if (wsUrl !== undefined) break;
     } catch {
       // not up yet
@@ -175,23 +219,31 @@ export async function captureCpuProfile(
     return { ok: false, reason: `could not attach to inspector: ${(err as Error).message}` };
   }
 
+  let profile: CpuProfile;
   try {
     await session.send('Profiler.enable');
     await session.send('Profiler.start');
-    if (req.onProfiling) await req.onProfiling();
     await sleep(req.durationMs);
     const stopped = (await session.send('Profiler.stop')) as { profile?: CpuProfile };
-    const profile = stopped.profile;
-    if (!profile || !Array.isArray(profile.nodes)) {
+    if (!stopped.profile || !Array.isArray(stopped.profile.nodes)) {
       return { ok: false, reason: 'Profiler.stop returned no profile' };
     }
-    writeFile(req.outPath, JSON.stringify(profile));
-    return { ok: true, outPath: req.outPath, profile };
+    profile = stopped.profile;
   } catch (err) {
     return { ok: false, reason: `profiling failed: ${(err as Error).message}` };
   } finally {
     session.close();
   }
+
+  // Written OUTSIDE the capture try: a bad --out path must not be reported as a
+  // profiling failure, and must not discard a profile that cost a full sampling
+  // window against a live service.
+  try {
+    writeFile(req.outPath, JSON.stringify(profile));
+  } catch (err) {
+    return { ok: false, reason: `captured OK but could not write ${req.outPath}: ${(err as Error).message}` };
+  }
+  return { ok: true, outPath: req.outPath, profile };
 }
 
 /**

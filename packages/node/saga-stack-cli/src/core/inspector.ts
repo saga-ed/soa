@@ -1,42 +1,23 @@
 /**
  * Inspector-port derivation for attach-mode profiling (`ss stack profile`).
+ * PURE: port arithmetic only, zero IO.
  *
- * This module is PURE: port arithmetic only, zero IO.
+ * SIGUSR1 opens the inspector on Node's DEFAULT port and cannot be told another,
+ * so this module PREDICTS where the inspector will appear rather than choosing it.
  *
- * NOTHING IS INJECTED AT LAUNCH. A service's V8 inspector is opened on demand by
- * SIGUSR1, which always uses Node's DEFAULT port (9229) and offers no way to pick
- * one at signal time. So this module does not choose the port so much as PREDICT
- * it — the profiler needs to know where the inspector will appear.
+ * Don't inject `--inspect-port` into a service's launch env to get per-service
+ * ports: NODE_OPTIONS is inherited by the whole `pnpm dev → tsup → node
+ * dist/main.js` tree, so the wrappers reserve the port and the service fails to
+ * bind it — visible only as `address already in use` in the service's own log.
+ * A regression test in launch-plan.unit.test.ts pins this.
  *
- * WHY NOT PRESET THE PORT. An earlier revision set
- * `NODE_OPTIONS=--inspect-port=<n>` on each service's launch env to get a distinct
- * per-service port. It does not work, and the failure is instructive: NODE_OPTIONS
- * is inherited by the ENTIRE launch tree, so `pnpm` and `tsup` each reserved the
- * same port and the real `node dist/main.js` — 4 levels down — then failed to bind
- * it, logging `Starting inspector on 127.0.0.1:9229 failed: address already in use`
- * into its own log while `ss` saw nothing. (The deployed `docker-entrypoint.sh`
- * avoids exactly this with a `[ "$1" = "node" ]` gate, but that works only because
- * the entrypoint IS the exec wrapper; the `ss` launch path has no such hop.)
- *
- * CONSEQUENCE — ONE SERVICE AT A TIME PER SLOT. Without a preset, every service in
- * a slot would open its inspector on the same port, so only one can be profiled at
- * a time. That is enforced, not hoped for: `planProfile` hard-refuses when the port
- * is already held (`ProfileTarget.inspectorPortBusy`) rather than silently
- * attaching to whoever owns it. Slots stay isolated because the port carries the
- * slot offset.
- *
- * SIGNAL THE SERVICE PID, NEVER THE GROUP. `ss` launches each service
- * `detached: true`, so the `pnpm dev` wrapper is the PROCESS-GROUP LEADER and the
- * real `node dist/main.js` shares its pgid. `launcher.ts` stops services by
- * signalling the NEGATIVE pid (the whole group) — profiling must not copy that.
- * A group-delivered SIGUSR1 would reach pnpm and tsup too, and whichever node in
- * the tree binds the default port first wins, leaving the service unprofilable.
- * Hence the positive, `lsof`-resolved listener pid only.
- *
- * A HELD PORT MAY NOT SPEAK HTTP. Whatever already owns the port need not be a
- * working inspector — it can accept TCP and never answer `/json/version` (any
- * stray listener does this). An HTTP probe HANGS against such a holder, so
- * `inspectorPortBusy` uses a bounded raw TCP connect instead.
+ * Two consequences the callers depend on:
+ *  - ONE SERVICE AT A TIME PER SLOT (every service in a slot shares the port).
+ *    `planProfile` hard-refuses a held port rather than sampling whoever owns it.
+ *    Slots stay isolated via the slot offset.
+ *  - SIGNAL THE POSITIVE, `lsof`-RESOLVED LISTENER PID, NEVER THE GROUP. Services
+ *    launch `detached: true`, so the `pnpm dev` wrapper leads the process group;
+ *    a group-delivered SIGUSR1 lets a wrapper win the port instead.
  */
 
 import { SLOT_PORT_STRIDE } from './derive-instance.js';

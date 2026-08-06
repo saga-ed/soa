@@ -693,8 +693,15 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // curriculum read path is Postgres now (PostgresContentReadStore over
     // content_release), coach-api carries no mongo dependency and reads no MONGO_*
     // env, so the mesh mongo is NOT gated on and those vars are not injected.
-    // RABBITMQ_ENABLED=false, so rabbitmq is intentionally NOT gated on either.
-    mesh: [],
+    // Rabbitmq IS gated on: coach-api consumes iam.persona_assignment.{added,
+    // removed} + iam.persona_definition.upserted off the shared iam.events
+    // exchange and projects them into persona_assignment / persona_definition —
+    // the table coachReport's roster joins against. With the consumer off (the
+    // pre-2026-08-06 default) `consumed_events` stayed empty on every slot and
+    // that projection was only ever written by concierge's direct-SQL mirror, so
+    // the event path that production depends on was NEVER exercised locally.
+    // coach#413 is that same path being cold in prod. Mongo stays retired.
+    mesh: ['rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
       env: {
@@ -705,7 +712,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_TARGET: '${IAM_URL}',
         AUTH_JWKSURL: '${IAM_URL}/.well-known/jwks.json',
         AUTH_ISSUER: '${IAM_ISSUER}',
-        RABBITMQ_ENABLED: 'false',
+        RABBITMQ_ENABLED: 'true',
         RABBITMQ_URL: '${MESH_MQ}',
         EXPRESS_SERVER_CORSALLOWEDDOMAINS: '${COACH_WEB_HOST}',
         SAGA_API_TARGET: '${SAGA_API_TARGET_COACH}',

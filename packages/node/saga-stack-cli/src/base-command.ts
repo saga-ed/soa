@@ -90,6 +90,7 @@ import {
   makeRealBuildCleaner,
   makeRealEnvFs,
   makeRealForeignProcs,
+  makeRealProvenance,
   generateTunnelFleetConfig,
   generateSlotFleetConfig,
   resolveRepoRoot,
@@ -136,6 +137,7 @@ import type {
   BuildCleaner,
   EnvFs,
   ForeignProcs,
+  Provenance,
 } from './runtime/index.js';
 
 /**
@@ -520,6 +522,19 @@ export abstract class BaseCommand extends Command {
    */
   protected getForeignProcs(): ForeignProcs {
     return makeRealForeignProcs();
+  }
+
+  /**
+   * The listener-provenance seam — production is the only place `/proc`, `lsof
+   * -d cwd`, `ps -o lstart=` and the reflog stat run to answer "is the process
+   * answering this port still serving the code I think it is?". Complements
+   * `getForeignProcs` (which answers ownership) and posture (which answers
+   * whether the CHECKOUT is right); this one catches an owned process, in the
+   * right checkout, that predates the checkout's last HEAD movement. `stack
+   * status` uses `assess` (report-only). See `runtime/provenance`.
+   */
+  protected getProvenance(): Provenance {
+    return makeRealProvenance();
   }
 
   /**
@@ -1001,6 +1016,10 @@ export abstract class BaseCommand extends Command {
         reclaimStopped: (holder) => this.reclaimStoppedPrepLock(flags, holder),
       }),
       repoDirExists: this.getRepoDirCheck(),
+      // The foreign-listener sweep native `restart` runs between its pidfile reap and
+      // the fresh bring-up: an orphan with no pidfile is invisible to the stopper, and
+      // `up` would adopt it and serve its stale code.
+      foreignProcs: this.getForeignProcs(),
       // M9: the ff-only sibling sync (up.sh `pull_repos`) + its mode, the vite-cache
       // clear (native `restart`), and best-effort Connect AV (slot-0 + connect-in-closure,
       // gated in the facade). All three no-op unless the relevant native path invokes them.

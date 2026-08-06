@@ -41,6 +41,7 @@ import type { LaunchContext } from './core/launch-plan.js';
 import { recordPlan } from './core/record-plan.js';
 import type { RecordPlan } from './core/record-plan.js';
 import { launchOrder } from './core/launch-order.js';
+import { deriveInstance } from './core/derive-instance.js';
 import { getMesh, getService, manifest as defaultManifest } from './core/manifest/index.js';
 import type { DbId, Lane, Manifest, MeshId, RepoKey, ServiceId } from './core/manifest/index.js';
 import type { HealthProbe } from './core/probe-plan.js';
@@ -84,6 +85,8 @@ import type {
   ServiceLauncher,
   PrepRepoLock,
   ServiceStopper,
+  ForeignProcs,
+  ReapedProc,
   StopResult,
   StopServiceResult,
   ViteClear,
@@ -241,6 +244,26 @@ export interface Runtime {
    * launcher writes pids under, so the restart reap targets exactly this run's servers.
    */
   stateDir?: string;
+  /**
+   * The foreign-listener seam (`core/foreign-procs`). Native `restart` uses it to reap
+   * a stack port held by a process with NO pidfile in this state dir — an orphan from
+   * an earlier run, a slot remap, a crashed CLI, or a hand-run `pnpm dev`.
+   *
+   * WHY `restart` NEEDS IT: the stopper above enumerates PIDFILES, so a listener that
+   * has lost its pidfile is invisible to it. `up()` then health-probes the port, sees a
+   * 200, and ADOPTS the survivor (`alreadyUp`) — so the orphan rides through every
+   * bounce, forever, serving whatever code it was launched with. Measured 2026-08-05:
+   * slot 0's coach-web was served by a six-day-old process across a branch change while
+   * `stack status` reported healthy. `cold-start` already reaps this; nothing short of
+   * it did.
+   *
+   * STILL SLOT-SAFE — this is NOT up.sh's host-global `pkill -f tsup` / `fuser -k`. The
+   * targets are THIS slot's ports (via `portOverrides`) and ownership is decided against
+   * THIS state dir's pidfiles, so a peer slot's servers are never candidates.
+   *
+   * Absent ⇒ `restart` skips the sweep (facade unit tests stay byte-identical).
+   */
+  foreignProcs?: ForeignProcs;
   /**
    * Best-effort Connect AV bring-up (M9 — livekit + coturn from qboard's compose). When
    * true AND slot 0 AND connect is in the closure, `up` starts AV via the Runner (parity
@@ -427,6 +450,13 @@ export interface RestartOutcome {
    * (`alive`) survivor — an under-kill that would let `up()` serve stale code.
    */
   reaped?: StopServiceResult[];
+  /**
+   * Foreign listeners on this slot's ports that were killed after the pidfile reap —
+   * orphans the stopper could not see because they had no pidfile. Present when the
+   * `foreignProcs` seam was wired; empty on a clean bounce. `killed:false` means the
+   * port is STILL held, so `up()` will adopt a stale server: the command surfaces it.
+   */
+  reapedForeign?: ReapedProc[];
   /** The vite-cache clear (absent when no viteClear seam was wired). */
   vite?: ViteClearResult;
   /**
@@ -1098,6 +1128,23 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         down = await this.down(services);
       }
 
+      // 1b. foreign sweep — the stopper above works from PIDFILES, so a listener that
+      //     has lost its (an orphan from an earlier run, a slot remap, a crashed CLI, a
+      //     hand-run `pnpm dev`) survives it untouched. `up()` would then probe the
+      //     port, get a 200, and adopt the survivor — which is precisely how a process
+      //     rides through every bounce serving stale code. Reap it here so `up()` boots
+      //     fresh. Slot-safe: this slot's ports, this state dir's pidfiles.
+      let reapedForeign: ReapedProc[] | undefined;
+      if (runtime.foreignProcs && runtime.stateDir !== undefined) {
+        const foreign = await runtime.foreignProcs.find({
+          manifest,
+          services,
+          stateDir: runtime.stateDir,
+          portOverrides: deriveInstance({ slot: runtime.slot ?? 0 }).portOverrides,
+        });
+        reapedForeign = foreign.length > 0 ? await runtime.foreignProcs.reap(foreign) : [];
+      }
+
       // 2. vite-clear — drop the stale optimized-bundle caches (up.sh `nuke_vite`) so a
       //    dead watcher can't serve old JS. Paths are byte-faithful to up.sh; skipped
       //    when no seam is wired.
@@ -1141,7 +1188,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       const relaunch =
         restorable.length > 0 ? [...new Set<ServiceId>([...services, ...restorable])] : services;
       const up = await this.up(relaunch);
-      return { down, reaped, vite, up, notRelaunched: overlayBound };
+      return { down, reaped, reapedForeign, vite, up, notRelaunched: overlayBound };
     },
 
     async reset(services: ServiceId[], opts: ResetOpts = {}): Promise<ResetOutcome> {

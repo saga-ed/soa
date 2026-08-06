@@ -93,12 +93,29 @@ describe('tunnel_env overlay (--tunnel)', () => {
     );
   });
 
-  it('programs/scheduling/sessions/ads-adm: CORS + JANUS_LOGIN_HOST → tunnelled iam demo', () => {
-    for (const id of ['programs-api', 'scheduling-api', 'sessions-api', 'ads-adm-api'] as const) {
+  it('scheduling/sessions/ads-adm: CORS + JANUS_LOGIN_HOST → tunnelled iam demo', () => {
+    // programs-api is NOT in this loop any more — see the test below.
+    for (const id of ['scheduling-api', 'sessions-api', 'ads-adm-api'] as const) {
       const e = envFor(id, TUN);
       expect(e.CORS_ORIGIN).toBe(`http://localhost:8900,https://dash.${TD}`);
       expect(e.JANUS_LOGIN_HOST).toBe(`iam.${TD}/demo`);
     }
+  });
+
+  it('programs-api: CORS keeps the coach origins its siblings do not have (coach#329)', () => {
+    // The overlay REPLACES CORS_ORIGIN wholesale (env last-wins, no merge), so the
+    // ${COACH_WEB_URL} the base launch.env carries has to be restated here or a
+    // --tunnel run silently regresses to dash-only and the Reports program filter
+    // fails preflight again — this time only for the remote coworker.
+    const e = envFor('programs-api', TUN);
+    expect(e.CORS_ORIGIN).toBe(
+      `http://localhost:8900,http://localhost:8800,https://dash.${TD},https://coach.${TD}`,
+    );
+    expect(e.JANUS_LOGIN_HOST).toBe(`iam.${TD}/demo`);
+    // The tunnel LABEL is `coach` (vendor/tunnel.sh "coach:8800"), NOT the
+    // manifest's tunnelSlug 'coach-web' — the latter is a host the tunnel never
+    // creates, so admitting it would allow nothing.
+    expect(e.CORS_ORIGIN).not.toContain(`coach-web.${TD}`);
   });
 
   it('connect-api: allowed origins + public URL + fleek cluster AV topology (no creds by default)', () => {
@@ -155,6 +172,18 @@ describe('tunnel_env overlay (--tunnel)', () => {
     expect(envFor('coach-web', TUN).PUBLIC_IAM_API_URL).toBe(`https://iam.${TD}`);
   });
 
+  it('coach-web: programs flips too — the Reports filter fetches programs.list DIRECT (coach#329)', () => {
+    // Same shape as the iam case above: the base manifest pins this to
+    // http://localhost:${PROGRAMS_PORT}, which a remote coworker's browser cannot
+    // reach. The tunnel LABEL is `programs` (vendor/tunnel.sh "programs:3006",
+    // tunnelSlug 'programs') — NOT `programs-api`, which is only the shape of the
+    // DEPLOYED host in coach-web's checked-in .env and a name the tunnel never
+    // creates.
+    const e = envFor('coach-web', TUN);
+    expect(e.PUBLIC_PROGRAMS_API_URL).toBe(`https://programs.${TD}`);
+    expect(e.PUBLIC_PROGRAMS_API_URL).not.toContain('programs-api.');
+  });
+
   it('coach-web: login + dashboard leave the SHARED remote hosts for this tunnel', () => {
     const e = envFor('coach-web', TUN);
     // `.env` defaults are login./dash.wootdev.com — shared remote infra. A tunnel session
@@ -208,7 +237,12 @@ describe('soa#336: tunnel-rewritten keys are covered by the adoption contract', 
   const EXEMPT = new Set(['__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS']);
   const TD = 'm1.vms.wootdev.com';
 
-  for (const id of ['iam-api', 'coach-web', 'connect-web'] as ServiceId[]) {
+  // programs-api joined this list with coach#329: once coach-web's browser calls
+  // it direct, its CORS_ORIGIN is boot-critical to a frontend exactly like
+  // iam-api's, and an adopted programs-api carrying the old allow-list is the
+  // same silent failure. Its rewrite set is {CORS_ORIGIN, JANUS_LOGIN_HOST}, and
+  // its adoptEnv guards both.
+  for (const id of ['iam-api', 'coach-web', 'connect-web', 'programs-api'] as ServiceId[]) {
     it(`${id}: adoptEnv ⊇ its tunnelOverlay() rewrite set`, () => {
       const plain = envFor(id, {});
       const tunneled = envFor(id, { tunnel: { domain: TD } });

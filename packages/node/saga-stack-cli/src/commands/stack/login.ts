@@ -39,6 +39,9 @@ import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { fakeMediaChromiumArgs } from '../../core/fake-media.js';
 import { DEFAULT_LOGIN_USER, loginFailureHint } from '../../core/login.js';
+import { SPA_REGISTRY } from '../../core/flow/spa-registry.js';
+import type { RepoKey } from '../../core/manifest/index.js';
+import { SERVICES } from '../../core/manifest/services.js';
 import { prepareFakeMedia } from '../../runtime/index.js';
 
 export default class StackLogin extends BaseCommand {
@@ -49,6 +52,8 @@ export default class StackLogin extends BaseCommand {
     '<%= config.bin %> <%= command.id %>',
     '<%= config.bin %> <%= command.id %> teacher@saga.org',
     '<%= config.bin %> <%= command.id %> --browser',
+    '<%= config.bin %> <%= command.id %> --browser --app coach-web',
+    '<%= config.bin %> <%= command.id %> --browser --url http://localhost:8800/reports?org=ist-sc',
     '<%= config.bin %> <%= command.id %> empty@saga.org --browser --fake-video ~/clips/student.mp4',
   ];
 
@@ -65,6 +70,20 @@ export default class StackLogin extends BaseCommand {
       default: false,
       description:
         'ALSO open an auto-logged-in Chromium via the vendored browser-login.mjs (native headless jar + headful browser). The default mints only the native headless cookie jar.',
+    }),
+    // Which SPA the --browser Chromium lands on. Until now `stack login --browser`
+    // always opened saga-dash, so a Coach (or connectv3) walkthrough handed the
+    // reader the WRONG app — and saga-dash's own identity config failing then reads
+    // as "login is broken" when the jar is fine. `develop coach` already opens
+    // coach-web through the same seam; these two flags expose that to `stack login`.
+    app: Flags.string({
+      options: Object.keys(SPA_REGISTRY),
+      description:
+        'which SPA the --browser Chromium opens (default saga-dash). Also sources the Playwright cwd + clone gate from that SPA\'s own repo. The port is slot-aware. Requires --browser.',
+    }),
+    url: Flags.string({
+      description:
+        'open the --browser Chromium at this exact URL (deep links welcome). Beats --app and $LOGIN_DASH_URL; leaves Playwright resolution on --app (or saga-dash), so any URL works. Requires --browser.',
     }),
     'fake-video': Flags.string({
       description:
@@ -101,6 +120,11 @@ export default class StackLogin extends BaseCommand {
     const fakeAudio = flags['fake-audio'];
     if ((fakeVideo || fakeAudio) && !flags.browser) {
       this.warn('--fake-video/--fake-audio apply only with --browser — ignoring (no headful browser to feed).');
+    }
+    // Same shape: these only steer the headful Chromium. Warn rather than error —
+    // the jar is the command's real product and it is unaffected.
+    if ((flags.app !== undefined || flags.url !== undefined) && !flags.browser) {
+      this.warn('--app/--url apply only with --browser — ignoring (no headful browser to point anywhere).');
     }
 
     const res = await this.mintNativeLoginJar({ email, slot: flags.slot, stateDir });
@@ -145,8 +169,23 @@ export default class StackLogin extends BaseCommand {
       // stateDir (⇒ PROFILE_DIR) are already slot-aware; the per-slot stateDir gives a
       // distinct persistent profile per slot. At slot 0 dashPort is 8900, so this is
       // byte-identical to the previous slot-0-only behaviour.
-      const dashPort = profile.portOverrides['saga-dash'] ?? 8900;
-      const dashUrl = process.env.LOGIN_DASH_URL || `http://localhost:${dashPort}`;
+      // --app selects the SPA row (its `system` is the manifest service that owns
+      // the port, and its repo drives the Playwright cwd); --url overrides the
+      // address outright. Default stays saga-dash, so an unflagged invocation is
+      // byte-identical to the previous behaviour.
+      const spaRow = flags.app === undefined ? undefined : SPA_REGISTRY[flags.app];
+      const spaSystem = spaRow?.system ?? 'saga-dash';
+      const spaPort = profile.portOverrides[spaSystem] ?? SERVICES[spaSystem]?.port ?? 8900;
+      // Explicit --url beats $LOGIN_DASH_URL (a flag is a deliberate act; the env
+      // var is ambient tunnel config), which still beats the derived port.
+      const dashUrl = flags.url || process.env.LOGIN_DASH_URL || `http://localhost:${spaPort}`;
+      const spa =
+        spaRow === undefined
+          ? undefined
+          : // `SpaDescriptor.repoEnvVar` is a plain string in the flow schema; the
+            // registry rows are curated and match RepoKey. Same cast `develop coach`
+            // makes at its own openVendoredBrowser call site.
+            { repoEnvVar: spaRow.repoEnvVar as RepoKey, appDir: spaRow.appDir, port: spaPort };
 
       // soa#363: transcode any --fake-video/--fake-audio to Chromium capture format and
       // build the launch flags. A prep failure (missing file / ffmpeg / bad transcode) is
@@ -174,7 +213,7 @@ export default class StackLogin extends BaseCommand {
         }
       }
 
-      await this.openVendoredBrowser(flags, { email, iamUrl, stateDir, dashUrl, chromiumExtraArgs });
+      await this.openVendoredBrowser(flags, { email, iamUrl, stateDir, dashUrl, spa, chromiumExtraArgs });
     }
   }
 }

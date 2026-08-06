@@ -84,6 +84,7 @@ import {
   makeSettleBarrier,
   makeRealEnvAws,
   makeRealEnvPsql,
+  makeRealHydrateIO,
   makeSlotWipe,
   realSleep,
   makeRealDockerWipe,
@@ -130,6 +131,7 @@ import type {
   SleepFn,
   EnvAws,
   EnvPsql,
+  HydrateIO,
   SlotWipe,
   SnapshotIO,
   ViteClear,
@@ -861,6 +863,18 @@ export abstract class BaseCommand extends Command {
    */
   protected getEnvPsql(): EnvPsql {
     return makeRealEnvPsql();
+  }
+
+  /**
+   * The hydrate seam (`ss stack hydrate`) — production is the only place the
+   * prod-mirror → local-slot `docker run pg_dump|pg_restore|psql` pipelines and
+   * the database-level DDL (`DROP DATABASE`, `pg_terminate_backend`, `ALTER
+   * DATABASE … RENAME`) are launched, and the only place the mirror's master
+   * password is handed to a child process. Injected so the whole plan — argv AND
+   * SQL — is asserted with no docker, no database, and no credential.
+   */
+  protected getHydrateIO(): HydrateIO {
+    return makeRealHydrateIO();
   }
 
   /**

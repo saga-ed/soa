@@ -17,7 +17,6 @@ import {
   BUNDLES,
   BUNDLE_FOR_SERVICE,
   BUNDLE_NAMES,
-  closureOptsFor,
   combineRequested,
   featureSet,
   featuresFor,
@@ -161,43 +160,259 @@ describe('legacy adapters round-trip (delete with the last withX call site)', ()
   });
 });
 
-describe('parity with the legacy derivation (no behavior change)', () => {
-  // Every realistic existing invocation must resolve an IDENTICAL closure under
-  // the old derivation (`closureOptsFor`, `--with` only) and the new one
-  // (`featuresFor`, `--only ∪ --with`). A difference here is an unintended
-  // behavior change.
+describe('characterization: what each realistic invocation resolves', () => {
+  // FROZEN EXPECTATIONS, captured from the pre-FeatureSet derivation. These
+  // started as an old-vs-new parity assertion, but that form called the legacy
+  // producer — so deleting the legacy path would have deleted the proof that
+  // deleting it was safe. Literals outlive the code path they were taken from.
   //
-  // The ONE deliberate exception is `--only <optional-svc>` with no `--with`,
-  // which used to resolve EMPTY — asserted as a fix above, so it is not listed
-  // here.
-  const CASES: Array<{ only?: string; with?: string[] }> = [
-    {},
-    { with: ['dash'] },
-    { with: ['connect'] },
-    { with: ['coach'] },
-    { with: ['playback'] },
-    { with: ['authz'] },
-    { with: ['staff-admin'] },
-    { with: ['qtf'] },
-    { with: ['dash', 'authz'] },
-    { with: ['playback', 'authz', 'staff-admin'] },
-    { only: 'sessions-api' },
-    { only: 'iam-api,programs-api' },
-    { only: 'saga-dash', with: ['dash'] },
-    { only: 'transcripts-api', with: ['playback'] },
-    { only: 'authz-sync', with: ['authz'] },
-    { only: 'connect-web', with: ['connect'] },
+  // A diff here is a real closure change: re-derive it deliberately, don't
+  // re-bless the literal.
+  //
+  // `--only <optional-svc>` with no `--with` is absent on purpose — it used to
+  // resolve EMPTY, and the fix is asserted as a fix above.
+  const CASES: Array<{
+    only?: string;
+    with?: string[];
+    services: string[];
+    mesh: string[];
+    databases: string[];
+  }> = [
+    { services: [], mesh: [], databases: [] },
+    {
+      with: ['dash'],
+      services: [
+        'iam-api',
+        'sis-api',
+        'authz-api',
+        'programs-api',
+        'scheduling-api',
+        'content-api',
+        'sessions-api',
+        'ads-adm-api',
+        'saga-dash',
+      ],
+      mesh: ['postgres', 'redis', 'rabbitmq'],
+      databases: [
+        'iam_local',
+        'iam_pii_local',
+        'programs',
+        'scheduling',
+        'sessions',
+        'content',
+        'sis_db',
+        'ads_adm_local',
+        'ledger_local',
+        'authz_local',
+      ],
+    },
+    {
+      with: ['connect'],
+      services: [
+        'iam-api',
+        'rtsm-api',
+        'authz-api',
+        'programs-api',
+        'scheduling-api',
+        'content-api',
+        'sessions-api',
+        'connect-api',
+        'connect-web',
+      ],
+      mesh: ['postgres', 'redis', 'rabbitmq', 'connect-mongo'],
+      databases: [
+        'iam_local',
+        'iam_pii_local',
+        'programs',
+        'scheduling',
+        'sessions',
+        'content',
+        'connectv3',
+        'authz_local',
+      ],
+    },
+    {
+      with: ['coach'],
+      services: ['iam-api', 'programs-api', 'coach-api', 'coach-web'],
+      mesh: ['postgres', 'redis', 'rabbitmq'],
+      databases: ['iam_local', 'iam_pii_local', 'programs', 'coach_api'],
+    },
+    {
+      with: ['playback'],
+      services: ['transcripts-api', 'insights-api', 'chat-api'],
+      mesh: ['postgres'],
+      databases: ['transcripts_local', 'insights_local', 'chat_local'],
+    },
+    {
+      with: ['authz'],
+      services: ['authz-sync'],
+      mesh: ['postgres', 'rabbitmq', 'openfga'],
+      databases: ['openfga', 'authz_sync_local'],
+    },
+    {
+      with: ['staff-admin'],
+      services: ['iam-api', 'sis-api', 'programs-api', 'staff-admin-bff', 'staff-admin-console'],
+      mesh: ['postgres', 'redis', 'rabbitmq'],
+      databases: ['iam_local', 'iam_pii_local', 'programs', 'sis_db'],
+    },
+    // qtf contributes no services (it is a mesh-only bundle) — an empty closure
+    // here is correct, not the empty-closure bug.
+    { with: ['qtf'], services: [], mesh: [], databases: [] },
+    {
+      with: ['dash', 'authz'],
+      services: [
+        'iam-api',
+        'authz-sync',
+        'sis-api',
+        'authz-api',
+        'programs-api',
+        'scheduling-api',
+        'content-api',
+        'sessions-api',
+        'ads-adm-api',
+        'saga-dash',
+      ],
+      mesh: ['postgres', 'redis', 'rabbitmq', 'openfga'],
+      // Both `authz_local` (unconditional, authz-api's) AND the opt-in pair
+      // (`openfga`/`authz_sync_local`) — the distinction soa#402 introduced.
+      databases: [
+        'iam_local',
+        'iam_pii_local',
+        'programs',
+        'scheduling',
+        'sessions',
+        'content',
+        'sis_db',
+        'ads_adm_local',
+        'ledger_local',
+        'openfga',
+        'authz_sync_local',
+        'authz_local',
+      ],
+    },
+    {
+      with: ['playback', 'authz', 'staff-admin'],
+      services: [
+        'iam-api',
+        'transcripts-api',
+        'insights-api',
+        'chat-api',
+        'authz-sync',
+        'sis-api',
+        'programs-api',
+        'staff-admin-bff',
+        'staff-admin-console',
+      ],
+      mesh: ['postgres', 'redis', 'rabbitmq', 'openfga'],
+      databases: [
+        'iam_local',
+        'iam_pii_local',
+        'programs',
+        'sis_db',
+        'transcripts_local',
+        'insights_local',
+        'chat_local',
+        'openfga',
+        'authz_sync_local',
+      ],
+    },
+    {
+      only: 'sessions-api',
+      services: ['iam-api', 'authz-api', 'programs-api', 'scheduling-api', 'sessions-api'],
+      mesh: ['postgres', 'redis', 'rabbitmq'],
+      databases: [
+        'iam_local',
+        'iam_pii_local',
+        'programs',
+        'scheduling',
+        'sessions',
+        'authz_local',
+      ],
+    },
+    {
+      only: 'iam-api,programs-api',
+      services: ['iam-api', 'programs-api'],
+      mesh: ['postgres', 'redis', 'rabbitmq'],
+      databases: ['iam_local', 'iam_pii_local', 'programs'],
+    },
+    {
+      only: 'saga-dash',
+      with: ['dash'],
+      services: [
+        'iam-api',
+        'sis-api',
+        'authz-api',
+        'programs-api',
+        'scheduling-api',
+        'content-api',
+        'sessions-api',
+        'ads-adm-api',
+        'saga-dash',
+      ],
+      mesh: ['postgres', 'redis', 'rabbitmq'],
+      databases: [
+        'iam_local',
+        'iam_pii_local',
+        'programs',
+        'scheduling',
+        'sessions',
+        'content',
+        'sis_db',
+        'ads_adm_local',
+        'ledger_local',
+        'authz_local',
+      ],
+    },
+    {
+      only: 'transcripts-api',
+      with: ['playback'],
+      services: ['transcripts-api', 'insights-api', 'chat-api'],
+      mesh: ['postgres'],
+      databases: ['transcripts_local', 'insights_local', 'chat_local'],
+    },
+    {
+      only: 'authz-sync',
+      with: ['authz'],
+      services: ['authz-sync'],
+      mesh: ['postgres', 'rabbitmq', 'openfga'],
+      databases: ['openfga', 'authz_sync_local'],
+    },
+    {
+      only: 'connect-web',
+      with: ['connect'],
+      services: [
+        'iam-api',
+        'rtsm-api',
+        'authz-api',
+        'programs-api',
+        'scheduling-api',
+        'content-api',
+        'sessions-api',
+        'connect-api',
+        'connect-web',
+      ],
+      mesh: ['postgres', 'redis', 'rabbitmq', 'connect-mongo'],
+      databases: [
+        'iam_local',
+        'iam_pii_local',
+        'programs',
+        'scheduling',
+        'sessions',
+        'content',
+        'connectv3',
+        'authz_local',
+      ],
+    },
   ];
 
-  it.each(CASES)('resolves identically for %j', (c) => {
+  it.each(CASES)('resolves the frozen closure for %j', (c) => {
     const requested = combineRequested(c.only, c.with, fail);
-    const old = computeClosure(manifest, requested, closureOptsFor(c.with));
-    const next = computeClosure(manifest, requested, {
+    const closure = computeClosure(manifest, requested, {
       features: featuresFor(c.only, c.with, fail),
     });
-    expect(next.services).toEqual(old.services);
-    expect(next.mesh).toEqual(old.mesh);
-    expect(next.databases).toEqual(old.databases);
+    expect(closure.services).toEqual(c.services);
+    expect(closure.mesh).toEqual(c.mesh);
+    expect(closure.databases).toEqual(c.databases);
   });
 });
 

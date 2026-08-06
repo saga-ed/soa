@@ -288,7 +288,12 @@ describe('stack up --only — native partial-stack', () => {
 
     // the seed plan dropped coach-pg — NOTHING ran against the coach-db dir (which
     // would have spawn-crashed on the missing checkout with a real runner).
-    expect(runs.some((r) => r.cwd.includes('/coach'))).toBe(false);
+    // Anchored at the FIXTURE's coach checkout, not a bare '/coach' substring:
+    // the loose form also matched any path merely containing "coach" (a worktree
+    // named `coach-api-events`, say), which made this assertion fail for reasons
+    // having nothing to do with the coach repo.
+    const coachRepo = resolve(DEV_ROOT, 'coach');
+    expect(runs.some((r) => r.cwd === coachRepo || r.cwd.startsWith(`${coachRepo}/`))).toBe(false);
     expect(runs.some((r) => r.command === 'pnpm' && r.args.includes('db:seed') && r.cwd.includes('coach-db'))).toBe(
       false,
     );

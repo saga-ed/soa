@@ -307,7 +307,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       IAM_API_TARGET: 'http://localhost:3010',
       AUTH_JWKSURL: 'http://localhost:3010/.well-known/jwks.json',
       AUTH_ISSUER: 'https://iam.wootdev.com',
-      RABBITMQ_ENABLED: 'false',
+      RABBITMQ_ENABLED: 'true',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       EXPRESS_SERVER_CORSALLOWEDDOMAINS: 'localhost',
       SAGA_API_TARGET: 'https://staging.wootmath.com',

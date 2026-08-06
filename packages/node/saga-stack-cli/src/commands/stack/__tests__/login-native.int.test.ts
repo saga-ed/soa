@@ -238,4 +238,103 @@ describe('stack login — native headless cookie jar', () => {
     expect(spawn?.env?.DASH_URL).toBe('https://dash.moniker.wootdev.com');
     expect(spawn?.env?.IAM_URL).toBe('http://localhost:4010');
   });
+
+  // ── --app / --url: WHICH SPA the headful browser lands on ───────────────────
+  // Until these existed, `stack login --browser` always opened saga-dash, so a
+  // Coach walkthrough handed the reader the wrong app (and saga-dash's own
+  // identity failure then reads as "login is broken" when the jar is fine).
+  it('--app coach-web opens coach-web (:8800) with the Playwright cwd off COACH, not saga-dash', async () => {
+    installPoster(OK_COOKIES);
+    installJar();
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue(() => true);
+
+    await StackLogin.run(['--browser', '--app', 'coach-web', ...WS], config);
+
+    expect(runnerCalls).toHaveLength(1);
+    const spawn = runnerCalls[0];
+    const coachApp = join(DEV_ROOT, 'coach', 'apps/web/coach-web');
+    // The SPA row drives BOTH the address and where playwright resolves from.
+    expect(spawn?.env?.DASH_URL).toBe('http://localhost:8800');
+    expect(spawn?.cwd).toBe(coachApp);
+    expect(spawn?.env?.SAGA_DASH_DASH).toBe(coachApp);
+    // iam is unaffected by the SPA choice.
+    expect(spawn?.env?.IAM_URL).toBe('http://localhost:3010');
+  });
+
+  it('--app is slot-aware: coach-web at slot 1 is :9800', async () => {
+    installPoster(OK_COOKIES);
+    installJar();
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue(() => true);
+
+    await StackLogin.run(['--browser', '--app', 'coach-web', '--slot', '1', ...WS], config);
+
+    expect(runnerCalls[0]?.env?.DASH_URL).toBe('http://localhost:9800');
+    expect(runnerCalls[0]?.env?.IAM_URL).toBe('http://localhost:4010');
+  });
+
+  it('--url wins over --app AND over $LOGIN_DASH_URL, and keeps the --app playwright cwd (deep links)', async () => {
+    process.env.LOGIN_DASH_URL = 'https://dash.moniker.wootdev.com';
+    installPoster(OK_COOKIES);
+    installJar();
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue(() => true);
+
+    await StackLogin.run(
+      ['--browser', '--app', 'coach-web', '--url', 'http://localhost:8800/reports?org=ist-sc', ...WS],
+      config,
+    );
+
+    const spawn = runnerCalls[0];
+    // An explicit flag is a deliberate act; the env var is ambient tunnel config.
+    expect(spawn?.env?.DASH_URL).toBe('http://localhost:8800/reports?org=ist-sc');
+    expect(spawn?.cwd).toBe(join(DEV_ROOT, 'coach', 'apps/web/coach-web'));
+  });
+
+  it('--url alone leaves playwright resolution on saga-dash, so ANY url works', async () => {
+    installPoster(OK_COOKIES);
+    installJar();
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue(() => true);
+
+    await StackLogin.run(['--browser', '--url', 'http://localhost:6210/', ...WS], config);
+
+    const spawn = runnerCalls[0];
+    expect(spawn?.env?.DASH_URL).toBe('http://localhost:6210/');
+    expect(spawn?.cwd).toBe(join(DEV_ROOT, 'saga-dash', 'apps', 'web', 'dash'));
+  });
+
+  it('no --app/--url is byte-identical to the previous saga-dash behaviour', async () => {
+    installPoster(OK_COOKIES);
+    installJar();
+    vi.spyOn(
+      BaseCommand.prototype as unknown as { getRepoDirCheck: () => (dir: string) => boolean },
+      'getRepoDirCheck',
+    ).mockReturnValue(() => true);
+
+    await StackLogin.run(['--browser', ...WS], config);
+
+    const spawn = runnerCalls[0];
+    expect(spawn?.env?.DASH_URL).toBe('http://localhost:8900');
+    expect(spawn?.cwd).toBe(join(DEV_ROOT, 'saga-dash', 'apps', 'web', 'dash'));
+  });
+
+  it('--app/--url without --browser warns and opens nothing (the jar is still the product)', async () => {
+    installPoster(OK_COOKIES);
+    installJar();
+
+    await StackLogin.run(['--app', 'coach-web', ...WS], config);
+
+    expect(jarWrites).toHaveLength(1); // the jar still minted
+    expect(runnerCalls).toHaveLength(0); // but no browser opened
+  });
 });

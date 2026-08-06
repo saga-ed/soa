@@ -14,7 +14,7 @@ you have to reverse-engineer.
 > path (up → status → verify → e2e → down) with the real output of each command, linking out
 > to per-feature docs ([sub-stacks](./docs/sub-stacks-and-bundles.md) · [slots](./docs/slots.md) ·
 > [verify](./docs/verify.md) · [snapshots](./docs/snapshots.md) · [e2e](./docs/e2e.md) ·
-> [develop](./docs/develop.md) · [tunnel](./docs/tunnel.md) · [integration](./docs/integration.md)).
+> [develop](./docs/develop.md) · [tunnel](./docs/tunnel.md) · [hydrate](./docs/hydrate.md) · [integration](./docs/integration.md)).
 
 ```bash
 ss stack up --only scheduling-api,sessions-api   # boot just those + their deps
@@ -55,6 +55,7 @@ plus tab-completion work at every level.
 | **`reset`** | Truncate the data DBs to an empty baseline (preserving migration history) + re-seed the dev user (native; `--legacy` → `up.sh --reset`). |
 | **`seed`** | Seed a running stack (`--with playback\|qtf` add-ons). |
 | **`snapshot`** | `store` / `list` / `restore` / `validate` / `delete` native DB fixtures (pg_dump/mongodump, schema-ahead guard, restore-as-owner) — restore a known-good DB state in seconds instead of re-running `db:seed`. |
+| **`hydrate`** | Replace a slot's Postgres with the daily **prod mirror** (SSM tunnel → staging DB → verify → rename swap), so a slot carries real prod-shaped data across every store. **Preview by default**; `--execute` performs it. Refuses slot 0. → [docs/hydrate.md](./docs/hydrate.md) |
 | **`bundle list`** | Show the `--with` convenience bundles (name → services + seed). |
 | **`overlay`** | Overlay your in-flight PRs onto a main-based stack. |
 | **`tunnel`** | Expose the local stack via the vms rendezvous (share your stack). |

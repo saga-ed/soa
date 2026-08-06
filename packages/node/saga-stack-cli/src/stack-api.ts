@@ -35,6 +35,7 @@
  * docker / fetch / fs touch happens behind a seam the caller injected.
  */
 
+import type { FeatureSet } from './core/bundles.js';
 import type { RecordMode, ScriptPlan } from './core/flag-map.js';
 import { launchPlan } from './core/launch-plan.js';
 import type { LaunchContext } from './core/launch-plan.js';
@@ -411,10 +412,11 @@ export interface DownResult {
 
 /** Per-call `reset` knobs (M8 R4). */
 export interface ResetOpts {
-  /** Also reset the opt-in playback DBs (transcripts/insights/chat). */
-  withPlayback?: boolean;
-  /** Also reset the opt-in authz DBs (openfga/authz_sync_local). */
-  withAuthz?: boolean;
+  /**
+   * The run's selected features. An opt-in db (playback's trio, authz's
+   * openfga/authz_sync_local) is reset only when its owning bundle is selected.
+   */
+  features?: FeatureSet;
 }
 
 /** The outcome of a native `reset` (M8 R4). */
@@ -1203,8 +1205,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         mongoContainer,
         repoRoots: launchContext.repoRoots,
         meshOffset: runtime.meshOffset,
-        withPlayback: opts.withPlayback,
-        withAuthz: opts.withAuthz,
+        features: opts.features,
         runner,
         // R2/R3 probe seam: SKIP (don't truncate/migrate-reset) a pg DB that a partial
         // `up` never provisioned (e.g. coach_api) — matches up.sh's reset_data tolerance,

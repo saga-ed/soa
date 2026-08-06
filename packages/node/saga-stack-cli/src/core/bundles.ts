@@ -15,7 +15,7 @@
  */
 
 import type { ClosureOpts } from './closure.js';
-import type { MeshId, ServiceId } from './manifest/index.js';
+import type { DbId, MeshId, ServiceId } from './manifest/index.js';
 
 /** The named features a `--with` value may select (services, a seed add-on, or both). */
 export type BundleName =
@@ -263,6 +263,34 @@ export const BUNDLE_FOR_SERVICE: ReadonlyMap<ServiceId, BundleName> = new Map(
     BUNDLES[name].services.map((id) => [id, name] as const),
   ),
 );
+
+/**
+ * The bundle that admits a database, via its owning service — `undefined` when
+ * the db belongs to no bundle (every `meshProvisioned:true` db, which no feature
+ * gates).
+ *
+ * Ownership is only derivable service→db (`svc.databases`), so this walks that
+ * direction once and composes with `BUNDLE_FOR_SERVICE`. Callers gating an
+ * opt-in db ask `features.has(bundleForDb(...))` rather than hand-listing db ids
+ * per family — a hand-list silently mis-gates a db the moment a family gains one.
+ *
+ * ⚠️ Keyed on OWNERSHIP, never on the db's name or `ownerRole`. `authz_local`
+ * is owned by authz-api and is UNCONDITIONAL (a hard sessions-api dep, soa#402);
+ * it merely shares a prefix with the `--with authz` OpenFGA opt-in. Callers gate
+ * on `meshProvisioned:false`, which excludes it structurally. PURE.
+ */
+export function bundleForDb(
+  db: DbId,
+  m: { services: Record<ServiceId, { databases: readonly DbId[] }> },
+): BundleName | undefined {
+  for (const [id, svc] of Object.entries(m.services) as [
+    ServiceId,
+    { databases: readonly DbId[] },
+  ][]) {
+    if (svc.databases.includes(db)) return BUNDLE_FOR_SERVICE.get(id);
+  }
+  return undefined;
+}
 
 /**
  * The features implied by a run's selection flags — from BOTH `--only` and

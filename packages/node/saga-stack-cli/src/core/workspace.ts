@@ -18,7 +18,7 @@
  *  - version != "1" warns (proceeds); missing/empty `.services` throws.
  */
 
-import { PLAYBACK_IDS } from './bundles.js';
+import { featuresForIds } from './bundles.js';
 import type { ServiceId } from './manifest/index.js';
 
 /** One service entry in a workspace manifest. */
@@ -137,9 +137,9 @@ export function parseWorkspace(manifest: WorkspaceManifest): WorkspaceSelection 
   // Registry-derived (bundles.ts) rather than a local hand-list, so it cannot
   // drift from BUNDLES. Only `playback` is surfaced: it has a real consumer (the
   // `DO_PLAYBACK` launch token). The other optional families are derived where
-  // they are USED, via `closureOptsForIds(ws.runSet)` in `up.ts` — one derivation
+  // they are USED, via `featuresForIds(ws.runSet)` in `up.ts` — one derivation
   // on the same registry, rather than a second set of fields to keep in sync.
-  const playback = runSet.some((s) => PLAYBACK_IDS.includes(s));
+  const playback = featuresForIds(runSet).has('playback');
 
   return { runSet, iamSandbox, sandboxServices, playback, dbProfiles, warnings };
 }

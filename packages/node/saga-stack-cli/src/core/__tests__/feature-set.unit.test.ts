@@ -17,6 +17,7 @@ import {
   BUNDLES,
   BUNDLE_FOR_SERVICE,
   BUNDLE_NAMES,
+  bundleForDb,
   combineRequested,
   featureSet,
   featuresFor,
@@ -27,7 +28,7 @@ import {
 } from '../bundles.js';
 import { computeClosure } from '../closure.js';
 import { manifest } from '../manifest/index.js';
-import type { ServiceId } from '../manifest/index.js';
+import type { DbId, ServiceId } from '../manifest/index.js';
 
 const fail = (m: string): never => {
   throw new Error(m);
@@ -62,6 +63,28 @@ describe('BUNDLE_FOR_SERVICE — the manifest/registry invariant', () => {
       const closure = computeClosure(manifest, [id], { features: featureSet([owner]) });
       expect(closure.services, `${id} via --with ${owner}`).toContain(id);
     }
+  });
+
+  it('maps every opt-in (meshProvisioned:false) DB to a bundle', () => {
+    // The db-level twin, guarding `reset`/`snapshot store`: both gate an opt-in
+    // db on `bundleForDb`, and a db owned by NO bundle resolves to `undefined`
+    // and is silently skipped — a db that never resets, or a snapshot that omits
+    // a db while restore still reports success. An unmapped entry must fail
+    // HERE, at registry level, rather than degrading quietly at runtime.
+    const optIn = (Object.keys(manifest.databases) as DbId[]).filter(
+      (db) => !manifest.databases[db].meshProvisioned,
+    );
+    expect(optIn.length).toBeGreaterThan(0);
+    expect(optIn.filter((db) => bundleForDb(db, manifest) === undefined)).toEqual([]);
+  });
+
+  it('does NOT map authz_local to a bundle — it is unconditional, not opt-in', () => {
+    // authz_local shares the `authz` prefix but belongs to authz-api, a hard
+    // sessions-api dependency (soa#402), NOT the `--with authz` OpenFGA opt-in.
+    // `meshProvisioned:true` keeps it out of both gates structurally; this pins
+    // that a name-keyed sweep would have swept it in.
+    expect(manifest.databases.authz_local.meshProvisioned).toBe(true);
+    expect(bundleForDb('authz_local', manifest)).toBeUndefined();
   });
 });
 

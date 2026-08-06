@@ -21,6 +21,8 @@
  * runtime layer; nothing here touches fs, child_process, docker, or the network.
  */
 
+import { bundleForDb } from '../bundles.js';
+import type { FeatureSet } from '../bundles.js';
 import type { DatabaseDef, DbId, Engine, Manifest, ServiceId } from '../manifest/index.js';
 import type { SnapshotManifest } from './manifest.js';
 
@@ -61,17 +63,11 @@ function ownerServiceOf(m: Manifest): Map<DbId, ServiceId> {
 /**
  * A db is "optional" when its owning service is `optional:true` — the playback
  * trio (owned by transcripts-api/insights-api/chat-api) or authz_sync_local/
- * openfga (owned by authz-sync). Name kept for the playback-only pre-authz
- * history; despite the name it is ownership-generic (`svcId ? optional : false`).
+ * openfga (owned by authz-sync). Which FEATURE admits it is `bundleForDb`'s job.
  */
-function isPlaybackDb(db: DbId, m: Manifest, owner: Map<DbId, ServiceId>): boolean {
+function isOptionalDb(db: DbId, m: Manifest, owner: Map<DbId, ServiceId>): boolean {
   const svcId = owner.get(db);
   return svcId ? m.services[svcId].optional : false;
-}
-
-/** Whether an optional db's owning service is specifically `authz-sync` (vs. playback). */
-function isAuthzDb(db: DbId, owner: Map<DbId, ServiceId>): boolean {
-  return owner.get(db) === 'authz-sync';
 }
 
 /**
@@ -118,10 +114,11 @@ export interface StorePlanOptions {
    * determines the db set and `withPlayback` is ignored.
    */
   only?: DbId[];
-  /** Include the optional playback trio (transcripts/insights/chat). Ignored when `only` is set. */
-  withPlayback?: boolean;
-  /** Include the optional authz DBs (openfga/authz_sync_local). Ignored when `only` is set. */
-  withAuthz?: boolean;
+  /**
+   * The run's selected features. A db owned by an `optional:true` service is
+   * captured only when its owning bundle is selected. Ignored when `only` is set.
+   */
+  features?: FeatureSet;
 }
 
 export interface StorePlan {
@@ -148,10 +145,9 @@ export function storePlan(m: Manifest, opts: StorePlanOptions): StorePlan {
   const onlySet = opts.only ? new Set<DbId>(opts.only) : undefined;
   const selected = allDbIds.filter((db) => {
     if (onlySet) return onlySet.has(db);
-    if (isPlaybackDb(db, m, owner)) {
-      return isAuthzDb(db, owner) ? (opts.withAuthz ?? false) : (opts.withPlayback ?? false);
-    }
-    return true;
+    if (!isOptionalDb(db, m, owner)) return true;
+    const bundle = bundleForDb(db, m);
+    return bundle ? (opts.features?.has(bundle) ?? false) : false;
   });
 
   const databases: StoreDbAction[] = selected.map((db) => {

@@ -15,6 +15,7 @@ import {
   STAFF_ADMIN_IDS,
   closureOptsFor,
   closureOptsForIds,
+  featureSet,
 } from '../../bundles.js';
 import { computeClosure } from '../../closure.js';
 import { manifest } from '../index.js';
@@ -224,14 +225,14 @@ describe('snapshot store — closureDatabases', () => {
     // to an EMPTY db list — and `storePlan` honours a defined-but-empty `only`
     // as "dump exactly these", writing a zero-database snapshot that exits 0.
     // The pair owns no DBs itself; the upstreams it pulls in do.
-    const dbs = closureDatabases([...STAFF_ADMIN_IDS], closureOptsFor(['staff-admin']), fail);
+    const dbs = closureDatabases([...STAFF_ADMIN_IDS], featureSet(['staff-admin']), fail);
     expect(dbs).not.toEqual([]);
     expect(dbs).toContain('iam_local');
   });
 
   it('still fails loudly on an unknown service id', () => {
-    expect(() => closureDatabases(['nope' as never], closureOptsFor(['staff-admin']), fail)).toThrow(
-      /unknown service id/,
-    );
+    expect(() =>
+      closureDatabases(['nope' as never], featureSet(['staff-admin']), fail),
+    ).toThrow(/unknown service id/);
   });
 });

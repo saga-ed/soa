@@ -19,7 +19,7 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import { BUNDLE_NAMES, featuresFor, toLegacy } from '../../core/bundles.js';
+import { BUNDLE_NAMES, featuresFor } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { manifest } from '../../core/manifest/index.js';
@@ -63,7 +63,7 @@ export default class StackReset extends BaseCommand {
   async run(): Promise<void> {
     const { flags } = await this.parse(StackReset);
     // `reset` has no `--only`; features come from `--with` alone.
-    const closureOpts = toLegacy(featuresFor(undefined, flags.with, (m) => this.error(m)));
+    const features = featuresFor(undefined, flags.with, (m) => this.error(m));
 
     const profile = deriveInstance({ slot: flags.slot });
     const api = makeStackApi(manifest, this.buildNativeRuntime(flags, profile));
@@ -75,11 +75,11 @@ export default class StackReset extends BaseCommand {
       .filter((s) => !s.optional)
       .map((s) => s.id);
     const excluded = new Set(profile.excludedServices);
-    const services = computeClosure(manifest, requested, closureOpts).services.filter(
+    const services = computeClosure(manifest, requested, { features }).services.filter(
       (id) => !excluded.has(id),
     );
 
-    const res = await api.reset(services, closureOpts);
+    const res = await api.reset(services, { features });
 
     const truncated = res.native?.dbs.filter((d) => d.action === 'truncated').map((d) => d.db) ?? [];
     const migrateReset = res.native?.dbs.filter((d) => d.action === 'migrate-reset').map((d) => d.db) ?? [];

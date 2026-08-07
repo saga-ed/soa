@@ -328,13 +328,14 @@ export function featuresOf(
 
 /**
  * Mesh units the selected features contribute DIRECTLY (`BundleDef.mesh`),
- * independent of any service.
+ * independent of any service — the only route into the mesh for a bundle with
+ * `services: []`.
  *
- * 🔑 Both mesh derivations MUST call this — `computeClosure`'s `closure.mesh`
- * (what `--dry-run` reports) and the launch path's `neededMesh` (what actually
- * starts). They union over different sets, so applying `BundleDef.mesh`
- * separately in each lets the planner promise a unit the launcher never starts.
- * PURE.
+ * 🔑 THE canonical feature→mesh union: `computeClosure` (`closure.mesh`, what
+ * `--dry-run` reports) and the launch path's `neededMesh` (what starts the
+ * container, via `COMPOSE_PROFILES`) must BOTH route through it. They union over
+ * different sets, so a separate application of `BundleDef.mesh` in either lets
+ * the planner promise a unit the launcher never starts. PURE.
  */
 export function meshForFeatures(features: FeatureSet): MeshId[] {
   const out: MeshId[] = [];

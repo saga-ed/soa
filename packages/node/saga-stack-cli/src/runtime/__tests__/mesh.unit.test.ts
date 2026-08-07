@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { manifest } from '../../core/manifest/index.js';
+import type { MeshId } from '../../core/manifest/index.js';
 import type { RunResult, Runner, ScriptInvocation } from '../exec.js';
 import { meshDownArgs, meshExecArgs, meshMakeArgs, meshUp } from '../mesh.js';
 import type { MeshExec } from '../mesh.js';
@@ -436,17 +437,6 @@ describe('meshUp', () => {
  * `shell:false` escape does not reach it).
  */
 describe('meshUp — readinessHttp units', () => {
-  /** A short-timeout collector so a never-ready case resolves in ~1s, not 30. */
-  function otelManifest(): typeof manifest {
-    return {
-      ...manifest,
-      mesh: {
-        ...manifest.mesh,
-        'otel-collector': { ...manifest.mesh['otel-collector'], timeoutSec: 1 },
-      },
-    };
-  }
-
   it('probes over HTTP, never docker exec (the image has no exec-able probe)', async () => {
     const { runner } = fakeRunner();
     const urls: string[] = [];
@@ -467,7 +457,7 @@ describe('meshUp — readinessHttp units', () => {
       exec,
       portProbe: FREE_PROBE,
       units: ['otel-collector'],
-      manifest: otelManifest(),
+      manifest: shortTimeoutManifest('otel-collector'),
     });
     expect(res.ok).toBe(true);
     expect(urls).toEqual(['http://localhost:13133/']);
@@ -493,7 +483,7 @@ describe('meshUp — readinessHttp units', () => {
       portProbe: FREE_PROBE,
       units: ['otel-collector'],
       meshOffset: 2000,
-      manifest: otelManifest(),
+      manifest: shortTimeoutManifest('otel-collector'),
     });
     expect(urls).toEqual(['http://localhost:15133/']);
   });
@@ -514,7 +504,7 @@ describe('meshUp — readinessHttp units', () => {
       exec,
       portProbe: FREE_PROBE,
       units: ['otel-collector'],
-      manifest: otelManifest(),
+      manifest: shortTimeoutManifest('otel-collector'),
       sleep: async () => {},
     });
     expect(res.ok).toBe(false);
@@ -532,20 +522,20 @@ describe('meshUp — readinessHttp units', () => {
       exec,
       portProbe: FREE_PROBE,
       units: ['otel-collector'],
-      manifest: otelManifest(),
+      manifest: shortTimeoutManifest('otel-collector'),
       sleep: async () => {},
     });
     expect(res.ok).toBe(false);
   });
 });
 
-/** Clone the manifest with rabbitmq's readiness timeout dropped to 1s (fast never-ready test). */
-function shortTimeoutManifest(): typeof manifest {
+/** Clone the manifest with one unit's readiness timeout dropped to 1s (fast never-ready tests). */
+function shortTimeoutManifest(unit: MeshId = 'rabbitmq'): typeof manifest {
   return {
     ...manifest,
     mesh: {
       ...manifest.mesh,
-      rabbitmq: { ...manifest.mesh.rabbitmq, timeoutSec: 1 },
+      [unit]: { ...manifest.mesh[unit], timeoutSec: 1 },
     },
   };
 }

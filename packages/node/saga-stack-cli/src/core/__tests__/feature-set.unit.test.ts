@@ -23,6 +23,7 @@ import {
   featuresFor,
   featuresForIds,
   featuresOf,
+  meshForFeatures,
 } from '../bundles.js';
 import { computeClosure } from '../closure.js';
 import { manifest } from '../manifest/index.js';
@@ -146,6 +147,22 @@ describe('bundle-contributed mesh', () => {
         expect(closure.mesh).not.toContain(unit);
       }
     }
+  });
+
+  // `meshForFeatures` is the SHARED half: `computeClosure` (asserted above, what
+  // `--dry-run` reports) and the launch path's `neededMesh` (what starts the
+  // container) must both route through it. The launch-path half is pinned in
+  // `stack-api.unit.test.ts`, which drives the real `api.up` and asserts
+  // `COMPOSE_PROFILES` — it cannot be asserted here, since `neededMesh` is
+  // module-private and a reimplementation of it would pass while the real one broke.
+  it("meshForFeatures yields a bundle's units independently of any service", () => {
+    for (const name of BUNDLE_NAMES) {
+      expect(meshForFeatures(featureSet([name]))).toEqual([...(BUNDLES[name].mesh ?? [])]);
+    }
+  });
+
+  it('meshForFeatures yields nothing when no feature is selected', () => {
+    expect(meshForFeatures(featureSet([]))).toEqual([]);
   });
 });
 

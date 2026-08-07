@@ -478,18 +478,19 @@ export interface RestartOutcome {
 export interface StackApi {
   /**
    * `features` is REQUIRED, not `?:` — it decides which profile-gated mesh units
-   * start (a feature-contributed unit is otherwise never launched), and an
-   * optional parameter would re-open the "caller forgot to thread it, the run
-   * silently shrinks" hole the `FeatureSet` brand exists to close. Pass
-   * `featureSet([])` for a run that selects nothing.
+   * start, and an optional parameter would re-open the "caller forgot to thread
+   * it, the run silently shrinks" hole the `FeatureSet` brand exists to close.
+   * Pass `featureSet([])` for a run that selects nothing.
    */
   up(closureServices: ServiceId[], features: FeatureSet): Promise<UpResult>;
   down(closureServices: ServiceId[]): Promise<DownResult>;
   /**
-   * `features` defaults to the empty set: `stack restart` bounces the full
-   * NON-OPTIONAL closure and selects no bundle. A caller restarting a
-   * feature-selected stack must pass the same set it brought it up with, or the
-   * bounce drops that feature's mesh units.
+   * `features` defaults to the empty set — `stack restart` bounces the full
+   * NON-OPTIONAL closure and parses no `--with`, so it has no record of what the
+   * stack came up with. A caller restarting a feature-selected stack must pass
+   * the same set, or the bounce drops that feature's mesh units. (The command
+   * already warns about the sibling case: overlay-bound optionals it stops but
+   * deliberately does not relaunch.)
    */
   restart(closureServices: ServiceId[], features?: FeatureSet): Promise<RestartOutcome>;
   reset(closureServices: ServiceId[], opts?: ResetOpts): Promise<ResetOutcome>;
@@ -544,12 +545,10 @@ function head(argv: string[]): { command: string; args: string[] } {
  * manifest declaration order (so a postgres-only partial stack waits only on
  * postgres). `make up` still starts the WHOLE mesh; this only narrows the gate.
  *
- * 🔑 The feature half is load-bearing: for a PROFILE-GATED unit this list is what
- * activates its compose profile (`meshUp`'s `COMPOSE_PROFILES`), so a unit missing
- * here is never STARTED, not merely un-waited-on. A bundle contributing zero
- * services (`otel`) reaches the mesh ONLY through this half, and `--dry-run` reads
- * `closure.mesh` — so a service-only union here makes the planner and the launcher
- * disagree. `meshForFeatures` is shared with `computeClosure` to prevent that.
+ * 🔑 The feature half is load-bearing, NOT a narrowing convenience: for a
+ * profile-gated unit this list is what activates its compose profile, so a unit
+ * missing here is never STARTED, not merely un-waited-on. Both halves must route
+ * through `meshForFeatures` — see its docstring in bundles.ts.
  */
 function neededMesh(services: ServiceId[], m: Manifest, features: FeatureSet): MeshId[] {
   const set = new Set<MeshId>();

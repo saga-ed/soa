@@ -62,10 +62,9 @@ export interface ResolvedFlow {
   /** The full dependency closure of `requiredSystems` (the N-of-M launch set). */
   closure: Closure;
   /**
-   * The features `closure` was computed from — surfaced because the launch path
-   * needs the SAME set (`StackApi.up`) to decide which profile-gated mesh units
-   * start. Re-deriving it at the call site would be a second derivation free to
-   * disagree with the one that shaped this closure.
+   * The features `closure` was computed from. `StackApi.up` needs the same set;
+   * re-deriving it at the call site would be a second derivation free to disagree
+   * with the one that shaped this closure.
    */
   features: FeatureSet;
   /** Effective seed selection (flow-level, terminal-stage seed merged over it). */

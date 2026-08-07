@@ -24,7 +24,8 @@ export type BundleName =
   | 'playback'
   | 'qtf'
   | 'authz'
-  | 'staff-admin';
+  | 'staff-admin'
+  | 'otel';
 
 /** A seed add-on a bundle may layer onto the composed seed plan. */
 export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz';
@@ -100,6 +101,18 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
       'iam/programs/sis closure they read. Log in with `ss stack login` — the console ' +
       'reads that operator cookie. Impersonate is HIDDEN (the synthetic seed mints no ' +
       'staff:* claims) and the COACH pages 401 (coach-api verifies a janus_session).',
+  },
+  otel: {
+    // The first bundle to use `mesh` rather than contributing infra through a
+    // service: an OTLP collector is wanted by `programs-api`, which is
+    // `optional:false`, so there is no optional service to hang it off.
+    services: [],
+    mesh: ['otel-collector'],
+    description:
+      'Local OTLP collector (:4318) that prints received spans to its container log — ' +
+      'so a span-level change is verifiable on a laptop instead of first in a deployed ' +
+      'environment. Services already default to localhost:4318, so this only gives those ' +
+      'exports somewhere to land. `docker logs soa-otel-collector-1` to read them.',
   },
 };
 

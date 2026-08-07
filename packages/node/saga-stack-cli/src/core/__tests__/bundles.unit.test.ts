@@ -26,7 +26,7 @@ const throwFail = (msg: string): never => {
 };
 
 describe('bundle registry', () => {
-  it('exposes the seven bundle names in registry order', () => {
+  it('exposes the eight bundle names in registry order', () => {
     expect(BUNDLE_NAMES).toEqual([
       'dash',
       'connect',
@@ -35,6 +35,7 @@ describe('bundle registry', () => {
       'qtf',
       'authz',
       'staff-admin',
+      'otel',
     ]);
   });
 

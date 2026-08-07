@@ -59,11 +59,22 @@ import type { PortConflict, PortProbe } from './preflight.js';
  * profile name are independent strings, so this map, not the unit id itself,
  * is what `COMPOSE_PROFILES` must be built from).
  */
-const PROFILE_GATED_MESH: ReadonlyMap<MeshId, string> = new Map<MeshId, string>([['openfga', 'authz']]);
+const PROFILE_GATED_MESH: ReadonlyMap<MeshId, string> = new Map<MeshId, string>([
+  ['openfga', 'authz'],
+  ['otel-collector', 'otel'],
+]);
 
-/** Strip a `meshPortSpecs` mgmt-port suffix (`'<id>-mgmt'` → `'<id>'`) back to its unit id. */
+/**
+ * Strip a `meshPortSpecs` suffix (`'<id>-mgmt'`, `'<id>-health'`) back to its unit
+ * id, so a secondary port maps to the unit whose profile gates it. An unstripped
+ * suffix reads as an unknown unit, and the gating filter would then preflight a
+ * port belonging to a container this run never starts.
+ */
 function baseUnitId(specName: string): string {
-  return specName.endsWith('-mgmt') ? specName.slice(0, -'-mgmt'.length) : specName;
+  for (const suffix of ['-mgmt', '-health']) {
+    if (specName.endsWith(suffix)) return specName.slice(0, -suffix.length);
+  }
+  return specName;
 }
 
 /**
@@ -73,6 +84,13 @@ function baseUnitId(specName: string): string {
  */
 export interface MeshExec {
   ready(container: string, readinessCmd: string, shell?: boolean): Promise<boolean>;
+  /**
+   * Host-side readiness for a unit whose image carries no exec-able probe
+   * (`MeshDef.readinessHttp`). Resolves true iff the URL answered 2xx. Optional
+   * so existing fakes that only script `ready()` keep compiling; a unit that
+   * needs it against a fake without it is treated as never ready.
+   */
+  readyHttp?(url: string): Promise<boolean>;
 }
 
 /** Inputs to a native mesh bring-up. */
@@ -166,6 +184,7 @@ export function meshMakeArgs(
   const rabbit = getMesh('rabbitmq', m);
   const mongo = getMesh('connect-mongo', m);
   const openfga = getMesh('openfga', m);
+  const otel = getMesh('otel-collector', m);
   return [
     'up',
     ...(opts.project ? [`COMPOSE_PROJECT_NAME=${opts.project}`] : []),
@@ -193,6 +212,14 @@ export function meshMakeArgs(
     // dev-UI port with no readiness/URL role — nothing else in the CLI consumes
     // it — so it is derived from the same base the compose default uses.
     `OPENFGA_PLAYGROUND_PORT=${OPENFGA_PLAYGROUND_BASE_PORT + offset}`,
+    // BOTH ports the otel-collector fragment publishes. The health port is not a
+    // MeshDef `port`/`mgmtPort` (it is the readiness probe's target, not a
+    // service address), but compose publishes it, so omitting it here repeats
+    // the openfga playground bug one unit over: a fixed 13133 on every slot,
+    // failing the whole `make up` with "port is already allocated" the moment a
+    // second slot runs `--with otel`.
+    `OTEL_COLLECTOR_OTLP_HTTP_PORT=${otel.port + offset}`,
+    `OTEL_COLLECTOR_HEALTH_PORT=${(otel.readinessHttp?.port ?? 13133) + offset}`,
   ];
 }
 
@@ -316,7 +343,7 @@ export async function meshUp(ctx: MeshContext): Promise<MeshResult> {
   for (const id of gatedIds) {
     const unit = getMesh(id, m);
     const container = meshContainer(unit);
-    const ready = await pollReady(exec, container, unit.readinessCmd, unit.shell, unit.timeoutSec, ctx.sleep);
+    const ready = await pollReady(exec, container, unit, offset, unit.timeoutSec, ctx.sleep);
     units.push({ id, container, ok: ready });
     if (!ready) allReady = false;
   }
@@ -328,14 +355,23 @@ export async function meshUp(ctx: MeshContext): Promise<MeshResult> {
 async function pollReady(
   exec: MeshExec,
   container: string,
-  readinessCmd: string,
-  shell: boolean | undefined,
+  unit: MeshDef,
+  offset: number,
   timeoutSec: number,
   sleep: (ms: number) => Promise<void> = (ms): Promise<void> =>
     new Promise((r) => setTimeout(r, ms)),
 ): Promise<boolean> {
-  for (let attempt = 0; attempt < timeoutSec; attempt += 1) {
-    if (await exec.ready(container, readinessCmd, shell)) return true;
+  // An HTTP unit probes from the HOST, so it must target the SLOT's published
+  // port — the same `base + offset` every other port derivation uses. Probing
+  // the base port at slot > 0 would report slot 0's container as this slot's.
+  const http = unit.readinessHttp;
+  const attempt = http
+    ? (): Promise<boolean> =>
+        exec.readyHttp?.(`http://localhost:${http.port + offset}${http.path}`) ?? Promise.resolve(false)
+    : (): Promise<boolean> => exec.ready(container, unit.readinessCmd, unit.shell);
+
+  for (let i = 0; i < timeoutSec; i += 1) {
+    if (await attempt()) return true;
     await sleep(1000);
   }
   return false;
@@ -368,6 +404,17 @@ export function makeRealMeshExec(): MeshExec {
           resolve(!err);
         });
       });
+    },
+    async readyHttp(url: string): Promise<boolean> {
+      // Any 2xx counts. A connection refusal while the container is still
+      // starting is a normal not-ready, not an error to surface — the caller
+      // polls until timeoutSec.
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+        return res.ok;
+      } catch {
+        return false;
+      }
     },
   };
 }

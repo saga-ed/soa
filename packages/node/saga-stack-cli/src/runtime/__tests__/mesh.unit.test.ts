@@ -8,6 +8,10 @@
  * real make/docker.
  */
 
+// eslint-disable-next-line no-restricted-imports
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { manifest } from '../../core/manifest/index.js';
 import type { RunResult, Runner, ScriptInvocation } from '../exec.js';
@@ -56,6 +60,59 @@ const FREE_PROBE: PortProbe = {
   },
 };
 
+describe('meshMakeArgs covers every port the compose fragments publish', () => {
+  // The structural guard against a recurring bug: a port a fragment publishes but
+  // `meshMakeArgs` does not export falls through to the FIXED value in
+  // infra/.env.defaults on every slot, so a second slot's `make up` dies on
+  // "Bind for 0.0.0.0:<port> failed: port is already allocated" — which reads as a
+  // broken bundle, not a port clash. openfga hit this twice: once for its http/grpc
+  // pair, then again for the playground port that was missed while fixing them.
+  //
+  // Reads the real fragments rather than a hand-list, so a NEW published port fails
+  // here the moment it is added, instead of on someone else's second slot.
+  const COMPOSE = fileURLToPath(new URL('../../../../../../infra/compose', import.meta.url));
+
+  // Only the fragments `saga-mesh.yml` actually includes. `services/` also holds
+  // `mongo` and `mysql`, which belong to OTHER compose projects — `meshMakeArgs`
+  // is not expected to export their ports, and scanning the directory instead of
+  // the include list would fail on units this mesh never starts.
+  const includedDirs = [
+    ...readFileSync(join(COMPOSE, 'projects/saga-mesh.yml'), 'utf8').matchAll(
+      /-\s*path:\s*\.\.\/services\/([\w-]+)\/compose\.yml/g,
+    ),
+  ].map((mm) => mm[1]);
+
+  /** `${VAR:-default}:container` → VAR, for every published port in a fragment. */
+  function publishedPortVars(dir: string): string[] {
+    const yml = readFileSync(join(COMPOSE, 'services', dir, 'compose.yml'), 'utf8');
+    return [...yml.matchAll(/-\s*"\$\{([A-Z0-9_]+):-\d+\}:\d+"/g)].map((mm) => mm[1]);
+  }
+
+  it('exports a make arg for each published port var', () => {
+    expect(includedDirs.length).toBeGreaterThan(0); // the include list really parsed
+    const args = meshMakeArgs(manifest);
+    const exported = new Set(args.map((a) => a.split('=')[0]));
+    for (const dir of includedDirs) {
+      for (const v of publishedPortVars(dir)) {
+        expect(exported, `${dir}/compose.yml publishes \${${v}} but meshMakeArgs never exports it`).toContain(v);
+      }
+    }
+  });
+
+  it('offsets every one of those ports at slot > 0 (no fixed port survives)', () => {
+    const base = meshMakeArgs(manifest);
+    const slot1 = meshMakeArgs(manifest, { offset: 1000 });
+    const portVars = new Set(includedDirs.flatMap(publishedPortVars));
+    const valueOf = (args: string[], v: string): string =>
+      args.find((a) => a.startsWith(`${v}=`))?.split('=')[1] ?? '';
+    for (const v of portVars) {
+      expect(Number(valueOf(slot1, v)), `${v} must shift by the slot offset`).toBe(
+        Number(valueOf(base, v)) + 1000,
+      );
+    }
+  });
+});
+
 describe('meshMakeArgs', () => {
   it('builds the manifest-derived make argv', () => {
     expect(meshMakeArgs(manifest)).toEqual([
@@ -70,6 +127,8 @@ describe('meshMakeArgs', () => {
       'OPENFGA_HTTP_PORT=8180',
       'OPENFGA_GRPC_PORT=8181',
       'OPENFGA_PLAYGROUND_PORT=3105',
+      'OTEL_COLLECTOR_OTLP_HTTP_PORT=4318',
+      'OTEL_COLLECTOR_HEALTH_PORT=13133',
     ]);
   });
 
@@ -110,6 +169,8 @@ describe('meshMakeArgs', () => {
       'OPENFGA_HTTP_PORT=9180',
       'OPENFGA_GRPC_PORT=9181',
       'OPENFGA_PLAYGROUND_PORT=4105',
+      'OTEL_COLLECTOR_OTLP_HTTP_PORT=5318',
+      'OTEL_COLLECTOR_HEALTH_PORT=14133',
     ]);
   });
 

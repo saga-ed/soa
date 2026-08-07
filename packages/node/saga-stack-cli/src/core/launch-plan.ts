@@ -207,6 +207,21 @@ export interface LaunchTokens {
    */
   OPENFGA_STORE_ID: string;
 
+  // ── OTLP tracing (`--with otel`) ──
+  /**
+   * OTLP base endpoint — `http://localhost:<collector host port + meshOffset>`
+   * (4318 at slot 0).
+   *
+   * This is a SLOT-CORRECTNESS token, not an enable/disable one:
+   * `@saga-ed/soa-observability`'s `resolveOtlpTracesUrl()` already defaults to
+   * localhost:4318, so a service exports there whether or not this is set. What
+   * it fixes is slot > 0, where the collector publishes 5318 and the default
+   * would send this slot's spans to slot 0's collector (or nowhere). Resolved
+   * unconditionally for the same reason: with no collector up, the export fails
+   * silently exactly as it did before — the status quo, not a regression.
+   */
+  OTEL_EXPORTER_OTLP_ENDPOINT: string;
+
   // ── global launch env (up.sh services_up `export`s these ONCE, ~1384-1385, so
   //    every `pnpm dev` child inherits them; soa-logger/soa-config validate them
   //    at startup with NO defaults, so they are required for any node service to
@@ -672,6 +687,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
   const mongoPort = getMesh('connect-mongo', m).port + meshOffset; // 27037
   const redisPort = getMesh('redis', m).port + meshOffset; // 6379
   const openfgaPort = getMesh('openfga', m).port + meshOffset; // 8180 (host; 8080 in-container)
+  const otelPort = getMesh('otel-collector', m).port + meshOffset; // 4318 (OTLP/HTTP)
 
   const recorderControlPort = inputs.recorderControlPort ?? 7890;
   const recordingsApiPort = inputs.recordingsApiPort ?? 8444;
@@ -733,6 +749,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     // OpenFGA authz (opt-in — see LaunchTokens' FGA_ENABLED/OPENFGA_* docs)
     FGA_ENABLED: inputs.withAuthz ? 'true' : 'false',
     OPENFGA_API_URL: `http://localhost:${openfgaPort}`,
+    OTEL_EXPORTER_OTLP_ENDPOINT: `http://localhost:${otelPort}`,
     OPENFGA_STORE_ID: inputs.openfgaStoreId ?? '',
 
     // global launch env (up.sh `:-` defaults; runtime may pass ambient overrides)

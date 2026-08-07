@@ -41,6 +41,7 @@ import type { LaunchContext } from './core/launch-plan.js';
 import { recordPlan } from './core/record-plan.js';
 import type { RecordPlan } from './core/record-plan.js';
 import { launchOrder } from './core/launch-order.js';
+import { deriveInstance } from './core/derive-instance.js';
 import { getMesh, getService, manifest as defaultManifest } from './core/manifest/index.js';
 import type { DbId, Lane, Manifest, MeshId, RepoKey, ServiceId } from './core/manifest/index.js';
 import type { HealthProbe } from './core/probe-plan.js';
@@ -84,6 +85,8 @@ import type {
   ServiceLauncher,
   PrepRepoLock,
   ServiceStopper,
+  ForeignProcs,
+  ReapedProc,
   StopResult,
   StopServiceResult,
   ViteClear,
@@ -241,6 +244,26 @@ export interface Runtime {
    * launcher writes pids under, so the restart reap targets exactly this run's servers.
    */
   stateDir?: string;
+  /**
+   * The foreign-listener seam (`core/foreign-procs`). Native `restart` uses it to reap
+   * a stack port held by a process with NO pidfile in this state dir — an orphan from
+   * an earlier run, a slot remap, a crashed CLI, or a hand-run `pnpm dev`.
+   *
+   * WHY `restart` NEEDS IT: the stopper above enumerates PIDFILES, so a listener that
+   * has lost its pidfile is invisible to it. `up()` then health-probes the port, sees a
+   * 200, and ADOPTS the survivor (`alreadyUp`) — so the orphan rides through every
+   * bounce, forever, serving whatever code it was launched with. Measured 2026-08-05:
+   * slot 0's coach-web was served by a six-day-old process across a branch change while
+   * `stack status` reported healthy. `cold-start` already reaps this; nothing short of
+   * it did.
+   *
+   * STILL SLOT-SAFE — this is NOT up.sh's host-global `pkill -f tsup` / `fuser -k`. The
+   * targets are THIS slot's ports (via `portOverrides`) and ownership is decided against
+   * THIS state dir's pidfiles, so a peer slot's servers are never candidates.
+   *
+   * Absent ⇒ `restart` skips the sweep (facade unit tests stay byte-identical).
+   */
+  foreignProcs?: ForeignProcs;
   /**
    * Best-effort Connect AV bring-up (M9 — livekit + coturn from qboard's compose). When
    * true AND slot 0 AND connect is in the closure, `up` starts AV via the Runner (parity
@@ -427,8 +450,24 @@ export interface RestartOutcome {
    * (`alive`) survivor — an under-kill that would let `up()` serve stale code.
    */
   reaped?: StopServiceResult[];
+  /**
+   * Foreign listeners on this slot's ports that were killed after the pidfile reap —
+   * orphans the stopper could not see because they had no pidfile. Present when the
+   * `foreignProcs` seam was wired; empty on a clean bounce. `killed:false` means the
+   * port is STILL held, so `up()` will adopt a stale server: the command surfaces it.
+   */
+  reapedForeign?: ReapedProc[];
   /** The vite-cache clear (absent when no viteClear seam was wired). */
   vite?: ViteClearResult;
+  /**
+   * Optional services that were reaped but deliberately NOT relaunched, because
+   * their correct launch env depends on an overlay `restart` does not build
+   * (`authz-sync` needs `--with authz`'s FGA_ENABLED + OPENFGA_STORE_ID).
+   * Relaunching them here would start them MISCONFIGURED while reporting
+   * success; the command surfaces this list so the operator re-`up`s them
+   * explicitly. Empty on a normal bounce.
+   */
+  notRelaunched?: ServiceId[];
   /** The fresh bring-up (mesh + prep + launch + auto-pull + AV). */
   up: UpResult;
 }
@@ -446,6 +485,20 @@ export interface StackApi {
 // ── helpers (pure) ───────────────────────────────────────────────────────────
 
 /** Matches a `${NAME}` token (uppercase / digits / underscore). */
+/**
+ * Optional services whose CORRECT launch env depends on an overlay that only
+ * `up` builds — so a context without that overlay would start them
+ * misconfigured rather than not at all.
+ *
+ * `authz-sync` is the case today: without `--with authz`'s overlay the tokens
+ * resolve to `FGA_ENABLED='false'` and an EMPTY `OPENFGA_STORE_ID`, i.e. a
+ * consumer projecting tuples into nowhere while iam-api runs with FGA off.
+ * `restart` uses this to leave such a service visibly down instead of silently
+ * wrong. The staff-admin pair is deliberately NOT here — its launch env is
+ * fully token-resolved with no overlay, so it restores cleanly.
+ */
+const OVERLAY_BOUND_SERVICES = new Set<ServiceId>(['authz-sync']);
+
 const TOKEN_RE = /\$\{([A-Z0-9_]+)\}/g;
 
 /** Expand every `${NAME}` in `value` from `tokens`; throws on an unset token. */
@@ -1075,6 +1128,23 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         down = await this.down(services);
       }
 
+      // 1b. foreign sweep — the stopper above works from PIDFILES, so a listener that
+      //     has lost its (an orphan from an earlier run, a slot remap, a crashed CLI, a
+      //     hand-run `pnpm dev`) survives it untouched. `up()` would then probe the
+      //     port, get a 200, and adopt the survivor — which is precisely how a process
+      //     rides through every bounce serving stale code. Reap it here so `up()` boots
+      //     fresh. Slot-safe: this slot's ports, this state dir's pidfiles.
+      let reapedForeign: ReapedProc[] | undefined;
+      if (runtime.foreignProcs && runtime.stateDir !== undefined) {
+        const foreign = await runtime.foreignProcs.find({
+          manifest,
+          services,
+          stateDir: runtime.stateDir,
+          portOverrides: deriveInstance({ slot: runtime.slot ?? 0 }).portOverrides,
+        });
+        reapedForeign = foreign.length > 0 ? await runtime.foreignProcs.reap(foreign) : [];
+      }
+
       // 2. vite-clear — drop the stale optimized-bundle caches (up.sh `nuke_vite`) so a
       //    dead watcher can't serve old JS. Paths are byte-faithful to up.sh; skipped
       //    when no seam is wired.
@@ -1088,8 +1158,37 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
 
       // 3. up — the SAME native bring-up (mesh + prep + launch + auto-pull + AV). NO
       //    reset (restart never truncates data); the caller passes only the closure.
-      const up = await this.up(services);
-      return { down, reaped, vite, up };
+      //
+      //    RESTORE THE OPTIONALS WE JUST REAPED. The caller's closure is built from
+      //    NON-OPTIONAL services (restart takes no `--with`, so it cannot know which
+      //    opt-ins were used at `up` time), but step 1's reap is dir-scoped and stops
+      //    EVERY pidfile — including `--with`-launched optional services. Without this
+      //    union a bounce silently DELETES them: `up --with staff-admin` then `restart`
+      //    left the console and its BFF dead while reporting a successful restart (the
+      //    browser tab just dies with connection-refused). Reaped ids are what was
+      //    actually running, so this restores exactly the previous shape — and it is
+      //    generic, so it covers `authz-sync` and any future optional too.
+      //
+      //    ⚠️ OVERLAY-FREE OPTIONALS ONLY. `restart` builds its runtime with NO
+      //    overlays (`buildNativeRuntime(flags, profile)`, `overlays = {}`), so
+      //    `launchContext` here carries `withAuthz: undefined` /
+      //    `openfgaStoreId: undefined` ⇒ tokens `FGA_ENABLED='false'` and
+      //    `OPENFGA_STORE_ID=''`. Relaunching an overlay-DEPENDENT service under
+      //    that context is WORSE than leaving it down: authz-sync would come back
+      //    projecting tuples into an empty store id while iam-api runs with FGA
+      //    off, and the operator — told "restart: OK, relaunched authz-sync" —
+      //    would believe authz is live. Down is at least visibly down. So those
+      //    are reported as needing an explicit re-`up` instead.
+      const defs = manifest.services as Record<string, { id: ServiceId; optional: boolean }>;
+      const reapedOptional = (reaped ?? [])
+        .map((r) => r.id)
+        .filter((id): id is ServiceId => defs[id]?.optional === true);
+      const restorable = reapedOptional.filter((id) => !OVERLAY_BOUND_SERVICES.has(id));
+      const overlayBound = reapedOptional.filter((id) => OVERLAY_BOUND_SERVICES.has(id));
+      const relaunch =
+        restorable.length > 0 ? [...new Set<ServiceId>([...services, ...restorable])] : services;
+      const up = await this.up(relaunch);
+      return { down, reaped, reapedForeign, vite, up, notRelaunched: overlayBound };
     },
 
     async reset(services: ServiceId[], opts: ResetOpts = {}): Promise<ResetOutcome> {

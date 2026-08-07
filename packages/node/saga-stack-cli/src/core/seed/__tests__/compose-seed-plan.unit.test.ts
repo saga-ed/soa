@@ -35,14 +35,14 @@ describe('composeSeedPlan — gate 1: partial-stack drop', () => {
     // service-inactive (coach-api owns two full-profile steps now — dedupe the services).
     const dropped = plan.skipped.filter((s) => s.reason === 'service-inactive');
     expect([...new Set(dropped.map((s) => s.service))].sort()).toEqual(
-      ['coach-api', 'content-api', 'programs-api', 'scheduling-api', 'sessions-api'].sort(),
+      ['authz-api', 'coach-api', 'content-api', 'programs-api', 'scheduling-api', 'sessions-api'].sort(),
     );
   });
 });
 
 describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () => {
-  const sel: SeedSelection = { profile: 'roster' }; // iam-registry, iam-dev-user, iam, sessions
-  const active = set('iam-api', 'sessions-api');
+  const sel: SeedSelection = { profile: 'roster' }; // iam-registry, iam-dev-user, iam, authz-projection-backfill, sessions
+  const active = set('iam-api', 'sessions-api', 'authz-api');
 
   it('drops a fully-restored service\'s steps; keeps the rest', () => {
     const plan = composeSeedPlan(sel, active, set('iam-api'));
@@ -57,6 +57,8 @@ describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () =
   it('keeps all steps when nothing is restored', () => {
     const plan = composeSeedPlan(sel, active, set());
     expect(ids(plan.offline)).toEqual(['iam-registry', 'iam-dev-user', 'iam', 'sessions']);
+    // soa#402: online — needs iam-api + authz-api up to relay/consume iam.* events.
+    expect(ids(plan.online)).toEqual(['authz-projection-backfill']);
     expect(plan.skipped).toEqual([]);
   });
 
@@ -75,7 +77,15 @@ describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () =
     // Coach is single-store now — mongo is retired — so fga-bootstrap is the
     // remaining `databases: []` step and carries the case.)
     const sel: SeedSelection = { profile: 'full', addOns: ['authz'] };
-    const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api', 'coach-api');
+    const active = set(
+      'iam-api',
+      'sessions-api',
+      'programs-api',
+      'scheduling-api',
+      'content-api',
+      'coach-api',
+      'authz-api',
+    );
     const plan = composeSeedPlan(sel, active, set('iam-api', 'coach-api'));
 
     // fga-bootstrap (databases: []) survives despite iam-api ∈ restored...
@@ -95,7 +105,15 @@ describe('composeSeedPlan — gate 2: snapshot-skip (service granularity)', () =
 describe('composeSeedPlan — gate 3: offline / online partition', () => {
   it('partitions survivors by requiresServiceUp, in canonical run order', () => {
     const sel: SeedSelection = { profile: 'full', addOns: ['qtf'] };
-    const active = set('iam-api', 'sessions-api', 'programs-api', 'scheduling-api', 'content-api', 'coach-api');
+    const active = set(
+      'iam-api',
+      'sessions-api',
+      'programs-api',
+      'scheduling-api',
+      'content-api',
+      'coach-api',
+      'authz-api',
+    );
     const plan = composeSeedPlan(sel, active, set());
 
     // qtf-demo (requires sessions-api) + content (requires content-api) defer online;
@@ -111,7 +129,9 @@ describe('composeSeedPlan — gate 3: offline / online partition', () => {
       'scheduling',
       'coach-pg',
     ]);
-    expect(ids(plan.online)).toEqual(['qtf-demo', 'content']);
+    // soa#402: the backfill leads the online set — it must warm authz-api's
+    // projection before qtf-demo's reads traverse sessions-api's authz gate.
+    expect(ids(plan.online)).toEqual(['authz-projection-backfill', 'qtf-demo', 'content']);
     expect(plan.skipped).toEqual([]);
   });
 });
@@ -170,8 +190,9 @@ describe('composeSeedPlan — selection refinements', () => {
 
   it('exclude drops a step by id without recording a skip note', () => {
     const sel: SeedSelection = { profile: 'roster', exclude: ['sessions'] };
-    const plan = composeSeedPlan(sel, set('iam-api', 'sessions-api'), set());
+    const plan = composeSeedPlan(sel, set('iam-api', 'sessions-api', 'authz-api'), set());
     expect(ids(plan.offline)).toEqual(['iam-registry', 'iam-dev-user', 'iam']);
+    expect(ids(plan.online)).toEqual(['authz-projection-backfill']);
     expect(plan.skipped).toEqual([]); // excluded ≠ skipped (never requested)
   });
 });

@@ -111,4 +111,19 @@ describe('seed profiles list iam-registry FIRST in every iam-seeding profile (so
   it('SEED_RUN_ORDER places iam-registry before iam-dev-user', () => {
     expect(SEED_RUN_ORDER.indexOf('iam-registry')).toBeLessThan(SEED_RUN_ORDER.indexOf('iam-dev-user'));
   });
+
+  // Regression: the step passed `--tuples` but NOT `--model`, so bootstrap.mjs's
+  // defaultModelPath() silently preferred the PUBLISHED @saga-ed/saga-authz-model
+  // package over rostering's checked-out scripts/fga/model.fga. Every local
+  // `--with authz` store was therefore built from a stale model — 0.1.0-dev.3 is
+  // missing three already-shipped relations — while still reporting success.
+  // The deploy workflow always passed `--model ./model.fga`; local was the gap.
+  it('fga-bootstrap pins --model to the checked-out model.fga (not the published package)', () => {
+    const step = buildSeedRegistry()['fga-bootstrap'];
+    expect(step.cwd).toBe('scripts/fga');
+    const i = step.command.indexOf('--model');
+    expect(i).toBeGreaterThan(-1);
+    // cwd-relative, exactly like the --tuples arg beside it.
+    expect(step.command[i + 1]).toBe('model.fga');
+  });
 });

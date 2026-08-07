@@ -173,6 +173,74 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     isFrontend: false,
     optional: false,
   },
+  /**
+   * rostering authz-api — the tRPC capabilities/values service (soa#402).
+   *
+   * NOT `authz-sync`: that is the OpenFGA tuple projector behind `--with authz`
+   * (core/bundles.ts), a different subsystem that only shares the prefix. This
+   * one is a HARD dependency of sessions-api — since program-hub#454 (2026-07-28)
+   * sessions-api's read pipeline calls it on every request with no bypass flag,
+   * so an absent authz-api means SERVICE_UNAVAILABLE → tRPC TIMEOUT → HTTP 408
+   * on every sessions read, on a stack whose health checks all report green.
+   * Hence `optional: false`.
+   *
+   * ENV DERIVATION (from authz-api's config/schemas.ts + inversify.config.ts —
+   * nothing invented; the audit diffs resolved env against what the app reads):
+   *  - `AUTHZ_DATABASE_URL` / `RABBITMQ_URL` are read STRAIGHT off process.env,
+   *    deliberately bypassing DotenvConfigManager's `AUTHZ_` prefixing, because
+   *    they are fleet-wide names shared with authz-db's prisma.config.ts and
+   *    every other event consumer.
+   *  - The `IAM_AUTH_*` block is DotenvConfigManager-prefixed
+   *    (`configType.toUpperCase() + '_' + FIELDNAME`, no inner underscores).
+   *    Every one of these has a default, and EVERY default is wrong here:
+   *      · the JWKS defaults point at `localhost:3000`, but this stack runs
+   *        iam-api on ${IAM_PORT} (3010 at slot 0) — wrong even at slot 0, and
+   *        cross-slot at slot > 0.
+   *      · `userTokenIssuer` defaults to `https://iam.saga.org` while local
+   *        iam-api stamps `${IAM_ISSUER}` (https://iam.wootdev.com). That exact
+   *        mismatch is what made coach-api 401 every locally-minted session —
+   *        see the IAM_ISSUER note in core/launch-plan.ts.
+   *    sessions-api reaches authz-api by relaying the caller's `iam_session`
+   *    cookie (authz-api's `cookieOrServiceProcedure`), so the USER token leg is
+   *    the one on the critical path; the SERVICE leg is pinned alongside it so
+   *    the two can't drift.
+   *  - `audience` is left at its default: iam-api and authz-api already agree on
+   *    `saga-platform`.
+   */
+  'authz-api': {
+    id: 'authz-api',
+    repo: 'ROSTERING',
+    subpath: 'apps/node/authz-api',
+    port: 3200,
+    portEnvVar: 'PORT',
+    healthPath: '/health',
+    databases: ['authz_local'],
+    // iam-api is BOTH an s2s edge (authz-api fetches its JWKS to verify the
+    // relayed cookie) and an event source (the iam.* projection over rabbitmq
+    // fills authz_local's projection tables). Declared `s2s` because that is the
+    // synchronous, request-path coupling; the async edge is covered by `mesh`.
+    dependsOn: ['iam-api'],
+    depKinds: { 'iam-api': 's2s' },
+    mesh: ['postgres', 'rabbitmq'],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        NODE_ENV: 'development',
+        PORT: '${AUTHZ_PORT}',
+        AUTHZ_DATABASE_URL: '${AUTHZ_DB_URL}',
+        RABBITMQ_URL: '${MESH_MQ}',
+        IAM_AUTH_JWKSURL: '${IAM_URL}/.well-known/services/jwks.json',
+        IAM_AUTH_USERJWKSURL: '${IAM_URL}/.well-known/jwks.json',
+        IAM_AUTH_SERVICETOKENISSUER: '${IAM_ISSUER}',
+        IAM_AUTH_USERTOKENISSUER: '${IAM_ISSUER}',
+      },
+    },
+    seed: ['authz-projection-backfill'],
+    lane: lanes(3200, 'authz'),
+    tunnelSlug: 'authz',
+    isFrontend: false,
+    optional: false,
+  },
   'programs-api': {
     id: 'programs-api',
     repo: 'PROGRAM_HUB',
@@ -192,7 +260,18 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         JANUS_REQUIRED: 'false',
-        CORS_ORIGIN: '${DASH_URL}',
+        // coach-web is here for the SAME reason it is in iam-api's CORS_ORIGIN:
+        // its browser calls `programs.list` DIRECT (coach-web
+        // `src/lib/api/programs.ts`), and that call carries an
+        // `x-organization-id` header, so it PREFLIGHTS. programs-api's allow-list
+        // is `CORS_ORIGIN` + devOrigins + the https-only `*.wootdev.com` regex
+        // (api-util `buildSagaOriginAllowlist`) — nothing in it matched
+        // `http://localhost:8800`, so the OPTIONS came back 204 with NO
+        // `Access-Control-Allow-Origin` and the browser reported the same opaque
+        // "Failed to fetch" a wrong host produces (coach#329). Measured live on
+        // slot 0 before this line existed; fixing coach-web's URL alone left the
+        // symptom byte-identical.
+        CORS_ORIGIN: '${DASH_URL},${COACH_WEB_URL}',
         JANUS_LOGIN_HOST: 'localhost:${IAM_PORT}/demo',
         // Validate the SAME issuer iam-api stamps (its JWT_ISSUER). Without this
         // the rostering-client verifier falls back to the prod issuer and 401s
@@ -205,6 +284,18 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'programs',
     isFrontend: false,
     optional: false,
+    // programs-api serves a BROWSER plane now (coach-web's Reports program
+    // filter), so its CORS allow-list is boot-critical to a frontend the same
+    // way iam-api's is — and it is exactly what `tunnelOverlay()` rewrites.
+    // Without a fingerprint an already-running programs-api carrying the OLD
+    // single-origin allow-list is adopted by the next `up` (healthy ⇒
+    // alreadyUp), the preflight keeps failing, and the fix looks like it
+    // shipped while nothing changed. JANUS_LOGIN_HOST is the overlay's other
+    // rewrite; guarding both is what lets programs-api join the
+    // `adoptEnv ⊇ tunnelOverlay() rewrite set` invariant test.
+    // Same one-time "stop the process and re-run" cost iam-api/saga-dash
+    // already pay for processes stamped by an older CLI.
+    adoptEnv: ['CORS_ORIGIN', 'JANUS_LOGIN_HOST'],
   },
   'scheduling-api': {
     id: 'scheduling-api',
@@ -245,9 +336,17 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     portEnvVar: 'PORT',
     healthPath: '/health',
     databases: ['sessions'],
-    dependsOn: ['iam-api', 'programs-api', 'scheduling-api'],
+    dependsOn: ['iam-api', 'programs-api', 'scheduling-api', 'authz-api'],
     // iam-api is a required url dep; programs/scheduling are event (projections converge async).
-    depKinds: { 'iam-api': 'url', 'programs-api': 'event', 'scheduling-api': 'event' },
+    // authz-api is a HARD url dep (soa#402): SessionsAuthzGate calls it on every
+    // read with no bypass. Because the closure is transitive, this one edge pulls
+    // authz-api into EVERY flow that contains sessions-api — no per-flow edits.
+    depKinds: {
+      'iam-api': 'url',
+      'programs-api': 'event',
+      'scheduling-api': 'event',
+      'authz-api': 'url',
+    },
     mesh: ['postgres', 'rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
@@ -259,6 +358,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         CORS_ORIGIN: '${DASH_URL}',
         // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
         JWT_ISSUER: '${IAM_ISSUER}',
+        // soa#402. authz-api's client default is a LITERAL http://localhost:3200,
+        // so at slot > 0 an unset var would dial SLOT 0's authz-api — the
+        // cross-slot braid this manifest exists to prevent.
+        AUTHZ_API_URL: 'http://localhost:${AUTHZ_PORT}',
       },
     },
     // qtf-demo runs `db:seed:qtf-demo` against the sessions DB (up.sh seed_qtf_demo); add-on, online.
@@ -613,8 +716,15 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // curriculum read path is Postgres now (PostgresContentReadStore over
     // content_release), coach-api carries no mongo dependency and reads no MONGO_*
     // env, so the mesh mongo is NOT gated on and those vars are not injected.
-    // RABBITMQ_ENABLED=false, so rabbitmq is intentionally NOT gated on either.
-    mesh: [],
+    // Rabbitmq IS gated on: coach-api consumes iam.persona_assignment.{added,
+    // removed} + iam.persona_definition.upserted off the shared iam.events
+    // exchange and projects them into persona_assignment / persona_definition —
+    // the table coachReport's roster joins against. With the consumer off (the
+    // pre-2026-08-06 default) `consumed_events` stayed empty on every slot and
+    // that projection was only ever written by concierge's direct-SQL mirror, so
+    // the event path that production depends on was NEVER exercised locally.
+    // coach#413 is that same path being cold in prod. Mongo stays retired.
+    mesh: ['rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
       env: {
@@ -625,7 +735,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_TARGET: '${IAM_URL}',
         AUTH_JWKSURL: '${IAM_URL}/.well-known/jwks.json',
         AUTH_ISSUER: '${IAM_ISSUER}',
-        RABBITMQ_ENABLED: 'false',
+        RABBITMQ_ENABLED: 'true',
         RABBITMQ_URL: '${MESH_MQ}',
         EXPRESS_SERVER_CORSALLOWEDDOMAINS: '${COACH_WEB_HOST}',
         SAGA_API_TARGET: '${SAGA_API_TARGET_COACH}',
@@ -646,11 +756,20 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // SvelteKit SPA — probed on the root path like saga-dash / connect-web.
     healthPath: '/',
     databases: [],
-    // Client-only SPA (ssr = false): the BROWSER calls coach-api for data and
-    // iam's auth.whoami direct for identity — so it needs both URLs, and iam
-    // must allow its origin (see iam-api's CORS_ORIGIN).
-    dependsOn: ['coach-api', 'iam-api'],
-    depKinds: { 'coach-api': 'browser', 'iam-api': 'browser' },
+    // Client-only SPA (ssr = false): the BROWSER calls coach-api for data,
+    // iam's auth.whoami direct for identity, and programs-api direct for the
+    // Reports program filter (coach#313) — so it needs all three URLs, and each
+    // must allow its origin (see those services' CORS_ORIGIN).
+    //
+    // programs-api is a real dep even though it only powers ONE control: with
+    // it absent, `stack up --with coach` / `--only coach-web` hand the browser a
+    // localhost:3006 nothing is listening on, so the Reports Program selector
+    // errors by construction. The cost is that the `coach` bundle now pulls the
+    // `programs` db + rabbitmq + the programs seed; that is the honest price of
+    // the page working. `browser` kind, so e2e FLOW closures (which list their
+    // own requiredSystems and run with followBrowserEdges:false) are unchanged.
+    dependsOn: ['coach-api', 'iam-api', 'programs-api'],
+    depKinds: { 'coach-api': 'browser', 'iam-api': 'browser', 'programs-api': 'browser' },
     mesh: [],
     launch: {
       cmd: 'pnpm dev',
@@ -659,6 +778,15 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // Without this, coach-web falls back to its .env default
         // (https://iam.wootdev.com) and the local SPA talks to deployed iam.
         PUBLIC_IAM_API_URL: '${IAM_URL}',
+        // Same class, third instance: without this, coach-web falls back to its
+        // .env default (https://programs-api.wootdev.com) and the local SPA's
+        // Reports Program selector fires a cross-origin call at DEPLOYED
+        // programs-api — net::ERR_FAILED, "programs.list request failed: Failed
+        // to fetch", empty selector (coach#329).
+        // No ${PROGRAMS_URL} token exists (only the port), so this composes the
+        // origin from ${PROGRAMS_PORT} — the staff-admin-api / ads-adm-api idiom
+        // below, which slot-offsets correctly where a literal would not.
+        PUBLIC_PROGRAMS_API_URL: 'http://localhost:${PROGRAMS_PORT}',
       },
     },
     seed: [],
@@ -674,22 +802,36 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // 2026-07-16 slot-0 incident: a plain `develop coach` adopted a leftover
     // `--tunnel` coach-web and the browser whoami dialed the dead tunnel iam →
     // the misleading soa#300 "503 — Unable to reach the sign-in service".
-    // Fingerprint the four browser-plane keys tunnelOverlay() rewrites:
-    //  - PUBLIC_COACH_API_URL / PUBLIC_IAM_API_URL (boot-critical): in the
-    //    plain launch env above AND value-flipped under --tunnel ⇒ the
+    // Fingerprint the five browser-plane keys tunnelOverlay() rewrites:
+    //  - PUBLIC_COACH_API_URL / PUBLIC_IAM_API_URL / PUBLIC_PROGRAMS_API_URL:
+    //    in the plain launch env above AND value-flipped under --tunnel ⇒ the
     //    fingerprints differ in both directions.
     //  - PUBLIC_LOGIN_URL / PUBLIC_DASHBOARD_URL: tunnel-ONLY (no plain-env
     //    entry — plain runs let them fall through to coach-web's dotfiles).
     //    The fingerprint OMITS absent keys, so plain stamps lack them while
     //    tunnel stamps carry them — present-vs-omitted still mismatches BOTH
     //    ways, the same asymmetry saga-dash's guard relies on.
-    // A mode-drifted coach-web is REFUSED loudly and relaunched with the
-    // current mode's env — refuse-or-relaunch, never adopt.
+    // PUBLIC_PROGRAMS_API_URL (coach#329) is the case that proves why the list
+    // must grow with the launch env rather than track modes: adding the var
+    // WITHOUT adding it here is a plain→plain drift the other four are provably
+    // incapable of seeing — their values are unchanged, so a coach-web vite
+    // started before the fix stamps a byte-identical contract, gets adopted, and
+    // keeps serving the `.env` default https://programs-api.wootdev.com out of a
+    // bundle no on-disk write can reach. Green stack, unchanged bug.
+    // A mode- or contract-drifted coach-web is REFUSED loudly — the launcher
+    // neither adopts nor kills it; the operator stops the process (`ss stack
+    // down` for an ss-launched one; a hand-run `pnpm dev` has no pidfile here
+    // and must be killed by hand) and re-runs, and THAT run relaunches with the
+    // current env. Every existing slot pays that once when this lands.
     adoptEnv: [
       'PUBLIC_COACH_API_URL',
       'PUBLIC_IAM_API_URL',
       'PUBLIC_LOGIN_URL',
       'PUBLIC_DASHBOARD_URL',
+      // Appended, not inserted: the first four positions of an existing stamp
+      // stay put, so the refusal message's expected-vs-recorded diff reads as
+      // "one key added" rather than a wholesale reshuffle.
+      'PUBLIC_PROGRAMS_API_URL',
     ],
   },
   'transcripts-api': {
@@ -837,5 +979,123 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'authz-sync',
     isFrontend: false,
     optional: true,
+  },
+  // ── staff-admin console (saga-dash's SECOND app) ────────────────────────
+  // A staff-only SPA + its OWN Express/Lambda BFF. Modeled as TWO entries, the
+  // coach-web/coach-api precedent — `ServiceDef` is one id → one launch.cmd →
+  // one port, so a single entry cannot start both processes. `--with
+  // staff-admin` brings the pair up together (bundles.ts).
+  //
+  // Both are `optional: true`: this is an operator console, not part of the
+  // default closure, so a bare `ss stack up` is byte-identical to before.
+  'staff-admin-bff': {
+    id: 'staff-admin-bff',
+    repo: 'SAGA_DASH',
+    subpath: 'apps/web/staff-admin-console/backend',
+    // 3011, NOT the app's own default of 3000 — same reason content-api runs on
+    // 3009 instead of its default. :3000 is the most contested port on a dev box
+    // (every default Next/Express/Rails app), and `deriveInstance` builds
+    // `portOverrides` over EVERY manifest service including optional ones, so
+    // `stack down`'s orphan reap (`reapScanServices`) would group-kill whatever
+    // sits on :3000 for EVERY user — including people who never pass
+    // `--with staff-admin`. Registering an unrelated dev server's port into a
+    // SIGKILL band is not a cost this opt-in bundle gets to impose.
+    port: 3011,
+    // `pnpm dev` = `JANUS_REQUIRED=false tsx watch src/local.ts`, so the janus
+    // (JumpCloud) perimeter bypass rides along for free — a local operator has
+    // no janus_session to present. src/local.ts reads `PORT`, so the launcher
+    // injects 3011 (and the slot offset) rather than the app's baked default.
+    portEnvVar: 'PORT',
+    healthPath: '/health/ready',
+    databases: [],
+    dependsOn: ['iam-api', 'programs-api', 'sis-api'],
+    // All plain URL reads — the BFF proxies the operator's forwarded cookie to
+    // each. No S2S: access rides on the `iam_session` `ss stack login` mints.
+    depKinds: { 'iam-api': 'url', 'programs-api': 'url', 'sis-api': 'url' },
+    mesh: [],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        // 🪤 BARE ORIGINS — NOT `${IAM_URL}/trpc`. The BFF's tRPC clients append
+        // `/trpc` themselves (iam-client.ts, programs-client.ts, sis-client.ts),
+        // so ads-adm-api's `${IAM_URL}/trpc` form would double the segment and
+        // 404 in a way that reads like a broken feature.
+        //
+        // Also note the BFF's built-in IAM_API_URL default is localhost:3000 —
+        // its OWN port — so leaving this unset makes it proxy to itself.
+        IAM_API_URL: '${IAM_URL}',
+        // No PROGRAMS_URL / SIS_URL tokens exist (only the ports), so these
+        // compose the origin from the port tokens and slot correctly.
+        PROGRAMS_API_URL: 'http://localhost:${PROGRAMS_PORT}',
+        SIS_API_URL: 'http://localhost:${SIS_PORT}',
+        // Impersonation hands off to the local dash. Slot-correct via the token
+        // rather than the BFF's own localhost:8900 default.
+        IMPERSONATION_MOCK_DASH_ORIGIN: '${DASH_URL}',
+      },
+    },
+    seed: [],
+    lane: lanes(3011, 'staff-admin-api'),
+    tunnelSlug: 'staff-admin-api',
+    isFrontend: false,
+    optional: true,
+    // soa#305 adoption guard. The DOCUMENTED local path for this app is
+    // `pnpm dev:mock`, which pins IAM_API_URL at the e2e mock (127.0.0.1:4610).
+    // Without this fingerprint the launcher adopts such a process and the
+    // console then serves MOCK FIXTURE data while claiming to be on the ss
+    // stack — 200s all the way down, which is exactly how it misleads. Refuse
+    // it loudly instead (one-time "stop and re-run" for a pre-existing process).
+    adoptEnv: ['IAM_API_URL'],
+  },
+  'staff-admin-console': {
+    id: 'staff-admin-console',
+    repo: 'SAGA_DASH',
+    subpath: 'apps/web/staff-admin-console',
+    port: 8910,
+    // `null` because vite does NOT read $PORT — the dev script is
+    // `vite dev --port 8910` and vite.config.ts hardcodes `server.port: 8910`
+    // (verified: with PORT=8913 set it still took the config's 8910, then
+    // auto-incremented to 8911 when that was busy). It still SLOTS: like every
+    // `isFrontend` service, stack-api appends `--port <base+offset>` to the
+    // launch argv at slot > 0 and vite/cac honours the LAST `--port`. Same seam
+    // saga-dash (:8900, portEnvVar: null, isFrontend: true) rides — so do NOT
+    // add this to SLOT_EXCLUDED_SERVICES.
+    portEnvVar: null,
+    healthPath: '/',
+    databases: [],
+    dependsOn: ['staff-admin-bff'],
+    // 'url', NOT 'browser' — deliberately unlike saga-dash's deps. A `browser`
+    // edge is skipped under `followBrowserEdges:false` (flow/e2e closures), which
+    // would resolve a closure containing the SPA and NOT its BFF: every page then
+    // fails at the /api proxy with connection errors that read as a broken test
+    // rather than a missing service. And the distinction a `browser` edge encodes
+    // — "the SPA MAY call this backend from SOME page" — does not apply here: the
+    // console has exactly ONE upstream and cannot render a single page without
+    // it, so it is a hard dependency in every closure.
+    depKinds: { 'staff-admin-bff': 'url' },
+    mesh: [],
+    launch: {
+      cmd: 'pnpm dev',
+      env: {
+        // vite.config.ts's proxy target is `process.env.BFF_URL ??
+        // 'http://localhost:3000'`, so the proxy target slots too: at slot > 0
+        // the SPA reaches ITS slot's BFF rather than silently proxying to
+        // slot 0's (which would mix two stacks' data behind one console).
+        BFF_URL: 'http://localhost:${STAFF_ADMIN_BFF_PORT}',
+      },
+    },
+    seed: [],
+    lane: lanes(8910, 'staff-admin'),
+    tunnelSlug: 'staff-admin',
+    isFrontend: true,
+    optional: true,
+    // Same soa#305 guard as the BFF, for the same reason on the other side of the
+    // proxy. `healthPath: '/'` means a bare `pnpm dev` vite left running in the
+    // app dir answers 200, and an unguarded launcher ADOPTS it — never applying
+    // BFF_URL, so the console's /api proxy falls back to vite.config.ts's
+    // `http://localhost:3000` default and the browser reads whatever happens to
+    // be on 3000 instead of this stack's BFF. Fingerprinting the key refuses that
+    // process instead (one-time "stop and re-run"), which is precisely the
+    // mixed-stack condition BFF_URL exists to prevent.
+    adoptEnv: ['BFF_URL'],
   },
 };

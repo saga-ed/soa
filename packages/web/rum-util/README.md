@@ -88,6 +88,11 @@ Per-app, per-account, region `us-west-2`:
 `application-id` or `client-token` empty to disable RUM entirely for that
 account — `initRum` returns `false` and every other call no-ops.
 
+> **Non-prod only.** A build with `RUM_ENV_DEFAULT=prod` rejects empty or
+> malformed credentials outright — see [Production builds fail
+> loud](#production-builds-fail-loud). "Leave it empty to disable" is a dev/preview
+> affordance, not a way to ship prod without RUM.
+
 Seed once out-of-band (or as a one-shot CFN/Terraform stack) — the values are
 account-scoped, not per-branch, so they live longer than any single deploy.
 
@@ -113,11 +118,34 @@ The script:
   `loadEnv`.
 - Uses heredoc-delimited form so a multi-line SSM value can't inject extra
   entries into `$GITHUB_ENV`.
-- Tolerates `ParameterNotFound` (falls back to `RUM_ENV_DEFAULT` for the env
-  param; empties for app-id / token). Other AWS errors (`AccessDenied`,
+- Tolerates `ParameterNotFound` on non-prod (falls back to `RUM_ENV_DEFAULT` for
+  the env param; empties for app-id / token). Other AWS errors (`AccessDenied`,
   `ThrottlingException`, wrong region) fail the build loudly — an IAM
   regression should not silently ship prod without RUM.
 - Masks the client-token in CI logs via `::add-mask::`.
+
+#### Production builds fail loud
+
+When `RUM_ENV_DEFAULT=prod`, the script **fails the build** if either credential
+is empty/missing, or if either is present but malformed:
+
+| Param | Expected shape |
+|---|---|
+| `application-id` | UUID (`8-4-4-4-12` hex) |
+| `client-token` | `pub` + 32 hex chars |
+
+Non-prod builds keep warning instead — local and preview builds legitimately run
+without RUM.
+
+Presence alone is not a sufficient check. A malformed value passes an is-it-empty
+test, the build goes green, and Datadog then rejects the credential at runtime —
+prod is dark, but in a way nobody notices. This is not hypothetical: saga-dash's
+prod `client-token` was once seeded as the literal placeholder `<same as dev>`
+copied out of a runbook, and prod ran unmonitored for weeks as a result.
+
+> **Before adopting this in a repo that already deploys to prod**, confirm the
+> prod SSM params are seeded and well-formed — otherwise the next prod deploy
+> hard-fails. Reading `*/rum/*` needs AppInfra or higher; Observer is denied.
 
 ### 4. Vite config
 

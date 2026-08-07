@@ -28,6 +28,7 @@
  * would wrongly resolve transcripts-api), so the gate dispatches per service id.
  */
 
+import { AUTHZ_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from './bundles.js';
 import { launchOrder } from './launch-order.js';
 import type { DbId, Manifest, MeshId, ServiceId } from './manifest/index.js';
 
@@ -47,6 +48,8 @@ export interface ClosureOpts {
   withPlayback?: boolean;
   /** Keep the `optional:true` `authz-sync` service. */
   withAuthz?: boolean;
+  /** Keep the `optional:true` staff-admin console pair (SPA + its BFF). */
+  withStaffAdmin?: boolean;
   /**
    * Whether to traverse `depKind: 'browser'` edges (default `true`).
    *
@@ -73,13 +76,32 @@ export function computeClosure(
 ): Closure {
   const withPlayback = opts.withPlayback ?? false;
   const withAuthz = opts.withAuthz ?? false;
+  const withStaffAdmin = opts.withStaffAdmin ?? false;
   const followBrowserEdges = opts.followBrowserEdges ?? true;
 
   // Each optional service is admitted by its OWN flag — never a blanket OR of
   // every opt-in flag, which would cross-admit (e.g. `--with authz` alone must
   // not also resolve the playback trio).
-  const admitsOptional = (id: ServiceId): boolean =>
-    id === 'authz-sync' ? withAuthz : withPlayback;
+  //
+  // The id→family sets come from `bundles.ts` (derived from BUNDLES) rather than
+  // being hand-listed here, so adding a family is a registry edit only. Importing
+  // bundles.ts is safe: its only dependency on this module is `import type
+  // { ClosureOpts }`, which is erased at compile time — there is no runtime cycle.
+  //
+  // EXHAUSTIVE BY CONSTRUCTION: there is deliberately no `return withPlayback`
+  // fallthrough. That default is what silently handed every unmapped optional id
+  // the playback flag — so a newly-added optional service resolved an EMPTY
+  // closure (exit 0, no error) until someone noticed. An unmapped id now THROWS,
+  // which surfaces at the first test that touches it rather than in the field.
+  const admitsOptional = (id: ServiceId): boolean => {
+    if (PLAYBACK_IDS.includes(id)) return withPlayback;
+    if (AUTHZ_IDS.includes(id)) return withAuthz;
+    if (STAFF_ADMIN_IDS.includes(id)) return withStaffAdmin;
+    throw new Error(
+      `closure: optional service '${id}' has no opt-in flag — add it to a BUNDLES entry ` +
+        `(and its *_IDS export), or it will silently resolve an empty closure.`,
+    );
+  };
 
   const inClosure = new Set<ServiceId>();
   const reasons = new Map<ServiceId, string[]>();

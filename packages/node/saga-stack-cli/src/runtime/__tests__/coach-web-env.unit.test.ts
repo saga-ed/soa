@@ -37,6 +37,7 @@ function fakeFs(opts: { hasApp?: boolean } = {}): {
 const slotPorts = (offset: number): Partial<Record<ServiceId, number>> => ({
   'iam-api': 3010 + offset,
   'coach-api': 6105 + offset,
+  'programs-api': 3006 + offset,
   'saga-dash': 8900 + offset,
 });
 
@@ -81,6 +82,10 @@ describe('syncCoachWebEnvLocal', () => {
     // base ports: iam 3010, coach-api 6105, saga-dash 8900. Remote wootdev defaults gone.
     expect(env.PUBLIC_IAM_API_URL).toBe('http://localhost:3010');
     expect(env.PUBLIC_COACH_API_URL).toBe('http://localhost:6105');
+    // coach#329: the Reports program filter fetches programs.list from the
+    // browser. Redundant under `ss` (the launch env outranks this file) — this
+    // line is what makes a hand-run `pnpm dev` in the coach-web dir work.
+    expect(env.PUBLIC_PROGRAMS_API_URL).toBe('http://localhost:3006');
     expect(env.PUBLIC_DASHBOARD_URL).toBe('http://localhost:8900');
     // PUBLIC_LOGIN_URL → iam (the whoami 401 challenge login lives at iam's /demo).
     expect(env.PUBLIC_LOGIN_URL).toBe('http://localhost:3010');
@@ -97,11 +102,13 @@ describe('syncCoachWebEnvLocal', () => {
     // slot 2 = base + 2000: iam 5010, coach-api 8105, saga-dash 10900.
     expect(env.PUBLIC_IAM_API_URL).toBe('http://localhost:5010');
     expect(env.PUBLIC_COACH_API_URL).toBe('http://localhost:8105');
+    expect(env.PUBLIC_PROGRAMS_API_URL).toBe('http://localhost:5006');
     expect(env.PUBLIC_DASHBOARD_URL).toBe('http://localhost:10900');
     expect(env.PUBLIC_LOGIN_URL).toBe('http://localhost:5010');
     // base-port (slot 0) values must NOT leak through at an offset slot.
     expect(env.PUBLIC_IAM_API_URL).not.toContain(':3010');
     expect(env.PUBLIC_COACH_API_URL).not.toContain(':6105');
+    expect(env.PUBLIC_PROGRAMS_API_URL).not.toContain(':3006');
   });
 
   it('coachWebEnvLocalContents omits a PUBLIC_ var whose backing service has no resolved port', () => {

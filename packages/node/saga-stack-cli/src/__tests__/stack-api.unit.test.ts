@@ -12,7 +12,7 @@
  *   reset() — NATIVE (M8 R4); login() is now native at the command layer (removed here).
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { computeClosure } from '../core/closure.js';
 import { deriveInstance } from '../core/derive-instance.js';
 import { defaultLaunchContext } from '../core/launch-plan.js';
@@ -161,6 +161,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     // launch order is the topo flatten: iam-api → programs-api → scheduling-api → sessions-api.
     expect(fakes.launches.map((s) => s.id)).toEqual([
       'iam-api',
+      'authz-api', // soa#402
       'programs-api',
       'scheduling-api',
       'sessions-api',
@@ -221,6 +222,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     // base ports at slot 0: iam 3010, coach-api 6105, saga-dash 8900. No remote defaults.
     expect(contents).toContain('PUBLIC_IAM_API_URL=http://localhost:3010');
     expect(contents).toContain('PUBLIC_COACH_API_URL=http://localhost:6105');
+    expect(contents).toContain('PUBLIC_PROGRAMS_API_URL=http://localhost:3006');
     expect(contents).toContain('PUBLIC_DASHBOARD_URL=http://localhost:8900');
     expect(contents).toContain('PUBLIC_LOGIN_URL=http://localhost:3010');
     expect(contents).not.toContain('wootdev.com');
@@ -242,8 +244,10 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     // slot 1 = base + 1000: iam 4010, coach-api 7105, saga-dash 9900.
     expect(contents).toContain('PUBLIC_IAM_API_URL=http://localhost:4010');
     expect(contents).toContain('PUBLIC_COACH_API_URL=http://localhost:7105');
+    expect(contents).toContain('PUBLIC_PROGRAMS_API_URL=http://localhost:4006');
     expect(contents).toContain('PUBLIC_DASHBOARD_URL=http://localhost:9900');
     expect(contents).not.toContain(':6105'); // slot 0's coach-api must not leak
+    expect(contents).not.toContain(':3006'); // …nor slot 0's programs-api
   });
 
   it('soa#300: no coach-web .env.local write when coach-web is not in the closure', async () => {
@@ -1128,5 +1132,80 @@ describe('StackApi.restart — M9 native bounce (down → vite-clear → up, no 
 
     expect(out.reaped?.find((r) => r.id === 'iam-api')?.outcome).toBe('alive');
     expect(out.down.stopped.find((s) => s.id === 'iam-api')?.stopped).toBe(false);
+  });
+
+  // B2: the group reap above only ever reaches a listener that HAS a pidfile. An
+  // orphan that lost its — a previous run, a slot remap, a crashed CLI, a hand-run
+  // `pnpm dev` — is invisible to the stopper, survives the bounce, and is then
+  // ADOPTED by up() (200 on the port ⇒ alreadyUp), so it rides through every
+  // restart serving stale code. Measured 2026-08-05 on slot 0's coach-web.
+  const ORPHAN = {
+    id: 'iam-api' as ServiceId,
+    port: 3010,
+    pid: 2703661,
+    pgid: 2703660,
+    command: 'node vite.js dev',
+  };
+
+  function fakeForeignProcs(found: typeof ORPHAN[], killed = true) {
+    const find = vi.fn(async () => found);
+    const reap = vi.fn(async (fs: typeof found) => fs.map((f) => ({ ...f, killed })));
+    return { seam: { find, reap } as unknown as Runtime['foreignProcs'], find, reap };
+  }
+
+  it('B2: reaps a FOREIGN listener that holds a stack port with no pidfile', async () => {
+    const { seam, reap } = fakeForeignProcs([ORPHAN]);
+    const { runtime } = makeRuntime({
+      serviceStopper: async () => [],
+      stateDir: '/tmp/sds-synthetic',
+      foreignProcs: seam,
+    });
+    const out = await makeStackApi(manifest, runtime).restart(['iam-api'] as ServiceId[]);
+
+    expect(reap).toHaveBeenCalledWith([ORPHAN]);
+    expect(out.reapedForeign).toEqual([{ ...ORPHAN, killed: true }]);
+  });
+
+  it('B2: surfaces a foreign SURVIVOR rather than claiming a clean bounce', async () => {
+    const { seam } = fakeForeignProcs([ORPHAN], false);
+    const { runtime } = makeRuntime({
+      serviceStopper: async () => [],
+      stateDir: '/tmp/sds-synthetic',
+      foreignProcs: seam,
+    });
+    const out = await makeStackApi(manifest, runtime).restart(['iam-api'] as ServiceId[]);
+
+    // up() will adopt it — never report this as a successful bounce.
+    expect(out.reapedForeign?.[0]?.killed).toBe(false);
+  });
+
+  it('B2: stays SLOT-SAFE — sweeps this slot’s ports against this state dir, never host-globally', async () => {
+    const { seam, find, reap } = fakeForeignProcs([]);
+    const { runtime } = makeRuntime({
+      serviceStopper: async () => [],
+      stateDir: '/tmp/sds-synthetic-s2',
+      foreignProcs: seam,
+      slot: 2,
+    });
+    const out = await makeStackApi(manifest, runtime).restart(['iam-api'] as ServiceId[]);
+
+    const arg = find.mock.calls[0]?.[0] as {
+      stateDir: string;
+      services?: ServiceId[];
+      portOverrides?: Partial<Record<ServiceId, number>>;
+    };
+    expect(arg.stateDir).toBe('/tmp/sds-synthetic-s2');
+    expect(arg.services).toEqual(['iam-api']);
+    // Slot 2's OFFSET port — a host-global sweep would have hit the base 3010.
+    expect(arg.portOverrides?.['iam-api' as ServiceId]).toBe(5010);
+    // Nothing foreign ⇒ no kills attempted at all.
+    expect(reap).not.toHaveBeenCalled();
+    expect(out.reapedForeign).toEqual([]);
+  });
+
+  it('B2: skips the sweep when no foreignProcs seam is wired (facade parity)', async () => {
+    const { runtime } = makeRuntime({ serviceStopper: async () => [], stateDir: '/tmp/x' });
+    const out = await makeStackApi(manifest, runtime).restart(['iam-api'] as ServiceId[]);
+    expect(out.reapedForeign).toBeUndefined();
   });
 });

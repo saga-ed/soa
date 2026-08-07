@@ -2,37 +2,15 @@
 
 Example applications demonstrating SOA package usage patterns.
 
-**Parent Context:** Part of [soa](../CLAUDE.md), the shared-infrastructure monorepo for Saga platform applications.
-
-## Structure
-
-```
-apps/
-├── web/         # Frontend applications (browser runtime)
-├── node/        # Backend applications (Node.js runtime)
-├── core/        # Runtime-agnostic apps (if any)
-└── projects/    # Legacy project directory
-```
-
 ## Runtime Tiers
 
-| Tier | Runtime | Description |
-|------|---------|-------------|
-| `web/` | Browser | Next.js/SvelteKit frontend apps |
-| `node/` | Node.js | Express/tRPC backend APIs |
-| `core/` | Agnostic | CLI tools, scripts (if any) |
+Apps import from `packages/` by runtime compatibility: `web/` (browser, Next.js/SvelteKit),
+`node/` (Express/tRPC backend), `core/` (runtime-agnostic — currently empty except this
+tier's own CLAUDE.md). `examples/` holds demo apps; `projects/` is a legacy directory.
 
-## Key Patterns
-
-- Apps import from `packages/` using workspace protocol
-- Each app has its own `package.json` with specific dependencies
-- Use `pnpm --filter [app-name] dev` to run individual apps
+Run an individual app with `pnpm --filter [app-name] dev`.
 
 ## See Also
 
 - `web/CLAUDE.md` - Frontend app patterns
 - `node/CLAUDE.md` - Backend API patterns
-
----
-
-*Last updated: 2026-02*

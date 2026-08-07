@@ -52,6 +52,8 @@ let warns: string[];
 let prompts: string[];
 let psqlCalls: { conn: string; sql: string }[];
 let lambdaCalls: LambdaInvokeRequest[];
+/** Every `aws` shell-out attempted (there should be none outside --snapshot). */
+let awsCalls: string[][];
 
 const text = (): string => out.join('\n');
 
@@ -101,7 +103,8 @@ function installEnvPsql(
 
 function installEnvAws(lambda: (req: LambdaInvokeRequest) => unknown = () => null): void {
   const fake: EnvAws = {
-    async json(): Promise<unknown> {
+    async json(args): Promise<unknown> {
+      awsCalls.push(args);
       throw new Error('unexpected aws json call in reset tests');
     },
     async lambdaInvoke(req): Promise<unknown> {
@@ -144,6 +147,7 @@ beforeEach(async () => {
   prompts = [];
   psqlCalls = [];
   lambdaCalls = [];
+  awsCalls = [];
   vi.spyOn(BaseCommand.prototype as unknown as { log: (msg?: string) => void }, 'log').mockImplementation(
     (msg?: string) => {
       out.push(String(msg ?? ''));
@@ -193,6 +197,44 @@ describe('refusals (non-zero, nothing touched)', () => {
       EnvOrgReset.run(['--org', 'emptyOrg', '--url', 'iam=', '--url', 'programs=postgres://p', '--yes'], config),
     ).rejects.toThrow(/empty connection string/);
     expect(psqlCalls).toHaveLength(0);
+  });
+
+  it('refuses a reset-forbidden env (--env prod) before ANY url is parsed or dialed', async () => {
+    // I#375: the refusal is a DECLARATION check (`resetForbidden`) placed
+    // immediately after resolveEnv — before --url parsing, before the anchor
+    // guards, before psql exists. No production connection string is read,
+    // logged, or dialed, and there is no --force.
+    await expect(EnvOrgReset.run(['--org', 'emptyOrg', ...ALL_URLS, '--yes', '--env', 'prod'], config)).rejects.toThrow(
+      /env org reset does not operate on 'prod'/,
+    );
+    expect(psqlCalls).toHaveLength(0);
+    expect(transactions()).toHaveLength(0);
+    expect(lambdaCalls).toHaveLength(0);
+    expect(awsCalls).toHaveLength(0);
+    expect(prompts).toHaveLength(0);
+  });
+
+  it('the prod refusal beats --dry-run, --snapshot, and a malformed --url alike', async () => {
+    // Ordering proof: a bad --url shape would normally be the FIRST thing to
+    // fail (and would echo the string back). On a forbidden env the env
+    // refusal must win, so the connection string is never even inspected.
+    for (const extra of [['--dry-run'], ['--yes', '--snapshot'], ['--yes']]) {
+      await expect(
+        EnvOrgReset.run(['--org', 'emptyOrg', '--url', 'iam=postgres://prod-secret', '--env', 'prod', ...extra], config),
+      ).rejects.toThrow(/does not operate on 'prod'.*There is no --force/s);
+    }
+    expect(psqlCalls).toHaveLength(0);
+    expect(awsCalls).toHaveLength(0);
+  });
+
+  it('dev and training are untouched by the reset-forbidden guard', async () => {
+    for (const envName of ['dev', 'training']) {
+      psqlCalls = [];
+      await expect(
+        EnvOrgReset.run(['--org', 'emptyOrg', ...ALL_URLS, '--yes', '--env', envName], config),
+      ).resolves.toBeUndefined();
+      expect(transactions()).toHaveLength(7);
+    }
   });
 
   it('IDENTITY ASSERTION: a wrong org display name refuses before any delete', async () => {

@@ -38,8 +38,11 @@ describe('meshPortSpecs / meshOwnedContainers', () => {
       { port: 5672, name: 'rabbitmq' },
       { port: 15672, name: 'rabbitmq-mgmt' },
       { port: 27037, name: 'connect-mongo' },
-      { port: 8080, name: 'openfga' },
-      { port: 8081, name: 'openfga-mgmt' },
+      // HOST ports, matching compose's `${OPENFGA_HTTP_PORT:-8080}:8080` with
+      // infra/.env.defaults' OPENFGA_HTTP_PORT=8180. Asserting 8080/8081 here
+      // meant the preflight guarded ports nothing ever bound.
+      { port: 8180, name: 'openfga' },
+      { port: 8181, name: 'openfga-mgmt' },
     ]);
   });
 
@@ -56,8 +59,8 @@ describe('meshPortSpecs / meshOwnedContainers', () => {
       { port: 6672, name: 'rabbitmq' },
       { port: 16672, name: 'rabbitmq-mgmt' },
       { port: 28037, name: 'connect-mongo' },
-      { port: 9080, name: 'openfga' },
-      { port: 9081, name: 'openfga-mgmt' },
+      { port: 9180, name: 'openfga' },
+      { port: 9181, name: 'openfga-mgmt' },
     ]);
     // offset 0 is byte-identical to the default.
     expect(meshPortSpecs(manifest, 0)).toEqual(meshPortSpecs(manifest));

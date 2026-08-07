@@ -5,6 +5,8 @@
  */
 
 export * from './registry.js';
+export * from './credentials.js';
+export * from './data-plane.js';
 export * from './seed-ids.js';
 export * from './footprint.js';
 export * from './reset-plan.js';

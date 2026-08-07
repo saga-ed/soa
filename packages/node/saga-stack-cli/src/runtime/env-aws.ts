@@ -22,6 +22,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -133,6 +134,66 @@ export function lambdaInvokeArgs(req: LambdaInvokeRequest, outfile: string): str
 const READY_MARKER = 'Waiting for connections';
 const READY_TIMEOUT_MS = 30_000;
 
+/**
+ * Is the tunnel's LOCAL end already taken? Resolves the errno when 127.0.0.1
+ * `port` cannot be bound, undefined when it is free (soa#370).
+ *
+ * Reaping our own timed-out children stops this CLI from creating new orphans,
+ * but it cannot free a port some EARLIER process is still holding — a run that
+ * predates the reaping fix, one killed with SIGKILL, a second concurrent
+ * `ss env connect`, or an unrelated local postgres. Without this probe every
+ * one of those spends the full 30s readiness deadline and then reports a
+ * message naming the SSM document, target and remote endpoint — i.e. it
+ * describes the ROUTE, which is exactly the wrong layer. That is the misread
+ * that cost soa#370 a day of investigation, and the reaping fix alone does not
+ * prevent a repeat.
+ *
+ * Deliberately advisory, not a lock: it races the spawn below rather than
+ * gating it, so `portForward` keeps its synchronous handle (and a real `pid`).
+ * A bind test takes ~1ms while the plugin needs a round trip to AWS before it
+ * touches the port, so the probe always settles first in practice. Losing the
+ * race costs nothing — the session-manager-plugin then fails its own bind and
+ * the early-exit path reports that instead.
+ */
+/**
+ * Tear down a port-forward session — the whole process GROUP, not just `aws`
+ * (soa#370).
+ *
+ * `aws ssm start-session` is a launcher: it execs `session-manager-plugin`, and
+ * THAT grandchild is what binds the local port. SIGTERM to the `aws` child kills
+ * the launcher only; the plugin is reparented to init and keeps the port held
+ * forever. Confirmed live against dev — a completed `coach-concierge reset`
+ * left `session-manager-plugin` (PPID 4056) still listening on 127.0.0.1:15432,
+ * which is why the very next reset failed. Since concierge pins dev to 15432,
+ * that made every run after the first fail, matching the "reads work, every
+ * write fails" report exactly.
+ *
+ * Spawning `detached` makes the child a group leader, so a negative pid signals
+ * the launcher and the plugin together. Falls back to the plain child kill if
+ * the group is already gone (ESRCH) or the platform refuses the negative pid.
+ */
+function killGroup(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'): void {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      // Already reaped — nothing left to signal.
+    }
+  }
+}
+
+export function probeLocalPort(port: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const probe = createServer();
+    probe.once('error', (err: NodeJS.ErrnoException) => resolve(err.code ?? 'EADDRINUSE'));
+    probe.once('listening', () => probe.close(() => resolve(undefined)));
+    probe.listen(port, '127.0.0.1');
+  });
+}
+
 export function makeRealEnvAws(): EnvAws {
   return {
     async json(args, opts): Promise<unknown> {
@@ -182,8 +243,12 @@ export function makeRealEnvAws(): EnvAws {
     },
 
     portForward(req): PortForwardHandle {
+      // `detached` puts the session in its OWN process group so teardown can
+      // signal the GROUP (see killGroup). Without it we can only reach `aws`
+      // itself, which is not the process holding the port (soa#370).
       const child: ChildProcess = spawn('aws', portForwardArgs(req), {
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true,
       });
       let output = '';
       const readyTimeoutMs = req.readyTimeoutMs ?? READY_TIMEOUT_MS;
@@ -194,12 +259,12 @@ export function makeRealEnvAws(): EnvAws {
         // A session that never signals READY must be REAPED, not abandoned
         // (soa#370). `aws ssm start-session` keeps running after we give up —
         // and the session-manager-plugin under it holds the local port — so an
-        // un-killed child silently poisons that port for every later run. The
+        // un-killed session silently poisons that port for every later run. The
         // next attempt then times out too and orphans another, which is how one
         // transient failure turned into "the tunnel is permanently broken".
         const fail = (err: Error): void => {
           clearTimeout(timer);
-          child.kill('SIGTERM');
+          killGroup(child);
           reject(err);
         };
         const timer = setTimeout(() => {
@@ -215,6 +280,21 @@ export function makeRealEnvAws(): EnvAws {
             ),
           );
         }, readyTimeoutMs);
+        // Name the LOCAL bind as the cause the moment we can prove it, and say
+        // outright that the route was never dialled — otherwise the deadline
+        // message above (document + target + remote endpoint) reads as a
+        // routing failure and sends the next reader to the wrong layer.
+        void probeLocalPort(req.localPort).then((errno) => {
+          if (errno === undefined) return;
+          fail(
+            new Error(
+              `local port :${req.localPort} is already in use (${errno}) — the tunnel cannot bind it. ` +
+                `The route ${req.target} → ${req.host}:${req.remotePort} was never attempted, so this is NOT a routing problem. ` +
+                `An earlier tunnel may still hold the port: check \`pgrep -af session-manager-plugin\` and kill any stragglers, ` +
+                `or rerun with --local-port <other>.`,
+            ),
+          );
+        });
         const scan = (chunk: Buffer): void => {
           output += chunk.toString();
           if (output.includes(READY_MARKER)) {
@@ -236,7 +316,7 @@ export function makeRealEnvAws(): EnvAws {
         ready,
         exited,
         stop: () => {
-          child.kill('SIGTERM');
+          killGroup(child);
         },
       };
     },
@@ -255,6 +335,24 @@ export async function resolveCallerAccount(aws: EnvAws, opts: { profile?: string
   try {
     const account = (await aws.json(['sts', 'get-caller-identity', '--query', 'Account'], opts)) as string | null;
     return account ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The full STS caller ARN (`sts get-caller-identity --query Arn`) — the
+ * credential-tier half of the identity, where `resolveCallerAccount` reads the
+ * account half. `ss env connect` uses it on a production data plane to refuse
+ * the read-only Observer tier (`core/env/credentials.ts` owns the judgment;
+ * this is only the read). Returns undefined when the identity can't be read —
+ * the gate then lets the caller through and a real AWS call surfaces the auth
+ * problem, exactly as the account preflight does.
+ */
+export async function resolveCallerArn(aws: EnvAws, opts: { profile?: string; region: string }): Promise<string | undefined> {
+  try {
+    const arn = (await aws.json(['sts', 'get-caller-identity', '--query', 'Arn'], opts)) as string | null;
+    return arn ?? undefined;
   } catch {
     return undefined;
   }

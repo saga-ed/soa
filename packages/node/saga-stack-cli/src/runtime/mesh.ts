@@ -147,6 +147,15 @@ export function meshContainer(unit: MeshDef): string {
  * under the slot's `soa-s<N>` namespace. At slot 0 (offset 0, no project) the
  * argv is byte-identical to the pre-M7 form.
  */
+/**
+ * Host base port for OpenFGA's playground UI, matching
+ * `infra/compose/services/openfga/compose.yml`'s
+ * `${OPENFGA_PLAYGROUND_PORT:-3105}:3005` default. Kept here rather than on the
+ * MeshDef because no other part of the CLI consumes it (no readiness probe, no
+ * service URL) — it exists only so the slot offset reaches compose.
+ */
+const OPENFGA_PLAYGROUND_BASE_PORT = 3105;
+
 export function meshMakeArgs(
   m: Manifest = defaultManifest,
   opts: { project?: string; offset?: number } = {},
@@ -156,6 +165,7 @@ export function meshMakeArgs(
   const redis = getMesh('redis', m);
   const rabbit = getMesh('rabbitmq', m);
   const mongo = getMesh('connect-mongo', m);
+  const openfga = getMesh('openfga', m);
   return [
     'up',
     ...(opts.project ? [`COMPOSE_PROJECT_NAME=${opts.project}`] : []),
@@ -166,6 +176,23 @@ export function meshMakeArgs(
     `RABBITMQ_PORT=${rabbit.port + offset}`,
     `RABBITMQ_MGMT_PORT=${(rabbit.mgmtPort ?? 15672) + offset}`,
     `CONNECT_MONGO_PORT=${mongo.port + offset}`,
+    // Exported like every other mesh port so the slot offset actually reaches
+    // compose. Omitting them let compose fall through to infra/.env.defaults'
+    // FIXED 8180/8181, which meant every slot published openfga on the SAME host
+    // ports — two slots running `--with authz` would collide, and the offset the
+    // rest of the mesh honours was silently ignored for this unit.
+    `OPENFGA_HTTP_PORT=${openfga.port + offset}`,
+    `OPENFGA_GRPC_PORT=${(openfga.mgmtPort ?? 8181) + offset}`,
+    // The PLAYGROUND port is the third port this compose unit publishes
+    // (`${OPENFGA_PLAYGROUND_PORT:-3105}:3005`) and it was missed when the two
+    // above were fixed — so it still fell through to the fixed 3105 on EVERY
+    // slot. That is not a cosmetic gap: compose fails the whole `make up` with
+    // "Bind for 0.0.0.0:3105 failed: port is already allocated" the moment a
+    // second slot runs `--with authz`, which reads as a broken authz bundle
+    // rather than a port clash. Not modeled as a MeshDef field because it is a
+    // dev-UI port with no readiness/URL role — nothing else in the CLI consumes
+    // it — so it is derived from the same base the compose default uses.
+    `OPENFGA_PLAYGROUND_PORT=${OPENFGA_PLAYGROUND_BASE_PORT + offset}`,
   ];
 }
 

@@ -11,12 +11,27 @@
  * the shared RDS):
  *
  *   1. ECS service `<store.ecsService>-<env.ledgerIdentifier>` looked up across
- *      the shared clusters (`dev-shared-arm`, `dev-shared`).
+ *      the env's shared clusters (`env.ecsClusters`).
  *   2. Its task definition yields either the DATABASE_URL secret or the split
  *      POSTGRES_* fields (`core/env/taskdef.ts`); referenced secrets are
  *      fetched (Secrets Manager or SSM parameter refs both handled).
- *   3. Jump host = newest running EC2 tagged `Name=dev-shared-ecs-instance`
- *      that is Online in SSM; CloudMap `.dbs-v2.local` names resolve THERE.
+ *   3. Jump host = newest running EC2 tagged `Name=<env.jumpHostNameTag>` that
+ *      is Online in SSM; CloudMap `.<env.dbHostNamespace>` names resolve THERE.
+ *
+ * REACHABILITY branches on the env's DATA-PLANE STYLE (`core/env/data-plane.ts`,
+ * I#375), never on its name:
+ *
+ *   'db-host-cloudmap' (dev, training) — a `.<dbHostNamespace>` target is a DB
+ *      CONTAINER the shared jump host's SG cannot reach, so the tunnel goes via
+ *      the container's own EC2 host with a 127.0.0.1 dial (step 3 above).
+ *   'rds-endpoint' (prod) — no db-host fleet: the task definition still supplies
+ *      the DATABASE and USER, but the address dialled is the shared Postgres
+ *      endpoint read at RUN TIME from `env.postgresEndpointParams` (SSM), and the
+ *      jump host forwards straight to it. Nothing about it is hardcoded here.
+ *
+ * An env that declares `productionDataPlane` additionally REFUSES the read-only
+ * Observer tier (read-only `list`/`discover`/`verify` still accept it) and
+ * banners its human output; `--print-only` is the documented habit there.
  *
  * `--host/--remote-port/--database/--username` skip resolution entirely;
  * `--print-only` stops before the tunnel. Once the session-manager plugin
@@ -29,20 +44,19 @@
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import {
-  DB_HOST_CLOUDMAP_NAMESPACE,
-  ECS_CLUSTERS,
   ENV_NAMES,
-  JUMP_HOST_NAME_TAG,
   STORES,
   accountMismatchError,
+  connectTierRefusal,
+  dataPlaneStyle,
   extractDbTarget,
   localUrl,
   parseDatabaseUrl,
   resolveEnv,
 } from '../../core/env/index.js';
-import type { SecretRef, TaskDefContainer } from '../../core/env/index.js';
-import { bold, cyan, dim, green } from '../../color.js';
-import { resolveCallerAccount, resolveJumpHost } from '../../runtime/index.js';
+import type { DeployedEnv, SecretRef, TaskDefContainer } from '../../core/env/index.js';
+import { bold, cyan, dim, green, yellow } from '../../color.js';
+import { resolveCallerAccount, resolveCallerArn, resolveJumpHost } from '../../runtime/index.js';
 
 interface ResolvedTarget {
   host: string;
@@ -61,6 +75,10 @@ export default class EnvConnect extends BaseCommand {
     '<%= config.bin %> <%= command.id %> iam --env dev --profile dev_admin',
     '<%= config.bin %> <%= command.id %> programs --env dev --local-port 15433',
     '<%= config.bin %> <%= command.id %> iam --host mydb.dbs-v2.local --remote-port 5440 --database rostering-iam-canonical --print-only',
+    // Production: --print-only FIRST — resolve and look before opening anything
+    // (Observer is refused here; the endpoint is read live from SSM).
+    '<%= config.bin %> <%= command.id %> iam --env prod --print-only',
+    '<%= config.bin %> <%= command.id %> iam --env prod --local-port 15442',
   ];
 
   static args = {
@@ -96,6 +114,26 @@ export default class EnvConnect extends BaseCommand {
     const mismatch = accountMismatchError(await resolveCallerAccount(this.getEnvAws(), opts), [env.awsAccountId], `'${env.name}'`);
     if (mismatch !== null) this.error(mismatch);
 
+    // ── credential gate (I#375 Q5): a PRODUCTION data plane refuses the
+    // read-only Observer tier before any resolution happens. Declared on the
+    // env, so dev/training pay neither the extra sts call nor the refusal. ──
+    if (env.productionDataPlane === true) {
+      const refusal = connectTierRefusal(await resolveCallerArn(this.getEnvAws(), opts), env);
+      if (refusal !== null) this.error(refusal);
+      if (!flags['output-json'] && !flags.porcelain) {
+        this.log(
+          yellow(
+            `⚠ this is PRODUCTION — '${env.name}' (${env.awsAccountId}/${env.domain}) holds real tenant data. ` +
+              (flags['print-only'] ? 'Resolving only (--print-only).' : 'Prefer --print-only unless you mean to open a live tunnel.'),
+          ),
+        );
+      }
+    }
+
+    // The reachability style this env's data plane needs — derived from the
+    // registry (db-host fleet present or not), never from `env.name`.
+    const style = dataPlaneStyle(env);
+
     // ── target resolution: explicit flags beat the task definition ──
     let target: ResolvedTarget;
     if (flags.host !== undefined) {
@@ -108,7 +146,23 @@ export default class EnvConnect extends BaseCommand {
       };
     } else {
       const serviceName = `${store!.ecsService}-${env.ledgerIdentifier}`;
-      target = await this.resolveFromTaskDef(serviceName, opts);
+      target = await this.resolveFromTaskDef(env, serviceName, opts);
+      // ── 'rds-endpoint' style: the task definition supplied the DATABASE and
+      // USER (that is why it is still consulted), but the ADDRESS is the shared
+      // Postgres endpoint discovered live from SSM — the task def may name a
+      // private alias the jump host does not resolve, and the endpoint moves on
+      // failover. `--host` (above) opts out of this too. ──
+      if (style === 'rds-endpoint') {
+        const rds = await this.resolveSharedEndpoint(env, opts);
+        if (rds.host !== target.host || rds.port !== target.port) {
+          this.log(
+            `  ${dim('endpoint:')}  ${green(`${rds.host}:${rds.port}`)} ${dim(`(${rds.source}; task def named ${target.host}:${target.port})`)}`,
+          );
+        }
+        target.host = rds.host;
+        target.port = rds.port;
+        target.source = `${target.source} + ${rds.source}`;
+      }
       if (flags.database !== undefined) target.database = flags.database;
       if (flags.username !== undefined) {
         target.username = flags.username;
@@ -116,24 +170,36 @@ export default class EnvConnect extends BaseCommand {
       }
     }
 
-    // ── route: db-host-v2 CloudMap targets tunnel via the container's OWN host
-    // instance with a 127.0.0.1 dial (the shared jump host's SG cannot reach the
-    // containers — task-SG allowlists); everything else via the shared jump host. ──
+    // ── route: under the 'db-host-cloudmap' style a `.<namespace>` target
+    // tunnels via the container's OWN host instance with a 127.0.0.1 dial.
+    // Everything else — including EVERY 'rds-endpoint' target, which has no
+    // namespace — dials from the shared jump host.
+    //
+    // This detour is not load-bearing. It used to be justified here with "the
+    // shared jump host's SG cannot reach the containers — task-SG allowlists",
+    // which soa#370 disproved against live dev: the container publishes on
+    // 0.0.0.0 (docker-proxy) and dev-db-host-v2-sg admits 5432-5499 from the
+    // whole 10.3.0.0/16 VPC CIDR, so the jump host reaches these containers
+    // directly. The branch survives only because collapsing it is a ROUTING
+    // change (it would also delete discoverDbHostInstance and its
+    // container-moved-hosts failure mode) and does not belong in a bugfix —
+    // tracked separately. Do not re-derive the old claim from this code. ──
     let ssmTarget: string;
     let dialHost: string;
     let dialPort = target.port;
     let route: string;
-    if (target.host.endsWith(`.${DB_HOST_CLOUDMAP_NAMESPACE}`)) {
-      const serviceName = target.host.slice(0, -(DB_HOST_CLOUDMAP_NAMESPACE.length + 1));
-      const found = await this.discoverDbHostInstance(serviceName, opts);
+    const namespace = style === 'db-host-cloudmap' ? env.dbHostNamespace : undefined;
+    if (namespace !== undefined && target.host.endsWith(`.${namespace}`)) {
+      const serviceName = target.host.slice(0, -(namespace.length + 1));
+      const found = await this.discoverDbHostInstance(namespace, serviceName, opts);
       ssmTarget = found.instanceId;
       dialHost = '127.0.0.1';
       dialPort = found.port ?? target.port;
       route = `db-host ${found.instanceId} (CloudMap ${serviceName}, local dial :${dialPort})`;
     } else {
-      const jump = await resolveJumpHost(this.getEnvAws(), JUMP_HOST_NAME_TAG, opts);
+      const jump = await resolveJumpHost(this.getEnvAws(), env.jumpHostNameTag, opts);
       if (jump === undefined) {
-        this.error(`no running+Online SSM jump host tagged Name=${JUMP_HOST_NAME_TAG} — check tier/region/profile.`);
+        this.error(`no running+Online SSM jump host tagged Name=${env.jumpHostNameTag} — check tier/region/profile.`);
       }
       ssmTarget = jump;
       dialHost = target.host;
@@ -174,13 +240,14 @@ export default class EnvConnect extends BaseCommand {
 
   /** ECS service → task definition → DB target, secrets fetched through the aws seam. */
   private async resolveFromTaskDef(
+    env: DeployedEnv,
     serviceName: string,
     opts: { profile?: string; region: string },
   ): Promise<ResolvedTarget> {
     const aws = this.getEnvAws();
     let taskDefArn: string | undefined;
     let clusterUsed: string | undefined;
-    for (const cluster of ECS_CLUSTERS) {
+    for (const cluster of env.ecsClusters) {
       const described = (await aws.json(
         ['ecs', 'describe-services', '--cluster', cluster, '--services', serviceName, '--query', 'services[0].taskDefinition'],
         opts,
@@ -196,7 +263,7 @@ export default class EnvConnect extends BaseCommand {
     }
     if (taskDefArn === undefined) {
       this.error(
-        `ECS service '${serviceName}' not found in ${ECS_CLUSTERS.join(' or ')} — is the store deployed on this env? (--host overrides resolution)`,
+        `ECS service '${serviceName}' not found in ${env.ecsClusters.join(' or ')} — is the store deployed on this env? (--host overrides resolution)`,
       );
     }
 
@@ -225,20 +292,59 @@ export default class EnvConnect extends BaseCommand {
     };
   }
 
+  /**
+   * The 'rds-endpoint' style's address: the env's shared Postgres endpoint +
+   * port, read at RUN TIME from the SSM parameters the registry NAMES (never
+   * from a stored value — the endpoint changes on failover/rotation and must
+   * not be able to drift out of a CLI release).
+   */
+  private async resolveSharedEndpoint(
+    env: DeployedEnv,
+    opts: { profile?: string; region: string },
+  ): Promise<{ host: string; port: number; source: string }> {
+    const params = env.postgresEndpointParams;
+    if (params === undefined) {
+      this.error(
+        `'${env.name}' has no db-host fleet and declares no postgres endpoint parameters — ` +
+          'nothing to discover. Pass --host (and --remote-port) to name the endpoint yourself.',
+      );
+    }
+    const host = await this.fetchParam(params.endpoint, opts);
+    const portRaw = await this.fetchParam(params.port, opts);
+    const port = Number(portRaw);
+    if (!Number.isInteger(port) || port <= 0) {
+      this.error(`SSM ${params.port} is not a port number ('${portRaw}') — pass --remote-port to override.`);
+    }
+    return { host, port, source: `SSM ${params.endpoint}` };
+  }
+
+  /** One plain SSM parameter value (endpoint discovery — nothing encrypted here). */
+  private async fetchParam(name: string, opts: { profile?: string; region: string }): Promise<string> {
+    const value = (await this.getEnvAws().json(
+      ['ssm', 'get-parameter', '--name', name, '--query', 'Parameter.Value'],
+      opts,
+    )) as string | null;
+    if (value === null || value === '') {
+      this.error(`SSM parameter ${name} resolved to nothing — is the tier/profile right for this env?`);
+    }
+    return value;
+  }
+
   /** CloudMap discover-instances → the db container's EC2 host + registered port. */
   private async discoverDbHostInstance(
+    namespace: string,
     serviceName: string,
     opts: { profile?: string; region: string },
   ): Promise<{ instanceId: string; port?: number }> {
     const aws = this.getEnvAws();
     const discovered = (await aws.json(
-      ['servicediscovery', 'discover-instances', '--namespace-name', DB_HOST_CLOUDMAP_NAMESPACE, '--service-name', serviceName],
+      ['servicediscovery', 'discover-instances', '--namespace-name', namespace, '--service-name', serviceName],
       opts,
     )) as { Instances?: { Attributes?: Record<string, string> }[] } | null;
     const attrs = discovered?.Instances?.[0]?.Attributes;
     const ip = attrs?.AWS_INSTANCE_IPV4;
     if (ip === undefined) {
-      this.error(`CloudMap has no instance for ${serviceName}.${DB_HOST_CLOUDMAP_NAMESPACE} — is the DB container up?`);
+      this.error(`CloudMap has no instance for ${serviceName}.${namespace} — is the DB container up?`);
     }
     const ids = (await aws.json(
       [

@@ -51,6 +51,10 @@ export interface LaunchTokens {
   IAM_PORT: string;
   /** sis-api port — up.sh `SIS_PORT` (3100). */
   SIS_PORT: string;
+  /** authz-api port (3200) — sessions-api's `AUTHZ_API_URL` (soa#402). authz-api's
+   *  own default is a LITERAL `:3200`, so without this token a slot > 0 sessions-api
+   *  would dial slot 0's authz-api — the exact cross-slot braid this file prevents. */
+  AUTHZ_PORT: string;
   /** sessions-api port (3007) — ads-adm-api's SESSIONS_API_CLIENT_BASEURL (was a
    *  literal `:3007` in up.sh; tokenized for M13 ads-adm slottability). */
   SESSIONS_PORT: string;
@@ -74,6 +78,13 @@ export interface LaunchTokens {
   COACH_API_PORT: string;
   /** coach-web port — up.sh `COACH_WEB_PORT` (8800). */
   COACH_WEB_PORT: string;
+  /**
+   * staff-admin-console BFF port (3011) — the SPA's vite `/api` proxy target
+   * (`BFF_URL`). Needed because the SPA's own listen port cannot slot (vite
+   * ignores $PORT) but its proxy target CAN, so a slot > 0 console still talks
+   * to ITS slot's BFF instead of slot 0's.
+   */
+  STAFF_ADMIN_BFF_PORT: string;
   /** connect-mongo mesh port — up.sh `CONNECT_MONGO_PORT` (27037; coach-api's MONGO_PORT). */
   CONNECT_MONGO_PORT: string;
   /**
@@ -139,6 +150,8 @@ export interface LaunchTokens {
   IAM_PII_DB_URL: string;
   /** up.sh `SIS_DB_URL`. */
   SIS_DB_URL: string;
+  /** authz-api DB URL — `postgresql://authz:authz@localhost:<pg>/authz_local` (soa#402). */
+  AUTHZ_DB_URL: string;
   /** up.sh `PROGRAMS_DB_URL`. */
   PROGRAMS_DB_URL: string;
   /** up.sh `SCHEDULING_DB_URL`. */
@@ -177,9 +190,13 @@ export interface LaunchTokens {
    * off every default `stack up` (opt-in design decision).
    */
   FGA_ENABLED: string;
-  /** OpenFGA HTTP API — `http://localhost:8080` (single-slot only; no meshOffset
-   *  port-shifting support for openfga in this pass). Feeds both iam-api's
-   *  `FGA_API_URL` and authz-sync's `OPENFGA_API_URL`. */
+  /**
+   * OpenFGA HTTP API — `http://localhost:<openfga host port + meshOffset>`
+   * (8180 at slot 0; 8080 is the IN-CONTAINER port and is deliberately not used
+   * here). Feeds both iam-api's `FGA_API_URL` and authz-sync's
+   * `OPENFGA_API_URL`, and is slot-correct because `meshMakeArgs` exports the
+   * matching `OPENFGA_HTTP_PORT` to compose.
+   */
   OPENFGA_API_URL: string;
   /**
    * The bootstrapped OpenFGA store id, or `''` before the `fga-bootstrap` seed
@@ -345,6 +362,18 @@ function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string,
         CORS_ORIGIN: `${dash},http://localhost:${tokens.IAM_PORT},https://dash.${td},https://iam.${td}`,
       };
     case 'programs-api':
+      // Split out from its three siblings below because programs-api is the only
+      // one of them with a SECOND browser origin: coach-web calls programs.list
+      // direct (coach#329). The overlay REPLACES CORS_ORIGIN wholesale (env
+      // last-wins over the launch env, it does not merge), so the coach origins
+      // the base value carries must be restated here or a tunnel run silently
+      // regresses to dash-only. Local coach-web is kept alongside the tunnel host
+      // for the same reason iam-api keeps ${connectWeb}: a local browser must
+      // keep working next to remote ones.
+      return {
+        CORS_ORIGIN: `${dash},${tokens.COACH_WEB_URL},https://dash.${td},https://coach.${td}`,
+        JANUS_LOGIN_HOST: `iam.${td}/demo`,
+      };
     case 'scheduling-api':
     case 'sessions-api':
     case 'ads-adm-api':
@@ -415,6 +444,15 @@ function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string,
         // that would otherwise reach the remote browser verbatim → whoami fails →
         // coach-web renders the soa#300 503 "Unable to reach the sign-in service".
         PUBLIC_IAM_API_URL: `https://iam.${td}`,
+        // programs-api flips for the same reason: the Reports Program filter
+        // fetches programs.list DIRECT from the browser (coach-web
+        // `src/lib/api/programs.ts`). The base manifest pins this to the
+        // PROGRAMS_PORT localhost origin, which is unreachable from a remote
+        // coworker's machine. The tunnel LABEL is `programs`, NOT `programs-api`
+        // — vendor/tunnel.sh declares "programs:3006" and the manifest's
+        // tunnelSlug is 'programs'; a `programs-api.<domain>` host (the shape of
+        // the deployed default in coach-web's .env) is one the tunnel never creates.
+        PUBLIC_PROGRAMS_API_URL: `https://programs.${td}`,
         // Logout target and the "open dashboard" link. Not boot-critical (unlike the two
         // above), but their `.env` defaults are the SHARED remote hosts
         // (login./dash.wootdev.com) — a tunnel session must stay inside its own mesh.
@@ -633,6 +671,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
   const mqPort = getMesh('rabbitmq', m).port + meshOffset; // 5672
   const mongoPort = getMesh('connect-mongo', m).port + meshOffset; // 27037
   const redisPort = getMesh('redis', m).port + meshOffset; // 6379
+  const openfgaPort = getMesh('openfga', m).port + meshOffset; // 8180 (host; 8080 in-container)
 
   const recorderControlPort = inputs.recorderControlPort ?? 7890;
   const recordingsApiPort = inputs.recordingsApiPort ?? 8444;
@@ -641,6 +680,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     // ports (string form)
     IAM_PORT: String(ports['iam-api']),
     SIS_PORT: String(ports['sis-api']),
+    AUTHZ_PORT: String(ports['authz-api']),
     SESSIONS_PORT: String(ports['sessions-api']),
     PROGRAMS_PORT: String(ports['programs-api']),
     CONTENT_PORT: String(ports['content-api']),
@@ -650,6 +690,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     RECORDINGS_API_PORT: String(recordingsApiPort),
     COACH_API_PORT: String(ports['coach-api']),
     COACH_WEB_PORT: String(ports['coach-web']),
+    STAFF_ADMIN_BFF_PORT: String(ports['staff-admin-bff']),
     CONNECT_MONGO_PORT: String(mongoPort),
     REDIS_PORT: String(redisPort),
     AUTHZ_SYNC_PORT: String(ports['authz-sync']),
@@ -674,6 +715,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     IAM_DB_URL: pgUrl('iam_local', pgPort, m),
     IAM_PII_DB_URL: pgUrl('iam_pii_local', pgPort, m),
     SIS_DB_URL: pgUrl('sis_db', pgPort, m),
+    AUTHZ_DB_URL: pgUrl('authz_local', pgPort, m),
     PROGRAMS_DB_URL: pgUrl('programs', pgPort, m),
     SCHEDULING_DB_URL: pgUrl('scheduling', pgPort, m),
     SESSIONS_DB_URL: pgUrl('sessions', pgPort, m),
@@ -690,7 +732,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
 
     // OpenFGA authz (opt-in — see LaunchTokens' FGA_ENABLED/OPENFGA_* docs)
     FGA_ENABLED: inputs.withAuthz ? 'true' : 'false',
-    OPENFGA_API_URL: 'http://localhost:8080',
+    OPENFGA_API_URL: `http://localhost:${openfgaPort}`,
     OPENFGA_STORE_ID: inputs.openfgaStoreId ?? '',
 
     // global launch env (up.sh `:-` defaults; runtime may pass ambient overrides)

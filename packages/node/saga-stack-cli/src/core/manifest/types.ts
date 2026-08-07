@@ -15,6 +15,7 @@
 export type ServiceId =
   | 'iam-api'
   | 'sis-api'
+  | 'authz-api' //      rostering authz capabilities service (:3200) — hard dep of sessions-api (soa#402)
   | 'programs-api'
   | 'scheduling-api'
   | 'sessions-api'
@@ -29,7 +30,9 @@ export type ServiceId =
   | 'transcripts-api' // optional: true (--with-playback)
   | 'insights-api' //    optional: true (--with-playback)
   | 'chat-api' //        optional: true (--with-playback)
-  | 'authz-sync'; //     optional: true (--with authz) — RabbitMQ-only OpenFGA tuple projector
+  | 'authz-sync' //      optional: true (--with authz) — RabbitMQ-only OpenFGA tuple projector
+  | 'staff-admin-bff' //     optional: true (--with staff-admin) — the console's own Express BFF
+  | 'staff-admin-console'; // optional: true (--with staff-admin) — staff-only SvelteKit SPA (:8910)
 
 /** Mesh infra units, started as a single `make up PROFILE=empty`. */
 export type MeshId = 'postgres' | 'redis' | 'rabbitmq' | 'connect-mongo' | 'openfga';
@@ -75,12 +78,14 @@ export type DbId =
   | 'chat_local'
   | 'connectv3'
   | 'openfga'
-  | 'authz_sync_local';
+  | 'authz_sync_local'
+  | 'authz_local';
 
 /** Canonical SeedStep ids (see §4). Referenced by `ServiceDef.seed`. */
 export type SeedStepRef =
   | 'iam-dev-user'
   | 'iam'
+  | 'authz-projection-backfill'
   | 'sessions'
   | 'qtf-demo'
   | 'programs'

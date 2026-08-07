@@ -4,6 +4,17 @@ Tier-2 (per-resource) OpenFGA authorization gate for Saga services — a thin
 `check` client over [`@openfga/sdk`](https://www.npmjs.com/package/@openfga/sdk)
 plus an enforcement flag and a framework-agnostic helper.
 
+Two query shapes, and the choice matters:
+
+| Need | Use |
+|---|---|
+| Enforce on one object | `check` / `enforceFgaRelation` |
+| Attribute *which* rule allowed it | `checkDetailed` |
+| Return only the items a user may see | [`batchCheck`](#filtered-lists-batchcheck-not-listobjects) |
+
+Enumeration (`ListObjects`) is intentionally **absent** — see
+[why](#filtered-lists-batchcheck-not-listobjects).
+
 Pairs with [`@saga-ed/saga-authz-model`](../saga-authz-model) (the `.fga` model +
 typed tuple-key builders) and the sync worker (which owns tuple **writes** —
 ADR 0005). Services only **check**.
@@ -62,6 +73,57 @@ is both.
 > when you add a branch to a `can_*` union, grep for its `checkDetailed`
 > callers. The capability catalog codegens these shapes, so branch growth is
 > anticipated.
+
+## Filtered lists: `batchCheck` (not `ListObjects`)
+
+When an endpoint must return only the items a user may see, **fetch the candidate
+records from your own datastore, then ask about them**:
+
+```ts
+const districts = await db.districts.findMany({ where: { status: 'ACTIVE' } });
+const verdicts = await fga.batchCheck(
+  districts.map((d) => ({ user: `user:${actorId}`, relation: 'can_view', object: `staff_org:${d.id}` })),
+);
+const visible = districts.filter(
+  (d) => verdicts.get(fgaBatchKey(`user:${actorId}`, 'can_view', `staff_org:${d.id}`)),
+);
+```
+
+Use `fgaBatchKey(user, relation, object)` for lookups — don't format the key by
+hand. Requests are auto-chunked (50 per batch, 10 batches in parallel), so >50
+items is allowed, but each chunk is a round trip: bound the candidate set rather
+than passing an unbounded page.
+
+**This package deliberately does not expose OpenFGA's `ListObjects`**, for two
+measured reasons:
+
+1. **It cannot report truncation.** `ListObjectsResponse` is `{ objects: string[] }`
+   — no continuation token, no truncation flag. The operation is bounded
+   server-side by a max-results cap and a deadline, so a **capped** list and a
+   **complete** list are the same response. Silently under-reporting a list is an
+   authorization *correctness* bug (items the user may see never render, with no
+   error), not a performance nit.
+2. **Result count is not the cost driver.** Measured on rostering's prototype
+   (`scripts/fga/prototype/latency.md`): p50 **28ms for ~421 objects** vs **73ms
+   for one** — latency tracks graph-search shape, not result size. So "the set is
+   small" is not a safety argument. And list-objects is **cache-immune**, while
+   `check` goes ~23ms → ~1.4ms warm; every sub-check in a `batchCheck` is
+   check-cache-eligible.
+
+If a caller genuinely needs the id set *before* touching its own datastore, that
+belongs behind the PDP's own API with an explicit `truncated` contract — not
+here, where the shape invites silent under-reporting.
+
+> **A per-item failure is not a deny.** If any item comes back carrying an
+> `error`, or the response omits a requested item, `batchCheck` throws
+> `FgaUnavailableError` rather than reporting that item `false` — same contract as
+> `check` (see below). A successfully returned map always holds exactly one entry
+> per distinct question asked.
+
+Pagination note: authorization filtering and pagination don't compose at the app
+layer — filter-after-fetch yields nondeterministic page sizes and no reliable
+total. If you need stable pagination, counts, or sort, the decision has to live
+in your datastore (a projection join), not in a post-filter.
 
 ## Contextual tuples
 

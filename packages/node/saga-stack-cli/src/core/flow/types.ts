@@ -24,6 +24,7 @@ import type { SeedSelection } from '../seed/index.js';
 const SERVICE_IDS = [
   'iam-api',
   'sis-api',
+  'authz-api',
   'programs-api',
   'scheduling-api',
   'sessions-api',
@@ -39,6 +40,8 @@ const SERVICE_IDS = [
   'insights-api',
   'chat-api',
   'authz-sync',
+  'staff-admin-bff',
+  'staff-admin-console',
 ] as const;
 
 // Compile guard: every literal above must be a real ServiceId (catches typos /

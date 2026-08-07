@@ -41,11 +41,12 @@ import { BaseCommand } from '../../base-command.js';
 import type { NativeOverlays, WorkspaceFlags } from '../../base-command.js';
 import {
   BUNDLE_NAMES,
+  closureOptsFor,
+  closureOptsForIds,
   combineRequested,
-  effectiveWithAuthz,
-  effectiveWithPlayback,
   seedAddOnsFor,
 } from '../../core/bundles.js';
+import type { ResolvedClosureOpts } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance, slotExcludedServices } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
@@ -60,7 +61,7 @@ import { parseWorkspace } from '../../core/workspace.js';
 import type { WorkspaceSelection } from '../../core/workspace.js';
 import { resolveVendorScript } from '../../runtime/index.js';
 import { makeStackApi } from '../../stack-api.js';
-import type { Runtime, StackApi } from '../../stack-api.js';
+import type { Runtime, SeedResult, StackApi } from '../../stack-api.js';
 
 /** `--sandbox <name>` shape gate (up.sh ~2154; the composition API's IDENTIFIER shape). */
 const SANDBOX_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$/;
@@ -100,6 +101,12 @@ export default class StackUp extends BaseCommand {
       description:
         'seed the named profile after launch (native). An absent --seed still seeds the `roster` baseline (the up.sh bare-default).',
       options: ['roster', 'full'],
+    }),
+    'no-seed': Flags.boolean({
+      default: false,
+      exclusive: ['seed', 'reset'],
+      description:
+        'launch WITHOUT seeding. The only way to bring services back up over data you want kept: an absent --seed still seeds the roster baseline, which is destructive to non-fixture data (it drops a hydrated or synced org). Required after `stack hydrate`, whose database swap leaves the running services on dead connections — `stack restart` is slot-0 only, so on slots 1..9 this is the bounce.',
     }),
     pull: Flags.boolean({
       description:
@@ -190,15 +197,22 @@ export default class StackUp extends BaseCommand {
       ? ws.runSet
       : combineRequested(flags.only, flags.with, (m) => this.error(m));
     let isOnly = requested.length > 0 || ws !== undefined;
-    const withPlayback = ws ? ws.playback : effectiveWithPlayback(flags.with);
-    // Workspace files carry no authz axis (mirrors playback's `ws.playback`, but
-    // `--with authz` is a `--only`/`--with` concept only, not modeled in workspace JSON).
-    const withAuthz = ws ? false : effectiveWithAuthz(flags.with);
+    // When a workspace is set, its flags come from the run set — a workspace
+    // names services DIRECTLY, so naming e.g. `authz-sync` is the workspace's way
+    // of asking for it, NOT from flags.with. `closureOptsForIds` derives every
+    // flag from the BUNDLES-backed id sets, so a future bundle needs only a
+    // registry edit in bundles.ts rather than a hand-listed derivation here (which
+    // is why `parseWorkspace` exposes no per-family booleans of its own).
+    // Hard-coding withAuthz to false previously dropped a workspace-named
+    // `authz-sync` silently.
+    const closureOpts: ResolvedClosureOpts =
+      ws ? closureOptsForIds(ws.runSet) : closureOptsFor(flags.with);
+    const { withAuthz } = closureOpts;
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the
     // launch path applies (BLOCKER-1) so the dry-run reflects what actually launches. ──
     if (flags['dry-run']) {
-      this.runDryRun(flags, requested, isOnly, withPlayback, withAuthz, {
+      this.runDryRun(flags, requested, isOnly, closureOpts, {
         sandboxHybrid: flags.sandbox !== undefined,
         sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
         sandboxName: ws?.iamSandbox ?? flags.sandbox,
@@ -249,7 +263,7 @@ export default class StackUp extends BaseCommand {
     //    deps the closure pulled in — iam-api et al. live at the cloud sandbox).
     //  - `--workspace`: subtract EVERY mode:sandbox service id (`ws.sandboxServices`).
     const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz);
-    await this.runNative(flags, requested, withPlayback, withAuthz, overlays, {
+    await this.runNative(flags, requested, closureOpts, overlays, {
       sandboxHybrid: flags.sandbox !== undefined,
       sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
       sandboxName,
@@ -367,8 +381,7 @@ export default class StackUp extends BaseCommand {
     flags: DryRunFlags,
     requested: ServiceId[],
     isOnly: boolean,
-    withPlayback: boolean,
-    withAuthz: boolean,
+    closureOpts: ResolvedClosureOpts,
     prune: LaunchPrune = {},
   ): void {
     const resolvedRequest: ServiceId[] = isOnly
@@ -383,7 +396,7 @@ export default class StackUp extends BaseCommand {
       this.error(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
     }
 
-    const closure = computeClosure(manifest, resolvedRequest, { withPlayback, withAuthz });
+    const closure = computeClosure(manifest, resolvedRequest, closureOpts);
 
     // M7: at slot > 0 the bring-up would EXCLUDE the literal-port services; surface
     // that in the preview so the dry-run matches what a real `--slot N` up launches.
@@ -464,11 +477,11 @@ export default class StackUp extends BaseCommand {
   private async runNative(
     flags: NativeFlags,
     requested: ServiceId[],
-    withPlayback: boolean,
-    withAuthz: boolean,
+    closureOpts: ResolvedClosureOpts,
     overlays: NativeOverlays = {},
     prune: LaunchPrune = {},
   ): Promise<void> {
+    const { withPlayback, withAuthz } = closureOpts;
     const known = new Set(Object.keys(manifest.services));
     const unknown = requested.filter((s) => !known.has(s));
     if (unknown.length > 0) {
@@ -489,7 +502,7 @@ export default class StackUp extends BaseCommand {
     // THIS slot's rtsm, not slot 0's) is generated in `buildRuntime`, the seam BOTH
     // `stack up` and `e2e run` share; it need not be repeated here.
 
-    const fullClosure = computeClosure(manifest, requested, { withPlayback, withAuthz });
+    const fullClosure = computeClosure(manifest, requested, closureOpts);
 
     // Exclude the still-un-slottable services from a slot > 0 bring-up: only the
     // literal-port playback trio (transcripts/insights/chat) carries literal cross-slot
@@ -582,12 +595,26 @@ export default class StackUp extends BaseCommand {
     // pass a fully-restored set later.)
     const skippedIds = new Set(up.skipped.map((s) => s.id));
     const active = new Set(services.filter((id) => !skippedIds.has(id)));
-    const plan: SeedPlan = composeSeedPlan(
-      this.seedSelection(flags),
-      active,
-      new Set<ServiceId>(),
-    );
-    const seeded = await api.seed(plan);
+    // --no-seed: launch only. The seed is DESTRUCTIVE to non-fixture data — the
+    // iam seed drops an org it did not write — so bringing services back up over
+    // a hydrated or synced slot needs a way to skip it. There is no other:
+    // `stack restart` refuses slots 1..9, and an absent --seed still seeds the
+    // roster baseline. Measured 2026-08-07: `up` over a freshly hydrated slot 1
+    // took iam_local from 6935 users to 314 and removed the org entirely.
+    let seeded: SeedResult;
+    if (flags['no-seed']) {
+      // `ok: true` because nothing FAILED — the phase was deliberately not run.
+      // Downstream (`--tunnel`, `--login`) reads seeded.ok as "the stack is in a
+      // good state", and skipping the seed does not make it otherwise.
+      seeded = { ok: true, ran: { offline: [], online: [] }, skipped: [] };
+    } else {
+      const plan: SeedPlan = composeSeedPlan(
+        this.seedSelection(flags),
+        active,
+        new Set<ServiceId>(),
+      );
+      seeded = await api.seed(plan);
+    }
 
     // Phase 2 --tunnel: after a successful native (tunnel-aware) launch, start the
     // reverse tunnels via the VENDORED tunnel.sh (up.sh drives the frpc tunnels the
@@ -840,6 +867,7 @@ type NativeFlags = DryRunFlags & {
   'state-dir'?: string;
   slot: number;
   reset: boolean;
+  'no-seed': boolean;
   login: boolean;
   'skip-prep': boolean;
   pull: boolean;

@@ -27,12 +27,7 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import {
-  BUNDLE_NAMES,
-  combineRequested,
-  effectiveWithAuthz,
-  effectiveWithPlayback,
-} from '../../core/bundles.js';
+import { BUNDLE_NAMES, closureOptsFor, combineRequested } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { healthProbes } from '../../core/probe-plan.js';
@@ -41,6 +36,7 @@ import type { RepoKey, ServiceId } from '../../core/manifest/index.js';
 import { resolveRepoRoot } from '../../runtime/index.js';
 import { repoContextFromFlags } from '../../runtime/index.js';
 import type { ScriptContext } from '../../runtime/index.js';
+import { isProvenanceProblem, type ProvenanceRow } from '../../core/provenance.js';
 
 export default class StackStatus extends BaseCommand {
   static description =
@@ -63,6 +59,12 @@ export default class StackStatus extends BaseCommand {
       options: [...BUNDLE_NAMES],
       description:
         "convenience bundle(s) to include — sugar over --only (unions the bundle's services into the closure). Repeatable/composable: --with dash --with coach. Bundles: dash, connect, coach, playback.",
+    }),
+    provenance: Flags.boolean({
+      default: true,
+      allowNo: true,
+      description:
+        'also check that each listener is serving the checkout ss resolves for it, and started after that checkout last moved (--no-provenance to skip). Reports problems only; --output-json carries every verdict.',
     }),
   };
 
@@ -108,6 +110,23 @@ export default class StackStatus extends BaseCommand {
     const down = rows.length - up;
     const healthy = down === 0; // not-cloned services do NOT count as down
 
+    // Provenance is a SEPARATE question from health: a 200 says something is
+    // answering, not that it is answering with the code on disk. Assessed only
+    // for services we actually probed, and never folded into `healthy` — see the
+    // note on the JSON payload below.
+    const provenance = flags.provenance
+      ? await this.getProvenance().assess({
+          manifest,
+          services: probe,
+          portOverrides: profile.portOverrides,
+          expectedRoots: new Map(
+            probe.map((id) => [id, resolveRepoRoot(manifest.services[id].repo, ctx)]),
+          ),
+        })
+      : [];
+    const suspect = provenance.filter((p) => isProvenanceProblem(p.verdict));
+    const byId = new Map(provenance.map((p) => [p.id, p]));
+
     if (flags['output-json']) {
       this.log(
         JSON.stringify(
@@ -119,8 +138,28 @@ export default class StackStatus extends BaseCommand {
               status: r.status ?? null,
             })),
             notCloned: notCloned.map((n) => ({ id: n.id, repo: n.repo, repoDir: n.repoDir })),
-            summary: { total: rows.length, up, down, notCloned: notCloned.length },
+            // `healthy` deliberately still means "every probed service answered".
+            // Provenance gets its OWN verdict so anything gating on `healthy`
+            // keeps its existing meaning instead of silently tightening.
+            provenance: provenance.map((p) => ({
+              id: p.id,
+              port: p.port,
+              verdict: p.verdict,
+              pid: p.pid,
+              expectedRoot: p.expectedRoot,
+              actualRoot: p.actualRoot,
+              startedAt: p.startedAtMs === null ? null : new Date(p.startedAtMs).toISOString(),
+              refMovedAt: p.refMovedAtMs === null ? null : new Date(p.refMovedAtMs).toISOString(),
+            })),
+            summary: {
+              total: rows.length,
+              up,
+              down,
+              notCloned: notCloned.length,
+              suspect: suspect.length,
+            },
             healthy,
+            provenanceOk: suspect.length === 0,
           },
           null,
           2,
@@ -132,17 +171,23 @@ export default class StackStatus extends BaseCommand {
     if (flags.porcelain) {
       for (const r of rows) this.log(`${r.id}=${r.ok ? 'up' : 'down'}`);
       for (const n of notCloned) this.log(`${n.id}=not-cloned`);
+      for (const p of suspect) this.log(`provenance.${p.id}=${p.verdict}`);
       this.log(`healthy=${healthy}`);
+      this.log(`provenanceOk=${suspect.length === 0}`);
       return;
     }
 
-    for (const r of rows) this.log(formatRow(r));
+    for (const r of rows) {
+      this.log(formatRow(r, byId.get(r.id)));
+      for (const line of provenanceDetail(byId.get(r.id))) this.log(line);
+    }
     for (const n of notCloned) {
       this.log(`⚠ ${n.id.padEnd(16)} ${n.repoDir}  (not cloned: ${n.repo} repo not present)`);
     }
     this.log(
       `${up}/${rows.length} services up${healthy ? '' : ` (${down} down)`}` +
-        (notCloned.length ? `, ${notCloned.length} not cloned` : ''),
+        (notCloned.length ? `, ${notCloned.length} not cloned` : '') +
+        (suspect.length ? ` · ⚠ ${suspect.length} serving unverified code` : ''),
     );
   }
 }
@@ -155,11 +200,58 @@ interface StatusRow {
   status?: number;
 }
 
-/** Human line: `✓ id   url   (200)` for up, `✗ id   url   (down)` for down. */
-function formatRow(r: StatusRow): string {
-  const mark = r.ok ? '✓' : '✗';
+/**
+ * Human line: `✓ id   url   (200)` for up, `✗ id   url   (down)` for down. A
+ * service that answers but whose provenance is suspect is marked `⚠` and
+ * labelled, because a bare `✓` on a process serving week-old code is exactly the
+ * false reassurance this check exists to remove.
+ */
+function formatRow(r: StatusRow, p?: ProvenanceRow): string {
+  const suspect = p !== undefined && isProvenanceProblem(p.verdict);
+  const mark = suspect ? '⚠' : r.ok ? '✓' : '✗';
   const code = r.status !== undefined ? `(${r.status})` : '(down)';
-  return `${mark} ${r.id.padEnd(16)} ${r.url}  ${code}`;
+  const label = suspect ? `  ${p.verdict === 'stale' ? 'STALE' : 'WRONG CHECKOUT'}` : '';
+  return `${mark} ${r.id.padEnd(16)} ${r.url}  ${code}${label}`;
+}
+
+/** Render `ms` as a local `YYYY-MM-DD HH:MM`, or `?` when unknown. */
+function stamp(ms: number | null): string {
+  if (ms === null) return '?';
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** `6d` / `3h` / `12m` — how far `earlier` precedes `later`; '' if either is unknown. */
+function gap(earlier: number | null, later: number | null): string {
+  if (earlier === null || later === null) return '';
+  const mins = Math.max(0, Math.round((later - earlier) / 60000));
+  if (mins >= 1440) return `${Math.floor(mins / 1440)}d`;
+  if (mins >= 60) return `${Math.floor(mins / 60)}h`;
+  return `${mins}m`;
+}
+
+/**
+ * The indented explanation under a suspect service. Says what is wrong, what was
+ * expected, and — for `stale` — how far behind the process is, so the operator
+ * can act without re-deriving it by hand.
+ */
+function provenanceDetail(p?: ProvenanceRow): string[] {
+  if (p === undefined || !isProvenanceProblem(p.verdict)) return [];
+  const out: string[] = [];
+  if (p.verdict === 'wrong-checkout') {
+    out.push(`    serving from  ${p.actualRoot ?? '?'}`);
+    out.push(`    expected      ${p.expectedRoot}`);
+  } else {
+    const behind = gap(p.startedAtMs, p.refMovedAtMs);
+    out.push(`    checkout      ${p.expectedRoot}`);
+    out.push(
+      `    started       ${stamp(p.startedAtMs)}  ·  HEAD moved ${stamp(p.refMovedAtMs)}` +
+        (behind ? `  (${behind} behind)` : ''),
+    );
+  }
+  out.push(`    pid ${p.pid ?? '?'} — restart this service to serve what is on disk`);
+  return out;
 }
 
 /**
@@ -191,10 +283,7 @@ export function resolveServiceSet(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  return computeClosure(manifest, requested, {
-    withPlayback: effectiveWithPlayback(withBundles),
-    withAuthz: effectiveWithAuthz(withBundles),
-  }).services;
+  return computeClosure(manifest, requested, closureOptsFor(withBundles)).services;
 }
 
 /** A service excluded from the health pass because its sibling repo isn't cloned. */

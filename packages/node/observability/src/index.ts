@@ -13,9 +13,11 @@ export {
     type OutboxMetrics,
 } from './metrics.js';
 export { structuredErrorMiddleware } from './error-middleware.js';
+export { recordSpanException } from './record-exception.js';
 export {
     PiiSanitizingSpanExporter,
     sanitizeUrl,
+    sanitizeText,
     setSanitizerWarnSink,
     resetSanitizerWarnSink,
 } from './span-sanitizer.js';

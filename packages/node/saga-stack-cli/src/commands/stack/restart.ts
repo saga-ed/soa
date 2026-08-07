@@ -18,6 +18,7 @@
 
 import { BaseCommand } from '../../base-command.js';
 import type { NativeRuntimeFlags } from '../../base-command.js';
+import { bundleForService } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
@@ -69,6 +70,17 @@ export default class StackRestart extends BaseCommand {
         );
       }
     }
+    // Orphans the pidfile reap could not see, because they had no pidfile. Worth a
+    // line even when the kill succeeded: a process holding a stack port that `ss` did
+    // not launch is a fact the operator wants, and a survivor means the fresh `up`
+    // below will adopt stale code.
+    for (const f of outcome.reapedForeign ?? []) {
+      this.log(
+        f.killed
+          ? `⚠ reaped FOREIGN ${f.id} :${f.port} (pid ${f.pid}, pgid ${f.pgid}) — held the port with no pidfile`
+          : `⚠ FOREIGN ${f.id} :${f.port} (pid ${f.pid}) SURVIVED the reap — restart will serve stale code`,
+      );
+    }
     const up = outcome.up;
     if (up.autoPull) {
       this.log(`sibling sync (ff-only — ${up.autoPull.mode}):`);
@@ -76,12 +88,32 @@ export default class StackRestart extends BaseCommand {
     }
     if (up.av) this.log(up.av.message);
     for (const s of up.skipped) this.log(`⚠ ${s.message}`);
+    // Overlay-bound optionals were stopped by the reap but deliberately not
+    // relaunched (restart builds no overlay — relaunching would misconfigure
+    // them). Say so loudly: a silent drop here is what makes an operator think
+    // authz is still live after a bounce.
+    for (const id of outcome.notRelaunched ?? []) {
+      // Print the BUNDLE name, not the service id — `--with authz-sync` is not a
+      // valid bundle. Derived from the registry so a second overlay-bound service
+      // cannot silently start printing an uninvokable command.
+      const bundle = bundleForService(id);
+      this.log(
+        `⚠ ${id} was stopped but NOT relaunched — it needs its overlay.` +
+          (bundle ? ` Re-run: ss stack up --with ${bundle}` : ''),
+      );
+    }
 
     this.emit(
       flags,
       {
         native: true,
         stopped,
+        reapedForeign: (outcome.reapedForeign ?? []).map((f) => ({
+          id: f.id,
+          port: f.port,
+          pid: f.pid,
+          killed: f.killed,
+        })),
         viteCleared: outcome.vite?.removed ?? [],
         launched: up.launched.map((r) => ({ id: r.id, ok: r.ok, alreadyUp: r.alreadyUp ?? false })),
         mesh: { ok: up.mesh.ok },

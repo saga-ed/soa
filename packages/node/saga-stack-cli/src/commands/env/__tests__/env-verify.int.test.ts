@@ -13,6 +13,7 @@ import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaseCommand } from '../../../base-command.js';
 import { buildEnvHealthProbes, classifyEcsState, classifyProbeBody } from '../../../core/env/index.js';
+import type { DeployedServiceDef } from '../../../core/env/index.js';
 import type { EnvPsql, HealthProber, ProbeResult } from '../../../runtime/index.js';
 import EnvVerify from '../verify.js';
 
@@ -94,6 +95,37 @@ describe('probe planning (pure)', () => {
     expect(byId['connect-web']).toBe('https://dev.d2ezd4i8b4uexc.amplifyapp.com/');
   });
 
+  it('prod uses the SAME <host>.<domain> convention — no curated prod host map', () => {
+    // The issue assumed prod was multi-apex; live probing refuted it. If this
+    // ever needs a per-service prod entry, the premise changed, not the code.
+    const byId = Object.fromEntries(buildEnvHealthProbes('saga.org', 'prod').map((p) => [p.id, p.url]));
+    expect(byId['iam-api']).toBe('https://iam.saga.org/health');
+    expect(byId['sis-api']).toBe('https://sis.saga.org/health');
+    expect(byId['programs-api']).toBe('https://programs-api.saga.org/health');
+    expect(byId['coach-web']).toBe('https://coach.saga.org/');
+  });
+
+  it('never probes the wootdev.com recording fleets on a PROD run', () => {
+    // fleek/fleek-recorder/rtsm-api pin `fqdn` to *.wootdev.com — a DEV-account
+    // fleet. Prod runs its own (`recorder_cluster_prod`,
+    // `av-recorder-cluster-prod-v3`). Probing the dev host during a prod run is
+    // a false signal BOTH ways: green while prod's recorder is down, red while
+    // dev's is down and prod is fine. They must be absent from prod entirely —
+    // not merely un-gated, which would still report the wrong fleet's health.
+    const ids = buildEnvHealthProbes('saga.org', 'prod').map((p) => p.id);
+    expect(ids).not.toContain('fleek');
+    expect(ids).not.toContain('fleek-recorder');
+    expect(ids).not.toContain('rtsm-api');
+    // …and no prod probe may target a wootdev.com host by any route.
+    const urls = buildEnvHealthProbes('saga.org', 'prod')
+        .map((p) => p.url)
+        .filter((u): u is string => u !== null);
+    expect(urls.filter((u) => u.includes('wootdev.com'))).toEqual([]);
+    // Still required where they ARE the right fleet.
+    expect(buildEnvHealthProbes('wootdev.com', 'dev').map((p) => p.id)).toContain('fleek');
+    expect(buildEnvHealthProbes('saga-training.org', 'training').map((p) => p.id)).toContain('rtsm-api');
+  });
+
   it('re-targets per-env services, but pins SHARED fleets to their real host', () => {
     const byId = Object.fromEntries(buildEnvHealthProbes('saga-training.org', 'training').map((p) => [p.id, p.url]));
     expect(byId['iam-api']).toBe('https://iam.saga-training.org/health');
@@ -104,6 +136,104 @@ describe('probe planning (pure)', () => {
     expect(byId['fleek-recorder']).toBe('https://recorder-chi-1.fleek.wootdev.com/v1/health');
     // connect-web resolves to the TRAINING Amplify branch, not a wootdev host.
     expect(byId['connect-web']).toBe('https://training.d2ezd4i8b4uexc.amplifyapp.com/');
+  });
+});
+
+describe('per-env service scope (I#375)', () => {
+  const ids = (envName: string, domain: string): string[] =>
+    buildEnvHealthProbes(domain, envName).map((p) => p.id);
+
+  it('OMITS services that are not deployed to the env, and only there', () => {
+    // Absent from prod-shared AND NXDOMAIN ⇒ genuinely not deployed to prod.
+    for (const id of ['content-api', 'ads-adm-api', 'transcripts-api']) {
+      expect(ids('prod', 'saga.org')).not.toContain(id);
+      expect(ids('dev', 'wootdev.com')).toContain(id);
+      expect(ids('training', 'saga-training.org')).toContain(id);
+    }
+  });
+
+  it('scoping OUT of prod does NOT weaken the dev gate (scope is not `optional`)', () => {
+    // The trap this field exists to avoid: marking the three optional would
+    // have let them fail silently on dev, where they really do run.
+    const dev = Object.fromEntries(buildEnvHealthProbes('wootdev.com', 'dev').map((p) => [p.id, p]));
+    expect(dev['content-api']!.optional).toBe(false);
+    expect(dev['ads-adm-api']!.optional).toBe(false);
+    // transcripts-api was already optional before this change — unchanged.
+    expect(dev['transcripts-api']!.optional).toBe(true);
+  });
+
+  it('gives EVERY prod service an HTTP route — no stale no-public-route entries', () => {
+    // Regression for the three services recorded as unrouted in prod that were
+    // in fact routed the whole time (Seth, 2026-07-29). A stale "no public
+    // route" is not a harmless omission: coach-api/connect-api FAILED the gate
+    // outright, so `verify --env prod` was red on a healthy fleet.
+    const prod = Object.fromEntries(buildEnvHealthProbes('saga.org', 'prod').map((p) => [p.id, p]));
+    expect(prod['coach-api']!.url).toBe('https://coach-api.saga.org/health');
+    expect(prod['connect-api']!.url).toBe('https://connectv3-api.saga.org/connectv3/v1/health');
+    // Prod has a custom domain (connectv3., NOT connect.); dev/training do not.
+    expect(prod['connect-web']!.url).toBe('https://connectv3.saga.org/');
+    // Nothing in prod is unroutable or un-gated any more.
+    for (const p of buildEnvHealthProbes('saga.org', 'prod')) {
+      expect(p.url, `${p.id} has no prod URL`).not.toBeNull();
+      expect(p.optional, `${p.id} is un-gated in prod`).toBe(false);
+    }
+    // …while dev/training keep their own distinct hosts.
+    const dev = Object.fromEntries(buildEnvHealthProbes('wootdev.com', 'dev').map((p) => [p.id, p.url]));
+    expect(dev['coach-api']).toBe('https://coach-api.wootdev.com/health');
+    expect(dev['connect-api']).toBe('https://connectv3-api.wootdev.com/connectv3/v1/health');
+    expect(dev['connect-web']).toBe('https://dev.d2ezd4i8b4uexc.amplifyapp.com/');
+  });
+
+  it('reports a DEPLOYED-but-unrouted service instead of dropping it (noPublicRouteEnvs)', () => {
+    // No live service needs this today, so it is pinned against a fixture: the
+    // mechanism must keep working for the next host that loses its DNS record.
+    // Dropping such a service (via `envs`) would hide a real outage — it stays
+    // listed with url null, still REQUIRED, judged by --ecs.
+    const svc: DeployedServiceDef[] = [
+      { id: 'x-api', host: 'x-api', noPublicRouteEnvs: ['prod'], healthPath: '/health', kind: 'api', ecsService: 'x' },
+    ];
+    const prod = buildEnvHealthProbes('saga.org', 'prod', svc)[0]!;
+    expect(prod.url).toBeNull();
+    expect(prod.optional).toBe(false);
+    expect(prod.ecsService).toBe('x');
+    expect(buildEnvHealthProbes('wootdev.com', 'dev', svc)[0]!.url).toBe('https://x-api.wootdev.com/health');
+  });
+
+  it('un-gates a service ONLY in the env where it has no signal at all (optionalEnvs)', () => {
+    // Also fixture-pinned now that prod's connect-web is checkable. The rule:
+    // un-gating one env must never weaken the envs where the service IS
+    // verifiable, or a real outage there passes silently.
+    const svc: DeployedServiceDef[] = [
+      {
+        id: 'x-web',
+        fqdnByEnv: { dev: 'dev.example.amplifyapp.com' },
+        optionalEnvs: ['prod'],
+        healthPath: '/',
+        kind: 'frontend',
+      },
+    ];
+    const prod = buildEnvHealthProbes('saga.org', 'prod', svc)[0]!;
+    expect(prod.url).toBeNull();
+    expect(prod.optional).toBe(true);
+    expect(prod.ecsService).toBeUndefined();
+    expect(prod.ecsServiceName).toBeUndefined();
+    const dev = buildEnvHealthProbes('wootdev.com', 'dev', svc)[0]!;
+    expect(dev.optional).toBe(false);
+    expect(dev.url).toBe('https://dev.example.amplifyapp.com/');
+  });
+
+  it('carries the per-env ABSOLUTE ECS name only where one is declared', () => {
+    const prod = Object.fromEntries(buildEnvHealthProbes('saga.org', 'prod').map((p) => [p.id, p]));
+    // No service declares an override today — coach-api used to pin
+    // `coach-coach-api-canary`, but prod-shared runs `coach-coach-api-main`.
+    expect(prod['coach-api']!.ecsServiceName).toBeUndefined();
+    expect(prod['coach-api']!.ecsService).toBe('coach-coach-api');
+    // Everything else composes from the prefix — no global suffix override.
+    expect(prod['iam-api']!.ecsServiceName).toBeUndefined();
+    expect(prod['iam-api']!.ecsService).toBe('rostering-iam-api');
+    const dev = Object.fromEntries(buildEnvHealthProbes('wootdev.com', 'dev').map((p) => [p.id, p]));
+    expect(dev['coach-api']!.ecsServiceName).toBeUndefined();
+    expect(dev['coach-api']!.ecsService).toBe('coach-coach-api');
   });
 });
 
@@ -202,6 +332,89 @@ describe('env verify --ecs', () => {
 
     await expect(EnvVerify.run(['--env', 'dev', '--ecs'], config)).rejects.toThrow(/env verify FAILED/);
     expect(text()).toContain('ECS: under-running 0/2');
+  });
+
+  it('--env prod asks ECS for the right service names — all on the -main suffix', async () => {
+    const asked: string[] = [];
+    const fake = {
+      async json(args: string[]): Promise<unknown> {
+        if (args[0] === 'sts') return '531314149529'; // the prod account
+        if (args[1] === 'describe-services') {
+          asked.push(args[args.indexOf('--services') + 1]!);
+          expect(args[args.indexOf('--cluster') + 1]).toBe('prod-shared'); // no arm cluster in prod
+          return { running: 2, desired: 2, status: 'ACTIVE', rollout: 'COMPLETED' };
+        }
+        return null;
+      },
+      async lambdaInvoke(): Promise<unknown> {
+        throw new Error('unexpected');
+      },
+      portForward(): never {
+        throw new Error('unexpected');
+      },
+    };
+    vi.spyOn(BaseCommand.prototype as unknown as { getEnvAws: () => unknown }, 'getEnvAws').mockReturnValue(fake);
+
+    // NO --tolerate: a healthy prod fleet must pass on its own. If this ever
+    // needs one, the gate has become a thing operators route around.
+    await expect(EnvVerify.run(['--env', 'prod', '--ecs'], config)).resolves.toBeUndefined();
+
+    // prod's shared mesh uses the SAME `-main` suffix as dev's…
+    expect(asked).toContain('rostering-iam-api-main');
+    expect(asked).toContain('qboard-connectv3-api-main');
+    // …and coach is no exception: `aws ecs list-services --cluster prod-shared`
+    // lists `coach-coach-api-main` and no canary, so it composes like the rest.
+    expect(asked).toContain('coach-coach-api-main');
+    expect(asked).not.toContain('coach-coach-api-canary');
+    // Services scoped out of prod are never asked about at all.
+    expect(asked.some((s) => s.includes('content-api') || s.includes('ads-adm') || s.includes('transcripts'))).toBe(false);
+    // Nothing in prod reads as unroutable any more — the three services that
+    // once did are probed over HTTP like the rest.
+    expect(text()).not.toContain('no public route');
+    expect(probed).toContain('https://coach-api.saga.org/health');
+    expect(probed).toContain('https://connectv3-api.saga.org/connectv3/v1/health');
+    expect(probed).toContain('https://connectv3.saga.org/');
+    // connect-web is an Amplify SPA — HTTP is its only signal, never ECS.
+    expect(asked.some((s) => s.includes('connect-web'))).toBe(false);
+    expect(text()).toContain('verify passed');
+  });
+
+  it('--env prod does NOT green a service whose HTTP is fine but whose ECS is bad', async () => {
+    const fake = {
+      async json(args: string[]): Promise<unknown> {
+        if (args[0] === 'sts') return '531314149529';
+        if (args[1] === 'describe-services') {
+          return args.includes('coach-coach-api-main') ? null : { running: 1, desired: 1, status: 'ACTIVE', rollout: 'COMPLETED' };
+        }
+        return null;
+      },
+      async lambdaInvoke(): Promise<unknown> {
+        throw new Error('unexpected');
+      },
+      portForward(): never {
+        throw new Error('unexpected');
+      },
+    };
+    vi.spyOn(BaseCommand.prototype as unknown as { getEnvAws: () => unknown }, 'getEnvAws').mockReturnValue(fake);
+
+    // A healthy /health cannot cover for a missing ECS service: the platform
+    // pass is the truth HTTP cannot see (stale target behind a dead service).
+    await expect(EnvVerify.run(['--env', 'prod', '--ecs'], config)).rejects.toThrow(/env verify FAILED.*coach-api/s);
+    expect(text()).toContain('no such ECS service');
+    expect(text()).toContain('1 required service(s) unhealthy');
+  });
+
+  it('--env prod passes on HTTP alone — every prod service is routed', async () => {
+    // The bug this replaces: coach-api/connect-api carried a stale "no public
+    // route", so a plain `ss env verify --env prod` FAILED on a healthy fleet
+    // and could only be worked around with --tolerate.
+    await expect(EnvVerify.run(['--env', 'prod'], config)).resolves.toBeUndefined();
+    expect(text()).not.toContain('no public route');
+    expect(probed).toContain('https://coach-api.saga.org/health');
+    expect(probed).toContain('https://connectv3-api.saga.org/connectv3/v1/health');
+    expect(probed).toContain('https://connectv3.saga.org/');
+    // …alongside the services that were already probed on the plain apex.
+    expect(probed).toContain('https://iam.saga.org/health');
   });
 
   it('refuses on the wrong AWS account before any ECS call', async () => {

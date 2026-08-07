@@ -5761,6 +5761,16 @@
           "name": "no-auto-pull",
           "type": "boolean"
         },
+        "no-seed": {
+          "allowNo": false,
+          "description": "launch WITHOUT seeding. The only way to bring services back up over data you want kept: an absent --seed still seeds the roster baseline, which is destructive to non-fixture data (it drops a hydrated or synced org). Required after `stack hydrate`, whose database swap leaves the running services on dead connections — `stack restart` is slot-0 only, so on slots 1..9 this is the bounce.",
+          "exclusive": [
+            "seed",
+            "reset"
+          ],
+          "name": "no-seed",
+          "type": "boolean"
+        },
         "only": {
           "description": "services to bring up. With --dry-run, a comma-list whose dependency closure is printed. On a real run a comma-list boots the closure NATIVELY (never up.sh); combine freely with --sandbox/--tunnel/--record (all native Phase-2 overlays).",
           "hasDynamicHelp": false,

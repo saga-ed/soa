@@ -20,6 +20,11 @@ vi.mock('@openfga/sdk', () => ({
     ApiToken: 'api_token',
     ClientCredentials: 'client_credentials',
   },
+  ConsistencyPreference: {
+    Unspecified: 'UNSPECIFIED',
+    MinimizeLatency: 'MINIMIZE_LATENCY',
+    HigherConsistency: 'HIGHER_CONSISTENCY',
+  },
   OpenFgaClient: class {
     check = checkMock;
     batchCheck = batchCheckMock;
@@ -340,8 +345,8 @@ describe('batchCheck — a per-item failure is NOT a deny', () => {
 });
 
 describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
-  // The wire accepts exactly ONE user_filter per ListUsers call, so the mock
-  // answers per filter — a multi-filter request would be a real-server 400.
+  // Mock answers per single filter, asserting the arity the real server
+  // enforces (see the implementation's fan-out comment).
   const respondPerFilter = () =>
     listUsersMock
       .mockReset()
@@ -377,6 +382,30 @@ describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
     });
   });
 
+  it('requests HIGHER_CONSISTENCY — a stale read misreads as a missing tuple', async () => {
+    respondPerFilter();
+    await gateWithStore().listUsersDiagnostic('can_view', 'qtf_review:r1', ['user']);
+    expect(listUsersMock.mock.calls[0]?.[1]).toEqual({ consistency: 'HIGHER_CONSISTENCY' });
+  });
+
+  it('forwards contextual tuples to every fanned-out call, omitting the key when absent', async () => {
+    respondPerFilter();
+    const tuples = [{ user: 'pod:p1', relation: 'pod', object: 'session:s1' }];
+    await gateWithStore().listUsersDiagnostic(
+      'host',
+      'session:s1',
+      ['user', 'group#member'],
+      tuples
+    );
+    for (const call of listUsersMock.mock.calls) {
+      expect(call[0]).toMatchObject({ contextualTuples: tuples });
+    }
+
+    respondPerFilter();
+    await gateWithStore().listUsersDiagnostic('host', 'session:s1', ['user'], []);
+    expect(listUsersMock.mock.calls[0]?.[0]).not.toHaveProperty('contextualTuples');
+  });
+
   it('collapses duplicate filters to one wire call — no double-counted subjects', async () => {
     respondPerFilter();
     const listing = await gateWithStore().listUsersDiagnostic('can_view', 'qtf_review:r1', [
@@ -399,7 +428,7 @@ describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
     listUsersMock.mockReset();
     const gate = gateWithStore();
     // 'session:' is the empty-interpolation bug (`session:${id}` with id '').
-    for (const bad of ['no-type-separator', 'session:', ':s1']) {
+    for (const bad of ['no-type-separator', 'session:', ':s1', 'qtf review:r1', 'session#occ:s1']) {
       await expect(gate.listUsersDiagnostic('host', bad, ['user'])).rejects.toThrow(TypeError);
     }
     expect(listUsersMock).not.toHaveBeenCalled();

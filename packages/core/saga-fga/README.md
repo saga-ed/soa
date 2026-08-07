@@ -160,14 +160,21 @@ Reading the result honestly:
   `userTypes` entries map to server-side filters, which is why the parameter is
   required: a shape you don't name is _absent from the search_, not
   empty-because-nobody-holds-it. Forget `'group#member'` and every group grant
-  reads as a missing tuple. The wire accepts exactly one filter per `ListUsers`
-  call, so each entry is its own round trip with its own results cap.
+  reads as a missing tuple. Each entry is its own round trip with its own
+  results cap.
+- **Contextual-tuple-derived holders are invisible** unless you ride the same
+  tuples in via the optional `contextualTuples` parameter — the server can only
+  search stored tuples, and the ephemeral-session pattern above stores nothing.
+  Same rule as `check`.
 - A **userset** (`group:g#member`) is a reference — its members are not listed;
   a complete "who" requires expanding it separately.
 - A **wildcard** entry means a `user:*` tuple holds **this** relation. On a
   marker relation (a `released` flip) that is the expected shape; it does _not_
   mean "everyone can" on any computed relation, where the model's intersections
   bind the wildcard.
+
+Lookups request `HIGHER_CONSISTENCY` (unlike the check path's latency-first
+default) so a just-written tuple shows up when an operator verifies a write.
 
 A malformed argument — an object without its `type:` prefix, a filter that is
 not `type` or `type#relation`, an empty filter list — throws `TypeError`: a

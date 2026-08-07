@@ -1,4 +1,4 @@
-import { CredentialsMethod, OpenFgaClient } from '@openfga/sdk';
+import { ConsistencyPreference, CredentialsMethod, OpenFgaClient } from '@openfga/sdk';
 
 /**
  * @saga-ed/saga-fga — Tier-2 (per-resource) OpenFGA authorization gate.
@@ -245,32 +245,28 @@ export interface FgaGate {
  */
 export interface FgaDiagnostics {
   /**
-   * The reverse question — "WHO holds `relation` on `object`?" — completing the
-   * two-of-three (user, relation, object) debugging triple. **Diagnostic tier
-   * ONLY**, and the name is the guardrail: `ListUsers` cannot report truncation
-   * (the same defect that keeps `ListObjects` out of this package), so it is
-   * never an enforcement input, a notification/fan-out source, or an
-   * audit-of-record. Rationale → README "The reverse question".
+   * The reverse question — "WHO holds `relation` on `object`?" — for debugging
+   * and audit tooling ONLY; the name is the guardrail (`ListUsers` cannot
+   * report truncation). Full rationale + honest-reading guide → README
+   * "The reverse question".
    *
-   * `userTypes` names the subject shapes to search, and the listing contains
-   * ONLY what it names: entries map to server-side filters, so the parameter is
-   * required — an implicit default would silently hide the shapes it omits
-   * (e.g. group grants). `'group#member'` asks for usersets of that shape; bare
-   * `'user'` asks for direct subjects. The wire accepts one filter per
-   * `ListUsers` call, so each entry costs its own (independently capped) round
-   * trip; results are merged.
+   * `userTypes` is required and the listing contains ONLY the shapes it names
+   * (`'user'` direct subjects, `'group#member'` usersets of that shape); each
+   * entry costs its own (independently capped) round trip. Holders derived
+   * through contextual tuples are invisible unless the same tuples ride in via
+   * `contextualTuples`, exactly as on `check`. Reads request
+   * HIGHER_CONSISTENCY: this surface answers "who does the graph reach NOW",
+   * often right after a tuple write.
    *
-   * Throws `TypeError` on a malformed argument — a caller bug, detected
-   * locally, deliberately NOT {@link FgaUnavailableError} so it can never read
-   * as a PDP outage. Throws {@link FgaUnavailableError} when no verdict could
-   * be reached, like every other method here — a diagnostic that silently
-   * returns `[]` on an outage would send the debugger chasing a phantom
-   * missing-tuple bug.
+   * Throws `TypeError` on a malformed argument (a caller bug, detected
+   * locally — never read as a PDP outage); {@link FgaUnavailableError} when no
+   * verdict could be reached — never an empty listing on an outage.
    */
   listUsersDiagnostic(
     relation: string,
     object: string,
-    userTypes: readonly string[]
+    userTypes: readonly string[],
+    contextualTuples?: readonly FgaContextualTuple[]
   ): Promise<FgaUserListing>;
 }
 
@@ -386,13 +382,14 @@ export function createFgaGate(
   const listUsersDiagnostic = async (
     relation: string,
     object: string,
-    userTypes: readonly string[]
+    userTypes: readonly string[],
+    contextualTuples?: readonly FgaContextualTuple[]
   ): Promise<FgaUserListing> => {
     // Malformed arguments are caller bugs → TypeError, never FgaUnavailableError.
-    // 'type:id' with a NON-EMPTY id, split on the FIRST colon only — instance
-    // ids may themselves contain separators (session_instance:S|date).
+    // 'type:id' with a well-formed type and NON-EMPTY id, split on the FIRST
+    // colon only — instance ids may contain separators (session_instance:S|date).
     const sep = object.indexOf(':');
-    if (sep <= 0 || sep === object.length - 1) {
+    if (sep <= 0 || sep === object.length - 1 || !/^[^\s#]+$/.test(object.slice(0, sep))) {
       throw new TypeError(
         `FGA listUsersDiagnostic requires an object of the form "type:id", got "${object}"`
       );
@@ -423,11 +420,17 @@ export function createFgaGate(
       userFilters.map(async filter => {
         let res;
         try {
-          res = await clientFor().listUsers({
-            object: wireObject,
-            relation,
-            user_filters: [filter],
-          });
+          res = await clientFor().listUsers(
+            {
+              object: wireObject,
+              relation,
+              user_filters: [filter],
+              ...(contextualTuples?.length ? { contextualTuples: [...contextualTuples] } : {}),
+            },
+            // A stale read here misreads as a missing tuple (the very thing a
+            // debugger comes to verify), so trade latency for consistency.
+            { consistency: ConsistencyPreference.HigherConsistency }
+          );
         } catch (cause) {
           // Same contract as check/batchCheck: failure to reach a verdict is
           // unavailability, never an empty listing.
@@ -461,13 +464,11 @@ export function createFgaGate(
         return partial;
       })
     );
-    const listing: FgaUserListing = { users: [], usersets: [], wildcardTypes: [] };
-    for (const p of partials) {
-      listing.users.push(...p.users);
-      listing.usersets.push(...p.usersets);
-      listing.wildcardTypes.push(...p.wildcardTypes);
-    }
-    return listing;
+    return {
+      users: partials.flatMap(p => p.users),
+      usersets: partials.flatMap(p => p.usersets),
+      wildcardTypes: partials.flatMap(p => p.wildcardTypes),
+    };
   };
 
   return {

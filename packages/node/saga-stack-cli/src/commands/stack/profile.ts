@@ -1,11 +1,9 @@
 /**
  * `ss stack profile <service>` — capture a CPU profile from a RUNNING service.
  *
- * ATTACH MODE. The app is never a direct child of `pnpm dev` (backends nest it
- * inside tsup's quoted `--onSuccess` or a `tsx watch` fork), so nothing injected
- * at launch reaches it. This command leaves the launch path alone: find the
- * LISTENING process, open its inspector with SIGUSR1, pull the profile over CDP.
- * Port selection and its constraints: `core/inspector.ts`.
+ * ATTACH MODE: find the LISTENING process, open its inspector with SIGUSR1, pull
+ * the profile over CDP. The launch path is left untouched — nothing injected there
+ * reaches the app. Why: docs/instrumentation.md. Port constraints: `core/inspector.ts`.
  */
 
 import { Args, Flags } from '@oclif/core';

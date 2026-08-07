@@ -307,16 +307,7 @@ export async function captureCpuProfile(
  * are missing, which is right for a preflight warning and wrong here, where the
  * answer gates a hard refusal.
  */
-export async function inspectorPortBusy(
-  port: number,
-  deps: { probeTcp?: (port: number, timeoutMs: number) => Promise<boolean> } = {},
-): Promise<boolean> {
-  const probe = deps.probeTcp ?? tcpListening;
-  return probe(port, 1000);
-}
-
-/** Resolve true when a TCP connect to 127.0.0.1:port succeeds within `timeoutMs`. */
-function tcpListening(port: number, timeoutMs: number): Promise<boolean> {
+export function inspectorPortBusy(port: number, timeoutMs = 1000): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new Socket();
     const done = (held: boolean) => {

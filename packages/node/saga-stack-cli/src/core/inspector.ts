@@ -5,11 +5,9 @@
  * SIGUSR1 opens the inspector on Node's DEFAULT port and cannot be told another,
  * so this module PREDICTS where the inspector will appear rather than choosing it.
  *
- * Don't inject `--inspect-port` into a service's launch env to get per-service
- * ports: NODE_OPTIONS is inherited by the whole `pnpm dev → tsup → node
- * dist/main.js` tree, so the wrappers reserve the port and the service fails to
- * bind it — visible only as `address already in use` in the service's own log.
- * A regression test in launch-plan.unit.test.ts pins this.
+ * Per-service inspector ports are not available: injecting `--inspect-port` via
+ * NODE_OPTIONS reserves the port in a wrapper instead of the service. Pinned by
+ * launch-plan.unit.test.ts; rationale in docs/instrumentation.md.
  *
  * Two consequences the callers depend on:
  *  - ONE SERVICE AT A TIME, MACHINE-WIDE — not per slot. The port is Node's

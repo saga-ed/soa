@@ -48,12 +48,10 @@ const env = (id: ServiceId) => {
 };
 
 describe('attach-mode profiling leaves the launch env UNTOUCHED', () => {
-  // `ss stack profile` attaches to a running process (SIGUSR1 + CDP) and injects
-  // nothing at launch. An earlier attempt DID preset `NODE_OPTIONS=--inspect-port`
-  // here and it failed in a way worth pinning: NODE_OPTIONS is inherited by the
-  // whole `pnpm dev → tsup → node dist/main.js` tree, so pnpm and tsup each
-  // reserved the port and the real service could not bind it. If NODE_OPTIONS ever
-  // reappears on a launch line, that regression is back.
+  // `ss stack profile` attaches to a running process (SIGUSR1 + CDP) and must
+  // inject nothing at launch: NODE_OPTIONS reaches the whole `pnpm dev → tsup →
+  // node dist/main.js` tree, so a wrapper reserves the port and the service
+  // cannot bind it. Rationale: docs/instrumentation.md.
   it('injects no NODE_OPTIONS on any service', () => {
     for (const id of Object.keys(manifest.services) as ServiceId[]) {
       expect(rawEnv(id).NODE_OPTIONS).toBeUndefined();

@@ -61,7 +61,7 @@ import { parseWorkspace } from '../../core/workspace.js';
 import type { WorkspaceSelection } from '../../core/workspace.js';
 import { resolveVendorScript } from '../../runtime/index.js';
 import { makeStackApi } from '../../stack-api.js';
-import type { Runtime, StackApi } from '../../stack-api.js';
+import type { Runtime, SeedResult, StackApi } from '../../stack-api.js';
 
 /** `--sandbox <name>` shape gate (up.sh ~2154; the composition API's IDENTIFIER shape). */
 const SANDBOX_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$/;
@@ -101,6 +101,12 @@ export default class StackUp extends BaseCommand {
       description:
         'seed the named profile after launch (native). An absent --seed still seeds the `roster` baseline (the up.sh bare-default).',
       options: ['roster', 'full'],
+    }),
+    'no-seed': Flags.boolean({
+      default: false,
+      exclusive: ['seed', 'reset'],
+      description:
+        'launch WITHOUT seeding. The only way to bring services back up over data you want kept: an absent --seed still seeds the roster baseline, which is destructive to non-fixture data (it drops a hydrated or synced org). Required after `stack hydrate`, whose database swap leaves the running services on dead connections — `stack restart` is slot-0 only, so on slots 1..9 this is the bounce.',
     }),
     pull: Flags.boolean({
       description:
@@ -589,12 +595,26 @@ export default class StackUp extends BaseCommand {
     // pass a fully-restored set later.)
     const skippedIds = new Set(up.skipped.map((s) => s.id));
     const active = new Set(services.filter((id) => !skippedIds.has(id)));
-    const plan: SeedPlan = composeSeedPlan(
-      this.seedSelection(flags),
-      active,
-      new Set<ServiceId>(),
-    );
-    const seeded = await api.seed(plan);
+    // --no-seed: launch only. The seed is DESTRUCTIVE to non-fixture data — the
+    // iam seed drops an org it did not write — so bringing services back up over
+    // a hydrated or synced slot needs a way to skip it. There is no other:
+    // `stack restart` refuses slots 1..9, and an absent --seed still seeds the
+    // roster baseline. Measured 2026-08-07: `up` over a freshly hydrated slot 1
+    // took iam_local from 6935 users to 314 and removed the org entirely.
+    let seeded: SeedResult;
+    if (flags['no-seed']) {
+      // `ok: true` because nothing FAILED — the phase was deliberately not run.
+      // Downstream (`--tunnel`, `--login`) reads seeded.ok as "the stack is in a
+      // good state", and skipping the seed does not make it otherwise.
+      seeded = { ok: true, ran: { offline: [], online: [] }, skipped: [] };
+    } else {
+      const plan: SeedPlan = composeSeedPlan(
+        this.seedSelection(flags),
+        active,
+        new Set<ServiceId>(),
+      );
+      seeded = await api.seed(plan);
+    }
 
     // Phase 2 --tunnel: after a successful native (tunnel-aware) launch, start the
     // reverse tunnels via the VENDORED tunnel.sh (up.sh drives the frpc tunnels the
@@ -847,6 +867,7 @@ type NativeFlags = DryRunFlags & {
   'state-dir'?: string;
   slot: number;
   reset: boolean;
+  'no-seed': boolean;
   login: boolean;
   'skip-prep': boolean;
   pull: boolean;

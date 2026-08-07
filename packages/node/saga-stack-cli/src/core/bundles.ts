@@ -330,12 +330,11 @@ export function featuresOf(
  * Mesh units the selected features contribute DIRECTLY (`BundleDef.mesh`),
  * independent of any service.
  *
- * 🔑 Shared by BOTH mesh derivations — `computeClosure`'s `closure.mesh` and the
- * launch path's `neededMesh`. They are two separate unions (one over the closure,
- * one over the launched service list) and having each apply `BundleDef.mesh`
- * itself is exactly how they drifted: the closure reported `otel-collector` while
- * the launch path dropped it, so `--dry-run` promised a collector that `stack up`
- * never started. One function, two callers, no drift. PURE.
+ * 🔑 Both mesh derivations MUST call this — `computeClosure`'s `closure.mesh`
+ * (what `--dry-run` reports) and the launch path's `neededMesh` (what actually
+ * starts). They union over different sets, so applying `BundleDef.mesh`
+ * separately in each lets the planner promise a unit the launcher never starts.
+ * PURE.
  */
 export function meshForFeatures(features: FeatureSet): MeshId[] {
   const out: MeshId[] = [];

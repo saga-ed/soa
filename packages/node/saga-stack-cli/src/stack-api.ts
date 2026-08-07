@@ -544,12 +544,12 @@ function head(argv: string[]): { command: string; args: string[] } {
  * manifest declaration order (so a postgres-only partial stack waits only on
  * postgres). `make up` still starts the WHOLE mesh; this only narrows the gate.
  *
- * 🔑 The feature half is not optional garnish: for a PROFILE-GATED unit this list
- * is what activates its compose profile (`meshUp`'s `COMPOSE_PROFILES`), so a unit
- * missing here is never STARTED, not merely un-waited-on. A service-union-only
- * derivation silently dropped `otel-collector` (the `otel` bundle contributes zero
- * services) while `--dry-run` — which reads `closure.mesh` — promised it.
- * `meshForFeatures` is shared with `computeClosure` so the two cannot re-drift.
+ * 🔑 The feature half is load-bearing: for a PROFILE-GATED unit this list is what
+ * activates its compose profile (`meshUp`'s `COMPOSE_PROFILES`), so a unit missing
+ * here is never STARTED, not merely un-waited-on. A bundle contributing zero
+ * services (`otel`) reaches the mesh ONLY through this half, and `--dry-run` reads
+ * `closure.mesh` — so a service-only union here makes the planner and the launcher
+ * disagree. `meshForFeatures` is shared with `computeClosure` to prevent that.
  */
 function neededMesh(services: ServiceId[], m: Manifest, features: FeatureSet): MeshId[] {
   const set = new Set<MeshId>();

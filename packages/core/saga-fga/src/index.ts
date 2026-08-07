@@ -8,11 +8,14 @@ import { CredentialsMethod, OpenFgaClient } from '@openfga/sdk';
  * "can user X do action A on object R?" — they NEVER write tuples (ADR 0005);
  * writes flow through the sync worker.
  *
- * Two query shapes, and the choice matters:
+ * Three query shapes, and the choice matters:
  *   - `check`/`checkDetailed` — one object. Enforcement.
  *   - `batchCheck` — many objects. **Authorization-filtered lists**: fetch the
  *     candidates, then ask about them. Deliberately NOT `ListObjects`, which
  *     cannot report truncation (see `batchCheck`'s doc comment).
+ *   - `listUsersDiagnostic` — the reverse question ("WHO holds R on O"), for
+ *     debugging and audit tooling ONLY. Same truncation dishonesty as
+ *     ListObjects, hence the name (see its doc comment).
  *
  * Enumeration (`ListObjects`) is intentionally absent. If a caller ever truly
  * needs the id set before touching its own datastore, that belongs behind the
@@ -53,7 +56,7 @@ export interface FgaGateConfig {
 }
 
 export function loadFgaGateConfig(
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = process.env
 ): FgaGateConfig {
   return {
     enforce: env.AUTHZ_FGA_ENFORCE === 'true',
@@ -136,6 +139,26 @@ export function fgaBatchKey(user: string, relation: string, object: string): str
 }
 
 /**
+ * The subjects holding a relation, from {@link FgaGate.listUsersDiagnostic},
+ * partitioned by subject kind because they mean different things:
+ *
+ *   - `users` — direct subjects (`user:<id>`). What a debugger usually wants.
+ *   - `usersets` — indirect subjects (`group:<id>#member`). A userset is a
+ *     REFERENCE, not an enumeration: its members are not listed here, so a
+ *     complete "who" requires expanding each userset yourself.
+ *   - `wildcardTypes` — object types with a public-wildcard tuple on this
+ *     relation (`user:*` → `['user']`). Meaningful for MARKER relations
+ *     (e.g. a `released` flip); on a computed relation the model's
+ *     intersections have already bound the wildcard, so one appearing here
+ *     does NOT mean "everyone".
+ */
+export interface FgaUserListing {
+  users: string[];
+  usersets: string[];
+  wildcardTypes: string[];
+}
+
+/**
  * The outcome of a `checkDetailed` call: whether access is allowed, and — when
  * it is — which relation branch produced it.
  */
@@ -163,7 +186,7 @@ export interface FgaGate {
     user: string,
     relation: string,
     object: string,
-    contextualTuples?: readonly FgaContextualTuple[],
+    contextualTuples?: readonly FgaContextualTuple[]
   ): Promise<boolean>;
   /**
    * Evaluate several relation branches on the same object and report which
@@ -183,7 +206,7 @@ export interface FgaGate {
     user: string,
     relations: readonly string[],
     object: string,
-    contextualTuples?: readonly FgaContextualTuple[],
+    contextualTuples?: readonly FgaContextualTuple[]
   ): Promise<FgaDetailedDecision>;
   /**
    * Evaluate many independent (user, relation, object) questions in one call.
@@ -211,6 +234,32 @@ export interface FgaGate {
    * map keyed by {@link fgaBatchKey}; duplicate questions collapse to one entry.
    */
   batchCheck(checks: readonly FgaBatchCheckItem[]): Promise<FgaBatchCheckResult>;
+  /**
+   * The reverse question — "WHO holds `relation` on `object`?" — completing the
+   * two-of-three (user, relation, object) debugging triple. **Diagnostic tier
+   * ONLY**, and the name is the guardrail:
+   *
+   * OpenFGA's `ListUsers` response is `{ users: [...] }` — no continuation
+   * token, no truncation flag — while the server bounds the search with a
+   * max-results cap and a deadline. A CAPPED listing and a COMPLETE listing are
+   * therefore the same response, which disqualifies it from every load-bearing
+   * job: never an enforcement input, never a notification/fan-out source, never
+   * an audit-of-record (the PDP's decision log is that). It answers "show me
+   * who the graph currently reaches" during debugging, and nothing else.
+   *
+   * `userTypes` selects the subject kinds to search (default `['user']`).
+   * `'group#member'` syntax asks for usersets of that shape. Each entry maps to
+   * one server-side filter.
+   *
+   * Throws {@link FgaUnavailableError} when no verdict could be reached, like
+   * every other method here — a diagnostic that silently returns `[]` on an
+   * outage would send the debugger chasing a phantom missing-tuple bug.
+   */
+  listUsersDiagnostic(
+    relation: string,
+    object: string,
+    userTypes?: readonly string[]
+  ): Promise<FgaUserListing>;
 }
 
 /**
@@ -247,7 +296,7 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
     user: string,
     relation: string,
     object: string,
-    contextualTuples?: readonly FgaContextualTuple[],
+    contextualTuples?: readonly FgaContextualTuple[]
   ): Promise<boolean> => {
     let res;
     try {
@@ -260,17 +309,12 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
     } catch (cause) {
       // Any failure to REACH a verdict — unconfigured store, transport error,
       // non-2xx — is unavailability, not denial. Never collapse it to `false`.
-      throw new FgaUnavailableError(
-        `FGA check failed for ${relation} on ${object}`,
-        { cause },
-      );
+      throw new FgaUnavailableError(`FGA check failed for ${relation} on ${object}`, { cause });
     }
     return res.allowed === true;
   };
 
-  const batchCheck = async (
-    checks: readonly FgaBatchCheckItem[],
-  ): Promise<FgaBatchCheckResult> => {
+  const batchCheck = async (checks: readonly FgaBatchCheckItem[]): Promise<FgaBatchCheckResult> => {
     const verdicts = new Map<string, boolean>();
     if (checks.length === 0) return verdicts;
 
@@ -288,10 +332,9 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
     try {
       res = await clientFor().batchCheck({ checks: items });
     } catch (cause) {
-      throw new FgaUnavailableError(
-        `FGA batchCheck failed for ${checks.length} item(s)`,
-        { cause },
-      );
+      throw new FgaUnavailableError(`FGA batchCheck failed for ${checks.length} item(s)`, {
+        cause,
+      });
     }
 
     for (const single of res.result) {
@@ -301,7 +344,7 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
       if (single.error) {
         throw new FgaUnavailableError(
           `FGA batchCheck item failed for ${single.request.relation} on ${single.request.object}`,
-          { cause: single.error },
+          { cause: single.error }
         );
       }
       const key = keyByCorrelationId.get(single.correlationId);
@@ -309,7 +352,7 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
       // a question we asked; treating it as anything would be a guess.
       if (key === undefined) {
         throw new FgaUnavailableError(
-          `FGA batchCheck returned an unrecognized correlationId: ${single.correlationId}`,
+          `FGA batchCheck returned an unrecognized correlationId: ${single.correlationId}`
         );
       }
       verdicts.set(key, single.allowed === true);
@@ -320,19 +363,60 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
     const expected = new Set(keyByCorrelationId.values());
     if (verdicts.size !== expected.size) {
       throw new FgaUnavailableError(
-        `FGA batchCheck returned ${verdicts.size} verdict(s) for ${expected.size} distinct item(s)`,
+        `FGA batchCheck returned ${verdicts.size} verdict(s) for ${expected.size} distinct item(s)`
       );
     }
     return verdicts;
+  };
+
+  const listUsersDiagnostic = async (
+    relation: string,
+    object: string,
+    userTypes: readonly string[] = ['user']
+  ): Promise<FgaUserListing> => {
+    // 'type:id' → the wire's structured object. Split on the FIRST colon only —
+    // instance ids may themselves contain separators (session_instance:S|date).
+    const sep = object.indexOf(':');
+    if (sep <= 0) {
+      throw new FgaUnavailableError(
+        `FGA listUsers requires an object of the form "type:id", got "${object}"`
+      );
+    }
+    let res;
+    try {
+      res = await clientFor().listUsers({
+        object: { type: object.slice(0, sep), id: object.slice(sep + 1) },
+        relation,
+        // 'group#member' asks for usersets of that shape; bare 'user' asks for
+        // direct subjects.
+        user_filters: userTypes.map(t => {
+          const hash = t.indexOf('#');
+          return hash > 0 ? { type: t.slice(0, hash), relation: t.slice(hash + 1) } : { type: t };
+        }),
+      });
+    } catch (cause) {
+      // An outage must never present as an empty listing — the debugger would
+      // chase a phantom missing-tuple bug. Same contract as check/batchCheck.
+      throw new FgaUnavailableError(`FGA listUsers failed for ${relation} on ${object}`, { cause });
+    }
+    const listing: FgaUserListing = { users: [], usersets: [], wildcardTypes: [] };
+    for (const u of res.users) {
+      if (u.object) listing.users.push(`${u.object.type}:${u.object.id}`);
+      else if (u.userset)
+        listing.usersets.push(`${u.userset.type}:${u.userset.id}#${u.userset.relation}`);
+      else if (u.wildcard) listing.wildcardTypes.push(u.wildcard.type);
+    }
+    return listing;
   };
 
   return {
     enforce: config.enforce,
     check: checkOne,
     batchCheck,
+    listUsersDiagnostic,
     async checkDetailed(user, relations, object, contextualTuples) {
       const held = await Promise.all(
-        relations.map((relation) => checkOne(user, relation, object, contextualTuples)),
+        relations.map(relation => checkOne(user, relation, object, contextualTuples))
       );
       const branches = relations.filter((_, i) => held[i]);
       return {
@@ -363,7 +447,7 @@ export async function enforceFgaRelation(
   user: string,
   relation: string,
   object: string,
-  makeForbidden: () => Error,
+  makeForbidden: () => Error
 ): Promise<void> {
   if (!gate.enforce) return;
   const allowed = await gate.check(user, relation, object);

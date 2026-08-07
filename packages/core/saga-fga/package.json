@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/saga-fga",
-    "version": "0.1.0-dev.4",
+    "version": "0.1.0-dev.5",
     "private": false,
     "type": "module",
     "description": "Saga OpenFGA Tier-2 authorization gate — check, batchCheck (authorization-filtered lists) + framework-agnostic enforcement helper over @openfga/sdk. Services check; they never write tuples (ADR 0005).",

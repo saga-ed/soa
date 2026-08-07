@@ -10,14 +10,20 @@ import {
 
 const checkMock = vi.hoisted(() => vi.fn());
 const batchCheckMock = vi.hoisted(() => vi.fn());
+const listUsersMock = vi.hoisted(() => vi.fn());
 // Capture constructor args so we can assert on the CLIENT CONFIG, not just on
 // calls — a token that never reaches the constructor never reaches the wire.
 const clientConfigs = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock('@openfga/sdk', () => ({
-  CredentialsMethod: { None: 'none', ApiToken: 'api_token', ClientCredentials: 'client_credentials' },
+  CredentialsMethod: {
+    None: 'none',
+    ApiToken: 'api_token',
+    ClientCredentials: 'client_credentials',
+  },
   OpenFgaClient: class {
     check = checkMock;
     batchCheck = batchCheckMock;
+    listUsers = listUsersMock;
     constructor(config: Record<string, unknown>) {
       clientConfigs.push(config);
     }
@@ -26,16 +32,20 @@ vi.mock('@openfga/sdk', () => ({
 
 /** Echo back an `allowed` verdict per requested item, in request order. */
 const respondAllowing = (allow: (item: { object: string; relation: string }) => boolean) =>
-  batchCheckMock.mockReset().mockImplementation(
-    (body: { checks: { user: string; relation: string; object: string; correlationId: string }[] }) =>
-      Promise.resolve({
-        result: body.checks.map((c) => ({
-          allowed: allow(c),
-          request: c,
-          correlationId: c.correlationId,
-        })),
-      }),
-  );
+  batchCheckMock
+    .mockReset()
+    .mockImplementation(
+      (body: {
+        checks: { user: string; relation: string; object: string; correlationId: string }[];
+      }) =>
+        Promise.resolve({
+          result: body.checks.map(c => ({
+            allowed: allow(c),
+            request: c,
+            correlationId: c.correlationId,
+          })),
+        })
+    );
 
 const gateWithStore = () =>
   createFgaGate({ enforce: true, apiUrl: 'http://fga.test', storeId: 's1' });
@@ -103,16 +113,30 @@ describe('enforceFgaRelation', () => {
     let called = false;
     const gate: Pick<FgaGate, 'enforce' | 'check'> = {
       enforce: false,
-      async check() { called = true; return false; },
+      async check() {
+        called = true;
+        return false;
+      },
     };
-    await enforceFgaRelation(gate, 'user:a', 'host', 'session:s', () => new Error('should not throw'));
+    await enforceFgaRelation(
+      gate,
+      'user:a',
+      'host',
+      'session:s',
+      () => new Error('should not throw')
+    );
     expect(called).toBe(false);
   });
 
   it('throws makeForbidden() when the relation does not hold', async () => {
-    const gate: Pick<FgaGate, 'enforce' | 'check'> = { enforce: true, async check() { return false; } };
+    const gate: Pick<FgaGate, 'enforce' | 'check'> = {
+      enforce: true,
+      async check() {
+        return false;
+      },
+    };
     await expect(
-      enforceFgaRelation(gate, 'user:a', 'host', 'session:s', () => new Error('forbidden')),
+      enforceFgaRelation(gate, 'user:a', 'host', 'session:s', () => new Error('forbidden'))
     ).rejects.toThrow('forbidden');
   });
 
@@ -120,10 +144,13 @@ describe('enforceFgaRelation', () => {
     let asked: [string, string, string] | undefined;
     const gate: Pick<FgaGate, 'enforce' | 'check'> = {
       enforce: true,
-      async check(u, r, o) { asked = [u, r, o]; return true; },
+      async check(u, r, o) {
+        asked = [u, r, o];
+        return true;
+      },
     };
     await expect(
-      enforceFgaRelation(gate, 'user:a', 'host', 'session:s', () => new Error('forbidden')),
+      enforceFgaRelation(gate, 'user:a', 'host', 'session:s', () => new Error('forbidden'))
     ).resolves.toBeUndefined();
     expect(asked).toEqual(['user:a', 'host', 'session:s']);
   });
@@ -149,9 +176,11 @@ describe('contextual tuples', () => {
 
 describe('checkDetailed attribution', () => {
   const allowOnly = (relation: string) =>
-    checkMock.mockReset().mockImplementation(
-      (req: { relation: string }) => Promise.resolve({ allowed: req.relation === relation }),
-    );
+    checkMock
+      .mockReset()
+      .mockImplementation((req: { relation: string }) =>
+        Promise.resolve({ allowed: req.relation === relation })
+      );
 
   it('reports which branch fired', async () => {
     allowOnly('edit_grant');
@@ -186,10 +215,10 @@ describe('checkDetailed attribution', () => {
 describe('batchCheck — the authorization-filtered-list primitive', () => {
   const districts = ['staff_org:d1', 'staff_org:d2', 'staff_org:d3'];
   const asChecks = (objects: string[]) =>
-    objects.map((object) => ({ user: 'user:a', relation: 'can_view', object }));
+    objects.map(object => ({ user: 'user:a', relation: 'can_view', object }));
 
   it('returns one verdict per item, keyed by fgaBatchKey', async () => {
-    respondAllowing((c) => c.object !== 'staff_org:d2');
+    respondAllowing(c => c.object !== 'staff_org:d2');
     const verdicts = await gateWithStore().batchCheck(asChecks(districts));
 
     expect(verdicts.size).toBe(3);
@@ -223,18 +252,18 @@ describe('batchCheck — the authorization-filtered-list primitive', () => {
 
   it('correlates by correlationId, not response order', async () => {
     // A server that answers out of order must not shuffle the verdicts.
-    batchCheckMock.mockReset().mockImplementation(
-      (body: { checks: { relation: string; object: string; correlationId: string }[] }) =>
-        Promise.resolve({
-          result: [...body.checks]
-            .reverse()
-            .map((c) => ({
+    batchCheckMock
+      .mockReset()
+      .mockImplementation(
+        (body: { checks: { relation: string; object: string; correlationId: string }[] }) =>
+          Promise.resolve({
+            result: [...body.checks].reverse().map(c => ({
               allowed: c.object === 'staff_org:d1',
               request: c,
               correlationId: c.correlationId,
             })),
-        }),
-    );
+          })
+      );
     const verdicts = await gateWithStore().batchCheck(asChecks(districts));
 
     expect(verdicts.get(fgaBatchKey('user:a', 'can_view', 'staff_org:d1'))).toBe(true);
@@ -310,11 +339,75 @@ describe('batchCheck — a per-item failure is NOT a deny', () => {
   });
 });
 
+describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
+  it('partitions direct users, usersets, and wildcards, asking for user subjects by default', async () => {
+    listUsersMock.mockReset().mockResolvedValue({
+      users: [
+        { object: { type: 'user', id: 'ingrid' } },
+        { userset: { type: 'group', id: 'demo-north', relation: 'member' } },
+        { wildcard: { type: 'user' } },
+      ],
+    });
+    const listing = await gateWithStore().listUsersDiagnostic('can_view', 'qtf_review:r1');
+
+    expect(listing).toEqual({
+      users: ['user:ingrid'],
+      usersets: ['group:demo-north#member'],
+      wildcardTypes: ['user'],
+    });
+    expect(listUsersMock.mock.calls[0]?.[0]).toEqual({
+      object: { type: 'qtf_review', id: 'r1' },
+      relation: 'can_view',
+      user_filters: [{ type: 'user' }],
+    });
+  });
+
+  it("maps 'group#member' filter syntax to a typed userset filter", async () => {
+    listUsersMock.mockReset().mockResolvedValue({ users: [] });
+    await gateWithStore().listUsersDiagnostic('can_view', 'session:s1', ['user', 'group#member']);
+    expect(listUsersMock.mock.calls[0]?.[0]).toMatchObject({
+      user_filters: [{ type: 'user' }, { type: 'group', relation: 'member' }],
+    });
+  });
+
+  it('splits the object on the FIRST colon only — instance ids contain separators', async () => {
+    listUsersMock.mockReset().mockResolvedValue({ users: [] });
+    await gateWithStore().listUsersDiagnostic('host', 'session_instance:S|2026-08-05');
+    expect(listUsersMock.mock.calls[0]?.[0]).toMatchObject({
+      object: { type: 'session_instance', id: 'S|2026-08-05' },
+    });
+  });
+
+  it('rejects an un-typed object id rather than sending a malformed filter', async () => {
+    listUsersMock.mockReset();
+    await expect(gateWithStore().listUsersDiagnostic('host', 'no-type-separator')).rejects.toThrow(
+      FgaUnavailableError
+    );
+    expect(listUsersMock).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a transport failure as FgaUnavailableError — an outage must never read as an empty listing', async () => {
+    listUsersMock.mockReset().mockRejectedValue(new Error('ECONNREFUSED'));
+    await expect(gateWithStore().listUsersDiagnostic('host', 'session:s1')).rejects.toThrow(
+      FgaUnavailableError
+    );
+  });
+
+  it('surfaces a missing store id without reaching the client', async () => {
+    listUsersMock.mockReset();
+    const gate = createFgaGate({ enforce: true, apiUrl: 'http://fga.test' });
+    await expect(gate.listUsersDiagnostic('host', 'session:s1')).rejects.toThrow(
+      FgaUnavailableError
+    );
+    expect(listUsersMock).not.toHaveBeenCalled();
+  });
+});
+
 describe('an unreachable verdict is NOT a deny', () => {
   it('surfaces a transport failure as FgaUnavailableError', async () => {
     checkMock.mockReset().mockRejectedValue(new Error('ECONNREFUSED'));
     await expect(gateWithStore().check('user:a', 'host', 'session:s')).rejects.toThrow(
-      FgaUnavailableError,
+      FgaUnavailableError
     );
   });
 
@@ -328,16 +421,20 @@ describe('an unreachable verdict is NOT a deny', () => {
   it('propagates out of checkDetailed rather than degrading to a denial', async () => {
     checkMock.mockReset().mockRejectedValue(new Error('boom'));
     await expect(
-      gateWithStore().checkDetailed('user:a', ['host', 'edit_grant'], 'session:s'),
+      gateWithStore().checkDetailed('user:a', ['host', 'edit_grant'], 'session:s')
     ).rejects.toThrow(FgaUnavailableError);
   });
 
   it('propagates through enforceFgaRelation instead of throwing makeForbidden()', async () => {
     checkMock.mockReset().mockRejectedValue(new Error('boom'));
     await expect(
-      enforceFgaRelation(gateWithStore(), 'user:a', 'host', 'session:s', () =>
-        new Error('MASKED-AS-DENY'),
-      ),
+      enforceFgaRelation(
+        gateWithStore(),
+        'user:a',
+        'host',
+        'session:s',
+        () => new Error('MASKED-AS-DENY')
+      )
     ).rejects.toThrow(FgaUnavailableError);
   });
 });

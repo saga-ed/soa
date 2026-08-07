@@ -4,13 +4,14 @@ Tier-2 (per-resource) OpenFGA authorization gate for Saga services — a thin
 `check` client over [`@openfga/sdk`](https://www.npmjs.com/package/@openfga/sdk)
 plus an enforcement flag and a framework-agnostic helper.
 
-Two query shapes, and the choice matters:
+Three query shapes, and the choice matters:
 
-| Need | Use |
-|---|---|
-| Enforce on one object | `check` / `enforceFgaRelation` |
-| Attribute *which* rule allowed it | `checkDetailed` |
-| Return only the items a user may see | [`batchCheck`](#filtered-lists-batchcheck-not-listobjects) |
+| Need                                 | Use                                                                                                 |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Enforce on one object                | `check` / `enforceFgaRelation`                                                                      |
+| Attribute _which_ rule allowed it    | `checkDetailed`                                                                                     |
+| Return only the items a user may see | [`batchCheck`](#filtered-lists-batchcheck-not-listobjects)                                          |
+| Debug _who_ holds a relation         | [`listUsersDiagnostic`](#the-reverse-question-listusersdiagnostic-debug-tier) — **debug tier only** |
 
 Enumeration (`ListObjects`) is intentionally **absent** — see
 [why](#filtered-lists-batchcheck-not-listobjects).
@@ -32,13 +33,13 @@ await enforceFgaRelation(
   `user:${userId}`,
   'host',
   `session:${sessionId}`,
-  () => new TRPCError({ code: 'FORBIDDEN', message: 'Only the session host may do this' }),
+  () => new TRPCError({ code: 'FORBIDDEN', message: 'Only the session host may do this' })
 );
 ```
 
 ## Attribution: `checkDetailed`
 
-Some gates must report not just *whether* access was allowed but *which* rule
+Some gates must report not just _whether_ access was allowed but _which_ rule
 allowed it — program-hub's sessions gate derives its D19 actor (`HOST` vs
 `ADMIN`) from exactly that.
 
@@ -53,7 +54,7 @@ winners. No `Expand` call is involved.
 const d = await fga.checkDetailed(
   `user:${callerId}`,
   ['host', 'edit_grant'], // attribution-priority order
-  `session:${sessionId}`,
+  `session:${sessionId}`
 );
 // d.allowed → boolean
 // d.via     → 'host' | 'edit_grant' | undefined  (first branch that held)
@@ -82,10 +83,14 @@ records from your own datastore, then ask about them**:
 ```ts
 const districts = await db.districts.findMany({ where: { status: 'ACTIVE' } });
 const verdicts = await fga.batchCheck(
-  districts.map((d) => ({ user: `user:${actorId}`, relation: 'can_view', object: `staff_org:${d.id}` })),
+  districts.map(d => ({
+    user: `user:${actorId}`,
+    relation: 'can_view',
+    object: `staff_org:${d.id}`,
+  }))
 );
-const visible = districts.filter(
-  (d) => verdicts.get(fgaBatchKey(`user:${actorId}`, 'can_view', `staff_org:${d.id}`)),
+const visible = districts.filter(d =>
+  verdicts.get(fgaBatchKey(`user:${actorId}`, 'can_view', `staff_org:${d.id}`))
 );
 ```
 
@@ -101,7 +106,7 @@ measured reasons:
    — no continuation token, no truncation flag. The operation is bounded
    server-side by a max-results cap and a deadline, so a **capped** list and a
    **complete** list are the same response. Silently under-reporting a list is an
-   authorization *correctness* bug (items the user may see never render, with no
+   authorization _correctness_ bug (items the user may see never render, with no
    error), not a performance nit.
 2. **Result count is not the cost driver.** Measured on rostering's prototype
    (`scripts/fga/prototype/latency.md`): p50 **28ms for ~421 objects** vs **73ms
@@ -110,7 +115,7 @@ measured reasons:
    `check` goes ~23ms → ~1.4ms warm; every sub-check in a `batchCheck` is
    check-cache-eligible.
 
-If a caller genuinely needs the id set *before* touching its own datastore, that
+If a caller genuinely needs the id set _before_ touching its own datastore, that
 belongs behind the PDP's own API with an explicit `truncated` contract — not
 here, where the shape invites silent under-reporting.
 
@@ -125,11 +130,47 @@ layer — filter-after-fetch yields nondeterministic page sizes and no reliable
 total. If you need stable pagination, counts, or sort, the decision has to live
 in your datastore (a projection join), not in a post-filter.
 
+## The reverse question: `listUsersDiagnostic` (debug tier)
+
+`(user, action)` and `(user, object)` are covered above; `listUsersDiagnostic`
+completes the two-of-three triple — _"who holds `relation` on `object`?"_ —
+for **debugging and audit tooling only**, and the name is the guardrail:
+
+```ts
+const who = await fga.listUsersDiagnostic('can_view', `qtf_review:${id}`);
+// who.users         → ['user:ingrid']            direct subjects
+// who.usersets      → ['group:demo-north#member'] references, NOT enumerations
+// who.wildcardTypes → ['user']                    a public-wildcard tuple exists
+```
+
+OpenFGA's `ListUsers` has the same defect that keeps `ListObjects` out of this
+package: the response carries **no truncation flag** while the server bounds
+the search with a max-results cap and a deadline, so a capped listing and a
+complete listing are indistinguishable. That disqualifies it from every
+load-bearing job — never an enforcement input, never a notification/fan-out
+source, never the audit of record (the PDP's decision log is that). It answers
+"show me who the graph currently reaches" at a debugger's prompt, nothing else.
+
+Reading the result honestly:
+
+- A **userset** (`group:g#member`) is a reference — its members are not listed;
+  a complete "who" requires expanding it separately.
+- A **wildcard** entry means a `user:*` tuple holds **this** relation. On a
+  marker relation (a `released` flip) that is the expected shape; it does _not_
+  mean "everyone can" on any computed relation, where the model's intersections
+  bind the wildcard.
+- Ask for usersets explicitly with filter syntax:
+  `listUsersDiagnostic('can_view', obj, ['user', 'group#member'])`.
+
+Failures throw `FgaUnavailableError` like everything else here — a diagnostic
+that returned `[]` during an outage would send the debugger chasing a phantom
+missing-tuple bug.
+
 ## Contextual tuples
 
 Ephemeral objects are never materialized as stored tuples. A session id decodes
-to `(date, periodId, slotId, podId)`; the *durable* facts (pod tutorship,
-program scope edges) live in the graph, while the *derived* facts — effective
+to `(date, periodId, slotId, podId)`; the _durable_ facts (pod tutorship,
+program scope edges) live in the graph, while the _derived_ facts — effective
 pod after SWAP/ABSENT at NOW, the per-occurrence override host after its
 live-membership gate — are resolved by the caller and ride in on the request:
 
@@ -172,23 +213,23 @@ checks stay authoritative until the flag flips on.
 
 ## Env
 
-| Var | Meaning | Default |
-|---|---|---|
-| `AUTHZ_FGA_ENFORCE` | master switch (`"true"` to enable) | off |
-| `OPENFGA_API_URL` | OpenFGA HTTP API | `http://localhost:8080` |
-| `OPENFGA_STORE_ID` | store id (required once enforcing) | — |
-| `OPENFGA_MODEL_ID` | authorization model id | store's latest |
-| `OPENFGA_API_TOKEN` | preshared key, sent as `Authorization: Bearer` | — (no credentials) |
+| Var                 | Meaning                                        | Default                 |
+| ------------------- | ---------------------------------------------- | ----------------------- |
+| `AUTHZ_FGA_ENFORCE` | master switch (`"true"` to enable)             | off                     |
+| `OPENFGA_API_URL`   | OpenFGA HTTP API                               | `http://localhost:8080` |
+| `OPENFGA_STORE_ID`  | store id (required once enforcing)             | —                       |
+| `OPENFGA_MODEL_ID`  | authorization model id                         | store's latest          |
+| `OPENFGA_API_TOKEN` | preshared key, sent as `Authorization: Bearer` | — (no credentials)      |
 
 > **The shared dev and prod OpenFGA servers run `authn=preshared`** — the
 > `openfga-shared-<env>` task definition sets `OPENFGA_AUTHN_METHOD=preshared`.
 > Against those, `OPENFGA_API_TOKEN` is **required**: without it every call is a
 > 401, which the gate surfaces as `FgaUnavailableError`. That's the right
-> failure *direction* (never a silent deny), but the gate answers nothing. Leave
+> failure _direction_ (never a silent deny), but the gate answers nothing. Leave
 > it unset only for a local/CI OpenFGA started with no authn.
 
 > 🪤 **Supply ONE key.** The server-side var is `OPENFGA_AUTHN_PRESHARED_KEYS`
-> (*plural* — OpenFGA accepts a comma-separated list). If `OPENFGA_API_TOKEN` is
+> (_plural_ — OpenFGA accepts a comma-separated list). If `OPENFGA_API_TOKEN` is
 > pointed at a secret holding `key1,key2` or a JSON blob, the client sends
 > `Bearer key1,key2` and gets a 401 → `FgaUnavailableError` — a symptom
 > **identical to having no token at all**, and easily misread as "the token

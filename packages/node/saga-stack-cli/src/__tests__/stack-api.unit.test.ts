@@ -19,7 +19,6 @@ import { deriveInstance } from '../core/derive-instance.js';
 import { defaultLaunchContext } from '../core/launch-plan.js';
 import type { LaunchContext } from '../core/launch-plan.js';
 import { manifest } from '../core/manifest/index.js';
-import { featureSet } from '../core/bundles.js';
 import type { RepoKey, ServiceId } from '../core/manifest/index.js';
 import { healthProbes } from '../core/probe-plan.js';
 import { composeSeedPlan } from '../core/seed/compose-seed-plan.js';
@@ -90,6 +89,11 @@ function makeRuntime(overrides: Partial<Runtime> = {}): { runtime: Runtime; fake
   const meshExec: MeshExec = {
     async ready(container: string, readinessCmd: string): Promise<boolean> {
       fakes.meshExecs.push({ container, cmd: readinessCmd });
+      return true;
+    },
+    // A `readinessHttp` unit probes the host, never `docker exec`; without this
+    // the fake reports it never-ready and any closure containing one fails.
+    async readyHttp(): Promise<boolean> {
       return true;
     },
   };
@@ -178,6 +182,33 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     // `make up` ran in <soa>/infra.
     const makeUp = fakes.runs.find((r) => r.command === 'make');
     expect(makeUp?.cwd).toBe('/dev/soa/infra');
+  });
+
+  // A bundle contributing mesh but ZERO services (`otel`) reaches the mesh only
+  // via the FeatureSet half of `neededMesh`. These drive the real `api.up`, so
+  // they pin the whole chain — neededMesh → meshUp's activeGatedIds →
+  // COMPOSE_PROFILES — which is what actually starts the profile-gated container.
+  it('a bundle-contributed mesh unit is readiness-gated and activates its compose profile', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const features = featureSet(['otel']);
+    const closure = computeClosure(manifest, ['programs-api'] as ServiceId[], { features });
+    const res = await api.up(closure.services, features);
+
+    expect(res.mesh.units.map((u) => u.id)).toContain('otel-collector');
+    const makeUp = fakes.runs.find((r) => r.command === 'make');
+    expect(makeUp?.env?.COMPOSE_PROFILES).toBe('otel');
+  });
+
+  it('without the bundle, neither the unit nor its compose profile appears', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['programs-api'] as ServiceId[]);
+    const res = await api.up(closure.services, featureSet([]));
+
+    expect(res.mesh.units.map((u) => u.id)).not.toContain('otel-collector');
+    const makeUp = fakes.runs.find((r) => r.command === 'make');
+    expect(makeUp?.env?.COMPOSE_PROFILES).toBeUndefined();
   });
 
   it('launch env is FAITHFUL + fully resolved (no dangling tokens)', async () => {

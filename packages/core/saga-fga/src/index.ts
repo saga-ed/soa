@@ -56,8 +56,10 @@ export interface FgaGateConfig {
 }
 
 export function loadFgaGateConfig(
-  // core-tier package: `process` may not exist in the importing runtime.
-  env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env
+  // core-tier package: `process` may be absent, or a bundler shim without `env`.
+  env: Record<string, string | undefined> = typeof process === 'undefined'
+    ? {}
+    : (process.env ?? {})
 ): FgaGateConfig {
   return {
     enforce: env.AUTHZ_FGA_ENFORCE === 'true',
@@ -254,7 +256,9 @@ export interface FgaDiagnostics {
    * ONLY what it names: entries map to server-side filters, so the parameter is
    * required — an implicit default would silently hide the shapes it omits
    * (e.g. group grants). `'group#member'` asks for usersets of that shape; bare
-   * `'user'` asks for direct subjects.
+   * `'user'` asks for direct subjects. The wire accepts one filter per
+   * `ListUsers` call, so each entry costs its own (independently capped) round
+   * trip; results are merged.
    *
    * Throws `TypeError` on a malformed argument — a caller bug, detected
    * locally, deliberately NOT {@link FgaUnavailableError} so it can never read
@@ -384,60 +388,84 @@ export function createFgaGate(
     object: string,
     userTypes: readonly string[]
   ): Promise<FgaUserListing> => {
-    // Malformed arguments are caller bugs → TypeError, never FgaUnavailableError:
-    // a deterministic local rejection must not read as a PDP outage.
-    // 'type:id' → the wire's structured object. Split on the FIRST colon only —
-    // instance ids may themselves contain separators (session_instance:S|date).
+    // Malformed arguments are caller bugs → TypeError, never FgaUnavailableError.
+    // 'type:id' with a NON-EMPTY id, split on the FIRST colon only — instance
+    // ids may themselves contain separators (session_instance:S|date).
     const sep = object.indexOf(':');
-    if (sep <= 0) {
+    if (sep <= 0 || sep === object.length - 1) {
       throw new TypeError(
-        `FGA listUsers requires an object of the form "type:id", got "${object}"`
+        `FGA listUsersDiagnostic requires an object of the form "type:id", got "${object}"`
+      );
+    }
+    if (!/^[^\s#:]+$/.test(relation)) {
+      throw new TypeError(
+        `FGA listUsersDiagnostic requires a bare relation name, got "${relation}"`
       );
     }
     if (userTypes.length === 0) {
-      throw new TypeError('FGA listUsers requires at least one subject-type filter');
+      throw new TypeError('FGA listUsersDiagnostic requires at least one subject-type filter');
     }
-    // 'group#member' asks for usersets of that shape; bare 'user' asks for
-    // direct subjects.
-    const userFilters = userTypes.map(t => {
-      if (!/^[^\s#:]+(?:#[^\s#:]+)?$/.test(t)) {
-        throw new TypeError(`FGA listUsers filter must be "type" or "type#relation", got "${t}"`);
-      }
-      const hash = t.indexOf('#');
-      return hash > 0 ? { type: t.slice(0, hash), relation: t.slice(hash + 1) } : { type: t };
-    });
-    let res;
-    try {
-      res = await clientFor().listUsers({
-        object: { type: object.slice(0, sep), id: object.slice(sep + 1) },
-        relation,
-        user_filters: userFilters,
-      });
-    } catch (cause) {
-      // An outage must never present as an empty listing — the debugger would
-      // chase a phantom missing-tuple bug. Same contract as check/batchCheck.
-      throw new FgaUnavailableError(`FGA listUsers failed for ${relation} on ${object}`, { cause });
-    }
-    // A 2xx whose body carries no `users` array reached no verdict — it must
-    // not read as an empty listing.
-    if (!Array.isArray(res.users)) {
-      throw new FgaUnavailableError(
-        `FGA listUsers returned a malformed response for ${relation} on ${object}`
-      );
-    }
-    const listing: FgaUserListing = { users: [], usersets: [], wildcardTypes: [] };
-    for (const u of res.users) {
-      if (u.object) listing.users.push(`${u.object.type}:${u.object.id}`);
-      else if (u.userset)
-        listing.usersets.push(`${u.userset.type}:${u.userset.id}#${u.userset.relation}`);
-      else if (u.wildcard) listing.wildcardTypes.push(u.wildcard.type);
-      else {
-        // An entry of an unrecognized kind cannot be partitioned; skipping it
-        // would silently under-report the listing.
-        throw new FgaUnavailableError(
-          `FGA listUsers returned an unrecognized subject entry for ${relation} on ${object}`
+    // Duplicate filters would double-count subjects in the merged listing.
+    const userFilters = [...new Set(userTypes)].map(t => {
+      const m = /^([^\s#:]+)(?:#([^\s#:]+))?$/.exec(t);
+      if (!m?.[1]) {
+        throw new TypeError(
+          `FGA listUsersDiagnostic filter must be "type" or "type#relation", got "${t}"`
         );
       }
+      return m[2] ? { type: m[1], relation: m[2] } : { type: m[1] };
+    });
+    const wireObject = { type: object.slice(0, sep), id: object.slice(sep + 1) };
+    // The wire accepts exactly ONE user_filter per ListUsers call
+    // (ListUsersRequest.user_filters: "Only accepts exactly one value"), so a
+    // multi-shape query fans out one call per filter and merges.
+    const partials = await Promise.all(
+      userFilters.map(async filter => {
+        let res;
+        try {
+          res = await clientFor().listUsers({
+            object: wireObject,
+            relation,
+            user_filters: [filter],
+          });
+        } catch (cause) {
+          // Same contract as check/batchCheck: failure to reach a verdict is
+          // unavailability, never an empty listing.
+          throw new FgaUnavailableError(
+            `FGA listUsersDiagnostic failed for ${relation} on ${object}`,
+            { cause }
+          );
+        }
+        // A 2xx whose body carries no `users` array reached no verdict.
+        if (!Array.isArray(res.users)) {
+          throw new FgaUnavailableError(
+            `FGA listUsersDiagnostic got a malformed response for ${relation} on ${object}`
+          );
+        }
+        const partial: FgaUserListing = { users: [], usersets: [], wildcardTypes: [] };
+        for (const u of res.users) {
+          if (u.object?.type && u.object.id) {
+            partial.users.push(`${u.object.type}:${u.object.id}`);
+          } else if (u.userset?.type && u.userset.id && u.userset.relation) {
+            partial.usersets.push(`${u.userset.type}:${u.userset.id}#${u.userset.relation}`);
+          } else if (u.wildcard?.type) {
+            partial.wildcardTypes.push(u.wildcard.type);
+          } else {
+            // A partial or unrecognized entry cannot be partitioned; skipping
+            // or stringifying it would misreport the listing.
+            throw new FgaUnavailableError(
+              `FGA listUsersDiagnostic got an unrecognized subject entry for ${relation} on ${object}`
+            );
+          }
+        }
+        return partial;
+      })
+    );
+    const listing: FgaUserListing = { users: [], usersets: [], wildcardTypes: [] };
+    for (const p of partials) {
+      listing.users.push(...p.users);
+      listing.usersets.push(...p.usersets);
+      listing.wildcardTypes.push(...p.wildcardTypes);
     }
     return listing;
   };

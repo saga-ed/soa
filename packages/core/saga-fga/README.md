@@ -160,7 +160,8 @@ Reading the result honestly:
   `userTypes` entries map to server-side filters, which is why the parameter is
   required: a shape you don't name is _absent from the search_, not
   empty-because-nobody-holds-it. Forget `'group#member'` and every group grant
-  reads as a missing tuple.
+  reads as a missing tuple. The wire accepts exactly one filter per `ListUsers`
+  call, so each entry is its own round trip with its own results cap.
 - A **userset** (`group:g#member`) is a reference — its members are not listed;
   a complete "who" requires expanding it separately.
 - A **wildcard** entry means a `user:*` tuple holds **this** relation. On a

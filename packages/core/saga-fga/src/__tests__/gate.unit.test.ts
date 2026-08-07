@@ -340,14 +340,22 @@ describe('batchCheck — a per-item failure is NOT a deny', () => {
 });
 
 describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
-  it('partitions direct users, usersets, and wildcards by the requested subject shapes', async () => {
-    listUsersMock.mockReset().mockResolvedValue({
-      users: [
-        { object: { type: 'user', id: 'ingrid' } },
-        { userset: { type: 'group', id: 'demo-north', relation: 'member' } },
-        { wildcard: { type: 'user' } },
-      ],
-    });
+  // The wire accepts exactly ONE user_filter per ListUsers call, so the mock
+  // answers per filter — a multi-filter request would be a real-server 400.
+  const respondPerFilter = () =>
+    listUsersMock
+      .mockReset()
+      .mockImplementation((req: { user_filters: { type: string; relation?: string }[] }) => {
+        expect(req.user_filters).toHaveLength(1);
+        return Promise.resolve({
+          users: req.user_filters[0]?.relation
+            ? [{ userset: { type: 'group', id: 'demo-north', relation: 'member' } }]
+            : [{ object: { type: 'user', id: 'ingrid' } }, { wildcard: { type: 'user' } }],
+        });
+      });
+
+  it('fans out one wire call per subject shape and merges the partitions', async () => {
+    respondPerFilter();
     const listing = await gateWithStore().listUsersDiagnostic('can_view', 'qtf_review:r1', [
       'user',
       'group#member',
@@ -358,11 +366,25 @@ describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
       usersets: ['group:demo-north#member'],
       wildcardTypes: ['user'],
     });
+    expect(listUsersMock).toHaveBeenCalledTimes(2);
     expect(listUsersMock.mock.calls[0]?.[0]).toEqual({
       object: { type: 'qtf_review', id: 'r1' },
       relation: 'can_view',
-      user_filters: [{ type: 'user' }, { type: 'group', relation: 'member' }],
+      user_filters: [{ type: 'user' }],
     });
+    expect(listUsersMock.mock.calls[1]?.[0]).toMatchObject({
+      user_filters: [{ type: 'group', relation: 'member' }],
+    });
+  });
+
+  it('collapses duplicate filters to one wire call — no double-counted subjects', async () => {
+    respondPerFilter();
+    const listing = await gateWithStore().listUsersDiagnostic('can_view', 'qtf_review:r1', [
+      'user',
+      'user',
+    ]);
+    expect(listUsersMock).toHaveBeenCalledTimes(1);
+    expect(listing.users).toEqual(['user:ingrid']);
   });
 
   it('splits the object on the FIRST colon only — instance ids contain separators', async () => {
@@ -373,11 +395,24 @@ describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
     });
   });
 
-  it('rejects an un-typed object id as a caller bug (TypeError), never as unavailability', async () => {
+  it('rejects an un-typed or id-less object as a caller bug (TypeError), never as unavailability', async () => {
     listUsersMock.mockReset();
-    await expect(
-      gateWithStore().listUsersDiagnostic('host', 'no-type-separator', ['user'])
-    ).rejects.toThrow(TypeError);
+    const gate = gateWithStore();
+    // 'session:' is the empty-interpolation bug (`session:${id}` with id '').
+    for (const bad of ['no-type-separator', 'session:', ':s1']) {
+      await expect(gate.listUsersDiagnostic('host', bad, ['user'])).rejects.toThrow(TypeError);
+    }
+    expect(listUsersMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed relation as a caller bug (TypeError)', async () => {
+    listUsersMock.mockReset();
+    const gate = gateWithStore();
+    for (const bad of ['', 'can view', 'session:can_view', 'can_view#x']) {
+      await expect(gate.listUsersDiagnostic(bad, 'session:s1', ['user'])).rejects.toThrow(
+        TypeError
+      );
+    }
     expect(listUsersMock).not.toHaveBeenCalled();
   });
 
@@ -408,11 +443,21 @@ describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
     ).rejects.toThrow(FgaUnavailableError);
   });
 
-  it('throws on an unrecognized subject entry rather than silently dropping it', async () => {
-    listUsersMock.mockReset().mockResolvedValue({ users: [{}] });
-    await expect(
-      gateWithStore().listUsersDiagnostic('host', 'session:s1', ['user'])
-    ).rejects.toThrow(FgaUnavailableError);
+  it('throws on an unrecognized or partial subject entry rather than misreporting it', async () => {
+    const gate = gateWithStore();
+    // A partial entry would otherwise stringify as a phantom subject like
+    // 'user:undefined' that matches no real tuple.
+    for (const entry of [
+      {},
+      { object: {} },
+      { object: { type: 'user' } },
+      { userset: { type: 'group', id: 'g' } },
+    ]) {
+      listUsersMock.mockReset().mockResolvedValue({ users: [entry] });
+      await expect(gate.listUsersDiagnostic('host', 'session:s1', ['user'])).rejects.toThrow(
+        FgaUnavailableError
+      );
+    }
   });
 
   it('surfaces a missing store id without reaching the client', async () => {

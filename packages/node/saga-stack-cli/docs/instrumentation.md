@@ -57,17 +57,20 @@ node pnpm dev                                   ← ss records THIS pid
 Attach mode sidesteps all of it, and leaves the launch env **byte-identical** to a
 stack without profiling.
 
-## One service at a time, per slot
+## One service at a time, machine-wide
 
-`SIGUSR1` always opens the inspector on Node's default port and gives no way to
-choose another, so within a slot only one service can hold it. The port carries the
-slot offset (`9229 + slot*1000`), so parallel slots don't interfere.
+`SIGUSR1` always opens the inspector on Node's default port (9229) and gives no way
+to choose another. Nothing injects `--inspect-port` — that's the whole point of
+attach mode — so the port takes **no slot offset**: slot 2's inspector lands on 9229
+exactly like slot 0's. Only one profile can be in flight on the machine at a time.
+
+`--slot` still selects *which* service to profile; it just doesn't move the
+inspector port.
 
 Profiling the **same** service repeatedly is fine: Node leaves the inspector open
 after the client disconnects, so subsequent runs re-attach to it.
 
-Profiling a **different** service in that slot is refused while the first holds the
-port:
+Profiling a **different** service is refused while the first holds the port:
 
 ```
 Error: coach-api: inspector port 9229 is held by pid 4242, not by the service.
@@ -75,10 +78,12 @@ SIGUSR1 cannot choose a port, so the service could not open its own inspector an
 this profile would attach to the wrong process.
 ```
 
-That refusal is the point. Without it the service's failure to bind is invisible
-except as `Starting inspector on 127.0.0.1:9229 failed: address already in use` in
-its own log, while the profiler happily samples whatever *did* own the port. To
-profile another service, use a different `--slot`, or `ss stack down` first.
+That refusal is the point. `inspector.open()` on a taken port does **not** throw —
+it logs `Starting inspector on 127.0.0.1:9229 failed: address already in use` to the
+service's own log and returns, leaving the service running with no inspector while
+the profiler samples whatever *did* own the port. The capture re-checks the port's
+owner after signalling for the same reason. Wait for the in-flight profile to
+finish, or `ss stack down` first.
 
 `profile` also refuses when the process holding the service's port isn't Node —
 SIGUSR1 has no handler there, so signalling it would **kill** the process rather
@@ -115,7 +120,7 @@ perfectly healthy until you open it.
 | --- | --- |
 | `--duration` | how long to sample (`500ms`, `30s`, `2m`; default `15s`) |
 | `--out` | artifact path (default `<state-dir>/<service>-<timestamp>.cpuprofile`) |
-| `--slot N` | profile the service in slot N (inspector port offsets with it) |
+| `--slot N` | profile the service in slot N (the inspector port stays 9229) |
 | `--output-json` / `--porcelain` | machine-readable result |
 
 ---

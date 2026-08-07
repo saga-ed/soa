@@ -9,7 +9,7 @@
  * the pidfiles for ownership (the `classifyForeign` approach). See `inspector.ts`.
  */
 
-import { inspectorPort } from './inspector.js';
+import { INSPECTOR_PORT } from './inspector.js';
 import { getService, manifest as defaultManifest } from './manifest/index.js';
 import type { Manifest, ServiceId } from './manifest/index.js';
 
@@ -32,9 +32,19 @@ export interface ProfileTarget {
   inspectorPortPid?: number | null;
 }
 
-/** SIGUSR1's default disposition is TERMINATE, so only signal a real node process. */
-function looksLikeNode(command: string): boolean {
-  return /(^|\/|\s)node(\s|$)|\bnode$/.test(command.split(/\s+/)[0] ?? '') || /(^|\/)node\b/.test(command);
+/**
+ * SIGUSR1's default disposition is TERMINATE, so only signal a real node process.
+ * Match argv[0]'s BASENAME only: a `/node/` path segment anywhere else in the
+ * command line belongs to some other runtime's arguments, and signalling it kills it.
+ */
+export function looksLikeNode(command: string): boolean {
+  const argv = command.trim().split(/\s+/);
+  let exe = argv[0] ?? '';
+  // `env` execs its first non-assignment argument, so unwrap to the real binary.
+  if (/(^|\/)env$/.test(exe)) {
+    exe = argv.slice(1).find((a) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(a)) ?? '';
+  }
+  return /^node(js)?(-[\d.]+)?$/.test(exe.split('/').pop() ?? '');
 }
 
 export type ProfilePlan =
@@ -63,7 +73,6 @@ const UP_HINT = 'Bring it up first: `ss stack up --only <service>`.';
  */
 export function planProfile(
   service: ServiceId,
-  slot: number,
   target: ProfileTarget,
   m: Manifest = defaultManifest,
 ): ProfilePlan {
@@ -73,11 +82,6 @@ export function planProfile(
       ok: false,
       reason: `${service} is a frontend — \`pnpm dev\` runs a Vite dev server, so a CPU profile would measure the bundler, not the app.`,
     };
-  }
-
-  const port = inspectorPort(service, slot, m);
-  if (port === null) {
-    return { ok: false, reason: `${service} has no inspector port (not profilable).` };
   }
 
   if (target.listenerPid === null) {
@@ -111,16 +115,17 @@ export function planProfile(
     return {
       ok: false,
       reason:
-        `${service}: inspector port ${port} is held by ${who}, not by the service. SIGUSR1 cannot ` +
-        `choose a port, so the service could not open its own inspector and this profile would ` +
-        `attach to the wrong process. Free the port (or profile in another slot) and re-run.`,
+        `${service}: inspector port ${INSPECTOR_PORT} is held by ${who}, not by the service. SIGUSR1 ` +
+        `cannot choose a port, so the service could not open its own inspector and this profile ` +
+        `would attach to the wrong process. The port takes no slot offset, so another slot is not ` +
+        `an escape — free it and re-run.`,
     };
   }
 
   return {
     ok: true,
     pid: target.listenerPid,
-    port,
+    port: INSPECTOR_PORT,
     command: target.proc.command,
     adopted: target.ownedPgids.includes(target.proc.pgid),
     // Already listening ⇒ SIGUSR1 is unnecessary (and would be a no-op on an open

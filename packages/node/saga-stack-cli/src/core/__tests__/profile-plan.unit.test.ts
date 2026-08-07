@@ -8,9 +8,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { inspectorPort } from '../inspector.js';
+import { INSPECTOR_PORT } from '../inspector.js';
 import {
   defaultArtifactPath,
+  looksLikeNode,
   parseDuration,
   planProfile,
   profileHasServiceFrames,
@@ -30,31 +31,35 @@ function target(over: Partial<ProfileTarget> = {}): ProfileTarget {
 
 describe('planProfile', () => {
   it('plans a profile against the LISTENING pid, not a pidfile pid', () => {
-    const plan = planProfile('iam-api', 0, target());
+    const plan = planProfile('iam-api', target());
     expect(plan).toMatchObject({ ok: true, pid: 4242, adopted: true });
-    if (plan.ok) expect(plan.port).toBe(inspectorPort('iam-api', 0));
+    if (plan.ok) expect(plan.port).toBe(INSPECTOR_PORT);
   });
 
-  it('uses the slot-offset inspector port', () => {
-    const plan = planProfile('iam-api', 4, target());
-    if (!plan.ok) throw new Error('expected ok');
-    expect(plan.port).toBe(inspectorPort('iam-api', 4));
+  it('reports the un-offset inspector port for every service', () => {
+    // SIGUSR1 takes no port argument, so the port must never carry a slot offset:
+    // an offset port is one nothing ever binds.
+    for (const id of ['iam-api', 'coach-api', 'sessions-api'] as const) {
+      const plan = planProfile(id, target());
+      if (!plan.ok) throw new Error(`expected ok for ${id}`);
+      expect(plan.port).toBe(INSPECTOR_PORT);
+    }
   });
 
   it('refuses a frontend (that would profile the Vite dev server)', () => {
-    const plan = planProfile('coach-web', 0, target());
+    const plan = planProfile('coach-web', target());
     expect(plan).toMatchObject({ ok: false });
     if (!plan.ok) expect(plan.reason).toMatch(/frontend/i);
   });
 
   it('refuses when nothing is listening', () => {
-    const plan = planProfile('iam-api', 0, target({ listenerPid: null }));
+    const plan = planProfile('iam-api', target({ listenerPid: null }));
     expect(plan).toMatchObject({ ok: false });
     if (!plan.ok) expect(plan.reason).toMatch(/not listening/i);
   });
 
   it('refuses when the listener vanished before it could be inspected', () => {
-    const plan = planProfile('iam-api', 0, target({ proc: null }));
+    const plan = planProfile('iam-api', target({ proc: null }));
     expect(plan).toMatchObject({ ok: false });
     if (!plan.ok) expect(plan.reason).toMatch(/no longer inspectable/i);
   });
@@ -62,24 +67,23 @@ describe('planProfile', () => {
   it('HARD-refuses when SOMEONE ELSE holds the inspector port', () => {
     // SIGUSR1 cannot pick a port, so the service could not open its own inspector
     // and we would attach to the squatter.
-    const plan = planProfile(
-      'iam-api',
-      0,
-      target({ inspectorPortBusy: true, inspectorPortPid: 777 }),
-    );
+    const plan = planProfile('iam-api', target({ inspectorPortBusy: true, inspectorPortPid: 777 }));
     expect(plan).toMatchObject({ ok: false });
     if (!plan.ok) expect(plan.reason).toMatch(/held by pid 777/i);
   });
 
+  it('does not offer another slot as an escape from a held port', () => {
+    // The inspector port takes no slot offset, so "try another slot" is unachievable
+    // advice — the refusal must not imply the collision is slot-scoped.
+    const plan = planProfile('iam-api', target({ inspectorPortBusy: true, inspectorPortPid: 777 }));
+    if (plan.ok) throw new Error('expected refusal');
+    expect(plan.reason).not.toMatch(/profile in another slot/i);
+  });
+
   it('RE-ATTACHES when the target itself holds the port', () => {
     // Node leaves the inspector open after the CDP client disconnects, so a second
-    // profile of the same service must not be refused — that made the command
-    // single-use per service lifetime.
-    const plan = planProfile(
-      'iam-api',
-      0,
-      target({ inspectorPortBusy: true, inspectorPortPid: 4242 }),
-    );
+    // profile of the same service must not be refused.
+    const plan = planProfile('iam-api', target({ inspectorPortBusy: true, inspectorPortPid: 4242 }));
     expect(plan).toMatchObject({ ok: true, pid: 4242, alreadyOpen: true });
   });
 
@@ -87,24 +91,43 @@ describe('planProfile', () => {
     // SIGUSR1 has no handler there, so the default disposition TERMINATES it.
     const plan = planProfile(
       'iam-api',
-      0,
       target({ proc: { pgid: 4200, command: '/usr/bin/python3 -m http.server 3010' } }),
     );
     expect(plan).toMatchObject({ ok: false });
     if (!plan.ok) expect(plan.reason).toMatch(/not a node process/i);
   });
 
-  it('accepts the usual node command shapes', () => {
-    for (const command of ['node dist/main.js', '/usr/local/bin/node dist/main.js']) {
-      expect(planProfile('iam-api', 0, target({ proc: { pgid: 4200, command } }))).toMatchObject({
-        ok: true,
-      });
-    }
+  it('allows an unowned listener but reports it as not adopted', () => {
+    const plan = planProfile('iam-api', target({ ownedPgids: [999] }));
+    expect(plan).toMatchObject({ ok: true, adopted: false });
+  });
+});
+
+describe('looksLikeNode', () => {
+  // Both directions matter: a false POSITIVE gets a live non-node process killed by
+  // SIGUSR1's default disposition, and a false NEGATIVE refuses a real service.
+  it.each([
+    'node dist/main.js',
+    '/usr/bin/node dist/main.js',
+    '/usr/bin/env node dist/main.js',
+    '/usr/bin/env NODE_ENV=dev node dist/main.js',
+    '/home/u/.nvm/versions/node/v24.13.0/bin/node dist/main.js',
+    'nodejs server.js',
+    '/opt/node-22/bin/node app.js',
+  ])('accepts %s', (command) => {
+    expect(looksLikeNode(command)).toBe(true);
   });
 
-  it('allows an unowned listener but reports it as not adopted', () => {
-    const plan = planProfile('iam-api', 0, target({ ownedPgids: [999] }));
-    expect(plan).toMatchObject({ ok: true, adopted: false });
+  it.each([
+    'java -cp /opt/node/lib App',
+    'python /srv/node/app.py',
+    'ruby /srv/node/app.rb',
+    'nginx -c /etc/node/nginx.conf',
+    '/usr/bin/python3 -m http.server 3010',
+    '/usr/bin/env python3 /srv/node/x.py',
+    'node_modules/.bin/tsx watch src/main.ts',
+  ])('refuses %s', (command) => {
+    expect(looksLikeNode(command)).toBe(false);
   });
 });
 

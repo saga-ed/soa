@@ -17,8 +17,11 @@
  * Uses Node's global `WebSocket` — the `ws` package is not resolvable here.
  */
 
-import { writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { Socket } from 'node:net';
+import { dirname } from 'node:path';
+import { promisify } from 'node:util';
 
 /** A V8 CPU profile as returned by `Profiler.stop`. */
 export interface CpuProfile {
@@ -38,12 +41,16 @@ export interface ProfilerDeps {
   connect?: (wsUrl: string) => Promise<CdpSession>;
   /** Sleep. Default a real timer. */
   sleep?: (ms: number) => Promise<void>;
-  /** Write the artifact. Default `fs.writeFileSync`. */
+  /** Write the artifact, creating parent dirs. Default `fs.writeFileSync` + `mkdirSync`. */
   writeFile?: (path: string, body: string) => void;
+  /** Resolve the pid listening on a port, for the post-signal identity check. */
+  portOwner?: (port: number) => Promise<number | null>;
   /** Attempts to wait for the inspector to answer after SIGUSR1. Default 30. */
   attempts?: number;
   /** Delay between those attempts, ms. Default 100. */
   intervalMs?: number;
+  /** Per-attempt HTTP timeout, ms — the dominant term in the poll's worst case. Default 2000. */
+  fetchTimeoutMs?: number;
 }
 
 /** The minimal CDP surface the capture needs. */
@@ -160,16 +167,24 @@ export async function captureCpuProfile(
   deps: ProfilerDeps = {},
 ): Promise<CaptureResult> {
   const signal = deps.signal ?? ((pid, sig) => process.kill(pid, sig));
+  const attempts = deps.attempts ?? 30;
+  const intervalMs = deps.intervalMs ?? 100;
+  const fetchTimeoutMs = deps.fetchTimeoutMs ?? 2000;
   // AbortSignal is mandatory here: a holder that accepts TCP but never answers HTTP
   // makes a bare fetch() hang forever, defeating the poll loop's own attempt bound.
   const fetchJson =
     deps.fetchJson ??
-    (async (url: string) => (await fetch(url, { signal: AbortSignal.timeout(2000) })).json());
+    (async (url: string) =>
+      (await fetch(url, { signal: AbortSignal.timeout(fetchTimeoutMs) })).json());
   const connect = deps.connect ?? defaultConnect;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const writeFile = deps.writeFile ?? ((p: string, b: string) => writeFileSync(p, b));
-  const attempts = deps.attempts ?? 30;
-  const intervalMs = deps.intervalMs ?? 100;
+  const writeFile =
+    deps.writeFile ??
+    ((p: string, b: string) => {
+      mkdirSync(dirname(p), { recursive: true });
+      writeFileSync(p, b);
+    });
+  const portOwner = deps.portOwner ?? defaultPortOwner;
 
   if (!req.alreadyOpen) {
     try {
@@ -209,6 +224,22 @@ export async function captureCpuProfile(
       reason:
         `inspector never came up on port ${req.port} after SIGUSR1. The service may have failed to ` +
         `bind it — check its log for "address already in use".`,
+    };
+  }
+
+  // The port answering is NOT proof it is OUR target answering. `inspector.open()`
+  // on a taken port logs "address already in use" and returns normally, leaving the
+  // loser running with no inspector — so a concurrent profile finds the FIRST
+  // service's still-open inspector here and would capture it under our pid's name.
+  // /json/list carries no pid, so identity comes from the port's actual owner.
+  const owner = await portOwner(req.port);
+  if (owner !== null && owner !== req.pid) {
+    return {
+      ok: false,
+      reason:
+        `inspector port ${req.port} is held by pid ${owner}, not ${req.pid}. Profiling is ` +
+        `machine-wide (Node's inspector port takes no slot offset) — wait for the other ` +
+        `profile to finish, then retry.`,
     };
   }
 
@@ -263,6 +294,20 @@ export async function inspectorPortBusy(
 ): Promise<boolean> {
   const probe = deps.probeTcp ?? tcpListening;
   return probe(port, 1000);
+}
+
+/**
+ * The pid listening on `port`, or null when it can't be resolved. Null is
+ * inconclusive, never "free" — callers must not read it as permission to proceed.
+ */
+async function defaultPortOwner(port: number): Promise<number | null> {
+  try {
+    const { stdout } = await promisify(execFile)('lsof', ['-ti', `:${port}`, '-sTCP:LISTEN']);
+    const pid = Number.parseInt(stdout.trim().split('\n')[0] ?? '', 10);
+    return Number.isFinite(pid) ? pid : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve true when a TCP connect to 127.0.0.1:port succeeds within `timeoutMs`. */

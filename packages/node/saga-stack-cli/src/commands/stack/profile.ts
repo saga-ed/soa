@@ -11,7 +11,7 @@
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { deriveInstance } from '../../core/derive-instance.js';
-import { assertInspectorBandFree, inspectorPort, profilableServices } from '../../core/inspector.js';
+import { assertInspectorPortFree, INSPECTOR_PORT, profilableServices } from '../../core/inspector.js';
 import { manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import {
@@ -72,13 +72,17 @@ export default class StackProfile extends BaseCommand {
       this.error(`--duration ${flags.duration} is not a duration (try 500ms, 30s, 2m)`);
     }
 
-    // Fail loudly if a service has since been banded onto an inspector port —
+    // Fail loudly if a service has since been banded onto the inspector port —
     // otherwise the collision surfaces only as a profile of the wrong service.
-    assertInspectorBandFree();
+    assertInspectorPortFree();
 
     const io: ForeignIo = makeRealForeignIo();
-    const servicePort = profile.portOverrides[service] ?? manifest.services[service].port;
-    const plan = await this.buildPlan(service, profile.slot, servicePort, stateDir, io);
+    // Slot-excluded services keep their literal port at every slot, so the offset
+    // override would point at a port they never bind.
+    const servicePort = profile.excludedServices.includes(service)
+      ? manifest.services[service].port
+      : (profile.portOverrides[service] ?? manifest.services[service].port);
+    const plan = await this.buildPlan(service, servicePort, stateDir, io);
 
     if (!plan.ok) {
       this.error(plan.reason);
@@ -131,21 +135,14 @@ export default class StackProfile extends BaseCommand {
   }
 
   /** Gather the live facts the pure planner needs, then let it decide. */
-  private async buildPlan(
-    service: ServiceId,
-    slot: number,
-    servicePort: number,
-    stateDir: string,
-    io: ForeignIo,
-  ) {
+  private async buildPlan(service: ServiceId, servicePort: number, stateDir: string, io: ForeignIo) {
     const listenerPid = await io.pidOnPort(servicePort);
     const proc = listenerPid === null ? null : await io.procInfo(listenerPid);
-    const port = inspectorPort(service, slot);
-    const busy = port === null ? false : await inspectorPortBusy(port);
+    const busy = await inspectorPortBusy(INSPECTOR_PORT);
     // Who holds the inspector port decides refuse-vs-reattach, so resolve it
     // rather than treating any held port as a conflict.
-    const inspectorPortPid = busy && port !== null ? await io.pidOnPort(port) : null;
-    return planProfile(service, slot, {
+    const inspectorPortPid = busy ? await io.pidOnPort(INSPECTOR_PORT) : null;
+    return planProfile(service, {
       listenerPid,
       proc,
       ownedPgids: io.ownedPgids(stateDir),

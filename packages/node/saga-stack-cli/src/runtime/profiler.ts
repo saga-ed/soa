@@ -17,11 +17,10 @@
  * Uses Node's global `WebSocket` — the `ws` package is not resolvable here.
  */
 
-import { execFile } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { Socket } from 'node:net';
 import { dirname } from 'node:path';
-import { promisify } from 'node:util';
+import { makeRealForeignIo } from './foreign-procs.js';
 
 /** A V8 CPU profile as returned by `Profiler.stop`. */
 export interface CpuProfile {
@@ -49,8 +48,16 @@ export interface ProfilerDeps {
   attempts?: number;
   /** Delay between those attempts, ms. Default 100. */
   intervalMs?: number;
-  /** Per-attempt HTTP timeout, ms — the dominant term in the poll's worst case. Default 2000. */
+  /** Per-attempt HTTP timeout, ms. Default 2000. */
   fetchTimeoutMs?: number;
+  /**
+   * Wall-clock ceiling on the whole poll, ms. Default 8000. A holder that accepts
+   * TCP but never answers HTTP burns the full per-attempt timeout every time, so
+   * `attempts * (fetchTimeoutMs + intervalMs)` alone would block for ~63s.
+   */
+  pollBudgetMs?: number;
+  /** Monotonic clock for the poll deadline. Default `Date.now`. */
+  now?: () => number;
 }
 
 /** The minimal CDP surface the capture needs. */
@@ -107,9 +114,8 @@ async function defaultConnect(wsUrl: string): Promise<CdpSession> {
     const waiter = pending.get(msg.id);
     if (!waiter) return;
     pending.delete(msg.id);
-    // A CDP `error` reply must REJECT — resolving it as {} let a failed
-    // Profiler.enable/start pass silently and produced a capture against a
-    // profiler that was never started.
+    // A CDP `error` reply must REJECT: resolving it as {} would hide a failed
+    // Profiler.enable/start and capture against a profiler that never started.
     if (msg.error) waiter.reject(new Error(`CDP error: ${msg.error.message ?? 'unknown'}`));
     else waiter.resolve(msg.result ?? {});
   };
@@ -170,6 +176,8 @@ export async function captureCpuProfile(
   const attempts = deps.attempts ?? 30;
   const intervalMs = deps.intervalMs ?? 100;
   const fetchTimeoutMs = deps.fetchTimeoutMs ?? 2000;
+  const pollBudgetMs = deps.pollBudgetMs ?? 8000;
+  const now = deps.now ?? Date.now;
   // AbortSignal is mandatory here: a holder that accepts TCP but never answers HTTP
   // makes a bare fetch() hang forever, defeating the poll loop's own attempt bound.
   const fetchJson =
@@ -184,7 +192,9 @@ export async function captureCpuProfile(
       mkdirSync(dirname(p), { recursive: true });
       writeFileSync(p, b);
     });
-  const portOwner = deps.portOwner ?? defaultPortOwner;
+  // The SAME resolver the plan used, so plan-time and post-signal can never
+  // disagree about who owns the port.
+  const portOwner = deps.portOwner ?? makeRealForeignIo().pidOnPort;
 
   if (!req.alreadyOpen) {
     try {
@@ -194,9 +204,12 @@ export async function captureCpuProfile(
     }
   }
 
-  // SIGUSR1 is async — poll until the inspector's HTTP endpoint answers.
+  // SIGUSR1 is async — poll until the inspector's HTTP endpoint answers. Bounded by
+  // BOTH attempts and wall clock: a holder that accepts TCP but never answers burns
+  // the full per-attempt timeout each pass, so attempts alone is not a time bound.
   let wsUrl: string | undefined;
-  for (let i = 0; i < attempts; i += 1) {
+  const deadline = now() + pollBudgetMs;
+  for (let i = 0; i < attempts && now() < deadline; i += 1) {
     try {
       const list = (await fetchJson(`http://127.0.0.1:${req.port}/json/list`)) as Array<{
         webSocketDebuggerUrl?: string;
@@ -289,6 +302,10 @@ export async function captureCpuProfile(
  * of its own. An HTTP probe HANGS against that (verified: `curl` connects, then
  * waits forever), which would both defeat the guard and stall the CLI. A connect
  * that succeeds is enough to know the real service cannot bind.
+ *
+ * Not `PortProbe.listening` (preflight.ts): that one degrades OPEN when `ss`/`lsof`
+ * are missing, which is right for a preflight warning and wrong here, where the
+ * answer gates a hard refusal.
  */
 export async function inspectorPortBusy(
   port: number,
@@ -296,23 +313,6 @@ export async function inspectorPortBusy(
 ): Promise<boolean> {
   const probe = deps.probeTcp ?? tcpListening;
   return probe(port, 1000);
-}
-
-/**
- * The pid listening on `port`, or null when it can't be resolved. Null is
- * inconclusive, never "free" — the caller refuses on it.
- *
- * Duplicates `ForeignIo.pidOnPort`; fold the two together so plan-time and
- * post-signal can never disagree about who owns the port.
- */
-async function defaultPortOwner(port: number): Promise<number | null> {
-  try {
-    const { stdout } = await promisify(execFile)('lsof', ['-ti', `:${port}`, '-sTCP:LISTEN']);
-    const pid = Number.parseInt(stdout.trim().split('\n')[0] ?? '', 10);
-    return Number.isFinite(pid) ? pid : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Resolve true when a TCP connect to 127.0.0.1:port succeeds within `timeoutMs`. */

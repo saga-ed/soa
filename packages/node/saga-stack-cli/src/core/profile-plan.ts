@@ -128,8 +128,8 @@ export function planProfile(
     port: INSPECTOR_PORT,
     command: target.proc.command,
     adopted: target.ownedPgids.includes(target.proc.pgid),
-    // Already listening ⇒ SIGUSR1 is unnecessary (and would be a no-op on an open
-    // inspector); the runtime skips the signal and attaches directly.
+    // Our own inspector already open ⇒ SIGUSR1 is a no-op; attach directly. Keep
+    // both conjuncts: this must not depend on the refusal above staying in place.
     alreadyOpen: target.inspectorPortBusy && target.inspectorPortPid === target.listenerPid,
   };
 }
@@ -159,9 +159,8 @@ export function defaultArtifactPath(stateDir: string, service: ServiceId, stamp:
  *
  * The positive signal that separates a real capture from a wrapper profile: at
  * least one sampled frame whose script URL sits under the service's own directory.
- * A profile of pnpm/tsup has plenty of nodes but none from `<subpath>/dist`, which
- * is exactly how the earlier `--cpu-prof` attempt looked "successful" while being
- * useless.
+ * A profile of pnpm/tsup has plenty of nodes but none from the service's subpath,
+ * so node count alone cannot tell the two apart.
  */
 export function profileHasServiceFrames(
   profile: { nodes?: Array<{ hitCount?: number; callFrame?: { url?: string } }> },

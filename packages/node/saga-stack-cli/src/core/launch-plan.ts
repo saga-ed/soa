@@ -521,15 +521,9 @@ export function resolveLaunchEnv(
     env[portEnvVar] = String(ctx.ports[service]);
   }
 
-  // NOTE (attach-mode profiling): do NOT inject `--inspect-port` here. NODE_OPTIONS
-  // is inherited by the WHOLE launch tree, so pnpm and tsup would each reserve the
-  // same port and the real `node dist/main.js` then fails to bind it
-  // ("Starting inspector on 127.0.0.1:9229 failed: address already in use" — the
-  // service's own log is the only trace). Verified empirically. The deployed
-  // entrypoint dodges this with a `[ "$1" = "node" ]` gate, but that only works
-  // because the entrypoint IS the exec wrapper; there is no such hop here.
-  // `ss stack profile` therefore presets nothing and lets SIGUSR1 open the
-  // inspector on its default port — see core/inspector.ts.
+  // Do NOT inject `--inspect-port` here: NODE_OPTIONS reaches the whole
+  // pnpm→tsup→node tree, so a wrapper reserves the port and the service fails to
+  // bind it. See core/inspector.ts and docs/instrumentation.md.
 
   // Lane overrides win (env last-wins, matching up.sh's trailing splat).
   return { ...env, ...laneOverlay(service, lane, ctx) };

@@ -82,6 +82,27 @@ describe('captureCpuProfile — inspector port identity', () => {
     expect(result.reason).toMatch(/never came up/);
   });
 
+  it('stops polling on the wall-clock budget, not just the attempt count', async () => {
+    // A holder that accepts TCP but never answers burns the full per-attempt
+    // timeout, so 30 attempts alone would block far longer than the budget.
+    let clock = 0;
+    let calls = 0;
+    const result = await captureCpuProfile(
+      request,
+      deps({
+        now: () => clock,
+        pollBudgetMs: 500,
+        fetchJson: async () => {
+          calls += 1;
+          clock += 2000;
+          return [];
+        },
+      }),
+    );
+    expect(result).toMatchObject({ ok: false });
+    expect(calls).toBe(1);
+  });
+
   it('surfaces a write failure without claiming the profiling failed', async () => {
     const result = await captureCpuProfile(
       request,

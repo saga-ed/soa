@@ -56,7 +56,7 @@ export default class StackProfile extends BaseCommand {
     }),
   };
 
-  /** Profiling targets ONE slot's service — the slot picks the inspector port. */
+  /** The slot picks WHICH service to profile; the inspector port is fixed (core/inspector.ts). */
   protected slotAware(): boolean {
     return true;
   }
@@ -77,11 +77,7 @@ export default class StackProfile extends BaseCommand {
     assertInspectorPortFree();
 
     const io: ForeignIo = makeRealForeignIo();
-    // Slot-excluded services keep their literal port at every slot, so the offset
-    // override would point at a port they never bind.
-    const servicePort = profile.excludedServices.includes(service)
-      ? manifest.services[service].port
-      : (profile.portOverrides[service] ?? manifest.services[service].port);
+    const servicePort = profile.portOverrides[service] ?? manifest.services[service].port;
     const plan = await this.buildPlan(service, servicePort, stateDir, io);
 
     if (!plan.ok) {
@@ -110,10 +106,8 @@ export default class StackProfile extends BaseCommand {
       this.error(`${service}: ${result.reason}`);
     }
 
-    // A profile of pnpm/tsup has plenty of nodes but none from the service's own
-    // dist — exactly how the earlier --cpu-prof attempt looked fine while being
-    // useless. Warn rather than fail: a genuinely idle service can sample no app
-    // frames, and the artifact is still valid.
+    // Warn, don't fail: an idle service legitimately samples no app frames, and the
+    // artifact is still valid. See `profileHasServiceFrames` for what the check means.
     const hasFrames = profileHasServiceFrames(result.profile, service);
     const samples = result.profile.samples?.length ?? 0;
 

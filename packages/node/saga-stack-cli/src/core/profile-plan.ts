@@ -29,7 +29,7 @@ export interface ProfileTarget {
    * the CDP client disconnects, so the target's own inspector is a re-attach, not a
    * conflict.
    */
-  inspectorPortPid?: number | null;
+  inspectorPortPid: number | null;
 }
 
 /**

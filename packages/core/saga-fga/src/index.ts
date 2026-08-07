@@ -14,8 +14,8 @@ import { CredentialsMethod, OpenFgaClient } from '@openfga/sdk';
  *     candidates, then ask about them. Deliberately NOT `ListObjects`, which
  *     cannot report truncation (see `batchCheck`'s doc comment).
  *   - `listUsersDiagnostic` — the reverse question ("WHO holds R on O"), for
- *     debugging and audit tooling ONLY. Same truncation dishonesty as
- *     ListObjects, hence the name (see its doc comment).
+ *     debugging and audit tooling ONLY ({@link FgaDiagnostics}; rationale →
+ *     README "The reverse question").
  *
  * Enumeration (`ListObjects`) is intentionally absent. If a caller ever truly
  * needs the id set before touching its own datastore, that belongs behind the
@@ -56,7 +56,8 @@ export interface FgaGateConfig {
 }
 
 export function loadFgaGateConfig(
-  env: Record<string, string | undefined> = process.env
+  // core-tier package: `process` may not exist in the importing runtime.
+  env: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env
 ): FgaGateConfig {
   return {
     enforce: env.AUTHZ_FGA_ENFORCE === 'true',
@@ -139,18 +140,17 @@ export function fgaBatchKey(user: string, relation: string, object: string): str
 }
 
 /**
- * The subjects holding a relation, from {@link FgaGate.listUsersDiagnostic},
- * partitioned by subject kind because they mean different things:
+ * The subjects holding a relation, from
+ * {@link FgaDiagnostics.listUsersDiagnostic}, partitioned by subject kind:
  *
- *   - `users` — direct subjects (`user:<id>`). What a debugger usually wants.
- *   - `usersets` — indirect subjects (`group:<id>#member`). A userset is a
- *     REFERENCE, not an enumeration: its members are not listed here, so a
- *     complete "who" requires expanding each userset yourself.
+ *   - `users` — direct subjects (`user:<id>`).
+ *   - `usersets` — indirect subjects (`group:<id>#member`); references, not
+ *     enumerations — their members are not listed here.
  *   - `wildcardTypes` — object types with a public-wildcard tuple on this
- *     relation (`user:*` → `['user']`). Meaningful for MARKER relations
- *     (e.g. a `released` flip); on a computed relation the model's
- *     intersections have already bound the wildcard, so one appearing here
- *     does NOT mean "everyone".
+ *     relation (`user:*` → `['user']`).
+ *
+ * Reading these honestly (userset expansion, wildcard-on-marker semantics) →
+ * README "The reverse question".
  */
 export interface FgaUserListing {
   users: string[];
@@ -234,31 +234,39 @@ export interface FgaGate {
    * map keyed by {@link fgaBatchKey}; duplicate questions collapse to one entry.
    */
   batchCheck(checks: readonly FgaBatchCheckItem[]): Promise<FgaBatchCheckResult>;
+}
+
+/**
+ * Debug-tier query surface, deliberately separate from {@link FgaGate}:
+ * enforcement call sites (and their hand-rolled `FgaGate` test fakes) never
+ * carry a diagnostic member. {@link createFgaGate} returns both.
+ */
+export interface FgaDiagnostics {
   /**
    * The reverse question — "WHO holds `relation` on `object`?" — completing the
    * two-of-three (user, relation, object) debugging triple. **Diagnostic tier
-   * ONLY**, and the name is the guardrail:
+   * ONLY**, and the name is the guardrail: `ListUsers` cannot report truncation
+   * (the same defect that keeps `ListObjects` out of this package), so it is
+   * never an enforcement input, a notification/fan-out source, or an
+   * audit-of-record. Rationale → README "The reverse question".
    *
-   * OpenFGA's `ListUsers` response is `{ users: [...] }` — no continuation
-   * token, no truncation flag — while the server bounds the search with a
-   * max-results cap and a deadline. A CAPPED listing and a COMPLETE listing are
-   * therefore the same response, which disqualifies it from every load-bearing
-   * job: never an enforcement input, never a notification/fan-out source, never
-   * an audit-of-record (the PDP's decision log is that). It answers "show me
-   * who the graph currently reaches" during debugging, and nothing else.
+   * `userTypes` names the subject shapes to search, and the listing contains
+   * ONLY what it names: entries map to server-side filters, so the parameter is
+   * required — an implicit default would silently hide the shapes it omits
+   * (e.g. group grants). `'group#member'` asks for usersets of that shape; bare
+   * `'user'` asks for direct subjects.
    *
-   * `userTypes` selects the subject kinds to search (default `['user']`).
-   * `'group#member'` syntax asks for usersets of that shape. Each entry maps to
-   * one server-side filter.
-   *
-   * Throws {@link FgaUnavailableError} when no verdict could be reached, like
-   * every other method here — a diagnostic that silently returns `[]` on an
-   * outage would send the debugger chasing a phantom missing-tuple bug.
+   * Throws `TypeError` on a malformed argument — a caller bug, detected
+   * locally, deliberately NOT {@link FgaUnavailableError} so it can never read
+   * as a PDP outage. Throws {@link FgaUnavailableError} when no verdict could
+   * be reached, like every other method here — a diagnostic that silently
+   * returns `[]` on an outage would send the debugger chasing a phantom
+   * missing-tuple bug.
    */
   listUsersDiagnostic(
     relation: string,
     object: string,
-    userTypes?: readonly string[]
+    userTypes: readonly string[]
   ): Promise<FgaUserListing>;
 }
 
@@ -267,7 +275,9 @@ export interface FgaGate {
  * `check`, so a disabled gate (enforce=false, no storeId) never constructs a
  * client and never reaches the network.
  */
-export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaGate {
+export function createFgaGate(
+  config: FgaGateConfig = loadFgaGateConfig()
+): FgaGate & FgaDiagnostics {
   let client: OpenFgaClient | undefined;
   const clientFor = (): OpenFgaClient => {
     if (!config.storeId) {
@@ -372,32 +382,48 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
   const listUsersDiagnostic = async (
     relation: string,
     object: string,
-    userTypes: readonly string[] = ['user']
+    userTypes: readonly string[]
   ): Promise<FgaUserListing> => {
+    // Malformed arguments are caller bugs → TypeError, never FgaUnavailableError:
+    // a deterministic local rejection must not read as a PDP outage.
     // 'type:id' → the wire's structured object. Split on the FIRST colon only —
     // instance ids may themselves contain separators (session_instance:S|date).
     const sep = object.indexOf(':');
     if (sep <= 0) {
-      throw new FgaUnavailableError(
+      throw new TypeError(
         `FGA listUsers requires an object of the form "type:id", got "${object}"`
       );
     }
+    if (userTypes.length === 0) {
+      throw new TypeError('FGA listUsers requires at least one subject-type filter');
+    }
+    // 'group#member' asks for usersets of that shape; bare 'user' asks for
+    // direct subjects.
+    const userFilters = userTypes.map(t => {
+      if (!/^[^\s#:]+(?:#[^\s#:]+)?$/.test(t)) {
+        throw new TypeError(`FGA listUsers filter must be "type" or "type#relation", got "${t}"`);
+      }
+      const hash = t.indexOf('#');
+      return hash > 0 ? { type: t.slice(0, hash), relation: t.slice(hash + 1) } : { type: t };
+    });
     let res;
     try {
       res = await clientFor().listUsers({
         object: { type: object.slice(0, sep), id: object.slice(sep + 1) },
         relation,
-        // 'group#member' asks for usersets of that shape; bare 'user' asks for
-        // direct subjects.
-        user_filters: userTypes.map(t => {
-          const hash = t.indexOf('#');
-          return hash > 0 ? { type: t.slice(0, hash), relation: t.slice(hash + 1) } : { type: t };
-        }),
+        user_filters: userFilters,
       });
     } catch (cause) {
       // An outage must never present as an empty listing — the debugger would
       // chase a phantom missing-tuple bug. Same contract as check/batchCheck.
       throw new FgaUnavailableError(`FGA listUsers failed for ${relation} on ${object}`, { cause });
+    }
+    // A 2xx whose body carries no `users` array reached no verdict — it must
+    // not read as an empty listing.
+    if (!Array.isArray(res.users)) {
+      throw new FgaUnavailableError(
+        `FGA listUsers returned a malformed response for ${relation} on ${object}`
+      );
     }
     const listing: FgaUserListing = { users: [], usersets: [], wildcardTypes: [] };
     for (const u of res.users) {
@@ -405,6 +431,13 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
       else if (u.userset)
         listing.usersets.push(`${u.userset.type}:${u.userset.id}#${u.userset.relation}`);
       else if (u.wildcard) listing.wildcardTypes.push(u.wildcard.type);
+      else {
+        // An entry of an unrecognized kind cannot be partitioned; skipping it
+        // would silently under-report the listing.
+        throw new FgaUnavailableError(
+          `FGA listUsers returned an unrecognized subject entry for ${relation} on ${object}`
+        );
+      }
     }
     return listing;
   };

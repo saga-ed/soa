@@ -137,7 +137,10 @@ completes the two-of-three triple — _"who holds `relation` on `object`?"_ —
 for **debugging and audit tooling only**, and the name is the guardrail:
 
 ```ts
-const who = await fga.listUsersDiagnostic('can_view', `qtf_review:${id}`);
+const who = await fga.listUsersDiagnostic('can_view', `qtf_review:${id}`, [
+  'user', // direct subjects
+  'group#member', // usersets of that shape
+]);
 // who.users         → ['user:ingrid']            direct subjects
 // who.usersets      → ['group:demo-north#member'] references, NOT enumerations
 // who.wildcardTypes → ['user']                    a public-wildcard tuple exists
@@ -153,18 +156,25 @@ source, never the audit of record (the PDP's decision log is that). It answers
 
 Reading the result honestly:
 
+- **The listing contains only the subject shapes you asked for.** The
+  `userTypes` entries map to server-side filters, which is why the parameter is
+  required: a shape you don't name is _absent from the search_, not
+  empty-because-nobody-holds-it. Forget `'group#member'` and every group grant
+  reads as a missing tuple.
 - A **userset** (`group:g#member`) is a reference — its members are not listed;
   a complete "who" requires expanding it separately.
 - A **wildcard** entry means a `user:*` tuple holds **this** relation. On a
   marker relation (a `released` flip) that is the expected shape; it does _not_
   mean "everyone can" on any computed relation, where the model's intersections
   bind the wildcard.
-- Ask for usersets explicitly with filter syntax:
-  `listUsersDiagnostic('can_view', obj, ['user', 'group#member'])`.
 
-Failures throw `FgaUnavailableError` like everything else here — a diagnostic
-that returned `[]` during an outage would send the debugger chasing a phantom
-missing-tuple bug.
+A malformed argument — an object without its `type:` prefix, a filter that is
+not `type` or `type#relation`, an empty filter list — throws `TypeError`: a
+caller bug, detected locally, deliberately distinct from `FgaUnavailableError`
+so it can never read as a PDP outage. Failures to reach a verdict throw
+`FgaUnavailableError` like everything else here — a diagnostic that returned
+`[]` during an outage would send the debugger chasing a phantom missing-tuple
+bug.
 
 ## Contextual tuples
 

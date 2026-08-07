@@ -340,7 +340,7 @@ describe('batchCheck — a per-item failure is NOT a deny', () => {
 });
 
 describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
-  it('partitions direct users, usersets, and wildcards, asking for user subjects by default', async () => {
+  it('partitions direct users, usersets, and wildcards by the requested subject shapes', async () => {
     listUsersMock.mockReset().mockResolvedValue({
       users: [
         { object: { type: 'user', id: 'ingrid' } },
@@ -348,7 +348,10 @@ describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
         { wildcard: { type: 'user' } },
       ],
     });
-    const listing = await gateWithStore().listUsersDiagnostic('can_view', 'qtf_review:r1');
+    const listing = await gateWithStore().listUsersDiagnostic('can_view', 'qtf_review:r1', [
+      'user',
+      'group#member',
+    ]);
 
     expect(listing).toEqual({
       users: ['user:ingrid'],
@@ -358,45 +361,64 @@ describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
     expect(listUsersMock.mock.calls[0]?.[0]).toEqual({
       object: { type: 'qtf_review', id: 'r1' },
       relation: 'can_view',
-      user_filters: [{ type: 'user' }],
-    });
-  });
-
-  it("maps 'group#member' filter syntax to a typed userset filter", async () => {
-    listUsersMock.mockReset().mockResolvedValue({ users: [] });
-    await gateWithStore().listUsersDiagnostic('can_view', 'session:s1', ['user', 'group#member']);
-    expect(listUsersMock.mock.calls[0]?.[0]).toMatchObject({
       user_filters: [{ type: 'user' }, { type: 'group', relation: 'member' }],
     });
   });
 
   it('splits the object on the FIRST colon only — instance ids contain separators', async () => {
     listUsersMock.mockReset().mockResolvedValue({ users: [] });
-    await gateWithStore().listUsersDiagnostic('host', 'session_instance:S|2026-08-05');
+    await gateWithStore().listUsersDiagnostic('host', 'session_instance:S|2026-08-05', ['user']);
     expect(listUsersMock.mock.calls[0]?.[0]).toMatchObject({
       object: { type: 'session_instance', id: 'S|2026-08-05' },
     });
   });
 
-  it('rejects an un-typed object id rather than sending a malformed filter', async () => {
+  it('rejects an un-typed object id as a caller bug (TypeError), never as unavailability', async () => {
     listUsersMock.mockReset();
-    await expect(gateWithStore().listUsersDiagnostic('host', 'no-type-separator')).rejects.toThrow(
-      FgaUnavailableError
-    );
+    await expect(
+      gateWithStore().listUsersDiagnostic('host', 'no-type-separator', ['user'])
+    ).rejects.toThrow(TypeError);
+    expect(listUsersMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed subject-type filters as caller bugs (TypeError)', async () => {
+    listUsersMock.mockReset();
+    const gate = gateWithStore();
+    for (const bad of ['#member', 'group#', 'group:member', '', 'group#member#extra']) {
+      await expect(gate.listUsersDiagnostic('can_view', 'session:s1', [bad])).rejects.toThrow(
+        TypeError
+      );
+    }
+    // An empty filter list means "no shapes", not "all shapes" — reject it too.
+    await expect(gate.listUsersDiagnostic('can_view', 'session:s1', [])).rejects.toThrow(TypeError);
     expect(listUsersMock).not.toHaveBeenCalled();
   });
 
   it('surfaces a transport failure as FgaUnavailableError — an outage must never read as an empty listing', async () => {
     listUsersMock.mockReset().mockRejectedValue(new Error('ECONNREFUSED'));
-    await expect(gateWithStore().listUsersDiagnostic('host', 'session:s1')).rejects.toThrow(
-      FgaUnavailableError
-    );
+    await expect(
+      gateWithStore().listUsersDiagnostic('host', 'session:s1', ['user'])
+    ).rejects.toThrow(FgaUnavailableError);
+  });
+
+  it('surfaces a 2xx body with no users array as FgaUnavailableError, not an empty listing', async () => {
+    listUsersMock.mockReset().mockResolvedValue({});
+    await expect(
+      gateWithStore().listUsersDiagnostic('host', 'session:s1', ['user'])
+    ).rejects.toThrow(FgaUnavailableError);
+  });
+
+  it('throws on an unrecognized subject entry rather than silently dropping it', async () => {
+    listUsersMock.mockReset().mockResolvedValue({ users: [{}] });
+    await expect(
+      gateWithStore().listUsersDiagnostic('host', 'session:s1', ['user'])
+    ).rejects.toThrow(FgaUnavailableError);
   });
 
   it('surfaces a missing store id without reaching the client', async () => {
     listUsersMock.mockReset();
     const gate = createFgaGate({ enforce: true, apiUrl: 'http://fga.test' });
-    await expect(gate.listUsersDiagnostic('host', 'session:s1')).rejects.toThrow(
+    await expect(gate.listUsersDiagnostic('host', 'session:s1', ['user'])).rejects.toThrow(
       FgaUnavailableError
     );
     expect(listUsersMock).not.toHaveBeenCalled();

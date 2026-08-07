@@ -35,7 +35,7 @@
  * docker / fetch / fs touch happens behind a seam the caller injected.
  */
 
-import type { FeatureSet } from './core/bundles.js';
+import { featureSet, meshForFeatures, type FeatureSet } from './core/bundles.js';
 import type { RecordMode, ScriptPlan } from './core/flag-map.js';
 import { launchPlan } from './core/launch-plan.js';
 import type { LaunchContext } from './core/launch-plan.js';
@@ -476,9 +476,22 @@ export interface RestartOutcome {
 
 /** The in-process facade (plan §6.3) — M9 adds native `restart`. */
 export interface StackApi {
-  up(closureServices: ServiceId[]): Promise<UpResult>;
+  /**
+   * `features` is REQUIRED, not `?:` — it decides which profile-gated mesh units
+   * start (a feature-contributed unit is otherwise never launched), and an
+   * optional parameter would re-open the "caller forgot to thread it, the run
+   * silently shrinks" hole the `FeatureSet` brand exists to close. Pass
+   * `featureSet([])` for a run that selects nothing.
+   */
+  up(closureServices: ServiceId[], features: FeatureSet): Promise<UpResult>;
   down(closureServices: ServiceId[]): Promise<DownResult>;
-  restart(closureServices: ServiceId[]): Promise<RestartOutcome>;
+  /**
+   * `features` defaults to the empty set: `stack restart` bounces the full
+   * NON-OPTIONAL closure and selects no bundle. A caller restarting a
+   * feature-selected stack must pass the same set it brought it up with, or the
+   * bounce drops that feature's mesh units.
+   */
+  restart(closureServices: ServiceId[], features?: FeatureSet): Promise<RestartOutcome>;
   reset(closureServices: ServiceId[], opts?: ResetOpts): Promise<ResetOutcome>;
   seed(plan: SeedPlan): Promise<SeedResult>;
   verify(probes: HealthProbe[], opts?: VerifyOpts): Promise<VerifyResult>;
@@ -526,13 +539,22 @@ function head(argv: string[]): { command: string; args: string[] } {
 }
 
 /**
- * Mesh units the closure needs — the union of the closure services' `mesh`,
- * in manifest declaration order (so a postgres-only partial stack waits only on
+ * Mesh units the closure needs — the union of the closure services' `mesh` PLUS
+ * the units the selected features contribute directly (`BundleDef.mesh`), in
+ * manifest declaration order (so a postgres-only partial stack waits only on
  * postgres). `make up` still starts the WHOLE mesh; this only narrows the gate.
+ *
+ * 🔑 The feature half is not optional garnish: for a PROFILE-GATED unit this list
+ * is what activates its compose profile (`meshUp`'s `COMPOSE_PROFILES`), so a unit
+ * missing here is never STARTED, not merely un-waited-on. A service-union-only
+ * derivation silently dropped `otel-collector` (the `otel` bundle contributes zero
+ * services) while `--dry-run` — which reads `closure.mesh` — promised it.
+ * `meshForFeatures` is shared with `computeClosure` so the two cannot re-drift.
  */
-function neededMesh(services: ServiceId[], m: Manifest): MeshId[] {
+function neededMesh(services: ServiceId[], m: Manifest, features: FeatureSet): MeshId[] {
   const set = new Set<MeshId>();
   for (const id of services) for (const u of getService(id, m).mesh) set.add(u);
+  for (const u of meshForFeatures(features)) set.add(u);
   return (Object.keys(m.mesh) as MeshId[]).filter((u) => set.has(u));
 }
 
@@ -765,7 +787,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
   }
 
   return {
-    async up(services: ServiceId[]): Promise<UpResult> {
+    async up(services: ServiceId[], features: FeatureSet): Promise<UpResult> {
       // 0. AUTO-PULL (M9) — ff-only sibling sync BEFORE anything is built/migrated, so a
       // bare native `up` never runs a checkout silently behind origin (up.sh runs
       // `pull_repos` before mesh_up/prep). Warn-and-continue on every per-repo issue; a
@@ -795,7 +817,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         runner,
         exec: meshExec,
         portProbe,
-        units: neededMesh(services, manifest),
+        units: neededMesh(services, manifest, features),
         manifest,
         // M7: slot > 0 namespaces + offsets the mesh; slot 0 leaves both undefined/0.
         project: runtime.meshProject,
@@ -1096,7 +1118,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       return { stopped };
     },
 
-    async restart(services: ServiceId[]): Promise<RestartOutcome> {
+    async restart(services: ServiceId[], features: FeatureSet = featureSet([])): Promise<RestartOutcome> {
       // Native `restart` (M9 — up.sh `restart`, ~2293-2306): a clean bounce with NO
       // data wipe. down → vite-clear → up, in that order.
       //
@@ -1189,7 +1211,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
       const overlayBound = reapedOptional.filter((id) => OVERLAY_BOUND_SERVICES.has(id));
       const relaunch =
         restorable.length > 0 ? [...new Set<ServiceId>([...services, ...restorable])] : services;
-      const up = await this.up(relaunch);
+      const up = await this.up(relaunch, features);
       return { down, reaped, reapedForeign, vite, up, notRelaunched: overlayBound };
     },
 

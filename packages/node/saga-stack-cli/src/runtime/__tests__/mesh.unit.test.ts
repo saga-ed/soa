@@ -429,6 +429,116 @@ describe('meshUp', () => {
   });
 });
 
+/**
+ * `MeshDef.readinessHttp` — the host-side probe for a unit whose image carries no
+ * exec-able binary (`otel-collector` is distroless: no `sh`, no `curl`, and its
+ * subcommands validate config rather than liveness, so even openfga's
+ * `shell:false` escape does not reach it).
+ */
+describe('meshUp — readinessHttp units', () => {
+  /** A short-timeout collector so a never-ready case resolves in ~1s, not 30. */
+  function otelManifest(): typeof manifest {
+    return {
+      ...manifest,
+      mesh: {
+        ...manifest.mesh,
+        'otel-collector': { ...manifest.mesh['otel-collector'], timeoutSec: 1 },
+      },
+    };
+  }
+
+  it('probes over HTTP, never docker exec (the image has no exec-able probe)', async () => {
+    const { runner } = fakeRunner();
+    const urls: string[] = [];
+    const execCalls: string[] = [];
+    const exec: MeshExec = {
+      async ready(container) {
+        execCalls.push(container);
+        return true;
+      },
+      async readyHttp(url) {
+        urls.push(url);
+        return true;
+      },
+    };
+    const res = await meshUp({
+      soaRoot: SOA,
+      runner,
+      exec,
+      portProbe: FREE_PROBE,
+      units: ['otel-collector'],
+      manifest: otelManifest(),
+    });
+    expect(res.ok).toBe(true);
+    expect(urls).toEqual(['http://localhost:13133/']);
+    expect(execCalls).toEqual([]);
+  });
+
+  it('probes the SLOT port — base + offset, not slot 0s container', async () => {
+    const { runner } = fakeRunner();
+    const urls: string[] = [];
+    const exec: MeshExec = {
+      async ready() {
+        return true;
+      },
+      async readyHttp(url) {
+        urls.push(url);
+        return true;
+      },
+    };
+    await meshUp({
+      soaRoot: SOA,
+      runner,
+      exec,
+      portProbe: FREE_PROBE,
+      units: ['otel-collector'],
+      meshOffset: 2000,
+      manifest: otelManifest(),
+    });
+    expect(urls).toEqual(['http://localhost:15133/']);
+  });
+
+  it('reports the unit DOWN when the probe never answers (does not hang or pass)', async () => {
+    const { runner } = fakeRunner();
+    const exec: MeshExec = {
+      async ready() {
+        return true;
+      },
+      async readyHttp() {
+        return false;
+      },
+    };
+    const res = await meshUp({
+      soaRoot: SOA,
+      runner,
+      exec,
+      portProbe: FREE_PROBE,
+      units: ['otel-collector'],
+      manifest: otelManifest(),
+      sleep: async () => {},
+    });
+    expect(res.ok).toBe(false);
+    expect(res.units).toEqual([
+      { id: 'otel-collector', container: 'soa-otel-collector-1', ok: false },
+    ]);
+  });
+
+  it('an exec fake with no readyHttp reports never-ready rather than falsely passing', async () => {
+    const { runner } = fakeRunner();
+    const { exec } = fakeExec();
+    const res = await meshUp({
+      soaRoot: SOA,
+      runner,
+      exec,
+      portProbe: FREE_PROBE,
+      units: ['otel-collector'],
+      manifest: otelManifest(),
+      sleep: async () => {},
+    });
+    expect(res.ok).toBe(false);
+  });
+});
+
 /** Clone the manifest with rabbitmq's readiness timeout dropped to 1s (fast never-ready test). */
 function shortTimeoutManifest(): typeof manifest {
   return {

@@ -538,7 +538,7 @@ export default class StackUp extends BaseCommand {
     const api = makeStackApi(manifest, runtime);
 
     // 1. native bring-up (mesh + topo-wave service launch + M9 auto-pull + AV).
-    const up = await api.up(services);
+    const up = await api.up(services, features);
 
     // M9 auto-pull: surface the ff-only sibling-sync outcome per repo (up.sh's
     // pull_repos ⚠/·/✓ lines). Printed first so a fast-forward / skip is visible even

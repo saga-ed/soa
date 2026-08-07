@@ -25,7 +25,7 @@
  * --with authz` would wrongly resolve transcripts-api.
  */
 
-import { BUNDLE_FOR_SERVICE, BUNDLES, featureSet, type FeatureSet } from './bundles.js';
+import { BUNDLE_FOR_SERVICE, featureSet, meshForFeatures, type FeatureSet } from './bundles.js';
 import { launchOrder } from './launch-order.js';
 import type { DbId, Manifest, MeshId, ServiceId } from './manifest/index.js';
 
@@ -159,9 +159,9 @@ export function computeClosure(
   // (BundleDef.mesh). Without this a unit can only be gated by hanging it off an
   // `optional:true` service, which is impossible for one wanted by an
   // `optional:false` service — see the BundleDef.mesh docs.
-  for (const name of features) {
-    for (const u of BUNDLES[name].mesh ?? []) meshSet.add(u);
-  }
+  // Shared with the launch path's `neededMesh` via `meshForFeatures` — the two
+  // unions must agree or `--dry-run` reports a unit that never starts.
+  for (const u of meshForFeatures(features)) meshSet.add(u);
 
   const databases = (Object.keys(m.databases) as DbId[]).filter((d) => dbSet.has(d));
   const mesh = (Object.keys(m.mesh) as MeshId[]).filter((u) => meshSet.has(u));

@@ -24,7 +24,7 @@
  * only shapes the orchestration inputs.
  */
 
-import { featureSet, featuresForIds } from '../bundles.js';
+import { featureSet, featuresForIds, type FeatureSet } from '../bundles.js';
 import { computeClosure } from '../closure.js';
 import type { Closure } from '../closure.js';
 import { manifest as defaultManifest } from '../manifest/index.js';
@@ -61,6 +61,13 @@ export interface ResolvedFlow {
   requiredSystems: ServiceId[];
   /** The full dependency closure of `requiredSystems` (the N-of-M launch set). */
   closure: Closure;
+  /**
+   * The features `closure` was computed from — surfaced because the launch path
+   * needs the SAME set (`StackApi.up`) to decide which profile-gated mesh units
+   * start. Re-deriving it at the call site would be a second derivation free to
+   * disagree with the one that shaped this closure.
+   */
+  features: FeatureSet;
   /** Effective seed selection (flow-level, terminal-stage seed merged over it). */
   seedSelection?: SeedSelection;
   /** Whether THIS flow's run should reset+seed before Playwright. False when a prerequisite already built the end-state. */
@@ -365,6 +372,7 @@ export function resolveFlow(
     stages,
     requiredSystems,
     closure,
+    features,
     seedSelection,
     reset,
     foreground,

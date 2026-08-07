@@ -231,13 +231,15 @@ export async function captureCpuProfile(
   // on a taken port logs "address already in use" and returns normally, leaving the
   // loser running with no inspector — so a concurrent profile finds the FIRST
   // service's still-open inspector here and would capture it under our pid's name.
-  // /json/list carries no pid, so identity comes from the port's actual owner.
+  // /json/list carries no pid, so identity comes from the port's actual owner, and
+  // an UNRESOLVABLE owner refuses too: unknown is not permission to sample.
   const owner = await portOwner(req.port);
-  if (owner !== null && owner !== req.pid) {
+  if (owner !== req.pid) {
+    const who = owner === null ? 'an unidentifiable process' : `pid ${owner}`;
     return {
       ok: false,
       reason:
-        `inspector port ${req.port} is held by pid ${owner}, not ${req.pid}. Profiling is ` +
+        `inspector port ${req.port} is held by ${who}, not ${req.pid}. Profiling is ` +
         `machine-wide (Node's inspector port takes no slot offset) — wait for the other ` +
         `profile to finish, then retry.`,
     };
@@ -298,7 +300,10 @@ export async function inspectorPortBusy(
 
 /**
  * The pid listening on `port`, or null when it can't be resolved. Null is
- * inconclusive, never "free" — callers must not read it as permission to proceed.
+ * inconclusive, never "free" — the caller refuses on it.
+ *
+ * Duplicates `ForeignIo.pidOnPort`; fold the two together so plan-time and
+ * post-signal can never disagree about who owns the port.
  */
 async function defaultPortOwner(port: number): Promise<number | null> {
   try {

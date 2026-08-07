@@ -20,10 +20,11 @@
  *
  * SO WHAT THIS HOOK ACTUALLY BUYS: `PUBLIC_LOGIN_URL` + `PUBLIC_DASHBOARD_URL` — the
  * two the launch env does NOT set, whose `.env` defaults are shared REMOTE hosts.
- * `PUBLIC_IAM_API_URL` / `PUBLIC_COACH_API_URL` are also written here, but the manifest
- * sets both (`core/manifest/services.ts`, `${IAM_URL}` / `${COACH_API_URL}`) and the
- * launch env outranks this file, so those two lines are a redundant fallback rather
- * than the operative fix. Do not "fix" a URL bug by editing them alone — check whether
+ * `PUBLIC_IAM_API_URL` / `PUBLIC_COACH_API_URL` / `PUBLIC_PROGRAMS_API_URL` are also
+ * written here, but the manifest sets all three (`core/manifest/services.ts`,
+ * `${IAM_URL}` / `${COACH_API_URL}` / `http://localhost:${PROGRAMS_PORT}`) and the
+ * launch env outranks this file, so those three lines are a redundant fallback rather
+ * than the operative fix — what they buy is a hand-run `pnpm dev` in the coach-web dir. Do not "fix" a URL bug by editing them alone — check whether
  * the manifest or `tunnelOverlay()` sets the var first, because that is what wins.
  *
  * SCOPE: the local `stack` lane only. Under `--tunnel` every coach-web PUBLIC_ var is
@@ -94,16 +95,19 @@ export function coachWebEnvLocalPath(coachWebRoot: string): string {
  * port is omitted rather than emitting `localhost:undefined` (coach-web then falls
  * back to its `.env` default for that one var — never a broken URL). Trailing newline.
  *
- *   PUBLIC_IAM_API_URL   ← iam-api    (browser dials iam DIRECT for whoami)
- *   PUBLIC_COACH_API_URL ← coach-api  (the coach BFF)
- *   PUBLIC_DASHBOARD_URL ← saga-dash  (the "open dashboard" link)
- *   PUBLIC_LOGIN_URL     ← iam-api    (the whoami 401 challenge login lives at iam's /demo)
+ *   PUBLIC_IAM_API_URL      ← iam-api      (browser dials iam DIRECT for whoami)
+ *   PUBLIC_COACH_API_URL    ← coach-api    (the coach BFF)
+ *   PUBLIC_PROGRAMS_API_URL ← programs-api (browser dials programs DIRECT for the
+ *                                           Reports program filter, coach#329)
+ *   PUBLIC_DASHBOARD_URL    ← saga-dash    (the "open dashboard" link)
+ *   PUBLIC_LOGIN_URL        ← iam-api      (the whoami 401 challenge login lives at iam's /demo)
  *
  * PUBLIC_EMBED_ALLOWED_ORIGINS is deliberately LEFT ALONE — not needed for boot.
  */
 export function coachWebEnvLocalContents(stackPorts: Partial<Record<ServiceId, number>>): string {
   const iam = stackPorts['iam-api'];
   const coachApi = stackPorts['coach-api'];
+  const programs = stackPorts['programs-api'];
   const dash = stackPorts['saga-dash'];
 
   const header = [
@@ -116,6 +120,7 @@ export function coachWebEnvLocalContents(stackPorts: Partial<Record<ServiceId, n
   const vars: string[] = [];
   if (iam !== undefined) vars.push(`PUBLIC_IAM_API_URL=http://localhost:${iam}`);
   if (coachApi !== undefined) vars.push(`PUBLIC_COACH_API_URL=http://localhost:${coachApi}`);
+  if (programs !== undefined) vars.push(`PUBLIC_PROGRAMS_API_URL=http://localhost:${programs}`);
   if (dash !== undefined) vars.push(`PUBLIC_DASHBOARD_URL=http://localhost:${dash}`);
   // PUBLIC_LOGIN_URL → iam locally: the whoami 401 challenge login URL is iam's /demo.
   if (iam !== undefined) vars.push(`PUBLIC_LOGIN_URL=http://localhost:${iam}`);

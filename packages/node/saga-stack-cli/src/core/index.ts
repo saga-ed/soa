@@ -37,3 +37,6 @@ export * from './snapshot/index.js';
 
 // ss env — deployed shared-environment registry + org footprint model (soa#355).
 export * from './env/index.js';
+
+// ss stack hydrate — prod-mirror → local-slot map + the pure hydrate planner.
+export * from './mirror/index.js';

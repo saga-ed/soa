@@ -62,7 +62,7 @@ export interface ForeignIo {
   /** The pids recorded in `<stateDir>/*.pid` (== ss pgid leaders); [] if none. */
   ownedPgids(stateDir: string): number[];
   /** SIGKILL a process group (negative pid), then confirm the pid is gone. */
-  killGroup(pgid: number, pid: number): boolean;
+  killGroup(pgid: number, pid: number): Promise<boolean>;
 }
 
 /** Run a command, resolving its trimmed stdout (or '' on any error). NEVER throws. */
@@ -73,6 +73,12 @@ function runCapture(command: string, args: string[]): Promise<string> {
     });
   });
 }
+
+/** Bounded wait for an async SIGKILL to land: 20 x 50ms = 1s worst case. */
+const KILL_POLL_ATTEMPTS = 20;
+const KILL_POLL_INTERVAL_MS = 50;
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 function pidAlive(pid: number): boolean {
   try {
@@ -88,7 +94,8 @@ function pidAlive(pid: number): boolean {
  * The production `ForeignIo`. `pidOnPort` prefers `lsof -t` (terse pid list,
  * works on Linux + macOS), falling back to `ss -ltnHp` for a Linux box without
  * lsof; `procInfo` uses POSIX `ps -o pgid=,args=`; `killGroup` SIGKILLs the
- * negative pid (the whole detached tree) with a bare-pid fallback.
+ * negative pid (the whole detached tree) with a bare-pid fallback, then POLLS
+ * for the exit (SIGKILL is asynchronous — see `killGroup`).
  */
 export function makeRealForeignIo(): ForeignIo {
   return {
@@ -137,7 +144,7 @@ export function makeRealForeignIo(): ForeignIo {
       return pids;
     },
 
-    killGroup(pgid: number, pid: number): boolean {
+    async killGroup(pgid: number, pid: number): Promise<boolean> {
       try {
         process.kill(-pgid, 'SIGKILL');
       } catch {
@@ -146,6 +153,17 @@ export function makeRealForeignIo(): ForeignIo {
         } catch {
           /* already gone — treat as reaped below */
         }
+      }
+      // SIGKILL is ASYNCHRONOUS: the kernel has not necessarily torn the process
+      // down by the time this line runs, and a not-yet-reaped child lingers as a
+      // zombie that still answers signal 0 — so an immediate `!pidAlive(pid)`
+      // reports a SUCCESSFUL reap as a survivor. Measured 2026-08-05: a foreign
+      // coach-web was killed (both pids confirmed gone a moment later) and still
+      // reported `killed:false`. Poll for the exit the way `stopServices` already
+      // does, rather than trusting a single instantaneous read.
+      for (let i = 0; i < KILL_POLL_ATTEMPTS; i += 1) {
+        if (!pidAlive(pid)) return true;
+        await sleep(KILL_POLL_INTERVAL_MS);
       }
       return !pidAlive(pid);
     },
@@ -179,7 +197,9 @@ export function makeRealForeignProcs(io: ForeignIo = makeRealForeignIo()): Forei
       // pgid, the second SIGKILL to the now-dead group is a harmless ESRCH no-op
       // (folded inside killGroup), and `killed` is still checked per-pid — so no
       // dedupe is needed and every finding reports its own liveness accurately.
-      return foreign.map((f) => ({ ...f, killed: io.killGroup(f.pgid, f.pid) }));
+      return Promise.all(
+        foreign.map(async (f) => ({ ...f, killed: await io.killGroup(f.pgid, f.pid) })),
+      );
     },
   };
 }

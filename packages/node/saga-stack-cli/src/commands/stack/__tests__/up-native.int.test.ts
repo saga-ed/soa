@@ -209,6 +209,30 @@ describe('stack up --only — native partial-stack', () => {
     expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
   });
 
+  it('--no-seed launches the closure but runs NO seed step', async () => {
+    // The seed is destructive to non-fixture data (the iam seed drops an org it
+    // did not write), and it is the ONLY thing standing between `stack up` and
+    // being usable as a post-hydrate bounce: `stack restart` refuses slots 1..9,
+    // and an absent --seed still seeds the roster baseline. Measured on a live
+    // slot: an ordinary `up` over a freshly hydrated slot took iam_local from
+    // 6935 users to 314 and removed the org entirely.
+    await StackUp.run(['--only', 'scheduling-api,sessions-api', '--no-seed', ...WS], config);
+
+    // the closure still launches — this is a bounce, not a no-op.
+    expect(launches.map((s) => s.id)).toEqual([
+      'iam-api',
+      'authz-api',
+      'programs-api',
+      'scheduling-api',
+      'sessions-api',
+    ]);
+    // …and NOTHING from the seed lane ran.
+    const seedRuns = runs.filter((r) => r.command !== 'make');
+    expect(seedRuns.some((r) => r.args.some((a) => a.includes('seed-dev-user')))).toBe(false);
+    expect(seedRuns.some((r) => r.args.includes('db:seed'))).toBe(false);
+    expect(seedRuns.some((r) => r.args.some((a) => a.includes('seed-registry')))).toBe(false);
+  });
+
   it('runs the dash prelaunch hook when saga-dash is in the closure', async () => {
     await StackUp.run(['--only', 'saga-dash', ...WS], config);
     expect(launches.some((s) => s.id === 'saga-dash')).toBe(true);
@@ -276,17 +300,24 @@ describe('stack up --only — native partial-stack', () => {
       'getRepoDirCheck',
     ).mockReturnValue((dir: string) => !dir.endsWith('/coach'));
 
-    // closure(coach-web) = coach-web + coach-api (COACH, absent) + iam-api (present).
+    // closure(coach-web) = coach-web + coach-api (COACH, absent) + iam-api and
+    // programs-api (present — programs-api rides in on coach-web's `browser`
+    // edge for the Reports program filter, coach#329).
     await expect(
       StackUp.run(['--only', 'coach-web', '--seed', 'full', ...WS], config),
     ).resolves.toBeUndefined();
 
-    // only iam-api launched; the coach pair was skipped (repo not cloned).
-    expect(launches.map((s) => s.id)).toEqual(['iam-api']);
+    // only the present-repo services launched; the coach pair was skipped (repo not cloned).
+    expect(launches.map((s) => s.id)).toEqual(['iam-api', 'programs-api']);
 
     // the seed plan dropped coach-pg — NOTHING ran against the coach-db dir (which
     // would have spawn-crashed on the missing checkout with a real runner).
-    expect(runs.some((r) => r.cwd.includes('/coach'))).toBe(false);
+    // Anchored at the FIXTURE's coach checkout, not a bare '/coach' substring:
+    // the loose form also matched any path merely containing "coach" (a worktree
+    // named `coach-api-events`, say), which made this assertion fail for reasons
+    // having nothing to do with the coach repo.
+    const coachRepo = resolve(DEV_ROOT, 'coach');
+    expect(runs.some((r) => r.cwd === coachRepo || r.cwd.startsWith(`${coachRepo}/`))).toBe(false);
     expect(runs.some((r) => r.command === 'pnpm' && r.args.includes('db:seed') && r.cwd.includes('coach-db'))).toBe(
       false,
     );

@@ -84,12 +84,14 @@ import {
   makeSettleBarrier,
   makeRealEnvAws,
   makeRealEnvPsql,
+  makeRealHydrateIO,
   makeSlotWipe,
   realSleep,
   makeRealDockerWipe,
   makeRealBuildCleaner,
   makeRealEnvFs,
   makeRealForeignProcs,
+  makeRealProvenance,
   generateTunnelFleetConfig,
   generateSlotFleetConfig,
   resolveRepoRoot,
@@ -129,6 +131,7 @@ import type {
   SleepFn,
   EnvAws,
   EnvPsql,
+  HydrateIO,
   SlotWipe,
   SnapshotIO,
   ViteClear,
@@ -136,6 +139,7 @@ import type {
   BuildCleaner,
   EnvFs,
   ForeignProcs,
+  Provenance,
 } from './runtime/index.js';
 
 /**
@@ -523,6 +527,19 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * The listener-provenance seam — production is the only place `/proc`, `lsof
+   * -d cwd`, `ps -o lstart=` and the reflog stat run to answer "is the process
+   * answering this port still serving the code I think it is?". Complements
+   * `getForeignProcs` (which answers ownership) and posture (which answers
+   * whether the CHECKOUT is right); this one catches an owned process, in the
+   * right checkout, that predates the checkout's last HEAD movement. `stack
+   * status` uses `assess` (report-only). See `runtime/provenance`.
+   */
+  protected getProvenance(): Provenance {
+    return makeRealProvenance();
+  }
+
+  /**
    * The native-prep postgres-probe seam (M8 — R2 provision + R3 migrate) —
    * production is the only place the read-only `docker exec … psql -tAc` probes
    * run (pg_database existence / `_prisma_migrations` presence / public-table
@@ -849,6 +866,18 @@ export abstract class BaseCommand extends Command {
   }
 
   /**
+   * The hydrate seam (`ss stack hydrate`) — production is the only place the
+   * prod-mirror → local-slot `docker run pg_dump|pg_restore|psql` pipelines and
+   * the database-level DDL (`DROP DATABASE`, `pg_terminate_backend`, `ALTER
+   * DATABASE … RENAME`) are launched, and the only place the mirror's master
+   * password is handed to a child process. Injected so the whole plan — argv AND
+   * SQL — is asserted with no docker, no database, and no credential.
+   */
+  protected getHydrateIO(): HydrateIO {
+    return makeRealHydrateIO();
+  }
+
+  /**
    * The build-clean seam (cold-start) — production is the only place a real `rm -rf` of a repo's
    * `dist/` (and, under `--reinstall`, `node_modules`) runs to force a clean rebuild.
    */
@@ -1001,6 +1030,10 @@ export abstract class BaseCommand extends Command {
         reclaimStopped: (holder) => this.reclaimStoppedPrepLock(flags, holder),
       }),
       repoDirExists: this.getRepoDirCheck(),
+      // The foreign-listener sweep native `restart` runs between its pidfile reap and
+      // the fresh bring-up: an orphan with no pidfile is invisible to the stopper, and
+      // `up` would adopt it and serve its stale code.
+      foreignProcs: this.getForeignProcs(),
       // M9: the ff-only sibling sync (up.sh `pull_repos`) + its mode, the vite-cache
       // clear (native `restart`), and best-effort Connect AV (slot-0 + connect-in-closure,
       // gated in the facade). All three no-op unless the relevant native path invokes them.

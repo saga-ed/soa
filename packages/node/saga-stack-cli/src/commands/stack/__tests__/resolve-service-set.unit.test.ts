@@ -24,9 +24,11 @@ const resolve = (only: string | undefined, withB: string[] | undefined): Service
   resolveServiceSet(only, withB, throwFail);
 
 describe('resolveServiceSet — --with is sugar over --only', () => {
-  it('--with coach ⇒ closure {iam-api, coach-api, coach-web}', () => {
+  it('--with coach ⇒ closure {iam-api, coach-api, coach-web, programs-api}', () => {
+    // programs-api via coach-web's `browser` dep edge (coach#329 — the Reports
+    // program filter calls programs.list straight from the browser).
     expect(new Set(resolve(undefined, ['coach']))).toEqual(
-      new Set(['iam-api', 'coach-api', 'coach-web']),
+      new Set(['iam-api', 'coach-api', 'coach-web', 'programs-api']),
     );
   });
 

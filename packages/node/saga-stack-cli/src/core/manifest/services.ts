@@ -260,7 +260,18 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         JANUS_REQUIRED: 'false',
-        CORS_ORIGIN: '${DASH_URL}',
+        // coach-web is here for the SAME reason it is in iam-api's CORS_ORIGIN:
+        // its browser calls `programs.list` DIRECT (coach-web
+        // `src/lib/api/programs.ts`), and that call carries an
+        // `x-organization-id` header, so it PREFLIGHTS. programs-api's allow-list
+        // is `CORS_ORIGIN` + devOrigins + the https-only `*.wootdev.com` regex
+        // (api-util `buildSagaOriginAllowlist`) — nothing in it matched
+        // `http://localhost:8800`, so the OPTIONS came back 204 with NO
+        // `Access-Control-Allow-Origin` and the browser reported the same opaque
+        // "Failed to fetch" a wrong host produces (coach#329). Measured live on
+        // slot 0 before this line existed; fixing coach-web's URL alone left the
+        // symptom byte-identical.
+        CORS_ORIGIN: '${DASH_URL},${COACH_WEB_URL}',
         JANUS_LOGIN_HOST: 'localhost:${IAM_PORT}/demo',
         // Validate the SAME issuer iam-api stamps (its JWT_ISSUER). Without this
         // the rostering-client verifier falls back to the prod issuer and 401s
@@ -273,6 +284,18 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'programs',
     isFrontend: false,
     optional: false,
+    // programs-api serves a BROWSER plane now (coach-web's Reports program
+    // filter), so its CORS allow-list is boot-critical to a frontend the same
+    // way iam-api's is — and it is exactly what `tunnelOverlay()` rewrites.
+    // Without a fingerprint an already-running programs-api carrying the OLD
+    // single-origin allow-list is adopted by the next `up` (healthy ⇒
+    // alreadyUp), the preflight keeps failing, and the fix looks like it
+    // shipped while nothing changed. JANUS_LOGIN_HOST is the overlay's other
+    // rewrite; guarding both is what lets programs-api join the
+    // `adoptEnv ⊇ tunnelOverlay() rewrite set` invariant test.
+    // Same one-time "stop the process and re-run" cost iam-api/saga-dash
+    // already pay for processes stamped by an older CLI.
+    adoptEnv: ['CORS_ORIGIN', 'JANUS_LOGIN_HOST'],
   },
   'scheduling-api': {
     id: 'scheduling-api',
@@ -693,8 +716,15 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // curriculum read path is Postgres now (PostgresContentReadStore over
     // content_release), coach-api carries no mongo dependency and reads no MONGO_*
     // env, so the mesh mongo is NOT gated on and those vars are not injected.
-    // RABBITMQ_ENABLED=false, so rabbitmq is intentionally NOT gated on either.
-    mesh: [],
+    // Rabbitmq IS gated on: coach-api consumes iam.persona_assignment.{added,
+    // removed} + iam.persona_definition.upserted off the shared iam.events
+    // exchange and projects them into persona_assignment / persona_definition —
+    // the table coachReport's roster joins against. With the consumer off (the
+    // pre-2026-08-06 default) `consumed_events` stayed empty on every slot and
+    // that projection was only ever written by concierge's direct-SQL mirror, so
+    // the event path that production depends on was NEVER exercised locally.
+    // coach#413 is that same path being cold in prod. Mongo stays retired.
+    mesh: ['rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
       env: {
@@ -705,7 +735,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_TARGET: '${IAM_URL}',
         AUTH_JWKSURL: '${IAM_URL}/.well-known/jwks.json',
         AUTH_ISSUER: '${IAM_ISSUER}',
-        RABBITMQ_ENABLED: 'false',
+        RABBITMQ_ENABLED: 'true',
         RABBITMQ_URL: '${MESH_MQ}',
         EXPRESS_SERVER_CORSALLOWEDDOMAINS: '${COACH_WEB_HOST}',
         SAGA_API_TARGET: '${SAGA_API_TARGET_COACH}',
@@ -726,11 +756,20 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // SvelteKit SPA — probed on the root path like saga-dash / connect-web.
     healthPath: '/',
     databases: [],
-    // Client-only SPA (ssr = false): the BROWSER calls coach-api for data and
-    // iam's auth.whoami direct for identity — so it needs both URLs, and iam
-    // must allow its origin (see iam-api's CORS_ORIGIN).
-    dependsOn: ['coach-api', 'iam-api'],
-    depKinds: { 'coach-api': 'browser', 'iam-api': 'browser' },
+    // Client-only SPA (ssr = false): the BROWSER calls coach-api for data,
+    // iam's auth.whoami direct for identity, and programs-api direct for the
+    // Reports program filter (coach#313) — so it needs all three URLs, and each
+    // must allow its origin (see those services' CORS_ORIGIN).
+    //
+    // programs-api is a real dep even though it only powers ONE control: with
+    // it absent, `stack up --with coach` / `--only coach-web` hand the browser a
+    // localhost:3006 nothing is listening on, so the Reports Program selector
+    // errors by construction. The cost is that the `coach` bundle now pulls the
+    // `programs` db + rabbitmq + the programs seed; that is the honest price of
+    // the page working. `browser` kind, so e2e FLOW closures (which list their
+    // own requiredSystems and run with followBrowserEdges:false) are unchanged.
+    dependsOn: ['coach-api', 'iam-api', 'programs-api'],
+    depKinds: { 'coach-api': 'browser', 'iam-api': 'browser', 'programs-api': 'browser' },
     mesh: [],
     launch: {
       cmd: 'pnpm dev',
@@ -739,6 +778,15 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // Without this, coach-web falls back to its .env default
         // (https://iam.wootdev.com) and the local SPA talks to deployed iam.
         PUBLIC_IAM_API_URL: '${IAM_URL}',
+        // Same class, third instance: without this, coach-web falls back to its
+        // .env default (https://programs-api.wootdev.com) and the local SPA's
+        // Reports Program selector fires a cross-origin call at DEPLOYED
+        // programs-api — net::ERR_FAILED, "programs.list request failed: Failed
+        // to fetch", empty selector (coach#329).
+        // No ${PROGRAMS_URL} token exists (only the port), so this composes the
+        // origin from ${PROGRAMS_PORT} — the staff-admin-api / ads-adm-api idiom
+        // below, which slot-offsets correctly where a literal would not.
+        PUBLIC_PROGRAMS_API_URL: 'http://localhost:${PROGRAMS_PORT}',
       },
     },
     seed: [],
@@ -754,22 +802,36 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // 2026-07-16 slot-0 incident: a plain `develop coach` adopted a leftover
     // `--tunnel` coach-web and the browser whoami dialed the dead tunnel iam →
     // the misleading soa#300 "503 — Unable to reach the sign-in service".
-    // Fingerprint the four browser-plane keys tunnelOverlay() rewrites:
-    //  - PUBLIC_COACH_API_URL / PUBLIC_IAM_API_URL (boot-critical): in the
-    //    plain launch env above AND value-flipped under --tunnel ⇒ the
+    // Fingerprint the five browser-plane keys tunnelOverlay() rewrites:
+    //  - PUBLIC_COACH_API_URL / PUBLIC_IAM_API_URL / PUBLIC_PROGRAMS_API_URL:
+    //    in the plain launch env above AND value-flipped under --tunnel ⇒ the
     //    fingerprints differ in both directions.
     //  - PUBLIC_LOGIN_URL / PUBLIC_DASHBOARD_URL: tunnel-ONLY (no plain-env
     //    entry — plain runs let them fall through to coach-web's dotfiles).
     //    The fingerprint OMITS absent keys, so plain stamps lack them while
     //    tunnel stamps carry them — present-vs-omitted still mismatches BOTH
     //    ways, the same asymmetry saga-dash's guard relies on.
-    // A mode-drifted coach-web is REFUSED loudly and relaunched with the
-    // current mode's env — refuse-or-relaunch, never adopt.
+    // PUBLIC_PROGRAMS_API_URL (coach#329) is the case that proves why the list
+    // must grow with the launch env rather than track modes: adding the var
+    // WITHOUT adding it here is a plain→plain drift the other four are provably
+    // incapable of seeing — their values are unchanged, so a coach-web vite
+    // started before the fix stamps a byte-identical contract, gets adopted, and
+    // keeps serving the `.env` default https://programs-api.wootdev.com out of a
+    // bundle no on-disk write can reach. Green stack, unchanged bug.
+    // A mode- or contract-drifted coach-web is REFUSED loudly — the launcher
+    // neither adopts nor kills it; the operator stops the process (`ss stack
+    // down` for an ss-launched one; a hand-run `pnpm dev` has no pidfile here
+    // and must be killed by hand) and re-runs, and THAT run relaunches with the
+    // current env. Every existing slot pays that once when this lands.
     adoptEnv: [
       'PUBLIC_COACH_API_URL',
       'PUBLIC_IAM_API_URL',
       'PUBLIC_LOGIN_URL',
       'PUBLIC_DASHBOARD_URL',
+      // Appended, not inserted: the first four positions of an existing stamp
+      // stay put, so the refusal message's expected-vs-recorded diff reads as
+      // "one key added" rather than a wholesale reshuffle.
+      'PUBLIC_PROGRAMS_API_URL',
     ],
   },
   'transcripts-api': {

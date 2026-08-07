@@ -126,7 +126,10 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       IAM_API_URL: 'http://localhost:3010',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       JANUS_REQUIRED: 'false',
-      CORS_ORIGIN: 'http://localhost:8900',
+      // dash AND coach-web: coach-web's browser calls programs.list direct, and
+      // that call preflights (x-organization-id), so an unlisted origin gets a
+      // 204 with no ACAO → "Failed to fetch" (coach#329).
+      CORS_ORIGIN: 'http://localhost:8900,http://localhost:8800',
       JANUS_LOGIN_HOST: 'localhost:3010/demo',
       JWT_ISSUER: 'https://iam.wootdev.com',
     });
@@ -304,19 +307,24 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       IAM_API_TARGET: 'http://localhost:3010',
       AUTH_JWKSURL: 'http://localhost:3010/.well-known/jwks.json',
       AUTH_ISSUER: 'https://iam.wootdev.com',
-      RABBITMQ_ENABLED: 'false',
+      RABBITMQ_ENABLED: 'true',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       EXPRESS_SERVER_CORSALLOWEDDOMAINS: 'localhost',
       SAGA_API_TARGET: 'https://staging.wootmath.com',
     });
   });
 
-  it('coach-web (client-only SPA: browser calls coach-api AND iam direct)', () => {
+  it('coach-web (client-only SPA: browser calls coach-api, iam AND programs direct)', () => {
     expect(env('coach-web')).toEqual({
       PUBLIC_COACH_API_URL: 'http://localhost:6105',
       // Without this it falls back to its .env default (https://iam.wootdev.com)
       // and the local SPA talks to DEPLOYED iam.
       PUBLIC_IAM_API_URL: 'http://localhost:3010',
+      // Same, for programs-api: the .env default is
+      // https://programs-api.wootdev.com, which is what the Reports program
+      // selector was dialling cross-origin (coach#329). Composed from
+      // ${PROGRAMS_PORT} — there is no ${PROGRAMS_URL} token.
+      PUBLIC_PROGRAMS_API_URL: 'http://localhost:3006',
     });
   });
 

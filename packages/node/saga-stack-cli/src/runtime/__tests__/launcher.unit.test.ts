@@ -370,18 +370,21 @@ describe('makeRealLauncher.launch adopt-contract guard (soa#305)', () => {
     'PUBLIC_IAM_API_URL',
     'PUBLIC_LOGIN_URL',
     'PUBLIC_DASHBOARD_URL',
+    'PUBLIC_PROGRAMS_API_URL',
   ];
-  // Plain slot-0 launch env: only the two boot-critical keys (manifest launch.env).
+  // Plain slot-0 launch env: the three boot-critical keys (manifest launch.env).
   const COACH_PLAIN_ENV = {
     PUBLIC_COACH_API_URL: 'http://localhost:6105',
     PUBLIC_IAM_API_URL: 'http://localhost:3010',
+    PUBLIC_PROGRAMS_API_URL: 'http://localhost:3006',
   };
-  // Tunnel launch env: all four, rewritten to the public hosts (tunnelOverlay()).
+  // Tunnel launch env: all five, rewritten to the public hosts (tunnelOverlay()).
   const COACH_TUNNEL_ENV = {
     PUBLIC_COACH_API_URL: 'https://coach-api.sk.vms.wootdev.com',
     PUBLIC_IAM_API_URL: 'https://iam.sk.vms.wootdev.com',
     PUBLIC_LOGIN_URL: 'https://iam.sk.vms.wootdev.com',
     PUBLIC_DASHBOARD_URL: 'https://dash.sk.vms.wootdev.com',
+    PUBLIC_PROGRAMS_API_URL: 'https://programs.sk.vms.wootdev.com',
   };
 
   it('refuses to adopt a TUNNEL-leftover coach-web on a plain run (the 2026-07-16 slot-0 incident)', async () => {
@@ -447,6 +450,43 @@ describe('makeRealLauncher.launch adopt-contract guard (soa#305)', () => {
     });
 
     expect(res).toEqual({ id: 'coach-web', ok: true, alreadyUp: true });
+  });
+
+  it('refuses a PRE-coach#329 coach-web on a plain re-run (plain → plain, no mode change)', async () => {
+    // The regression the fifth key exists for. A vite started before
+    // PUBLIC_PROGRAMS_API_URL was injected has the .env default
+    // (https://programs-api.wootdev.com) INLINED into its bundle, and no on-disk
+    // write can reach it. Its stamp is the four-key shape below. Without
+    // PUBLIC_PROGRAMS_API_URL in adoptEnv the expected fingerprint would pick the
+    // same four keys with the same values — byte-identical — so the launcher
+    // would adopt it, `ss stack status` would read 14/14, and the browser would
+    // still dial deployed programs-api. Same mode both sides: the other four keys
+    // are provably incapable of catching this.
+    const { prober } = seqProber([true]);
+    const { spawn, calls } = fakeSpawn(1);
+    const preFixStamp = {
+      PUBLIC_COACH_API_URL: 'http://localhost:6105',
+      PUBLIC_IAM_API_URL: 'http://localhost:3010',
+    };
+    const launcher = makeRealLauncher({
+      stateDir: STATE,
+      prober,
+      spawn,
+      readContract: () => JSON.stringify(preFixStamp),
+    });
+
+    const res = await launcher.launch({
+      ...SPEC,
+      id: 'coach-web',
+      env: COACH_PLAIN_ENV,
+      adoptEnv: COACH_ADOPT,
+    });
+
+    expect(res.ok).toBe(false);
+    expect(res.alreadyUp).toBeUndefined();
+    expect(res.reason).toMatch(/contract/);
+    // Refuse, don't restart: no spawn and no kill — the operator stops it and re-runs.
+    expect(calls).toHaveLength(0);
   });
 
   it("refuses a tunnel-leftover iam-api whose JWT_ISSUER alone would MATCH (soa#336's finding A)", async () => {

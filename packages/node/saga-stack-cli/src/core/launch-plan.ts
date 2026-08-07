@@ -362,6 +362,18 @@ function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string,
         CORS_ORIGIN: `${dash},http://localhost:${tokens.IAM_PORT},https://dash.${td},https://iam.${td}`,
       };
     case 'programs-api':
+      // Split out from its three siblings below because programs-api is the only
+      // one of them with a SECOND browser origin: coach-web calls programs.list
+      // direct (coach#329). The overlay REPLACES CORS_ORIGIN wholesale (env
+      // last-wins over the launch env, it does not merge), so the coach origins
+      // the base value carries must be restated here or a tunnel run silently
+      // regresses to dash-only. Local coach-web is kept alongside the tunnel host
+      // for the same reason iam-api keeps ${connectWeb}: a local browser must
+      // keep working next to remote ones.
+      return {
+        CORS_ORIGIN: `${dash},${tokens.COACH_WEB_URL},https://dash.${td},https://coach.${td}`,
+        JANUS_LOGIN_HOST: `iam.${td}/demo`,
+      };
     case 'scheduling-api':
     case 'sessions-api':
     case 'ads-adm-api':
@@ -432,6 +444,15 @@ function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string,
         // that would otherwise reach the remote browser verbatim → whoami fails →
         // coach-web renders the soa#300 503 "Unable to reach the sign-in service".
         PUBLIC_IAM_API_URL: `https://iam.${td}`,
+        // programs-api flips for the same reason: the Reports Program filter
+        // fetches programs.list DIRECT from the browser (coach-web
+        // `src/lib/api/programs.ts`). The base manifest pins this to the
+        // PROGRAMS_PORT localhost origin, which is unreachable from a remote
+        // coworker's machine. The tunnel LABEL is `programs`, NOT `programs-api`
+        // — vendor/tunnel.sh declares "programs:3006" and the manifest's
+        // tunnelSlug is 'programs'; a `programs-api.<domain>` host (the shape of
+        // the deployed default in coach-web's .env) is one the tunnel never creates.
+        PUBLIC_PROGRAMS_API_URL: `https://programs.${td}`,
         // Logout target and the "open dashboard" link. Not boot-critical (unlike the two
         // above), but their `.env` defaults are the SHARED remote hosts
         // (login./dash.wootdev.com) — a tunnel session must stay inside its own mesh.

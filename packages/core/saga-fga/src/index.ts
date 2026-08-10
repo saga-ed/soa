@@ -1,4 +1,4 @@
-import { CredentialsMethod, OpenFgaClient } from '@openfga/sdk';
+import { ConsistencyPreference, CredentialsMethod, OpenFgaClient } from '@openfga/sdk';
 
 /**
  * @saga-ed/saga-fga — Tier-2 (per-resource) OpenFGA authorization gate.
@@ -8,11 +8,14 @@ import { CredentialsMethod, OpenFgaClient } from '@openfga/sdk';
  * "can user X do action A on object R?" — they NEVER write tuples (ADR 0005);
  * writes flow through the sync worker.
  *
- * Two query shapes, and the choice matters:
+ * Three query shapes, and the choice matters:
  *   - `check`/`checkDetailed` — one object. Enforcement.
  *   - `batchCheck` — many objects. **Authorization-filtered lists**: fetch the
  *     candidates, then ask about them. Deliberately NOT `ListObjects`, which
  *     cannot report truncation (see `batchCheck`'s doc comment).
+ *   - `listUsersDiagnostic` — the reverse question ("WHO holds R on O"), for
+ *     debugging and audit tooling ONLY ({@link FgaDiagnostics}; rationale →
+ *     README "The reverse question").
  *
  * Enumeration (`ListObjects`) is intentionally absent. If a caller ever truly
  * needs the id set before touching its own datastore, that belongs behind the
@@ -53,7 +56,10 @@ export interface FgaGateConfig {
 }
 
 export function loadFgaGateConfig(
-  env: Record<string, string | undefined> = process.env,
+  // core-tier package: `process` may be absent, or a bundler shim without `env`.
+  env: Record<string, string | undefined> = typeof process === 'undefined'
+    ? {}
+    : (process.env ?? {})
 ): FgaGateConfig {
   return {
     enforce: env.AUTHZ_FGA_ENFORCE === 'true',
@@ -98,6 +104,11 @@ export class FgaUnavailableError extends Error {
   }
 }
 
+/** Every no-verdict path throws through here — one site owns the invariant. */
+function unavailable(message: string, cause?: unknown): never {
+  throw new FgaUnavailableError(message, cause === undefined ? undefined : { cause });
+}
+
 /**
  * One (user, relation, object) question in a {@link FgaGate.batchCheck} call.
  *
@@ -136,6 +147,25 @@ export function fgaBatchKey(user: string, relation: string, object: string): str
 }
 
 /**
+ * The subjects holding a relation, from
+ * {@link FgaDiagnostics.listUsersDiagnostic}, partitioned by subject kind:
+ *
+ *   - `users` — direct subjects (`user:<id>`).
+ *   - `usersets` — indirect subjects (`group:<id>#member`); references, not
+ *     enumerations — their members are not listed here.
+ *   - `wildcardTypes` — object types with a public-wildcard tuple on this
+ *     relation (`user:*` → `['user']`).
+ *
+ * Reading these honestly (userset expansion, wildcard-on-marker semantics) →
+ * README "The reverse question".
+ */
+export interface FgaUserListing {
+  users: string[];
+  usersets: string[];
+  wildcardTypes: string[];
+}
+
+/**
  * The outcome of a `checkDetailed` call: whether access is allowed, and — when
  * it is — which relation branch produced it.
  */
@@ -163,7 +193,7 @@ export interface FgaGate {
     user: string,
     relation: string,
     object: string,
-    contextualTuples?: readonly FgaContextualTuple[],
+    contextualTuples?: readonly FgaContextualTuple[]
   ): Promise<boolean>;
   /**
    * Evaluate several relation branches on the same object and report which
@@ -183,7 +213,7 @@ export interface FgaGate {
     user: string,
     relations: readonly string[],
     object: string,
-    contextualTuples?: readonly FgaContextualTuple[],
+    contextualTuples?: readonly FgaContextualTuple[]
   ): Promise<FgaDetailedDecision>;
   /**
    * Evaluate many independent (user, relation, object) questions in one call.
@@ -214,11 +244,66 @@ export interface FgaGate {
 }
 
 /**
+ * Debug-tier query surface, deliberately separate from {@link FgaGate}:
+ * enforcement call sites (and their hand-rolled `FgaGate` test fakes) never
+ * carry a diagnostic member. {@link createFgaGate} returns both.
+ */
+export interface FgaDiagnostics {
+  /**
+   * The reverse question — "WHO holds `relation` on `object`?" — for debugging
+   * and audit tooling ONLY; the name is the guardrail (`ListUsers` cannot
+   * report truncation). Full rationale + honest-reading guide → README
+   * "The reverse question".
+   *
+   * `userTypes` is required and the listing contains ONLY the shapes it names
+   * (`'user'` direct subjects, `'group#member'` usersets of that shape); each
+   * entry costs its own (independently capped) round trip. Holders derived
+   * through contextual tuples are invisible unless the same tuples ride in via
+   * `contextualTuples`, exactly as on `check`. Reads request
+   * HIGHER_CONSISTENCY: this surface answers "who does the graph reach NOW",
+   * often right after a tuple write.
+   *
+   * Throws `TypeError` on a malformed argument (a caller bug, detected
+   * locally — never read as a PDP outage); {@link FgaUnavailableError} when no
+   * verdict could be reached — never an empty listing on an outage.
+   */
+  listUsersDiagnostic(
+    relation: string,
+    object: string,
+    userTypes: readonly string[],
+    contextualTuples?: readonly FgaContextualTuple[]
+  ): Promise<FgaUserListing>;
+}
+
+/** Bare type/relation names: no whitespace, '#', or ':'. */
+const BARE_NAME = /^[^\s#:]+$/;
+const USER_FILTER = /^([^\s#:]+)(?:#([^\s#:]+))?$/;
+
+/**
+ * 'type:id' with a well-formed type and NON-EMPTY id, split on the FIRST colon
+ * only — instance ids may contain separators (session_instance:S|date).
+ * `undefined` = malformed.
+ */
+function parseFgaObject(object: string): { type: string; id: string } | undefined {
+  const sep = object.indexOf(':');
+  if (sep <= 0 || sep === object.length - 1 || !BARE_NAME.test(object.slice(0, sep))) {
+    return undefined;
+  }
+  return { type: object.slice(0, sep), id: object.slice(sep + 1) };
+}
+
+/** Wire field for request-supplied tuples: key OMITTED when none, readonly caller array copied. */
+const contextualTuplesField = (tuples?: readonly FgaContextualTuple[]) =>
+  tuples?.length ? { contextualTuples: [...tuples] } : {};
+
+/**
  * Build a gate from config. The OpenFGA client is created lazily on first
  * `check`, so a disabled gate (enforce=false, no storeId) never constructs a
  * client and never reaches the network.
  */
-export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaGate {
+export function createFgaGate(
+  config: FgaGateConfig = loadFgaGateConfig()
+): FgaGate & FgaDiagnostics {
   let client: OpenFgaClient | undefined;
   const clientFor = (): OpenFgaClient => {
     if (!config.storeId) {
@@ -247,7 +332,7 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
     user: string,
     relation: string,
     object: string,
-    contextualTuples?: readonly FgaContextualTuple[],
+    contextualTuples?: readonly FgaContextualTuple[]
   ): Promise<boolean> => {
     let res;
     try {
@@ -255,22 +340,17 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
         user,
         relation,
         object,
-        ...(contextualTuples?.length ? { contextualTuples: [...contextualTuples] } : {}),
+        ...contextualTuplesField(contextualTuples),
       });
     } catch (cause) {
       // Any failure to REACH a verdict — unconfigured store, transport error,
       // non-2xx — is unavailability, not denial. Never collapse it to `false`.
-      throw new FgaUnavailableError(
-        `FGA check failed for ${relation} on ${object}`,
-        { cause },
-      );
+      unavailable(`FGA check failed for ${relation} on ${object}`, cause);
     }
     return res.allowed === true;
   };
 
-  const batchCheck = async (
-    checks: readonly FgaBatchCheckItem[],
-  ): Promise<FgaBatchCheckResult> => {
+  const batchCheck = async (checks: readonly FgaBatchCheckItem[]): Promise<FgaBatchCheckResult> => {
     const verdicts = new Map<string, boolean>();
     if (checks.length === 0) return verdicts;
 
@@ -288,10 +368,7 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
     try {
       res = await clientFor().batchCheck({ checks: items });
     } catch (cause) {
-      throw new FgaUnavailableError(
-        `FGA batchCheck failed for ${checks.length} item(s)`,
-        { cause },
-      );
+      unavailable(`FGA batchCheck failed for ${checks.length} item(s)`, cause);
     }
 
     for (const single of res.result) {
@@ -299,17 +376,17 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
       // as `allowed: false` would be a silent deny — the exact failure mode
       // `check`'s contract exists to prevent.
       if (single.error) {
-        throw new FgaUnavailableError(
+        unavailable(
           `FGA batchCheck item failed for ${single.request.relation} on ${single.request.object}`,
-          { cause: single.error },
+          single.error
         );
       }
       const key = keyByCorrelationId.get(single.correlationId);
       // An unrecognized correlation id means we cannot attribute this verdict to
       // a question we asked; treating it as anything would be a guess.
       if (key === undefined) {
-        throw new FgaUnavailableError(
-          `FGA batchCheck returned an unrecognized correlationId: ${single.correlationId}`,
+        unavailable(
+          `FGA batchCheck returned an unrecognized correlationId: ${single.correlationId}`
         );
       }
       verdicts.set(key, single.allowed === true);
@@ -319,20 +396,100 @@ export function createFgaGate(config: FgaGateConfig = loadFgaGateConfig()): FgaG
     // not a set of denials.
     const expected = new Set(keyByCorrelationId.values());
     if (verdicts.size !== expected.size) {
-      throw new FgaUnavailableError(
-        `FGA batchCheck returned ${verdicts.size} verdict(s) for ${expected.size} distinct item(s)`,
+      unavailable(
+        `FGA batchCheck returned ${verdicts.size} verdict(s) for ${expected.size} distinct item(s)`
       );
     }
     return verdicts;
+  };
+
+  const listUsersDiagnostic = async (
+    relation: string,
+    object: string,
+    userTypes: readonly string[],
+    contextualTuples?: readonly FgaContextualTuple[]
+  ): Promise<FgaUserListing> => {
+    // Malformed arguments are caller bugs → TypeError, never FgaUnavailableError.
+    const wireObject = parseFgaObject(object);
+    if (!wireObject) {
+      throw new TypeError(
+        `FGA listUsersDiagnostic requires an object of the form "type:id", got "${object}"`
+      );
+    }
+    if (!BARE_NAME.test(relation)) {
+      throw new TypeError(
+        `FGA listUsersDiagnostic requires a bare relation name, got "${relation}"`
+      );
+    }
+    if (userTypes.length === 0) {
+      throw new TypeError('FGA listUsersDiagnostic requires at least one subject-type filter');
+    }
+    // Duplicate filters would double-count subjects in the merged listing.
+    const userFilters = [...new Set(userTypes)].map(t => {
+      const m = USER_FILTER.exec(t);
+      if (!m?.[1]) {
+        throw new TypeError(
+          `FGA listUsersDiagnostic filter must be "type" or "type#relation", got "${t}"`
+        );
+      }
+      return m[2] ? { type: m[1], relation: m[2] } : { type: m[1] };
+    });
+    const contextualField = contextualTuplesField(contextualTuples);
+    // The wire accepts exactly ONE user_filter per ListUsers call
+    // (ListUsersRequest.user_filters: "Only accepts exactly one value"), so a
+    // multi-shape query fans out one call per filter and merges.
+    const partials = await Promise.all(
+      userFilters.map(async filter => {
+        let res;
+        try {
+          res = await clientFor().listUsers(
+            { object: wireObject, relation, user_filters: [filter], ...contextualField },
+            // A stale read here misreads as a missing tuple (the very thing a
+            // debugger comes to verify), so trade latency for consistency.
+            { consistency: ConsistencyPreference.HigherConsistency }
+          );
+        } catch (cause) {
+          // Same contract as check/batchCheck: failure to reach a verdict is
+          // unavailability, never an empty listing.
+          unavailable(`FGA listUsersDiagnostic failed for ${relation} on ${object}`, cause);
+        }
+        // A 2xx whose body carries no `users` array reached no verdict.
+        if (!Array.isArray(res.users)) {
+          unavailable(
+            `FGA listUsersDiagnostic got a malformed response for ${relation} on ${object}`
+          );
+        }
+        return res.users;
+      })
+    );
+    // Partials arrive in filter order (Promise.all), so the listing does too.
+    const listing: FgaUserListing = { users: [], usersets: [], wildcardTypes: [] };
+    for (const u of partials.flat()) {
+      if (u.object?.type && u.object.id) {
+        listing.users.push(`${u.object.type}:${u.object.id}`);
+      } else if (u.userset?.type && u.userset.id && u.userset.relation) {
+        listing.usersets.push(`${u.userset.type}:${u.userset.id}#${u.userset.relation}`);
+      } else if (u.wildcard?.type) {
+        listing.wildcardTypes.push(u.wildcard.type);
+      } else {
+        // A partial or unrecognized entry cannot be partitioned; skipping or
+        // stringifying it would misreport the listing.
+        unavailable(
+          `FGA listUsersDiagnostic got an unrecognized subject entry for ${relation} on ${object}`
+        );
+      }
+    }
+    return listing;
   };
 
   return {
     enforce: config.enforce,
     check: checkOne,
     batchCheck,
+    listUsersDiagnostic,
     async checkDetailed(user, relations, object, contextualTuples) {
       const held = await Promise.all(
-        relations.map((relation) => checkOne(user, relation, object, contextualTuples)),
+        relations.map(relation => checkOne(user, relation, object, contextualTuples))
       );
       const branches = relations.filter((_, i) => held[i]);
       return {
@@ -363,7 +520,7 @@ export async function enforceFgaRelation(
   user: string,
   relation: string,
   object: string,
-  makeForbidden: () => Error,
+  makeForbidden: () => Error
 ): Promise<void> {
   if (!gate.enforce) return;
   const allowed = await gate.check(user, relation, object);

@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 
 describe('register', () => {
-    it('reuses a leaked service instead of failing the provision', async () => {
+    it('reuses a leaked service instead of failing the provision', () => {
         // A teardown can remove the DB container but leave its Cloud Map entry;
         // create-service then returns ServiceAlreadyExists, and treating that as
         // fatal strands the identifier with no operator tier able to delete it.
@@ -119,7 +119,29 @@ describe('deregister', () => {
                 : ok()),
         });
 
-        expect(() => deregister({ name: NAME, namespace_id: NS, region: REGION })).not.toThrow();
+        expect(() => deregister({
+            name: NAME, namespace_id: NS, region: REGION, delete_retry_ms: 1,
+        })).not.toThrow();
+        expect(attempts).toBe(3);
+    });
+
+    it('gives up after a bounded number of attempts', () => {
+        // The bound is what limits how long a teardown can block the router,
+        // so it needs pinning: an unbounded loop passes every other test here.
+        let attempts = 0;
+        route({
+            'list-services': list_of({ Name: NAME, Id: 'srv-1' }),
+            'deregister-instance': ok(),
+            'delete-service': () => {
+                attempts++;
+                return fail('An error occurred (ResourceInUse) when calling DeleteService');
+            },
+        });
+
+        expect(() => deregister({
+            name: NAME, namespace_id: NS, region: REGION,
+            delete_attempts: 3, delete_retry_ms: 1,
+        })).toThrow(/Could not delete CloudMap service/);
         expect(attempts).toBe(3);
     });
 

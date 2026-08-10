@@ -879,6 +879,11 @@ export function create_ec2_router(config = {}) {
                 rmSync(project_dir, { recursive: true, force: true });
             }
 
+            // Release the port before CloudMap: a failed deregister must still
+            // surface (it strands the identifier), but it must not also leak the
+            // port registry row on a project dir that is already gone.
+            release_port(name, { registry_path });
+
             // Deregister from CloudMap
             if (namespace_id) {
                 const meta = get_instance_metadata();
@@ -888,9 +893,6 @@ export function create_ec2_router(config = {}) {
                     region: region || meta.region,
                 });
             }
-
-            // Release port
-            release_port(name, { registry_path });
 
             const result = { ok: true, name, action: 'deleted' };
             if (on_after_delete) on_after_delete(result);

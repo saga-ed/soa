@@ -97,7 +97,10 @@ export function register({ name, ip, port, namespace_id, region }) {
  * Deregister a database from Cloud Map and delete the service.
  * @param {{ name: string, namespace_id: string, region: string }} config
  */
-export function deregister({ name, namespace_id, region }) {
+export function deregister({
+    name, namespace_id, region,
+    delete_attempts = DELETE_ATTEMPTS, delete_retry_ms = DELETE_RETRY_MS,
+}) {
     const service = find_service(name, namespace_id, region);
     if (!service) {
         console.log(`CloudMap service not found: ${name}`);
@@ -121,7 +124,7 @@ export function deregister({ name, namespace_id, region }) {
     // into a log line. DeregisterInstance is asynchronous and DeleteService
     // rejects a service that still has one, so retry across that window.
     let last_err;
-    for (let attempt = 0; attempt < DELETE_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < delete_attempts; attempt++) {
         try {
             run([
                 'servicediscovery', 'delete-service',
@@ -133,7 +136,7 @@ export function deregister({ name, namespace_id, region }) {
         } catch (err) {
             last_err = err;
             if (!/ResourceInUse/.test(err.message)) break;
-            sleep_sync(DELETE_RETRY_MS);
+            if (attempt < delete_attempts - 1) sleep_sync(delete_retry_ms);
         }
     }
 

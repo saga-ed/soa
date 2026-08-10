@@ -13,7 +13,7 @@ import { engines } from './engines.js';
 import { generate_compose } from './compose-generator.js';
 import { allocate_port, register_port, release_port, get_allocated_ports } from './ports.js';
 import { create_volume, attach_and_mount, cleanup_volume, get_instance_metadata } from './volumes.js';
-import { register, deregister, deregister_instance, delete_service } from './cloudmap.js';
+import { register, deregister_instance, delete_service } from './cloudmap.js';
 import { snapshot_db, download_profile_seed, seed_after_start, list_s3_profiles, read_profile_registry, write_active_profile, check_schema_rev_gate } from './profiles.js';
 
 const SEEDS_BASE = '/mnt/seeds';
@@ -446,25 +446,36 @@ export function create_ec2_router(config = {}) {
                     && !cleanup_volume({ volume_id: rollback_volume_id, mount_path, region: effective_region })) {
                     console.log(`ROLLBACK INCOMPLETE: volume ${rollback_volume_id} (${name}) left on ${meta.instance_id} — needs a reap pass`);
                 }
-                // Same ordering constraint as the DELETE route: a surviving A
-                // record advertises ip:port, so the port stays held rather than
-                // being handed to the next identifier.
-                let record_cleared = true;
+                // Same ordering as the DELETE route, and best-effort at each
+                // step. The port is released only on an affirmative "the A
+                // record is gone": while it survives it advertises ip:port, and
+                // reissuing the port aims that name at the next identifier.
+                let cloudmap_service = null;
+                let record_cleared = !namespace_id;
                 if (namespace_id) {
                     try {
-                        deregister({ name, namespace_id, region: effective_region });
+                        cloudmap_service = deregister_instance({
+                            name, namespace_id, region: effective_region,
+                        });
+                        record_cleared = true;
                     } catch (cleanup_err) {
-                        record_cleared = !cleanup_err.record_survives;
                         console.log(`Rollback of ${name}: CloudMap deregister failed: ${cleanup_err.message}`);
                     }
                 }
                 try {
                     if (allocated_port && record_cleared) release_port(name, { registry_path });
                     else if (allocated_port) {
-                        console.log(`ROLLBACK INCOMPLETE: port for ${name} held — its CloudMap A record survives`);
+                        console.log(`ROLLBACK INCOMPLETE: port for ${name} held — its CloudMap A record may survive`);
                     }
                 } catch (cleanup_err) {
                     console.log(`Rollback of ${name}: port release failed: ${cleanup_err.message}`);
+                }
+                if (cloudmap_service) {
+                    try {
+                        delete_service({ name, service: cloudmap_service, region: effective_region });
+                    } catch (cleanup_err) {
+                        console.log(`Rollback of ${name}: CloudMap service delete failed: ${cleanup_err.message}`);
+                    }
                 }
                 try {
                     rmSync(project_dir, { recursive: true, force: true });
@@ -893,14 +904,11 @@ export function create_ec2_router(config = {}) {
             // still advertises it, and the shell's delete can fail for minutes
             // (async deregistration) without justifying a leaked registry row.
             let cloudmap_service = null;
-            const cloudmap_region = namespace_id
-                ? (region || get_instance_metadata().region)
-                : null;
+            let cloudmap_region;
             if (namespace_id) {
+                cloudmap_region = region || get_instance_metadata().region;
                 cloudmap_service = deregister_instance({
-                    name,
-                    namespace_id,
-                    region: cloudmap_region,
+                    name, namespace_id, region: cloudmap_region,
                 });
             }
 

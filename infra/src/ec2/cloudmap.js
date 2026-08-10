@@ -94,24 +94,9 @@ export function register({ name, ip, port, namespace_id, region }) {
 }
 
 /**
- * Deregister a database from Cloud Map and delete the service.
- * Throws if either half fails; a caller wanting best-effort cleanup must catch,
- * and should check `err.record_survives` before reusing the database's port.
- * @param {{ name: string, namespace_id: string, region: string }} config
- */
-export function deregister({
-    name, namespace_id, region,
-    delete_attempts = DELETE_ATTEMPTS, delete_retry_ms = DELETE_RETRY_MS,
-}) {
-    const service = deregister_instance({ name, namespace_id, region });
-    if (!service) return;
-
-    delete_service({ name, service, region, delete_attempts, delete_retry_ms });
-}
-
-/**
  * Remove the A record for a database, leaving the service shell in place.
  * Returns the resolved service, or null when there was nothing registered.
+ * Callers must not reuse the database's port unless this returned.
  * @param {{ name: string, namespace_id: string, region: string }} config
  */
 export function deregister_instance({ name, namespace_id, region }) {
@@ -135,12 +120,7 @@ export function deregister_instance({ name, namespace_id, region }) {
         ]);
         console.log(`Deregistered CloudMap instance: ${name}`);
     } catch (err) {
-        if (!/NotFound/.test(err.message)) {
-            // Lets a caller tell "the record is gone" from "the record may
-            // still be advertising ip:port" without matching on message text.
-            err.record_survives = true;
-            throw err;
-        }
+        if (!/NotFound/.test(err.message)) throw err;
         console.log(`No instance to deregister for ${name}: ${err.message}`);
     }
 
@@ -160,7 +140,6 @@ export function delete_service({
     // again, so a failed delete has to reach the caller rather than tail off
     // into a log line. DeregisterInstance is asynchronous and DeleteService
     // rejects a service that still has one, so retry across that window.
-    let last_err;
     for (let attempt = 0; attempt < delete_attempts; attempt++) {
         try {
             run([
@@ -171,16 +150,15 @@ export function delete_service({
             console.log(`Deleted CloudMap service: ${name}`);
             return;
         } catch (err) {
-            last_err = err;
-            if (!/ResourceInUse/.test(err.message)) break;
-            if (attempt < delete_attempts - 1) sleep_sync(delete_retry_ms);
+            if (!/ResourceInUse/.test(err.message) || attempt === delete_attempts - 1) {
+                throw new Error(
+                    `Could not delete CloudMap service ${name}: ${err.message}`,
+                    { cause: err },
+                );
+            }
+            sleep_sync(delete_retry_ms);
         }
     }
-
-    throw new Error(
-        `Could not delete CloudMap service ${name}: ${last_err.message}`,
-        { cause: last_err },
-    );
 }
 
 /**

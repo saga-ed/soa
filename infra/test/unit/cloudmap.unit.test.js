@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('child_process', () => ({ spawnSync: vi.fn() }));
 
 import { spawnSync } from 'child_process';
-import { register, deregister } from '../../src/ec2/cloudmap.js';
+import { register, deregister_instance, delete_service } from '../../src/ec2/cloudmap.js';
 
 const NS = 'ns-test';
 const REGION = 'us-west-2';
@@ -30,6 +30,12 @@ function route(handlers) {
 }
 
 const calls_to = op => spawnSync.mock.calls.filter(([, args]) => args[1] === op);
+
+// The full teardown a caller performs: drop the A record, then delete the shell.
+function remove({ name, namespace_id, region, ...retry }) {
+    const service = deregister_instance({ name, namespace_id, region });
+    if (service) delete_service({ name, service, region, ...retry });
+}
 
 beforeEach(() => {
     vi.clearAllMocks();
@@ -103,7 +109,7 @@ describe('deregister', () => {
             'delete-service': fail('An error occurred (InvalidInput) when calling DeleteService'),
         });
 
-        expect(() => deregister({ name: NAME, namespace_id: NS, region: REGION }))
+        expect(() => remove({ name: NAME, namespace_id: NS, region: REGION }))
             .toThrow(/Could not delete CloudMap service/);
     });
 
@@ -119,28 +125,30 @@ describe('deregister', () => {
                 : ok()),
         });
 
-        expect(() => deregister({
+        expect(() => remove({
             name: NAME, namespace_id: NS, region: REGION, delete_retry_ms: 1,
         })).not.toThrow();
         expect(attempts).toBe(3);
     });
 
-    it('flags a surviving A record so callers can hold the port', () => {
-        // Best-effort callers catch this; they still need to know the record is
-        // live, because releasing the port then points the name at whoever
-        // takes it next.
+    it('refuses to report the A record gone when it could not be removed', () => {
+        // The caller releases the database's port only if this returns, so a
+        // failure here has to propagate rather than resolve to "nothing there".
         route({
             'list-services': list_of({ Name: NAME, Id: 'srv-1' }),
             'deregister-instance': fail('An error occurred (AccessDeniedException)'),
         });
 
-        expect.assertions(2);
-        try {
-            deregister({ name: NAME, namespace_id: NS, region: REGION });
-        } catch (err) {
-            expect(err.record_survives).toBe(true);
-            expect(calls_to('delete-service')).toHaveLength(0);
-        }
+        expect(() => deregister_instance({ name: NAME, namespace_id: NS, region: REGION }))
+            .toThrow(/AccessDeniedException/);
+        expect(calls_to('delete-service')).toHaveLength(0);
+    });
+
+    it('propagates a failed lookup rather than reporting nothing registered', () => {
+        route({ 'list-services': fail('AccessDeniedException: ListServices') });
+
+        expect(() => deregister_instance({ name: NAME, namespace_id: NS, region: REGION }))
+            .toThrow(/ListServices/);
     });
 
     it('gives up after a bounded number of attempts', () => {
@@ -156,7 +164,7 @@ describe('deregister', () => {
             },
         });
 
-        expect(() => deregister({
+        expect(() => remove({
             name: NAME, namespace_id: NS, region: REGION,
             delete_attempts: 3, delete_retry_ms: 1,
         })).toThrow(/Could not delete CloudMap service/);
@@ -170,7 +178,7 @@ describe('deregister', () => {
             'delete-service': ok(),
         });
 
-        expect(() => deregister({ name: NAME, namespace_id: NS, region: REGION })).not.toThrow();
+        expect(() => remove({ name: NAME, namespace_id: NS, region: REGION })).not.toThrow();
         expect(calls_to('delete-service')).toHaveLength(1);
     });
 });

@@ -23,7 +23,6 @@ vi.mock('../../src/ec2/ports.js', () => ({
 }));
 vi.mock('../../src/ec2/cloudmap.js', () => ({
     register: vi.fn(),
-    deregister: vi.fn(),
     deregister_instance: vi.fn(() => ({ Id: 'srv-test' })),
     delete_service: vi.fn(),
 }));
@@ -213,7 +212,6 @@ describe('DELETE /dbs/:name teardown ordering', () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
-        deregister_instance.mockReturnValue({ Id: 'srv-test' });
         projects_dir = mkdtempSync(join(tmpdir(), 'ec2-router-projects-'));
         data_dir = mkdtempSync(join(tmpdir(), 'ec2-router-data-'));
         test_server = await create_test_server({
@@ -260,6 +258,24 @@ describe('DELETE /dbs/:name teardown ordering', () => {
         deregister_instance.mockImplementation(() => { throw new Error('AccessDeniedException'); });
 
         const { status } = await api(test_server.base_url, 'DELETE', '/dbs/svc-pr-9');
+
+        expect(status).toBe(500);
+        expect(release_port).not.toHaveBeenCalled();
+    });
+
+    it('holds the port on a failed provision whose A record could not be dropped', async () => {
+        // The rollback path is best-effort everywhere else, but releasing this
+        // port would aim a live record at whichever identifier takes it next —
+        // so it must fail closed on ANY deregister failure, including a lookup
+        // that never got far enough to say whether a record exists.
+        deregister_instance.mockImplementation(() => { throw new Error('AccessDeniedException: ListServices'); });
+        spawnSync.mockImplementation((cmd, args) => (cmd === 'docker' && args.includes('up')
+            ? { status: 1, stdout: '', stderr: 'compose exploded' }
+            : { status: 0, stdout: '', stderr: '' }));
+
+        const { status } = await api(test_server.base_url, 'POST', '/dbs', {
+            name: 'svc-pr-10', engine: 'postgres',
+        });
 
         expect(status).toBe(500);
         expect(release_port).not.toHaveBeenCalled();

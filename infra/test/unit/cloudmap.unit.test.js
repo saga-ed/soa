@@ -125,6 +125,24 @@ describe('deregister', () => {
         expect(attempts).toBe(3);
     });
 
+    it('flags a surviving A record so callers can hold the port', () => {
+        // Best-effort callers catch this; they still need to know the record is
+        // live, because releasing the port then points the name at whoever
+        // takes it next.
+        route({
+            'list-services': list_of({ Name: NAME, Id: 'srv-1' }),
+            'deregister-instance': fail('An error occurred (AccessDeniedException)'),
+        });
+
+        expect.assertions(2);
+        try {
+            deregister({ name: NAME, namespace_id: NS, region: REGION });
+        } catch (err) {
+            expect(err.record_survives).toBe(true);
+            expect(calls_to('delete-service')).toHaveLength(0);
+        }
+    });
+
     it('gives up after a bounded number of attempts', () => {
         // The bound is what limits how long a teardown can block the router,
         // so it needs pinning: an unbounded loop passes every other test here.

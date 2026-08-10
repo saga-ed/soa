@@ -446,15 +446,23 @@ export function create_ec2_router(config = {}) {
                     && !cleanup_volume({ volume_id: rollback_volume_id, mount_path, region: effective_region })) {
                     console.log(`ROLLBACK INCOMPLETE: volume ${rollback_volume_id} (${name}) left on ${meta.instance_id} — needs a reap pass`);
                 }
+                // Same ordering constraint as the DELETE route: a surviving A
+                // record advertises ip:port, so the port stays held rather than
+                // being handed to the next identifier.
+                let record_cleared = true;
                 if (namespace_id) {
                     try {
                         deregister({ name, namespace_id, region: effective_region });
                     } catch (cleanup_err) {
+                        record_cleared = !cleanup_err.record_survives;
                         console.log(`Rollback of ${name}: CloudMap deregister failed: ${cleanup_err.message}`);
                     }
                 }
                 try {
-                    if (allocated_port) release_port(name, { registry_path });
+                    if (allocated_port && record_cleared) release_port(name, { registry_path });
+                    else if (allocated_port) {
+                        console.log(`ROLLBACK INCOMPLETE: port for ${name} held — its CloudMap A record survives`);
+                    }
                 } catch (cleanup_err) {
                     console.log(`Rollback of ${name}: port release failed: ${cleanup_err.message}`);
                 }

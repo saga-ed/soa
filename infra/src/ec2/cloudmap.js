@@ -95,6 +95,8 @@ export function register({ name, ip, port, namespace_id, region }) {
 
 /**
  * Deregister a database from Cloud Map and delete the service.
+ * Throws if either half fails; a caller wanting best-effort cleanup must catch,
+ * and should check `err.record_survives` before reusing the database's port.
  * @param {{ name: string, namespace_id: string, region: string }} config
  */
 export function deregister({
@@ -133,7 +135,12 @@ export function deregister_instance({ name, namespace_id, region }) {
         ]);
         console.log(`Deregistered CloudMap instance: ${name}`);
     } catch (err) {
-        if (!/InstanceNotFound|NotFound/.test(err.message)) throw err;
+        if (!/NotFound/.test(err.message)) {
+            // Lets a caller tell "the record is gone" from "the record may
+            // still be advertising ip:port" without matching on message text.
+            err.record_survives = true;
+            throw err;
+        }
         console.log(`No instance to deregister for ${name}: ${err.message}`);
     }
 

@@ -85,7 +85,8 @@ export interface FgaRelationsByType {
         | 'can_impersonate'
         | 'can_create_org'
         | 'can_admin_personas'
-        | 'can_manage_staff';
+        | 'can_manage_staff'
+        | 'can_view_district_programs';
     staff_org:
         | 'platform'
         | 'staff_admin'
@@ -151,6 +152,7 @@ export const FGA_RELATIONS = {
         'can_create_org',
         'can_admin_personas',
         'can_manage_staff',
+        'can_view_district_programs',
     ],
     staff_org: [
         'platform',

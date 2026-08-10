@@ -242,33 +242,52 @@ describe('DELETE /dbs/:name teardown ordering', () => {
         expect(order).toEqual(['deregister', 'release', 'delete']);
     });
 
-    it('still releases the port when the service shell will not delete', async () => {
-        // The shell's delete can fail for minutes on an async deregistration;
-        // that must surface, but it must not also leak the registry row.
+    it('reports a leaked shell without failing a teardown that removed the database', async () => {
+        // The DB and its port are already gone; answering `ok:false` would stop
+        // the caller reaping its own row over a leak it cannot act on.
         delete_service.mockImplementation(() => { throw new Error('Could not delete CloudMap service'); });
 
         const { status, data } = await api(test_server.base_url, 'DELETE', '/dbs/svc-pr-9');
 
-        expect(status).toBe(500);
-        expect(data.error).toMatch(/Could not delete CloudMap service/);
+        expect(status).toBe(200);
+        expect(data).toMatchObject({ ok: true, action: 'deleted', cloudmapLeaked: true });
+        expect(data.warning).toMatch(/Could not delete CloudMap service/);
         expect(release_port).toHaveBeenCalledWith('svc-pr-9', expect.anything());
     });
 
     it('does not release the port when the A record survives', async () => {
-        deregister_instance.mockImplementation(() => { throw new Error('AccessDeniedException'); });
+        const err = new Error('An error occurred (AccessDeniedException)');
+        err.service = { Id: 'srv-test' };
+        deregister_instance.mockImplementation(() => { throw err; });
+
+        const { status, data } = await api(test_server.base_url, 'DELETE', '/dbs/svc-pr-9');
+
+        expect(status).toBe(200);
+        expect(data.cloudmapLeaked).toBe(true);
+        expect(release_port).not.toHaveBeenCalled();
+        // The shell is still deletable even though the record would not drop.
+        expect(delete_service).toHaveBeenCalled();
+    });
+
+    it('releases the port when the lookup failed before reaching any record', async () => {
+        // A failed list-services never touched an A record, so holding the port
+        // would strand a registry row for a name that advertises nothing.
+        deregister_instance.mockImplementation(() => {
+            throw new Error('An error occurred (AccessDeniedException) calling ListServices');
+        });
 
         const { status } = await api(test_server.base_url, 'DELETE', '/dbs/svc-pr-9');
 
-        expect(status).toBe(500);
-        expect(release_port).not.toHaveBeenCalled();
+        expect(status).toBe(200);
+        expect(release_port).toHaveBeenCalledWith('svc-pr-9', expect.anything());
     });
 
     it('holds the port on a failed provision whose A record could not be dropped', async () => {
-        // The rollback path is best-effort everywhere else, but releasing this
-        // port would aim a live record at whichever identifier takes it next —
-        // so it must fail closed on ANY deregister failure, including a lookup
-        // that never got far enough to say whether a record exists.
-        deregister_instance.mockImplementation(() => { throw new Error('AccessDeniedException: ListServices'); });
+        // Rollback is best-effort everywhere else, but releasing this port would
+        // aim a live record at whichever identifier takes it next.
+        const err = new Error('An error occurred (AccessDeniedException)');
+        err.service = { Id: 'srv-test' };
+        deregister_instance.mockImplementation(() => { throw err; });
         spawnSync.mockImplementation((cmd, args) => (cmd === 'docker' && args.includes('up')
             ? { status: 1, stdout: '', stderr: 'compose exploded' }
             : { status: 0, stdout: '', stderr: '' }));
@@ -279,5 +298,7 @@ describe('DELETE /dbs/:name teardown ordering', () => {
 
         expect(status).toBe(500);
         expect(release_port).not.toHaveBeenCalled();
+        // The shell this provision created is still cleaned up.
+        expect(delete_service).toHaveBeenCalled();
     });
 });

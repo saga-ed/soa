@@ -37,6 +37,15 @@ function remove({ name, namespace_id, region, ...retry }) {
     if (service) delete_service({ name, service, region, ...retry });
 }
 
+function capture(fn) {
+    try {
+        fn();
+    } catch (err) {
+        return err;
+    }
+    throw new Error('expected the call to throw');
+}
+
 beforeEach(() => {
     vi.clearAllMocks();
 });
@@ -147,8 +156,26 @@ describe('deregister', () => {
     it('propagates a failed lookup rather than reporting nothing registered', () => {
         route({ 'list-services': fail('AccessDeniedException: ListServices') });
 
-        expect(() => deregister_instance({ name: NAME, namespace_id: NS, region: REGION }))
-            .toThrow(/ListServices/);
+        const err = capture(() => deregister_instance({ name: NAME, namespace_id: NS, region: REGION }));
+        expect(err.message).toMatch(/ListServices/);
+        // Nothing was resolved, so there is no shell for a caller to delete.
+        expect(err.service).toBeUndefined();
+    });
+
+    it('treats only InstanceNotFound as nothing-to-deregister', () => {
+        // Other codes end in the same word but mean the call never landed, so
+        // the record's fate is unknown and the caller must hold the port.
+        route({
+            'list-services': list_of({ Name: NAME, Id: 'srv-1' }),
+            'deregister-instance': fail(
+                'An error occurred (ResourceNotFoundException) when calling the DeregisterInstance operation',
+            ),
+        });
+
+        const err = capture(() => deregister_instance({ name: NAME, namespace_id: NS, region: REGION }));
+        expect(err.message).toMatch(/ResourceNotFoundException/);
+        // The shell still exists, so it rides along for the caller to delete.
+        expect(err.service).toEqual({ Name: NAME, Id: 'srv-1' });
     });
 
     it('gives up after a bounded number of attempts', () => {
@@ -171,10 +198,26 @@ describe('deregister', () => {
         expect(attempts).toBe(3);
     });
 
+    it('never reports success without a confirmed delete', () => {
+        // A non-positive attempt count is the natural way to say "do not
+        // retry"; falling out of the loop must not read as a completed delete.
+        route({
+            'list-services': list_of({ Name: NAME, Id: 'srv-1' }),
+            'deregister-instance': ok(),
+            'delete-service': fail('An error occurred (ResourceInUse) when calling DeleteService'),
+        });
+
+        expect(() => remove({
+            name: NAME, namespace_id: NS, region: REGION, delete_attempts: 0,
+        })).toThrow(/Could not delete CloudMap service/);
+    });
+
     it('deletes the service even when no instance was registered', () => {
         route({
             'list-services': list_of({ Name: NAME, Id: 'srv-1' }),
-            'deregister-instance': fail('InstanceNotFound'),
+            'deregister-instance': fail(
+                'An error occurred (InstanceNotFound) when calling the DeregisterInstance operation',
+            ),
             'delete-service': ok(),
         });
 

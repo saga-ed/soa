@@ -8,8 +8,7 @@ import { spawnSync } from 'child_process';
 const DELETE_ATTEMPTS = 5;
 const DELETE_RETRY_MS = 2000;
 
-// The router calls teardown synchronously; Atomics.wait is the only way to
-// block without restructuring every caller onto promises.
+// The router's teardown handlers are synchronous.
 function sleep_sync(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -17,7 +16,13 @@ function sleep_sync(ms) {
 function run(args) {
     const result = spawnSync('aws', args, { encoding: 'utf8', stdio: 'pipe' });
     if (result.status !== 0) {
-        throw new Error(`aws ${args.slice(0, 3).join(' ')} failed: ${result.stderr || result.error}`);
+        const err = new Error(`aws ${args.slice(0, 3).join(' ')} failed: ${result.stderr || result.error}`);
+        // The CLI reports the failure kind as "An error occurred (Code) when
+        // calling ...". Substring-matching the whole message instead conflates
+        // codes that share a suffix — InstanceNotFound vs ResourceNotFoundException
+        // mean opposite things here.
+        err.aws_code = /An error occurred \(([A-Za-z]+)\)/.exec(result.stderr || '')?.[1] ?? null;
+        throw err;
     }
     return result.stdout.trim();
 }
@@ -60,12 +65,10 @@ export function register({ name, ip, port, namespace_id, region }) {
             service = result.Service;
             console.log(`Created CloudMap service: ${name} (${service.Id})`);
         } catch (err) {
-            // A service surviving without its DB container is reusable, not
-            // fatal: the name is the only thing CreateService reserves, and a
-            // provision that dies here strands the identifier permanently —
-            // deleting the leftover needs servicediscovery:DeleteService, which
-            // no operator tier currently holds (hipponot/iac#672).
-            if (!/ServiceAlreadyExists/.test(err.message)) throw err;
+            // A service surviving without its DB container is reusable: the
+            // name is all CreateService reserves, and no operator tier can
+            // delete the leftover to unstick the identifier (hipponot/iac#672).
+            if (err.aws_code !== 'ServiceAlreadyExists') throw err;
             service = find_service(name, namespace_id, region);
             if (!service) {
                 throw new Error(
@@ -120,7 +123,14 @@ export function deregister_instance({ name, namespace_id, region }) {
         ]);
         console.log(`Deregistered CloudMap instance: ${name}`);
     } catch (err) {
-        if (!/NotFound/.test(err.message)) throw err;
+        // Only "there was no instance" is success. Every other code — including
+        // the neighbouring ResourceNotFoundException — leaves the record's fate
+        // unknown, which the caller must treat as still-advertising. The service
+        // rides along so the caller can still delete the shell.
+        if (err.aws_code !== 'InstanceNotFound') {
+            err.service = service;
+            throw err;
+        }
         console.log(`No instance to deregister for ${name}: ${err.message}`);
     }
 
@@ -140,7 +150,9 @@ export function delete_service({
     // again, so a failed delete has to reach the caller rather than tail off
     // into a log line. DeregisterInstance is asynchronous and DeleteService
     // rejects a service that still has one, so retry across that window.
-    for (let attempt = 0; attempt < delete_attempts; attempt++) {
+    // Every exit is an explicit return or throw: a caller passing a
+    // non-positive attempt count must not read "never tried" as "deleted".
+    for (let attempt = 1; ; attempt++) {
         try {
             run([
                 'servicediscovery', 'delete-service',
@@ -150,7 +162,7 @@ export function delete_service({
             console.log(`Deleted CloudMap service: ${name}`);
             return;
         } catch (err) {
-            if (!/ResourceInUse/.test(err.message) || attempt === delete_attempts - 1) {
+            if (err.aws_code !== 'ResourceInUse' || attempt >= delete_attempts) {
                 throw new Error(
                     `Could not delete CloudMap service ${name}: ${err.message}`,
                     { cause: err },

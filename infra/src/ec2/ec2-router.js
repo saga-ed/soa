@@ -28,6 +28,40 @@ function schema_gate_mode() {
     return process.env.SNAPSHOT_SCHEMA_GATE || 'off';
 }
 
+// Remove a database's discovery entries, reporting the two outcomes a caller
+// has to act on separately. `record_cleared` gates reuse of the port: while the
+// A record may still advertise ip:port, reissuing the port aims that name at
+// the next identifier. The shell delete is attempted either way — leaving one
+// behind strands the identifier, and no operator tier can delete it.
+function teardown_discovery({ name, namespace_id, region }) {
+    if (!namespace_id) return { record_cleared: true, error: null };
+
+    const effective_region = region || get_instance_metadata().region;
+    let service = null;
+    let error = null;
+    let record_cleared = true;
+    try {
+        service = deregister_instance({ name, namespace_id, region: effective_region });
+    } catch (err) {
+        error = err;
+        // A failure before the service resolved never reached the record, so it
+        // says nothing about whether one is advertising; only a failed
+        // deregister-instance leaves that unknown.
+        service = err.service ?? null;
+        record_cleared = !err.service;
+    }
+
+    if (service) {
+        try {
+            delete_service({ name, service, region: effective_region });
+        } catch (err) {
+            error = error ?? err;
+        }
+    }
+
+    return { record_cleared, error };
+}
+
 function sync_seeds(name) {
     const seeds_dir = resolve(SEEDS_BASE, name);
     const s3_path = `s3://${SEED_BUCKET}/${name}/`;
@@ -446,36 +480,19 @@ export function create_ec2_router(config = {}) {
                     && !cleanup_volume({ volume_id: rollback_volume_id, mount_path, region: effective_region })) {
                     console.log(`ROLLBACK INCOMPLETE: volume ${rollback_volume_id} (${name}) left on ${meta.instance_id} — needs a reap pass`);
                 }
-                // Same ordering as the DELETE route, and best-effort at each
-                // step. The port is released only on an affirmative "the A
-                // record is gone": while it survives it advertises ip:port, and
-                // reissuing the port aims that name at the next identifier.
-                let cloudmap_service = null;
-                let record_cleared = !namespace_id;
-                if (namespace_id) {
-                    try {
-                        cloudmap_service = deregister_instance({
-                            name, namespace_id, region: effective_region,
-                        });
-                        record_cleared = true;
-                    } catch (cleanup_err) {
-                        console.log(`Rollback of ${name}: CloudMap deregister failed: ${cleanup_err.message}`);
-                    }
+                // Rollback is best-effort, but the port still obeys the same
+                // gate as the DELETE route.
+                const teardown = teardown_discovery({ name, namespace_id, region: effective_region });
+                if (teardown.error) {
+                    console.log(`Rollback of ${name}: CloudMap teardown failed: ${teardown.error.message}`);
                 }
                 try {
-                    if (allocated_port && record_cleared) release_port(name, { registry_path });
+                    if (allocated_port && teardown.record_cleared) release_port(name, { registry_path });
                     else if (allocated_port) {
                         console.log(`ROLLBACK INCOMPLETE: port for ${name} held — its CloudMap A record may survive`);
                     }
                 } catch (cleanup_err) {
                     console.log(`Rollback of ${name}: port release failed: ${cleanup_err.message}`);
-                }
-                if (cloudmap_service) {
-                    try {
-                        delete_service({ name, service: cloudmap_service, region: effective_region });
-                    } catch (cleanup_err) {
-                        console.log(`Rollback of ${name}: CloudMap service delete failed: ${cleanup_err.message}`);
-                    }
                 }
                 try {
                     rmSync(project_dir, { recursive: true, force: true });
@@ -899,26 +916,18 @@ export function create_ec2_router(config = {}) {
                 rmSync(project_dir, { recursive: true, force: true });
             }
 
-            // Drop the A record first, release the port second, delete the
-            // service shell last. The port must not be reissued while the name
-            // still advertises it, and the shell's delete can fail for minutes
-            // (async deregistration) without justifying a leaked registry row.
-            let cloudmap_service = null;
-            let cloudmap_region;
-            if (namespace_id) {
-                cloudmap_region = region || get_instance_metadata().region;
-                cloudmap_service = deregister_instance({
-                    name, namespace_id, region: cloudmap_region,
-                });
-            }
+            const teardown = teardown_discovery({ name, namespace_id, region });
+            if (teardown.record_cleared) release_port(name, { registry_path });
 
-            release_port(name, { registry_path });
-
-            if (cloudmap_service) {
-                delete_service({ name, service: cloudmap_service, region: cloudmap_region });
-            }
-
+            // The database itself is gone by here, so the caller's own cleanup
+            // must still run; a surviving discovery entry is reported alongside
+            // the deletion rather than as a failure to delete.
             const result = { ok: true, name, action: 'deleted' };
+            if (teardown.error) {
+                result.cloudmapLeaked = true;
+                result.warning = teardown.error.message;
+                console.log(`Teardown of ${name} left a CloudMap entry: ${teardown.error.message}`);
+            }
             if (on_after_delete) on_after_delete(result);
             res.json(result);
         } catch (err) {

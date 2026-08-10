@@ -24,7 +24,7 @@
  * only shapes the orchestration inputs.
  */
 
-import { closureOptsForIds } from '../bundles.js';
+import { featureSet, featuresForIds, type FeatureSet } from '../bundles.js';
 import { computeClosure } from '../closure.js';
 import type { Closure } from '../closure.js';
 import { manifest as defaultManifest } from '../manifest/index.js';
@@ -61,6 +61,12 @@ export interface ResolvedFlow {
   requiredSystems: ServiceId[];
   /** The full dependency closure of `requiredSystems` (the N-of-M launch set). */
   closure: Closure;
+  /**
+   * The features `closure` was computed from. `StackApi.up` needs the same set;
+   * re-deriving it at the call site would be a second derivation free to disagree
+   * with the one that shaped this closure.
+   */
+  features: FeatureSet;
   /** Effective seed selection (flow-level, terminal-stage seed merged over it). */
   seedSelection?: SeedSelection;
   /** Whether THIS flow's run should reset+seed before Playwright. False when a prerequisite already built the end-state. */
@@ -298,27 +304,32 @@ export function resolveFlow(
   // silently drops every non-playback optional a flow names (an empty closure,
   // whose stages then fail against a service that was never launched — pointing
   // at the browser rather than at the gate that dropped it).
-  // `closureOptsForIds` is the shared id→flag mapping (derived from BUNDLES), so
+  // `featuresForIds` is the shared id→feature mapping (derived from BUNDLES), so
   // this cannot drift from `admitsOptional` as families are added.
-  const implied = closureOptsForIds(requiredSystems);
+  const implied = featuresForIds(requiredSystems);
+  // Tri-state, and NOT expressible as set membership: `undefined` derives,
+  // `false` SUPPRESSES a derivation that would otherwise admit playback. That is
+  // why the override stays a separate boolean rather than folding into the set.
   const withPlayback =
     opts.withPlayback ??
-    (implied.withPlayback || (seedSelection?.addOns?.includes('playback') ?? false));
-  const withStaffAdmin = implied.withStaffAdmin;
-  // ⚠️ authz stays SEED-DRIVEN ONLY, deliberately NOT `implied.withAuthz`. The
-  // flow/e2e path builds no authz overlay, so admitting authz-sync purely because
-  // a flow names it would launch it with an empty OPENFGA_STORE_ID against an
-  // iam-api running FGA_ENABLED=false — misconfigured, but reported as up (the
+    (implied.has('playback') || (seedSelection?.addOns?.includes('playback') ?? false));
+  // ⚠️ authz stays SEED-DRIVEN ONLY, deliberately NOT implied by requiredSystems.
+  // The flow/e2e path builds no authz overlay, so admitting authz-sync purely
+  // because a flow names it would launch it with an empty OPENFGA_STORE_ID against
+  // an iam-api running FGA_ENABLED=false — misconfigured, but reported as up (the
   // same trap `restart` avoids via OVERLAY_BOUND_SERVICES). A flow that genuinely
   // needs authz must come up under `stack up --with authz` first.
   const withAuthz = seedSelection?.addOns?.includes('authz') ?? false;
+  const features = featureSet([
+    ...(withPlayback ? (['playback'] as const) : []),
+    ...(withAuthz ? (['authz'] as const) : []),
+    ...(implied.has('staff-admin') ? (['staff-admin'] as const) : []),
+  ]);
   // followBrowserEdges:false — a flow's requiredSystems explicitly list the
   // backends its stages touch; we must NOT auto-expand the SPA's browser deps
   // (which would drag in every backend and defeat the N-of-M payoff, §5.2).
   const closure = computeClosure(sm, requiredSystems, {
-    withPlayback,
-    withAuthz,
-    withStaffAdmin,
+    features,
     followBrowserEdges: false,
   });
 
@@ -360,6 +371,7 @@ export function resolveFlow(
     stages,
     requiredSystems,
     closure,
+    features,
     seedSelection,
     reset,
     foreground,

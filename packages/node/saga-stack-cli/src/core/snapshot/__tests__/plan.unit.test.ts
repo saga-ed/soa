@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { featureSet } from '../../bundles.js';
 import { computeClosure } from '../../closure.js';
 import { manifest } from '../../manifest/index.js';
 import type { DbId } from '../../manifest/index.js';
@@ -105,21 +106,25 @@ describe('storePlan — manifest-driven db set (the 6→11-pg + mongo extension)
     );
   });
 
-  it('--only overrides --with-playback (only fully determines the set)', () => {
+  it('--only overrides the selected features (only fully determines the set)', () => {
     const only = computeClosure(manifest, ['iam-api']).databases;
     const plan = storePlan(manifest, {
       fixtureId: 'x',
       profile: 'roster',
       only,
-      withPlayback: true,
+      features: featureSet(['playback']),
     });
     expect(new Set(plan.databases.map((d) => d.db))).toEqual(
       new Set<DbId>(['iam_local', 'iam_pii_local']),
     );
   });
 
-  it('--with-playback adds the transcripts/insights/chat trio', () => {
-    const plan = storePlan(manifest, { fixtureId: 'x', profile: 'roster', withPlayback: true });
+  it('--with playback adds the transcripts/insights/chat trio', () => {
+    const plan = storePlan(manifest, {
+      fixtureId: 'x',
+      profile: 'roster',
+      features: featureSet(['playback']),
+    });
     const dbs = plan.databases.map((d) => d.db);
     expect(plan.databases.filter((d) => d.engine === 'postgres')).toHaveLength(14);
     for (const pb of PLAYBACK_DBS) expect(dbs).toContain(pb);

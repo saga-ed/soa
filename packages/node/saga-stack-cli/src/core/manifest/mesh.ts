@@ -65,4 +65,22 @@ export const MESH: Readonly<Record<MeshId, MeshDef>> = {
     // dependency already gates `openfga`'s start on it.
     timeoutSec: 30,
   },
+  'otel-collector': {
+    id: 'otel-collector',
+    container: 'soa-otel-collector-1',
+    // OTLP/HTTP. The observability package's `resolveOtlpTracesUrl()` already
+    // defaults to http://localhost:4318/v1/traces when no endpoint var is set, so
+    // at slot 0 a service exports here with no configuration at all — before this
+    // unit existed those exports failed silently against a closed port.
+    port: 4318,
+    // Unused: `readinessHttp` wins. The collector image ships ONLY the collector
+    // binary — no `sh`, no `curl`, and its subcommands (`validate`, `components`)
+    // check config rather than liveness — so there is no exec-able probe to name
+    // here, not even the `shell:false` escape openfga uses.
+    readinessCmd: '',
+    // The health_check extension, enabled in the compose fragment's config.
+    readinessHttp: { port: 13133, path: '/' },
+    // Only brought up when the `otel` bundle is selected (--with otel).
+    timeoutSec: 30,
+  },
 };

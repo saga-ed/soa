@@ -23,8 +23,8 @@ import { join } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../../base-command.js';
 import { deriveInstance } from '../../../core/derive-instance.js';
-import { BUNDLE_NAMES, closureOptsFor, combineRequested } from '../../../core/bundles.js';
-import type { ResolvedClosureOpts } from '../../../core/bundles.js';
+import { BUNDLE_NAMES, combineRequested, featuresFor } from '../../../core/bundles.js';
+import type { FeatureSet } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { DbId, ServiceId } from '../../../core/manifest/index.js';
@@ -99,10 +99,9 @@ export default class SnapshotStore extends BaseCommand {
     this.applyInstanceEnv(instance);
     const fixtureId = flags['fixture-id'];
 
-    // `--with playback` admits the optional playback DBs (== the old
-    // --with-playback). With `--only`, the `--with` bundle services union into
-    // the scoped closure; without it, the default full-dump path is used and
-    // withPlayback layers the playback trio on top.
+    // `--with playback` admits the optional playback DBs. With `--only`, the
+    // `--with` bundle services union into the scoped closure; without it, the
+    // default full-dump path layers each selected bundle's DBs on top.
     //
     // M13-A: at slot > 0 the excluded literal-port services' DBs are never
     // provisioned in the slot's postgres — a bare full dump would pg_dump
@@ -112,13 +111,13 @@ export default class SnapshotStore extends BaseCommand {
     // an excluded service back in (a dependency edge from a non-excluded service
     // into an excluded one), and it applies AFTER the --with union so `--with playback --slot N`
     // degrades gracefully rather than dumping absent playback DBs.
-    const closureOpts = closureOptsFor(flags.with);
+    const features = featuresFor(flags.only, flags.with, (m) => this.error(m));
     const excluded = new Set<ServiceId>(instance.excludedServices);
     let only: DbId[] | undefined;
     if (flags.only) {
       only = closureDatabases(
         combineRequested(flags.only, flags.with, (m) => this.error(m)),
-        closureOpts,
+        features,
         (m) => this.error(m),
       );
     } else if (instance.slot > 0) {
@@ -127,7 +126,7 @@ export default class SnapshotStore extends BaseCommand {
         .map((s) => s.id);
       const bundleServices = combineRequested(undefined, flags.with, (m) => this.error(m));
       const requested = [...new Set<ServiceId>([...fullNonOptional, ...bundleServices])];
-      const kept = computeClosure(manifest, requested, closureOpts).services.filter(
+      const kept = computeClosure(manifest, requested, { features }).services.filter(
         (id) => !excluded.has(id),
       );
       only = [...new Set<DbId>(kept.flatMap((id) => manifest.services[id].databases))];
@@ -137,8 +136,7 @@ export default class SnapshotStore extends BaseCommand {
       fixtureId,
       profile: flags.profile,
       only,
-      withPlayback: closureOpts.withPlayback,
-      withAuthz: closureOpts.withAuthz,
+      features,
     });
 
     const io = this.getSnapshotIO();
@@ -216,19 +214,15 @@ export default class SnapshotStore extends BaseCommand {
  * Mirrors `status`'s `resolveServiceSet`: unknown ids fail with a friendly oclif
  * error.
  *
- * Takes the opt-in flags as a `Required<…>` OBJECT rather than positionals:
- * every `optional:true` service needs its OWN flag (see `admitsOptional`), and a
- * missing flag silently yields an EMPTY db list here — which `storePlan` then
- * honours as "dump exactly these", writing a zero-database snapshot that exits 0.
- *
- * `Required` is load-bearing: every `ClosureOpts` field is declared `?:`, so a
- * bare `Pick` would leave them all optional and `closureDatabases(ids, {}, fail)`
- * would typecheck — re-opening the exact hole this signature exists to close.
- * Callers should pass `closureOptsFor(flags.with)` rather than hand-building it.
+ * Takes a `FeatureSet` rather than positional flags: an unadmitted optional
+ * service silently yields an EMPTY db list here — which `storePlan` then honours
+ * as "dump exactly these", writing a zero-database snapshot that exits 0. The
+ * brand is what forecloses that: `{}` is not assignable, so a caller cannot omit
+ * the selection. Mint it with `featuresFor(flags.only, flags.with, fail)`.
  */
 export function closureDatabases(
   requested: ServiceId[],
-  opts: ResolvedClosureOpts,
+  features: FeatureSet,
   fail: (msg: string) => never,
 ): DbId[] {
   const known = new Set(Object.keys(manifest.services));
@@ -237,5 +231,5 @@ export function closureDatabases(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  return computeClosure(manifest, requested, opts).databases;
+  return computeClosure(manifest, requested, { features }).databases;
 }

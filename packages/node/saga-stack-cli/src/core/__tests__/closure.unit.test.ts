@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { featureSet } from '../bundles.js';
 import { computeClosure } from '../closure.js';
 import { launchOrder } from '../launch-order.js';
 import { manifest } from '../manifest/index.js';
@@ -129,8 +130,10 @@ describe('computeClosure — playback gate', () => {
     expect(closure.services).toHaveLength(0);
   });
 
-  it('keeps it when withPlayback is set', () => {
-    const closure = computeClosure(manifest, ['transcripts-api'], { withPlayback: true });
+  it('keeps it when the playback feature is set', () => {
+    const closure = computeClosure(manifest, ['transcripts-api'], {
+      features: featureSet(['playback']),
+    });
     expect(closure.services).toContain('transcripts-api');
   });
 });

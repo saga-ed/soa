@@ -21,6 +21,7 @@ import { computeClosure } from '../core/closure.js';
 import { defaultLaunchContext } from '../core/launch-plan.js';
 import type { LaunchContext } from '../core/launch-plan.js';
 import { manifest } from '../core/manifest/index.js';
+import { featureSet } from '../core/bundles.js';
 import type { RepoKey, ServiceId } from '../core/manifest/index.js';
 import { composeSeedPlan } from '../core/seed/compose-seed-plan.js';
 import { makeStackApi } from '../stack-api.js';
@@ -150,7 +151,7 @@ describe('StackApi.up — full native bring-up over a concrete closure', () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
 
-    const res = await api.up(FOUR);
+    const res = await api.up(FOUR, featureSet([]));
 
     expect(res.ok).toBe(true);
 
@@ -183,7 +184,7 @@ describe('StackApi.up — full native bring-up over a concrete closure', () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
 
-    await api.up(FOUR);
+    await api.up(FOUR, featureSet([]));
 
     // one health URL polled per service, in launch order, each on its own port.
     expect(fakes.polled).toEqual([
@@ -198,7 +199,7 @@ describe('StackApi.up — full native bring-up over a concrete closure', () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
 
-    await api.up(FOUR);
+    await api.up(FOUR, featureSet([]));
     const byId = new Map(fakes.launches.map((s) => [s.id, s]));
 
     // command split from the manifest `pnpm dev`.
@@ -231,7 +232,7 @@ describe('StackApi.up — full native bring-up over a concrete closure', () => {
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['saga-dash'] as ServiceId[]);
 
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
 
     expect(fakes.launches.some((s) => s.id === 'saga-dash')).toBe(true);
     // non-tunnel + no existing config.local.json ⇒ a clean noop-absent (the hook ran).
@@ -243,7 +244,7 @@ describe('StackApi.up — full native bring-up over a concrete closure', () => {
     const { runtime, fakes } = makeRuntime(new Set(['iam-api']));
     const api = makeStackApi(manifest, runtime);
 
-    const res = await api.up(FOUR);
+    const res = await api.up(FOUR, featureSet([]));
 
     expect(res.ok).toBe(false);
     expect(res.failedAt).toBe('iam-api');
@@ -264,7 +265,7 @@ describe('StackApi.up — skips a service whose sibling repo is not cloned (warn
     // edge for the Reports program filter, coach#329).
     const closure = computeClosure(manifest, ['coach-web'] as ServiceId[]);
 
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
 
     // the run does NOT fail — the missing repo is a warning, not an error.
     expect(res.ok).toBe(true);
@@ -286,7 +287,7 @@ describe('StackApi.up — skips a service whose sibling repo is not cloned (warn
     runtime.repoDirExists = () => true;
     const api = makeStackApi(manifest, runtime);
 
-    const res = await api.up(['iam-api', 'coach-api'] as ServiceId[]);
+    const res = await api.up(['iam-api', 'coach-api'] as ServiceId[], featureSet([]));
 
     expect(res.ok).toBe(true);
     expect(res.skipped).toEqual([]);
@@ -302,7 +303,7 @@ describe('StackApi — up() then seed() run the composed offline-THEN-online pla
     // a closure that pulls in content-api so the composed plan has BOTH phases.
     const closure = computeClosure(manifest, ['sessions-api', 'content-api'] as ServiceId[]);
 
-    const up = await api.up(closure.services);
+    const up = await api.up(closure.services, featureSet([]));
     expect(up.ok).toBe(true);
     expect(up.launched.some((r) => r.id === 'content-api')).toBe(true);
 
@@ -351,7 +352,7 @@ describe('StackApi — up() transitively skips HARD dependents of a repo-absent 
     // closure(connect-web) = connect-web + connect-api + rtsm-api + iam-api +
     // sessions-api + content-api (+ their PROGRAM_HUB upstreams).
     const closure = computeClosure(manifest, ['connect-web'] as ServiceId[]);
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
 
     // Warn, never fail.
     expect(res.ok).toBe(true);
@@ -381,7 +382,7 @@ describe('StackApi — up() transitively skips HARD dependents of a repo-absent 
     runtime.repoDirExists = (dir: string) => dir !== REPO_ROOTS.PROGRAM_HUB;
     const api = makeStackApi(manifest, runtime);
 
-    const res = await api.up(['iam-api', 'sessions-api', 'ads-adm-api'] as ServiceId[]);
+    const res = await api.up(['iam-api', 'sessions-api', 'ads-adm-api'] as ServiceId[], featureSet([]));
 
     expect(res.ok).toBe(true);
     const ads = res.skipped.find((s) => s.id === 'ads-adm-api');
@@ -395,7 +396,7 @@ describe('StackApi — up() transitively skips HARD dependents of a repo-absent 
     const { runtime } = makeRuntime();
     runtime.repoDirExists = () => true;
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['iam-api', 'sessions-api', 'ads-adm-api'] as ServiceId[]);
+    const res = await api.up(['iam-api', 'sessions-api', 'ads-adm-api'] as ServiceId[], featureSet([]));
     expect(res.skipped).toEqual([]);
   });
 });

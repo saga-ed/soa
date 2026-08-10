@@ -203,8 +203,8 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     resettable: true,
     resetMode: 'truncate',
     // NOT part of default mesh-up (opt-in decision) — provisioned only when the
-    // `authz` bundle is selected, same pattern as the playback trio's `withPlayback`
-    // gate (runtime/reset.ts's `!def.meshProvisioned && !ctx.withAuthz` check).
+    // `authz` bundle is selected, same pattern as the playback trio. `meshProvisioned`
+    // is what puts a db behind that gate (runtime/reset.ts, via `bundleForDb`).
     meshProvisioned: false,
   },
   authz_sync_local: {

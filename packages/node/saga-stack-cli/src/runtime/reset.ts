@@ -45,6 +45,8 @@
  * imports this and stays pure. All DB names/roles/modes come from the manifest.
  */
 
+import { bundleForDb } from '../core/bundles.js';
+import type { FeatureSet } from '../core/bundles.js';
 import { getDb, manifest as defaultManifest } from '../core/manifest/index.js';
 import type { DbId, Manifest, RepoKey } from '../core/manifest/index.js';
 import type { Runner } from './exec.js';
@@ -62,10 +64,12 @@ export interface ResetContext {
   repoRoots: Record<RepoKey, string>;
   /** Offset added to the mesh pg port for the migrate-reset `DATABASE_URL` (0 at slot 0). */
   meshOffset?: number;
-  /** Include the opt-in playback DBs (transcripts/insights/chat) in the truncate set. */
-  withPlayback?: boolean;
-  /** Include the opt-in authz DBs (openfga/authz_sync_local) in the truncate set. */
-  withAuthz?: boolean;
+  /**
+   * The run's selected features. Each opt-in (`meshProvisioned:false`) db is
+   * truncated only when its owning service's bundle is selected; omit to reset
+   * no opt-in db.
+   */
+  features?: FeatureSet;
   /** Process seam — the `docker exec …` / `pnpm prisma …` statements run through it. */
   runner: Runner;
   /**
@@ -177,14 +181,15 @@ export async function resetClosure(ctx: ResetContext): Promise<ResetResult> {
       continue;
     }
 
-    // meshProvisioned:false DBs are opt-in, each gated by its OWN bundle flag —
-    // playback trio under --with playback (up.sh DO_PLAYBACK), openfga/authz_sync_local
-    // under --with authz. Never a blanket OR of both flags (would cross-admit).
+    // meshProvisioned:false DBs are opt-in, each gated by the bundle that owns
+    // it — never a blanket OR across families (would cross-admit). Derived from
+    // db → owning service → bundle, so a family gaining a db needs no edit here.
     if (!def.meshProvisioned) {
-      const isAuthzDb = id === 'openfga' || id === 'authz_sync_local';
-      const admitted = isAuthzDb ? ctx.withAuthz : ctx.withPlayback;
-      if (!admitted) {
-        const reason = isAuthzDb ? 'authz DB (needs --with authz)' : 'playback DB (needs --with playback)';
+      const bundle = bundleForDb(id, m);
+      if (!bundle || !ctx.features?.has(bundle)) {
+        const reason = bundle
+          ? `${bundle} DB (needs --with ${bundle})`
+          : `opt-in DB owned by no bundle`;
         results.push({ db: id, action: 'skipped', ok: true, reason });
         continue;
       }

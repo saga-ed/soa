@@ -101,12 +101,29 @@ export function deregister({
     name, namespace_id, region,
     delete_attempts = DELETE_ATTEMPTS, delete_retry_ms = DELETE_RETRY_MS,
 }) {
+    const service = deregister_instance({ name, namespace_id, region });
+    if (!service) return;
+
+    delete_service({ name, service, region, delete_attempts, delete_retry_ms });
+}
+
+/**
+ * Remove the A record for a database, leaving the service shell in place.
+ * Returns the resolved service, or null when there was nothing registered.
+ * @param {{ name: string, namespace_id: string, region: string }} config
+ */
+export function deregister_instance({ name, namespace_id, region }) {
     const service = find_service(name, namespace_id, region);
     if (!service) {
         console.log(`CloudMap service not found: ${name}`);
-        return;
+        return null;
     }
 
+    // The A record has to go before the caller releases the port: it advertises
+    // ip:port, and preview DB secrets carry `<name>.dbs-v2.local` as a fallback
+    // host, so a surviving record plus a reissued port resolves one identifier
+    // to another's database. Nothing to deregister is success, anything else
+    // must stop the teardown.
     try {
         run([
             'servicediscovery', 'deregister-instance',
@@ -116,9 +133,22 @@ export function deregister({
         ]);
         console.log(`Deregistered CloudMap instance: ${name}`);
     } catch (err) {
+        if (!/InstanceNotFound|NotFound/.test(err.message)) throw err;
         console.log(`No instance to deregister for ${name}: ${err.message}`);
     }
 
+    return service;
+}
+
+/**
+ * Delete a Cloud Map service shell whose instance is already deregistered.
+ * @param {{ name: string, service: { Id: string }, region: string,
+ *           delete_attempts?: number, delete_retry_ms?: number }} config
+ */
+export function delete_service({
+    name, service, region,
+    delete_attempts = DELETE_ATTEMPTS, delete_retry_ms = DELETE_RETRY_MS,
+}) {
     // A surviving service blocks that identifier from ever being provisioned
     // again, so a failed delete has to reach the caller rather than tail off
     // into a log line. DeregisterInstance is asynchronous and DeleteService

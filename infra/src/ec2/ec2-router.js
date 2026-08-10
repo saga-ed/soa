@@ -13,7 +13,7 @@ import { engines } from './engines.js';
 import { generate_compose } from './compose-generator.js';
 import { allocate_port, register_port, release_port, get_allocated_ports } from './ports.js';
 import { create_volume, attach_and_mount, cleanup_volume, get_instance_metadata } from './volumes.js';
-import { register, deregister } from './cloudmap.js';
+import { register, deregister, deregister_instance, delete_service } from './cloudmap.js';
 import { snapshot_db, download_profile_seed, seed_after_start, list_s3_profiles, read_profile_registry, write_active_profile, check_schema_rev_gate } from './profiles.js';
 
 const SEEDS_BASE = '/mnt/seeds';
@@ -879,19 +879,26 @@ export function create_ec2_router(config = {}) {
                 rmSync(project_dir, { recursive: true, force: true });
             }
 
-            // Release the port before CloudMap: a failed deregister must still
-            // surface (it strands the identifier), but it must not also leak the
-            // port registry row on a project dir that is already gone.
-            release_port(name, { registry_path });
-
-            // Deregister from CloudMap
+            // Drop the A record first, release the port second, delete the
+            // service shell last. The port must not be reissued while the name
+            // still advertises it, and the shell's delete can fail for minutes
+            // (async deregistration) without justifying a leaked registry row.
+            let cloudmap_service = null;
+            const cloudmap_region = namespace_id
+                ? (region || get_instance_metadata().region)
+                : null;
             if (namespace_id) {
-                const meta = get_instance_metadata();
-                deregister({
+                cloudmap_service = deregister_instance({
                     name,
                     namespace_id,
-                    region: region || meta.region,
+                    region: cloudmap_region,
                 });
+            }
+
+            release_port(name, { registry_path });
+
+            if (cloudmap_service) {
+                delete_service({ name, service: cloudmap_service, region: cloudmap_region });
             }
 
             const result = { ok: true, name, action: 'deleted' };

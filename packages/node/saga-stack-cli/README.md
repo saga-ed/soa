@@ -14,7 +14,8 @@ you have to reverse-engineer.
 > path (up → status → verify → e2e → down) with the real output of each command, linking out
 > to per-feature docs ([sub-stacks](./docs/sub-stacks-and-bundles.md) · [slots](./docs/slots.md) ·
 > [verify](./docs/verify.md) · [snapshots](./docs/snapshots.md) · [e2e](./docs/e2e.md) ·
-> [develop](./docs/develop.md) · [tunnel](./docs/tunnel.md) · [hydrate](./docs/hydrate.md) · [integration](./docs/integration.md)).
+> [develop](./docs/develop.md) · [tunnel](./docs/tunnel.md) · [hydrate](./docs/hydrate.md) ·
+> [integration](./docs/integration.md) · [instrumentation](./docs/instrumentation.md)).
 
 ```bash
 ss stack up --only scheduling-api,sessions-api   # boot just those + their deps
@@ -61,6 +62,7 @@ plus tab-completion work at every level.
 | **`tunnel`** | Expose the local stack via the vms rendezvous (share your stack). |
 | **`bootstrap`** | One-command stand-up on `main` (ensure repos → up → verify). |
 | **`login`** / **`restart`** | Log in a persona / cleanly bounce the stack (no data wipe). |
+| **`profile`** | CPU-profile a *running* service by attaching to it (SIGUSR1 + CDP) — writes a `.cpuprofile` for Chrome DevTools / VS Code. Nothing is restarted or injected at launch. → [instrumentation](./docs/instrumentation.md) |
 
 ### Dependency-aware sub-stacks (N-of-M)
 

@@ -521,6 +521,10 @@ export function resolveLaunchEnv(
     env[portEnvVar] = String(ctx.ports[service]);
   }
 
+  // Do NOT inject `--inspect-port` here: NODE_OPTIONS reaches the whole
+  // pnpm→tsup→node tree, so a wrapper reserves the port and the service fails to
+  // bind it. See core/inspector.ts and docs/instrumentation.md.
+
   // Lane overrides win (env last-wins, matching up.sh's trailing splat).
   return { ...env, ...laneOverlay(service, lane, ctx) };
 }

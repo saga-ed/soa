@@ -226,8 +226,14 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
                 'can_create_org',
                 'can_admin_personas',
                 'can_manage_staff',
+                'can_view_district_programs',
             ]),
         );
+    });
+
+    it('can_view_district_programs resolves from org_admin, not super_admin alone', () => {
+        const rel = byType.saga_platform.relations?.can_view_district_programs;
+        expect(rel?.computedUserset?.relation).toBe('org_admin');
     });
 
     it('staff_org uses staff_admin and NEVER admin (SEC-CRIT-2)', () => {

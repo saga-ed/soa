@@ -286,6 +286,10 @@ type saga_platform
     define can_create_org: org_admin
     define can_admin_personas: org_admin
     define can_manage_staff: super_admin
+    # Breadth over every district's program list. Staff hold no roster
+    # membership, so without this iam-api returns them no program permissions
+    # and program lists render empty.
+    define can_view_district_programs: org_admin
 
 # An organization staff create/administer. Maps 1:1 to an iam-api group
 # (kind=district): object id is the rostering group id. DISTINCT from the

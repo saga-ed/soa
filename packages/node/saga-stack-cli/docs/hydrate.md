@@ -227,13 +227,45 @@ That failure surfaces days later as a 500. So hydrate then:
 | `--slot 0` (including a bare `--slot`) is refused | none | `ss stack cold-start` resets slot 0 |
 | non-local target (repointed `$SAGA_MESH_POSTGRES_CONTAINER`, non-loopback host, wrong port) | none | unset the override |
 | slot's postgres container not running | none | `ss stack up --slot N` |
-| wrong AWS account | none | `--profile dev_admin` |
+| wrong AWS account | none | a profile resolving to the dev account (`396913734878`) — `dev_admin` is an example name, not an issued profile |
+| a scrubbed database enumerates zero `_real` tables (the daily scrub has not landed yet) | none | wait ~30 min and re-run — see [The scrub gap](#the-scrub-gap) |
 | another driver's live claim on the slot | `--yes` | wait, or `ss stack slots` |
 | destructive confirm | `--yes` | — |
 
 A **declined prompt** is an abort: exit 0, "hydrate aborted — nothing changed". The
 structural refusals above are `this.error` → exit 2. A per-database failure emits the full
 report, then exits 1.
+
+### The scrub gap
+
+The mirror's endpoint is published to SSM **before** the daily scrub renames each app table to
+`{table}_real` and lays a scramble view over it. A hydrate started inside that window fails
+discovery:
+
+```
+enumerated ZERO _real tables in iam_db, but it is a scrubbed database — expected at
+least 12 (e.g. auth_associations, audit_logs, event_outbox).
+```
+
+That is a refusal, not a defect. Zero `_real` tables is ambiguous, and the two causes want
+opposite answers: the scrub may simply not have run (the database is raw prod, every app-named
+relation is already an ordinary writable table, and hydrating would be safe), or it may have run
+and moved off `public` / renamed its suffix (the app names are read-only VIEWs, and promoting
+those over a good local database is exactly the outcome the view-swap exists to prevent). A count
+alone cannot separate them, so hydrate declines both.
+
+Measured 2026-08-10: mirror RDS instance created 14:06 UTC,
+`/mirror/current/postgres-rds/endpoint` updated 14:16, hydrate still refused at 14:22, succeeded
+at 14:49. **Wait ~30 minutes and re-run.** To see where you are in the cycle:
+
+```bash
+aws ssm get-parameter --name /mirror/current/postgres-rds/endpoint \
+  --profile dev_admin --query Parameter.LastModifiedDate --output text
+```
+
+`pii-scrubber-api-dev` is **not** the job that performs this scrub — it has been idle since
+2026-04-28 and carries no EventBridge schedule. Its CloudWatch history is a dead end; do not
+spend time there.
 
 ### Preview by default
 

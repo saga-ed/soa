@@ -868,7 +868,8 @@ export function create_ec2_router(config = {}) {
     router.post('/dbs/:name/switch', (req, res) => handle_switch(req, res, 'switched'));
     router.post('/dbs/:name/restore', (req, res) => handle_switch(req, res, 'restored'));
 
-    // DELETE /dbs/:name — stop, remove project dir, deregister, release port. Keep EBS volume.
+    // DELETE /dbs/:name — stop, remove project dir, then tear down discovery in
+    // the order below. Keep EBS volume.
     router.delete('/dbs/:name', (req, res) => {
         try {
             const { name } = req.params;

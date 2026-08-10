@@ -5,6 +5,15 @@
 
 import { spawnSync } from 'child_process';
 
+const DELETE_ATTEMPTS = 5;
+const DELETE_RETRY_MS = 2000;
+
+// The router calls teardown synchronously; Atomics.wait is the only way to
+// block without restructuring every caller onto promises.
+function sleep_sync(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function run(args) {
     const result = spawnSync('aws', args, { encoding: 'utf8', stdio: 'pipe' });
     if (result.status !== 0) {
@@ -13,18 +22,17 @@ function run(args) {
     return result.stdout.trim();
 }
 
+// Returns null ONLY when the namespace listed successfully and the name was
+// absent. A failed list must propagate: "couldn't look" and "isn't there" lead
+// to opposite actions in both callers below.
 function find_service(name, namespace_id, region) {
-    try {
-        const result = JSON.parse(run([
-            'servicediscovery', 'list-services',
-            '--filters', `Name=NAMESPACE_ID,Values=${namespace_id},Condition=EQ`,
-            '--region', region,
-            '--output', 'json',
-        ]));
-        return result.Services.find(s => s.Name === name) || null;
-    } catch {
-        return null;
-    }
+    const result = JSON.parse(run([
+        'servicediscovery', 'list-services',
+        '--filters', `Name=NAMESPACE_ID,Values=${namespace_id},Condition=EQ`,
+        '--region', region,
+        '--output', 'json',
+    ]));
+    return result.Services.find(s => s.Name === name) || null;
 }
 
 /**
@@ -41,15 +49,32 @@ export function register({ name, ip, port, namespace_id, region }) {
             DnsRecords: [{ Type: 'A', TTL: 60 }],
         });
 
-        const result = JSON.parse(run([
-            'servicediscovery', 'create-service',
-            '--name', name,
-            '--dns-config', dns_config,
-            '--region', region,
-            '--output', 'json',
-        ]));
-        service = result.Service;
-        console.log(`Created CloudMap service: ${name} (${service.Id})`);
+        try {
+            const result = JSON.parse(run([
+                'servicediscovery', 'create-service',
+                '--name', name,
+                '--dns-config', dns_config,
+                '--region', region,
+                '--output', 'json',
+            ]));
+            service = result.Service;
+            console.log(`Created CloudMap service: ${name} (${service.Id})`);
+        } catch (err) {
+            // A service surviving without its DB container is reusable, not
+            // fatal: the name is the only thing CreateService reserves, and a
+            // provision that dies here strands the identifier permanently —
+            // deleting the leftover needs servicediscovery:DeleteService, which
+            // no operator tier currently holds (hipponot/iac#672).
+            if (!/ServiceAlreadyExists/.test(err.message)) throw err;
+            service = find_service(name, namespace_id, region);
+            if (!service) {
+                throw new Error(
+                    `CloudMap reports service '${name}' exists but it is absent from namespace `
+                    + `${namespace_id}; cannot resolve its id to reuse it`,
+                );
+            }
+            console.log(`Reusing existing CloudMap service: ${name} (${service.Id})`);
+        }
     }
 
     const attributes = JSON.stringify({
@@ -90,16 +115,28 @@ export function deregister({ name, namespace_id, region }) {
         console.log(`No instance to deregister for ${name}: ${err.message}`);
     }
 
-    try {
-        run([
-            'servicediscovery', 'delete-service',
-            '--id', service.Id,
-            '--region', region,
-        ]);
-        console.log(`Deleted CloudMap service: ${name}`);
-    } catch (err) {
-        console.log(`Could not delete service ${name}: ${err.message}`);
+    // A surviving service blocks that identifier from ever being provisioned
+    // again, so a failed delete has to reach the caller rather than tail off
+    // into a log line. DeregisterInstance is asynchronous and DeleteService
+    // rejects a service that still has one, so retry across that window.
+    let last_err;
+    for (let attempt = 0; attempt < DELETE_ATTEMPTS; attempt++) {
+        try {
+            run([
+                'servicediscovery', 'delete-service',
+                '--id', service.Id,
+                '--region', region,
+            ]);
+            console.log(`Deleted CloudMap service: ${name}`);
+            return;
+        } catch (err) {
+            last_err = err;
+            if (!/ResourceInUse/.test(err.message)) break;
+            sleep_sync(DELETE_RETRY_MS);
+        }
     }
+
+    throw new Error(`Could not delete CloudMap service ${name}: ${last_err.message}`);
 }
 
 /**

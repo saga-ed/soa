@@ -5,26 +5,39 @@
 
 import { spawnSync } from 'child_process';
 
+const DELETE_ATTEMPTS = 5;
+const DELETE_RETRY_MS = 2000;
+
+// The router's teardown handlers are synchronous.
+function sleep_sync(ms) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function run(args) {
     const result = spawnSync('aws', args, { encoding: 'utf8', stdio: 'pipe' });
     if (result.status !== 0) {
-        throw new Error(`aws ${args.slice(0, 3).join(' ')} failed: ${result.stderr || result.error}`);
+        const err = new Error(`aws ${args.slice(0, 3).join(' ')} failed: ${result.stderr || result.error}`);
+        // The CLI reports the failure kind as "An error occurred (Code) when
+        // calling ...". Substring-matching the whole message instead conflates
+        // codes that share a suffix — InstanceNotFound vs ResourceNotFoundException
+        // mean opposite things here.
+        err.aws_code = /An error occurred \(([A-Za-z]+)\)/.exec(result.stderr || '')?.[1] ?? null;
+        throw err;
     }
     return result.stdout.trim();
 }
 
+// Returns null ONLY when the namespace listed successfully and the name was
+// absent. A failed list must propagate: "couldn't look" and "isn't there" lead
+// to opposite actions in both callers below.
 function find_service(name, namespace_id, region) {
-    try {
-        const result = JSON.parse(run([
-            'servicediscovery', 'list-services',
-            '--filters', `Name=NAMESPACE_ID,Values=${namespace_id},Condition=EQ`,
-            '--region', region,
-            '--output', 'json',
-        ]));
-        return result.Services.find(s => s.Name === name) || null;
-    } catch {
-        return null;
-    }
+    const result = JSON.parse(run([
+        'servicediscovery', 'list-services',
+        '--filters', `Name=NAMESPACE_ID,Values=${namespace_id},Condition=EQ`,
+        '--region', region,
+        '--output', 'json',
+    ]));
+    return result.Services.find(s => s.Name === name) || null;
 }
 
 /**
@@ -41,15 +54,31 @@ export function register({ name, ip, port, namespace_id, region }) {
             DnsRecords: [{ Type: 'A', TTL: 60 }],
         });
 
-        const result = JSON.parse(run([
-            'servicediscovery', 'create-service',
-            '--name', name,
-            '--dns-config', dns_config,
-            '--region', region,
-            '--output', 'json',
-        ]));
-        service = result.Service;
-        console.log(`Created CloudMap service: ${name} (${service.Id})`);
+        try {
+            const result = JSON.parse(run([
+                'servicediscovery', 'create-service',
+                '--name', name,
+                '--dns-config', dns_config,
+                '--region', region,
+                '--output', 'json',
+            ]));
+            service = result.Service;
+            console.log(`Created CloudMap service: ${name} (${service.Id})`);
+        } catch (err) {
+            // A service surviving without its DB container is reusable: the
+            // name is all CreateService reserves, and no operator tier can
+            // delete the leftover to unstick the identifier (hipponot/iac#672).
+            if (err.aws_code !== 'ServiceAlreadyExists') throw err;
+            service = find_service(name, namespace_id, region);
+            if (!service) {
+                throw new Error(
+                    `CloudMap reports service '${name}' exists but it is absent from namespace `
+                    + `${namespace_id}; cannot resolve its id to reuse it`,
+                    { cause: err },
+                );
+            }
+            console.log(`Reusing existing CloudMap service: ${name} (${service.Id})`);
+        }
     }
 
     const attributes = JSON.stringify({
@@ -68,16 +97,23 @@ export function register({ name, ip, port, namespace_id, region }) {
 }
 
 /**
- * Deregister a database from Cloud Map and delete the service.
+ * Remove the A record for a database, leaving the service shell in place.
+ * Returns the resolved service, or null when there was nothing registered.
+ * Callers must not reuse the database's port unless this returned.
  * @param {{ name: string, namespace_id: string, region: string }} config
  */
-export function deregister({ name, namespace_id, region }) {
+export function deregister_instance({ name, namespace_id, region }) {
     const service = find_service(name, namespace_id, region);
     if (!service) {
         console.log(`CloudMap service not found: ${name}`);
-        return;
+        return null;
     }
 
+    // The A record has to go before the caller releases the port: it advertises
+    // ip:port, and preview DB secrets carry `<name>.dbs-v2.local` as a fallback
+    // host, so a surviving record plus a reissued port resolves one identifier
+    // to another's database. Nothing to deregister is success, anything else
+    // must stop the teardown.
     try {
         run([
             'servicediscovery', 'deregister-instance',
@@ -87,18 +123,53 @@ export function deregister({ name, namespace_id, region }) {
         ]);
         console.log(`Deregistered CloudMap instance: ${name}`);
     } catch (err) {
+        // Only "there was no instance" is success. Every other code — including
+        // the neighbouring ResourceNotFoundException — leaves the record's fate
+        // unknown, which the caller must treat as still-advertising. The service
+        // rides along so the caller can still delete the shell.
+        if (err.aws_code !== 'InstanceNotFound') {
+            err.service = service;
+            throw err;
+        }
         console.log(`No instance to deregister for ${name}: ${err.message}`);
     }
 
-    try {
-        run([
-            'servicediscovery', 'delete-service',
-            '--id', service.Id,
-            '--region', region,
-        ]);
-        console.log(`Deleted CloudMap service: ${name}`);
-    } catch (err) {
-        console.log(`Could not delete service ${name}: ${err.message}`);
+    return service;
+}
+
+/**
+ * Delete a Cloud Map service shell whose instance is already deregistered.
+ * @param {{ name: string, service: { Id: string }, region: string,
+ *           delete_attempts?: number, delete_retry_ms?: number }} config
+ */
+export function delete_service({
+    name, service, region,
+    delete_attempts = DELETE_ATTEMPTS, delete_retry_ms = DELETE_RETRY_MS,
+}) {
+    // A surviving service blocks that identifier from ever being provisioned
+    // again, so a failed delete has to reach the caller rather than tail off
+    // into a log line. DeregisterInstance is asynchronous and DeleteService
+    // rejects a service that still has one, so retry across that window.
+    // Every exit is an explicit return or throw: a caller passing a
+    // non-positive attempt count must not read "never tried" as "deleted".
+    for (let attempt = 1; ; attempt++) {
+        try {
+            run([
+                'servicediscovery', 'delete-service',
+                '--id', service.Id,
+                '--region', region,
+            ]);
+            console.log(`Deleted CloudMap service: ${name}`);
+            return;
+        } catch (err) {
+            if (err.aws_code !== 'ResourceInUse' || attempt >= delete_attempts) {
+                throw new Error(
+                    `Could not delete CloudMap service ${name}: ${err.message}`,
+                    { cause: err },
+                );
+            }
+            sleep_sync(delete_retry_ms);
+        }
     }
 }
 

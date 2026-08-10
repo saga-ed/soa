@@ -13,7 +13,7 @@ import { engines } from './engines.js';
 import { generate_compose } from './compose-generator.js';
 import { allocate_port, register_port, release_port, get_allocated_ports } from './ports.js';
 import { create_volume, attach_and_mount, cleanup_volume, get_instance_metadata } from './volumes.js';
-import { register, deregister } from './cloudmap.js';
+import { register, deregister_instance, delete_service } from './cloudmap.js';
 import { snapshot_db, download_profile_seed, seed_after_start, list_s3_profiles, read_profile_registry, write_active_profile, check_schema_rev_gate } from './profiles.js';
 
 const SEEDS_BASE = '/mnt/seeds';
@@ -26,6 +26,43 @@ const SEED_BUCKET = process.env.SEED_BUCKET || 'saga-db-seeds-dev';
 // check_schema_rev_gate and services/switchboard/docs/snapshot-schema-versioning.md.
 function schema_gate_mode() {
     return process.env.SNAPSHOT_SCHEMA_GATE || 'off';
+}
+
+// Drop a database's A record, returning what the caller needs to decide the
+// next two steps. `record_cleared` gates reuse of the port: while the record
+// may still advertise ip:port, reissuing the port aims that name at the next
+// identifier. `finish` deletes the leftover service shell — leaving one strands
+// the identifier, and no operator tier can delete it — and must run only after
+// the port is settled, since it can block for the async-deregistration window.
+function teardown_discovery({ name, namespace_id, region }) {
+    if (!namespace_id) return { record_cleared: true, error: null, finish: () => null };
+
+    const effective_region = region || get_instance_metadata().region;
+    let service;
+    let error = null;
+    let record_cleared = true;
+    try {
+        service = deregister_instance({ name, namespace_id, region: effective_region });
+    } catch (err) {
+        error = err;
+        // A failure before the service resolved never reached the record, so it
+        // says nothing about whether one is advertising; only a failed
+        // deregister-instance leaves that unknown.
+        service = err.service ?? null;
+        record_cleared = !err.service;
+    }
+
+    const finish = () => {
+        if (!service) return error;
+        try {
+            delete_service({ name, service, region: effective_region });
+        } catch (err) {
+            return error ?? err;
+        }
+        return error;
+    };
+
+    return { record_cleared, error, finish };
 }
 
 function sync_seeds(name) {
@@ -446,17 +483,20 @@ export function create_ec2_router(config = {}) {
                     && !cleanup_volume({ volume_id: rollback_volume_id, mount_path, region: effective_region })) {
                     console.log(`ROLLBACK INCOMPLETE: volume ${rollback_volume_id} (${name}) left on ${meta.instance_id} — needs a reap pass`);
                 }
-                if (namespace_id) {
-                    try {
-                        deregister({ name, namespace_id, region: effective_region });
-                    } catch (cleanup_err) {
-                        console.log(`Rollback of ${name}: CloudMap deregister failed: ${cleanup_err.message}`);
-                    }
-                }
+                // Rollback is best-effort, but the port still obeys the same
+                // gate as the DELETE route.
+                const teardown = teardown_discovery({ name, namespace_id, region: effective_region });
                 try {
-                    if (allocated_port) release_port(name, { registry_path });
+                    if (allocated_port && teardown.record_cleared) release_port(name, { registry_path });
+                    else if (allocated_port) {
+                        console.log(`ROLLBACK INCOMPLETE: port for ${name} held — its CloudMap A record may survive`);
+                    }
                 } catch (cleanup_err) {
                     console.log(`Rollback of ${name}: port release failed: ${cleanup_err.message}`);
+                }
+                const teardown_error = teardown.finish();
+                if (teardown_error) {
+                    console.log(`Rollback of ${name}: CloudMap teardown failed: ${teardown_error.message}`);
                 }
                 try {
                     rmSync(project_dir, { recursive: true, force: true });
@@ -868,7 +908,8 @@ export function create_ec2_router(config = {}) {
     router.post('/dbs/:name/switch', (req, res) => handle_switch(req, res, 'switched'));
     router.post('/dbs/:name/restore', (req, res) => handle_switch(req, res, 'restored'));
 
-    // DELETE /dbs/:name — stop, remove project dir, deregister, release port. Keep EBS volume.
+    // DELETE /dbs/:name — stop, remove project dir, then tear down discovery in
+    // the order below. Keep EBS volume.
     router.delete('/dbs/:name', (req, res) => {
         try {
             const { name } = req.params;
@@ -879,20 +920,19 @@ export function create_ec2_router(config = {}) {
                 rmSync(project_dir, { recursive: true, force: true });
             }
 
-            // Deregister from CloudMap
-            if (namespace_id) {
-                const meta = get_instance_metadata();
-                deregister({
-                    name,
-                    namespace_id,
-                    region: region || meta.region,
-                });
-            }
+            const teardown = teardown_discovery({ name, namespace_id, region });
+            if (teardown.record_cleared) release_port(name, { registry_path });
+            const teardown_error = teardown.finish();
 
-            // Release port
-            release_port(name, { registry_path });
-
+            // The database itself is gone by here, so the caller's own cleanup
+            // must still run; a surviving discovery entry is reported alongside
+            // the deletion rather than as a failure to delete.
             const result = { ok: true, name, action: 'deleted' };
+            if (teardown_error) {
+                result.cloudmapLeaked = true;
+                result.warning = teardown_error.message;
+                console.log(`Teardown of ${name} left a CloudMap entry: ${teardown_error.message}`);
+            }
             if (on_after_delete) on_after_delete(result);
             res.json(result);
         } catch (err) {

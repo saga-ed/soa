@@ -23,7 +23,8 @@ vi.mock('../../src/ec2/ports.js', () => ({
 }));
 vi.mock('../../src/ec2/cloudmap.js', () => ({
     register: vi.fn(),
-    deregister: vi.fn(),
+    deregister_instance: vi.fn(() => ({ Id: 'srv-test' })),
+    delete_service: vi.fn(),
 }));
 vi.mock('../../src/ec2/profiles.js', () => ({
     snapshot_db: vi.fn(),
@@ -41,7 +42,7 @@ vi.mock('child_process', () => ({
 import { spawnSync } from 'child_process';
 import { create_volume, cleanup_volume } from '../../src/ec2/volumes.js';
 import { release_port } from '../../src/ec2/ports.js';
-import { register } from '../../src/ec2/cloudmap.js';
+import { register, deregister_instance, delete_service } from '../../src/ec2/cloudmap.js';
 import { create_ec2_router } from '../../src/ec2/ec2-router.js';
 
 function create_test_server(router_options) {
@@ -200,5 +201,104 @@ describe('POST /dbs provision race + rollback', () => {
         expect(cleanup_volume).toHaveBeenCalledWith(expect.objectContaining({ volume_id: 'vol-test123' }));
         expect(release_port).toHaveBeenCalledWith('svc-pr-3', expect.anything());
         expect(existsSync(join(projects_dir, 'svc-pr-3'))).toBe(false);
+    });
+});
+
+describe('DELETE /dbs/:name teardown ordering', () => {
+    let projects_dir;
+    let data_dir;
+    let test_server;
+
+    beforeEach(async () => {
+        vi.clearAllMocks();
+        spawnSync.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+        projects_dir = mkdtempSync(join(tmpdir(), 'ec2-router-projects-'));
+        data_dir = mkdtempSync(join(tmpdir(), 'ec2-router-data-'));
+        test_server = await create_test_server({
+            projects_dir, data_dir,
+            registry_path: join(data_dir, 'ports.json'),
+            namespace_id: 'ns-test',
+        });
+    });
+
+    afterEach(async () => {
+        await test_server.close();
+        rmSync(projects_dir, { recursive: true, force: true });
+        rmSync(data_dir, { recursive: true, force: true });
+    });
+
+    it('drops the A record before releasing the port', async () => {
+        // A freed port plus a live A record points `<name>.dbs-v2.local` — the
+        // fallback host baked into preview DB secrets — at whichever identifier
+        // takes the port next.
+        const order = [];
+        deregister_instance.mockImplementation(() => { order.push('deregister'); return { Id: 'srv-test' }; });
+        release_port.mockImplementation(() => { order.push('release'); });
+        delete_service.mockImplementation(() => { order.push('delete'); });
+
+        const { status } = await api(test_server.base_url, 'DELETE', '/dbs/svc-pr-9');
+
+        expect(status).toBe(200);
+        expect(order).toEqual(['deregister', 'release', 'delete']);
+    });
+
+    it('reports a leaked shell without failing a teardown that removed the database', async () => {
+        // The DB and its port are already gone; answering `ok:false` would stop
+        // the caller reaping its own row over a leak it cannot act on.
+        delete_service.mockImplementation(() => { throw new Error('Could not delete CloudMap service'); });
+
+        const { status, data } = await api(test_server.base_url, 'DELETE', '/dbs/svc-pr-9');
+
+        expect(status).toBe(200);
+        expect(data).toMatchObject({ ok: true, action: 'deleted', cloudmapLeaked: true });
+        expect(data.warning).toMatch(/Could not delete CloudMap service/);
+        expect(release_port).toHaveBeenCalledWith('svc-pr-9', expect.anything());
+    });
+
+    it('does not release the port when the A record survives', async () => {
+        const err = new Error('An error occurred (AccessDeniedException)');
+        err.service = { Id: 'srv-test' };
+        deregister_instance.mockImplementation(() => { throw err; });
+
+        const { status, data } = await api(test_server.base_url, 'DELETE', '/dbs/svc-pr-9');
+
+        expect(status).toBe(200);
+        expect(data.cloudmapLeaked).toBe(true);
+        expect(release_port).not.toHaveBeenCalled();
+        // The shell is still deletable even though the record would not drop.
+        expect(delete_service).toHaveBeenCalled();
+    });
+
+    it('releases the port when the lookup failed before reaching any record', async () => {
+        // A failed list-services never touched an A record, so holding the port
+        // would strand a registry row for a name that advertises nothing.
+        deregister_instance.mockImplementation(() => {
+            throw new Error('An error occurred (AccessDeniedException) calling ListServices');
+        });
+
+        const { status } = await api(test_server.base_url, 'DELETE', '/dbs/svc-pr-9');
+
+        expect(status).toBe(200);
+        expect(release_port).toHaveBeenCalledWith('svc-pr-9', expect.anything());
+    });
+
+    it('holds the port on a failed provision whose A record could not be dropped', async () => {
+        // Rollback is best-effort everywhere else, but releasing this port would
+        // aim a live record at whichever identifier takes it next.
+        const err = new Error('An error occurred (AccessDeniedException)');
+        err.service = { Id: 'srv-test' };
+        deregister_instance.mockImplementation(() => { throw err; });
+        spawnSync.mockImplementation((cmd, args) => (cmd === 'docker' && args.includes('up')
+            ? { status: 1, stdout: '', stderr: 'compose exploded' }
+            : { status: 0, stdout: '', stderr: '' }));
+
+        const { status } = await api(test_server.base_url, 'POST', '/dbs', {
+            name: 'svc-pr-10', engine: 'postgres',
+        });
+
+        expect(status).toBe(500);
+        expect(release_port).not.toHaveBeenCalled();
+        // The shell this provision created is still cleaned up.
+        expect(delete_service).toHaveBeenCalled();
     });
 });

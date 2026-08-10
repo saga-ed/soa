@@ -71,6 +71,7 @@ export function register({ name, ip, port, namespace_id, region }) {
                 throw new Error(
                     `CloudMap reports service '${name}' exists but it is absent from namespace `
                     + `${namespace_id}; cannot resolve its id to reuse it`,
+                    { cause: err },
                 );
             }
             console.log(`Reusing existing CloudMap service: ${name} (${service.Id})`);
@@ -136,7 +137,10 @@ export function deregister({ name, namespace_id, region }) {
         }
     }
 
-    throw new Error(`Could not delete CloudMap service ${name}: ${last_err.message}`);
+    throw new Error(
+        `Could not delete CloudMap service ${name}: ${last_err.message}`,
+        { cause: last_err },
+    );
 }
 
 /**

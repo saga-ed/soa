@@ -28,13 +28,14 @@ function schema_gate_mode() {
     return process.env.SNAPSHOT_SCHEMA_GATE || 'off';
 }
 
-// Remove a database's discovery entries, reporting the two outcomes a caller
-// has to act on separately. `record_cleared` gates reuse of the port: while the
-// A record may still advertise ip:port, reissuing the port aims that name at
-// the next identifier. The shell delete is attempted either way — leaving one
-// behind strands the identifier, and no operator tier can delete it.
+// Drop a database's A record, returning what the caller needs to decide the
+// next two steps. `record_cleared` gates reuse of the port: while the record
+// may still advertise ip:port, reissuing the port aims that name at the next
+// identifier. `finish` deletes the leftover service shell — leaving one strands
+// the identifier, and no operator tier can delete it — and must run only after
+// the port is settled, since it can block for the async-deregistration window.
 function teardown_discovery({ name, namespace_id, region }) {
-    if (!namespace_id) return { record_cleared: true, error: null };
+    if (!namespace_id) return { record_cleared: true, error: null, finish: () => null };
 
     const effective_region = region || get_instance_metadata().region;
     let service;
@@ -51,15 +52,17 @@ function teardown_discovery({ name, namespace_id, region }) {
         record_cleared = !err.service;
     }
 
-    if (service) {
+    const finish = () => {
+        if (!service) return error;
         try {
             delete_service({ name, service, region: effective_region });
         } catch (err) {
-            error = error ?? err;
+            return error ?? err;
         }
-    }
+        return error;
+    };
 
-    return { record_cleared, error };
+    return { record_cleared, error, finish };
 }
 
 function sync_seeds(name) {
@@ -483,9 +486,6 @@ export function create_ec2_router(config = {}) {
                 // Rollback is best-effort, but the port still obeys the same
                 // gate as the DELETE route.
                 const teardown = teardown_discovery({ name, namespace_id, region: effective_region });
-                if (teardown.error) {
-                    console.log(`Rollback of ${name}: CloudMap teardown failed: ${teardown.error.message}`);
-                }
                 try {
                     if (allocated_port && teardown.record_cleared) release_port(name, { registry_path });
                     else if (allocated_port) {
@@ -493,6 +493,10 @@ export function create_ec2_router(config = {}) {
                     }
                 } catch (cleanup_err) {
                     console.log(`Rollback of ${name}: port release failed: ${cleanup_err.message}`);
+                }
+                const teardown_error = teardown.finish();
+                if (teardown_error) {
+                    console.log(`Rollback of ${name}: CloudMap teardown failed: ${teardown_error.message}`);
                 }
                 try {
                     rmSync(project_dir, { recursive: true, force: true });
@@ -918,15 +922,16 @@ export function create_ec2_router(config = {}) {
 
             const teardown = teardown_discovery({ name, namespace_id, region });
             if (teardown.record_cleared) release_port(name, { registry_path });
+            const teardown_error = teardown.finish();
 
             // The database itself is gone by here, so the caller's own cleanup
             // must still run; a surviving discovery entry is reported alongside
             // the deletion rather than as a failure to delete.
             const result = { ok: true, name, action: 'deleted' };
-            if (teardown.error) {
+            if (teardown_error) {
                 result.cloudmapLeaked = true;
-                result.warning = teardown.error.message;
-                console.log(`Teardown of ${name} left a CloudMap entry: ${teardown.error.message}`);
+                result.warning = teardown_error.message;
+                console.log(`Teardown of ${name} left a CloudMap entry: ${teardown_error.message}`);
             }
             if (on_after_delete) on_after_delete(result);
             res.json(result);

@@ -37,7 +37,7 @@ function teardown_discovery({ name, namespace_id, region }) {
     if (!namespace_id) return { record_cleared: true, error: null };
 
     const effective_region = region || get_instance_metadata().region;
-    let service = null;
+    let service;
     let error = null;
     let record_cleared = true;
     try {

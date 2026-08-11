@@ -401,7 +401,9 @@ export class EventConsumer {
                 err instanceof MalformedEnvelopeError ||
                 err instanceof ConsumerVersionMismatchError;
             const requeue = poison ? false : !this.opts.dlq;
-            const fate = poison ? 'drop' : this.opts.dlq ? 'DLQ' : 'requeue';
+            // A nack with requeue=false lands in the DLQ whenever one is
+            // configured — poison included. Only an unrouteable nack drops.
+            const fate = this.opts.dlq ? 'DLQ' : poison ? 'drop' : 'requeue';
             this.opts.logger.error(
                 `[EventConsumer:${this.opts.consumerName}] handler error → ${fate}`,
                 err instanceof Error ? err : undefined,

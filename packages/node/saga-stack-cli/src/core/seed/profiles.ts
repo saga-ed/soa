@@ -427,6 +427,18 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
           // is VENDORED under the CLI's `vendor/` dir (Phase-2 DECOUPLING) — the `vendor`
           // sentinel cwd tells the runtime adapter (`stack-api` seedCwd) to run it from
           // there (resolved via the VENDOR_DIR launch token), NOT `tools/synthetic-dev`.
+          //
+          // AUTH: content-api gates REST writes on a verified iam_session
+          // (program-hub#570), so this step 401s unless `IAM_SESSION` is set. It is
+          // deliberately NOT in `vars` below — there is no token for a minted JWT, and
+          // exec spawns seed steps with `{...process.env, ...spec.env}`, so an exported
+          // IAM_SESSION reaches both this script and the legacy-poll migrate below:
+          //
+          //   IAM_SESSION=$(awk '/iam_session/{print $7}' /tmp/sds-synthetic/cookies.txt) \
+          //     ss stack seed full
+          //
+          // `failureMode: 'warn'` keeps a session-less `up` green — you lose the demo
+          // polls, not the stack. Teaching the CLI to mint its own jar is a follow-up.
           id: 'demo-polls',
           service: 'content-api',
           databases: ['content'],

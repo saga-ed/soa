@@ -9,9 +9,43 @@
 // the migrate tool's idempotency: GET /items/:ref → 404 ⇒ POST, 200 ⇒ PUT,
 // then POST /publish. Safe to re-run (and to call from up.sh `seed_content`).
 //
-//   CONTENT_API=http://localhost:3009 node seed-demo-polls.mjs
+//   CONTENT_API=http://localhost:3009 IAM_SESSION=<jwt> node seed-demo-polls.mjs
+//
+// IAM_SESSION is REQUIRED against a content-api built after program-hub#570,
+// which gates every REST write on a verified `iam_session` (cookie or bearer)
+// and fails closed with no dev bypass. Same env var, same spelling, as
+// content-api's own `tools/legacy-poll-migrate/migrate.ts`. Mint one with
+// `ss stack login` and read it out of the cookie jar:
+//
+//   IAM_SESSION=$(awk '/iam_session/{print $7}' /tmp/sds-synthetic/cookies.txt)
 // ───────────────────────────────────────────────────────────────────────────
 const BASE = (process.env.CONTENT_API || 'http://localhost:3009').replace(/\/$/, '');
+const IAM_SESSION = process.env.IAM_SESSION ?? '';
+
+/** Headers for a WRITE leg. The read leg (GET) needs none — content-api's gate
+ *  lets safe methods through — but sending the cookie there too is harmless and
+ *  keeps one code path. Omitting the cookie entirely when unset preserves the
+ *  pre-gate behaviour against an older content-api. */
+function writeHeaders(hasBody = true) {
+  return {
+    ...(hasBody ? { 'content-type': 'application/json' } : {}),
+    ...(IAM_SESSION ? { cookie: `iam_session=${IAM_SESSION}` } : {}),
+  };
+}
+
+/** A 401 here is almost always "no session", not "bad payload" — say so, rather
+ *  than making the reader diff a poll body against the schema. Mirrors the hint
+ *  migrate.ts prints for the identical failure. */
+async function writeFailed(verb, ref, res) {
+  const body = await res.text();
+  const hint =
+    res.status === 401
+      ? ` — content-api requires a verified iam_session on writes; ${
+          IAM_SESSION ? 'the IAM_SESSION passed was rejected (expired?)' : 'set IAM_SESSION'
+        } (mint one with \`ss stack login\`)`
+      : '';
+  return new Error(`${verb} ${ref} → ${res.status}: ${body}${hint}`);
+}
 
 /** One question → one page: grid background + a textbox carrying the prompt.
  *  `TextBoxElement.content` is what the qboard synthesizer renders (HTML-stripped);
@@ -63,25 +97,28 @@ async function upsertAndPublish(p) {
   if (existing.status === 404) {
     const r = await fetch(`${BASE}/content/items`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: writeHeaders(),
       body: JSON.stringify(payload),
     });
-    if (!r.ok) throw new Error(`POST ${p.ref} → ${r.status}: ${await r.text()}`);
+    if (!r.ok) throw await writeFailed('POST', p.ref, r);
     action = 'created';
   } else if (existing.status === 200) {
     const r = await fetch(`${BASE}/content/items/${p.ref}`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: writeHeaders(),
       body: JSON.stringify({ title: payload.title, body, metadata: payload.metadata }),
     });
-    if (!r.ok) throw new Error(`PUT ${p.ref} → ${r.status}: ${await r.text()}`);
+    if (!r.ok) throw await writeFailed('PUT', p.ref, r);
     action = 'updated';
   } else {
     throw new Error(`GET ${p.ref} → unexpected ${existing.status}`);
   }
 
-  const pub = await fetch(`${BASE}/content/items/${p.ref}/publish`, { method: 'POST' });
-  if (!pub.ok) throw new Error(`publish ${p.ref} → ${pub.status}: ${await pub.text()}`);
+  const pub = await fetch(`${BASE}/content/items/${p.ref}/publish`, {
+    method: 'POST',
+    headers: writeHeaders(false),
+  });
+  if (!pub.ok) throw await writeFailed('publish', p.ref, pub);
   return `${action} + published  ${p.ref}  (${body.pages.length} pages)`;
 }
 

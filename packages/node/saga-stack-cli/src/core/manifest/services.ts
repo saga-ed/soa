@@ -1003,15 +1003,23 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     port: 3011,
     // `pnpm dev` = `JANUS_REQUIRED=false tsx watch src/local.ts`, so the janus
     // (JumpCloud) perimeter bypass rides along for free — a local operator has
-    // no janus_session to present. src/local.ts reads `PORT`, so the launcher
-    // injects 3011 (and the slot offset) rather than the app's baked default.
+    // no janus_session to present. src/local.ts reads `PORT`.
     portEnvVar: 'PORT',
     healthPath: '/health/ready',
     databases: [],
-    dependsOn: ['iam-api', 'programs-api', 'sis-api'],
+    dependsOn: ['iam-api', 'programs-api', 'sis-api', 'content-api'],
     // All plain URL reads — the BFF proxies the operator's forwarded cookie to
     // each. No S2S: access rides on the `iam_session` `ss stack login` mints.
-    depKinds: { 'iam-api': 'url', 'programs-api': 'url', 'sis-api': 'url' },
+    // content-api is what the console's `connect-content` pages read and bulk-
+    // ingest through (backend/src/content-client.ts); it was undeclared until
+    // this fix, which left `--with staff-admin` composing a closure with no
+    // content-api in it.
+    depKinds: {
+      'iam-api': 'url',
+      'programs-api': 'url',
+      'sis-api': 'url',
+      'content-api': 'url',
+    },
     mesh: [],
     launch: {
       cmd: 'pnpm dev',
@@ -1028,6 +1036,22 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // compose the origin from the port tokens and slot correctly.
         PROGRAMS_API_URL: 'http://localhost:${PROGRAMS_PORT}',
         SIS_API_URL: 'http://localhost:${SIS_PORT}',
+        // 🪤 The BFF's baked CONTENT_API_URL default is localhost:3010 — which
+        // in THIS stack is iam-api, not content-api (:3009). Left unset, the
+        // console's connect-content pages query iam-api and get plausible 200s
+        // off the wrong service, which reads as "content is empty" rather than
+        // as a misconfiguration. Always inject it.
+        CONTENT_API_URL: 'http://localhost:${CONTENT_PORT}',
+        // 🪤 PORT must be explicit, NOT left to launch-plan's offset injection.
+        // That injection is guarded on `ctx.ports[service] !== def.port`, so at
+        // slot 0 (resolved 3011 === manifest 3011) it does not fire — and
+        // local.ts then falls back to its OWN baked default of 3000. The health
+        // poll watches :3011, the BFF listens on :3000, and the launch fails as
+        // "never became healthy". Every other portEnvVar service bakes the same
+        // default as its manifest port, so this one is the lone exception. An
+        // explicit launch.env entry wins over the injection, and the token keeps
+        // slots 1..9 correct.
+        PORT: '${STAFF_ADMIN_BFF_PORT}',
         // Impersonation hands off to the local dash. Slot-correct via the token
         // rather than the BFF's own localhost:8900 default.
         IMPERSONATION_MOCK_DASH_ORIGIN: '${DASH_URL}',

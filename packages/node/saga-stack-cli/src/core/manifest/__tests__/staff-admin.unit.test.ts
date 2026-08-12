@@ -62,7 +62,27 @@ describe('staff-admin manifest entries', () => {
 
   it('brings the BFF up before the SPA that proxies to it', () => {
     expect(spa.dependsOn).toContain('staff-admin-bff');
-    expect(bff.dependsOn).toEqual(['iam-api', 'programs-api', 'sis-api']);
+    expect(bff.dependsOn).toEqual(['iam-api', 'programs-api', 'sis-api', 'content-api']);
+  });
+
+  it('TELLS the BFF its listen port instead of relying on offset injection', () => {
+    // 🪤 launch-plan injects `portEnvVar` ONLY when the resolved port differs
+    // from the manifest base ("so slot-0 env stays byte-identical"). At slot 0
+    // this BFF resolves to 3011 === its manifest 3011, so nothing is injected —
+    // and local.ts falls back to its OWN baked default of 3000. The health poll
+    // then watches :3011 forever and the launch fails as "never became healthy".
+    // Every other portEnvVar service bakes the same default as its manifest
+    // port; this one is the lone exception, so it must say so explicitly.
+    expect(bff.launch.env.PORT).toBe('${STAFF_ADMIN_BFF_PORT}');
+  });
+
+  it('points the BFF at content-api, whose baked default is another service', () => {
+    // 🪤 The BFF's built-in CONTENT_API_URL default is localhost:3010 — which in
+    // this manifest is iam-api, not content-api (:3009). Unset, the console's
+    // connect-content pages query iam-api and get plausible 200s off the wrong
+    // service, reading as "content is empty" rather than as a misconfiguration.
+    expect(bff.launch.env.CONTENT_API_URL).toBe('http://localhost:${CONTENT_PORT}');
+    expect(bff.depKinds['content-api']).toBe('url');
   });
 
   it('keeps the BFF off the contested :3000', () => {
@@ -95,11 +115,13 @@ describe('staff-admin closure admission', () => {
   it('resolves the pair + its upstream closure under withStaffAdmin', () => {
     const c = computeClosure(manifest, [...ids], { withStaffAdmin: true });
     // The whole point of the bundle: one flag, and the upstreams the console
-    // reads come along automatically.
+    // reads come along automatically — content-api included, since the
+    // connect-content pages (search + bulk ingest) are unusable without it.
     expect(c.services).toEqual([
       'iam-api',
       'sis-api',
       'programs-api',
+      'content-api',
       'staff-admin-bff',
       'staff-admin-console',
     ]);

@@ -284,3 +284,50 @@ describe('coach-web x programs-api slottability (coach#329) — the browser dial
     );
   });
 });
+
+describe('authz-api CORS x slot — the dash origin the browser actually presents', () => {
+  const slotCtx = (slot: number) => {
+    const p = deriveInstance({ slot });
+    return defaultLaunchContext({
+      ...baseInputs,
+      portOverrides: p.portOverrides,
+      meshOffset: p.meshOffset,
+    });
+  };
+
+  it('slot 0: the dash origin authz-api already trusted via its hardcoded devOrigins', () => {
+    // rostering's origin-allowlist.ts hardcodes devOrigins ['http://localhost:8900',
+    // 'http://localhost:3010'] — slot 0's dash + the iam demo page. At slot 0 the
+    // stamped value is the same origin, so this is byte-identity, not new trust.
+    expect(resolveLaunchEnv('authz-api', 'stack', slotCtx(0)).CORS_ORIGIN).toBe(
+      'http://localhost:8900',
+    );
+  });
+
+  it('slot 5: admits the SLOT dash (:13900) — the origin devOrigins can never cover', () => {
+    // The measured break: with soa#432 pointing the slot-5 dash at its own
+    // authz-api (:8200 = 3200 + 5000), the preflight came back with no
+    // Access-Control-Allow-Origin because devOrigins only ever names slot 0.
+    // ${DASH_URL} offsets in lockstep with saga-dash's own listen port.
+    const env = resolveLaunchEnv('authz-api', 'stack', slotCtx(5));
+    expect(env.PORT).toBe(String(manifest.services['authz-api'].port + 5000)); // 8200
+    expect(env.CORS_ORIGIN).toBe('http://localhost:13900'); // dash 8900 + 5000
+    expect(env.CORS_ORIGIN).not.toBe('http://localhost:8900'); // never slot 0's
+  });
+
+  it('is dash-ONLY: no connect-web/coach-web origin rides along', () => {
+    // connect-web's authz client is gated on VITE_AUTHZ_API_URL (never set by
+    // this manifest or any deploy vehicle) and coach-web has none at all, so
+    // neither origin is earned. Guards against a future "just in case" widening.
+    const env = resolveLaunchEnv('authz-api', 'stack', slotCtx(2));
+    expect(env.CORS_ORIGIN).toBe('http://localhost:10900');
+    expect(env.CORS_ORIGIN).not.toContain(','); // exactly one origin
+  });
+
+  it('CORS_ORIGIN is adoption-guarded, so a pre-fix authz-api is refused not adopted', () => {
+    // Without this the manifest fix is inert on every slot that already had
+    // authz-api up: the launcher adopts the still-200-ing process, which was
+    // stamped with no allowlist at all (soa#305 pattern).
+    expect(manifest.services['authz-api'].adoptEnv).toContain('CORS_ORIGIN');
+  });
+});

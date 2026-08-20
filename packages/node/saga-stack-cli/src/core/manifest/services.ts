@@ -233,6 +233,20 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_AUTH_USERJWKSURL: '${IAM_URL}/.well-known/jwks.json',
         IAM_AUTH_SERVICETOKENISSUER: '${IAM_ISSUER}',
         IAM_AUTH_USERTOKENISSUER: '${IAM_ISSUER}',
+        // The dash's browser calls `authz.affordances` DIRECT on every page load
+        // (soa#432 pointed each slot at its OWN authz-api), so authz-api must
+        // allow the slot's dash origin like every other browser-facing service
+        // here. Without this key authz-api's allowlist is just its hardcoded
+        // devOrigins — `http://localhost:8900` (SLOT 0's dash) + the iam demo
+        // page — so every slot > 0 is CORS-blocked by construction and the dash
+        // silently degrades to permission-derived affordances. Invisible until
+        // soa#432, because before it the dash never dialled local authz at all.
+        // Dash-only ON PURPOSE: connect-web's authz client is gated on
+        // VITE_AUTHZ_API_URL, which this manifest never sets (and no deploy
+        // vehicle does either — qboard infra/connectv3-web/dependencies.yaml
+        // calls it "code-complete, dormant"), and coach-web has no authz client
+        // at all. Neither origin belongs here until one actually dials it.
+        CORS_ORIGIN: '${DASH_URL}',
       },
     },
     seed: ['authz-projection-backfill'],
@@ -240,6 +254,14 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     tunnelSlug: 'authz',
     isFrontend: false,
     optional: false,
+    // Adoption guard (soa#305 pattern, the ads-adm-api precedent below): an
+    // authz-api launched before CORS_ORIGIN existed carries no allowlist entry,
+    // and the launcher would happily adopt that still-200-ing process — so the
+    // fix above would land in the manifest and change nothing on any slot that
+    // already had authz-api up, presenting as "the CORS fix didn't work".
+    // Fingerprinting the key refuses the stale process instead. One-time
+    // "stop and re-run" cost, same as iam-api/saga-dash/ads-adm-api paid.
+    adoptEnv: ['CORS_ORIGIN'],
   },
   'programs-api': {
     id: 'programs-api',

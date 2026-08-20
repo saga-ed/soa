@@ -84,10 +84,11 @@ describe('syncDashLocalDefaults', () => {
       type: 'url',
       url: 'https://ads-adm.abc.vms.wootdev.com',
     });
-    // transcripts-api/ledger-api are NOT forwarded by the tunnel, so they must
-    // stay out of the tunnel map (a label would point at a dead host).
+    // transcripts-api/ledger-api/authz-api are NOT forwarded by the tunnel, so they
+    // must stay out of the tunnel map (a label would point at a dead host).
     expect(parsed.localDefaults['transcripts-api']).toBeUndefined();
     expect(parsed.localDefaults['ledger-api']).toBeUndefined();
+    expect(parsed.localDefaults['authz-api']).toBeUndefined();
     // every label key present, trailing newline preserved.
     expect(Object.keys(parsed.localDefaults).sort()).toEqual(Object.keys(DASH_TUNNEL_LABELS).sort());
     expect(written[0].contents.endsWith('\n')).toBe(true);
@@ -125,6 +126,7 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
     'connect-api': 6106 + offset,
     'ads-adm-api': 5005 + offset,
     'transcripts-api': 6302 + offset,
+    'authz-api': 3200 + offset,
   });
 
   it('slot 0 still REMOVES config.local.json (byte-identical) even with stackPorts present', () => {
@@ -162,7 +164,14 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
       type: 'url',
       url: 'http://localhost:7302',
     });
-    // same key set as the tunnel writer.
+    // authz-api must be routed LOCALLY (3200 + 1000). Absent from this map the dash
+    // gets no local answer at all and falls through to the switchboard's deployed
+    // https://authz-api.wootdev.com — a CORS block on every affordances call.
+    expect(parsed.localDefaults['authz-api']).toEqual({
+      type: 'url',
+      url: 'http://localhost:4200',
+    });
+    // every key of its own map present — a SUPERSET of the tunnel writer's keys.
     expect(Object.keys(parsed.localDefaults).sort()).toEqual(Object.keys(DASH_LOCAL_SERVICES).sort());
     expect(written[0].contents.endsWith('\n')).toBe(true);
   });
@@ -171,6 +180,20 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
     const parsed = JSON.parse(stackSlotConfigContents({ 'iam-api': 4010 }));
     expect(parsed.localDefaults.iam).toEqual({ type: 'url', url: 'http://localhost:4010' });
     expect(parsed.localDefaults.connect).toBeUndefined(); // connect-api port absent → dropped
+  });
+
+  it("the dash's authz-api key resolves to the slot's OWN authz-api offset port", () => {
+    // Ties the map entry to the manifest rather than a literal: authz-api is
+    // slottable (not in SLOT_EXCLUDED_SERVICES), so base + slot*1000 is a port THIS
+    // slot listens on — measured on slot 5, where 8200 answers /health 200.
+    const port = getService('authz-api').port + 5 * 1000;
+    expect(port).toBe(8200);
+    expect(DASH_LOCAL_SERVICES['authz-api']).toBe('authz-api');
+    const parsed = JSON.parse(stackSlotConfigContents({ 'authz-api': port }));
+    expect(parsed.localDefaults['authz-api']).toEqual({
+      type: 'url',
+      url: 'http://localhost:8200',
+    });
   });
 });
 

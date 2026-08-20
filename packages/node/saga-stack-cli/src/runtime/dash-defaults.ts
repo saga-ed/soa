@@ -39,9 +39,10 @@ import type { ServiceId } from '../core/manifest/index.js';
  * (`ads-adm:5005` in tools/synthetic-dev/tunnel.sh) and the dash's Overview page
  * dials it for real (`adm.getOverviewSummary`) — without this entry the dash
  * falls back to `config.json`'s `ads-adm: localhost:5005`, a mixed-content block
- * from the HTTPS tunnel page. `transcripts-api`/`ledger-api` are intentionally
- * absent: the tunnel does not forward them, so a label here would point at a
- * dead host.
+ * from the HTTPS tunnel page. `transcripts-api`/`ledger-api`/`authz-api` are
+ * intentionally absent: the tunnel does not forward them (its `SERVICES` table
+ * has no authz entry — the manifest's `tunnelSlug: 'authz'` only shapes the lane
+ * URL, it forwards nothing), so a label here would point at a dead host.
  */
 export const DASH_TUNNEL_LABELS: Readonly<Record<string, string>> = {
   iam: 'iam',
@@ -57,10 +58,12 @@ export const DASH_TUNNEL_LABELS: Readonly<Record<string, string>> = {
 
 /**
  * The dash service-key → manifest `ServiceId` whose localhost port backs it (M7
- * stack-lane slot config). Same key set as `DASH_TUNNEL_LABELS`; `program-hub` and
- * `enrollment-api` both resolve to programs-api, `connect` to connect-api. Used to
- * WRITE a slot's `config.local.json` pointing each dash service at its offset
- * localhost port (else the dash's built-in defaults hit slot 0's base ports).
+ * stack-lane slot config). A SUPERSET of `DASH_TUNNEL_LABELS`'s keys —
+ * `transcripts-api` and `authz-api` are local-only, having no tunnel host to name;
+ * `program-hub` and `enrollment-api` both resolve to programs-api, `connect` to
+ * connect-api. Used to WRITE a slot's `config.local.json` pointing each dash service
+ * at its offset localhost port (else the dash's built-in defaults hit slot 0's base
+ * ports, or — for a key absent here entirely — the switchboard's DEPLOYED host).
  */
 export const DASH_LOCAL_SERVICES: Readonly<Record<string, ServiceId>> = {
   iam: 'iam-api',
@@ -82,6 +85,17 @@ export const DASH_LOCAL_SERVICES: Readonly<Record<string, ServiceId>> = {
   // refused) instead of writing cross-slot — the corruption gate.
   'ads-adm': 'ads-adm-api',
   'transcripts-api': 'transcripts-api',
+  // Missed when soa#402 added authz-api: the dash resolves its authz endpoint via
+  // `topologyStore.getEndpoint('authz-api')` and dials `authz.affordances` on every
+  // page load. With NO entry here that key never gets a local answer at all — it
+  // falls through to the switchboard's DEPLOYED host (https://authz-api.wootdev.com),
+  // which the browser CORS-blocks, so every slot quietly evaluates affordances
+  // through the iam getMyPermissions fallback while its own authz-api sits healthy on
+  // the offset port. Unlike the two above there is no cross-slot hazard to weigh:
+  // authz-api is slottable (tokenized `PORT: ${AUTHZ_PORT}`, absent from
+  // SLOT_EXCLUDED_SERVICES), so the offset port (8200 at slot 5) is the slot's OWN
+  // authz-api, and the affordances call is a read either way.
+  'authz-api': 'authz-api',
 };
 
 /** Inputs to the dash-defaults prelaunch hook. */

@@ -1554,7 +1554,13 @@ services_up(){
   # literal-false bypass programs-api/scheduling-api already use on their launch
   # env, and is .env-independent. authEnabled defaults false; this is the
   # perimeter lever that actually gates the dev-bypass S2S actor.
-  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL" MAIL_FRONTEND_BASE_URL="http://localhost:$IAM_PORT/demo" $(tunnel_env iam-api)
+  # coach-web is in iam-api's CORS allow-list because it calls iam DIRECTLY from
+  # the browser for identity + permissions (auth.whoami,
+  # personas.getMyPermissions). Without its origin here the preflight has no
+  # Access-Control-Allow-Origin, the fetch fails, and coach-web renders a 503
+  # "Unable to reach the sign-in service" on every page — while curl against the
+  # same endpoint returns 200, because curl does not enforce CORS.
+  launch_if iam-api "$IAM_PORT" "$ROSTERING/apps/node/iam-api" PORT="$IAM_PORT" AUTH_DEVUSERID="$DEV_USER_UUID" JANUS_REQUIRED=false CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL,$COACH_WEB_URL" MAIL_FRONTEND_BASE_URL="http://localhost:$IAM_PORT/demo" $(tunnel_env iam-api)
   # sis-api → iam-api service.* over S2S; no creds locally (iam-api dev-bypass
   # synthesizes a service actor when auth is off). IAM_BASEURL/IAM_TOKENURL must
   # point at iam on :3010 (sis-api defaults to :3000). See d1.7. Under --sandbox
@@ -1585,12 +1591,27 @@ services_up(){
   # $COACH_WEB_HOST, NOT a URL; api-core matches origin.hostname), NOT CORS_ORIGIN.
   # SAGA_API_TARGET is a frontend-only config value (coach-web reads it
   # via GET /coach/v1/config); the backend no longer calls saga_api.
-  # RABBITMQ_ENABLED stays FALSE: turning the iam-event consumer on currently crashes
-  # coach-api at boot — its createIamEventConsumer DI binding is async (toDynamicValue)
-  # and breaks the synchronous construction of CnsDataService, which shares the pg
-  # pool (Inversify: "construct CnsDataService synchronously … has async dependencies").
-  # That's a pre-existing coach step-4a consumer bug, not a mesh issue; flip to true
-  # once it's fixed so coach projects iam persona events.
+  # RABBITMQ_ENABLED=true so coach projects iam persona events.
+  #
+  # This used to be false, citing a boot crash — createIamEventConsumer's async
+  # toDynamicValue binding breaking the synchronous construction of CnsDataService
+  # ("construct CnsDataService synchronously … has async dependencies"). That no
+  # longer reproduces: verified 2026-08-20 by booting coach-api against this mesh
+  # with the flag on, which logs "iam event consumer started (queue:
+  # coach-api.instance-creation)" and serves normally.
+  #
+  # up.sh was the last holdout. saga-stack-cli already sets 'true'
+  # (packages/node/saga-stack-cli/src/core/manifest/services.ts) — flipped
+  # 2026-08-06 with the reasoning that with the consumer off, consumed_events
+  # stayed empty on every slot and "the event path that production depends on was
+  # NEVER exercised locally" — and this file's own README documents coach-api as
+  # consuming iam persona events with RABBITMQ_ENABLED=true. So the two
+  # entrypoints disagreed, and the one that matched the docs was the CLI.
+  #
+  # This matters beyond parity: coach's iam consumer has never run in ANY
+  # deployed environment (RABBITMQ_ENABLED is false in dev, prod, canary and
+  # training), so a local stack is the only place the projection and the
+  # instance-materialization reconcile it drives can be exercised at all.
   # NOTE: the mesh mongo holds no coach curriculum yet, so coach-api boots green but
   # serves empty curriculum until a Mongo content seed lands (see prep()).
   launch_if coach-api "$COACH_API_PORT" "$COACH/apps/node/coach-api" \
@@ -1598,7 +1619,7 @@ services_up(){
      DATABASE_URL="$COACH_DB_URL" \
      MONGO_HOST=localhost MONGO_PORT="$CONNECT_MONGO_PORT" MONGO_DATABASE=saga_local CONTENT_DATABASE=wmlms_local \
      AUTH_AUTHENABLED=true IAM_API_TARGET="$IAM_URL" AUTH_JWKSURL="$IAM_URL/.well-known/jwks.json" AUTH_ISSUER="$IAM_ISSUER" \
-     RABBITMQ_ENABLED=false RABBITMQ_URL="$MESH_MQ" \
+     RABBITMQ_ENABLED=true RABBITMQ_URL="$MESH_MQ" \
      EXPRESS_SERVER_CORSALLOWEDDOMAINS="$COACH_WEB_HOST" \
      SAGA_API_TARGET="$SAGA_API_TARGET_COACH" \
      $(sandbox_env coach-api) $(tunnel_env coach-api)
@@ -1678,8 +1699,19 @@ services_up(){
   # coach-api (the iam_session cookie composition lives in coach-api per coach#94),
   # so it only needs the coach-api URL — no direct iam origin/JWKS. PUBLIC_-prefixed
   # vars are read by SvelteKit at vite-dev time.
+  # PUBLIC_IAM_API_URL is REQUIRED, not optional. coach-web calls iam-api
+  # DIRECTLY from the browser for identity and permissions
+  # (src/lib/api/session.ts: `${PUBLIC_IAM_API_URL}/trpc/auth.whoami` and
+  # `/trpc/personas.getMyPermissions`) — the "reaches iam server-side through
+  # coach-api" note above is stale, and predates coach#91's move to reading
+  # identity direct from iam. Without this, coach-web falls back to its
+  # committed .env (https://iam.wootdev.com) or a developer's personal,
+  # gitignored .env.local (which pins :4010) — either way it calls a host that
+  # is not this mesh's iam, `fetchSession` throws, and routes/+layout.ts turns
+  # that into a 503 "Unable to reach the sign-in service" on every page.
   launch_if coach-web "$COACH_WEB_PORT" "$COACH/apps/web/coach-web" \
      PUBLIC_COACH_API_URL="$COACH_API_URL" \
+     PUBLIC_IAM_API_URL="$IAM_URL" \
      $(tunnel_env coach-web)
   # rtsm-api: a ONE-NODE FLEET, not bare single-instance mode. rtsm-client
   # always discovers via GET /fleet/discover (404 without fleet mode → the

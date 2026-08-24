@@ -286,6 +286,13 @@ type saga_platform
     define can_create_org: org_admin
     define can_admin_personas: org_admin
     define can_manage_staff: super_admin
+    # District-scoped user PII (email, name, phone, DOB) on iam-api user reads.
+    # Staff hold no district membership, so the persona permission
+    # `iam:view_user_pii` never resolves for them; iam-api's resolveIncludePii
+    # falls back to THIS. Narrowest role on purpose (rostering#1126,
+    # saga-dash#1152) — and the scope group's subtree check still bounds WHOSE
+    # PII is released.
+    define can_view_user_pii: super_admin
     # Breadth over every district's program list. Staff hold no roster
     # membership, so without this iam-api returns them no program permissions
     # and program lists render empty.

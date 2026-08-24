@@ -227,8 +227,14 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
                 'can_admin_personas',
                 'can_manage_staff',
                 'can_view_district_programs',
+                'can_view_user_pii',
             ]),
         );
+    });
+
+    it('can_view_user_pii resolves from super_admin only (rostering#1126)', () => {
+        const rel = byType.saga_platform.relations?.can_view_user_pii;
+        expect(rel?.computedUserset?.relation).toBe('super_admin');
     });
 
     it('can_view_district_programs resolves from org_admin, not super_admin alone', () => {

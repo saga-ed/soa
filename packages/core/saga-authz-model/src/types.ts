@@ -83,6 +83,7 @@ export interface FgaRelationsByType {
         | 'support'
         | 'org_admin'
         | 'can_impersonate'
+        | 'can_set_temporary_password'
         | 'can_create_org'
         | 'can_admin_personas'
         | 'can_manage_staff'
@@ -94,6 +95,8 @@ export interface FgaRelationsByType {
         | 'can_view'
         | 'can_edit'
         | 'can_delete'
+        | 'can_configure_district'
+        | 'can_force_oneroster_ingest'
         | 'can_force_clever_sync';
 }
 
@@ -150,6 +153,7 @@ export const FGA_RELATIONS = {
         'support',
         'org_admin',
         'can_impersonate',
+        'can_set_temporary_password',
         'can_create_org',
         'can_admin_personas',
         'can_manage_staff',
@@ -163,6 +167,8 @@ export const FGA_RELATIONS = {
         'can_edit',
         'can_delete',
         'can_force_clever_sync',
+        'can_configure_district',
+        'can_force_oneroster_ingest',
     ],
 } as const satisfies {
     [T in FgaType]: readonly FgaRelationsByType[T][];

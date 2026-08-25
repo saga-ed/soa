@@ -283,9 +283,14 @@ type saga_platform
     # Computed capabilities — app code (fgaCheck) evaluates these, never the
     # role nouns above.
     define can_impersonate: support
+    define can_set_temporary_password: support
     define can_create_org: org_admin
     define can_admin_personas: org_admin
     define can_manage_staff: super_admin
+    # District-scoped user PII on iam-api user reads, for a STAFF session (no
+    # district persona can grant `iam:view_user_pii` to an operator who holds no
+    # district membership). super_admin only (rostering#1126).
+    define can_view_user_pii: super_admin
     # Breadth over every district's program list. Staff hold no roster
     # membership, so without this iam-api returns them no program permissions
     # and program lists render empty.
@@ -306,3 +311,5 @@ type staff_org
     # forceSync gate checks THIS, replacing the placeholder district-admin
     # `sis:force_clever_sync` persona permission.
     define can_force_clever_sync: staff_admin
+    define can_configure_district: staff_admin
+    define can_force_oneroster_ingest: staff_admin

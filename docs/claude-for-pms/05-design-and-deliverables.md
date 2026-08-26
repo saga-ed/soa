@@ -75,10 +75,17 @@ the real UI and lay out the journey.
 **Good fits:** UI mockups and screen flows, one-pagers, posters and flyers,
 launch decks, anything you'd otherwise fight Google Slides over.
 
-**Subscription:** included with Pro, Max, Team, and Enterprise at no extra cost.
-Not available on the free tier. Whether the visual *editor* saves for your account
-depends on your plan — if saving isn't enabled you still get a view-and-export
-preview (PNG/PDF) of the draft.
+**Subscription:** Claude Design is in **beta** on Pro, Max, Team, and Enterprise,
+included with the subscription at no extra cost. Not available on the free tier.
+
+> **On Enterprise it is off by default** and an administrator has to enable it in
+> Organization settings. If `/design` or claude.ai/design isn't working for you
+> and your plan should cover it, that's the first thing to check — it's an admin
+> toggle, not a bug.
+
+Whether the visual *editor* saves for your account depends on your plan — if
+saving isn't enabled you still get a view-and-export preview (PNG/PDF) of the
+draft.
 
 ### The sharing trap
 

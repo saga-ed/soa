@@ -73,6 +73,23 @@ them, or use OAuth where the server offers it — which is better still, because
 then there's no key to leak. See
 [07 — Permissions & Safety](07-permissions-and-safety.md).
 
+**Better still: put a *file path* in the env var, not the credential.** Point the
+server at a credentials file on disk rather than inlining the secret:
+
+```json
+"env": { "GOOGLE_CREDENTIALS_PATH": "~/.mcp/google/credentials.json" }
+```
+
+Now the config file itself holds nothing sensitive — you can paste it into a
+ticket, share it with a colleague, or commit it, and nothing leaks. Hosted
+servers that authenticate at connect time (Datadog, Slack) are cleaner again:
+their config carries no credential at all.
+
+> **`~/.claude.json` is not a file to share.** It accumulates MCP configuration
+> across every project, and depending on how your servers are set up it may hold
+> credentials inline. Don't paste it into a ticket or a Slack thread when
+> debugging — quote the single server block you're asking about instead.
+
 ---
 
 ## The servers worth having

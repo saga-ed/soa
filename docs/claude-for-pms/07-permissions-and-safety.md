@@ -49,6 +49,22 @@ Allowlist freely: `git status`, `git log`, `git diff`, `grep`, `find`, `gh issue
 list`, `gh run list`, test commands. Never allowlist: `git push`, `rm`, anything
 with `--force`, anything that sends a message.
 
+### You can write permissions as plain English
+
+This is the part most worth knowing if command-pattern matching makes your eyes
+glaze over. Auto-mode permissions can be expressed as **natural-language policy
+paragraphs**, not just globs like `Bash(git status:*)`. So instead of enumerating
+patterns you can write the actual rule:
+
+> Read-only commands and tests may run without asking. Anything that writes to a
+> deployed environment needs my approval. Never touch production — not the prod
+> console, not a prod database, not a prod deploy — regardless of what I asked
+> for earlier in the session.
+
+That is a far better mental model for a PM than pattern matching, and it
+expresses intent that globs can't: *which environment*, not just *which command*.
+Write the policy the way you'd explain it to a new colleague.
+
 ### Plan mode
 
 Plan mode lets Claude research and propose *without* touching anything. For a

@@ -44,10 +44,10 @@ Then dip into the rest as you need it.
 |---|---|
 | [01 — The Mental Model](01-mental-model.md) | Division of labour, the approve/deny decision table, context management, calibrating trust |
 | [02 — Setup on macOS](02-setup-macos.md) | Install, authentication, terminal basics, the different Claude surfaces |
-| [03 — Skills & Plugins](03-skills-and-plugins.md) | The `saga-tools` marketplace, which skills a PM actually uses, writing your own |
+| [03 — Skills & Plugins](03-skills-and-plugins.md) | The 18-plugin `saga-tools` marketplace, Anthropic's official PM plugin, which skills a PM actually uses, macOS caveats, writing your own |
 | [04 — MCP Servers](04-mcp-servers.md) | Slack, GitHub, Datadog, Figma, Chrome, Google — what they give you and how to set each up |
 | [05 — Design & Deliverables](05-design-and-deliverables.md) | Artifacts, Claude Design canvases, charts, diagrams — turning work into something you can send |
-| [06 — PM Playbooks](06-playbooks.md) | 14 concrete recipes, plus a phrase book of things you can say |
+| [06 — PM Playbooks](06-playbooks.md) | 16 concrete recipes, plus a phrase book of things you can say |
 | [07 — Permissions & Safety](07-permissions-and-safety.md) | Permission fatigue, the Saga prod gate, student PII, prompt injection, what leaves your machine |
 | [08 — Troubleshooting](08-troubleshooting.md) | The failures that actually happen here, in order of frequency |
 

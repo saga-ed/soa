@@ -222,12 +222,20 @@ if you want more grounding.
 | `/help` | Everything available |
 | `/clear` | Start fresh — use this between tasks |
 | `/compact` | Compress the conversation, keep the thread |
+| `/context` | See what's filling up your context |
+| `/status` | Session status — login, version, **permission mode**, context usage |
+| `/usage` | Token usage and cost |
 | `/mcp` | Which external services are connected |
 | `/plugin` | Install and manage plugins |
 | `/permissions` | What Claude may do without asking |
 | `/config` | Settings, without editing JSON |
 | `/resume` | Reopen an earlier session |
+| `/memory` | Edit project memory |
 | `/chrome` | Browser integration status |
+
+Run **`/status` on day one** and note your permission mode — Pro/Max/Team sessions
+start in auto mode, which behaves differently from what most people assume. See
+[07 — Permissions & Safety](07-permissions-and-safety.md#first-check-which-mode-youre-in).
 
 You can also **paste an image** straight into the prompt — a screenshot of a bug,
 a Figma comp, a spreadsheet. This works far better than describing it.

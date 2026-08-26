@@ -10,7 +10,32 @@ recognised.
 
 ---
 
+## 0. Start your day with a real checklist
+
+**Skills:** `/plan-my-day` (daily-planner), `/work-digest` (saga-pm)
+
+```
+/plan-my-day
+```
+
+Sweeps open issues across the repos you own and returns an ordered, effort-aware
+checklist. It deliberately **floats issues filed by non-engineers** as user-report
+proxies — the things most likely to be real user pain rather than internal
+cleanup. Read-only: it never edits, assigns, labels, or closes anything.
+
+Then, for the wider picture:
+
+```
+/work-digest
+
+Who's working on what across the ADM epics right now?
+```
+
+---
+
 ## 1. File a well-formed issue without opening GitHub
+
+**Skill:** `/write-issue` (saga-pm) — or just describe it, as below.
 
 **Why:** with a dozen repos, finding the right one in the UI is the slow part.
 
@@ -92,6 +117,24 @@ Where did we land on whether deactivated periods still count in ADS reports?
 
 **Why this beats scrolling:** Slack search matches words; this matches meaning
 across channels and then reconciles against issue state.
+
+---
+
+## 4b. What shipped, and what's waiting to ship
+
+**Skill:** `/release-digest` (saga-pm)
+
+```
+/release-digest
+```
+
+Tells you what's **merged but not yet deployed**, what actually shipped in the
+last release, and where to focus smoke tests. This is the answer to "is the fix
+live yet?" — a question that costs a surprising amount of Slack traffic, and one
+where Claude will otherwise confidently conflate *merged* with *deployed*.
+
+Companion: `/issue-triage` for bulk board hygiene — orphan parenting, missing
+types. Always proposes before applying.
 
 ---
 
@@ -281,6 +324,9 @@ materials and extended for PM work.
 | "Where is X documented?" | `/find-in-docs` |
 | "PM digest of this spec" | `/spec-status` |
 | "Sketch the cases for this feature" | `/spec-workshop` |
+| "What should I work on today?" | `/plan-my-day` |
+| "What's merged but not deployed?" | `/release-digest` |
+| "Who's working on what?" | `/work-digest` |
 | "Build today's standup deck" | `/standup-deck` |
 | "Draft an announcement about the deploy" | `/slack:draft-announcement` (draft only) |
 | "Are we seeing 500s in prod?" | Datadog MCP log search |

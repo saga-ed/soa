@@ -75,12 +75,27 @@ the real UI and lay out the journey.
 **Good fits:** UI mockups and screen flows, one-pagers, posters and flyers,
 launch decks, anything you'd otherwise fight Google Slides over.
 
-**A note on subscriptions:** Claude Design runs on Claude Code under the hood, so
-a Claude subscription covers it. Whether the visual *editor* saves for your
-account depends on your plan — if saving isn't enabled you still get a
-view-and-export preview (PNG/PDF) of the draft. Check
-[04 — MCP Servers](04-mcp-servers.md) and your account settings if you're unsure
-which you have.
+**Subscription:** included with Pro, Max, Team, and Enterprise at no extra cost.
+Not available on the free tier. Whether the visual *editor* saves for your account
+depends on your plan — if saving isn't enabled you still get a view-and-export
+preview (PNG/PDF) of the draft.
+
+### The sharing trap
+
+Worth knowing before you promise someone a link. An **editable Claude Design
+canvas can only be shared inside the org.** Its payload embeds editor code, and
+any version carrying those references is refused for public sharing — you'll get
+*"This version can't be shared publicly."* Declaring no capabilities does not
+help.
+
+So a deck that needs to go to anyone outside Saga needs **two copies**: the
+editable canvas for internal iteration, and a plain self-contained HTML copy for
+sharing. The `/standup-deck` skill does this automatically — it publishes both. If
+you're building a canvas by hand and it needs an external audience, plan for it.
+
+One more limitation: **headless runs (`claude -p`) cannot publish** — no Artifact
+tool, and the Skill tool won't invoke `design`. Publishing needs an interactive
+session.
 
 ---
 

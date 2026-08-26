@@ -34,7 +34,20 @@ claude mcp add <name> -- <command> <args...>
 claude mcp add --transport http <name> <url>
 ```
 
-Useful companions: `claude mcp list`, `claude mcp remove <name>`.
+Pass credentials as environment variables or headers rather than putting them in
+a file:
+
+```bash
+claude mcp add <name> --env API_KEY=... -- <command>
+claude mcp add --transport http <name> <url> --header "Authorization: Bearer ..."
+```
+
+Useful companions: `claude mcp list` (shows connection status), `claude mcp get
+<name>` (detail), `claude mcp remove <name>`.
+
+> **Install only what you'll use.** Every MCP server loads its tool list into
+> *every turn*, so unused servers cost you context on every message. If a server
+> is dead weight, `claude mcp remove` it.
 
 ### Scopes — who gets the server
 

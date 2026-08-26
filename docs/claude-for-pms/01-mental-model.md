@@ -3,6 +3,14 @@
 > Read this one first. Everything else in this guide is mechanics; this chapter is
 > the part that determines whether the mechanics pay off.
 
+> **You do not need to know how to code.** Anthropic's own
+> [terminal guide](https://code.claude.com/docs/en/terminal-guide) is explicit
+> about it: *"You can use Claude Code even if you've never used a terminal
+> before… Describe what you want in plain English."* Its worked examples are
+> deliberately non-code — renaming screenshots based on what's in them, that kind
+> of thing. If the terminal is the part putting you off, there's a desktop app
+> too; see [chapter 02](02-setup-macos.md).
+
 ## The division of labour
 
 **You own the *what* and the *why*. Claude owns the *how*.**

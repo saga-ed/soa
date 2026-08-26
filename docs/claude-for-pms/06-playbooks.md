@@ -258,6 +258,17 @@ shown in the roster table along with Emma's annotations.
 **Why it matters:** you get node IDs and verbatim annotation text you can paste
 straight into an issue, instead of screenshotting and describing.
 
+**The high-value variant** — this is what Anthropic's own Product Design team
+found most useful, and it's cheap to add:
+
+```
+Walk this comp and map the error states, logic flows, and system statuses.
+What edge cases does it not account for?
+```
+
+Finding edge cases at design time instead of discovering them in development is
+the single best return on pointing Claude at a Figma file.
+
 ---
 
 ## 12. Screenshots and walkthrough videos for help articles
@@ -272,6 +283,96 @@ article.
 
 For a narrated version, `saga-soa` has dedicated tooling — see
 [`docs/how-to-narrated-walkthrough-video.md`](../how-to-narrated-walkthrough-video.md).
+
+---
+
+## Discovery and prioritisation
+
+Everything above is *execution* — the work that follows a decision. This section
+is the half that precedes it, and it runs on Anthropic's official PM plugin
+rather than Saga tooling:
+
+```
+/plugin marketplace add anthropics/knowledge-work-plugins
+/plugin install product-management@knowledge-work-plugins
+```
+
+### 12a. Reprioritise the roadmap
+
+```
+/roadmap-update
+
+Re-rank the back-to-school epics with RICE. Flag anything whose dependencies
+mean it can't start when the current plan says it does.
+```
+
+Supports RICE, MoSCoW, Now/Next/Later, quarterly themes, OKR-aligned formats, and
+dependency mapping.
+
+### 12b. Synthesise user research
+
+The one with the clearest Saga analogue — tutor and coach feedback, focus-group
+notes, support tickets.
+
+```
+/synthesize-research
+
+Here are the notes from three focus groups plus the last 40 issues filed by
+site directors. Find the themes, size the opportunities, and keep an evidence
+trail back to the source for each one.
+```
+
+Handles interviews, surveys, and tickets → thematic analysis, affinity mapping,
+personas, opportunity sizing.
+
+### 12c. Review product metrics
+
+**This is not the same as the Datadog playbook.** Datadog tells you whether the
+service is *healthy*; this tells you whether the product is *working*.
+
+```
+/metrics-review
+
+Walk the North Star down to L1 and L2. What moved this month, what's off target,
+and which segment explains the drop?
+```
+
+### 12d. Use Claude as a sparring partner
+
+```
+/brainstorm
+
+How might we make section-to-period mapping comprehensible to a first-time site
+director? Push back on my framing before you generate options, and tell me the
+cheapest experiment to test the riskiest assumption.
+```
+
+Supports How Might We, JTBD, First Principles, and Opportunity Solution Trees.
+Asking it to challenge the premise first is the part people skip and shouldn't.
+
+### 12e. Competitive briefs
+
+```
+/competitive-brief
+```
+
+Feature comparison matrices, positioning, win/loss.
+
+---
+
+## 12f. Triage a pile of things at once
+
+**Why:** most playbooks above handle one item. This one handles hundreds.
+
+```
+Here's a CSV of every issue filed by site directors this term. Group them by
+underlying cause, tell me which five causes account for the most reports, and
+draft a one-line response for each group.
+```
+
+Claude will fan this out across subagents rather than grinding serially. This is
+where the leverage is on anything that currently means an afternoon of
+copy-pasting.
 
 ---
 

@@ -47,7 +47,7 @@ Then dip into the rest as you need it.
 | [03 — Skills & Plugins](03-skills-and-plugins.md) | The 18-plugin `saga-tools` marketplace, Anthropic's official PM plugin, which skills a PM actually uses, macOS caveats, writing your own |
 | [04 — MCP Servers](04-mcp-servers.md) | Slack, GitHub, Datadog, Figma, Chrome, Google — what they give you and how to set each up |
 | [05 — Design & Deliverables](05-design-and-deliverables.md) | Artifacts, Claude Design canvases, charts, diagrams — turning work into something you can send |
-| [06 — PM Playbooks](06-playbooks.md) | 16 concrete recipes, plus a phrase book of things you can say |
+| [06 — PM Playbooks](06-playbooks.md) | ~22 concrete recipes across execution *and* discovery/prioritisation, plus a phrase book |
 | [07 — Permissions & Safety](07-permissions-and-safety.md) | Permission fatigue, the Saga prod gate, student PII, prompt injection, what leaves your machine |
 | [08 — Troubleshooting](08-troubleshooting.md) | The failures that actually happen here, in order of frequency |
 
@@ -66,6 +66,9 @@ A rough sense of what changes, so you can judge whether the setup time is worth 
 - **Stakeholder-ready specs and decks** generated from what the code and the board
   actually say, not from memory.
 - **Production health checks** you can run yourself instead of asking an engineer.
+- **Discovery work with a sparring partner** — reprioritising a roadmap, finding
+  the themes in a term's worth of tutor feedback, mapping edge cases in a comp
+  before anyone builds it.
 
 The consistent theme: the work that used to mean holding four browser tabs and
 three repos in your head gets handed off, and you spend your time on judgement

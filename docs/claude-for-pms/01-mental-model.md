@@ -125,6 +125,14 @@ not *easy*. A gnarly bug is still a gnarly bug. What changes is that you can hol
 more of it in your head at once, and you stop losing an hour to "which repo was
 that in".
 
+Anthropic's own write-up of [how their teams use Claude Code](https://claude.com/blog/how-anthropic-teams-use-claude-code)
+lands in the same place: *"The most successful teams treat Claude Code as a
+thought partner rather than a code generator."* Their Product Design team's most
+valuable use turned out to be mapping error states and logic flows to find edge
+cases **during design**; Legal built prototype tools; Data Science shipped
+dashboards without knowing the language they were written in. None of that is
+code generation.
+
 ## Which Claude am I even using?
 
 There are several surfaces and they are genuinely easy to confuse. Full detail is

@@ -105,6 +105,27 @@ OAuth-based connectors expire. Re-authorise. Interactively-authenticated servers
 also may not be available in background or scheduled runs at all — if a scheduled
 job can't reach Slack, that's why.
 
+### "It analysed my big Jira/Notion/Slack pull and missed half of it"
+
+**The one that will actually catch you out.** MCP tool output is **truncated at
+25,000 tokens by default** (`MAX_MCP_OUTPUT_TOKENS`), with a warning above 10,000.
+
+So a PM who says *"pull every ticket from this board and find the themes"* can get
+a confident, well-structured analysis of **a partial dataset**, with no obvious
+sign that anything was dropped.
+
+Defences:
+
+- **Ask how many records it actually got**, and compare against what you expect.
+- **Narrow the pull** — filter by date, label, or component and do several passes
+  rather than one giant one.
+- **Export to a file** and have Claude read that instead. File reads aren't
+  subject to the MCP output cap.
+
+This is the most PM-shaped failure mode in the whole guide, because the requests
+that trip it — "summarise everything in this board" — are exactly the ones PMs
+most want to make.
+
 ### "The Slack tools can't search"
 
 Depending on which Slack MCP you have, keyword search across the workspace may

@@ -32,6 +32,13 @@ export const ExpressServerSchema = z.object({
   // string, e.g. '5mb'). Consumers that mount their own parser first are
   // unaffected. Defaults to '5mb' (see ExpressServer) when omitted.
   jsonBodyLimit: z.string().optional(),
+  // HTTP keep-alive timeout in ms for the underlying http.Server. Must exceed
+  // the fronting load balancer's idle timeout (the shared ALB's is 60s) —
+  // see ExpressServer for the 502 mechanism. Defaults to 65_000 when omitted.
+  keepAliveTimeoutMs: z.number().int().positive().optional(),
+  // HTTP headers timeout in ms for the underlying http.Server. Node requires
+  // it to exceed keepAliveTimeout. Defaults to 66_000 when omitted.
+  headersTimeoutMs: z.number().int().positive().optional(),
 });
 
 // Use the INPUT type, not `z.infer` (the output): this config is bound directly

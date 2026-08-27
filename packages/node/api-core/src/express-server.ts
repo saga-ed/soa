@@ -24,6 +24,17 @@ const DEFAULT_ALLOWED_HEADERS: string[] = ['Content-Type', 'Authorization', ...D
 // 100kb). Consumers override via the `jsonBodyLimit` config field.
 const DEFAULT_JSON_BODY_LIMIT = '5mb';
 
+// Default HTTP keep-alive / headers timeouts. Node's default keepAliveTimeout
+// (5s) is below the shared ALB's 60s idle timeout, so the ALB can reuse an
+// idle connection just as Node closes it — surfacing as sporadic
+// ALB-generated 502s (`target_status="-"`) that browsers report as CORS
+// errors. The keep-alive timeout must exceed the ALB idle timeout, and Node
+// requires headersTimeout to exceed keepAliveTimeout. Consumers with unusual
+// fronting override via the `keepAliveTimeoutMs` / `headersTimeoutMs` config
+// fields. See hipponot/iac#700.
+const DEFAULT_KEEP_ALIVE_TIMEOUT_MS = 65_000;
+const DEFAULT_HEADERS_TIMEOUT_MS = 66_000;
+
 @injectable()
 export class ExpressServer {
   private readonly app: Application;
@@ -155,6 +166,12 @@ export class ExpressServer {
         `Express server '${this.config.name}' started on port ${this.config.port}${basePathInfo}`
       );
     });
+    // Keep-alive tuning — see DEFAULT_KEEP_ALIVE_TIMEOUT_MS above for the
+    // ALB 502 mechanism this prevents (hipponot/iac#700).
+    this.serverInstance.keepAliveTimeout =
+      this.config.keepAliveTimeoutMs ?? DEFAULT_KEEP_ALIVE_TIMEOUT_MS;
+    this.serverInstance.headersTimeout =
+      this.config.headersTimeoutMs ?? DEFAULT_HEADERS_TIMEOUT_MS;
   }
 
   public stop(): void {
@@ -167,6 +184,15 @@ export class ExpressServer {
 
   public getApp(): Application {
     return this.app;
+  }
+
+  /**
+   * The underlying http.Server created by start(), or undefined before
+   * start() is called. Exposed so consumers can inspect or tune the server
+   * (e.g. socket timeouts) without reaching into private state.
+   */
+  public getServer(): ReturnType<Application['listen']> | undefined {
+    return this.serverInstance;
   }
 
   private static applyParamInheritancePatch(): void {

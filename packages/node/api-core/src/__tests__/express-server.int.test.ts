@@ -523,6 +523,102 @@ describe('ExpressServer (integration)', () => {
     }
   });
 
+  describe('keep-alive timeouts (hipponot/iac#700)', () => {
+    /** Builds an ExpressServer with the given extra config, runs fn, then stops it. */
+    async function withStartedServer(
+      extraConfig: Record<string, unknown>,
+      fn: (server: ExpressServer) => Promise<void> | void,
+    ) {
+      const container = new Container();
+      const mockLogger: ILogger = {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      };
+
+      const config = {
+        configType: 'EXPRESS_SERVER' as const,
+        port: getRandomPort(),
+        logLevel: 'info' as const,
+        name: 'Keep-Alive Test',
+        ...extraConfig,
+      };
+
+      container.bind('ExpressServerConfig').toConstantValue(config);
+      container.bind('ILogger').toConstantValue(mockLogger);
+      container.bind(ExpressServer).toSelf();
+
+      const server = container.get(ExpressServer);
+      await server.init(container, [SimpleTestController]);
+      server.start();
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      try {
+        await fn(server);
+      } finally {
+        server.stop();
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    it('defaults exceed the ALB 60s idle timeout after start()', async () => {
+      await withStartedServer({}, server => {
+        const httpServer = server.getServer();
+        expect(httpServer).toBeDefined();
+        expect(httpServer!.keepAliveTimeout).toBe(65_000);
+        expect(httpServer!.headersTimeout).toBe(66_000);
+      });
+    });
+
+    it('honors keepAliveTimeoutMs / headersTimeoutMs overrides', async () => {
+      await withStartedServer(
+        { keepAliveTimeoutMs: 120_000, headersTimeoutMs: 121_000 },
+        server => {
+          const httpServer = server.getServer();
+          expect(httpServer!.keepAliveTimeout).toBe(120_000);
+          expect(httpServer!.headersTimeout).toBe(121_000);
+        },
+      );
+    });
+
+    it('getServer() is undefined before start() and returns the http.Server after', async () => {
+      const container = new Container();
+      const mockLogger: ILogger = {
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      };
+
+      const config = {
+        configType: 'EXPRESS_SERVER' as const,
+        port: getRandomPort(),
+        logLevel: 'info' as const,
+        name: 'Accessor Test',
+      };
+
+      container.bind('ExpressServerConfig').toConstantValue(config);
+      container.bind('ILogger').toConstantValue(mockLogger);
+      container.bind(ExpressServer).toSelf();
+
+      const server = container.get(ExpressServer);
+      await server.init(container, [SimpleTestController]);
+      expect(server.getServer()).toBeUndefined();
+
+      server.start();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        const httpServer = server.getServer();
+        expect(httpServer).toBeDefined();
+        expect(httpServer!.listening).toBe(true);
+      } finally {
+        server.stop();
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    });
+  });
+
   it('advertises the configured limit on an oversized JSON body (413)', async () => {
     const container = new Container();
     const mockLogger: ILogger = {

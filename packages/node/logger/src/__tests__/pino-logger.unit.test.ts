@@ -7,6 +7,7 @@ import {
   redact,
   traceCorrelationMixin,
   resolveDeploymentBindings,
+  resolveVersionBinding,
 } from '../pino-logger.js';
 import { PinoLoggerConfig } from '../pino-logger-schema.js';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -300,6 +301,38 @@ describe('PinoLogger', () => {
           identifier: 'sandbox-e2e-626',
         });
       }
+    });
+
+    it('stamps version on every log line via pino `base` (DD_VERSION → logs)', () => {
+      // Traces get service.version from the tracer reading DD_VERSION; logs
+      // travel through the datadog-forwarder, which never sees container env.
+      // Seeding `version` (Datadog's reserved unified-service-tagging
+      // attribute) into `base` is what makes the version facet exist on logs.
+      const s = sink();
+      const logger = pino(
+        {
+          base: {
+            ...resolveDeploymentBindings('deployment.identifier=green'),
+            ...resolveVersionBinding('5da46b61d05d5f907df99f92f50ab7c5074c7980'),
+          },
+        },
+        s.stream,
+      );
+      logger.info('first');
+      logger.info({ userId: 'u1' }, 'second');
+
+      const lines = s.text.trim().split('\n').map(l => JSON.parse(l));
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        expect(line.version).toBe('5da46b61d05d5f907df99f92f50ab7c5074c7980');
+        expect(line.deployment).toEqual({ identifier: 'green' });
+      }
+    });
+
+    it('resolveVersionBinding emits no placeholder key when DD_VERSION is unset or empty (degrade-safe)', () => {
+      expect(resolveVersionBinding(undefined)).toEqual({});
+      expect(resolveVersionBinding('')).toEqual({});
+      expect(resolveVersionBinding('abc123')).toEqual({ version: 'abc123' });
     });
 
     it('does not collide with PII redaction (deployment keys are never redacted)', () => {

@@ -132,6 +132,23 @@ export function resolveDeploymentBindings(
   };
 }
 
+/**
+ * `version` for every log line, from the same DD_VERSION the OTel tracer reads
+ * (service templates set it to the image tag / git SHA). Traces get it via the
+ * tracer, but logs travel stdout → CloudWatch → datadog-forwarder, which never
+ * sees container env — emitting it in the JSON payload is the only route to
+ * the log surface (`version` is Datadog's reserved unified-service-tagging
+ * attribute; the forwarder passes payload attributes through untouched).
+ * Degrade-safe: unset or empty DD_VERSION emits no placeholder key.
+ *
+ * Exported for unit testing.
+ */
+export function resolveVersionBinding(
+  raw: string | undefined = process.env.DD_VERSION,
+): { version?: string } {
+  return raw ? { version: raw } : {};
+}
+
 @injectable()
 export class PinoLogger implements ILogger {
   private readonly logger: Logger;
@@ -155,6 +172,7 @@ export class PinoLogger implements ILogger {
       pid: process.pid,
       hostname: hostname(),
       ...resolveDeploymentBindings(),
+      ...resolveVersionBinding(),
     };
 
     // pino's ESM default interop (CJS package, ESM consumer).

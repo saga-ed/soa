@@ -142,4 +142,56 @@ describe('mountReadinessRoutes', () => {
     // a throw lands as not-ready with detail 'error' (distinct from 'timeout')
     expect(body.checks.kms).toEqual({ ready: false, detail: 'error' });
   });
+
+  // Superset guard, mirrors mountHealthRoutes' own: with no deploy env, the
+  // output is byte-identical to the pre-identity contract, so a repin is a
+  // no-op until a consumer actually deploys.
+  it('superset: with no deploy env, the output is unchanged from the pre-identity contract', async () => {
+    const { app, call } = fakeApp();
+    mountReadinessRoutes(app, { probes: { iamDb: async () => ok() } });
+    expect(await call('/health/live')).toEqual({ code: 200, body: { status: 'ok' } });
+    const { code, body } = await call('/health/ready');
+    expect(code).toBe(200);
+    expect(body).toEqual({ status: 'ready', checks: { iamDb: ok() } });
+  });
+});
+
+describe('build identity on the readiness pair', () => {
+  it('surfaces identity on both /health/live and /health/ready when the deploy env is present', async () => {
+    const { app, call } = fakeApp();
+    const env = {
+      DD_VERSION: 'abc123',
+      EXEC_ENV: 'prod',
+      OTEL_RESOURCE_ATTRIBUTES: 'deployment.identifier=green',
+    };
+    vi.stubGlobal('process', { env });
+    try {
+      mountReadinessRoutes(app, { probes: { iamDb: async () => ok() } });
+      const live = await call('/health/live');
+      expect(live.body).toEqual({
+        status: 'ok',
+        colour: 'green',
+        version: 'abc123',
+        environment: 'prod',
+      });
+      const ready = await call('/health/ready');
+      expect(ready.body).toMatchObject({ colour: 'green', version: 'abc123', environment: 'prod' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('reports identity on the not-ready (503) branch too, so a sick colour still identifies itself', async () => {
+    const { app, call } = fakeApp();
+    const env = { OTEL_RESOURCE_ATTRIBUTES: 'deployment.identifier=blue' };
+    vi.stubGlobal('process', { env });
+    try {
+      mountReadinessRoutes(app, { probes: { iamDb: async () => down() } });
+      const { code, body } = await call('/health/ready');
+      expect(code).toBe(503);
+      expect(body).toMatchObject({ status: 'not ready', colour: 'blue' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

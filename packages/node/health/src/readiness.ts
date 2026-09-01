@@ -26,7 +26,16 @@
  * handler's `res` only needs `status(code).json(body)` (which Express's
  * response satisfies: `res.status(code)` returns the response, which has
  * `.json()`).
+ *
+ * Both routes also report the running task's build identity (colour, git SHA,
+ * environment, deploy time) when the environment supplies it — see
+ * `buildIdentity()` in `./health.js`, and the same rationale in its own header
+ * comment. Reported on `/health/ready`'s not-ready (503) branch too, so a
+ * header-pinned smoke test against a sick colour still identifies which one
+ * answered.
  */
+
+import { buildIdentity } from './health.js';
 
 /** A single dependency probe's outcome. Only `ready` drives the 200/503. */
 export interface ProbeResult {
@@ -81,7 +90,7 @@ export function mountReadinessRoutes(app: ReadinessRouter, opts: MountReadinessO
   const timeoutMs = opts.timeoutMs ?? 2000;
 
   app.get('/health/live', (_req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', ...buildIdentity() });
   });
 
   app.get('/health/ready', async (_req, res) => {
@@ -99,6 +108,8 @@ export function mountReadinessRoutes(app: ReadinessRouter, opts: MountReadinessO
     );
     const checks: Record<string, ProbeResult> = Object.fromEntries(entries);
     const ready = entries.every(([, r]) => r.ready);
-    res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not ready', checks });
+    res
+      .status(ready ? 200 : 503)
+      .json({ status: ready ? 'ready' : 'not ready', ...buildIdentity(), checks });
   });
 }

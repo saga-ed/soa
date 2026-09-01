@@ -11,6 +11,10 @@
  *    produce, so a repeated `login` with the same clip doesn't re-transcode.
  *  - DERIVED audio is best-effort: a failed derive (a video with no audio track) drops
  *    audio and keeps video; an EXPLICIT `--fake-audio` failure throws.
+ *  - BACKGROUND-SAFE: every ffmpeg run routes stdin from /dev/null (`stdinFile`), so a
+ *    backgrounded `ss stack login --fake-video` can't take SIGTTIN on ffmpeg's stdin read
+ *    and STOP (`-nostdin` in the argv is the matching belt-and-suspenders). Without this
+ *    the transcode freezes and the browser never launches.
  *
  * IO is behind injectable deps (Runner + stat/mkdir seams) so it is unit-tested with a
  * fake runner and NO real ffmpeg/fs.
@@ -47,10 +51,22 @@ const realStatMtime = (p: string): number | null => {
   }
 };
 
+/**
+ * `/dev/null` stdin for every ffmpeg run: a backgrounded transcode must never read the
+ * controlling terminal (SIGTTIN → STOP → frozen transcode → no browser). See module header.
+ */
+const NULL_STDIN = '/dev/null';
+
 /** Run `ffmpeg -version` once to confirm it is on PATH; throw an install hint if not. */
 async function assertFfmpeg(runner: Runner): Promise<void> {
   try {
-    const { code } = await runner.run({ cwd: process.cwd(), command: 'ffmpeg', args: ['-version'], env: {} });
+    const { code } = await runner.run({
+      cwd: process.cwd(),
+      command: 'ffmpeg',
+      args: ['-version'],
+      env: {},
+      stdinFile: NULL_STDIN,
+    });
     if (code === 0) return;
   } catch {
     // spawn-level failure (ENOENT) — fall through to the throw.
@@ -83,7 +99,9 @@ async function runStep(
       command: 'ffmpeg',
       args: step.argv,
       env: {},
-      stdio: 'inherit',
+      // stdout/stderr inherit (progress visible); stdin from /dev/null so a backgrounded
+      // run can't SIGTTIN-freeze on ffmpeg's interactive stdin read (soa#363).
+      stdinFile: NULL_STDIN,
     });
     return code === 0 ? 'ok' : 'failed';
   } catch {

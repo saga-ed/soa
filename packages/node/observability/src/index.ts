@@ -15,6 +15,10 @@ export {
 export { structuredErrorMiddleware } from './error-middleware.js';
 export { recordSpanException } from './record-exception.js';
 export {
+    recordTRPCSpanException,
+    type TRPCFormattableError,
+} from './record-trpc-exception.js';
+export {
     PiiSanitizingSpanExporter,
     sanitizeUrl,
     sanitizeText,

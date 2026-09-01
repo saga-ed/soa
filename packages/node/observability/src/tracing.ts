@@ -8,6 +8,7 @@ import { RuntimeNodeInstrumentation } from '@opentelemetry/instrumentation-runti
 import { ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import type { ILogger } from '@saga-ed/soa-logger';
 import { PiiSanitizingSpanExporter } from './span-sanitizer.js';
+import { recordSpanException } from './record-exception.js';
 
 /**
  * Opaque handle to an initialized OTel SDK. Services don't need to import
@@ -96,9 +97,52 @@ export function initTracing(
 
     if (process.env.OTEL_TRACES_DISABLED !== 'true') {
         sdk.start();
+        // Gated with sdk.start() (not unconditional) so tests that set
+        // OTEL_TRACES_DISABLED=true — the existing convention for opting out
+        // of OTel side effects — don't also get a real `process.exit(1)`
+        // wired into their test runner.
+        installProcessErrorHandlers(opts.logger);
     }
 
     return sdk;
+}
+
+/**
+ * Catch what no per-service code does today: a crash that never went through
+ * Express or a tRPC procedure (an unawaited rejection, a callback throw, a
+ * timer). Node's own default behavior already exits the process on either
+ * event — this preserves that exit but records the exception on the active
+ * span first, so a fleet-wide crash stops shipping `error: {}` and a bare
+ * stderr line with no trace correlation.
+ *
+ * Registered once per `initTracing()` call (i.e. once per process, since
+ * that's meant to run exactly once at bootstrap) — not exported separately,
+ * since a second registration would double-record and double-exit.
+ */
+function installProcessErrorHandlers(logger?: ILogger): void {
+    process.on('uncaughtException', (error) => {
+        recordSpanException(error);
+        logProcessFailure(logger, 'uncaughtException', error);
+        process.exit(1);
+    });
+
+    process.on('unhandledRejection', (reason: unknown) => {
+        const error = reason instanceof Error ? reason : new Error(String(reason));
+        recordSpanException(error);
+        logProcessFailure(logger, 'unhandledRejection', error);
+        process.exit(1);
+    });
+}
+
+function logProcessFailure(logger: ILogger | undefined, kind: string, error: Error): void {
+    if (logger) {
+        logger.error(`${kind} — process exiting`, error);
+    } else {
+        // eslint-disable-next-line no-console -- no ILogger is guaranteed at
+        // process-bootstrap time (initTracing runs before DI container setup
+        // in every consumer today); this mirrors Node's own default handler.
+        console.error(`${kind} — process exiting`, error);
+    }
 }
 
 /**

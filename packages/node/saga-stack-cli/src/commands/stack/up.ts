@@ -207,7 +207,7 @@ export default class StackUp extends BaseCommand {
     // `authz-sync` silently.
     const closureOpts: ResolvedClosureOpts =
       ws ? closureOptsForIds(ws.runSet) : closureOptsFor(flags.with);
-    const { withAuthz } = closureOpts;
+    const { withAuthz, withJanusMock } = closureOpts;
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the
     // launch path applies (BLOCKER-1) so the dry-run reflects what actually launches. ──
@@ -262,7 +262,7 @@ export default class StackUp extends BaseCommand {
     //  - `--sandbox <name>` accompanies `--only`: launch the run-set ALONE (subtract the
     //    deps the closure pulled in — iam-api et al. live at the cloud sandbox).
     //  - `--workspace`: subtract EVERY mode:sandbox service id (`ws.sandboxServices`).
-    const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz);
+    const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz, withJanusMock);
     await this.runNative(flags, requested, closureOpts, overlays, {
       sandboxHybrid: flags.sandbox !== undefined,
       sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
@@ -308,6 +308,7 @@ export default class StackUp extends BaseCommand {
     flags: OverlayFlags,
     sandboxName?: string,
     withAuthz?: boolean,
+    withJanusMock?: boolean,
   ): Promise<NativeOverlays> {
     const overlays: NativeOverlays = {};
 
@@ -316,6 +317,11 @@ export default class StackUp extends BaseCommand {
     // resolved — see readOpenfgaStoreId). Absent ⇒ base env only (opt-in).
     if (withAuthz) {
       overlays.authz = { withAuthz: true };
+    }
+
+    // `--with janus-mock` / `--with staff-admin`: same shape, no extra IO needed.
+    if (withJanusMock) {
+      overlays.janusMock = { withJanusMock: true };
     }
 
     if (sandboxName !== undefined) {

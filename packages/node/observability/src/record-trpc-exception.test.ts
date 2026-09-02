@@ -61,9 +61,8 @@ describe('recordTRPCSpanException', () => {
         withActiveSpan(span);
 
         // Mirrors programs-api's throwServiceError pattern: the real cause is
-        // wrapped in a second *real* TRPCError instance (name: 'TRPCError') to
-        // survive a scrubbing errorFormatter — that wrap marks the error as
-        // already classified.
+        // wrapped in a second real `TRPCError` instance to survive a scrubbing
+        // errorFormatter — that wrap marks the error as already classified.
         recordTRPCSpanException({
             code: 'INTERNAL_SERVER_ERROR',
             cause: Object.assign(new Error('heal via retry'), {
@@ -78,8 +77,8 @@ describe('recordTRPCSpanException', () => {
     it('records an unexpected INTERNAL_SERVER_ERROR whose cause carries a non-tRPC error code', () => {
         // Prisma (P2002), pg (SQLSTATE), and Node system errors (ECONNREFUSED)
         // all carry a string `.code` without ever going through tRPC's
-        // classification — they must not be mistaken for the "expected 500"
-        // TRPCError-wrapping pattern above.
+        // classification — must not be mistaken for the TRPCError-wrapping
+        // pattern above.
         const span = fakeSpan();
         withActiveSpan(span);
 
@@ -88,6 +87,21 @@ describe('recordTRPCSpanException', () => {
             cause: Object.assign(new Error('connect ECONNREFUSED 10.0.1.5:5432'), {
                 code: 'ECONNREFUSED',
             }),
+        });
+
+        expect(span.recordException).toHaveBeenCalledTimes(1);
+    });
+
+    it('records a plain object cause with a matching code, since it never went through tRPC classification', () => {
+        // Same boundary as the ECONNREFUSED case above, at the shape that used
+        // to be (wrongly) excluded pre-fix: a duck-typed `{code}` object with
+        // no Error prototype and no `name`.
+        const span = fakeSpan();
+        withActiveSpan(span);
+
+        recordTRPCSpanException({
+            code: 'INTERNAL_SERVER_ERROR',
+            cause: { code: 'INTERNAL_SERVER_ERROR', message: 'not actually a TRPCError' },
         });
 
         expect(span.recordException).toHaveBeenCalledTimes(1);

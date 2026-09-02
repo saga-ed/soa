@@ -22,7 +22,7 @@ export interface TRPCFormattableError {
  *   }
  *
  * Only `INTERNAL_SERVER_ERROR` is recorded, and only when its `cause` isn't
- * itself a TRPCError-shaped object. Recording every tRPC error unfiltered
+ * itself a `TRPCError` instance. Recording every tRPC error unfiltered
  * would tag routine client faults (UNAUTHORIZED, BAD_REQUEST, NOT_FOUND,
  * CONFLICT, ...) as span exceptions and Error Tracking / error-rate monitors
  * would fire on auth rejections and validation failures instead of real bugs.
@@ -42,13 +42,9 @@ export function recordTRPCSpanException(error: TRPCFormattableError): void {
 }
 
 /**
- * Mirrors tRPC's own `getTRPCErrorFromUnknown` discriminant
- * (`cause instanceof Error && cause.name === 'TRPCError'`) rather than a
- * bare `'code' in value` check: a Prisma error carries `code: 'P2002'`, a pg
- * error carries a SQLSTATE, a Node system error carries `ECONNREFUSED` — all
- * would satisfy a `code`-only test despite never having gone through tRPC's
- * classification, silently discarding real unclassified 500s upstream of
- * `recordSpanException`.
+ * Discriminates like tRPC's own `getTRPCErrorFromUnknown`: a `code` string
+ * alone isn't enough — Prisma/pg/Node errors carry one too without ever
+ * being classified by tRPC.
  */
 function isTRPCErrorShaped(value: unknown): value is { code: string } {
     return (

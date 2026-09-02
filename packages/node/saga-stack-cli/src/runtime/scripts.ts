@@ -56,6 +56,7 @@ export const REPO_DEFAULT_DIR: Record<RepoKey, string> = {
   QBOARD: 'qboard',
   RTSM: 'rtsm',
   FLEEK: 'fleek',
+  JANUS: 'janus',
 };
 
 /** The sibling-repo workspace root: `--dev` → `$DEV` → `$HOME/dev`. */

@@ -32,7 +32,8 @@ export type ServiceId =
   | 'chat-api' //        optional: true (--with-playback)
   | 'authz-sync' //      optional: true (--with authz) — RabbitMQ-only OpenFGA tuple projector
   | 'staff-admin-bff' //     optional: true (--with staff-admin) — the console's own Express BFF
-  | 'staff-admin-console'; // optional: true (--with staff-admin) — staff-only SvelteKit SPA (:8910)
+  | 'staff-admin-console' // optional: true (--with staff-admin) — staff-only SvelteKit SPA (:8910)
+  | 'janus-mock-signer'; // optional: true (--with janus-mock / --with staff-admin) — local EdDSA JWKS signer for janus_session claims
 
 /** Mesh infra units, started as a single `make up PROFILE=empty`. */
 export type MeshId = 'postgres' | 'redis' | 'rabbitmq' | 'connect-mongo' | 'openfga';
@@ -47,7 +48,8 @@ export type RepoKey =
   | 'SDS'
   | 'QBOARD'
   | 'RTSM'
-  | 'FLEEK';
+  | 'FLEEK'
+  | 'JANUS';
 
 /** The three URL lanes a service can be addressed on. */
 export type Lane = 'stack' | 'sandbox' | 'tunnel';

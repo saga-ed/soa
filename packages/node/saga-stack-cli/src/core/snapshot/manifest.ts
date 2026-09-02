@@ -77,6 +77,7 @@ const SERVICE_IDS = [
   'authz-sync',
   'staff-admin-bff',
   'staff-admin-console',
+  'janus-mock-signer',
 ] as const;
 const _serviceIdsAreServiceIds: readonly ServiceId[] = SERVICE_IDS;
 void _serviceIdsAreServiceIds;

@@ -17,7 +17,7 @@
 #
 # Usage:
 #   ./clone-repos.sh                 clone any missing of the 7 required repos
-#   ./clone-repos.sh --with-optional also clone coach + fleek
+#   ./clone-repos.sh --with-optional also clone coach + fleek + janus
 #   ./clone-repos.sh --dry-run       report what it WOULD clone, clone nothing
 #   DEV=~/work ./clone-repos.sh      non-default sibling-repo parent
 #
@@ -40,7 +40,7 @@ usage(){
 clone-repos.sh — clone whichever saga-stack sibling repos are missing.
 
   ./clone-repos.sh                 clone any missing of the 7 required repos
-  ./clone-repos.sh --with-optional also clone coach + fleek
+  ./clone-repos.sh --with-optional also clone coach + fleek + janus
   ./clone-repos.sh --dry-run       report what it WOULD clone, clone nothing
   DEV=~/work ./clone-repos.sh      non-default sibling-repo parent
 
@@ -71,11 +71,12 @@ DEV=${DEV:-$HOME/dev}
 # REQUIRED_BOOTSTRAP_REPOS (src/runtime/ensure-repos.ts), which is the manifest
 # repo set minus coach + fleek. Keep the two in sync.
 REQUIRED=(soa rostering program-hub saga-dash student-data-system qboard rtsm)
-# coach + fleek are opt-in, matching ensure-repos.ts's EXCLUDED_FROM_BOOTSTRAP.
-# `ss stack up` SKIPS a service whose repo dir is absent, warning rather than
-# erroring (see StackApi's `repoDirExists` seam), so omitting these yields a
-# stack without coach-api/coach-web — not a failed one.
-OPTIONAL=(coach fleek)
+# coach + fleek + janus are opt-in, matching ensure-repos.ts's
+# EXCLUDED_FROM_BOOTSTRAP. `ss stack up` SKIPS a service whose repo dir is
+# absent, warning rather than erroring (see StackApi's `repoDirExists` seam),
+# so omitting these yields a stack without coach-api/coach-web/janus-mock-
+# signer — not a failed one.
+OPTIONAL=(coach fleek janus)
 
 REPOS=("${REQUIRED[@]}")
 [[ $WITH_OPTIONAL == 1 ]] && REPOS+=("${OPTIONAL[@]}")
@@ -95,6 +96,7 @@ repo_path(){ # name
         rtsm)                echo "${RTSM:-$DEV/rtsm}" ;;
         coach)               echo "${COACH:-$DEV/coach}" ;;
         fleek)               echo "${FLEEK:-$DEV/fleek}" ;;
+        janus)               echo "${JANUS:-$DEV/janus}" ;;
         *)                   echo "$DEV/$1" ;;
     esac
 }

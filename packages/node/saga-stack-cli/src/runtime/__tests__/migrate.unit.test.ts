@@ -25,6 +25,7 @@ const REPO_ROOTS = {
   QBOARD: '/dev/qboard',
   RTSM: '/dev/rtsm',
   FLEEK: '/dev/fleek',
+  JANUS: '/dev/janus',
 } as Record<RepoKey, string>;
 
 function fakeRunner(code = 0): { runner: Runner; calls: ScriptInvocation[] } {

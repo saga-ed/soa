@@ -56,6 +56,7 @@ const REPO_ROOTS = {
   RTSM: '/dev/rtsm',
   FLEEK: '/dev/fleek',
   COACH: '/dev/coach',
+  JANUS: '/dev/janus',
 } as Record<RepoKey, string>;
 
 function ctx(): LaunchContext {

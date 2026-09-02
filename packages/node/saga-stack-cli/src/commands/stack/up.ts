@@ -310,19 +310,7 @@ export default class StackUp extends BaseCommand {
     withAuthz?: boolean,
     withJanusMock?: boolean,
   ): Promise<NativeOverlays> {
-    const overlays: NativeOverlays = {};
-
-    // `--with authz`: hand the flag down as data (the store-id FILE READ itself
-    // stays in base-command.ts's buildNativeRuntime, the ONE place repoRoots is
-    // resolved — see readOpenfgaStoreId). Absent ⇒ base env only (opt-in).
-    if (withAuthz) {
-      overlays.authz = { withAuthz: true };
-    }
-
-    // `--with janus-mock` / `--with staff-admin`: same shape, no extra IO needed.
-    if (withJanusMock) {
-      overlays.janusMock = { withJanusMock: true };
-    }
+    const overlays: NativeOverlays = resolveFlagOverlays(withAuthz, withJanusMock);
 
     if (sandboxName !== undefined) {
       // up.sh SANDBOX_BASE default (dev fleet); env-overridable like up.sh.
@@ -929,4 +917,23 @@ function sandboxDropSet(
   }
   if (prune.sandboxServices) for (const id of prune.sandboxServices) sandboxDrop.add(id);
   return sandboxDrop;
+}
+
+/**
+ * PURE: the `--with authz` / `--with janus-mock` (or `--with staff-admin`) slice of
+ * `resolveOverlays` — split out so it's unit-testable without the oclif harness the
+ * rest of `resolveOverlays` (tunnel moniker resolution, fleek creds IO) requires.
+ * `closureOptsFor`/`effectiveWithJanusMock` computing `withJanusMock: true` is not
+ * enough on its own — soa#446 shipped `--with staff-admin` with the flag correctly
+ * computed for the CLOSURE but never reaching `NativeOverlays`, because this
+ * assembly step didn't accept a `withJanusMock` param at all.
+ */
+export function resolveFlagOverlays(
+  withAuthz?: boolean,
+  withJanusMock?: boolean,
+): Pick<NativeOverlays, 'authz' | 'janusMock'> {
+  const overlays: Pick<NativeOverlays, 'authz' | 'janusMock'> = {};
+  if (withAuthz) overlays.authz = { withAuthz: true };
+  if (withJanusMock) overlays.janusMock = { withJanusMock: true };
+  return overlays;
 }

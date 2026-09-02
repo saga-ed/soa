@@ -73,6 +73,30 @@ describe('global PINO logger env (up.sh services_up export ~1384-1385)', () => {
   });
 });
 
+describe('withJanusMock: true — local mock signer overlay (soa#446)', () => {
+  // Nothing previously asserted what withJanusMock:true actually produces — the
+  // soa#446 bug lived one layer up (resolveOverlays never threading the flag
+  // here at all), but this default-only coverage left the flip itself unpinned.
+  const mockCtx: LaunchContext = defaultLaunchContext({
+    repoRoots: REPO_ROOTS,
+    vendorDir: '/w/vendor',
+    withJanusMock: true,
+  });
+  const mockEnv = (id: ServiceId) => resolveLaunchEnv(id, 'stack', mockCtx);
+
+  it('iam-api: points at the local signer + turns claims verification on', () => {
+    const e = mockEnv('iam-api');
+    expect(e.JANUS_JWKS_URL).toBe('http://localhost:3099/.well-known/jwks.json');
+    expect(e.JANUS_CLAIMS_ENABLED).toBe('true');
+  });
+
+  it('programs-api / scheduling-api: JWKS URL flips, no claims-verification toggle (iam-api only)', () => {
+    expect(mockEnv('programs-api').JANUS_JWKS_URL).toBe('http://localhost:3099/.well-known/jwks.json');
+    expect(mockEnv('scheduling-api').JANUS_JWKS_URL).toBe('http://localhost:3099/.well-known/jwks.json');
+    expect(mockEnv('programs-api').JANUS_CLAIMS_ENABLED).toBeUndefined();
+  });
+});
+
 describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () => {
   it('iam-api', () => {
     expect(env('iam-api')).toEqual({

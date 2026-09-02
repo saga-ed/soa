@@ -28,8 +28,8 @@ export interface TRPCFormattableError {
  * would fire on auth rejections and validation failures instead of real bugs.
  * The cause check excludes the "expected 500" pattern some services use to
  * preserve a message through a scrubbing errorFormatter (wrapping the real
- * cause in a second TRPCError) — that shape is a deliberate, already-classified
- * error, not an unhandled one.
+ * cause in a second `TRPCError` instance) — that shape is a deliberate,
+ * already-classified error, not an unhandled one.
  */
 export function recordTRPCSpanException(error: TRPCFormattableError): void {
     if (error.code !== 'INTERNAL_SERVER_ERROR') {
@@ -41,10 +41,19 @@ export function recordTRPCSpanException(error: TRPCFormattableError): void {
     recordSpanException(error.cause ?? error);
 }
 
+/**
+ * Mirrors tRPC's own `getTRPCErrorFromUnknown` discriminant
+ * (`cause instanceof Error && cause.name === 'TRPCError'`) rather than a
+ * bare `'code' in value` check: a Prisma error carries `code: 'P2002'`, a pg
+ * error carries a SQLSTATE, a Node system error carries `ECONNREFUSED` — all
+ * would satisfy a `code`-only test despite never having gone through tRPC's
+ * classification, silently discarding real unclassified 500s upstream of
+ * `recordSpanException`.
+ */
 function isTRPCErrorShaped(value: unknown): value is { code: string } {
     return (
-        typeof value === 'object' &&
-        value !== null &&
+        value instanceof Error &&
+        value.name === 'TRPCError' &&
         'code' in value &&
         typeof (value as { code?: unknown }).code === 'string'
     );

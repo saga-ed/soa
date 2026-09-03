@@ -43,6 +43,8 @@ describe('meshPortSpecs / meshOwnedContainers', () => {
       // meant the preflight guarded ports nothing ever bound.
       { port: 8180, name: 'openfga' },
       { port: 8181, name: 'openfga-mgmt' },
+      { port: 4318, name: 'otel-collector' },
+      { port: 13133, name: 'otel-collector-health' },
     ]);
   });
 
@@ -61,6 +63,8 @@ describe('meshPortSpecs / meshOwnedContainers', () => {
       { port: 28037, name: 'connect-mongo' },
       { port: 9180, name: 'openfga' },
       { port: 9181, name: 'openfga-mgmt' },
+      { port: 5318, name: 'otel-collector' },
+      { port: 14133, name: 'otel-collector-health' },
     ]);
     // offset 0 is byte-identical to the default.
     expect(meshPortSpecs(manifest, 0)).toEqual(meshPortSpecs(manifest));

@@ -144,6 +144,7 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       CORS_ORIGIN: 'http://localhost:8900,http://localhost:8800',
       JANUS_LOGIN_HOST: 'localhost:3010/demo',
       JWT_ISSUER: 'https://iam.wootdev.com',
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
     });
   });
 

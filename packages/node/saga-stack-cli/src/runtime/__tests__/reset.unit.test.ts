@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { featureSet } from '../../core/bundles.js';
 import type { DbId } from '../../core/manifest/index.js';
 import type { RunResult, Runner, ScriptInvocation } from '../exec.js';
 import type { PgProbe } from '../pg-probe.js';
@@ -143,7 +144,7 @@ describe('resetClosure — per-DB reset plan (R4)', () => {
     );
   });
 
-  it('playback DBs are SKIPPED without withPlayback, truncated WITH it', async () => {
+  it('playback DBs are SKIPPED without the playback feature, truncated WITH it', async () => {
     const noPb = fakeRunner();
     const res1 = await resetClosure(baseCtx(['transcripts_local'] as DbId[], { runner: noPb.runner }));
     expect(res1.dbs).toEqual([
@@ -153,11 +154,25 @@ describe('resetClosure — per-DB reset plan (R4)', () => {
 
     const withPb = fakeRunner();
     const res2 = await resetClosure(
-      baseCtx(['transcripts_local'] as DbId[], { runner: withPb.runner, withPlayback: true }),
+      baseCtx(['transcripts_local'] as DbId[], {
+        runner: withPb.runner,
+        features: featureSet(['playback']),
+      }),
     );
     expect(res2.dbs).toEqual([{ db: 'transcripts_local', action: 'truncated', ok: true }]);
     expect(withPb.calls).toHaveLength(1);
     expect(withPb.calls[0].args[withPb.calls[0].args.indexOf('-d') + 1]).toBe('transcripts_local');
+  });
+
+  it('gates each opt-in DB on ITS OWN family — playback never admits an authz DB', async () => {
+    const { runner, calls } = fakeRunner();
+    const res = await resetClosure(
+      baseCtx(['openfga'] as DbId[], { runner, features: featureSet(['playback']) }),
+    );
+    expect(res.dbs).toEqual([
+      { db: 'openfga', action: 'skipped', ok: true, reason: 'authz DB (needs --with authz)' },
+    ]);
+    expect(calls).toHaveLength(0);
   });
 
   it('processes DBs in CANONICAL manifest order (not the arbitrary closure order)', async () => {

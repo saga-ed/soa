@@ -16,19 +16,16 @@
  *    without connect-api never includes it.
  *  - `connectv3` (db) is reached only via `connect-api.databases`, likewise.
  *
- * Playback (`optional:true`) services — transcripts/insights/chat — are kept
- * ONLY when `opts.withPlayback` is set. Nothing in the graph `dependsOn` them,
- * so this gate is the only thing that admits them, and a requested playback
- * service is dropped (not launched) unless `--with-playback` is passed.
- *
- * `authz-sync` (`optional:true`) is the same shape, gated by `opts.withAuthz`
- * instead. Each optional service maps to its OWN opt-in flag (see
- * `admitsOptional` below) — a bare `withPlayback || withAuthz` OR would let
- * either flag admit BOTH families (e.g. `--only transcripts-api --with authz`
- * would wrongly resolve transcripts-api), so the gate dispatches per service id.
+ * `optional:true` services — the playback trio, `authz-sync`, the staff-admin
+ * pair — are kept ONLY when `opts.features` selects the bundle that owns them.
+ * Nothing in the graph `dependsOn` them, so this gate is the only thing that
+ * admits them, and a requested optional service is dropped (not launched)
+ * otherwise. Each maps to its OWN bundle (see `admitsOptional` below): a blanket
+ * "any feature selected" test would cross-admit, e.g. `--only transcripts-api
+ * --with authz` would wrongly resolve transcripts-api.
  */
 
-import { AUTHZ_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from './bundles.js';
+import { BUNDLE_FOR_SERVICE, featureSet, meshForFeatures, type FeatureSet } from './bundles.js';
 import { launchOrder } from './launch-order.js';
 import type { DbId, Manifest, MeshId, ServiceId } from './manifest/index.js';
 
@@ -44,12 +41,11 @@ export interface Closure {
 }
 
 export interface ClosureOpts {
-  /** Keep `optional:true` playback services (transcripts/insights/chat). */
-  withPlayback?: boolean;
-  /** Keep the `optional:true` `authz-sync` service. */
-  withAuthz?: boolean;
-  /** Keep the `optional:true` staff-admin console pair (SPA + its BFF). */
-  withStaffAdmin?: boolean;
+  /**
+   * The features selected for this run. Omitted ⇒ no `optional:true` service is
+   * admitted; mint one with `featureSet()` / `featuresFor()` in bundles.ts.
+   */
+  features?: FeatureSet;
   /**
    * Whether to traverse `depKind: 'browser'` edges (default `true`).
    *
@@ -74,33 +70,32 @@ export function computeClosure(
   requested: ServiceId[],
   opts: ClosureOpts = {},
 ): Closure {
-  const withPlayback = opts.withPlayback ?? false;
-  const withAuthz = opts.withAuthz ?? false;
-  const withStaffAdmin = opts.withStaffAdmin ?? false;
+  const features = opts.features ?? featureSet([]);
   const followBrowserEdges = opts.followBrowserEdges ?? true;
 
-  // Each optional service is admitted by its OWN flag — never a blanket OR of
-  // every opt-in flag, which would cross-admit (e.g. `--with authz` alone must
-  // not also resolve the playback trio).
+  // Each optional service is admitted by its OWN feature — never a blanket OR of
+  // every selected feature, which would cross-admit (e.g. `--with authz` alone
+  // must not also resolve the playback trio). Membership comes from
+  // `BUNDLE_FOR_SERVICE`, inverted from BUNDLES, so adding a family is a registry
+  // edit and no code change here. Importing bundles.ts is safe: its only
+  // dependency on this module is `import type { ClosureOpts }`, erased at compile
+  // time — there is no runtime cycle.
   //
-  // The id→family sets come from `bundles.ts` (derived from BUNDLES) rather than
-  // being hand-listed here, so adding a family is a registry edit only. Importing
-  // bundles.ts is safe: its only dependency on this module is `import type
-  // { ClosureOpts }`, which is erased at compile time — there is no runtime cycle.
-  //
-  // EXHAUSTIVE BY CONSTRUCTION: there is deliberately no `return withPlayback`
-  // fallthrough. That default is what silently handed every unmapped optional id
-  // the playback flag — so a newly-added optional service resolved an EMPTY
-  // closure (exit 0, no error) until someone noticed. An unmapped id now THROWS,
-  // which surfaces at the first test that touches it rather than in the field.
+  // EXHAUSTIVE BY CONSTRUCTION: there is deliberately no permissive fallthrough.
+  // The original `return withPlayback` default silently handed every unmapped
+  // optional id the playback flag, so a newly-added optional service resolved an
+  // EMPTY closure (exit 0, no error) until someone noticed. An unmapped id THROWS.
+  // A manifest invariant test also asserts every `optional:true` id is mapped, so
+  // this throw is the belt to that test's braces.
   const admitsOptional = (id: ServiceId): boolean => {
-    if (PLAYBACK_IDS.includes(id)) return withPlayback;
-    if (AUTHZ_IDS.includes(id)) return withAuthz;
-    if (STAFF_ADMIN_IDS.includes(id)) return withStaffAdmin;
-    throw new Error(
-      `closure: optional service '${id}' has no opt-in flag — add it to a BUNDLES entry ` +
-        `(and its *_IDS export), or it will silently resolve an empty closure.`,
-    );
+    const owner = BUNDLE_FOR_SERVICE.get(id);
+    if (!owner) {
+      throw new Error(
+        `closure: optional service '${id}' belongs to no BUNDLES entry — add it to one, ` +
+          `or it will silently resolve an empty closure.`,
+      );
+    }
+    return features.has(owner);
   };
 
   const inClosure = new Set<ServiceId>();
@@ -159,6 +154,10 @@ export function computeClosure(
     for (const d of def.databases) dbSet.add(d);
     for (const u of def.mesh) meshSet.add(u);
   }
+
+  // Mesh units a selected FEATURE brings up directly, independent of any service
+  // (BundleDef.mesh). Must go through `meshForFeatures` — see its docstring.
+  for (const u of meshForFeatures(features)) meshSet.add(u);
 
   const databases = (Object.keys(m.databases) as DbId[]).filter((d) => dbSet.has(d));
   const mesh = (Object.keys(m.mesh) as MeshId[]).filter((u) => meshSet.has(u));

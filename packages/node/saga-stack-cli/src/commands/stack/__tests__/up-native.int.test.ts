@@ -346,8 +346,8 @@ describe('stack up --only — native partial-stack', () => {
     expect(runs.some((r) => r.args.some((a) => a.includes('seed-dev-user')))).toBe(true);
   });
 
-  it('--with playback --reset threads withPlayback into the native reset (playback DBs truncated)', async () => {
-    // BLOCKER 2: the up-path reset must forward `withPlayback` so `--with playback
+  it('--with playback --reset threads the feature into the native reset (playback DBs truncated)', async () => {
+    // BLOCKER 2: the up-path reset must forward the features so `--with playback
     // --reset` also truncates the playback trio (transcripts/insights/chat). Without
     // the thread, resetClosure would skip them (meshProvisioned:false) even though
     // --with playback pulled them into the closure — diverging from up.sh --reset

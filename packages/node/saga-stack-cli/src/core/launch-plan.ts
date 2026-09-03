@@ -186,8 +186,8 @@ export interface LaunchTokens {
   // ── OpenFGA authz (opt-in — `--with authz`; new, no up.sh precedent) ──
   /**
    * iam-api's `FGA_ENABLED` — `'true'` only when the `authz` bundle was
-   * selected (`effectiveWithAuthz`), else `'false'`. Keeps the OpenFGA footprint
-   * off every default `stack up` (opt-in design decision).
+   * selected, else `'false'`. Keeps the OpenFGA footprint off every default
+   * `stack up` (opt-in design decision).
    */
   FGA_ENABLED: string;
   /**
@@ -206,6 +206,21 @@ export interface LaunchTokens {
    * missing-token error like other tokens, since '' is expected on run 1.
    */
   OPENFGA_STORE_ID: string;
+
+  // ── OTLP tracing (`--with otel`) ──
+  /**
+   * OTLP base endpoint — `http://localhost:<collector host port + meshOffset>`
+   * (4318 at slot 0).
+   *
+   * This is a SLOT-CORRECTNESS token, not an enable/disable one:
+   * `@saga-ed/soa-observability`'s `resolveOtlpTracesUrl()` already defaults to
+   * localhost:4318, so a service exports there whether or not this is set. What
+   * it fixes is slot > 0, where the collector publishes 5318 and the default
+   * would send this slot's spans to slot 0's collector (or nowhere). Resolved
+   * unconditionally for the same reason: with no collector up, the export fails
+   * silently exactly as it did before — the status quo, not a regression.
+   */
+  OTEL_EXPORTER_OTLP_ENDPOINT: string;
 
   // ── global launch env (up.sh services_up `export`s these ONCE, ~1384-1385, so
   //    every `pnpm dev` child inherits them; soa-logger/soa-config validate them
@@ -628,9 +643,9 @@ export interface LaunchContextInputs {
   /** up.sh `${PINO_LOGGER_ISEXPRESSCONTEXT:-true}` — ambient override, else `true`. */
   pinoIsExpressContext?: string;
   /**
-   * Whether the `authz` bundle was selected (`effectiveWithAuthz(flags.with)`) —
-   * drives `FGA_ENABLED`. Default `false` (opt-in design decision — every
-   * default `stack up` keeps FGA off).
+   * Whether the `authz` bundle was selected (`features.has('authz')`) — drives
+   * `FGA_ENABLED`. Default `false` (opt-in design decision — every default
+   * `stack up` keeps FGA off).
    */
   withAuthz?: boolean;
   /**
@@ -676,6 +691,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
   const mongoPort = getMesh('connect-mongo', m).port + meshOffset; // 27037
   const redisPort = getMesh('redis', m).port + meshOffset; // 6379
   const openfgaPort = getMesh('openfga', m).port + meshOffset; // 8180 (host; 8080 in-container)
+  const otelPort = getMesh('otel-collector', m).port + meshOffset; // 4318 (OTLP/HTTP)
 
   const recorderControlPort = inputs.recorderControlPort ?? 7890;
   const recordingsApiPort = inputs.recordingsApiPort ?? 8444;
@@ -737,6 +753,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     // OpenFGA authz (opt-in — see LaunchTokens' FGA_ENABLED/OPENFGA_* docs)
     FGA_ENABLED: inputs.withAuthz ? 'true' : 'false',
     OPENFGA_API_URL: `http://localhost:${openfgaPort}`,
+    OTEL_EXPORTER_OTLP_ENDPOINT: `http://localhost:${otelPort}`,
     OPENFGA_STORE_ID: inputs.openfgaStoreId ?? '',
 
     // global launch env (up.sh `:-` defaults; runtime may pass ambient overrides)

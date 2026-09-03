@@ -299,6 +299,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // the rostering-client verifier falls back to the prod issuer and 401s
         // every locally-minted session on authenticated procedures.
         JWT_ISSUER: '${IAM_ISSUER}',
+        // Does NOT turn tracing on — @saga-ed/soa-observability already defaults
+        // to localhost:4318. This makes the endpoint SLOT-correct: without it a
+        // slot > 0 programs-api ships its spans to slot 0's collector.
+        OTEL_EXPORTER_OTLP_ENDPOINT: '${OTEL_EXPORTER_OTLP_ENDPOINT}',
       },
     },
     seed: ['programs'],
@@ -317,7 +321,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // `adoptEnv ⊇ tunnelOverlay() rewrite set` invariant test.
     // Same one-time "stop the process and re-run" cost iam-api/saga-dash
     // already pay for processes stamped by an older CLI.
-    adoptEnv: ['CORS_ORIGIN', 'JANUS_LOGIN_HOST'],
+    // OTEL_EXPORTER_OTLP_ENDPOINT is guarded for the same reason, one plane over:
+    // an adopted programs-api keeps the endpoint an older CLI stamped, so at
+    // slot > 0 it keeps exporting to slot 0's collector and the spans you are
+    // looking for never appear in this slot's log.
+    adoptEnv: ['CORS_ORIGIN', 'JANUS_LOGIN_HOST', 'OTEL_EXPORTER_OTLP_ENDPOINT'],
   },
   'scheduling-api': {
     id: 'scheduling-api',

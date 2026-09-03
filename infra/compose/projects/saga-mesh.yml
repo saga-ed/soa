@@ -50,3 +50,4 @@ include:
   - path: ../services/rabbitmq/compose.yml
   - path: ../services/connect-mongo/compose.yml
   - path: ../services/openfga/compose.yml
+  - path: ../services/otel-collector/compose.yml

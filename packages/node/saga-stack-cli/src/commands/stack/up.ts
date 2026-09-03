@@ -41,12 +41,12 @@ import { BaseCommand } from '../../base-command.js';
 import type { NativeOverlays, WorkspaceFlags } from '../../base-command.js';
 import {
   BUNDLE_NAMES,
-  closureOptsFor,
-  closureOptsForIds,
+  featuresFor,
+  featuresForIds,
   combineRequested,
   seedAddOnsFor,
 } from '../../core/bundles.js';
-import type { ResolvedClosureOpts } from '../../core/bundles.js';
+import type { FeatureSet } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance, slotExcludedServices } from '../../core/derive-instance.js';
 import type { InstanceProfile } from '../../core/derive-instance.js';
@@ -197,22 +197,28 @@ export default class StackUp extends BaseCommand {
       ? ws.runSet
       : combineRequested(flags.only, flags.with, (m) => this.error(m));
     let isOnly = requested.length > 0 || ws !== undefined;
-    // When a workspace is set, its flags come from the run set — a workspace
+    // When a workspace is set, its features come from the run set — a workspace
     // names services DIRECTLY, so naming e.g. `authz-sync` is the workspace's way
-    // of asking for it, NOT from flags.with. `closureOptsForIds` derives every
-    // flag from the BUNDLES-backed id sets, so a future bundle needs only a
+    // of asking for it, NOT from flags.with. Both derivations go through the
+    // BUNDLES-backed `BUNDLE_FOR_SERVICE` map, so a future bundle needs only a
     // registry edit in bundles.ts rather than a hand-listed derivation here (which
     // is why `parseWorkspace` exposes no per-family booleans of its own).
     // Hard-coding withAuthz to false previously dropped a workspace-named
     // `authz-sync` silently.
-    const closureOpts: ResolvedClosureOpts =
-      ws ? closureOptsForIds(ws.runSet) : closureOptsFor(flags.with);
-    const { withAuthz } = closureOpts;
+    //
+    // 🔑 `featuresFor` takes `flags.only` as well as `flags.with`: naming an
+    // optional service with `--only` now IMPLIES its feature. Previously only
+    // `--with` fed this, so `stack up --only transcripts-api` requested the id and
+    // then dropped it in `admitsOptional` — an empty closure, exit 0, no error.
+    const features: FeatureSet = ws
+      ? featuresForIds(ws.runSet)
+      : featuresFor(flags.only, flags.with, (m) => this.error(m));
+    const withAuthz = features.has('authz');
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the
     // launch path applies (BLOCKER-1) so the dry-run reflects what actually launches. ──
     if (flags['dry-run']) {
-      this.runDryRun(flags, requested, isOnly, closureOpts, {
+      this.runDryRun(flags, requested, isOnly, features, {
         sandboxHybrid: flags.sandbox !== undefined,
         sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
         sandboxName: ws?.iamSandbox ?? flags.sandbox,
@@ -263,7 +269,7 @@ export default class StackUp extends BaseCommand {
     //    deps the closure pulled in — iam-api et al. live at the cloud sandbox).
     //  - `--workspace`: subtract EVERY mode:sandbox service id (`ws.sandboxServices`).
     const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz);
-    await this.runNative(flags, requested, closureOpts, overlays, {
+    await this.runNative(flags, requested, features, overlays, {
       sandboxHybrid: flags.sandbox !== undefined,
       sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
       sandboxName,
@@ -381,7 +387,7 @@ export default class StackUp extends BaseCommand {
     flags: DryRunFlags,
     requested: ServiceId[],
     isOnly: boolean,
-    closureOpts: ResolvedClosureOpts,
+    features: FeatureSet,
     prune: LaunchPrune = {},
   ): void {
     const resolvedRequest: ServiceId[] = isOnly
@@ -396,7 +402,7 @@ export default class StackUp extends BaseCommand {
       this.error(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
     }
 
-    const closure = computeClosure(manifest, resolvedRequest, closureOpts);
+    const closure = computeClosure(manifest, resolvedRequest, { features });
 
     // M7: at slot > 0 the bring-up would EXCLUDE the literal-port services; surface
     // that in the preview so the dry-run matches what a real `--slot N` up launches.
@@ -477,11 +483,10 @@ export default class StackUp extends BaseCommand {
   private async runNative(
     flags: NativeFlags,
     requested: ServiceId[],
-    closureOpts: ResolvedClosureOpts,
+    features: FeatureSet,
     overlays: NativeOverlays = {},
     prune: LaunchPrune = {},
   ): Promise<void> {
-    const { withPlayback, withAuthz } = closureOpts;
     const known = new Set(Object.keys(manifest.services));
     const unknown = requested.filter((s) => !known.has(s));
     if (unknown.length > 0) {
@@ -502,7 +507,7 @@ export default class StackUp extends BaseCommand {
     // THIS slot's rtsm, not slot 0's) is generated in `buildRuntime`, the seam BOTH
     // `stack up` and `e2e run` share; it need not be repeated here.
 
-    const fullClosure = computeClosure(manifest, requested, closureOpts);
+    const fullClosure = computeClosure(manifest, requested, { features });
 
     // Exclude the still-un-slottable services from a slot > 0 bring-up: only the
     // literal-port playback trio (transcripts/insights/chat) carries literal cross-slot
@@ -539,7 +544,7 @@ export default class StackUp extends BaseCommand {
     const api = makeStackApi(manifest, runtime);
 
     // 1. native bring-up (mesh + topo-wave service launch + M9 auto-pull + AV).
-    const up = await api.up(services);
+    const up = await api.up(services, features);
 
     // M9 auto-pull: surface the ff-only sibling-sync outcome per repo (up.sh's
     // pull_repos ⚠/·/✓ lines). Printed first so a fast-forward / skip is visible even
@@ -578,12 +583,12 @@ export default class StackUp extends BaseCommand {
 
     // 2. (optional) reset — NATIVE (M8 R4). Truncates the closure's DBs to an empty
     // baseline; the native seed below then applies the SELECTED profile/add-ons on top
-    // (idempotent upserts). `withPlayback`/`withAuthz` MUST be threaded so
-    // `--with playback --reset` / `--with authz --reset` also truncate their opt-in
-    // DBs (playback trio / openfga+authz_sync_local) — matching both
-    // `up.sh --reset --with-playback` and the dedicated `stack reset --with playback`.
+    // (idempotent upserts). `features` MUST be threaded so `--with playback --reset` /
+    // `--with authz --reset` also truncate their opt-in DBs (playback trio /
+    // openfga+authz_sync_local) — matching both `up.sh --reset --with-playback` and
+    // the dedicated `stack reset --with playback`.
     if (flags.reset) {
-      const reset = await api.reset(services, { withPlayback, withAuthz });
+      const reset = await api.reset(services, { features });
       if (reset.code !== 0) this.exit(reset.code);
     }
 

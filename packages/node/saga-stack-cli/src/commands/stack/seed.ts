@@ -30,7 +30,7 @@ import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import {
   BUNDLE_NAMES,
-  closureOptsFor,
+  featuresOf,
   combineRequested,
   seedAddOnsFor,
 } from '../../core/bundles.js';
@@ -145,7 +145,9 @@ export default class StackSeed extends BaseCommand {
     // subtract them from the active set exactly like `reset` does, so their
     // seed steps degrade to service-inactive skips instead of failing.
     const excluded = new Set(instance.excludedServices);
-    const closureServices = computeClosure(manifest, requested, closureOptsFor(flags.with)).services;
+    const closureServices = computeClosure(manifest, requested, {
+      features: featuresOf(flags.with, requested),
+    }).services;
     const active = new Set(closureServices.filter((id) => !excluded.has(id)));
     const droppedForSlot = closureServices.filter((id) => excluded.has(id));
     if (droppedForSlot.length > 0) {

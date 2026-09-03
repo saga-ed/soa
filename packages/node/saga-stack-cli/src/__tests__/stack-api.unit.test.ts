@@ -13,6 +13,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { featureSet } from '../core/bundles.js';
 import { computeClosure } from '../core/closure.js';
 import { deriveInstance } from '../core/derive-instance.js';
 import { defaultLaunchContext } from '../core/launch-plan.js';
@@ -90,6 +91,11 @@ function makeRuntime(overrides: Partial<Runtime> = {}): { runtime: Runtime; fake
       fakes.meshExecs.push({ container, cmd: readinessCmd });
       return true;
     },
+    // A `readinessHttp` unit probes the host, never `docker exec`; without this
+    // the fake reports it never-ready and any closure containing one fails.
+    async readyHttp(): Promise<boolean> {
+      return true;
+    },
   };
   const portProbe: PortProbe = {
     async dockerHolder(): Promise<string | null> {
@@ -155,7 +161,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['scheduling-api', 'sessions-api'] as ServiceId[]);
 
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
 
     expect(res.ok).toBe(true);
     // launch order is the topo flatten: iam-api → programs-api → scheduling-api → sessions-api.
@@ -178,11 +184,38 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     expect(makeUp?.cwd).toBe('/dev/soa/infra');
   });
 
+  // A bundle contributing mesh but ZERO services (`otel`) reaches the mesh only
+  // via the FeatureSet half of `neededMesh`. These drive the real `api.up`, so
+  // they pin the whole chain — neededMesh → meshUp's activeGatedIds →
+  // COMPOSE_PROFILES — which is what actually starts the profile-gated container.
+  it('a bundle-contributed mesh unit is readiness-gated and activates its compose profile', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const features = featureSet(['otel']);
+    const closure = computeClosure(manifest, ['programs-api'] as ServiceId[], { features });
+    const res = await api.up(closure.services, features);
+
+    expect(res.mesh.units.map((u) => u.id)).toContain('otel-collector');
+    const makeUp = fakes.runs.find((r) => r.command === 'make');
+    expect(makeUp?.env?.COMPOSE_PROFILES).toBe('otel');
+  });
+
+  it('without the bundle, neither the unit nor its compose profile appears', async () => {
+    const { runtime, fakes } = makeRuntime();
+    const api = makeStackApi(manifest, runtime);
+    const closure = computeClosure(manifest, ['programs-api'] as ServiceId[]);
+    const res = await api.up(closure.services, featureSet([]));
+
+    expect(res.mesh.units.map((u) => u.id)).not.toContain('otel-collector');
+    const makeUp = fakes.runs.find((r) => r.command === 'make');
+    expect(makeUp?.env?.COMPOSE_PROFILES).toBeUndefined();
+  });
+
   it('launch env is FAITHFUL + fully resolved (no dangling tokens)', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
-    await api.up(closure.services);
+    await api.up(closure.services, featureSet([]));
 
     const sched = fakes.launches.find((s) => s.id === 'scheduling-api');
     expect(sched).toBeDefined();
@@ -202,7 +235,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['saga-dash'] as ServiceId[]);
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
 
     expect(res.dash?.action).toBe('noop-absent'); // existsFile:false, non-tunnel ⇒ nothing to remove
     expect(fakes.dashCalls.some((c) => c.startsWith('existsDir:'))).toBe(true);
@@ -213,7 +246,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     const { runtime, fakes } = makeRuntime(); // default slot (undefined ⇒ 0)
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['coach-web'] as ServiceId[]);
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
 
     expect(res.coachWeb?.action).toBe('wrote');
     expect(res.coachWeb?.path).toBe('/dev/coach/apps/web/coach-web/.env.local');
@@ -238,7 +271,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     });
     const { runtime, fakes } = makeRuntime({ launchContext: slotCtx, slot: 1 });
     const api = makeStackApi(manifest, runtime);
-    await api.up(['coach-web'] as ServiceId[]);
+    await api.up(['coach-web'] as ServiceId[], featureSet([]));
 
     const contents = fakes.coachWebWrites[0].contents;
     // slot 1 = base + 1000: iam 4010, coach-api 7105, saga-dash 9900.
@@ -254,7 +287,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
 
     expect(res.coachWeb).toBeUndefined();
     expect(fakes.coachWebWrites).toEqual([]);
@@ -263,7 +296,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
   it('soa#300: no coach-web .env.local write under --tunnel (public URLs are a separate concern)', async () => {
     const { runtime, fakes } = makeRuntime({ tunnel: true, tunnelDomain: 'abc.vms.wootdev.com' });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['coach-web'] as ServiceId[]);
+    const res = await api.up(['coach-web'] as ServiceId[], featureSet([]));
 
     expect(res.coachWeb?.action).toBe('noop-tunnel');
     expect(fakes.coachWebWrites).toEqual([]);
@@ -272,7 +305,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
   it('slot 0: a frontend launch command is byte-identical (no --port appended)', async () => {
     const { runtime, fakes } = makeRuntime(); // default slot (undefined ⇒ 0)
     const api = makeStackApi(manifest, runtime);
-    await api.up(['saga-dash'] as ServiceId[]);
+    await api.up(['saga-dash'] as ServiceId[], featureSet([]));
 
     const dash = fakes.launches.find((s) => s.id === 'saga-dash');
     expect(dash?.command).toBe('pnpm');
@@ -290,7 +323,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     });
     const { runtime, fakes } = makeRuntime({ launchContext: slotCtx, slot: 1 });
     const api = makeStackApi(manifest, runtime);
-    await api.up(['saga-dash', 'coach-web'] as ServiceId[]);
+    await api.up(['saga-dash', 'coach-web'] as ServiceId[], featureSet([]));
 
     // saga-dash 8900 + 1000 offset ⇒ appended `--port 9900`; vite honours the last --port.
     const dash = fakes.launches.find((s) => s.id === 'saga-dash');
@@ -317,7 +350,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
     });
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
 
     expect(res.ok).toBe(false);
     expect(res.failedAt).toBe('iam-api');
@@ -337,7 +370,7 @@ describe('StackApi.up — native partial-stack bring-up', () => {
       },
     });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services);
+    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services, featureSet([]));
 
     expect(res.ok).toBe(false);
     expect(res.mesh.conflicts.map((c) => c.port)).toContain(5432);
@@ -376,7 +409,7 @@ describe('StackApi.up — native prep pass wiring (M8)', () => {
     const api = makeStackApi(manifest, runtime);
     const closure = computeClosure(manifest, ['scheduling-api'] as ServiceId[]);
 
-    const res = await api.up(closure.services);
+    const res = await api.up(closure.services, featureSet([]));
     expect(res.ok).toBe(true);
 
     // all three phases populated + ok.
@@ -415,7 +448,7 @@ describe('StackApi.up — native prep pass wiring (M8)', () => {
   it('is SKIPPED entirely when no pgProbe is wired (pre-M8 byte-identical path)', async () => {
     const { runtime } = makeRuntime(); // no pgProbe
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services);
+    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services, featureSet([]));
     expect(res.prep).toBeUndefined();
     expect(res.provision).toBeUndefined();
     expect(res.migrate).toBeUndefined();
@@ -430,7 +463,7 @@ describe('StackApi.up — native prep pass wiring (M8)', () => {
       }),
     });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(computeClosure(manifest, ['scheduling-api'] as ServiceId[]).services);
+    const res = await api.up(computeClosure(manifest, ['scheduling-api'] as ServiceId[]).services, featureSet([]));
 
     expect(res.ok).toBe(true);
     // R1: every repo fresh ⇒ no prep steps ran.
@@ -454,7 +487,7 @@ describe('StackApi.up — native prep pass wiring (M8)', () => {
       },
     });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services);
+    const res = await api.up(computeClosure(manifest, ['iam-api'] as ServiceId[]).services, featureSet([]));
     expect(res.ok).toBe(false);
     expect(res.provision?.ok).toBe(false);
     expect(fakes.launches).toEqual([]); // never reached the launch stage
@@ -468,7 +501,7 @@ describe('StackApi.up — native prep pass wiring (M8)', () => {
       meshOffset: 1000,
     });
     const api = makeStackApi(manifest, runtime);
-    await api.up(computeClosure(manifest, ['programs-api'] as ServiceId[]).services);
+    await api.up(computeClosure(manifest, ['programs-api'] as ServiceId[]).services, featureSet([]));
 
     // provision docker-exec hit the slot container.
     const dockerCall = fakes.runs.find((r) => r.command === 'docker');
@@ -757,7 +790,7 @@ describe('StackApi.reset — native (M8 R4)', () => {
     );
   });
 
-  it('playback DBs are reset ONLY under withPlayback (idempotent gating)', async () => {
+  it('playback DBs are reset ONLY under the playback feature (idempotent gating)', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
     await api.reset(['transcripts-api', 'iam-api'] as ServiceId[]);
@@ -766,7 +799,9 @@ describe('StackApi.reset — native (M8 R4)', () => {
 
     const { runtime: rt2, fakes: fk2 } = makeRuntime();
     const api2 = makeStackApi(manifest, rt2);
-    await api2.reset(['transcripts-api', 'iam-api'] as ServiceId[], { withPlayback: true });
+    await api2.reset(['transcripts-api', 'iam-api'] as ServiceId[], {
+      features: featureSet(['playback']),
+    });
     expect(fk2.runs.some((r) => r.command === 'docker' && r.args.includes('transcripts_local'))).toBe(true);
   });
 
@@ -945,7 +980,7 @@ describe('StackApi.up — M9 auto-pull', () => {
     const { git } = fakeGitRunner({ async revListCount() { return 3; } });
     const { runtime } = makeRuntime({ gitRunner: git, autoPull: 'auto', repoDirExists: () => true });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['scheduling-api'] as ServiceId[]);
+    const res = await api.up(['scheduling-api'] as ServiceId[], featureSet([]));
     expect(res.autoPull?.mode).toBe('auto');
     // SOA (mesh infra) + program-hub (programs-api) + rostering (iam-api) are synced.
     const names = res.autoPull?.repos.map((r) => r.name);
@@ -959,7 +994,7 @@ describe('StackApi.up — M9 auto-pull', () => {
     const { git, ffd } = fakeGitRunner({ async revListCount() { return 3; } });
     const { runtime } = makeRuntime({ gitRunner: git, autoPull: 'auto', repoDirExists: () => true, slot: 1 });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['iam-api'] as ServiceId[]);
+    const res = await api.up(['iam-api'] as ServiceId[], featureSet([]));
     // The ff-only sync is gated to slot 0 (parity with the Connect-AV gate) — a slot-1
     // up must NOT fetch/ff the shared checkouts.
     expect(res.autoPull).toBeUndefined();
@@ -971,14 +1006,14 @@ describe('StackApi.up — M9 auto-pull', () => {
     const { git } = fakeGitRunner();
     const { runtime } = makeRuntime({ gitRunner: git, autoPull: false });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['iam-api'] as ServiceId[]);
+    const res = await api.up(['iam-api'] as ServiceId[], featureSet([]));
     expect(res.autoPull).toBeUndefined();
   });
 
   it('NO auto-pull when no git seam is wired (byte-identical to pre-M9)', async () => {
     const { runtime } = makeRuntime({ autoPull: 'auto' }); // gitRunner absent
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['iam-api'] as ServiceId[]);
+    const res = await api.up(['iam-api'] as ServiceId[], featureSet([]));
     expect(res.autoPull).toBeUndefined();
   });
 
@@ -986,7 +1021,7 @@ describe('StackApi.up — M9 auto-pull', () => {
     const { git } = fakeGitRunner({ async fetch() { return false; } });
     const { runtime } = makeRuntime({ gitRunner: git, autoPull: 'auto', repoDirExists: () => true });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['iam-api'] as ServiceId[]);
+    const res = await api.up(['iam-api'] as ServiceId[], featureSet([]));
     expect(res.ok).toBe(true); // fetch failure never aborts
     expect(res.autoPull?.repos.every((r) => r.action === 'skip' && r.reason === 'fetch-failed')).toBe(true);
   });
@@ -998,7 +1033,7 @@ describe('StackApi.up — M9 Connect AV', () => {
   it('starts livekit + coturn from qboard compose when connect is in the closure at slot 0', async () => {
     const { runtime, fakes } = makeRuntime({ connectAv: true });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['connect-api'] as ServiceId[]);
+    const res = await api.up(['connect-api'] as ServiceId[], featureSet([]));
     const av = fakes.runs.find((r) => r.command === 'docker');
     expect(av?.args).toEqual(AV_ARGS);
     expect(res.av).toMatchObject({ attempted: true, ok: true });
@@ -1007,7 +1042,7 @@ describe('StackApi.up — M9 Connect AV', () => {
   it('does NOT start AV when connect is absent from the closure', async () => {
     const { runtime, fakes } = makeRuntime({ connectAv: true });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['scheduling-api'] as ServiceId[]);
+    const res = await api.up(['scheduling-api'] as ServiceId[], featureSet([]));
     expect(fakes.runs.find((r) => r.command === 'docker')).toBeUndefined();
     expect(res.av).toBeUndefined();
   });
@@ -1015,7 +1050,7 @@ describe('StackApi.up — M9 Connect AV', () => {
   it('NEVER starts AV at slot > 0 (single-node :7880 would split-brain onto slot 0)', async () => {
     const { runtime, fakes } = makeRuntime({ connectAv: true, slot: 1 });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['connect-api'] as ServiceId[]);
+    const res = await api.up(['connect-api'] as ServiceId[], featureSet([]));
     expect(fakes.runs.find((r) => r.command === 'docker')).toBeUndefined();
     expect(res.av).toBeUndefined();
   });
@@ -1031,7 +1066,7 @@ describe('StackApi.up — M9 Connect AV', () => {
     };
     const { runtime } = makeRuntime({ connectAv: true, runner });
     const api = makeStackApi(manifest, runtime);
-    const res = await api.up(['connect-api'] as ServiceId[]);
+    const res = await api.up(['connect-api'] as ServiceId[], featureSet([]));
     expect(res.av).toMatchObject({ attempted: true, ok: false });
     expect(res.ok).toBe(true); // AV never aborts the bring-up
   });

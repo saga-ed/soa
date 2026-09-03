@@ -35,7 +35,13 @@ export type ServiceId =
   | 'staff-admin-console'; // optional: true (--with staff-admin) — staff-only SvelteKit SPA (:8910)
 
 /** Mesh infra units, started as a single `make up PROFILE=empty`. */
-export type MeshId = 'postgres' | 'redis' | 'rabbitmq' | 'connect-mongo' | 'openfga';
+export type MeshId =
+  | 'postgres'
+  | 'redis'
+  | 'rabbitmq'
+  | 'connect-mongo'
+  | 'openfga'
+  | 'otel-collector';
 
 /** Sibling-repo env-var keys (mirror up.sh:173-181). `repoRoot = $<key> ?? $DEV/<default>`. */
 export type RepoKey =
@@ -195,6 +201,23 @@ export interface MeshDef {
    * metacharacters (quoting, pipes, `&&`) to use this.
    */
   shell?: boolean;
+  /**
+   * Probe readiness over HTTP from the HOST instead of `docker exec`-ing into the
+   * container. `port` is the unit's HOST base port; the slot offset is applied by
+   * the poller, exactly as for every other published port.
+   *
+   * For an image that carries NO exec-able probe at all. `shell:false` rescues a
+   * distroless image that still ships a probe binary (openfga has
+   * `grpc_health_probe`), but otel-collector's ships only the collector itself:
+   * no `sh`, no `curl`, and its subcommands (`validate`, `components`) check
+   * CONFIG, not liveness. Without this the unit could not be gated honestly —
+   * and an ungated unit means a crash-looping collector reads as a healthy mesh
+   * while every span silently vanishes.
+   *
+   * When set, `readinessCmd` is unused (it stays required so the exec path needs
+   * no per-unit optionality).
+   */
+  readinessHttp?: { port: number; path: string };
   /** Max seconds to wait for readiness. */
   timeoutSec: number;
 }

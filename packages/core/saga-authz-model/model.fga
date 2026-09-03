@@ -295,6 +295,9 @@ type saga_platform
     # membership, so without this iam-api returns them no program permissions
     # and program lists render empty.
     define can_view_district_programs: org_admin
+    # Staff read access to a session and its recording regardless of grant
+    # group (program-hub#760).
+    define can_observe_session_recordings: support
 
 # An organization staff create/administer. Maps 1:1 to an iam-api group
 # (kind=district): object id is the rostering group id. DISTINCT from the

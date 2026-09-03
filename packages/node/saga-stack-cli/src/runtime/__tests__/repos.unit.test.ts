@@ -21,6 +21,7 @@ describe('REPO_ENV_VAR', () => {
       qboard: 'QBOARD',
       rtsm: 'RTSM',
       fleek: 'FLEEK',
+      janus: 'JANUS',
     });
   });
 });

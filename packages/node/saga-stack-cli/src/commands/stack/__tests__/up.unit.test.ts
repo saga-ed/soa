@@ -26,6 +26,7 @@ import { combineRequested, effectiveWithPlayback } from '../../../core/bundles.j
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { ServiceId } from '../../../core/manifest/index.js';
+import { resolveFlagOverlays } from '../up.js';
 
 const fail = (msg: string): never => {
   throw new Error(msg);
@@ -99,4 +100,31 @@ describe('stack up --dry-run — closure planning path', () => {
 
   it.todo('oclif harness: emit() stdout shape (--output-json / --porcelain / text)');
   it.todo('oclif harness: errors without --dry-run (live launch is M1+)');
+});
+
+describe('resolveFlagOverlays — withAuthz/withJanusMock → NativeOverlays (soa#446)', () => {
+  // soa#446: closureOptsFor() correctly computed withJanusMock:true for the
+  // CLOSURE, but resolveOverlays() (this function's caller) had no withJanusMock
+  // param at all, so `stack up --with staff-admin` silently shipped the real
+  // (unreachable-from-localhost) gate JWKS URL. Caught only by checking a live
+  // process's /proc/<pid>/environ, not by any test — this pins the seam.
+  it('sets neither overlay when both flags are false/undefined', () => {
+    expect(resolveFlagOverlays()).toEqual({});
+    expect(resolveFlagOverlays(false, false)).toEqual({});
+  });
+
+  it('threads withAuthz into overlays.authz', () => {
+    expect(resolveFlagOverlays(true, false)).toEqual({ authz: { withAuthz: true } });
+  });
+
+  it('threads withJanusMock into overlays.janusMock', () => {
+    expect(resolveFlagOverlays(false, true)).toEqual({ janusMock: { withJanusMock: true } });
+  });
+
+  it('threads both when --with staff-admin (janusMock) and --with authz are both selected', () => {
+    expect(resolveFlagOverlays(true, true)).toEqual({
+      authz: { withAuthz: true },
+      janusMock: { withJanusMock: true },
+    });
+  });
 });

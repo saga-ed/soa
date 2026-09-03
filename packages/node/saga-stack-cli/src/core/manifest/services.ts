@@ -1,5 +1,5 @@
 /**
- * The 16 ServiceDefs — verified against up.sh (ports `182-299`, the `services_up`
+ * The 17 ServiceDefs — verified against up.sh (ports `182-299`, the `services_up`
  * launch wall `1373-1584`) and verify.sh (health endpoints `52-76`).
  *
  * All review corrections + user decisions applied:
@@ -111,6 +111,16 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         FGA_ENABLED: '${FGA_ENABLED}',
         FGA_API_URL: '${OPENFGA_API_URL}',
         FGA_STORE_ID: '${OPENFGA_STORE_ID}',
+        // Local mock janus/gate (opt-in — --with janus-mock / --with staff-admin).
+        // Points DevPerimeterConfig's JWKS fetch at the mock signer; unset ⇒ the
+        // real (unreachable-from-localhost) gate.wootdev.com default.
+        JANUS_JWKS_URL: '${JANUS_JWKS_URL}',
+        // Unset defaults to DevPerimeterConfig.enabled, which this stack pins OFF
+        // via JANUS_REQUIRED above — so without this token nothing calls
+        // jose.jwtVerify on a presented janus_session even with the signer
+        // running. Flips VERIFICATION only (currentJanusClaims()), not perimeter
+        // ENFORCEMENT — deliberately split (ROSTERING's src/config/janus-claims.ts).
+        JANUS_CLAIMS_ENABLED: '${JANUS_CLAIMS_ENABLED}',
       },
     },
     // 'fga-bootstrap' (ADDON_STEPS.authz, core/seed/profiles.ts) is NOT listed here —
@@ -282,6 +292,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         JANUS_REQUIRED: 'false',
+        // Local mock janus/gate (opt-in — --with janus-mock / --with staff-admin);
+        // verification only, no enforcement flip (JANUS_REQUIRED stays 'false').
+        JANUS_JWKS_URL: '${JANUS_JWKS_URL}',
         // coach-web is here for the SAME reason it is in iam-api's CORS_ORIGIN:
         // its browser calls `programs.list` DIRECT (coach-web
         // `src/lib/api/programs.ts`), and that call carries an
@@ -338,6 +351,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
         JANUS_REQUIRED: 'false',
+        // Local mock janus/gate (opt-in — --with janus-mock / --with staff-admin);
+        // verification only, no enforcement flip (JANUS_REQUIRED stays 'false').
+        JANUS_JWKS_URL: '${JANUS_JWKS_URL}',
         CORS_ORIGIN: '${DASH_URL}',
         JANUS_LOGIN_HOST: 'localhost:${IAM_PORT}/demo',
         // Same iss iam-api stamps — see programs-api's JWT_ISSUER note.
@@ -1143,5 +1159,34 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // process instead (one-time "stop and re-run"), which is precisely the
     // mixed-stack condition BFF_URL exists to prevent.
     adoptEnv: ['BFF_URL'],
+  },
+  // ── janus mock signer (local janus_session issuer) ──────────────────────
+  // Ephemeral EdDSA JWKS signer for local dev: mints REAL, verifiable
+  // janus_session JWTs (`POST /mint`) so DevPerimeterConfig's verifier
+  // (iam-api/programs-api/scheduling-api) can validate one without a live
+  // janus/gate deployment. `optional: true` (--with janus-mock / --with
+  // staff-admin — the console is the actual consumer today).
+  'janus-mock-signer': {
+    id: 'janus-mock-signer',
+    repo: 'JANUS',
+    subpath: 'apps/api/gate',
+    port: 3099,
+    portEnvVar: 'PORT',
+    healthPath: '/health',
+    databases: [],
+    dependsOn: [],
+    depKinds: {},
+    mesh: [],
+    launch: {
+      cmd: 'pnpm dev:mock-signer',
+      env: {
+        PORT: '${JANUS_MOCK_SIGNER_PORT}',
+      },
+    },
+    seed: [],
+    lane: lanes(3099, 'janus-mock'),
+    tunnelSlug: 'janus-mock',
+    isFrontend: false,
+    optional: true,
   },
 };

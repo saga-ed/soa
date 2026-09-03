@@ -207,7 +207,7 @@ export default class StackUp extends BaseCommand {
     // `authz-sync` silently.
     const closureOpts: ResolvedClosureOpts =
       ws ? closureOptsForIds(ws.runSet) : closureOptsFor(flags.with);
-    const { withAuthz } = closureOpts;
+    const { withAuthz, withJanusMock } = closureOpts;
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the
     // launch path applies (BLOCKER-1) so the dry-run reflects what actually launches. ──
@@ -262,7 +262,7 @@ export default class StackUp extends BaseCommand {
     //  - `--sandbox <name>` accompanies `--only`: launch the run-set ALONE (subtract the
     //    deps the closure pulled in — iam-api et al. live at the cloud sandbox).
     //  - `--workspace`: subtract EVERY mode:sandbox service id (`ws.sandboxServices`).
-    const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz);
+    const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz, withJanusMock);
     await this.runNative(flags, requested, closureOpts, overlays, {
       sandboxHybrid: flags.sandbox !== undefined,
       sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
@@ -308,15 +308,9 @@ export default class StackUp extends BaseCommand {
     flags: OverlayFlags,
     sandboxName?: string,
     withAuthz?: boolean,
+    withJanusMock?: boolean,
   ): Promise<NativeOverlays> {
-    const overlays: NativeOverlays = {};
-
-    // `--with authz`: hand the flag down as data (the store-id FILE READ itself
-    // stays in base-command.ts's buildNativeRuntime, the ONE place repoRoots is
-    // resolved — see readOpenfgaStoreId). Absent ⇒ base env only (opt-in).
-    if (withAuthz) {
-      overlays.authz = { withAuthz: true };
-    }
+    const overlays: NativeOverlays = resolveFlagOverlays(withAuthz, withJanusMock);
 
     if (sandboxName !== undefined) {
       // up.sh SANDBOX_BASE default (dev fleet); env-overridable like up.sh.
@@ -923,4 +917,23 @@ function sandboxDropSet(
   }
   if (prune.sandboxServices) for (const id of prune.sandboxServices) sandboxDrop.add(id);
   return sandboxDrop;
+}
+
+/**
+ * PURE: the `--with authz` / `--with janus-mock` (or `--with staff-admin`) slice of
+ * `resolveOverlays` — split out so it's unit-testable without the oclif harness the
+ * rest of `resolveOverlays` (tunnel moniker resolution, fleek creds IO) requires.
+ * `closureOptsFor`/`effectiveWithJanusMock` computing `withJanusMock: true` is not
+ * enough on its own — soa#446 shipped `--with staff-admin` with the flag correctly
+ * computed for the CLOSURE but never reaching `NativeOverlays`, because this
+ * assembly step didn't accept a `withJanusMock` param at all.
+ */
+export function resolveFlagOverlays(
+  withAuthz?: boolean,
+  withJanusMock?: boolean,
+): Pick<NativeOverlays, 'authz' | 'janusMock'> {
+  const overlays: Pick<NativeOverlays, 'authz' | 'janusMock'> = {};
+  if (withAuthz) overlays.authz = { withAuthz: true };
+  if (withJanusMock) overlays.janusMock = { withJanusMock: true };
+  return overlays;
 }

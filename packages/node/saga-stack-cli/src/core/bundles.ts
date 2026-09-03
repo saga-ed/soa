@@ -25,7 +25,8 @@ export type BundleName =
   | 'playback'
   | 'qtf'
   | 'authz'
-  | 'staff-admin';
+  | 'staff-admin'
+  | 'janus-mock';
 
 /** A seed add-on a bundle may layer onto the composed seed plan. */
 export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz';
@@ -80,12 +81,23 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
       '`stack up --with authz` once more to pick up the persisted store id.',
   },
   'staff-admin': {
-    services: ['staff-admin-bff', 'staff-admin-console'],
+    services: ['staff-admin-bff', 'staff-admin-console', 'janus-mock-signer'],
     description:
       'Staff-admin console: the staff-only SPA (:8910) + its own BFF (:3011), plus the ' +
       'iam/programs/sis closure they read. Log in with `ss stack login` — the console ' +
-      'reads that operator cookie. Impersonate is HIDDEN (the synthetic seed mints no ' +
-      'staff:* claims) and the COACH pages 401 (coach-api verifies a janus_session).',
+      'reads that operator cookie. The bundled janus-mock-signer lets the console mint a ' +
+      'local janus_session for `can_impersonate` — but the SEEDED synthetic dataset may ' +
+      'still need an FGA/permission grant on the operator before impersonation actually ' +
+      'succeeds (separate, not-yet-done work). The COACH pages still 401 (coach-api ' +
+      'verifies a janus_session of its own).',
+  },
+  'janus-mock': {
+    services: ['janus-mock-signer'],
+    description:
+      'Local EdDSA JWKS signer for janus_session claims — lets iam-api/programs-api/' +
+      'scheduling-api verify a locally-minted impersonation/janus session without a real ' +
+      'janus/gate deployment. Mint a token with POST http://localhost:3099/mint ' +
+      '{sub,email,name,permissions}.',
   },
 };
 
@@ -201,6 +213,19 @@ export function effectiveWithStaffAdmin(withBundles: string[] | undefined): bool
 }
 
 /**
+ * Whether the closure should keep the `optional:true` `janus-mock-signer`
+ * service: true iff EITHER `janus-mock` or `staff-admin` was requested via
+ * `--with` — `staff-admin`'s bundle now folds `janus-mock-signer` into its own
+ * `services` (see `BUNDLES['staff-admin']`), so this flag must admit both
+ * spellings or `--with staff-admin` alone would compose a closure containing
+ * the id while `computeClosure` drops it for lack of an opt-in flag. Same
+ * shape as `effectiveWithAuthz`/`effectiveWithStaffAdmin` otherwise. PURE.
+ */
+export function effectiveWithJanusMock(withBundles: string[] | undefined): boolean {
+  return (withBundles ?? []).some((b) => b === 'janus-mock' || b === 'staff-admin');
+}
+
+/**
  * The `optional:true` service ids each opt-in flag admits, derived from the
  * bundle registry so they cannot drift from `BUNDLES`.
  *
@@ -212,6 +237,7 @@ export function effectiveWithStaffAdmin(withBundles: string[] | undefined): bool
 export const PLAYBACK_IDS: readonly ServiceId[] = BUNDLES.playback.services;
 export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
 export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
+export const JANUS_MOCK_IDS: readonly ServiceId[] = BUNDLES['janus-mock'].services;
 
 /**
  * The fully-resolved opt-in flags for every `optional:true` family — one field
@@ -224,7 +250,7 @@ export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].serv
  * of every signature that spells the shape out.
  */
 export type ResolvedClosureOpts = Required<
-  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>
+  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin' | 'withJanusMock'>
 >;
 
 /**
@@ -246,6 +272,7 @@ export function closureOptsFor(
     withPlayback: effectiveWithPlayback(withBundles),
     withAuthz: effectiveWithAuthz(withBundles),
     withStaffAdmin: effectiveWithStaffAdmin(withBundles),
+    withJanusMock: effectiveWithJanusMock(withBundles),
   };
 }
 
@@ -263,6 +290,7 @@ export function closureOptsForIds(
     withPlayback: has(PLAYBACK_IDS),
     withAuthz: has(AUTHZ_IDS),
     withStaffAdmin: has(STAFF_ADMIN_IDS),
+    withJanusMock: has(JANUS_MOCK_IDS),
   };
 }
 

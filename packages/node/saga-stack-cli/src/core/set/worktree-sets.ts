@@ -43,6 +43,7 @@ export const SET_REPO_KEYS = [
   'qboard',
   'rtsm',
   'fleek',
+  'janus',
 ] as const;
 
 export type SetRepoKey = (typeof SET_REPO_KEYS)[number];

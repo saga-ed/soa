@@ -97,6 +97,10 @@ export interface LaunchTokens {
   REDIS_PORT: string;
   /** authz-sync port — opt-in service (`--with authz`), no up.sh precedent (new). */
   AUTHZ_SYNC_PORT: string;
+  /** janus-mock-signer port (3099) — opt-in service (`--with janus-mock` /
+   *  `--with staff-admin`), no up.sh precedent (new). Fed into its own launch env
+   *  as `${JANUS_MOCK_SIGNER_PORT}` AND composed into `JANUS_JWKS_URL` below. */
+  JANUS_MOCK_SIGNER_PORT: string;
 
   // ── lane base URLs (local/stack lane: http://localhost:<port>) ──
   /** up.sh `IAM_URL`. */
@@ -206,6 +210,25 @@ export interface LaunchTokens {
    * missing-token error like other tokens, since '' is expected on run 1.
    */
   OPENFGA_STORE_ID: string;
+
+  // ── local janus mock signer (opt-in — `--with janus-mock` / `--with
+  //    staff-admin`; new, no up.sh precedent) ──
+  /**
+   * DevPerimeterConfig's JWKS URL for the three consumers (iam-api/programs-api/
+   * scheduling-api): the mock signer's `http://localhost:<port>/.well-known/
+   * jwks.json` when `effectiveWithJanusMock` is true, else the real
+   * (unreachable-from-localhost) `gate.wootdev.com` default every env's
+   * DevPerimeterConfig already carries.
+   */
+  JANUS_JWKS_URL: string;
+  /**
+   * iam-api's verification-only flip (populates `currentJanusClaims()`), NOT
+   * perimeter enforcement (`JANUS_REQUIRED` is untouched by this flag). `'true'`
+   * only when the janus mock signer is in the closure, else `'false'` — unset,
+   * iam-api never calls `jose.jwtVerify` on a presented `janus_session` even
+   * with the signer running.
+   */
+  JANUS_CLAIMS_ENABLED: string;
 
   // ── global launch env (up.sh services_up `export`s these ONCE, ~1384-1385, so
   //    every `pnpm dev` child inherits them; soa-logger/soa-config validate them
@@ -634,6 +657,14 @@ export interface LaunchContextInputs {
    */
   withAuthz?: boolean;
   /**
+   * Whether the `janus-mock` bundle was selected (`effectiveWithJanusMock`,
+   * true for both `--with janus-mock` and `--with staff-admin`) — drives
+   * `JANUS_JWKS_URL`/`JANUS_CLAIMS_ENABLED`. Default `false` (opt-in design
+   * decision — every default `stack up` keeps iam-api/programs-api/
+   * scheduling-api pointed at the real gate.wootdev.com JWKS URL).
+   */
+  withJanusMock?: boolean;
+  /**
    * The bootstrapped OpenFGA store id, read synchronously from the fixed
    * store-id file (or `SAGA_STACK_OPENFGA_STORE_ID` env override) by the
    * runtime BEFORE calling `defaultLaunchContext` — same seam as `--tunnel`'s
@@ -698,6 +729,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     CONNECT_MONGO_PORT: String(mongoPort),
     REDIS_PORT: String(redisPort),
     AUTHZ_SYNC_PORT: String(ports['authz-sync']),
+    JANUS_MOCK_SIGNER_PORT: String(ports['janus-mock-signer']),
 
     // lane base URLs (local/stack lane)
     IAM_URL: `http://localhost:${ports['iam-api']}`,
@@ -738,6 +770,15 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     FGA_ENABLED: inputs.withAuthz ? 'true' : 'false',
     OPENFGA_API_URL: `http://localhost:${openfgaPort}`,
     OPENFGA_STORE_ID: inputs.openfgaStoreId ?? '',
+
+    // Local mock signer (opt-in — --with janus-mock or --with staff-admin). Off ⇒ the
+    // real (unreachable-from-localhost) default gate.wootdev.com JWKS URL, matching every
+    // env's default DevPerimeterConfig; verification is a no-op there anyway since
+    // JANUS_CLAIMS_ENABLED defaults to DevPerimeterConfig.enabled (false in this stack).
+    JANUS_JWKS_URL: inputs.withJanusMock
+      ? `http://localhost:${ports['janus-mock-signer']}/.well-known/jwks.json`
+      : 'https://gate.wootdev.com/.well-known/jwks.json',
+    JANUS_CLAIMS_ENABLED: inputs.withJanusMock ? 'true' : 'false',
 
     // global launch env (up.sh `:-` defaults; runtime may pass ambient overrides)
     PINO_LOGGER_LEVEL: inputs.pinoLevel ?? 'info',

@@ -228,6 +228,7 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
                 'can_manage_staff',
                 'can_view_district_programs',
                 'can_view_user_pii',
+                'can_observe_session_recordings',
             ]),
         );
     });
@@ -240,6 +241,11 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
     it('can_view_district_programs resolves from org_admin, not super_admin alone', () => {
         const rel = byType.saga_platform.relations?.can_view_district_programs;
         expect(rel?.computedUserset?.relation).toBe('org_admin');
+    });
+
+    it('can_observe_session_recordings resolves from support (program-hub#760)', () => {
+        const rel = byType.saga_platform.relations?.can_observe_session_recordings;
+        expect(rel?.computedUserset?.relation).toBe('support');
     });
 
     it('staff_org uses staff_admin and NEVER admin (SEC-CRIT-2)', () => {

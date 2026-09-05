@@ -6,7 +6,8 @@
  *  - saga-dash.dependsOn includes sis-api (roster CSV page) AND content-api (picker).
  *  - sessions-api deps iam-api (url) + programs-api/scheduling-api (event).
  *  - connect-api deps content-api (so any connect closure pulls content + its DB).
- *  - connect-web deps connect-api + rtsm-api + iam-api (browser).
+ *  - connect-web deps connect-api + rtsm-api + iam-api + ads-adm-api (browser;
+ *    ads-adm-api hosts the Student Surveys sector Connect calls from the browser).
  *  - tunnelSlug carries the PUBLIC host slug (tunnel.sh exposes abbreviated names).
  *  - iam-api gates redis (mesh[] + REDIS_HOST/REDIS_PORT launch.env) — it is the
  *    only redis consumer in the manifest; every other service leaves redis OFF.
@@ -435,7 +436,9 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // M13 listen-port injection wins at slot > 0 and is absent at slot 0).
     portEnvVar: 'EXPRESS_SERVER_PORT',
     healthPath: '/health',
-    databases: ['ads_adm_local', 'ledger_local'],
+    // surveys_api_local: the Student Surveys sector's OWN database (sds#495),
+    // hosted in this process but never sharing ads_adm's schema.
+    databases: ['ads_adm_local', 'ledger_local', 'surveys_api_local'],
     // programs-api: ads-adm resolves program display NAMES from it (`programs.get`,
     // a publicProcedure → 'url', not 's2s' like sessions-api's service-gated reads).
     // sessions-api projects no display strings, so the occurrence wire's programName
@@ -485,6 +488,11 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         ADM_ALLOW_ROSTER_MODE_OVERRIDE: 'true',
         ADS_ADM_DATABASE_URL: '${ADS_ADM_DB_URL}',
         DATABASE_URL: '${ADS_ADM_DB_URL}',
+        // Student Surveys sector (sds#495): its OWN database, read by the hosted
+        // sector's Prisma client. up.sh literal `postgresql://surveys_api:
+        // surveys_api@localhost:5432/surveys_api_local`; tokenized like
+        // ADS_ADM_DB_URL so a slot > 0 process dials ITS slot's mesh pg.
+        SURVEYS_DATABASE_URL: '${SURVEYS_DB_URL}',
         CORS_ORIGIN: '${DASH_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
       },
@@ -651,14 +659,32 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     portEnvVar: null,
     healthPath: '/',
     databases: [],
-    dependsOn: ['connect-api', 'rtsm-api', 'iam-api'],
-    depKinds: { 'connect-api': 'browser', 'rtsm-api': 'browser', 'iam-api': 'browser' },
+    // ads-adm-api: the Student Surveys sector (sds#495) — Connect's survey
+    // surface calls it DIRECT from the browser via VITE_SURVEYS_API_URL. A
+    // `browser` edge like saga-dash's: it orders connect-web after ads-adm-api
+    // (and pulls it into a `--only connect-web` closure), but a repo-absent
+    // ads-adm-api never skips connect-web, and flow closures ignore it.
+    dependsOn: ['connect-api', 'rtsm-api', 'iam-api', 'ads-adm-api'],
+    depKinds: {
+      'connect-api': 'browser',
+      'rtsm-api': 'browser',
+      'iam-api': 'browser',
+      'ads-adm-api': 'browser',
+    },
     mesh: [],
     launch: {
       cmd: 'pnpm dev',
       env: {
         VITE_CONNECTV3_API_URL: '${CONNECT_API_URL}',
         VITE_IAM_API_URL: '${IAM_URL}',
+        // Student Surveys sector origin (ads-adm-api, sds#495). UNSET ⇒ the Connect
+        // survey feature is silently OFF — exactly the gap this fixes: up.sh
+        // launched connect-web with it while the native `stack up` did not
+        // (/tmp/sds-synthetic/connect-web.env-contract had no such key). up.sh
+        // literal `http://localhost:5005`; tokenized on the ads-adm port so a
+        // slot > 0 connect-web dials its slot's ads-adm-api. Tunnel mode flips it
+        // to `https://ads-adm.<domain>` (tunnelOverlay).
+        VITE_SURVEYS_API_URL: 'http://localhost:${ADS_ADM_PORT}',
         VITE_SAGA_API_TARGET: '${SAGA_API_TARGET}',
         VITE_RTSM_BOOTSTRAP_URL: '${RTSM_URL}',
         VITE_DASHBOARD_URL: '${DASH_URL}',
@@ -682,12 +708,17 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // tunnelOverlay(), so tunnel-vs-plain mismatches in both directions) so a
     // mode-drifted connect-web is REFUSED loudly and relaunched with the
     // current mode's env — refuse-or-relaunch, never adopt.
+    // VITE_SURVEYS_API_URL joins the fingerprint (it is tunnel-rewritten too, and
+    // its ABSENCE is the exact bug fixed above): a connect-web adopted from a
+    // build that never stamped it keeps serving with the survey feature off, so
+    // that process is refused and relaunched rather than adopted.
     adoptEnv: [
       'VITE_CONNECTV3_API_URL',
       'VITE_IAM_API_URL',
       'VITE_RTSM_BOOTSTRAP_URL',
       'VITE_JANUS_LOGIN_HOST',
       'VITE_DASHBOARD_URL',
+      'VITE_SURVEYS_API_URL',
     ],
   },
   'rtsm-api': {

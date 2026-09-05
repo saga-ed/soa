@@ -1141,6 +1141,22 @@ prep(){
   migrate_db "$COACH/packages/node/coach-db"         coach_api  "$COACH_DB_URL"
   migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7); uses sis-db's own config
   db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
+  # Student Surveys sector hosted in ads-adm-api (student-data-system#495): its
+  # OWN database + role triplet via surveys-db/seed/local-bootstrap.sql (idempotent:
+  # IF NOT EXISTS / \gexec, so it is safe on every up and on a volume whose
+  # profile-empty.sql predates surveys_api_local), then migrate as the local
+  # owner login (surveys_api) through the package's checked-in .env, exactly
+  # like ads-adm-db above. Guarded on the package dir so an SDS checkout without
+  # the PR (or the sector extracted later) still boots.
+  if [[ -d "$SDS/packages/node/surveys-db" ]]; then
+    if docker exec -i soa-postgres-1 psql -U postgres_admin -d postgres -v ON_ERROR_STOP=1 \
+         < "$SDS/packages/node/surveys-db/seed/local-bootstrap.sql" >"$STATE/surveys-bootstrap.log" 2>&1; then
+      ok "db+role: surveys_api_local / surveys_api"
+    else
+      printf "\033[31m✗\033[0m surveys-db bootstrap failed:\n"; tail -10 "$STATE/surveys-bootstrap.log" | sed 's/^/    /'; exit 1
+    fi
+    db_step "surveys-db migrate deploy" "$SDS/packages/node/surveys-db"    pnpm prisma migrate deploy
+  fi
   # sds_93 playback DBs (transcripts/insights/chat) — opt-in, own their DB+role
   # via each package's local-bootstrap.sql (see provision_playback_dbs).
   [[ $DO_PLAYBACK == 1 ]] && provision_playback_dbs
@@ -1644,6 +1660,7 @@ services_up(){
      SERVICE_TOKEN_SERVICESLUG=ads-adm-api \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
+     SURVEYS_DATABASE_URL=postgresql://surveys_api:surveys_api@localhost:5432/surveys_api_local \
      CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)
   # ── sds_93 playback APIs (opt-in: --with-playback) ──────────────────────────
   # transcripts/insights/chat. Each boots as its OWN least-privilege app role via
@@ -1778,6 +1795,7 @@ services_up(){
   launch_if connect-web "$CONNECT_WEB_PORT" "$QBOARD/apps/web/connectv3" \
      VITE_CONNECTV3_API_URL="$CONNECT_API_URL" \
      VITE_IAM_API_URL="$IAM_URL" \
+     VITE_SURVEYS_API_URL="http://localhost:5005" \
      VITE_SAGA_API_TARGET="$SAGA_API_TARGET" \
      VITE_RTSM_BOOTSTRAP_URL="$RTSM_URL" \
      VITE_DASHBOARD_URL="$DASH_URL" \
@@ -1809,6 +1827,8 @@ reset_data(){
   # _prisma_migrations, so the schema survives.
   local dbs=(iam_local iam_pii_local programs scheduling sessions content coach_api sis_db ads_adm_local)
   [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local ledger_local)
+  # surveys_api_local: submissions/launches are per school-year synthetic data too.
+  [[ -d "$SDS/packages/node/surveys-db" ]] && dbs+=(surveys_api_local)
   for db in "${dbs[@]}"; do
     if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then
       ok "truncated $db"

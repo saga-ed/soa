@@ -534,10 +534,12 @@ describe('stack up --slot N — isolated bring-up (M7 Phase 2)', () => {
     const cweb = launches.find((s) => s.id === 'connect-web');
     expect(cweb?.env.VITE_IAM_API_URL).toBe('https://iam.testmoniker.vms.wootdev.com');
     expect(cweb?.env.VITE_CONNECTV3_API_URL).toBe('https://connect-api.testmoniker.vms.wootdev.com');
+    // … including the Student Surveys origin (sds#495), by the ads-adm tunnel LABEL.
+    expect(cweb?.env.VITE_SURVEYS_API_URL).toBe('https://ads-adm.testmoniker.vms.wootdev.com');
     // … and the browser-plane deps are adoption-guarded too (soa#336, the
     // saga-dash idiom below extended to the remaining frontends).
     expect(cweb?.adoptEnv).toEqual(
-      expect.arrayContaining(['VITE_CONNECTV3_API_URL', 'VITE_IAM_API_URL']),
+      expect.arrayContaining(['VITE_CONNECTV3_API_URL', 'VITE_IAM_API_URL', 'VITE_SURVEYS_API_URL']),
     );
     // the VENDORED tunnel.sh up ran after the launch (not soa's tools/synthetic-dev copy).
     const tun = runs.find((r) => r.command.endsWith('tunnel.sh'));

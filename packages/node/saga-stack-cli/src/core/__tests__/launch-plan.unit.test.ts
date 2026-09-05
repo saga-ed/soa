@@ -215,9 +215,27 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       SERVICE_TOKEN_SERVICESLUG: 'ads-adm-api',
       ADS_ADM_DATABASE_URL: 'postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local',
       DATABASE_URL: 'postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local',
+      // Student Surveys sector DB (sds#495) — up.sh:1663 literal, tokenized here.
+      SURVEYS_DATABASE_URL: 'postgresql://surveys_api:surveys_api@localhost:5432/surveys_api_local',
       CORS_ORIGIN: 'http://localhost:8900',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
     });
+  });
+
+  it('ads-adm-api: owns surveys_api_local (the hosted Student Surveys sector, sds#495)', () => {
+    expect(manifest.services['ads-adm-api'].databases).toContain('surveys_api_local');
+    // The migrate injects the var surveys-db's prisma.config.ts reads FIRST
+    // (SURVEYS_DATABASE_URL — never DATABASE_URL, which its .env-baked value would
+    // not out-rank), and tolerates the package being absent from the checkout.
+    const spec = manifest.databases['surveys_api_local'].migrate;
+    expect(spec).toMatchObject({
+      dir: 'packages/node/surveys-db',
+      cmd: 'prisma migrate deploy',
+      migrateEnvVar: 'SURVEYS_DATABASE_URL',
+      optionalPackage: true,
+    });
+    expect(manifest.databases['surveys_api_local'].resetMode).toBe('truncate');
+    expect(manifest.databases['surveys_api_local'].ownerRole).toBe('surveys_api');
   });
 
   it('ads-adm-api: the override gate is adoption-guarded (a stale gate-less process is refused, not adopted)', () => {
@@ -276,12 +294,24 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     expect(env('connect-web')).toEqual({
       VITE_CONNECTV3_API_URL: 'http://localhost:6106',
       VITE_IAM_API_URL: 'http://localhost:3010',
+      // Student Surveys sector origin (ads-adm-api, sds#495) — up.sh:1798 literal
+      // `http://localhost:5005`. Its ABSENCE is the bug: without it the Connect
+      // survey feature is silently off (the native up launched connect-web
+      // without it while up.sh set it).
+      VITE_SURVEYS_API_URL: 'http://localhost:5005',
       VITE_SAGA_API_TARGET: 'https://wootmath.com',
       VITE_RTSM_BOOTSTRAP_URL: 'http://localhost:6110',
       VITE_DASHBOARD_URL: 'http://localhost:8900',
       VITE_JANUS_LOGIN_HOST: 'http://localhost:3010/demo',
       VITE_PLAYBACK_ASSET_BASE_OVERRIDE: 'http://localhost:8444',
     });
+  });
+
+  it('connect-web: VITE_SURVEYS_API_URL is adoption-guarded (a stale survey-less dev server is refused, not adopted)', () => {
+    expect(manifest.services['connect-web'].adoptEnv).toContain('VITE_SURVEYS_API_URL');
+    // …and ads-adm-api is a browser dep, so the origin it dials is up first.
+    expect(manifest.services['connect-web'].dependsOn).toContain('ads-adm-api');
+    expect(manifest.services['connect-web'].depKinds['ads-adm-api']).toBe('browser');
   });
 
   it('rtsm-api (FLEET_CONFIG_PATH resolved to the VENDORED rtsm-fleet-local.json)', () => {

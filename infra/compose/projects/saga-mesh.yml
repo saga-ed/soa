@@ -14,6 +14,7 @@
 ##   programs         program-hub programs-api   owner=saga_user
 ##   scheduling       program-hub scheduling-api owner=saga_user
 ##   ads_adm_local    SDS ads-adm-api            owner=ads_adm
+##   surveys_api_local SDS ads-adm-api surveys sector (sds#495) owner=surveys_api
 ##   ledger_local     SDS ledger-api             owner=ledger
 ##
 ## Opt-in (only created when `--with authz` selects the `authz` bundle):

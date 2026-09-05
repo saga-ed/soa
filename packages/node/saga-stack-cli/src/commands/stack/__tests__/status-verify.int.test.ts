@@ -105,15 +105,18 @@ function installRunner(code = 0): void {
  * Defaults to a fully-green stack (205 users, dev id, 6 admin personas, sis migrated,
  * mongo up); overrides flip individual readings to drive the hard-fail paths.
  */
-function installDataProbes(over: { users?: string; devId?: string; admin?: string; sisMigrated?: boolean; mongoReachable?: boolean } = {}): void {
+function installDataProbes(over: { users?: string; devId?: string; admin?: string; bank?: string; sisMigrated?: boolean; mongoReachable?: boolean; surveysDbExists?: boolean } = {}): void {
   const pg: PgProbe = {
-    async databaseExists(): Promise<boolean> { return true; },
+    // surveys_api_local (D6) exists by default; `surveysDbExists:false` models an SDS
+    // checkout without sds#495 (no check emitted). Every other DB always exists.
+    async databaseExists(_c, db): Promise<boolean> { return db === 'surveys_api_local' ? (over.surveysDbExists ?? true) : true; },
     async hasMigrationsTable(): Promise<boolean> { return over.sisMigrated ?? true; },
     async publicTableCount(): Promise<number> { return 0; },
     async scalar(_c, _db, sql): Promise<string> {
       if (sql.includes('FROM users WHERE')) return over.devId ?? '1';
       if (sql.includes('FROM users')) return over.users ?? '205';
       if (sql.includes('personas')) return over.admin ?? '6';
+      if (sql.includes('question_bank')) return over.bank ?? '6'; // D6 (sds#495): bank seeded
       return '';
     },
   };
@@ -435,6 +438,30 @@ describe('stack verify --full — FULLY NATIVE: health + DATA + posture, NOTHING
     });
   });
 
+  // D6 (sds#495): surveys_api_local is asserted ONLY when it exists.
+  it('D6: a migrated + seeded surveys_api_local renders the verify.sh data line', async () => {
+    installDataProbes();
+    installPostureSeams();
+    await expect(StackVerify.run(['--full', ...WS], config)).resolves.toBeUndefined();
+    expect(out.some((l) => l.startsWith('✓') && l.includes('surveys_api_local migrated + bank seeded (questions=6)'))).toBe(true);
+  });
+
+  it('D6: an ABSENT surveys_api_local (SDS checkout without sds#495) emits NO check and stays green', async () => {
+    installDataProbes({ surveysDbExists: false });
+    installPostureSeams();
+    await expect(StackVerify.run(['--full', ...WS], config)).resolves.toBeUndefined();
+    expect(out.some((l) => l.includes('surveys_api_local'))).toBe(false);
+  });
+
+  it('D6: HARD-FAILS (exit 1) when surveys_api_local is migrated but the bank is short (<6)', async () => {
+    installDataProbes({ bank: '2' });
+    installPostureSeams();
+    await expect(StackVerify.run(['--full', ...WS], config)).rejects.toMatchObject({
+      oclif: { exit: 1 },
+    });
+    expect(out.some((l) => l.startsWith('✗') && l.includes('surveys_api_local present but bank=2'))).toBe(true);
+  });
+
   // ── THE OVERRIDING INVARIANT: P1–P4 are STRICTLY WARN-ONLY. ──
   it('P1–P4 ALL "failing" (wrong branch + behind origin) do NOT flip the verdict — verify still exits 0 when health+DATA pass', async () => {
     installDataProbes(); // health + DATA green
@@ -514,6 +541,7 @@ function installCapturingDataProbes(): { pgContainers: string[] } {
       if (sql.includes('FROM users WHERE')) return '1';
       if (sql.includes('FROM users')) return '205';
       if (sql.includes('personas')) return '6';
+      if (sql.includes('question_bank')) return '6'; // D6 (sds#495): bank seeded
       return '';
     },
   };

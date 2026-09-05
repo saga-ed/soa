@@ -68,6 +68,10 @@ export interface LaunchTokens {
   CONTENT_PORT: string;
   /** connect-api port — up.sh `CONNECT_API_PORT` (6106). */
   CONNECT_API_PORT: string;
+  /** ads-adm-api port (5005) — connect-web's `VITE_SURVEYS_API_URL` origin (the Student
+   *  Surveys sector hosted in ads-adm-api, sds#495; up.sh's literal `http://localhost:5005`).
+   *  Tokenized so a slot > 0 connect-web dials ITS slot's ads-adm-api, not slot 0's. */
+  ADS_ADM_PORT: string;
   /** rtsm-api port — up.sh `RTSM_PORT` (6110). */
   RTSM_PORT: string;
   /** fleek-recorder control port — up.sh `RECORDER_CONTROL_PORT` (7890; --record). */
@@ -166,6 +170,9 @@ export interface LaunchTokens {
    *  (was a LITERAL `@localhost:5432` in up.sh/the manifest; tokenized for M13
    *  ads-adm slottability so the pg port offsets in lockstep with the slot mesh). */
   ADS_ADM_DB_URL: string;
+  /** Student Surveys sector DB URL — `postgresql://surveys_api:surveys_api@localhost:<pg>/surveys_api_local`
+   *  (ads-adm-api's `SURVEYS_DATABASE_URL`, sds#495; up.sh's literal `:5432` value at slot 0). */
+  SURVEYS_DB_URL: string;
   /** authz-sync dedup-table DB URL — `postgresql://authz_sync:authz_sync@localhost:<pg>/authz_sync_local`. */
   AUTHZ_SYNC_DB_URL: string;
 
@@ -405,6 +412,10 @@ function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string,
         VITE_RTSM_BOOTSTRAP_URL: `https://rtsm.${td}`,
         VITE_JANUS_LOGIN_HOST: `https://iam.${td}/demo`,
         VITE_DASHBOARD_URL: `https://dash.${td}`,
+        // Student Surveys sector origin — the ads-adm-api tunnel host. The tunnel
+        // LABEL is `ads-adm` (manifest tunnelSlug / vendor tunnel.sh), never the
+        // service id. Closes the PR #450 follow-up (up.sh's tunnel_env lacks it).
+        VITE_SURVEYS_API_URL: `https://ads-adm.${td}`,
         __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: `connect.${td}`,
       };
     case 'rtsm-api':
@@ -689,6 +700,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     PROGRAMS_PORT: String(ports['programs-api']),
     CONTENT_PORT: String(ports['content-api']),
     CONNECT_API_PORT: String(ports['connect-api']),
+    ADS_ADM_PORT: String(ports['ads-adm-api']),
     RTSM_PORT: String(ports['rtsm-api']),
     RECORDER_CONTROL_PORT: String(recorderControlPort),
     RECORDINGS_API_PORT: String(recordingsApiPort),
@@ -726,6 +738,7 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     CONTENT_DB_URL: pgUrl('content', pgPort, m),
     COACH_DB_URL: pgUrl('coach_api', pgPort, m),
     ADS_ADM_DB_URL: pgUrl('ads_adm_local', pgPort, m),
+    SURVEYS_DB_URL: pgUrl('surveys_api_local', pgPort, m),
     AUTHZ_SYNC_DB_URL: pgUrl('authz_sync_local', pgPort, m),
 
     // misc scalars (up.sh hardcodes these verbatim)

@@ -143,6 +143,9 @@ describe('tunnel_env overlay (--tunnel)', () => {
     expect(e.VITE_IAM_API_URL).toBe(`https://iam.${TD}`);
     expect(e.VITE_RTSM_BOOTSTRAP_URL).toBe(`https://rtsm.${TD}`);
     expect(e.VITE_DASHBOARD_URL).toBe(`https://dash.${TD}`);
+    // Student Surveys sector origin → the ads-adm-api tunnel host, by its tunnel
+    // LABEL (`ads-adm`, the manifest tunnelSlug) — never `ads-adm-api.<domain>`.
+    expect(e.VITE_SURVEYS_API_URL).toBe(`https://ads-adm.${TD}`);
     expect(e.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBe(`connect.${TD}`);
   });
 

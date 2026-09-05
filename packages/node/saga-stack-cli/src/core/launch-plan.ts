@@ -383,9 +383,15 @@ function tunnelOverlay(service: ServiceId, tokens: LaunchTokens): Record<string,
       };
     case 'scheduling-api':
     case 'sessions-api':
-    case 'ads-adm-api':
       return {
         CORS_ORIGIN: `${dash},https://dash.${td}`,
+        JANUS_LOGIN_HOST: `iam.${td}/demo`,
+      };
+    case 'ads-adm-api':
+      return {
+        // connect-web too: the surveys sector (surveys.runtime.*, sds#495) is
+        // called browser-direct from Connect, so the tunnel connect origin joins.
+        CORS_ORIGIN: `${dash},${connectWeb},https://dash.${td},https://connect.${td}`,
         JANUS_LOGIN_HOST: `iam.${td}/demo`,
       };
     case 'connect-api': {

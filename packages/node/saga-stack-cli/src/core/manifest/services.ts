@@ -493,7 +493,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // surveys_api@localhost:5432/surveys_api_local`; tokenized like
         // ADS_ADM_DB_URL so a slot > 0 process dials ITS slot's mesh pg.
         SURVEYS_DATABASE_URL: '${SURVEYS_DB_URL}',
-        CORS_ORIGIN: '${DASH_URL}',
+        // dash AND connect-web: Connect's browser dials ads-adm-api directly for
+        // the Student Surveys sector (surveys.runtime.*, student-data-system#495,
+        // qboard#900) with credentials, so an unlisted origin is a CORS failure.
+        CORS_ORIGIN: '${DASH_URL},${CONNECT_WEB_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
       },
     },

@@ -93,13 +93,21 @@ describe('tunnel_env overlay (--tunnel)', () => {
     );
   });
 
-  it('scheduling/sessions/ads-adm: CORS + JANUS_LOGIN_HOST → tunnelled iam demo', () => {
-    // programs-api is NOT in this loop any more — see the test below.
-    for (const id of ['scheduling-api', 'sessions-api', 'ads-adm-api'] as const) {
+  it('scheduling/sessions: CORS + JANUS_LOGIN_HOST → tunnelled iam demo', () => {
+    // programs-api and ads-adm-api are NOT in this loop any more — see the tests below.
+    for (const id of ['scheduling-api', 'sessions-api'] as const) {
       const e = envFor(id, TUN);
       expect(e.CORS_ORIGIN).toBe(`http://localhost:8900,https://dash.${TD}`);
       expect(e.JANUS_LOGIN_HOST).toBe(`iam.${TD}/demo`);
     }
+  });
+
+  it('ads-adm-api: CORS admits dash AND connect (surveys.runtime.* is browser-direct from Connect)', () => {
+    const e = envFor('ads-adm-api', TUN);
+    expect(e.CORS_ORIGIN).toBe(
+      `http://localhost:8900,http://localhost:6210,https://dash.${TD},https://connect.${TD}`,
+    );
+    expect(e.JANUS_LOGIN_HOST).toBe(`iam.${TD}/demo`);
   });
 
   it('programs-api: CORS keeps the coach origins its siblings do not have (coach#329)', () => {

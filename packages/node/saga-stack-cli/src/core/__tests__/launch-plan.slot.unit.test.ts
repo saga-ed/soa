@@ -182,7 +182,7 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     expect(env.ADM_ALLOW_ROSTER_MODE_OVERRIDE).toBe('true');
     expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:5010/trpc'); // 3010 + 2000
     expect(env.IAM_API_URL).toBe('http://localhost:5010');
-    expect(env.CORS_ORIGIN).toBe('http://localhost:10900'); // dash 8900 + 2000
+    expect(env.CORS_ORIGIN).toBe('http://localhost:10900,http://localhost:8210'); // dash 8900 + 2000, connect-web 6210 + 2000 (sds#495)
     expect(portOf(env.DATABASE_URL)).toBe(getMesh('postgres').port + 2000);
     expect(portOf(env.ADS_ADM_DATABASE_URL)).toBe(getMesh('postgres').port + 2000);
     expect(portOf(env.RABBITMQ_URL)).toBe(getMesh('rabbitmq').port + 2000);
@@ -204,7 +204,7 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:3010/trpc');
     expect(env.ADS_ADM_DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
     expect(env.DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
-    expect(env.CORS_ORIGIN).toBe('http://localhost:8900');
+    expect(env.CORS_ORIGIN).toBe('http://localhost:8900,http://localhost:6210'); // dash + connect-web (sds#495)
   });
 });
 

@@ -217,7 +217,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       DATABASE_URL: 'postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local',
       // Student Surveys sector DB (sds#495) — up.sh:1663 literal, tokenized here.
       SURVEYS_DATABASE_URL: 'postgresql://surveys_api:surveys_api@localhost:5432/surveys_api_local',
-      CORS_ORIGIN: 'http://localhost:8900',
+      // dash AND connect-web (surveys.runtime.* is browser-direct from Connect, sds#495).
+      CORS_ORIGIN: 'http://localhost:8900,http://localhost:6210',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
     });
   });

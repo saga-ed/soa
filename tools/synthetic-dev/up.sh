@@ -1403,7 +1403,13 @@ tunnel_env(){ # svc
       # drives sis directly, and setting CORS_ORIGIN overrides sis's built-in
       # localhost:3010 default (rostering #391)
       printf '%s\n' "CORS_ORIGIN=$DASH_URL,http://localhost:$IAM_PORT,https://dash.$TUNNEL_DOMAIN,https://iam.$TUNNEL_DOMAIN" ;;
-    programs-api|scheduling-api|sessions-api|ads-adm-api)
+    ads-adm-api)
+      # dash AND connect-web: Connect dials the surveys sector browser-direct
+      # (student-data-system#495 / qboard#900), so the tunnel connect origin
+      # must be on the allowlist too. Same JANUS_LOGIN_HOST note as below.
+      printf '%s\n' "CORS_ORIGIN=$DASH_URL,$CONNECT_WEB_URL,https://dash.$TUNNEL_DOMAIN,https://connect.$TUNNEL_DOMAIN" \
+                    "JANUS_LOGIN_HOST=iam.$TUNNEL_DOMAIN/demo" ;;
+    programs-api|scheduling-api|sessions-api)
       # JANUS_LOGIN_HOST drives the SagaAuth login= base on programs/scheduling
       # 401s (sessions/ads-adm don't emit it) → tunnelled iam demo, not prod.
       # Bare host; the services' resolveLoginBaseUrl prefixes https for it.
@@ -1661,7 +1667,7 @@ services_up(){
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      SURVEYS_DATABASE_URL=postgresql://surveys_api:surveys_api@localhost:5432/surveys_api_local \
-     CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)
+     CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL" RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)
   # ── sds_93 playback APIs (opt-in: --with-playback) ──────────────────────────
   # transcripts/insights/chat. Each boots as its OWN least-privilege app role via
   # discrete POSTGRES_* (provision_playback_dbs migrated the schema as master).

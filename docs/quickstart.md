@@ -4,7 +4,7 @@ This guide covers how to go from a fresh checkout to a complete build and full t
 
 ## Prerequisites
 
-- **Node.js**: v20+ (recommended: v22.x)
+- **Node.js**: >=24 (per `package.json` `engines`)
 - **pnpm**: v9.0.0+ (the project uses pnpm workspaces)
 
 ### Installing pnpm

@@ -7,7 +7,7 @@ Server-side packages for Node.js applications.
 ## Runtime Environment
 
 **Type**: Node.js Server
-**Target**: Node.js 20+ (ESM)
+**Target**: Node.js >=24 (ESM)
 **Module**: ESM only
 
 ## Packages
@@ -40,7 +40,7 @@ Server-side packages for Node.js applications.
 - **`pubsub-*`** (`pubsub-core`, `pubsub-client`, `pubsub-server`) — real-time UI push (browser ↔ server). Lives on top of HTTP/SSE. Use for live dashboards, notifications, collaborative cursors.
 - **`event-*`** + `observability` — durable cross-service eventing (server ↔ server) over RabbitMQ with transactional outbox + idempotency. Use for domain events that must survive broker restarts and be replayed safely.
 
-These are NOT interchangeable. See `~/dev/soa/.claude/projects/soa_75/decisions/d-soa-pubsub-divorce.md` for the rationale.
+These are NOT interchangeable. See `claude/projects/soa_75/decisions/d-soa-pubsub-divorce.md` for the rationale.
 
 ## Node.js Constraints
 

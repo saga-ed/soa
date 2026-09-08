@@ -1,6 +1,6 @@
 # Event-driven packages — adopter conventions
 
-Reference for fleet services consuming `@saga-ed/soa-event-envelope`, `event-outbox`, `event-consumer`, `observability`, `event-test-harness`. Design decisions live under `.claude/projects/soa_75/decisions/`.
+Reference for fleet services consuming `@saga-ed/soa-event-envelope`, `event-outbox`, `event-consumer`, `observability`, `event-test-harness`. Design decisions live under `claude/projects/soa_75/decisions/`.
 
 ## What this stack is (and isn't)
 
@@ -150,4 +150,4 @@ See `decisions/d-observability.md`.
 
 ---
 
-*Source decisions:* `.claude/projects/soa_75/decisions/`
+*Source decisions:* `claude/projects/soa_75/decisions/`

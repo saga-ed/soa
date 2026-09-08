@@ -104,6 +104,21 @@ Phase A/B as landed instead of "not yet executed", and the missing `coach:`
 prefix added to the decision doc's `gh_305` citation — which also cleared
 an `archived-citation` false-positive (5 warnings -> 4).
 
+Second correction: `memory-bank/` above turns out to be another wrongful
+removal, on the same "not fixed" carve-out miss as `multi/` — this
+program's own rule is that a cited file is never removed, and Cursor-tool
+config counts as a citer. 6 of the 8 `.cursor/rules/*.mdc` files depend on specific
+`memory-bank/*.md` files, and `claude/projects/gh_t54/sources/testing/README.md:132`
+separately points at `/memory-bank/testing/` — a citer the original sweep
+missed entirely. Restored in a follow-up commit: `memory-bank/` back in
+place (22 files, unchanged), `docs/overview.md`'s repo-structure bullet for
+it restored alongside. `human-notes/` stays removed — re-swept the whole
+repo plus `.cursor/` and found no citer anywhere. The true final D9.1/D9.2
+removal list is 6 items: `human-notes/`, `SCOPE_FIX_SUMMARY.md`,
+`SETUP_SUMMARY.md`, `WORKFLOW_SUCCESS_SUMMARY.md`, `LOCAL_DEVELOPMENT.md`,
+`docs/quickstart.md`. See `followups.md` for the full record of both
+corrections.
+
 D9.1 moves (`09d4b410`): `soa-audit.md`/`soa-remediation-plan.md` →
 `docs/history/soa-audit-2026-01/` (banner: CLOSED 2026-03-27); loose file
 `claude/projects/ss-develop-session-adm-plan.md` →

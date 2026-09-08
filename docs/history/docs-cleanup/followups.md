@@ -47,24 +47,26 @@ content requirement. The decision doc places this cluster's citation fixes
 in Phase D (comments), not Phase A/B; these 3 `code-doc-refs` findings stay
 as-is until then.
 
-## `.cursor/rules/*.mdc` depend on the removed `memory-bank/` — not fixed
+## `memory-bank/` — wrongly removed in Phase B, restored
 
-D9.1's citation sweep (Phase B, pre-removal HEAD `8e519e29`) turned up 5
-Cursor-IDE rule files that D9.1's own "nothing else cites it live" framing
-missed: `.cursor/rules/{unit-testing, code-organization, naming-conventions,
-inversify, turborepo}.mdc` each tell Cursor to "always read and apply" a
+D9.1's citation sweep (Phase B, pre-removal HEAD `8e519e29`) found the
+decision doc's "nothing cites it live" framing for `memory-bank/`
+incomplete: 6 of the 8 `.cursor/rules/*.mdc` files
+(`code-organization`, `inversify`, `memory-bank`, `naming-conventions`,
+`turborepo`, `unit-testing`) each tell Cursor to "always read and apply" a
 specific `memory-bank/*.md` file (`memory-bank/unit-testing.md`,
-`memory-bank/inversify.md`, etc.) — all now gone along with the rest of
-`memory-bank/` (15 files + a `testing/` subdir of 7), removed in the same
-commit as `human-notes/` (4 files), `SCOPE_FIX_SUMMARY.md`,
-`SETUP_SUMMARY.md`, `WORKFLOW_SUCCESS_SUMMARY.md`, `LOCAL_DEVELOPMENT.md`,
-and `docs/quickstart.md` — that commit also removed `claude/projects/multi/`,
-which turned out to be a mistake (see the entry above); it's restored, not
-part of this removal list. `docs/overview.md`'s
-repo-structure listing (a current-tier doc) had the same problem; that fix
-landed in the same commit as the removal. The `.mdc` files were left alone
-because they're Cursor-tool config outside the
-`.claude/rules/`/`docs/`/`CLAUDE.md` hierarchy this initiative scopes to,
-not because the dependency isn't real. Whoever still uses Cursor with this
-repo should either restore the referenced content under `.claude/rules/` (if
-still relevant) or delete the 5 `.mdc` files.
+`memory-bank/inversify.md`, etc., plus `memory-bank.mdc`'s own generic
+"Cursor Memory Bank" convention description), and
+`claude/projects/gh_t54/sources/testing/README.md:132` separately points at
+`/memory-bank/testing/` as "Additional testing prompts and strategies" — a
+citer the original sweep also missed. This got recorded at the time as an
+accepted gap (Cursor-tool config, treated as outside the
+`.claude/rules/`/`docs/`/`CLAUDE.md` hierarchy this initiative scopes to)
+rather than acted on.
+
+Corrected: a cited file is never removed regardless of who or what cites it
+— Cursor config counts. `memory-bank/` restored (22 files, unchanged
+content) along with `docs/overview.md`'s repo-structure bullet naming it.
+`human-notes/` (4 files) stays removed — re-swept the whole repo plus
+`.cursor/`, no citer found anywhere (only this program's own decision-doc
+prose mentions it).

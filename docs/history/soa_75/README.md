@@ -10,7 +10,7 @@ ads-adm-api read fan-out) and stand it up end-to-end to expose
 the real costs and design questions before any broader
 commitment.
 
-**Parent Context:** Part of [soa](../../../CLAUDE.md), the shared-infrastructure monorepo — this is a project-scoped working doc under `claude/projects/`.
+**Parent Context:** Part of [soa](../../../CLAUDE.md), the shared-infrastructure monorepo — this is a project-scoped working doc under `docs/history/`.
 
 ## Scope
 
@@ -37,8 +37,9 @@ Branch base per repo:
 ## Layout
 
 ```
-claude/projects/soa_75/
-├── CLAUDE.md            # this file
+docs/history/soa_75/
+├── CLAUDE.md            # banner
+├── README.md            # this file
 ├── sources/             # raw source material — Slack threads, PR comments, prompts
 ├── research/            # synthesized current-state + option analysis
 └── decisions/           # decision docs needing review (PENDING → RESOLVED)

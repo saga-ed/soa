@@ -203,4 +203,4 @@ unblocks the work and gives the user the base-vs-journey call to make.
 - Raw source: `../source/pr-152-*`
 - Live: saga-dash PR #152 (`docs/seed-ids-{onboarding,local-mesh-runbook,synthetic-dev-convergence}.md`)
 - Tool: `~/dev/soa/tools/synthetic-dev/{README,getting-started,STATUS}.md`
-- Adjacent track: `~/dev/soa/claude/projects/soa_75/` (events = runtime; seed-ids = seed-time)
+- Adjacent track: `~/dev/soa/docs/history/soa_75/` (events = runtime; seed-ids = seed-time)

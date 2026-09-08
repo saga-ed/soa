@@ -52,7 +52,7 @@ Ensures correct separation between node/web/core packages.
 
 ## Dimension 2: ESM Compliance
 
-Ensures strict ESM patterns as documented in /soa/claude/esm.md.
+Ensures strict ESM patterns as documented in /soa/docs/esm.md.
 
 ### 5 Points - Excellent ✅
 - All imports include .js extensions

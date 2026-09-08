@@ -144,7 +144,7 @@ Far smaller than the bash plan's "~30 call-sites across 5 scripts," because the
 manifest/context already is the single parameterization point the prior art wanted.
 
 ## Cross-references
-- `claude/projects/multi/` — the prior-art spec (inventory +
+- `../../multi/` — the prior-art spec (inventory +
   SLOT design + phased rollout). This doc retargets its implementation onto the CLI.
 - `gh_214/plans/01-saga-stack-cli-plan.md` (manifest §2.2, launch-plan §6.3),
   `02-handoff-and-status.md` (native-path soak gate), `03-soak-plan.md`.

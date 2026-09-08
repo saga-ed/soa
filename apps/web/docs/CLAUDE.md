@@ -63,7 +63,7 @@ All client-side env vars must use `NEXT_PUBLIC_*` prefix:
 
 - `/packages/web/ui/` - React component library
 - `/apps/web/CLAUDE.md` - Web app patterns
-- `/claude/frontend/nextjs/` - Next.js specific patterns
+- `/docs/frontend/nextjs/` - Next.js specific patterns
 
 ## Rules that apply here
 

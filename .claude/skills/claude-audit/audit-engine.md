@@ -92,7 +92,7 @@ grep -r "document\." packages/core/[package-name]/src/
 ## Dimension 2: ESM Compliance
 
 ### Objective
-Ensure all packages follow strict ESM patterns as documented in /soa/claude/esm.md.
+Ensure all packages follow strict ESM patterns as documented in /soa/docs/esm.md.
 
 ### Detection Patterns
 

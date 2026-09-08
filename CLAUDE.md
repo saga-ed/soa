@@ -7,7 +7,6 @@ Shared infrastructure monorepo for Saga platform applications.
 Current pattern = this file, `.claude/rules/`, `docs/` (except `docs/history/`),
 `docs/decisions/` entries marked `Accepted`/`RESOLVED`, non-draft `specs/`.
 History = `docs/history/` (index: [docs/history/README.md](docs/history/README.md))
-and legacy `claude/projects/` (index: [claude/projects/README.md](claude/projects/README.md))
 — never a current pattern; a fact found only there is a harvest gap. Newer of
 doc vs. code wins (`git log -1`).
 
@@ -57,10 +56,9 @@ doc-routing rules (repo-wide vs. nested vs. `.claude/rules/*.md` vs. skills).
 
 ## Detailed Documentation
 
-- See `claude/` for Claude-specific context
-- See `claude/esm.md` for ESM patterns (__dirname, imports, top-level await)
-- See `claude/frontend/` for web framework patterns
-- See `claude/tooling/pnpm.md` for pnpm installation rules
+- See `docs/esm.md` for ESM patterns (__dirname, imports, top-level await)
+- See `docs/frontend/` for web framework patterns
+- See `docs/tooling/pnpm.md` for pnpm installation rules
 - See `apps/CLAUDE.md` for application details
 - See `packages/CLAUDE.md` for package details
 - See `docs/cross-repo-linking-summary.md` for cross-repo package linking (development workflow)

@@ -1840,7 +1840,7 @@ reset_data(){
 # (LOGIN still uses iam-api devLogin + JANUS_REQUIRED=false — see login_user();
 # that bypass is independent of seeding and is preserved.) The scenario scripts
 # remain in their repos as the future "journey" layer. See plan
-# soa/claude/projects/synthetic-dev-align/plans/up-sh-db-seed-transition.md and
+# soa/docs/history/synthetic-dev-align/plans/up-sh-db-seed-transition.md and
 # d2.1 (db:seed = 205 users: 190 roster + 6 personas + dev + 8 Connect Demo).
 seed_iam(){
   say "seeding iam roster (db:seed — deterministic seed-ids, direct DB)…"

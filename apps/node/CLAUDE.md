@@ -58,7 +58,7 @@ All APIs expose:
 
 ## Testing
 
-See [claude/esm.md](../../claude/esm.md) for ESM patterns (__dirname workaround, imports).
+See [docs/esm.md](../../docs/esm.md) for ESM patterns (__dirname workaround, imports).
 
 ## Rules that apply here
 

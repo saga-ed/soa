@@ -13,7 +13,7 @@ onboarding, local mesh runbook & synthetic-dev convergence", author
 seed-ids packages, (2) give a manual local-mesh runbook, and (3) propose
 the synthetic-dev convergence as a **draft for discussion**.
 
-**Parent Context:** Part of [soa](../../../CLAUDE.md), the shared-infrastructure monorepo — this is a project-scoped working doc under `claude/projects/`.
+**Parent Context:** Part of [soa](../../../CLAUDE.md), the shared-infrastructure monorepo — this is a project-scoped working doc under `docs/history/`.
 
 **Last activity:** 2026-06-25
 
@@ -47,13 +47,14 @@ Seth's convergence doc.
 ## Layout
 
 ```
-claude/projects/synthetic-dev-align/
-├── CLAUDE.md            # this file
+docs/history/synthetic-dev-align/
+├── CLAUDE.md            # banner
+├── README.md            # this file
 ├── source/              # raw source material — Seth's PR #152 docs (snapshot), threads, prompts
 └── research/            # synthesized analysis of the plan + the convergence gap
 ```
 
-Same shape as `soa/claude/projects/soa_75/` (the data-side track this
+Same shape as `soa/docs/history/soa_75/` (the data-side track this
 ultimately serves) and `student-data-system/claude/projects/sds_92/`.
 
 ## Source artifacts
@@ -97,7 +98,7 @@ In `research/`:
   (`README.md` = service map + drift log; `getting-started.md` =
   onboarding + verbs; `STATUS.md` = first-run handoff).
 - **Data-side track (independent but adjacent):**
-  `~/dev/soa/claude/projects/soa_75/` — outbox / event-driven projections
+  `~/dev/soa/docs/history/soa_75/` — outbox / event-driven projections
   POC. seed-ids = **seed-time** agreement; events = **runtime**
   propagation. The two are complementary.
 - **Original seed/scenario vocabulary:**

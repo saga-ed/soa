@@ -63,8 +63,8 @@ The key insight is that **frontend apps and backend services need different cont
 ## Shared Infrastructure
 
 Uses infrastructure from [saga-soa](~/dev/soa):
-- See [soa/claude/frontend/sveltekit/](~/dev/soa/claude/frontend/sveltekit/) for SvelteKit patterns
-- See [soa/claude/tooling/pnpm.md](~/dev/soa/claude/tooling/pnpm.md) for pnpm installation rules
+- See [soa/docs/frontend/sveltekit/](~/dev/soa/docs/frontend/sveltekit/) for SvelteKit patterns
+- See [soa/docs/tooling/pnpm.md](~/dev/soa/docs/tooling/pnpm.md) for pnpm installation rules
 - See [soa/packages/node/](~/dev/soa/packages/node/) for Node.js packages
 ```
 
@@ -80,7 +80,7 @@ Claude loads context progressively:
 
 ## Token Budget
 
-Each CLAUDE.md file targets ~500 tokens (~375 words). Detailed information goes in `claude/` subdirectories and is linked from CLAUDE.md.
+Each CLAUDE.md file targets ~500 tokens (~375 words). Detailed information goes in `docs/` (reference) or `.claude/rules/` (path-scoped) and is linked from CLAUDE.md.
 
 ## What Gets Documented Where
 
@@ -89,9 +89,9 @@ Each CLAUDE.md file targets ~500 tokens (~375 words). Detailed information goes 
 | Tech stack overview | Root CLAUDE.md |
 | Build/test commands | Root CLAUDE.md |
 | Runtime APIs | Tier CLAUDE.md (web/ or node/) |
-| Deployment patterns | claude/deployment.md |
-| Code conventions | claude/conventions.md |
-| Architecture decisions | claude/decisions/*.md (ADRs) |
+| Deployment patterns | docs/deployment.md |
+| Code conventions | docs/conventions.md |
+| Architecture decisions | docs/decisions/*.md (ADRs) |
 | Project-specific gotchas | Project CLAUDE.md |
 
 ## Validation
@@ -110,4 +110,4 @@ CI validates documentation on every PR:
 
 ---
 
-*Based on research from nimbee PR 7876. Full plan: [claude/projects/gh_t54/research/plan.md](../claude/projects/gh_t54/research/plan.md)*
+*Based on research from nimbee PR 7876. Full plan: [docs/history/gh_t54/research/plan.md](history/gh_t54/research/plan.md)*

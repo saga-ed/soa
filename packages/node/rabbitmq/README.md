@@ -32,7 +32,7 @@ new ConnectionManager(logger, {
 Rationale and the full pattern set (idempotent UPSERT handlers, soft-delete
 projections, OTel `initTracing` ordering, queue-per-event-family) were meant to be
 captured in `d-consumer-resilience.md` — the file is missing; see
-[soa_75's README](../../../claude/projects/soa_75/README.md#missing-decisions).
+[soa_75's README](../../../docs/history/soa_75/README.md#missing-decisions).
 
 ## See also
 

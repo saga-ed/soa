@@ -7,7 +7,7 @@ user's own tracking issue — not a Phase A doc-only edit.
 
 Per D9.5: both decision files are cited from live production code with no
 deletion record and no fragment findable anywhere in the repo — see
-`claude/projects/soa_75/README.md#missing-decisions` for citers and detail.
+`docs/history/soa_75/README.md#missing-decisions` for citers and detail.
 This program records the gap; it doesn't file a GitHub issue on the user's
 behalf. Citer comment updates (`connection-manager.ts:70` and the 2 bare
 citers in `event-outbox`/`event-envelope`) are Phase D scope, not Phase A.
@@ -57,7 +57,7 @@ incomplete: 6 of the 8 `.cursor/rules/*.mdc` files
 specific `memory-bank/*.md` file (`memory-bank/unit-testing.md`,
 `memory-bank/inversify.md`, etc., plus `memory-bank.mdc`'s own generic
 "Cursor Memory Bank" convention description), and
-`claude/projects/gh_t54/sources/testing/README.md:132` separately points at
+`docs/history/gh_t54/sources/testing/README.md:132` separately points at
 `/memory-bank/testing/` as "Additional testing prompts and strategies" — a
 citer the original sweep also missed. This got recorded at the time as an
 accepted gap (Cursor-tool config, treated as outside the

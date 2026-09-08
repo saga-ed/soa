@@ -1,3 +1,6 @@
+> Reference. Verified against code 2026-09-08 — an environment-behavior rule,
+> not a code-derived claim; nothing here contradicts current tooling.
+
 # pnpm Rules
 
 ## VSCode / Claude Code Plugin Context

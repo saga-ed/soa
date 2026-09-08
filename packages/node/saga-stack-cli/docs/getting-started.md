@@ -64,7 +64,7 @@ $ ss --version
 `pnpm install` runs at the **monorepo root** — this is a pnpm workspace, so deps for the CLI (and
 every sibling package) resolve from there; it only needs re-running when dependencies change. In a
 VSCode / Claude Code shell `NODE_ENV=production` is set by default and silently skips
-devDependencies — prefix with `NODE_ENV=development pnpm install` there (see `claude/tooling/pnpm.md`).
+devDependencies — prefix with `NODE_ENV=development pnpm install` there (see `docs/tooling/pnpm.md`).
 
 Re-run `pnpm build` after pulling CLI changes. No-build alternative (runs from `src` via
 tsx): `node <abs-path>/bin/dev.js …`. Every command supports `--output-json` and `--porcelain`
@@ -530,4 +530,4 @@ and **[worktree-sets.md](./worktree-sets.md)**.
 - **[faq.md](./faq.md)** — "How do I…?" with real output under disclosure triangles
 
 For architecture and the design history, see the package [README](../README.md) and
-`soa/claude/projects/gh_214/`.
+`soa/docs/history/gh_214/`.

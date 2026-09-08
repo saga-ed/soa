@@ -1,3 +1,7 @@
+> Reference. Verified against code 2026-09-08 — `apps/web/web-client` and
+> `apps/web/docs` are still Next.js 15 (per each app's own `CLAUDE.md`); the
+> `sveltekit/`/`nextjs/`/`shared/` split is unchanged.
+
 # Frontend Framework Documentation
 
 This directory contains Claude-readable context for frontend development patterns.
@@ -25,7 +29,7 @@ This directory contains Claude-readable context for frontend development pattern
 
 Thrive and Coach CLAUDE.md files should reference:
 ```markdown
-See [soa/claude/frontend/sveltekit/](~/dev/soa/claude/frontend/sveltekit/) for:
+See [soa/docs/frontend/sveltekit/](~/dev/soa/docs/frontend/sveltekit/) for:
 - Project setup patterns
 - Routing conventions
 - Load function patterns

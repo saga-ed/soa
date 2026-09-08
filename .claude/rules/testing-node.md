@@ -154,7 +154,7 @@ const gqlResolvers = await controllerLoader.loadControllers(
 
 ### ESM Patterns in Tests
 
-For ESM-specific patterns (like `__dirname` workaround for file path resolution), see [claude/esm.md](../../claude/esm.md).
+For ESM-specific patterns (like `__dirname` workaround for file path resolution), see [docs/esm.md](../../docs/esm.md).
 
 **Common test use case**: Schema pattern resolution
 
@@ -169,7 +169,7 @@ const __dirname = path.dirname(__filename);
 const schemaPatterns = [path.resolve(__dirname, '../../schemas/**/*.gql')];
 ```
 
-See [claude/esm.md](../../claude/esm.md) for complete ESM documentation.
+See [docs/esm.md](../../docs/esm.md) for complete ESM documentation.
 
 ## Node packages (`packages/node/**`)
 

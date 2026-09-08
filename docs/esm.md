@@ -1,3 +1,9 @@
+> Reference. Verified against code 2026-09-08 — the "Real Example" below was
+> updated to a current file after the original `coach-api` smoke test it
+> cited no longer exists in the repo; every other claim (repo-wide
+> `"type": "module"`, the `fileURLToPath(import.meta.url)` pattern, `.js`
+> import extensions) still holds.
+
 # ECMAScript Modules (ESM) Patterns
 
 Runtime-agnostic patterns for ES modules. Applies to Node.js, Deno, Bun, and other ESM runtimes.
@@ -49,20 +55,14 @@ const schemaPath = path.resolve(__dirname, '../../schemas/**/*.gql');
 ### Real Example
 
 ```typescript
-// apps/node/coach-api/src/__tests__/smoke.int.smoke.test.ts
-import path from 'node:path';
+// apps/node/tgql-api/tgql-types/src/__tests__/schema-generation.unit.test.ts
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = dirname(__filename);
 
-async function createTestContainer(): Promise<Container> {
-  const gqlConfig: GQLServerConfig = {
-    // Absolute path works from any working directory
-    schemaPatterns: [path.resolve(__dirname, '../../schemas/**/*.gql')],
-  };
-  // ...
-}
+const manifestPath = resolve(__dirname, '../../generated/manifest.json');
 ```
 
 **Result**: Tests work whether run as:

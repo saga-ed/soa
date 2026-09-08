@@ -20,7 +20,7 @@ Frontend applications running in browser environment.
 
 ## Key Patterns
 
-See [claude/frontend/](../../claude/frontend/) for detailed patterns:
+See [docs/frontend/](../../docs/frontend/) for detailed patterns:
 - `nextjs/` - Next.js specific patterns (legacy)
 - `shared/` - API client, auth patterns
 

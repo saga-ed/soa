@@ -26,7 +26,7 @@ is **NOT yet registered** in the ss CLI's `spa-registry.ts`. **Scenarios 4 (admi
 
 ### Origin (what it replaced)
 - The legacy app is the **Haxe `ContentViewer`** web app in the saga-ed org. Confirmed via
-  `gh search code --owner saga-ed ContentViewer`: `saga-ed/coach:claude/projects/sub-domain/sources/prompt-1.md`
+  `gh search code --owner saga-ed ContentViewer`: `saga-ed/coach:docs/history/sub-domain/sources/prompt-1.md`
   describes _"a legacy web app ContentViewer that needs to seamlessly interoperate with the coach
   web-app"_. Not cloned locally.
 - The port re-implements the Haxe task engine. Code comments name the exact legacy sources:

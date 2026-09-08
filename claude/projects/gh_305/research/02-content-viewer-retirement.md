@@ -44,7 +44,7 @@ box.
   from `/woot_roster/v1.1/poll-inst/${instance_id}` (`PollDataStateManager.hx`).
 - **Where it was embedded / what depended on it:** it was a **separate legacy web app**
   the coach web-app had to interoperate with. Per
-  `coach/claude/projects/sub-domain/` (Feb 2026 cross-domain architecture research),
+  `coach/docs/history/sub-domain/` (Feb 2026 cross-domain architecture research),
   legacy ContentViewer was served under `my.sagaeducation.org/auth/content-viewer/`
   while new coach ran on Amplify — the original hard problem was "seamless navigation
   between Coach and legacy ContentViewer" sharing auth across domains. The port
@@ -264,7 +264,7 @@ ss e2e run coach-web/module-playback --coach=<worktree>
 - Publish CLI: `/home/skelly/dev/coach/packages/node/coach-content-publish/`
 - Two-store plan: `/home/skelly/dev/coach/docs/content/coach-content-two-store-plan.md`
 - Port scoping: `/home/skelly/dev/coach/docs/history/module-viewer-port/pr14-pr15-vscroll-shell-scoping.md`
-- Cross-domain / legacy-ContentViewer research: `/home/skelly/dev/coach/claude/projects/sub-domain/research/coach-cross-domain-architecture.md`
+- Cross-domain / legacy-ContentViewer research: `/home/skelly/dev/coach/docs/history/sub-domain/research/coach-cross-domain-architecture.md`
 - ss coach manifest (STALE — soa#300): `/home/skelly/dev/soa/.claude/worktrees/gh305-ss-develop/packages/node/saga-stack-cli/src/core/manifest/services.ts:475-538`
 - ss seed profiles (coach-pg / coach-mongo): `/home/skelly/dev/soa/.claude/worktrees/gh305-ss-develop/packages/node/saga-stack-cli/src/core/seed/profiles.ts:410-467`
 - Legacy haxe ContentViewer: `saga-ed/wmap-port` → `archive/woot_hxlib/lib/vscroll_task/src/vscroll/` (GitHub only, not cloned)

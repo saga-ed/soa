@@ -143,7 +143,7 @@ byte-matches the live `iam.*` events (one seed universe, PR coach#223).
   `$lib/api/curriculum` `fetchPollContent`.
 - **Legacy origin:** the haxe ContentViewer lives behind
   `https://my.sagaeducation.org/auth/content-viewer` (the `/auth/` path segment is
-  load-bearing for legacy cookie passthrough — see coach `claude/projects/sub-domain`).
+  load-bearing for legacy cookie passthrough — see coach `docs/history/sub-domain`).
   It is NOT cloned locally; the modern experience is the coach-web `/units/…` port.
   (A standalone `apps/content-viewer/` SvelteKit app appears only as a TARGET in
   coach `coach:docs/history/legacy-poc/api-poc/sources/project-breakdown.md` — a plan/POC, not shipped.)

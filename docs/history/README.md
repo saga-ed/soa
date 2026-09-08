@@ -8,6 +8,8 @@ moves them here.
 | initiative | status | last activity | entry point | harvested to |
 |---|---|---|---|---|
 | `docs-cleanup` | ACTIVE | 2026-09-08 | [CLAUDE.md](docs-cleanup/CLAUDE.md) | pending |
+| `soa-audit-2026-01` | CLOSED 2026-03-27 | 2026-03-27 | [CLAUDE.md](soa-audit-2026-01/CLAUDE.md) | none |
+| `ss-develop-session-adm` | PAUSED | 2026-07-17 | [CLAUDE.md](ss-develop-session-adm/CLAUDE.md) | none yet — cited live from saga-dash |
 
 ## Keeping this current
 

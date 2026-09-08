@@ -32,6 +32,14 @@ Server-side packages for Node.js applications.
 | `observability/` | OpenTelemetry tracing setup, Prometheus metrics for outbox/consumer, Express error middleware. **Usage:** `import { initTracing } from '@saga-ed/soa-observability'` | [event-driven.md](../../.claude/rules/event-driven.md) |
 | `event-test-harness/` | Testcontainers helpers for spinning up Postgres + RabbitMQ in integration tests. **Usage:** `import { startInfra } from '@saga-ed/soa-event-test-harness'` | [event-driven.md](../../.claude/rules/event-driven.md) |
 | `event-integration-tests/` | Cross-package integration tests for the event-driven stack (outbox → broker → consumer round-trips). | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `saga-stack-cli/` | The `ss` CLI — unified stack up/seed/verify/reset/snapshot/e2e across the whole fleet, one OCLIF package over a frozen TypeScript service manifest. | [saga-stack-cli/](./saga-stack-cli/CLAUDE.md) |
+| `contract-check/` | CI gate for event-schema changes: catches in-place edits to frozen schemas, unpinned new versions, and dropped versions a consumer still pins. | Tier |
+| `health/` | Shared `/health` + `/health/details` route mounters for Node services, unmounted from any auth perimeter; reports build identity (colour/SHA/env) for blue/green smoke tests. | Tier |
+| `inspect/` | Standard introspection surface for the sandbox visibility console — a service mounts one router and declares its browsable entities. | Tier |
+| `mailer/` | Shared transactional-email primitive: template-free `MailService` over a pluggable `MailAdapter` (`StubMailAdapter` for dev/test, `SesMailAdapter` for prod). | Tier |
+| `postgres/` | `PostgresProvider` — Inversify-injectable, ORM-agnostic `pg.Pool` wrapper with an AWS SSM/Secrets Manager config loader. | Tier |
+| `preview-headers/` | Canonical HTTP-plane `x-saga-preview-<service>` sandbox-routing-header primitives (capture/forward/match), the HTTP sibling of the event-plane preview tag. | Tier |
+| `mesh-fixture-cli/` | **Deprecated** — superseded by `saga-stack-cli` (`ss stack snapshot`/`seed`). Left functional, not removed; cross-repo fixture authoring for the saga-mesh. | Tier |
 
 **Note:** Packages marked "Tier" are simple/single-purpose and adequately documented here. Complex packages have dedicated CLAUDE.md files. The event-driven family share [event-driven.md](../../.claude/rules/event-driven.md).
 

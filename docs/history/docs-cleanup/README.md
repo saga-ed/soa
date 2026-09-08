@@ -88,7 +88,16 @@ pre-existing `followups.md` item: `gh_214/README.md`'s `../multi/`
 cross-reference, dropped in the same commit. No real citers found in
 rostering, saga-dash, student-data-system, program-hub, qboard, or coach.
 
-Remaining: D9.1 moves (`soa-audit.md`/`soa-remediation-plan.md` →
-`docs/history/soa-audit-2026-01/`, `ss-develop-session-adm-plan.md` →
-`docs/history/ss-develop-session-adm/`, saga-dash citer repoints), then a
-final validator pass and push.
+D9.1 moves (`09d4b410`): `soa-audit.md`/`soa-remediation-plan.md` →
+`docs/history/soa-audit-2026-01/` (banner: CLOSED 2026-03-27); loose file
+`claude/projects/ss-develop-session-adm-plan.md` →
+`docs/history/ss-develop-session-adm/plan.md` (banner: PAUSED — verified M0-M2
+shipped against `saga-stack-cli`'s `session-adm.ts`, but M3's
+`telemetry-demo-multi.sh` deprecation-shim conversion never happened, so not
+CLOSED as the decision doc assumed). saga-dash's 3 citers repointed in that
+repo's own commit (`a60e3dcb`).
+
+Phase B complete. Validator: 13 errors/7 warnings/17 info (Phase A baseline)
+→ 9 errors/5 warnings/11 info; no new findings introduced by any Phase B
+commit, each checked individually before committing. Full report in the
+session transcript; commit SHAs on this branch (soa) and in saga-dash.

@@ -99,8 +99,10 @@ cross-reference bullet restored. See `followups.md` for the full record.
 The same commit applied the fact-check's other 3 findings: `Last activity:`
 lines added to `gh_305`/`gh_t54`/`synthetic-dev-align`'s banners
 (2026-07-14 / 2026-02-01 / 2026-06-25, each verified against `git log`),
-this file's own status line updated to reflect Phase A/B as landed, and the
-missing `coach:` prefix added to the decision doc's `gh_305` citation.
+the meta-banner (`docs/history/docs-cleanup/CLAUDE.md`) updated to record
+Phase A/B as landed instead of "not yet executed", and the missing `coach:`
+prefix added to the decision doc's `gh_305` citation — which also cleared
+an `archived-citation` false-positive (5 warnings -> 4).
 
 D9.1 moves (`09d4b410`): `soa-audit.md`/`soa-remediation-plan.md` →
 `docs/history/soa-audit-2026-01/` (banner: CLOSED 2026-03-27); loose file
@@ -112,6 +114,7 @@ CLOSED as the decision doc assumed). saga-dash's 3 citers repointed in that
 repo's own commit (`a60e3dcb`).
 
 Phase B complete. Validator: 13 errors/7 warnings/17 info (Phase A baseline)
-→ 9 errors/5 warnings/11 info; no new findings introduced by any Phase B
-commit, each checked individually before committing. Full report in the
-session transcript; commit SHAs on this branch (soa) and in saga-dash.
+→ 9 errors/4 warnings/11 info, including the fact-check-fixes commit above;
+no new findings introduced by any Phase B commit or the fact-check
+corrections, each checked individually before committing. Full report in
+the session transcript; commit SHAs on this branch (soa) and in saga-dash.

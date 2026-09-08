@@ -1,9 +1,12 @@
 # claude/projects — initiative index (legacy layout)
 
 Migrates to `docs/history/<initiative>/` in Phase C; see root
-[`CLAUDE.md`](../../CLAUDE.md)'s authority-by-location paragraph. `multi/`
-and `ss-develop-session-adm-plan.md` (loose file) are excluded — not
-initiatives, moved/removed rather than banner-ized (D9.1).
+[`CLAUDE.md`](../../CLAUDE.md)'s authority-by-location paragraph.
+`ss-develop-session-adm-plan.md` (loose file) is excluded — not an
+initiative, moved rather than banner-ized (D9.1). `multi/` is also excluded
+from this table — not an initiative either, but it stays live (cited by
+`gh_214`, which is OPEN) and gets its own Phase C banner rather than a row
+here.
 
 | initiative | status | last activity | entry point | harvested to |
 |---|---|---|---|---|

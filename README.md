@@ -13,8 +13,8 @@ pnpm install
 pnpm check
 ```
 
-- Always run `pnpm install` before building or running any commands for the first time.
-- Run `pnpm check` before every commit or PR to ensure you haven't regressed functionality.
+Full setup, build/test cheatsheet, and local-CI checks:
+[docs/GETTING-STARTED.md](docs/GETTING-STARTED.md).
 
 ## Introduction
 

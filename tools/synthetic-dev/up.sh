@@ -1819,7 +1819,22 @@ services_up(){
 # (postgres_admin) so it can truncate tables owned by iam / saga_user / etc.
 reset_data(){
   say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis, ads-adm, connect)…"
-  local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
+  # $1 (optional): extra single-quoted table names to spare, e.g. "'a', 'b'".
+  trunc_sql(){
+    local extra="${1:-}"
+    local keep="'_prisma_migrations'${extra:+, $extra}"
+    printf "DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN (%s) LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;" "$keep"
+  }
+  local trunc; trunc="$(trunc_sql)"
+  # surveys_api_local keeps its SEEDED REFERENCE DATA (the #1324 question bank and
+  # the named sets). Those rows are inserted by a DATA MIGRATION, not a seed
+  # script, so a generic truncate destroys data that nothing restores: this reset
+  # preserves _prisma_migrations, so the next `prisma migrate deploy` sees the
+  # seeding migration already applied and does nothing. The stack would then serve
+  # an empty bank — a question set whose questions never load — with no error.
+  # Mirrors the CLI manifest's `resetPreserveTables` (saga-stack-cli
+  # core/manifest/databases.ts); keep the two in step.
+  local trunc_surveys; trunc_surveys="$(trunc_sql "'question_bank', 'question_set', 'question_set_item'")"
   # `sessions` truncation also clears its consumed-event cursors, so its
   # event-built projections re-converge from the producers' outbox replay.
   # playback DBs are truncated only under --with-playback, so a bare `--reset`
@@ -1833,10 +1848,13 @@ reset_data(){
   # _prisma_migrations, so the schema survives.
   local dbs=(iam_local iam_pii_local programs scheduling sessions content coach_api sis_db ads_adm_local)
   [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local ledger_local)
-  # surveys_api_local: submissions/launches are per school-year synthetic data too.
+  # surveys_api_local: submissions/launches are per school-year synthetic data too
+  # — but its question bank is NOT (see trunc_surveys above).
   [[ -d "$SDS/packages/node/surveys-db" ]] && dbs+=(surveys_api_local)
   for db in "${dbs[@]}"; do
-    if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then
+    local sql="$trunc"
+    [[ $db == surveys_api_local ]] && sql="$trunc_surveys"
+    if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$sql" >/dev/null 2>&1; then
       ok "truncated $db"
     else
       printf "\033[33m⚠\033[0m could not truncate %s (does it exist? is mesh up?)\n" "$db"

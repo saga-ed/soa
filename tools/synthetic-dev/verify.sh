@@ -123,7 +123,17 @@ if docker exec soa-postgres-1 psql -U postgres_admin -d postgres -tAc \
      "SELECT 1 FROM pg_database WHERE datname='surveys_api_local'" 2>/dev/null | grep -q 1; then
   bank=$(docker exec soa-postgres-1 psql -U postgres_admin -d surveys_api_local -tAc "SELECT count(*) FROM question_bank" 2>/dev/null || echo 0)
   if [[ "${bank:-0}" -ge 6 ]]; then okline "surveys_api_local migrated + bank seeded (questions=$bank)"
-  else badline "surveys_api_local present but bank=$bank (<6) — run ./up.sh up (surveys-db migrate deploy)"; fi
+  else
+    # NOT fixable by re-running up/migrate: the bank arrives in a DATA MIGRATION,
+    # and an applied `_prisma_migrations` row (which a reset preserves) makes
+    # `migrate deploy` a no-op. Replaying the migration SQL is idempotent
+    # (ON CONFLICT DO NOTHING), so it is the repair.
+    badline "surveys_api_local present but bank=$bank (<6) — reference data was truncated; replay the seed migration:
+      for m in 20260904120100_seed_question_bank 20260908120000_question_set_student_core_5; do
+        docker exec -i soa-postgres-1 psql -U postgres_admin -d surveys_api_local -v ON_ERROR_STOP=1 \\
+          < \"\$SDS/packages/node/surveys-db/src/prisma/migrations/\$m/migration.sql\"
+      done"
+  fi
 fi
 
 # Connect's mongo (mesh-managed: infra-compose services/connect-mongo, :27037).

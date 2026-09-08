@@ -1,4 +1,13 @@
+---
+paths:
+  - "python/**"
+---
+
 # Python Package Management with uv
+
+> Path-scoped rule. Loads when Claude touches `python/**`. No project exists
+> under `python/` yet (see `python/CLAUDE.md`) — this is the convention to
+> apply when one is added.
 
 This document defines the standard Python package management approach for all projects using [uv](https://github.com/astral-sh/uv).
 
@@ -332,3 +341,5 @@ uv run --python 3.12 python script.py
 - [uv Documentation](https://docs.astral.sh/uv/)
 - [uv GitHub](https://github.com/astral-sh/uv)
 - [PEP 621](https://peps.python.org/pep-0621/) - Project metadata standard
+
+Referenced from: root `CLAUDE.md`'s rules index and `python/CLAUDE.md`.

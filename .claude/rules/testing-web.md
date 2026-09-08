@@ -1,8 +1,13 @@
+---
+paths:
+  - "apps/web/**"
+---
+
 # Web Frontend Testing
 
-Testing patterns specific to web frontend applications.
-
-For shared patterns, see [claude/testing/](../../../claude/testing/).
+> Path-scoped rule. Loads when Claude touches `apps/web/**`. Shared
+> cross-runtime conventions (naming, ARES purposes, builders) live in
+> [`docs/testing/`](../../docs/testing/README.md), not here.
 
 ## Component Testing: Vitest Browser Mode
 
@@ -80,3 +85,6 @@ test('user can log in', async ({ page }) => {
 - **Vitest (unit)**: State logic, utilities, calculations
 - **Vitest browser mode**: Component interactions, form validation
 - **Playwright**: Cross-page flows, auth, real API integration
+
+Referenced from: root `CLAUDE.md`'s rules index, `apps/web/CLAUDE.md`, and
+every leaf CLAUDE.md whose directory matches `paths:` above.

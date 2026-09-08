@@ -46,6 +46,10 @@ All env vars must be prefixed with `NEXT_PUBLIC_*`:
 
 - ⚠️ Next.js is legacy - new projects should use SvelteKit
 
+## Rules that apply here
+
+- `testing-web.md`
+
 ---
 
 *Last updated: 2026-02*

@@ -108,7 +108,7 @@ Dynamic imports work in ESM but have caveats:
 const module = await import('./module.js');
 
 // ⚠️ Issues in test environments with decorators/DI
-// See apps/node/claude/testing.md for test-specific guidance
+// See .claude/rules/testing-node.md for test-specific guidance
 ```
 
 ## Top-Level Await
@@ -169,5 +169,5 @@ import path from 'path';
 
 ## See Also
 
-- [apps/node/claude/testing.md](../apps/node/claude/testing.md) - ESM patterns in tests
+- [.claude/rules/testing-node.md](../.claude/rules/testing-node.md) - ESM patterns in tests
 - [tooling/pnpm.md](./tooling/pnpm.md) - Workspace package resolution

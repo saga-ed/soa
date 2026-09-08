@@ -65,6 +65,10 @@ All client-side env vars must use `NEXT_PUBLIC_*` prefix:
 - `/apps/web/CLAUDE.md` - Web app patterns
 - `/claude/frontend/nextjs/` - Next.js specific patterns
 
+## Rules that apply here
+
+- `testing-web.md`
+
 ---
 
 *Last updated: 2026-02*

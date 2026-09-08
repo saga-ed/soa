@@ -26,14 +26,14 @@ Server-side packages for Node.js applications.
 | `redis-core/` | Redis client wrapper with ioredis. Connection pooling and error handling. **Usage:** `import { RedisClient } from '@saga-ed/soa-redis-core'` | Tier |
 | `aws-util/` | AWS SDK utilities for S3, SQS, and SNS. Helper functions for common AWS operations. | Tier |
 | `test-util/` | Vitest testing utilities with custom matchers and test helpers. **Usage:** `import { createMockRequest } from '@saga-ed/soa-test-util'` | Tier |
-| `event-envelope/` | Zod-validated cross-service event envelope (id, type, version, occurredAt, traceparent, payload). **Usage:** `import { EventEnvelopeSchema } from '@saga-ed/soa-event-envelope'` | [event-driven.md](./claude/event-driven.md) |
-| `event-outbox/` | Transactional outbox: `writeOutbox()` writes inside the same pg tx as your domain change; `new OutboxRelay({...}).start()` ships rows to RabbitMQ with at-least-once delivery. | [event-driven.md](./claude/event-driven.md) |
-| `event-consumer/` | Idempotent RabbitMQ consumer with `consumed_events` dedup table, Zod runtime validation, OTel trace propagation. | [event-driven.md](./claude/event-driven.md) |
-| `observability/` | OpenTelemetry tracing setup, Prometheus metrics for outbox/consumer, Express error middleware. **Usage:** `import { initTracing } from '@saga-ed/soa-observability'` | [event-driven.md](./claude/event-driven.md) |
-| `event-test-harness/` | Testcontainers helpers for spinning up Postgres + RabbitMQ in integration tests. **Usage:** `import { startInfra } from '@saga-ed/soa-event-test-harness'` | [event-driven.md](./claude/event-driven.md) |
-| `event-integration-tests/` | Cross-package integration tests for the event-driven stack (outbox → broker → consumer round-trips). | [event-driven.md](./claude/event-driven.md) |
+| `event-envelope/` | Zod-validated cross-service event envelope (id, type, version, occurredAt, traceparent, payload). **Usage:** `import { EventEnvelopeSchema } from '@saga-ed/soa-event-envelope'` | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `event-outbox/` | Transactional outbox: `writeOutbox()` writes inside the same pg tx as your domain change; `new OutboxRelay({...}).start()` ships rows to RabbitMQ with at-least-once delivery. | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `event-consumer/` | Idempotent RabbitMQ consumer with `consumed_events` dedup table, Zod runtime validation, OTel trace propagation. | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `observability/` | OpenTelemetry tracing setup, Prometheus metrics for outbox/consumer, Express error middleware. **Usage:** `import { initTracing } from '@saga-ed/soa-observability'` | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `event-test-harness/` | Testcontainers helpers for spinning up Postgres + RabbitMQ in integration tests. **Usage:** `import { startInfra } from '@saga-ed/soa-event-test-harness'` | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `event-integration-tests/` | Cross-package integration tests for the event-driven stack (outbox → broker → consumer round-trips). | [event-driven.md](../../.claude/rules/event-driven.md) |
 
-**Note:** Packages marked "Tier" are simple/single-purpose and adequately documented here. Complex packages have dedicated CLAUDE.md files. The event-driven family share [claude/event-driven.md](./claude/event-driven.md).
+**Note:** Packages marked "Tier" are simple/single-purpose and adequately documented here. Complex packages have dedicated CLAUDE.md files. The event-driven family share [event-driven.md](../../.claude/rules/event-driven.md).
 
 ## Two pubsub families — pick one
 
@@ -87,6 +87,12 @@ import { BaseController } from '@saga-ed/soa-api-core';
 import { logger } from '@saga-ed/soa-logger';
 import { db } from '@saga-ed/soa-db';
 ```
+
+## Rules that apply here
+
+- `testing-node.md`
+- `event-driven.md` — for the event-family packages (`event-envelope`, `event-outbox`,
+  `event-consumer`, `event-test-harness`, `event-integration-tests`, `observability`).
 
 ---
 

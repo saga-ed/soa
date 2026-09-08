@@ -394,18 +394,18 @@ pnpm turbo run test --filter=...[origin/main]
 
 | Document | Purpose |
 |----------|---------|
-| [README.md](../../../testing/README.md) | Index and routing |
-| [philosophy.md](../../../testing/philosophy.md) | ARES framework, core principles |
-| [conventions.md](../../../testing/conventions.md) | File naming, directory structure |
-| [builders.md](../../../testing/builders.md) | Fishery patterns, test data |
+| [README.md](../../../../docs/testing/README.md) | Index and routing |
+| [philosophy.md](../../../../docs/testing/philosophy.md) | ARES framework, core principles |
+| [conventions.md](../../../../docs/testing/conventions.md) | File naming, directory structure |
+| [builders.md](../../../../docs/testing/builders.md) | Fishery patterns, test data |
 
 ### Runtime-Tier Specific
 
 | Location | Purpose |
 |----------|---------|
-| [apps/node/claude/testing.md](../../../../apps/node/claude/testing.md) | DI testing, DB isolation, Docker |
-| [apps/web/claude/testing.md](../../../../apps/web/claude/testing.md) | Vitest browser mode, Svelte, Playwright |
-| [packages/node/claude/testing.md](../../../../packages/node/claude/testing.md) | Node package testing patterns |
+| [testing-node.md](../../../../.claude/rules/testing-node.md) | DI testing, DB isolation, Docker |
+| [testing-web.md](../../../../.claude/rules/testing-web.md) | Vitest browser mode, Svelte, Playwright |
+| [testing-node.md](../../../../.claude/rules/testing-node.md) | Node package testing patterns |
 
 ### Source Materials (Nathan's prework)
 

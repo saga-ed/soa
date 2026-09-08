@@ -14,7 +14,7 @@ initiatives, moved/removed rather than banner-ized (D9.1).
 | `gh_375` | ACTIVE | 2026-07-28 | [source/plan.md](gh_375/source/plan.md) | none yet |
 | `gh_401_2` | CLOSED 2026-08-10 | 2026-08-04 | [source/plan.md](gh_401_2/source/plan.md) | none yet |
 | `gh_t54` | ACTIVE | 2026-09-08 | [research/plan.md](gh_t54/research/plan.md) | none yet — cited live from `docs/claude-hierarchy-summary.md` |
-| `soa_75` | CLOSED 2026-05-26 | 2026-06-25 | [README.md](soa_75/README.md) | `d-soa-pubsub-divorce.md` cited live from `packages/node/CLAUDE.md`, `packages/node/claude/event-driven.md` |
+| `soa_75` | CLOSED 2026-05-26 | 2026-06-25 | [README.md](soa_75/README.md) | `d-soa-pubsub-divorce.md` cited live from `packages/node/CLAUDE.md` and its event-driven adopter-conventions rule |
 | `synthetic-dev-align` | ACTIVE | 2026-09-08 | [README.md](synthetic-dev-align/README.md) | none yet |
 
 ## Notes on dates

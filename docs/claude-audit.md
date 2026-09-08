@@ -303,7 +303,7 @@ The skill can be extended by:
 - [rating-criteria.md](../.claude/skills/claude-audit/rating-criteria.md) - Scoring rubrics
 - [CLAUDE.md](../CLAUDE.md) - SOA repository standards
 - [claude/esm.md](../claude/esm.md) - ESM patterns
-- [apps/node/claude/testing.md](../apps/node/claude/testing.md) - Testing patterns
+- [.claude/rules/testing-node.md](../.claude/rules/testing-node.md) - Testing patterns
 
 ---
 

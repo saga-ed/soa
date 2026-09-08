@@ -1,10 +1,19 @@
-# Node.js Backend Testing
+---
+paths:
+  - "apps/node/**"
+  - "packages/node/**"
+---
 
-Testing patterns specific to Node.js backend applications.
+# Node.js Testing — apps and packages
 
-For shared patterns, see [claude/testing/](../../../claude/testing/).
+> Path-scoped rule. Loads when Claude touches a Node.js backend app
+> (`apps/node/**`) or a shared Node.js package (`packages/node/**`). Shared
+> cross-runtime conventions (naming, ARES purposes, builders) live in
+> [`docs/testing/`](../../docs/testing/README.md), not here.
 
-## DI/Inversify Testing
+## Backend apps (`apps/node/**`)
+
+### DI/Inversify Testing
 
 Create a test container with mock bindings:
 
@@ -38,7 +47,7 @@ describe('MyService', () => {
 });
 ```
 
-## Database Testing
+### Database Testing
 
 **Requirement**: Docker containers (matches CI environment).
 
@@ -51,7 +60,7 @@ services:
     image: redis:7
 ```
 
-## Database Isolation (Parallel Tests)
+### Database Isolation (Parallel Tests)
 
 All integration tests must run in parallel without interference.
 
@@ -84,7 +93,7 @@ interface TestDatabase {
 }
 ```
 
-## Integration Test Pattern
+### Integration Test Pattern
 
 ```typescript
 describe('API Integration', () => {
@@ -110,7 +119,7 @@ describe('API Integration', () => {
 });
 ```
 
-## Controller Loading in Tests
+### Controller Loading in Tests
 
 **Rule**: Use static imports for controllers in test files. Do NOT use dynamic loading with ControllerLoader.
 
@@ -143,9 +152,9 @@ const gqlResolvers = await controllerLoader.loadControllers(
 
 **Note**: Production code (main.ts) can still use dynamic loading. This constraint applies only to test files.
 
-## ESM Patterns in Tests
+### ESM Patterns in Tests
 
-For ESM-specific patterns (like `__dirname` workaround for file path resolution), see [claude/esm.md](../../../claude/esm.md).
+For ESM-specific patterns (like `__dirname` workaround for file path resolution), see [claude/esm.md](../../claude/esm.md).
 
 **Common test use case**: Schema pattern resolution
 
@@ -160,4 +169,90 @@ const __dirname = path.dirname(__filename);
 const schemaPatterns = [path.resolve(__dirname, '../../schemas/**/*.gql')];
 ```
 
-See [claude/esm.md](../../../claude/esm.md) for complete ESM documentation.
+See [claude/esm.md](../../claude/esm.md) for complete ESM documentation.
+
+## Node packages (`packages/node/**`)
+
+Packages are consumed by multiple apps. Tests should verify:
+
+- **Public API contracts** (acceptance tests)
+- **Edge cases in utilities** (regression tests)
+- **Package can be imported** (smoke tests)
+
+### Unit Test Pattern
+
+Test public exports, mock external dependencies:
+
+```typescript
+// packages/node/api-core/src/__tests__/validation.unit.test.ts
+import { validateEmail } from '../validation.js';
+
+describe('validateEmail', () => {
+  it('accepts valid email addresses', () => {
+    expect(validateEmail('user@example.com')).toBe(true);
+  });
+
+  it('rejects invalid formats', () => {
+    expect(validateEmail('not-an-email')).toBe(false);
+  });
+});
+```
+
+### Testing Exported Types
+
+Ensure type exports work as documented:
+
+```typescript
+// Type test - compilation is the test
+import type { UserConfig } from '@saga-ed/soa-api-core';
+
+const config: UserConfig = {
+  timeout: 1000,
+  retries: 3,
+};
+```
+
+### Smoke Test Pattern
+
+Verify package imports correctly:
+
+```typescript
+// packages/node/api-core/src/__tests__/import.smoke.test.ts
+describe('Package Smoke Tests', () => {
+  it('exports main entry point', async () => {
+    const module = await import('@saga-ed/soa-api-core');
+    expect(module).toBeDefined();
+  });
+});
+```
+
+### Package-Specific Builders
+
+Each package maintains its own builders in `__tests__/builders/`:
+
+```
+packages/node/api-core/
+  src/
+    __tests__/
+      builders/
+        request.builder.ts
+        response.builder.ts
+        index.ts
+```
+
+### Vitest Config
+
+Each package has its own `vitest.config.ts`:
+
+```typescript
+export default defineConfig({
+  test: {
+    environment: 'node',
+    include: ['src/__tests__/**/*.test.ts'],
+  },
+});
+```
+
+Referenced from: root `CLAUDE.md`'s rules index, `apps/node/CLAUDE.md`,
+`packages/node/CLAUDE.md`, and every leaf CLAUDE.md whose directory matches
+`paths:` above.

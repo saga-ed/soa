@@ -73,6 +73,10 @@ API endpoints default to `localhost:4000-4003` for development.
 - `/packages/web/ui/` - React component library
 - `/claude/frontend/nextjs/` - Next.js specific patterns
 
+## Rules that apply here
+
+- `testing-web.md`
+
 ---
 
 *Last updated: 2026-02-11*

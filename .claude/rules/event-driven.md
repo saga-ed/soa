@@ -1,4 +1,14 @@
+---
+paths:
+  - "packages/node/event-*/**"
+  - "packages/node/observability/**"
+---
+
 # Event-driven packages — adopter conventions
+
+> Path-scoped rule. Loads when Claude touches an event-family package
+> (`event-envelope`, `event-outbox`, `event-consumer`, `event-test-harness`,
+> `event-integration-tests`) or `observability`.
 
 Reference for fleet services consuming `@saga-ed/soa-event-envelope`, `event-outbox`, `event-consumer`, `observability`, `event-test-harness`. Design decisions live under `claude/projects/soa_75/decisions/`.
 
@@ -151,3 +161,6 @@ See `decisions/d-observability.md`.
 ---
 
 *Source decisions:* `claude/projects/soa_75/decisions/`
+
+Referenced from: root `CLAUDE.md`'s rules index and `packages/node/CLAUDE.md`'s
+event-family package rows.

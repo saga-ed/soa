@@ -177,7 +177,7 @@ const __dirname = dirname(__filename);
 ## Dimension 3: Testing Requirements
 
 ### Objective
-Ensure adequate test coverage and correct testing patterns per /soa/apps/node/claude/testing.md.
+Ensure adequate test coverage and correct testing patterns per /soa/.claude/rules/testing-node.md.
 
 ### Detection Patterns
 
@@ -616,7 +616,7 @@ REMEDIATION:
   - test/services/user.service.test.ts
   - test/services/auth.service.test.ts
 
-  See: /soa/apps/node/claude/testing.md for patterns
+  See: /soa/.claude/rules/testing-node.md for patterns
 ```
 
 ### Template: Documentation Violation (Complex Package)

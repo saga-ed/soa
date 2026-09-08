@@ -13,10 +13,18 @@ doc vs. code wins (`git log -1`).
 
 <!-- docs-check: history-dir: docs/history -->
 
-## Rules
+## Path-scoped rules (`.claude/rules/`)
 
-`.claude/rules/` doesn't exist yet — `testing-node.md`, `testing-web.md`,
-`event-driven.md`, and `python-uv.md` land here in a later pass.
+- `testing-node.md` — loads on `apps/node/**` or `packages/node/**`: DI/Inversify,
+  DB isolation, controller-loading, package unit/smoke test patterns.
+- `testing-web.md` — loads on `apps/web/**`: Vitest browser mode, Playwright E2E.
+- `event-driven.md` — loads on `packages/node/event-*/**` or
+  `packages/node/observability/**`: outbox/consumer wiring, event versioning.
+- `python-uv.md` — loads on `python/**`: uv package-management conventions.
+
+Shared cross-runtime testing conventions (naming, ARES purposes, builders) live
+in [`docs/testing/`](docs/testing/README.md), not in a rule — they're reference
+material, not a path-scoped instruction.
 
 ## Saga tooling
 
@@ -54,7 +62,6 @@ doc-routing rules (repo-wide vs. nested vs. `.claude/rules/*.md` vs. skills).
 - See `claude/frontend/` for web framework patterns
 - See `claude/tooling/pnpm.md` for pnpm installation rules
 - See `apps/CLAUDE.md` for application details
-- See `apps/node/claude/testing.md` for Node.js testing patterns (DI, controller loading)
 - See `packages/CLAUDE.md` for package details
 - See `docs/cross-repo-linking-summary.md` for cross-repo package linking (development workflow)
 - See `tools/walkthrough-video/CLAUDE.md` for generating narrated demo videos of any saga-soa frontend

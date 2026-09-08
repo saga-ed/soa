@@ -12,12 +12,27 @@ This program records the gap; it doesn't file a GitHub issue on the user's
 behalf. Citer comment updates (`connection-manager.ts:70` and the 2 bare
 citers in `event-outbox`/`event-envelope`) are Phase D scope, not Phase A.
 
-## `gh_214/README.md`'s `../multi/` cross-reference — resolved in Phase B
+## `claude/projects/multi/` — wrongly removed in Phase B, restored
 
-Dropped the `../multi/` bullet from `gh_214/README.md`'s "Cross-references"
-section in the same commit that removed `claude/projects/multi/` (D9.2,
-Phase B) — no replacement target exists, so the line was removed rather than
-repointed.
+D9.1's decision doc framed `multi/` as uncited and slated it for Phase C
+removal; Phase B's removal commit (`ff92faa5`) acted on that premise early,
+`git rm`-ing it alongside the other dead root-level files, and dropped
+`gh_214/README.md`'s `../multi/` cross-reference bullet in the same commit
+on the reasoning that no replacement target would exist.
+
+A fact-check pass (`so-phaseA-factcheck.md`) found the premise wrong:
+`gh_214/research/06-multi-instance-analysis.md` cites the stale name
+`multi-synthetic-dev` as live prior art under its own "Cross-references"
+heading plus 3 inline prose mentions, and
+`gh_214/research/01-synthetic-dev-inventory.md:105` names it too — `gh_214`
+is OPEN, so D9.7's carve-out applies and `multi/` cannot be removed.
+Corrected in a follow-up commit: `claude/projects/multi/` restored (2
+files, unchanged content), the stale `multi-synthetic-dev` name fixed to
+`multi` in both research files (dropping the `~/dev/soa/` prefix on the
+one absolute-path occurrence), and `gh_214/README.md`'s `../multi/`
+cross-reference bullet restored. `multi/` stays live; Phase C moves it to
+`docs/history/multi/` with a banner (Status: CLOSED, "prior-art reference
+cited by gh_214") instead of deleting it.
 
 ## `docs/promotion-pipeline.md` — never written, cited from 3 shell scripts
 
@@ -41,9 +56,11 @@ inversify, turborepo}.mdc` each tell Cursor to "always read and apply" a
 specific `memory-bank/*.md` file (`memory-bank/unit-testing.md`,
 `memory-bank/inversify.md`, etc.) — all now gone along with the rest of
 `memory-bank/` (15 files + a `testing/` subdir of 7), removed in the same
-commit as `claude/projects/multi/` (2 files), `human-notes/` (4 files),
-`SCOPE_FIX_SUMMARY.md`, `SETUP_SUMMARY.md`, `WORKFLOW_SUCCESS_SUMMARY.md`,
-`LOCAL_DEVELOPMENT.md`, and `docs/quickstart.md`. `docs/overview.md`'s
+commit as `human-notes/` (4 files), `SCOPE_FIX_SUMMARY.md`,
+`SETUP_SUMMARY.md`, `WORKFLOW_SUCCESS_SUMMARY.md`, `LOCAL_DEVELOPMENT.md`,
+and `docs/quickstart.md` — that commit also removed `claude/projects/multi/`,
+which turned out to be a mistake (see the entry above); it's restored, not
+part of this removal list. `docs/overview.md`'s
 repo-structure listing (a current-tier doc) had the same problem; that fix
 landed in the same commit as the removal. The `.mdc` files were left alone
 because they're Cursor-tool config outside the

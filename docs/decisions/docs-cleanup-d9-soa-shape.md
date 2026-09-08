@@ -261,7 +261,7 @@ exists in fragments across the other 4 first).
   same POC's reasoning as a set. **Carve out and never archive** (fully
   live, no partial split): `gh_214` (saga-dash cites it live via
   `playwright.stack.config.ts:327`, plus it's OPEN), `gh_305` (CLOSED but
-  coach cites it live from `docs/history/module-viewer-port/README.md:23`),
+  coach cites it live from `coach:docs/history/module-viewer-port/README.md:23`),
   `ss-develop-session-adm-plan.md` (saga-dash cites it 3×), `gh_355` and
   `gh_375` (both OPEN). **`gh_t54` is excluded from the archive set
   entirely** — it has no matching GH issue at all (§2: "t54" predates the

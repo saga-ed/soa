@@ -74,7 +74,7 @@ after every code sample proved to drift from current
 nonexistent `AbstractTRPCController`/`ActionCtx`/`RedisAdapter`, a
 `ControllerLoader` test pattern the new `testing-node.md` rule forbids).
 
-D9.1/D9.2 removals (this commit): `git rm` of `claude/projects/multi`,
+D9.1/D9.2 removals (`ff92faa5`): `git rm` of `claude/projects/multi`,
 `human-notes/`, `memory-bank/`, `SCOPE_FIX_SUMMARY.md`, `SETUP_SUMMARY.md`,
 `WORKFLOW_SUCCESS_SUMMARY.md`, plus `LOCAL_DEVELOPMENT.md` and
 `docs/quickstart.md` (superseded by the D9.6 merge). Pre-removal HEAD:
@@ -87,6 +87,20 @@ scope — recorded in `followups.md` instead of fixed). Also resolved a
 pre-existing `followups.md` item: `gh_214/README.md`'s `../multi/`
 cross-reference, dropped in the same commit. No real citers found in
 rostering, saga-dash, student-data-system, program-hub, qboard, or coach.
+
+Correction (Phase A fact-check): removing `claude/projects/multi/` above
+proved a mistake — a fact-check pass found it cited as live prior art from
+`gh_214/research/06-multi-instance-analysis.md` and
+`01-synthetic-dev-inventory.md:105` under the stale name
+`multi-synthetic-dev`, and `gh_214` is OPEN, so D9.7's carve-out applies.
+Restored in a follow-up commit: `multi/` back in place, both research files'
+stale name fixed to `multi`, and `gh_214/README.md`'s `../multi/`
+cross-reference bullet restored. See `followups.md` for the full record.
+The same commit applied the fact-check's other 3 findings: `Last activity:`
+lines added to `gh_305`/`gh_t54`/`synthetic-dev-align`'s banners
+(2026-07-14 / 2026-02-01 / 2026-06-25, each verified against `git log`),
+this file's own status line updated to reflect Phase A/B as landed, and the
+missing `coach:` prefix added to the decision doc's `gh_305` citation.
 
 D9.1 moves (`09d4b410`): `soa-audit.md`/`soa-remediation-plan.md` →
 `docs/history/soa-audit-2026-01/` (banner: CLOSED 2026-03-27); loose file

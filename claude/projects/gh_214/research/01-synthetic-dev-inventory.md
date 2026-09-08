@@ -102,7 +102,7 @@ Profiles: **roster** (iam roster only) / **full** (roster+programs+content ±pla
 Per-subsystem seed is **already modular** (each service owns its `db:seed`); what's missing is a declarative "which seed for which flow" layer.
 
 ### Ports / state / config
-Hardcoded ports; `STATE=/tmp/sds-synthetic` (single-instance — the multi-instance concern is the sibling `multi-synthetic-dev` track). `apply_fixes` idempotently patches `.env.local` files (AUTH secrets, RABBITMQ_URL, rate limit, dash `config.json` sis-api entry).
+Hardcoded ports; `STATE=/tmp/sds-synthetic` (single-instance — the multi-instance concern is the sibling `multi` track). `apply_fixes` idempotently patches `.env.local` files (AUTH secrets, RABBITMQ_URL, rate limit, dash `config.json` sis-api entry).
 
 ### Mesh/infra coupling
 8 app DBs created by mesh profile (`iam_local iam_pii_local programs scheduling sessions ads_adm_local ledger_local sis_db`). `migrate deploy` (not `db:push`) — d1.5. S3 snapshot restore (workspace mode) from `s3://saga-db-seeds-dev/<source>/profile-<profile>.sql`.

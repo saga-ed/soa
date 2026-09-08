@@ -1,6 +1,7 @@
 # gh_305 — `ss develop` concierge topic, coach-first
 
 Status: CLOSED 2026-07-16
+Last activity: 2026-07-14
 Entry point: [source/plan.md](source/plan.md)
 Harvested to: none yet — cited live from
 `coach:docs/history/module-viewer-port/README.md:23` (research/02)

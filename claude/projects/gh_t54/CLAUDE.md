@@ -1,6 +1,7 @@
 # gh_t54 — Hierarchical CLAUDE.md organization (soa, Thrive, Coach)
 
 Status: ACTIVE
+Last activity: 2026-02-01
 Entry point: [research/plan.md](research/plan.md)
 Harvested to: none yet — cited live from `docs/claude-hierarchy-summary.md`
 

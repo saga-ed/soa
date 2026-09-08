@@ -2,13 +2,13 @@
 
 > Question: what would it take to run 2+ synthetic-dev stacks on one machine, so
 > agents on different initiatives stop competing for the single stack? Synthesizes
-> the existing `multi-synthetic-dev` prior art, a fresh single-instance hardcoding
+> the existing `multi` prior art, a fresh single-instance hardcoding
 > inventory, and a readiness audit of the new `saga-stack-cli`.
 
 ## TL;DR
 
 - The problem is fully understood and a sound design already exists: the
-  **`multi-synthetic-dev`** track (research + plan, 2026-06-09, **no code yet**)
+  **`multi`** track (research + plan, 2026-06-09, **no code yet**)
   specified an **instance-key / `SLOT`** model — one key derives a port offset,
   `COMPOSE_PROJECT_NAME`, `SEED_PROFILE`, `STATE` dir, and git-worktree source
   roots, with `SLOT=0` = today byte-for-byte. **Architecture A (separate mesh per
@@ -113,7 +113,7 @@ names with the same profile really do share the volume today.
 ## Recommendation
 
 1. **Build multi-instance as a saga-stack-cli feature, not a bash refactor.** Treat
-   the `multi-synthetic-dev` plan as the *spec*; retarget its implementation from
+   the `multi` plan as the *spec*; retarget its implementation from
    `up.sh` to the CLI. Doing it in bash now is throwaway (we're retiring `up.sh`),
    and the CLI makes it dramatically smaller.
 2. **It rides on the native path.** Multi-instance lives on the M4 native
@@ -144,7 +144,7 @@ Far smaller than the bash plan's "~30 call-sites across 5 scripts," because the
 manifest/context already is the single parameterization point the prior art wanted.
 
 ## Cross-references
-- `~/dev/soa/claude/projects/multi-synthetic-dev/` — the prior-art spec (inventory +
+- `claude/projects/multi/` — the prior-art spec (inventory +
   SLOT design + phased rollout). This doc retargets its implementation onto the CLI.
 - `gh_214/plans/01-saga-stack-cli-plan.md` (manifest §2.2, launch-plan §6.3),
   `02-handoff-and-status.md` (native-path soak gate), `03-soak-plan.md`.

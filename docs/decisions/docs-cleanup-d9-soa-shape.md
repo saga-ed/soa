@@ -1,10 +1,11 @@
 ---
-status: Proposed
+status: Accepted
 ---
 
 # d9 — soa: shape of the documentation cleanup
 
-Status: **PENDING** (2026-09-08)
+Status: **RESOLVED 2026-09-08** — all eight recommendations accepted
+(D9.1–D9.8 = A; D9.2 per its table).
 
 ## Context
 

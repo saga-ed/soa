@@ -2,6 +2,22 @@
 
 Shared infrastructure monorepo for Saga platform applications.
 
+## Authority by location
+
+Current pattern = this file, `.claude/rules/`, `docs/` (except `docs/history/`),
+`docs/decisions/` entries marked `Accepted`/`RESOLVED`, non-draft `specs/`.
+History = `docs/history/` (index: [docs/history/README.md](docs/history/README.md))
+and legacy `claude/projects/` (index: [claude/projects/README.md](claude/projects/README.md))
+— never a current pattern; a fact found only there is a harvest gap. Newer of
+doc vs. code wins (`git log -1`).
+
+<!-- docs-check: history-dir: docs/history -->
+
+## Rules
+
+`.claude/rules/` doesn't exist yet — `testing-node.md`, `testing-web.md`,
+`event-driven.md`, and `python-uv.md` land here in a later pass.
+
 ## Saga tooling
 
 This repo registers the [`saga-tools`](https://github.com/saga-ed/claude-plugins) marketplace

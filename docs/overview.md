@@ -21,8 +21,6 @@
 - `apps/` — Applications (web, docs, examples/rest_api, etc.)
 - `packages/` — Core libraries (config, db, logger, api-core, UI, etc.)
 - `docs/` — Project documentation (this directory)
-- `memory-bank/` — Design notes, architecture, and technical context
-- `human-notes/` — Ad-hoc notes and chat logs
 - `tsconfig.json` and `packages/typescript-config/` — Shared TypeScript configuration
 - `pnpm-workspace.yaml` — Workspace/project definitions
 - `turbo.json` — TurboRepo pipeline configuration

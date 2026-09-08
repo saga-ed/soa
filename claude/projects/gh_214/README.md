@@ -56,6 +56,4 @@ seed / …). Goals:
 
 ## Cross-references
 
-- `../multi/` — concurrent/namespaced instances track; shares
-  the same `up.sh` surface this CLI would wrap.
 - `../synthetic-dev-align/` — seed-ids convergence track.

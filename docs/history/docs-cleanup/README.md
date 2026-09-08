@@ -48,3 +48,47 @@ removable estimate). Decision: `docs-cleanup-d9-soa-shape.md`. Plan:
 run the program's baseline/post-phase scoring pass.
 
 Harvested to: pending.
+
+## Phase B outcome (in progress)
+
+D9.4 (`a9b621e8`): the four misplaced `apps/{node,web}/claude/`,
+`packages/node/claude/`, `python/claude/` reference trees became
+`.claude/rules/{testing-node,testing-web,event-driven,python-uv}.md` with
+`paths:` frontmatter; shared testing reference moved to `docs/testing/`;
+root `CLAUDE.md` and every leaf whose directory matches a rule's globs got
+pointers (5 leaves needed it beyond the initial pass — `orphan-rule` is
+mechanical, not a matter of judgment). D9.3 (`ce24b82b`): `saga-stack-cli`
+got a 40-line `CLAUDE.md` (documents that the vendored-pair "byte-identical"
+census claim is only true for one of its two scripts) plus its row and 7
+other undocumented packages' rows in `packages/node/CLAUDE.md`. D9.6
+(`be69e9be`, `0ff06ec8`): onboarding cluster (root README Quickstart +
+`LOCAL_DEVELOPMENT.md` + `docs/GETTING-STARTED.md` + `docs/quickstart.md`)
+merged into one verified `docs/GETTING-STARTED.md`; publishing cluster
+cross-linked, excluding `manual-package-management.md`/
+`github-packages-migration.md` from the "4 real docs" cross-link — both are
+self-marked DEPRECATED, contradicting the decision doc's framing. D9.2
+(`8e519e29`): `HowToAddPubsub.md` → `docs/how-to-add-pubsub.md`, rewritten
+against the real `apps/node/trpc-api/src/sectors/pubsub/` implementation
+after every code sample proved to drift from current
+`@saga-ed/soa-pubsub-{core,server}` (missing `soa-` prefixes, a
+nonexistent `AbstractTRPCController`/`ActionCtx`/`RedisAdapter`, a
+`ControllerLoader` test pattern the new `testing-node.md` rule forbids).
+
+D9.1/D9.2 removals (this commit): `git rm` of `claude/projects/multi`,
+`human-notes/`, `memory-bank/`, `SCOPE_FIX_SUMMARY.md`, `SETUP_SUMMARY.md`,
+`WORKFLOW_SUCCESS_SUMMARY.md`, plus `LOCAL_DEVELOPMENT.md` and
+`docs/quickstart.md` (superseded by the D9.6 merge). Pre-removal HEAD:
+`8e519e29`. Citation sweep (whole repo + the 6 sibling docs-cleanup
+worktrees) found two real citers the decision doc's "nothing else cites it
+live" verdict missed: `docs/overview.md`'s repo-structure listing (fixed in
+this commit) and 5 `.cursor/rules/*.mdc` files that depend on
+`memory-bank/*.md` content (Cursor-tool config, out of this initiative's
+scope — recorded in `followups.md` instead of fixed). Also resolved a
+pre-existing `followups.md` item: `gh_214/README.md`'s `../multi/`
+cross-reference, dropped in the same commit. No real citers found in
+rostering, saga-dash, student-data-system, program-hub, qboard, or coach.
+
+Remaining: D9.1 moves (`soa-audit.md`/`soa-remediation-plan.md` →
+`docs/history/soa-audit-2026-01/`, `ss-develop-session-adm-plan.md` →
+`docs/history/ss-develop-session-adm/`, saga-dash citer repoints), then a
+final validator pass and push.

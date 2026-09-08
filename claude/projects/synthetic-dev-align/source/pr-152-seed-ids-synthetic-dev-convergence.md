@@ -4,8 +4,8 @@
 
 # Proposal: seed synthetic-dev's canonical base from seed-ids (`db:seed`), run scenarios on top
 
-> **Companion to [`seed-ids-onboarding.md`](./seed-ids-onboarding.md) and
-> [`seed-ids-local-mesh-runbook.md`](./seed-ids-local-mesh-runbook.md).** A proposal for converging the
+> **Companion to [`seed-ids-onboarding.md`](./pr-152-seed-ids-onboarding.md) and
+> [`seed-ids-local-mesh-runbook.md`](./pr-152-seed-ids-local-mesh-runbook.md).** A proposal for converging the
 > local `synthetic-dev` stack onto the deterministic seed-ids base while keeping scenarios as the
 > journey layer on top. Status: **draft for discussion.**
 
@@ -89,8 +89,8 @@ friction and means a local repro isn't guaranteed to match a preview repro.
 
 ## References
 
-- seed-ids reference + ID inventory: [`seed-ids-onboarding.md`](./seed-ids-onboarding.md)
-- local mesh runbook + the layered model: [`seed-ids-local-mesh-runbook.md`](./seed-ids-local-mesh-runbook.md)
+- seed-ids reference + ID inventory: [`seed-ids-onboarding.md`](./pr-152-seed-ids-onboarding.md)
+- local mesh runbook + the layered model: [`seed-ids-local-mesh-runbook.md`](./pr-152-seed-ids-local-mesh-runbook.md)
 - synthetic-dev: `soa/tools/synthetic-dev/{README,getting-started}.md` + the drift log
 - original design (fixture/snapshot/scenario vocabulary): `rostering/claude/seed-scenario-handoff.md`
 - canonical snapshots / preview seeding: the canonical-seed-mesh campaign (db-host-v2 + `db:seed` → S3)

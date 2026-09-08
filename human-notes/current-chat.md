@@ -99,7 +99,7 @@ pnpm test
 
 ## Architecture
 
-![alt text](arc.png)
+![alt text](../arc.png)
 // ... existing code ...
 
 ````
@@ -182,7 +182,7 @@ pnpm test
 
 ## Architecture
 
-![alt text](arc.png)
+![alt text](../arc.png)
 // ... existing code ...
 
 ````

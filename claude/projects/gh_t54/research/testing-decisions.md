@@ -10,7 +10,7 @@
 
 This document captures all testing pattern decisions for the SOA, Thrive, and Coach repositories. Decisions come from two sources:
 
-1. **Nathan's prework** - Comprehensive testing documentation in [sources/testing/](./sources/testing/)
+1. **Nathan's prework** - Comprehensive testing documentation in [sources/testing/](../sources/testing/)
 2. **Pair session** - Decisions made during the planning session
 
 These decisions resolve the open questions from the original [plan.md](./plan.md) Phase 6 (Testing Documentation).
@@ -394,29 +394,29 @@ pnpm turbo run test --filter=...[origin/main]
 
 | Document | Purpose |
 |----------|---------|
-| [README.md](../../testing/README.md) | Index and routing |
-| [philosophy.md](../../testing/philosophy.md) | ARES framework, core principles |
-| [conventions.md](../../testing/conventions.md) | File naming, directory structure |
-| [builders.md](../../testing/builders.md) | Fishery patterns, test data |
+| [README.md](../../../testing/README.md) | Index and routing |
+| [philosophy.md](../../../testing/philosophy.md) | ARES framework, core principles |
+| [conventions.md](../../../testing/conventions.md) | File naming, directory structure |
+| [builders.md](../../../testing/builders.md) | Fishery patterns, test data |
 
 ### Runtime-Tier Specific
 
 | Location | Purpose |
 |----------|---------|
-| [apps/node/claude/testing.md](../../../apps/node/claude/testing.md) | DI testing, DB isolation, Docker |
-| [apps/web/claude/testing.md](../../../apps/web/claude/testing.md) | Vitest browser mode, Svelte, Playwright |
-| [packages/node/claude/testing.md](../../../packages/node/claude/testing.md) | Node package testing patterns |
+| [apps/node/claude/testing.md](../../../../apps/node/claude/testing.md) | DI testing, DB isolation, Docker |
+| [apps/web/claude/testing.md](../../../../apps/web/claude/testing.md) | Vitest browser mode, Svelte, Playwright |
+| [packages/node/claude/testing.md](../../../../packages/node/claude/testing.md) | Node package testing patterns |
 
 ### Source Materials (Nathan's prework)
 
 | Document | Purpose |
 |----------|---------|
-| [sources/testing/00-testing-overview.md](./sources/testing/00-testing-overview.md) | One-page summary |
-| [sources/testing/01-testing-philosophy.md](./sources/testing/01-testing-philosophy.md) | ARES framework (original) |
-| [sources/testing/02-test-conventions.md](./sources/testing/02-test-conventions.md) | File naming (original) |
-| [sources/testing/03-builders-and-scenarios.md](./sources/testing/03-builders-and-scenarios.md) | Test data generation |
-| [sources/testing/04-cicd-integration.md](./sources/testing/04-cicd-integration.md) | Pipeline configuration |
-| [sources/testing/05-ai-agent-testing-guide.md](./sources/testing/05-ai-agent-testing-guide.md) | AI assistant guidance |
+| [sources/testing/00-testing-overview.md](../sources/testing/00-testing-overview.md) | One-page summary |
+| [sources/testing/01-testing-philosophy.md](../sources/testing/01-testing-philosophy.md) | ARES framework (original) |
+| [sources/testing/02-test-conventions.md](../sources/testing/02-test-conventions.md) | File naming (original) |
+| [sources/testing/03-builders-and-scenarios.md](../sources/testing/03-builders-and-scenarios.md) | Test data generation |
+| [sources/testing/04-cicd-integration.md](../sources/testing/04-cicd-integration.md) | Pipeline configuration |
+| [sources/testing/05-ai-agent-testing-guide.md](../sources/testing/05-ai-agent-testing-guide.md) | AI assistant guidance |
 
 ---
 

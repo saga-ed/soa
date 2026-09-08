@@ -110,4 +110,4 @@ CI validates documentation on every PR:
 
 ---
 
-*Based on research from nimbee PR 7876. Full plan: [claude/gh_t54/plan.md](../claude/gh_t54/plan.md)*
+*Based on research from nimbee PR 7876. Full plan: [claude/projects/gh_t54/research/plan.md](../claude/projects/gh_t54/research/plan.md)*

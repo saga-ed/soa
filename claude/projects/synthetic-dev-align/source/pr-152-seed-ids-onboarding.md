@@ -9,7 +9,7 @@
 > [§4a](#4a-install-from-codeartifact) to install.
 >
 > **Want to run the whole mesh locally?** See the companion
-> [Local Mesh Runbook](./seed-ids-local-mesh-runbook.md) — bring up several services on your
+> [Local Mesh Runbook](./pr-152-seed-ids-local-mesh-runbook.md) — bring up several services on your
 > laptop and watch them correlate through these ids.
 
 ---

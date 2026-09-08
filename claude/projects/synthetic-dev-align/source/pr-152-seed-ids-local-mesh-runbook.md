@@ -4,7 +4,7 @@
 
 # Standing Up the Saga Mesh Locally with Canonical Seed-IDs
 
-> **Companion to [`seed-ids-onboarding.md`](./seed-ids-onboarding.md)** (package/API/ID reference).
+> **Companion to [`seed-ids-onboarding.md`](./pr-152-seed-ids-onboarding.md)** (package/API/ID reference).
 > This is the hands-on runbook: bring up several backend services on your laptop, seed each
 > from the shared `@saga-ed/*-seed-ids` catalogs, and watch them correlate **by construction**.
 >
@@ -298,7 +298,7 @@ canonical base:
 
 Pointing synthetic-dev's base seed at `db:seed` and making the scenarios seed-ids-aware would make
 **local == preview == CI** and retire the base-roster re-login churn — while keeping scenarios for
-journeys. See [`seed-ids-synthetic-dev-convergence.md`](./seed-ids-synthetic-dev-convergence.md).
+journeys. See [`seed-ids-synthetic-dev-convergence.md`](./pr-152-seed-ids-synthetic-dev-convergence.md).
 
 ---
 
@@ -306,7 +306,7 @@ journeys. See [`seed-ids-synthetic-dev-convergence.md`](./seed-ids-synthetic-dev
 
 | Thing | Path |
 |---|---|
-| Package/API/ID reference | [`seed-ids-onboarding.md`](./seed-ids-onboarding.md) |
+| Package/API/ID reference | [`seed-ids-onboarding.md`](./pr-152-seed-ids-onboarding.md) |
 | Automated stack (canonical) | `soa/tools/synthetic-dev/` (`bootstrap.sh` · `up.sh` · `verify.sh`) |
 | Local infra harness | `soa/infra/Makefile` · `soa/infra/compose/projects/saga-mesh/` |
 | Original design + correlation proof | `rostering/claude/seed-scenario-handoff.md` (§5c, §6) |

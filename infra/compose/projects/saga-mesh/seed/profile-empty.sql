@@ -20,6 +20,11 @@ CREATE USER sis            WITH PASSWORD 'sis';
 CREATE USER coach_api_app  WITH PASSWORD 'dev-password-coach-api-app';
 CREATE USER authz_sync     WITH PASSWORD 'authz_sync';
 CREATE USER authz          WITH PASSWORD 'authz';
+-- SDS ads-adm-api's hosted Student Surveys sector (student-data-system#495):
+-- its OWN database, never ads_adm_local. Local login = DB owner, same shape as
+-- ads_adm. surveys-db/seed/local-bootstrap.sql (idempotent) adds the
+-- owner/app/ro triplet + grants on top of this at every `up.sh up`.
+CREATE USER surveys_api    WITH PASSWORD 'surveys_api';
 
 -- ── Databases ───────────────────────────────────────────────────────
 -- Owner set at creation time so prisma migrate deploy can CREATE SCHEMA.
@@ -30,6 +35,7 @@ CREATE DATABASE scheduling      OWNER saga_user;
 CREATE DATABASE sessions        OWNER saga_user;
 CREATE DATABASE content         OWNER saga_user;
 CREATE DATABASE ads_adm_local   OWNER ads_adm;
+CREATE DATABASE surveys_api_local OWNER surveys_api;
 CREATE DATABASE ledger_local    OWNER ledger;
 CREATE DATABASE sis_db          OWNER sis;
 CREATE DATABASE coach_api       OWNER coach_api_app;
@@ -57,6 +63,7 @@ GRANT ALL PRIVILEGES ON DATABASE scheduling    TO saga_user;
 GRANT ALL PRIVILEGES ON DATABASE sessions      TO saga_user;
 GRANT ALL PRIVILEGES ON DATABASE content       TO saga_user;
 GRANT ALL PRIVILEGES ON DATABASE ads_adm_local TO ads_adm;
+GRANT ALL PRIVILEGES ON DATABASE surveys_api_local TO surveys_api;
 GRANT ALL PRIVILEGES ON DATABASE ledger_local  TO ledger;
 GRANT ALL PRIVILEGES ON DATABASE sis_db        TO sis;
 GRANT ALL PRIVILEGES ON DATABASE coach_api     TO coach_api_app;

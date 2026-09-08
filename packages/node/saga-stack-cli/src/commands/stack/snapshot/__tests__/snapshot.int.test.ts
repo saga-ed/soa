@@ -84,11 +84,11 @@ afterEach(() => {
   delete process.env.SEED_PROFILE;
 });
 
-describe('stack snapshot store — manifest-driven, all 11 pg + connectv3 mongo', () => {
-  it('dumps every non-playback DB (11 pg + connectv3 mongo) by default', async () => {
+describe('stack snapshot store — manifest-driven, all 12 pg + connectv3 mongo', () => {
+  it('dumps every non-playback DB (12 pg + connectv3 mongo) by default', async () => {
     await SnapshotStore.run(['--fixture-id', 'demo'], config);
     const pg = dbsCalled('pgDump');
-    expect(pg).toHaveLength(11); // +authz_local (soa#402)
+    expect(pg).toHaveLength(12); // +authz_local (soa#402), +surveys_api_local (sds#495)
     expect(pg).toContain('coach_api'); // the coach progress store (mesh app DB #10)
     expect(pg).toContain('ledger_local'); // the 7th-9th DBs mesh-fixture missed
     expect(pg).toContain('content');
@@ -175,7 +175,7 @@ describe('stack snapshot store — manifest-driven, all 11 pg + connectv3 mongo'
   it('writes a zod-valid manifest with profile + per-DB sizes', async () => {
     await SnapshotStore.run(['--fixture-id', 'demo', '--profile', 'full', '--output-json'], config);
     const json = JSON.parse(out.join(''));
-    expect(json).toMatchObject({ fixtureId: 'demo', profile: 'full', databases: 12 });
+    expect(json).toMatchObject({ fixtureId: 'demo', profile: 'full', databases: 13 }); // 12 pg + mongo
     expect(json.totalBytes).toBeGreaterThan(0);
     // manifest.json exists and parses
     expect(statSync(join(snapDir(), 'demo', 'manifest.json')).size).toBeGreaterThan(0);
@@ -197,7 +197,7 @@ describe('stack snapshot restore — restore-as-owner + guards', () => {
   it('restores every DB AS its owner, mongo too, then flushes redis', async () => {
     await store();
     await SnapshotRestore.run(['demo'], config);
-    expect(dbsCalled('pgRestore')).toHaveLength(11); // +authz_local (soa#402)
+    expect(dbsCalled('pgRestore')).toHaveLength(12); // +authz_local (soa#402), +surveys_api_local (sds#495)
     const ledger = ioCalls.find((c) => c.op === 'pgRestore' && c.db === 'ledger_local');
     expect(ledger?.ownerRole).toBe('ledger');
     expect(dbsCalled('mongoRestore')).toEqual(['connectv3']);
@@ -301,14 +301,14 @@ describe('stack snapshot list / validate / delete', () => {
     await SnapshotValidate.run(['demo', '--output-json'], config);
     const json = JSON.parse(out.join(''));
     expect(json.ok).toBe(true);
-    expect(json.checks).toBe(12);
+    expect(json.checks).toBe(13); // 12 pg + mongo
   });
 
   it('validate --deep runs pg_restore --list on each pg dump', async () => {
     await SnapshotStore.run(['--fixture-id', 'demo'], config);
     ioCalls.length = 0;
     await SnapshotValidate.run(['demo', '--deep'], config);
-    expect(ioCalls.filter((c) => c.op === 'pgRestoreList')).toHaveLength(11); // pg dumps only (+authz_local, soa#402)
+    expect(ioCalls.filter((c) => c.op === 'pgRestoreList')).toHaveLength(12); // pg dumps only (+authz_local soa#402, +surveys_api_local sds#495)
   });
 
   it('validate FAILS (exit 1) when a dump file is corrupt under --deep', async () => {

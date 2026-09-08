@@ -96,6 +96,50 @@ describe('assessData — verify --full DATA gate', () => {
     expect(d3?.ok).toBe(false);
   });
 
+  // D6 (sds#495) — surveys_api_local, asserted ONLY when the DB exists.
+  it('D6: no surveys readings (DB absent) ⇒ no D6 check at all, still green', () => {
+    const r = assessData({ ...green, surveys: null });
+    expect(r.passed).toBe(true);
+    expect(r.checks.map((c) => c.id)).toEqual(['D1', 'D2', 'D3', 'D4', 'D5']);
+  });
+
+  it('D6: migrated + bank ≥ 6 ⇒ the verify.sh data line', () => {
+    const r = assessData({ ...green, surveys: { migrated: true, publicTables: 7, bankRaw: '6' } });
+    expect(r.passed).toBe(true);
+    expect(r.checks.find((c) => c.id === 'D6')).toEqual({
+      id: 'D6',
+      label: 'surveys_api_local migrated + bank seeded (questions=6)',
+      ok: true,
+    });
+  });
+
+  it('D6: migrated but bank < 6 HARD-fails (seed migration missing)', () => {
+    const r = assessData({ ...green, surveys: { migrated: true, publicTables: 7, bankRaw: '2' } });
+    expect(r.passed).toBe(false);
+    const d6 = r.checks.find((c) => c.id === 'D6');
+    expect(d6?.ok).toBe(false);
+    expect(d6?.label).toContain('bank=2 (<6)');
+    // an unreadable bank ('' — table absent) renders as 0 and fails the same way.
+    expect(assessData({ ...green, surveys: { migrated: true, publicTables: 7, bankRaw: '' } }).passed).toBe(false);
+  });
+
+  it('D6: tables present but NO _prisma_migrations HARD-fails (db-pushed / half-applied)', () => {
+    const r = assessData({ ...green, surveys: { migrated: false, publicTables: 3, bankRaw: '' } });
+    expect(r.passed).toBe(false);
+    expect(r.checks.find((c) => c.id === 'D6')?.label).toContain('not migrated (tables=3)');
+  });
+
+  it('D6: provisioned-but-EMPTY (0 tables, no history) is a skipped NOTE, not a failure — the checkout-without-sds#495 steady state', () => {
+    // R2 provisions surveys_api_local on every up; R3 skips the migrate when surveys-db is
+    // not checked out. That is every developer without the PR — it must never redden the gate.
+    const r = assessData({ ...green, surveys: { migrated: false, publicTables: 0, bankRaw: '' } });
+    expect(r.passed).toBe(true);
+    const d6 = r.checks.find((c) => c.id === 'D6');
+    expect(d6?.ok).toBe(true);
+    expect(d6?.label).toContain('skipped');
+    expect(r.notes.join(' ')).toContain('surveys-db');
+  });
+
   it('V1: users empty (0) ⇒ D2/D3 relabelled skipped, gate still fails', () => {
     const r = assessData({ ...green, usersRaw: '0', devIdRaw: '', adminPersonasRaw: '' });
     expect(r.passed).toBe(false);

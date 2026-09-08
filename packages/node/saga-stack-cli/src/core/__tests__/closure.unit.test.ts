@@ -120,6 +120,15 @@ describe('computeClosure — connect-web pulls content-api', () => {
     expect(closure.databases).toContain('content');
     expect(closure.mesh).toContain('connect-mongo');
   });
+
+  it('pulls ads-adm-api (browser edge — the Student Surveys origin, sds#495) + its surveys DB', () => {
+    expect(closure.services).toContain('ads-adm-api');
+    expect(closure.reasons.get('ads-adm-api')).toContain('required by connect-web (browser)');
+    expect(closure.databases).toContain('surveys_api_local');
+    // A browser edge is dropped when a flow narrows the closure (requiredSystems drive it).
+    const narrowed = computeClosure(manifest, ['connect-web'], { followBrowserEdges: false });
+    expect(narrowed.services).not.toContain('ads-adm-api');
+  });
 });
 
 describe('computeClosure — playback gate', () => {

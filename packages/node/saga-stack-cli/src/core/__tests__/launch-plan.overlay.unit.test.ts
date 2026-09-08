@@ -93,13 +93,21 @@ describe('tunnel_env overlay (--tunnel)', () => {
     );
   });
 
-  it('scheduling/sessions/ads-adm: CORS + JANUS_LOGIN_HOST → tunnelled iam demo', () => {
-    // programs-api is NOT in this loop any more — see the test below.
-    for (const id of ['scheduling-api', 'sessions-api', 'ads-adm-api'] as const) {
+  it('scheduling/sessions: CORS + JANUS_LOGIN_HOST → tunnelled iam demo', () => {
+    // programs-api and ads-adm-api are NOT in this loop any more — see the tests below.
+    for (const id of ['scheduling-api', 'sessions-api'] as const) {
       const e = envFor(id, TUN);
       expect(e.CORS_ORIGIN).toBe(`http://localhost:8900,https://dash.${TD}`);
       expect(e.JANUS_LOGIN_HOST).toBe(`iam.${TD}/demo`);
     }
+  });
+
+  it('ads-adm-api: CORS admits dash AND connect (surveys.runtime.* is browser-direct from Connect)', () => {
+    const e = envFor('ads-adm-api', TUN);
+    expect(e.CORS_ORIGIN).toBe(
+      `http://localhost:8900,http://localhost:6210,https://dash.${TD},https://connect.${TD}`,
+    );
+    expect(e.JANUS_LOGIN_HOST).toBe(`iam.${TD}/demo`);
   });
 
   it('programs-api: CORS keeps the coach origins its siblings do not have (coach#329)', () => {
@@ -143,6 +151,9 @@ describe('tunnel_env overlay (--tunnel)', () => {
     expect(e.VITE_IAM_API_URL).toBe(`https://iam.${TD}`);
     expect(e.VITE_RTSM_BOOTSTRAP_URL).toBe(`https://rtsm.${TD}`);
     expect(e.VITE_DASHBOARD_URL).toBe(`https://dash.${TD}`);
+    // Student Surveys sector origin → the ads-adm-api tunnel host, by its tunnel
+    // LABEL (`ads-adm`, the manifest tunnelSlug) — never `ads-adm-api.<domain>`.
+    expect(e.VITE_SURVEYS_API_URL).toBe(`https://ads-adm.${TD}`);
     expect(e.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBe(`connect.${TD}`);
   });
 

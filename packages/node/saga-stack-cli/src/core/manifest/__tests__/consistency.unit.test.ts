@@ -77,6 +77,17 @@ describe('manifest consistency — every edge resolves', () => {
     expect(manifest.databases['coach_api'].ownerRole).toBe('coach_api_app');
   });
 
+  it('wires the Student Surveys sector (sds#495): surveys_api_local under ads-adm-api, SDS-owned, optional package', () => {
+    expect(manifest.services['ads-adm-api'].databases).toContain('surveys_api_local');
+    const db = manifest.databases['surveys_api_local'];
+    expect(db.ownerRole).toBe('surveys_api');
+    expect(db.meshProvisioned).toBe(true); // profile-empty.sql (fresh) / R2 (stale volume)
+    expect(db.migrate?.optionalPackage).toBe(true); // surveys-db may be absent from the checkout
+    // The only optionalPackage DB — the tolerance must not leak to core schemas.
+    const optional = Object.entries(manifest.databases).filter(([, d]) => d.migrate?.optionalPackage);
+    expect(optional.map(([id]) => id)).toEqual(['surveys_api_local']);
+  });
+
   // M9 (apply_fixes parity, up.sh ~457-467): iam-api's launch env lifts the login
   // rate-limit + access-token TTL far above prod caps for long local dev/e2e sessions.
   it("iam-api launch.env carries the apply_fixes rate-limit + JWT-TTL knobs", () => {

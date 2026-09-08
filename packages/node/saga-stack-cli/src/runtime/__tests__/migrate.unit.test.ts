@@ -212,6 +212,72 @@ describe('migrateClosure — canonical order + the three-way branch (R3)', () =>
     expect(calls[0].env.DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:7432/ads_adm_local');
   });
 
+  // sds#495 — the Student Surveys sector's own DB, hosted in ads-adm-api.
+  it('surveys_api_local: FIXED migrate deploy in surveys-db, right after ads-adm-db, injecting SURVEYS_DATABASE_URL (not DATABASE_URL)', async () => {
+    const { runner, calls } = fakeRunner();
+    const res = await migrateClosure({
+      ...base,
+      dbs: ['surveys_api_local', 'ads_adm_local'] as DbId[], // reversed input …
+      runner,
+      probe: fakeProbe(),
+      dirExists: () => true, // the package IS checked out
+    });
+    expect(res.ok).toBe(true);
+    // … canonical order: ads-adm-db first, then surveys-db (up.sh's db_step order).
+    expect(res.dbs.map((d) => d.db)).toEqual(['ads_adm_local', 'surveys_api_local']);
+    expect(res.dbs[1]).toMatchObject({ branch: 'fixed', ok: true, command: 'pnpm prisma migrate deploy' });
+    expect(calls[1]).toMatchObject({
+      command: 'pnpm',
+      args: ['prisma', 'migrate', 'deploy'],
+      cwd: '/dev/student-data-system/packages/node/surveys-db',
+    });
+    // surveys-db's prisma.config.ts reads SURVEYS_DATABASE_URL FIRST (the reverse of
+    // ads-adm-db, so a DATABASE_URL-only pass can never land in ads_adm); at slot 0 the
+    // injected value is byte-identical to the package's checked-in .env.
+    expect(calls[1].env).toEqual({
+      SURVEYS_DATABASE_URL: 'postgresql://surveys_api:surveys_api@localhost:5432/surveys_api_local',
+    });
+  });
+
+  it('surveys_api_local at slot > 0: SURVEYS_DATABASE_URL carries the OFFSET mesh port', async () => {
+    const { runner, calls } = fakeRunner();
+    await migrateClosure({
+      ...base,
+      pgContainer: 'soa-s2-postgres-1',
+      meshOffset: 2000,
+      dbs: ['surveys_api_local'] as DbId[],
+      runner,
+      probe: fakeProbe(),
+      dirExists: () => true,
+    });
+    expect(calls[0].env.SURVEYS_DATABASE_URL).toBe('postgresql://surveys_api:surveys_api@localhost:7432/surveys_api_local');
+  });
+
+  it('surveys_api_local: SKIPPED with a note when surveys-db is not checked out (optionalPackage — the up.sh `[[ -d ]]` guard)', async () => {
+    const { runner, calls } = fakeRunner();
+    const probed: string[] = [];
+    const res = await migrateClosure({
+      ...base,
+      dbs: ['ads_adm_local', 'surveys_api_local'] as DbId[],
+      runner,
+      probe: fakeProbe(),
+      dirExists: (p) => {
+        probed.push(p);
+        return false; // an SDS checkout WITHOUT student-data-system#495
+      },
+    });
+    expect(res.ok).toBe(true); // not a failure — the sector is simply absent
+    const surveys = res.dbs.find((d) => d.db === 'surveys_api_local');
+    expect(surveys?.branch).toBeNull();
+    expect(surveys?.skipped).toMatch(/packages\/node\/surveys-db absent from the SDS checkout/);
+    // The predicate was asked about the package dir — and ONLY for the optional package
+    // (ads-adm-db never consults it: a missing core package must fail loudly, not skip).
+    expect(probed).toEqual(['/dev/student-data-system/packages/node/surveys-db']);
+    // exactly ONE migrate ran (ads-adm-db); nothing was spawned in the missing cwd.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cwd).toBe('/dev/student-data-system/packages/node/ads-adm-db');
+  });
+
   it('skips mongo (connectv3) and playback DBs (not mesh-provisioned)', async () => {
     const { runner, calls } = fakeRunner();
     const res = await migrateClosure({

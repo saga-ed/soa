@@ -12,7 +12,7 @@
  *
  * Migrate order (plan §2.2 blocker fix):
  *   iam-db → iam-pii-db (db push) → programs → scheduling → sessions → content
- *   → coach-db → sis-db → ads-adm-db.
+ *   → coach-db → sis-db → ads-adm-db → surveys-db (skipped when the package is absent).
  */
 
 import type { DatabaseDef, DbId } from './types.js';
@@ -130,6 +130,35 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     ownerPw: 'ads_adm',
     resettable: true,
     resetMode: 'truncate',
+    meshProvisioned: true,
+  },
+  surveys_api_local: {
+    name: 'surveys_api_local',
+    engine: 'postgres',
+    // Student Surveys sector, hosted in ads-adm-api with its OWN database + owner
+    // login (student-data-system#495; saga-dash#1277). Schema owner is the
+    // surveys-db package. Its prisma.config.ts reads `SURVEYS_DATABASE_URL ??
+    // DATABASE_URL` — DELIBERATELY the reverse of ads-adm-db, so a container
+    // second-pass migrate that only exports DATABASE_URL fails loudly instead of
+    // writing the surveys schema into ads_adm — and its checked-in .env bakes the
+    // base-port localhost SURVEYS_DATABASE_URL (`import 'dotenv/config'` never
+    // overrides a pre-set var). Injecting SURVEYS_DATABASE_URL (slot-offset pgUrl)
+    // is byte-identical to the .env value at slot 0 and slot-correct above it.
+    // Fixed db_step (`prisma migrate deploy`) right after ads-adm-db, like up.sh.
+    // The package may be ABSENT from an SDS checkout (PR not overlaid, or the
+    // sector extracted later): R3 skips the migrate with a note (optionalPackage).
+    migrate: {
+      dir: 'packages/node/surveys-db',
+      cmd: 'prisma migrate deploy',
+      migrateEnvVar: 'SURVEYS_DATABASE_URL',
+      optionalPackage: true,
+    },
+    ownerRole: 'surveys_api',
+    ownerPw: 'surveys_api',
+    resettable: true,
+    resetMode: 'truncate',
+    // profile-empty.sql creates the login + DB on a FRESH volume (soa#450); on a
+    // pre-existing volume R2 creates them idempotently (the authz_local pattern).
     meshProvisioned: true,
   },
   ledger_local: {

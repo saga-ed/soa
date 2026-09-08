@@ -36,7 +36,7 @@ import { INSTANCE_ENV_KEYS, deriveInstance } from '../../core/derive-instance.js
 import type { InstanceProfile } from '../../core/derive-instance.js';
 import { SYNTH_DEV_DIR } from '../../core/flag-map.js';
 import { healthProbes } from '../../core/probe-plan.js';
-import { getMesh, manifest } from '../../core/manifest/index.js';
+import { getDb, getMesh, manifest } from '../../core/manifest/index.js';
 import type { ServiceId } from '../../core/manifest/index.js';
 import type { ForeignProc } from '../../core/foreign-procs.js';
 import { DATA_SQL, assessData } from '../../core/verify-data.js';
@@ -292,7 +292,7 @@ export default class StackVerify extends BaseCommand {
       this.log(formatForeign(f));
     }
 
-    // 2. native DATA checks (D1–D5). Reads as postgres_admin against the base mesh
+    // 2. native DATA checks (D1–D6). Reads as postgres_admin against the base mesh
     // containers (documented divergence from verify.sh's `-U iam` — same rows).
     const data = await this.readSlotData();
     this.log(cyan(bold('── data ──')));
@@ -504,7 +504,7 @@ export default class StackVerify extends BaseCommand {
   }
 
   /**
-   * Gather + assess the native DATA checks (D1–D5) against the mesh containers CURRENTLY
+   * Gather + assess the native DATA checks (D1–D6) against the mesh containers CURRENTLY
    * selected by `process.env` (`SAGA_MESH_*_CONTAINER`). At slot 0 those resolve to the base
    * `soa-*` containers; under `--all-slots` the caller wraps this in `withSlotEnv` so it hits
    * that slot's `soa-s<N>-*` mesh. IO-only (the pg/mesh seams); the pure verdict is `assessData`.
@@ -515,12 +515,23 @@ export default class StackVerify extends BaseCommand {
     const pgContainer = meshContainer(getMesh('postgres', manifest));
     const mongo = getMesh('connect-mongo', manifest);
     const mongoContainer = meshContainer(mongo);
+    // D6 (sds#495): surveys_api_local is read ONLY when it exists — an SDS checkout
+    // without the sector has none, and that is not a failure (verify.sh parity).
+    const surveysDb = getDb('surveys_api_local', manifest).name;
+    const surveys = (await pg.databaseExists(pgContainer, surveysDb))
+      ? {
+          migrated: await pg.hasMigrationsTable(pgContainer, surveysDb),
+          publicTables: await pg.publicTableCount(pgContainer, surveysDb),
+          bankRaw: await pg.scalar(pgContainer, surveysDb, DATA_SQL.questionBank),
+        }
+      : null;
     const readings: DataReadings = {
       usersRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.users),
       devIdRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.devId),
       adminPersonasRaw: await pg.scalar(pgContainer, 'iam_local', DATA_SQL.adminPersonas),
       sisMigrated: await pg.hasMigrationsTable(pgContainer, 'sis_db'),
       mongoReachable: await meshExec.ready(mongoContainer, mongo.readinessCmd),
+      surveys,
     };
     return assessData(readings);
   }

@@ -70,9 +70,24 @@ describe('defaultLaunchContext meshOffset — mesh connection strings offset in 
       ctx.tokens.CONTENT_DB_URL,
       ctx.tokens.COACH_DB_URL,
       ctx.tokens.ADS_ADM_DB_URL,
+      ctx.tokens.SURVEYS_DB_URL, // sds#495 — ads-adm-api's SURVEYS_DATABASE_URL
     ]) {
       expect(portOf(url)).toBe(pgBase + offset);
     }
+  });
+
+  it('ADS_ADM_PORT follows the slot ads-adm-api port — connect-web dials ITS slot\'s surveys origin (sds#495)', () => {
+    // meshOffset alone leaves service ports at the manifest defaults …
+    expect(ctx.tokens.ADS_ADM_PORT).toBe(String(manifest.services['ads-adm-api'].port));
+    // … a slot profile offsets ads-adm-api's listen port, and the token + connect-web's
+    // VITE_SURVEYS_API_URL follow it (slot 1 ⇒ :6005, never slot 0's :5005).
+    const p1 = deriveInstance({ slot: 1 });
+    const ctx1 = defaultLaunchContext({ ...baseInputs, portOverrides: p1.portOverrides, meshOffset: p1.meshOffset });
+    expect(ctx1.tokens.ADS_ADM_PORT).toBe(String(ctx1.ports['ads-adm-api']));
+    expect(ctx1.tokens.ADS_ADM_PORT).toBe(String(manifest.services['ads-adm-api'].port + 1000));
+    expect(resolveLaunchEnv('connect-web', 'stack', ctx1).VITE_SURVEYS_API_URL).toBe(
+      `http://localhost:${manifest.services['ads-adm-api'].port + 1000}`,
+    );
   });
 });
 
@@ -167,7 +182,7 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     expect(env.ADM_ALLOW_ROSTER_MODE_OVERRIDE).toBe('true');
     expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:5010/trpc'); // 3010 + 2000
     expect(env.IAM_API_URL).toBe('http://localhost:5010');
-    expect(env.CORS_ORIGIN).toBe('http://localhost:10900'); // dash 8900 + 2000
+    expect(env.CORS_ORIGIN).toBe('http://localhost:10900,http://localhost:8210'); // dash 8900 + 2000, connect-web 6210 + 2000 (sds#495)
     expect(portOf(env.DATABASE_URL)).toBe(getMesh('postgres').port + 2000);
     expect(portOf(env.ADS_ADM_DATABASE_URL)).toBe(getMesh('postgres').port + 2000);
     expect(portOf(env.RABBITMQ_URL)).toBe(getMesh('rabbitmq').port + 2000);
@@ -189,7 +204,7 @@ describe('ads-adm-api slottability — tokenized env + EXPRESS_SERVER_PORT injec
     expect(env.IAM_API_CLIENT_BASEURL).toBe('http://localhost:3010/trpc');
     expect(env.ADS_ADM_DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
     expect(env.DATABASE_URL).toBe('postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local');
-    expect(env.CORS_ORIGIN).toBe('http://localhost:8900');
+    expect(env.CORS_ORIGIN).toBe('http://localhost:8900,http://localhost:6210'); // dash + connect-web (sds#495)
   });
 });
 

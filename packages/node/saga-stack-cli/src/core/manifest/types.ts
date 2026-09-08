@@ -72,6 +72,7 @@ export type DbId =
   | 'coach_api'
   | 'sis_db'
   | 'ads_adm_local'
+  | 'surveys_api_local' // Student Surveys sector hosted in ads-adm-api (student-data-system#495)
   | 'ledger_local'
   | 'transcripts_local'
   | 'insights_local'
@@ -112,6 +113,17 @@ export interface MigrateSpec {
    * config (e.g. sessions-api via `databaseUrlOverride`) and no var is injected.
    */
   migrateEnvVar?: string;
+  /**
+   * The owning package may be ABSENT from the repo checkout — a sector whose PR
+   * is not overlaid yet (surveys-db, student-data-system#495), or one extracted
+   * to its own repo later. R3 then SKIPS the migrate with a note instead of
+   * failing on a missing cwd — up.sh's `[[ -d $dir ]]` guard around the
+   * surveys-db `db_step`. The DB itself is still provisioned (R2), so snapshot /
+   * reset / verify see one consistent DB set; verify tolerates the resulting
+   * provisioned-but-empty DB. Absent ⇒ a missing package dir fails loudly (a
+   * broken checkout must never be masked as a skip).
+   */
+  optionalPackage?: boolean;
 }
 
 export interface DatabaseDef {

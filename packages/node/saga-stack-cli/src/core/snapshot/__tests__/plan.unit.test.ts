@@ -38,6 +38,7 @@ const PG_APP_DBS: DbId[] = [
   'coach_api',
   'sis_db',
   'ads_adm_local',
+  'surveys_api_local', // sds#495 — ads-adm-api's third DB (must be captured for it to count as covered)
   'ledger_local',
   'authz_local', // soa#402
 ];
@@ -81,13 +82,13 @@ function knownMigrations(snap: SnapshotManifest): LocalMigrations {
   return out as LocalMigrations;
 }
 
-describe('storePlan — manifest-driven db set (the 6→11-pg + mongo extension)', () => {
-  it('defaults to all 11 pg app DBs + connectv3 mongo, excluding playback', () => {
+describe('storePlan — manifest-driven db set (the 6→12-pg + mongo extension)', () => {
+  it('defaults to all 12 pg app DBs + connectv3 mongo, excluding playback', () => {
     const plan = storePlan(manifest, { fixtureId: 'x', profile: 'roster' });
     const pg = plan.databases.filter((d) => d.engine === 'postgres').map((d) => d.db);
     const mongo = plan.databases.filter((d) => d.engine === 'mongo').map((d) => d.db);
 
-    expect(pg).toHaveLength(11);
+    expect(pg).toHaveLength(12); // +surveys_api_local (sds#495)
     expect(new Set(pg)).toEqual(new Set(PG_APP_DBS));
     expect(mongo).toEqual(['connectv3']);
     // The DBs mesh-fixture-cli's stale 6-DB list missed:
@@ -121,7 +122,7 @@ describe('storePlan — manifest-driven db set (the 6→11-pg + mongo extension)
   it('--with-playback adds the transcripts/insights/chat trio', () => {
     const plan = storePlan(manifest, { fixtureId: 'x', profile: 'roster', withPlayback: true });
     const dbs = plan.databases.map((d) => d.db);
-    expect(plan.databases.filter((d) => d.engine === 'postgres')).toHaveLength(14);
+    expect(plan.databases.filter((d) => d.engine === 'postgres')).toHaveLength(15); // 12 app + 3 playback
     for (const pb of PLAYBACK_DBS) expect(dbs).toContain(pb);
   });
 
@@ -146,7 +147,7 @@ describe('storePlan — manifest-driven db set (the 6→11-pg + mongo extension)
 
   it('reports fully-captured services as `systems` for the default scope', () => {
     const plan = storePlan(manifest, { fixtureId: 'x', profile: 'roster' });
-    // ads-adm-api owns BOTH ads_adm_local + ledger_local — fully covered.
+    // ads-adm-api owns ads_adm_local + ledger_local + surveys_api_local — fully covered.
     expect(plan.systems).toContain('ads-adm-api');
     expect(plan.systems).toContain('iam-api');
     expect(plan.systems).toContain('connect-api');

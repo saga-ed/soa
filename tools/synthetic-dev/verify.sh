@@ -116,6 +116,16 @@ else
   badline "sis_db not migrated (run ./up.sh up — prep deploys the schema)"
 fi
 
+# surveys_api_local (ads-adm-api's hosted Student Surveys sector, sds#495): only
+# asserted when the DB exists — an SDS checkout without the PR has none, and
+# that is not a failure. The seed migration inserts the six #1324 bank rows.
+if docker exec soa-postgres-1 psql -U postgres_admin -d postgres -tAc \
+     "SELECT 1 FROM pg_database WHERE datname='surveys_api_local'" 2>/dev/null | grep -q 1; then
+  bank=$(docker exec soa-postgres-1 psql -U postgres_admin -d surveys_api_local -tAc "SELECT count(*) FROM question_bank" 2>/dev/null || echo 0)
+  if [[ "${bank:-0}" -ge 6 ]]; then okline "surveys_api_local migrated + bank seeded (questions=$bank)"
+  else badline "surveys_api_local present but bank=$bank (<6) — run ./up.sh up (surveys-db migrate deploy)"; fi
+fi
+
 # Connect's mongo (mesh-managed: infra-compose services/connect-mongo, :27037).
 # No schema/seed to assert — collections auto-create — so reachability IS the
 # data check.

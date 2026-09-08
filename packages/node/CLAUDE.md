@@ -14,14 +14,14 @@ Server-side packages for Node.js applications.
 
 | Package | Description | Docs |
 |---------|-------------|------|
-| `api-core/` | Shared API server utilities with abstract controllers for REST/GraphQL/TypeGraphQL/tRPC, server bootstrapping, and dynamic controller loading. | [api-core/](./api-core/CLAUDE.md) |
+| `api-core/` | Shared API server utilities with abstract controllers for REST/GraphQL/TypeGraphQL, server bootstrapping, and dynamic controller loading. tRPC apps use `@saga-ed/soa-trpc-base` instead — see [how-to-add-pubsub.md](../../docs/how-to-add-pubsub.md). | [api-core/](./api-core/CLAUDE.md) |
 | `api-util/` | API helper utilities for request validation, response formatting, and error handling. Single-purpose utilities. | Tier |
 | `db/` | MongoDB connection management with DI integration, connection pooling, and mock provider for testing. | [db/](./db/CLAUDE.md) |
 | `fixture-serve/` | Ready-to-run Express server for test fixture lifecycle — provision/snapshot/restore endpoints, async jobs, Playwright credential export, infra-compose integration. Subclass `AbstractFixtureController` per service. | [fixture-serve/](./fixture-serve/CLAUDE.md) |
 | `logger/` | Simple Pino logger wrapper with sensible defaults and structured logging. Standard Node.js logging patterns. **Usage:** `import { logger } from '@saga-ed/soa-logger'` | Tier |
 | `pubsub-client/` | PubSub client library for subscribing to events. Connects to pubsub-server. Standard event emitter patterns. | Tier |
-| `pubsub-core/` | PubSub core types and interfaces. Pure TypeScript types. **Usage:** `import { PubSubEvent } from '@saga-ed/soa-pubsub-core'` | Tier |
-| `pubsub-server/` | PubSub server implementation for publishing events. Express middleware integration. Standard pub/sub patterns. | Tier |
+| `pubsub-core/` | PubSub core types and interfaces — `CSEEvent`/`SSEEvent`/`CSEEventWithResponse`, `ChannelConfig`, `ActionContext`. **Usage:** `import type { CSEEvent } from '@saga-ed/soa-pubsub-core'` | [how-to-add-pubsub.md](../../docs/how-to-add-pubsub.md) |
+| `pubsub-server/` | PubSub server implementation — `PubSubService`, `ChannelService`, `EventService`, `InMemoryAdapter`. Express/tRPC integration. | [how-to-add-pubsub.md](../../docs/how-to-add-pubsub.md) |
 | `rabbitmq/` | RabbitMQ client wrapper with connection pooling and channel management. Standard AMQP patterns. **Usage:** `import { RabbitMQ } from '@saga-ed/soa-rabbitmq'` | Tier |
 | `redis-core/` | Redis client wrapper with ioredis. Connection pooling and error handling. **Usage:** `import { RedisClient } from '@saga-ed/soa-redis-core'` | Tier |
 | `aws-util/` | AWS SDK utilities for S3, SQS, and SNS. Helper functions for common AWS operations. | Tier |
@@ -45,7 +45,7 @@ Server-side packages for Node.js applications.
 
 ## Two pubsub families — pick one
 
-- **`pubsub-*`** (`pubsub-core`, `pubsub-client`, `pubsub-server`) — real-time UI push (browser ↔ server). Lives on top of HTTP/SSE. Use for live dashboards, notifications, collaborative cursors.
+- **`pubsub-*`** (`pubsub-core`, `pubsub-client`, `pubsub-server`) — real-time UI push (browser ↔ server). Lives on top of HTTP/SSE. Use for live dashboards, notifications, collaborative cursors. See [how-to-add-pubsub.md](../../docs/how-to-add-pubsub.md) for a worked tRPC example.
 - **`event-*`** + `observability` — durable cross-service eventing (server ↔ server) over RabbitMQ with transactional outbox + idempotency. Use for domain events that must survive broker restarts and be replayed safely.
 
 These are NOT interchangeable. See `claude/projects/soa_75/decisions/d-soa-pubsub-divorce.md` for the rationale.

@@ -135,7 +135,7 @@ dev Postgres through an **SSM port-forward tunnel** via the shared jump host
 (same pattern as `postgres_mirror_to_dev.yml` in `saga-ed/iac`). Uses the
 `coach_api_app` (DML-only) role. `content-archive` is installed as a CodeArtifact
 package (`npm pack` + tar extract). `concurrency: publish-content-dev` (one at a time).
-Design writeup: `coach/claude/coach-content-publish-workflow-scope.md`.
+Design writeup: `coach:docs/history/coach-content-publish-workflow/coach-content-publish-workflow-scope.md`.
 
 ### How content gets seeded LOCALLY (the ss stack path — this is the "seeding")
 The dev stack does **not** run `coach-content publish`; it runs the coach-db

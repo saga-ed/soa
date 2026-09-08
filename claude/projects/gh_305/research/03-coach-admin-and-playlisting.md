@@ -265,7 +265,7 @@ need not reuse the e2e flow, but the discovery machinery is shared.
    come back empty. Does the admin scenario need real org/member data (names/emails)
    that the current CNS-only path does not provide?
 5. **Legacy authoring UI:** legacy `wmcm` (Angular content creator) and `xlr8_dash`
-   are noted as migration targets (`claude/api-poc/research/legacy-coach-architecture.md`),
+   are noted as migration targets (`coach:docs/history/legacy-poc/api-poc/research/legacy-coach-architecture.md`),
    but only the CLI publish pipeline and the mock Reports exist so far. Is an
    authoring/admin **web** UI planned for coach-web, or does authoring stay
    legacy + `coach-content` CLI?

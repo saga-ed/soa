@@ -52,7 +52,7 @@ box.
 - Host-specific hooks in the legacy source (Skye/Spark): `window.__spark_close()`,
   `'/spark-pages#/'`, `window.__set_content_completed` (quest-award). These were
   **explicitly dropped**, replaced by a coach-native `goto()` back to the unit page
-  (see `claude/module-viewer/pr14-pr15-vscroll-shell-scoping.md`, item 5).
+  (see `coach:docs/history/module-viewer-port/pr14-pr15-vscroll-shell-scoping.md`, item 5).
 
 ---
 
@@ -86,7 +86,7 @@ box.
   ported viewer serves module content out of the active Postgres `content_release`, not
   from legacy Mongo. (Mongo curriculum is still seeded/read for the *structure* /
   dual-store path — see `coach-api` manifest `mesh: ['connect-mongo']`.)
-- **PR14/PR15 fidelity scope** (`claude/module-viewer/pr14-pr15-vscroll-shell-scoping.md`):
+- **PR14/PR15 fidelity scope** (`coach:docs/history/module-viewer-port/pr14-pr15-vscroll-shell-scoping.md`):
   ported verbatim from legacy — gated reveal, 2.5s color-flash keyframes, feedback
   markdown, blocking audio/outro-audio (AVQueue model). **Deliberately dropped:**
   `task_timer`/`CC_TIMER_BLOCKED` (3/112 modules), splash screen, standalone progress
@@ -97,7 +97,7 @@ box.
 
 ## 3. The two-store / content pipeline this rides on (Seth's parallel effort)
 
-The port depends on a Mongo→Postgres re-architecture (`claude/coach-content-two-store-plan.md`,
+The port depends on a Mongo→Postgres re-architecture (`coach:docs/content/coach-content-two-store-plan.md`,
 Jun 2026). Relevant facts for the concierge:
 - **Read content = git archive, not Mongo.** `saga-ed/content-archive` (private, data-only
   repo) is the system of record for authored polls + the **8 `content_coach` curriculum
@@ -262,8 +262,8 @@ ss e2e run coach-web/module-playback --coach=<worktree>
 - Postgres read store: `/home/skelly/dev/coach/apps/node/coach-api/src/services/content-store/postgres-content-read-store.ts`
 - Local seed (publishes release + instance): `/home/skelly/dev/coach/packages/node/coach-db/src/seed/local-snapshot.ts` (+ `fixtures/content-release.json`, `fixtures/content-instances.json`)
 - Publish CLI: `/home/skelly/dev/coach/packages/node/coach-content-publish/`
-- Two-store plan: `/home/skelly/dev/coach/claude/coach-content-two-store-plan.md`
-- Port scoping: `/home/skelly/dev/coach/claude/module-viewer/pr14-pr15-vscroll-shell-scoping.md`
+- Two-store plan: `/home/skelly/dev/coach/docs/content/coach-content-two-store-plan.md`
+- Port scoping: `/home/skelly/dev/coach/docs/history/module-viewer-port/pr14-pr15-vscroll-shell-scoping.md`
 - Cross-domain / legacy-ContentViewer research: `/home/skelly/dev/coach/claude/projects/sub-domain/research/coach-cross-domain-architecture.md`
 - ss coach manifest (STALE — soa#300): `/home/skelly/dev/soa/.claude/worktrees/gh305-ss-develop/packages/node/saga-stack-cli/src/core/manifest/services.ts:475-538`
 - ss seed profiles (coach-pg / coach-mongo): `/home/skelly/dev/soa/.claude/worktrees/gh305-ss-develop/packages/node/saga-stack-cli/src/core/seed/profiles.ts:410-467`

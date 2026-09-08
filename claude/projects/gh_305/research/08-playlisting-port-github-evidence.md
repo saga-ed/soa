@@ -169,7 +169,7 @@ re-platforming of coach content off the legacy shared Mongo onto coach-owned Pos
 1. **Retire legacy dependencies** — abandon saga_api `session.context` S2S (coach #226),
    require iam-api auth + retire saga_api (coach #208), read identity direct from iam
    whoami.
-2. **Two-store split** (planning: `claude/coach-content-two-store-plan.md`, DRAFT
+2. **Two-store split** (planning: `coach:docs/content/coach-content-two-store-plan.md`, DRAFT
    2026-06-17, authored by Seth "infra-platform lead"): read-only authored content vs.
    per-user mutable progress. Progress-store → Postgres first (Phase 1), content
    ingestion second (Phase 2).
@@ -193,16 +193,16 @@ source; the 8 structure docs are the one gap being version-controlled directly.
 
 ## 5. Planning / doc artifacts in coach mentioning playlisting/tracks/content-ownership
 
-- `claude/coach-content-two-store-plan.md` — the master strategy doc (Seth, DRAFT
+- `coach:docs/content/coach-content-two-store-plan.md` — the master strategy doc (Seth, DRAFT
   2026-06-17).
 - `review_reports/coach-api/cross-api-plan.md` — enumerates the legacy `user_policy`
   playlist fields coach-api must own (`playlist_name`, `available_playlists`,
   `playlist_version`, `default_track`, `default_track_content`); "Coach-owned session"
   goal.
-- `claude/coach-content-publish-workflow-scope.md` — the publish workflow scope (coach
+- `coach:docs/history/coach-content-publish-workflow/coach-content-publish-workflow-scope.md` — the publish workflow scope (coach
   #209).
-- `claude/coach-postgres-deploy-handoff.md`, `claude/coach-cold-start-runbook.md`,
-  `claude/coach-rds-gate-runbook.md` — operational runbooks for the Postgres content
+- `coach:docs/history/coach-postgres-deploy-handoff/coach-postgres-deploy-handoff.md`, `coach:docs/ops/coach-cold-start-runbook.md`,
+  `coach:docs/ops/coach-rds-gate-runbook.md` — operational runbooks for the Postgres content
   store.
 - `packages/node/coach-content-publish/README.md` — the CLI contract.
 - `apps/web/coach-web/src/lib/types/coach.ts` — frontend `PlaylistData` interface

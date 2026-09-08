@@ -146,7 +146,7 @@ byte-matches the live `iam.*` events (one seed universe, PR coach#223).
   load-bearing for legacy cookie passthrough — see coach `claude/projects/sub-domain`).
   It is NOT cloned locally; the modern experience is the coach-web `/units/…` port.
   (A standalone `apps/content-viewer/` SvelteKit app appears only as a TARGET in
-  coach `claude/shared/sources/project-breakdown.md` — a plan/POC, not shipped.)
+  coach `coach:docs/history/legacy-poc/api-poc/sources/project-breakdown.md` — a plan/POC, not shipped.)
 - **Seeded?** The mongo curriculum (`coach-mongo`) + the PG `content_release`
   (`curriculum-coach`, 27 polls) both seed, so the viewer renders. **BUT** the
   Dashboard shows **spring-pilot** (59 modules) while Explore/the content-viewer
@@ -174,7 +174,7 @@ byte-matches the live `iam.*` events (one seed universe, PR coach#223).
 
 ### (5) Coach + the playlisting interface
 - **No shipped standalone playlisting UI.** "Playlist"/"Content Creator" appears only
-  in coach POC/plan docs (`claude/shared/sources/project-breakdown.md` "Content
+  in coach POC/plan docs (`coach:docs/history/legacy-poc/api-poc/sources/project-breakdown.md` "Content
   Creator (C)", "apps/content-creator"). The closest shipped artifact is the coach-web
   **authoring** e2e project: `pnpm test:e2e:authoring` (`E2E_AUTHORING=1`,
   `apps/web/coach-web/e2e/authoring/`), which runs coach-api with

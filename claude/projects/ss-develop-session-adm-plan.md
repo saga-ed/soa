@@ -11,7 +11,7 @@ shell script into the `ss develop` concierge family (today: `coach`, `connect`),
 | Demo spec (the showpiece) | `saga-dash/apps/web/dash/e2e/interactive/connect-session-demo.e2e.test.ts` — tutor (alex) + pod-A trio (ann, cara, gina) join a real Connect room staggered ~15s; each runs the real connectv3 `SessionHeartbeat`; ads-adm accrues TELEMETRY dosage; closing one student's window freezes only their counter |
 | Flow registration | `saga-dash/apps/web/dash/e2e/flows.json` → `connect-session-demo` (@interactive, av; prereq: journey@attendance) |
 | Concierge script | `saga-dash/apps/web/dash/e2e/telemetry-demo-multi.sh` — `ss stack down` → held flow w/ demo env → wait for dosage → admin browser |
-| Runbook | `saga-dash/claude/projects/e2e-testing/telemetry-demo.md` ("3 students, staggered self-report" variant) |
+| Runbook | `saga-dash/docs/history/e2e-testing/telemetry-demo.md` ("3 students, staggered self-report" variant) |
 | Single-student sibling | `connect-session-dosage.e2e.test.ts` + `telemetry-demo.sh` |
 | CI-safe half | `e2e/telemetry/ping-dosage-harness.mjs` (direct HTTP pings, no AV) |
 

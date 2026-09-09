@@ -47,6 +47,36 @@ name for a repo later merged or renamed, plus a personal-path prefix. Not
 part of D9's fix list; tracked here only so it isn't independently
 rediscovered as new.
 
+## `docs/express-api-guide.md` and `docs/library-guide.md` — orphaned and stale, not relinked
+
+Both lost their only citer (`docs/quickstart.md`) in the D9.6 onboarding
+merge and are unreachable from any doc. Attempted to relink both from
+`docs/GETTING-STARTED.md`'s "Further reading," but verification against
+current code found both stale on the build/test tooling they document,
+not just orphaned:
+
+- Both guides' "Unit Testing" section says "Use Jest," with
+  `jest.config.cjs`/`ts-jest`/`@types/jest`. Zero packages or apps in the
+  repo use Jest (`grep -rl '"jest"' apps/node/*/package.json
+  packages/node/*/package.json` = no hits); all use `vitest run`
+  (confirmed on 20+ `packages/node/*/package.json` and every sampled
+  `apps/node/*/package.json`), matching `.claude/rules/testing-node.md`'s
+  documented convention.
+- `library-guide.md`'s "Build Configuration" section says "Use bunchee."
+  Checked every `packages/{node,core,web}/*/package.json`'s `build`
+  script: 0 of 34 use bunchee: the standard is `tsup` (CLI-style
+  packages use `tsc`/`tsc && oclif manifest` instead). `bunchee` appears
+  only in the repo-root `package.json`, not any package's own script.
+
+Not relinked — following D9's "reference misfiled as history gets
+promoted, not linked back in stale" principle in reverse: these were
+never archived, but relinking a doc whose core technical claim is wrong
+would just re-orphan-in-place. Rewriting both guides to match current
+tooling is a real edit, not a doc-cleanup citer fix, so it's left for
+whoever owns onboarding docs next — this program's Phase A/D scope is
+comments and citations, not content correctness of files nothing else
+in the repo depends on.
+
 ## `claude/projects/multi/` — wrongly removed in Phase B, restored
 
 D9.1's decision doc framed `multi/` as uncited and slated it for Phase C

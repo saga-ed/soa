@@ -110,3 +110,10 @@ the full package index.
 Packages use the `@saga-ed` scope, published to AWS CodeArtifact
 (`@saga-ed:registry` in `.npmrc`). Authenticate first — see
 [CODEARTIFACT_SETUP.md](./CODEARTIFACT_SETUP.md).
+
+## Further reading
+
+- [express-api-guide.md](./express-api-guide.md) — scaffolding a new
+  Express-based API under `apps/`.
+- [library-guide.md](./library-guide.md) — scaffolding a new reusable
+  library under `packages/`.

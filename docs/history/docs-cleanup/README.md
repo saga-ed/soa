@@ -1,7 +1,9 @@
 # docs-cleanup — soa (2026-09-08)
 
-Status: OPEN
+Status: CLOSED 2026-09-09
 Entry point: this file
+
+PR open against `main`, pending merge.
 
 Seventh and last repo in the documentation-cleanup program. Method,
 principles and program-level decisions live in **student-data-system**
@@ -240,5 +242,81 @@ changed line is a `#`-comment or blank), and a dry run of
 `comment-proof.sh` covers the `.ts`/`.md` changes; the `.sh` changes fell
 back to the manual review per the plan's `.sh` coverage note.
 
-Validator: 8 errors/3 warnings/11 info (Phase C exit) → see this commit's
-report for the post-Phase-D count.
+Validator: 8 errors/3 warnings/11 info (Phase C exit) → 5 errors/3
+warnings/11 info (Phase D exit, `docs-check.py --all`) — this is also the
+final count; nothing after Phase D changed a validated file. The 3
+resolved errors were 3 of the 4 `code-doc-refs` findings tied to
+`promotion-pipeline.md`'s dropped citers (see Phase D outcome above); the
+4th (`tools/synthetic-dev/up.sh:1636`, `docs/dev-toggle-ads-adm.md`) and
+all 4 `links` errors are unchanged, pre-existing findings, not part of
+D9's fix list.
+
+## Eval outcome
+
+Fact-discovery scoring across all five states (baseline, post-a, post-b,
+post-c, final): full tables, per-kind breakdown, and the eval-harness
+escape-rate caveat are in [`eval/README.md`](eval/README.md). In three
+lines: pass rate was already saturated at baseline (100%) and stayed
+there, so this repo had no fact-discovery headroom to gain; the raw
+context numbers rise across states (110k → 145k median) but that tracks
+an eval-harness confound — clean, in-worktree-only runs hold flat (106k →
+107k) — not a doc-quality change; the cleanup's real value is structural
+(`claude/` retired, validator 60/4/12 → 5/3/11, 4 new rules, 7 promoted
+docs, 6 files archived).
+
+## Commits
+
+Full range `182668b6..HEAD` (`git log --oneline`), oldest first.
+
+**Pre-initiative** (opportunistic citer repoints, before the doc-state survey):
+- `f005c67e` repoint rostering `claude/projects` citation to `docs/history`
+- `f325ed3c` repoint `gh_305` research citations to coach's docs-cleanup Phase B paths
+- `b8c233d6` repoint coach sub-domain citations to `docs/history` (coach Phase C d7)
+- `011f7749` repoint saga-dash `e2e-testing` citation to `docs/history`
+
+**Survey, shape, plan:**
+- `0b360f49` open the soa initiative — doc-state survey and inline-comment census
+- `5e07b8b1` d9 — soa shape (pending) and execution plan
+- `60cbfd32` fact-discovery eval, visible half of the question set
+- `604dd224` resolve d9 (soa shape — all recommendations accepted)
+
+**Phase A:**
+- `1be49b4d` root `CLAUDE.md` — authority paragraph + layout declaration
+- `14eb7918` fix root-level stale facts (§6)
+- `8b420e71` fix links — 7 root-cause clusters + one-offs
+- `e266bec9` add `docs/history/README.md` index
+- `29f0a0f8` initiative banners for the 9 real initiatives (D9.1)
+
+**Phase B:**
+- `a9b621e8` D9.4 — four misplaced `claude/` trees promoted to `.claude/rules/`
+- `ce24b82b` D9.3 — `saga-stack-cli` `CLAUDE.md` + 7 missing package rows
+- `be69e9be` D9.6 — merge onboarding cluster into `docs/GETTING-STARTED.md`
+- `0ff06ec8` D9.6 — cross-link the package-publishing doc cluster
+- `8e519e29` D9.2 — promote `HowToAddPubsub.md` to `docs/how-to-add-pubsub.md`
+- `ff92faa5` D9.1/D9.2 — remove dead scaffolding + superseded onboarding docs
+- `09d4b410` D9.1 — move `soa-audit` + `ss-develop-session-adm-plan` to `docs/history`
+- `1fdf86ac` record Phase B completion in the initiative README
+- `7fe0af90` Phase B — `followups.md` accuracy pass
+- `dc89018f` Phase A fact-check fixes (`multi/` restored)
+- `30115a75` fix two stale-after-restore spots + confirm no other `multi-synthetic-dev` citers
+- `7763ffd9` restore `memory-bank/` (carve-out — cited by `.cursor/rules` + `gh_t54`)
+
+**Phase C:**
+- `1256eb57` claude/projects layout move + `claude/` retired (D9.1/D9.7)
+- `f110606a` citer repoints dropped by a failed multi-pathspec add
+- `44b7dd50` archive `gh_298`, `gh_401_2`, `soa_75` research (D9.7)
+- `73bbae5e` D9.5 record-the-gap update + `followups.md` + Phase C landed
+- `63eb4236` fix false "unchanged" validator claim + status vocabulary
+- `eb66de26` Phase B fact-check fixes (`memory-bank/` correction)
+- `4966ba5a` correct `eb66de26` — express/library guides are stale, don't relink
+
+**Phase D:**
+- `d08919d1` qualify cross-repo citations, repoint dangling decision-doc refs
+- `9284d967` trim `up.sh`'s duplicate header, land tracking updates
+- `5213127f` Phase C fact-check fixes
+- `d966da6e` align `connection-manager.ts` pointer wording
+
+**Eval + closeout:**
+- `6a437d1a` persist eval questions and runs for all five states
+- `5b90a7d8` eval Outcome section — five-state fact-discovery scoring
+- `27335828` followups — record the eval-harness escape-rate gap

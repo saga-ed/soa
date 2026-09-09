@@ -4,7 +4,7 @@ One row per directory under `docs/history/`.
 
 | initiative | status | last activity | entry point | harvested to | archived |
 |---|---|---|---|---|---|
-| `docs-cleanup` | ACTIVE | 2026-09-08 | [CLAUDE.md](docs-cleanup/CLAUDE.md) | pending |  |
+| `docs-cleanup` | CLOSED 2026-09-09 | 2026-09-09 | [CLAUDE.md](docs-cleanup/CLAUDE.md) | root `CLAUDE.md`, `.claude/rules/`, `docs/{esm.md,frontend/,tooling/pnpm.md}`, `packages/node/CLAUDE.md`, `docs/decisions/docs-cleanup-d9-soa-shape.md` |  |
 | `gh_214` | ACTIVE | 2026-07-07 | [README.md](gh_214/README.md) | none yet — cited live from `saga-dash:apps/web/dash/playwright.stack.config.ts:327` |  |
 | `gh_298` | CLOSED 2026-07-16 | 2026-07-13 | [README.md](gh_298/README.md) | none yet | research/, source/ @ f110606a |
 | `gh_305` | CLOSED 2026-07-16 | 2026-09-08 | [source/plan.md](gh_305/source/plan.md) | none yet — cited live from `coach:docs/history/module-viewer-port/README.md:23` |  |

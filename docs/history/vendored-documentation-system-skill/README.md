@@ -1,6 +1,6 @@
 # vendored-documentation-system-skill
 
-Status: CLOSED (superseded) 2026-02-11
+Status: CLOSED 2026-02-11
 Entry point: [SKILL.md](SKILL.md)
 Harvested to: none — superseded by the `saga-tools` marketplace plugin
 

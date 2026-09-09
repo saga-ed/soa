@@ -17,7 +17,7 @@ One row per directory under `docs/history/`.
 | `soa_75` | CLOSED 2026-05-26 | 2026-06-25 | [README.md](soa_75/README.md) | `d-soa-pubsub-divorce.md` cited live from `packages/node/CLAUDE.md` and its event-driven adopter-conventions rule | research/02-fleet-mutation-audit.md @ f110606a |
 | `ss-develop-session-adm` | PAUSED | 2026-07-17 | [CLAUDE.md](ss-develop-session-adm/CLAUDE.md) | none yet — cited live from saga-dash |  |
 | `synthetic-dev-align` | ACTIVE | 2026-09-08 | [README.md](synthetic-dev-align/README.md) | none yet |  |
-| `vendored-documentation-system-skill` | CLOSED (superseded) | 2026-09-08 | [README.md](vendored-documentation-system-skill/README.md) | none — superseded by the `saga-tools` marketplace plugin |  |
+| `vendored-documentation-system-skill` | CLOSED 2026-02-11 | 2026-01-26 | [README.md](vendored-documentation-system-skill/README.md) | none — superseded by the `saga-tools` marketplace plugin |  |
 
 ## Notes on dates
 

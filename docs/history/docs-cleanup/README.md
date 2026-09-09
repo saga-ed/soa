@@ -174,6 +174,23 @@ citer Phase C's sweep found that D9.5's own analysis missed
 citers of `d-preview-deploy-isolation.md` in `rostering` and
 `program-hub` — see `followups.md`.
 
-Validator: 8 errors/3 warnings/11 info, unchanged from the Phase B exit
-state (`misplaced-history-dir` stays at 0; the 8 errors are the
-pre-existing `code-doc-refs`/`links` false positives, not new).
+Validator: 9 errors/4 warnings/11 info (Phase B exit) → 8 errors/3
+warnings/11 info. Not a flat carry-forward — three checks moved:
+`misplaced-history-dir` 1 → 0 (the whole `claude/` dir cleared, the point
+of the layout move); `archived-citation` 4 → 1 (3 of the 4 resolved
+because their cited targets — `gh_t54`, `soa_75/README.md`,
+`soa_75/decisions/` — now exist under `docs/history/`; the 4th,
+`docs/history/e2e-testing/`, is cited from
+`docs/decisions/docs-cleanup-d9-soa-shape.md:53` but was never created
+under that name in this repo's history — pre-existing since Phase A/B,
+outside D9.7's carve-out, left as-is); `decision-location` 0 → 2 (new,
+not a regression — `soa_75/decisions/` and `synthetic-dev-align/decisions/`
+were always non-centralized, this check just couldn't evaluate paths
+under old `claude/`; D9.7 explicitly keeps both live under their
+initiative dir rather than centralizing to `docs/decisions/`, so these
+2 warnings are expected and intentional, not deferred debt). The 4
+`code-doc-refs` and 4 `links` errors are unchanged findings; 3 of the 4
+`links` errors moved path (`claude/skills/documentation-system/templates/*`
+→ `docs/history/vendored-documentation-system-skill/templates/*`) without
+resolving — pre-existing broken template placeholders, not part of D9's
+fix list.

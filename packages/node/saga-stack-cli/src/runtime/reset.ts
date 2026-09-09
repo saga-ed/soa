@@ -11,7 +11,10 @@
  *      The DO block truncates EVERY public table EXCEPT `_prisma_migrations`, so the
  *      schema + applied-migration history survive and a reset never forces a
  *      re-migrate (verbatim from up.sh). `RESTART IDENTITY CASCADE` clears sequences
- *      + fk-linked rows — matching up.sh.
+ *      + fk-linked rows — matching up.sh. A DB may also declare
+ *      `resetPreserveTables` (surveys_api_local's question bank) — reference data
+ *      seeded BY a migration, which the preserved `_prisma_migrations` would then
+ *      stop `migrate deploy` from ever restoring.
  *   2. postgres `resetMode:'migrate-reset'` DBs (ledger_local, decision 2026-06-30 —
  *      NOT in up.sh's truncate list) → `pnpm prisma migrate reset --force`
  *      in the OWNING package (ledger-db, the verified schema owner — its own migrations,
@@ -108,19 +111,30 @@ export interface ResetResult {
  * The generic per-DB TRUNCATE DO block — verbatim from up.sh. Truncates every
  * `public` table EXCEPT `_prisma_migrations` (so the schema + migration history
  * survive; a reset never forces a re-migrate). Exposed for tests + reporting.
+ *
+ * `preserve` (the DB's `resetPreserveTables`) spares SEEDED REFERENCE DATA that
+ * arrives via a data migration: preserving `_prisma_migrations` means a later
+ * `migrate deploy` treats the seeding migration as applied and never restores
+ * what the truncate removed. Names are manifest constants, never user input;
+ * they are single-quote escaped anyway so the DO block cannot be broken by one.
  */
-export function truncateSql(): string {
+export function truncateSql(preserve: readonly string[] = []): string {
+  const excluded = ['_prisma_migrations', ...preserve]
+    .map((t) => `'${t.replace(/'/g, "''")}'`)
+    .join(', ');
   return (
-    "DO $$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables " +
-    "WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP " +
+    'DO $$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables ' +
+    `WHERE schemaname='public' AND tablename NOT IN (${excluded}) LOOP ` +
     "EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; " +
     'END LOOP; END $$;'
   );
 }
 
 /** `docker exec <container> psql -U postgres_admin -d <db> -v ON_ERROR_STOP=1 -c "<sql>"` argv. */
-export function truncateArgs(container: string, db: string): string[] {
-  return ['exec', container, 'psql', '-U', 'postgres_admin', '-d', db, '-v', 'ON_ERROR_STOP=1', '-c', truncateSql()];
+export function truncateArgs(container: string, db: string, preserve: readonly string[] = []): string[] {
+  return [
+    'exec', container, 'psql', '-U', 'postgres_admin', '-d', db, '-v', 'ON_ERROR_STOP=1', '-c', truncateSql(preserve),
+  ];
 }
 
 /** `docker exec <container> mongosh --quiet --eval 'db.getSiblingDB("<db>").dropDatabase()'` argv. */
@@ -247,11 +261,12 @@ export async function resetClosure(ctx: ResetContext): Promise<ResetResult> {
       continue;
     }
 
-    // Default: generic TRUNCATE preserving _prisma_migrations.
+    // Default: generic TRUNCATE preserving _prisma_migrations (plus any
+    // migration-seeded reference tables the DB declares).
     const { code } = await ctx.runner.run({
       cwd: process.cwd(),
       command: 'docker',
-      args: truncateArgs(ctx.pgContainer, def.name),
+      args: truncateArgs(ctx.pgContainer, def.name, def.resetPreserveTables ?? []),
       env: {},
       stdio: 'inherit',
     });

@@ -157,6 +157,18 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     ownerPw: 'surveys_api',
     resettable: true,
     resetMode: 'truncate',
+    // The question bank and its named sets are SEEDED REFERENCE DATA, inserted by
+    // the data migration 20260904120100_seed_question_bank (and amended by later
+    // set migrations) — surveys-db's seed.ts is deliberately empty so prod gets
+    // the bank from the ordinary `db:deploy` chain. A generic truncate therefore
+    // destroys rows that NOTHING restores: the reset preserves
+    // `_prisma_migrations`, so the next `prisma migrate deploy` sees the seeding
+    // migration already applied and does nothing. The stack then serves an EMPTY
+    // bank — the admin editor offers a question set whose questions never load —
+    // with no error raised anywhere. Reset only the INSTANCE tables (survey,
+    // survey_question, survey_launch, submission, answer), which is the
+    // per-school-year synthetic residue this DB's reset actually exists to clear.
+    resetPreserveTables: ['question_bank', 'question_set', 'question_set_item'],
     // profile-empty.sql creates the login + DB on a FRESH volume (soa#450); on a
     // pre-existing volume R2 creates them idempotently (the authz_local pattern).
     meshProvisioned: true,

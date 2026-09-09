@@ -714,7 +714,8 @@ describe('StackApi.reset — native (M8 R4)', () => {
     expect(truncs.length).toBeGreaterThan(0);
     for (const t of truncs) {
       expect(t.args.slice(0, 3)).toEqual(['exec', 'soa-postgres-1', 'psql']);
-      expect(sqlOf(t)).toContain("tablename <> '_prisma_migrations'");
+      // `NOT IN (…)` so a DB can also spare migration-seeded reference tables.
+      expect(sqlOf(t)).toContain("tablename NOT IN ('_prisma_migrations'");
       expect(sqlOf(t)).toContain('RESTART IDENTITY CASCADE');
     }
     // registry + dev-user re-seed ran (iam-api is in the closure) via the seed path.

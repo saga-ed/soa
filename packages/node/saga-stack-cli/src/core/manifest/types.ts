@@ -142,6 +142,21 @@ export interface DatabaseDef {
    * (ledger_local — decision 2026-06-29).
    */
   resetMode: 'truncate' | 'migrate-reset';
+  /**
+   * `public` tables a `resetMode:'truncate'` reset must SPARE, on top of
+   * `_prisma_migrations`.
+   *
+   * For SEEDED REFERENCE DATA that arrives through a data migration rather than
+   * a seed script. The generic truncate empties those tables, and because a
+   * reset deliberately preserves `_prisma_migrations` so it never re-migrates,
+   * `prisma migrate deploy` afterwards still considers the seeding migration
+   * applied and never puts the rows back — leaving the DB permanently missing
+   * its reference data, with no error raised anywhere. Listing the tables here
+   * holds a reset to what it means: clearing SYNTHETIC data.
+   *
+   * Absent ⇒ every `public` table except `_prisma_migrations` is truncated.
+   */
+  resetPreserveTables?: string[];
   /** Created by profile-empty.sql at mesh-up. */
   meshProvisioned: boolean;
 }

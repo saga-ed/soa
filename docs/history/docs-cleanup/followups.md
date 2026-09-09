@@ -9,8 +9,7 @@ Per D9.5: both decision files are cited from live production code with no
 deletion record and no fragment findable anywhere in the repo — see
 `docs/history/soa_75/README.md#missing-decisions` for citers and detail.
 This program records the gap; it doesn't file a GitHub issue on the user's
-behalf. Citer comment updates (`connection-manager.ts:70` and the 2 bare
-citers in `event-outbox`/`event-envelope`) are Phase D scope, not Phase A.
+behalf.
 
 Phase C's cross-repo citer sweep found this citer list was incomplete:
 `packages/node/observability/README.md:54` also names
@@ -22,8 +21,16 @@ citers outside `soa` entirely, in two sibling repos: `rostering`'s
 `apps/node/content-api/src/inversify.config.ts:84`,
 `apps/node/programs-api/src/inversify.config.ts:245`, and
 `apps/node/scheduling-api/src/inversify.config.ts:95` — 4 additional
-citers beyond the 2 D9.5 scoped. Phase D's citer-comment-update pass
-needs to cover all of these, not just the originally-counted set.
+citers beyond the 2 D9.5 scoped.
+
+Phase D fixed every citer this repo owns: `connection-manager.ts:70`, the
+2 bare citers in `event-outbox`/`event-envelope`, and
+`observability/README.md:54` (this last one wasn't in D9.5's original
+count) all now point at `soa_75/README.md#missing-decisions` instead of a
+decision doc that doesn't exist. The 4 cross-repo citers in `rostering`
+and `program-hub` are still unfixed — out of this program's per-repo
+scope; each repo's own docs-cleanup pass (or a user-filed tracking issue)
+owns that fix.
 
 ## `project-kit` plugin's `/new` skill still emits `claude/projects/gh_<issue>` — different repo, undermines the migration going forward
 
@@ -99,18 +106,23 @@ cross-reference bullet restored. `multi/` stays live; Phase C moves it to
 `docs/history/multi/` with a banner (Status: CLOSED, "prior-art reference
 cited by gh_214") instead of deleting it.
 
-## `docs/promotion-pipeline.md` — never written, cited from 3 shell scripts
+## `docs/promotion-pipeline.md` — never written, cited from 3 shell scripts (resolved Phase D)
 
 `tools/synthetic-dev/{capture-local,capture-sandbox}.sh` and `up.sh:417`
-comment-cite a doc that was never written (§0/§8 of the doc-state survey).
+comment-cited a doc that was never written (§0/§8 of the doc-state survey).
 This is a distinct missing-doc from D9.6's `npm-registry-publishing.md`
 (package-publishing cluster) even though both share an "author vs. drop"
 shape; D9.6 landed (`0ff06ec8`) deciding not to author
 `npm-registry-publishing.md`, which settles that doc but not this one —
-`promotion-pipeline.md`'s citers are separate call sites with their own
-content requirement. The decision doc places this cluster's citation fixes
-in Phase D (comments), not Phase A/B; these 3 `code-doc-refs` findings stay
-as-is until then.
+`promotion-pipeline.md`'s citers were separate call sites with their own
+content requirement.
+
+Phase D resolved it the same way: no fragment of `promotion-pipeline.md`
+exists anywhere in the repo to author it from, so the 3 dangling
+references were dropped rather than the doc written. Each citer's
+surrounding content (the "What this does NOT do" bullet lists,
+`up.sh`'s `--workspace` manifest note) stayed intact — only the pointer
+to the nonexistent doc came out.
 
 ## `memory-bank/` — wrongly removed in Phase B, restored
 

@@ -194,3 +194,51 @@ initiative dir rather than centralizing to `docs/decisions/`, so these
 → `docs/history/vendored-documentation-system-skill/templates/*`) without
 resolving — pre-existing broken template placeholders, not part of D9's
 fix list.
+
+## Phase D outcome (comments)
+
+Census's own recommendation list (`02-inline-comments.md` §9), `d08919d1` +
+this commit: the 3 unqualified `sds_80` citations in `mesh-fixture-cli`
+(`seed-attendance.ts`, `enroll.ts`) gained the `student-data-system:`
+qualifier (both targets confirmed live at those paths in SDS's own
+docs-cleanup worktree). The D9.5 dangling-citer set —
+`rabbitmq/src/connection-manager.ts:70` and `event-outbox/create-pool.ts`
++ `event-envelope/preview-tag.ts` — now point at
+`soa_75/README.md#missing-decisions` instead of the two decision docs that
+never landed; `packages/node/observability/README.md`'s citer (found by
+Phase C's sweep, not in D9.5's original count) got the same fix, matching
+the wording already used in `event-consumer/README.md` and
+`rabbitmq/README.md` (fixed in Phase C's `f110606a`, not re-touched here).
+`event-consumer`/`rabbitmq`/`observability` are the only 3 `d-*.md` citers
+this repo owns; the 4 bare cross-repo citers in `rostering` and
+`program-hub` recorded in `followups.md` are untouched — out of this
+program's per-repo scope.
+
+`docs/promotion-pipeline.md`'s 3 shell-script citers
+(`capture-local.sh:21`, `capture-sandbox.sh:23`, `up.sh`) had their
+dangling reference dropped rather than the doc authored — no fragment of
+it exists anywhere in the repo to write it from, the same call D9.6 made
+for `npm-registry-publishing.md`. The 4 janus `@spec` tags in
+`packages/node/api-util/src/utils/` moved to
+`specs/contracts/drafts/saga-auth-signal.spec.md`, verified against
+janus's `origin/main` tree before editing (the old path no longer
+resolves there). D9.8's note that `saga-auth-url.ts:4` was the one
+instance missing the `(janus repo)` qualifier had drifted from current
+state: `saga-auth-url.ts:4` already carried it, and
+`saga-auth-url.test.ts:5` was the actual gap — fixed there instead, per
+current source over the decision doc's now-stale description.
+
+`tools/synthetic-dev/up.sh`'s 65-line header (lines 3–67, service
+topology near-duplicating `README.md`'s opening) trimmed to a 7-line
+summary + pointer to `README.md`; two facts the header carried that
+`README.md` didn't — the deterministic `db:seed` (`@saga-ed/*-seed-ids`,
+stable ids across `--reset`) and the "Deferred: fleek recording stack,
+dash→connect linking, `SAGA_API_TARGET` stays remote" note — added there
+as prose. Verified with `bash -n`, a manual line-prefix diff review (every
+changed line is a `#`-comment or blank), and a dry run of
+`./up.sh --status` (exits 0, same output shape as before the trim).
+`comment-proof.sh` covers the `.ts`/`.md` changes; the `.sh` changes fell
+back to the manual review per the plan's `.sh` coverage note.
+
+Validator: 8 errors/3 warnings/11 info (Phase C exit) → see this commit's
+report for the post-Phase-D count.

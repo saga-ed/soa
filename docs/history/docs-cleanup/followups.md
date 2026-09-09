@@ -3,6 +3,19 @@
 Not fixed in Phase A. Each needs a decision, a later phase's scope, or the
 user's own tracking issue — not a Phase A doc-only edit.
 
+## `fact-eval.py` doesn't sandbox `Read`/`Glob` to the worktree under test — program-level gap
+
+Every state's eval run (baseline through final; see `eval/README.md`
+Outcome section) shows a rising share of runs (35% baseline → 55% final)
+issuing an absolute `/home/spaul/dev/<repo>/...` path that resolves outside
+the worktree being scored, into the shared main checkout or another
+worktree — whichever happens to exist on disk at run time. Raw
+`total_tokens`/`num_turns` deltas across states are unreliable while this
+holds; only clean-run (in-worktree-only) subsets are state-comparable. Fix:
+either restrict `Read`/`Glob` to `--repo` inside `fact-eval.py`, or refresh
+the shared main checkout to match each state before scoring it. Tracked as
+claude-plugins PR #146 (documentation-system v5 plugin).
+
 ## `soa_75/decisions/d-consumer-resilience.md` and `d-preview-deploy-isolation.md` — missing, no tracking issue
 
 Per D9.5: both decision files are cited from live production code with no

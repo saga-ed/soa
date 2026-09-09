@@ -6,7 +6,7 @@ import {
 } from './dev-perimeter-config.js';
 
 /**
- * @spec specs/contracts/saga-auth-signal.spec.md (janus repo)
+ * @spec specs/contracts/drafts/saga-auth-signal.spec.md (janus repo)
  *
  * The dev recon perimeter config loader (renamed from janus-config). The
  * fail-safe `enabled` semantics are the security invariant the unattended-e2e

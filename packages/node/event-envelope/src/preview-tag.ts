@@ -5,7 +5,8 @@
  *
  * The tag is read from `EVENT_PREVIEW_TAG` by default; production deploys
  * leave it unset and the helper is a no-op. Both publisher and consumer
- * sides MUST apply the same tag — see d-preview-deploy-isolation.md.
+ * sides MUST apply the same tag (design rationale not written up; see
+ * docs/history/soa_75/README.md#missing-decisions).
  *
  * @example
  *   applyPreviewTag('iam.events')                          // → 'iam.events'

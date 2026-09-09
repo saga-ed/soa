@@ -414,9 +414,8 @@ svc_repo_dir(){ # svc
 
 # checkout_workspace_shas: a --workspace manifest's `sha` field pins a
 # local-source service's repo to an EXACT commit (typically captured off a
-# running sandbox — see docs/promotion-pipeline.md's cloud→local capture
-# direction) rather than "whatever branch happens to be checked out", which is
-# check_branches' warn-only default. A workspace run needs the stronger
+# running sandbox) rather than "whatever branch happens to be checked out",
+# which is check_branches' warn-only default. A workspace run needs the stronger
 # guarantee: fail loudly on a dirty tree rather than silently launching the
 # wrong code. No-op when the manifest carries no sha (older manifests, or rows
 # that only pin mode/dbProfile) — leaves check_branches' warn-only behavior as

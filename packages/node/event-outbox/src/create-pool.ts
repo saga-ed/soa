@@ -38,7 +38,8 @@ const SCHEMA_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * `search_path` and miss per-PR schema tables. This helper translates the
  * Prisma form into libpq's `options=-c search_path=<schema>` so both sides
  * resolve to the same schema — the load-bearing piece of preview-environment
- * isolation (see d-preview-deploy-isolation.md).
+ * isolation (design rationale not written up; see
+ * docs/history/soa_75/README.md#missing-decisions).
  *
  * The helper is intentionally production-safe: when neither `?schema=` nor
  * `EVENT_PREVIEW_TAG` are set, it's equivalent to

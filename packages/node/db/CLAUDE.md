@@ -152,7 +152,7 @@ None — follows all SOA patterns.
 
 - `/packages/node/api-core/` — API server utilities
 - `/apps/node/CLAUDE.md` — Backend app patterns
-- `/apps/node/claude/testing.md` — Database testing patterns
+- `.claude/rules/testing-node.md` — Database testing patterns (auto-loads on this dir)
 - `cloudformation_templates/dbs/mongodb_shared/` (iac) — Replica-set + TLS + SCRAM primitives this loader consumes
 - `cloudformation_templates/dbs/db_host/dev-auth-mongo/` (iac) — Local TLS+SCRAM testbed for client work
 

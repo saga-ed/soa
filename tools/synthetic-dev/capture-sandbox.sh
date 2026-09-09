@@ -20,7 +20,7 @@
 #   CONTROL_PLANE_FUNCTION   Lambda function name (default: dev-platform-control-plane-dev)
 #   AWS_PROFILE              defaults to 'saga-dev' (Observer tier — queryState is read-only)
 #
-# What this does NOT do (see docs/promotion-pipeline.md's non-goals):
+# What this does NOT do:
 #   - No AWS SSO / gh auth setup — preflight below fails fast with the fix, not
 #     a raw 403.
 #   - No secrets, no `pnpm install`, no clone-if-missing — this only produces a

@@ -16,6 +16,10 @@ fixtures, no proxy, recording deferred). Ten is **rtsm-api** (rtsm,
 :6110) — Connect's CRDT/socket service as a local single-instance node
 (stateless, no DB, auth off).
 
+Deferred: the fleek recording stack and dash→connect linking. `SAGA_API_TARGET`
+(legacy poll content, unauthenticated endpoint) stays remote until content-api
+lands.
+
 > **New here?** Read **`getting-started.md`** — onboarding + the
 > one-command path (`./bootstrap.sh`) that stands the stack up **on `main`**
 > (the default; up + seed + `verify.sh`). To overlay your own in-flight PRs,
@@ -231,6 +235,9 @@ server as its own background task instead. This only affects agent-run
 sessions, not you running `./up.sh` in a terminal.
 
 ## Seeding synthetic data
+
+Seeding runs through the deterministic `db:seed` (`@saga-ed/*-seed-ids`) — the
+same data as preview/CI, with ids stable across `--reset`.
 
 - **IAM roster:** `cd ~/dev/rostering && pnpm tsx scripts/scenarios/src/run.ts program-hub`
   (named dev users + 5 districts/13 schools/28 sections/168 students/22 tutors).

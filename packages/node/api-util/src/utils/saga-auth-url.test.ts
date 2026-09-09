@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { buildIamLoginUrl, nextUrlFromReferer } from './saga-auth-url.js';
 
 /**
- * @spec specs/contracts/saga-auth-signal.spec.md
+ * @spec specs/contracts/drafts/saga-auth-signal.spec.md (janus repo)
  *
  * These primitives back the `WWW-Authenticate: SagaAuth …` challenge every
  * SagaAuth-emitting service builds. Ported from the byte-/behavior-identical

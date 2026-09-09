@@ -124,4 +124,5 @@ To add CodeArtifact support to a new consuming repo:
 ## Further Reading
 
 - [CODEARTIFACT_SETUP.md](./CODEARTIFACT_SETUP.md) — full registry setup, IAM permissions, CI/CD config
+- [cicd-package-publishing.md](./cicd-package-publishing.md) — the automated CI/CD publish pipeline
 - [cross-repo-linking-summary.md](./cross-repo-linking-summary.md) — detailed linking workflow and troubleshooting

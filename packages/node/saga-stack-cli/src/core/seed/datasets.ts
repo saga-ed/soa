@@ -1,6 +1,6 @@
 /**
  * Named seed DATASETS + cross-system SCENARIOS (saga-ed/soa#221, multi-seed
- * composition — `claude/projects/gh_214/multiseed-research.md` Option C, with
+ * composition — `docs/history/gh_214/multiseed-research.md` Option C, with
  * Option A as the transport for the coupled core).
  *
  * Two layers, per the research recommendation:

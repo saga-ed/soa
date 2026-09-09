@@ -119,6 +119,6 @@ from that worktree's `flows.json`); containers/volumes/state/DBs stay disjoint p
   there is no recorded state to go stale.
 - `ss set create` / `set rm [--and-worktrees]` (M13-C) are now shipped (above). Remaining
   fast-follow: an `e2e run --baseline` clean-main preflight (M13-D). Plan of record:
-  `soa/claude/projects/gh_214/plans/10-m13-worktree-sets.md`.
+  `soa/docs/history/gh_214/plans/10-m13-worktree-sets.md`.
 
 ← [Slots](./slots.md) · [e2e](./e2e.md)

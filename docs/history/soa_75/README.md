@@ -134,6 +134,21 @@ six-item program.
 GitHub issue: see soa#75 for active POC tracking and
 cross-repo branch state.
 
+## Archive scope (D9.7)
+
+Of `research/`'s 3 files, only `02-fleet-mutation-audit.md` archived
+(uncited from `decisions/`); `01-current-architecture.md` and
+`03-event-driven-microservices-reference.md` stay live because
+`decisions/` cites them: `d-poc-location.md:30` cites both
+`research/01-current-architecture.md` and
+`research/03-event-driven-microservices-reference.md`;
+`d-broker-choice.md:36` cites only
+`research/03-event-driven-microservices-reference.md`. The archive
+commit's own message (`44b7dd50`) paired these the other way around
+(`d-broker-choice.md` → 01, `d-poc-location.md` → 03) — this is the
+correction; the archive action (only `02-fleet-mutation-audit.md`
+archived) is unaffected.
+
 ## Missing decisions
 
 Two decision files are cited from live code with no deletion record and no

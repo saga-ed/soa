@@ -1,8 +1,8 @@
-> Reference. Verified against code 2026-09-08 — the "Real Example" below was
-> updated to a current file after the original `coach-api` smoke test it
-> cited no longer exists in the repo; every other claim (repo-wide
-> `"type": "module"`, the `fileURLToPath(import.meta.url)` pattern, `.js`
-> import extensions) still holds.
+> Reference. Verified against code 2026-09-08 — the "Real Example" below
+> is `mesh-fixture-cli`'s live fixture-path resolution (source, not a
+> test); every other claim (repo-wide `"type": "module"`, the
+> `fileURLToPath(import.meta.url)` pattern, `.js` import extensions) still
+> holds.
 
 # ECMAScript Modules (ESM) Patterns
 
@@ -55,20 +55,22 @@ const schemaPath = path.resolve(__dirname, '../../schemas/**/*.gql');
 ### Real Example
 
 ```typescript
-// apps/node/tgql-api/tgql-types/src/__tests__/schema-generation.unit.test.ts
-import { resolve, dirname } from 'node:path';
+// packages/node/mesh-fixture-cli/src/lib/load-fixture-definition.ts
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const manifestPath = resolve(__dirname, '../../generated/manifest.json');
+const FIXTURES_SOURCE_DIR = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  'fixtures',
+);
 ```
 
-**Result**: Tests work whether run as:
-- `pnpm test` (from package root)
-- `pnpm test` (from monorepo root via turbo)
-- `vitest run path/to/test.ts` (from anywhere)
+**Result**: `FIXTURES_SOURCE_DIR` resolves relative to the module's own
+location, not the process's working directory — correct whether the
+compiled `dist/` output runs inside the soa workspace or is consumed via
+workspace-link from another repo.
 
 ### Alternative Approach
 

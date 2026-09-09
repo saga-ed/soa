@@ -70,8 +70,12 @@ export interface DeployedServiceDef {
    * that: it would weaken the gate in the envs where the service DOES run.
    *
    * Only for services genuinely ABSENT from an env (confirmed by BOTH an ECS
-   * miss and NXDOMAIN). A service that is deployed but unrouted belongs in
-   * `noPublicRouteEnvs` instead — dropping it would hide a real outage.
+   * miss and NXDOMAIN) — and only when that absence is the INTENDED state. A
+   * service whose deployment to an env is actively in flight stays in scope
+   * there, so the gate reports the miss and becomes the deploy's acceptance
+   * signal; `--tolerate` absorbs the red until it lands. A service that is
+   * deployed but unrouted belongs in `noPublicRouteEnvs` instead — dropping
+   * it would hide a real outage.
    */
   envs?: readonly string[];
   /** Subdomain under the env's domain, or undefined when there is no public route. */
@@ -159,9 +163,19 @@ export const DEPLOYED_SERVICES: DeployedServiceDef[] = [
     ecsService: 'program-hub-content-api',
   },
   {
-    // Absent from prod (no ECS service on prod-shared + NXDOMAIN).
+    // Deployed to dev/training; on prod it is DEPLOYED BUT UNROUTABLE
+    // (sds#369, measured 2026-08-04): `sds-ads-adm-api-main` reached ECS
+    // steady state on prod-shared (deploy runs 30674907653/30908836441 —
+    // `aws ecs wait services-stable` in the prod account), but
+    // ads-adm-api.saga.org NXDOMAINs because deploy-ads-adm-api.yml
+    // hardcodes wootdev.com host-headers AND health-checks the dev URL, so
+    // prod dispatches route nothing and still report success. The former
+    // `envs: ['dev', 'training']` scope-out predates the first successful
+    // prod dispatch (2026-08-01) and would hide exactly this state:
+    // `verify --env prod` must REPORT the unreachable service (HTTP red even
+    // when --ecs sees it running — routing is part of health). Until the
+    // routing lands, accept the red with `--tolerate ads-adm-api`.
     id: 'ads-adm-api',
-    envs: ['dev', 'training'],
     host: 'ads-adm-api',
     healthPath: '/health',
     kind: 'api',

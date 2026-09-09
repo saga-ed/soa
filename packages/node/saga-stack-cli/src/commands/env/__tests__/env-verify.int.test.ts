@@ -145,11 +145,23 @@ describe('per-env service scope (I#375)', () => {
 
   it('OMITS services that are not deployed to the env, and only there', () => {
     // Absent from prod-shared AND NXDOMAIN ⇒ genuinely not deployed to prod.
-    for (const id of ['content-api', 'ads-adm-api', 'transcripts-api']) {
+    for (const id of ['content-api', 'transcripts-api']) {
       expect(ids('prod', 'saga.org')).not.toContain(id);
       expect(ids('dev', 'wootdev.com')).toContain(id);
       expect(ids('training', 'saga-training.org')).toContain(id);
     }
+  });
+
+  it('REPORTS ads-adm-api on prod even though it is not deployed there yet (sds#369)', () => {
+    // Its prod deploy is actively being dispatched, so the absence is a state
+    // the gate must SHOW (and the deploy's acceptance signal when it flips),
+    // not a scope-out that keeps `verify --env prod` green around the very
+    // service whose deploy is being debugged. Required, not optional — accept
+    // the interim red with `--tolerate ads-adm-api`.
+    const prod = Object.fromEntries(buildEnvHealthProbes('saga.org', 'prod').map((p) => [p.id, p]));
+    expect(prod['ads-adm-api']!.url).toBe('https://ads-adm-api.saga.org/health');
+    expect(prod['ads-adm-api']!.optional).toBe(false);
+    expect(prod['ads-adm-api']!.ecsService).toBe('sds-ads-adm-api');
   });
 
   it('scoping OUT of prod does NOT weaken the dev gate (scope is not `optional`)', () => {
@@ -366,8 +378,11 @@ describe('env verify --ecs', () => {
     // lists `coach-coach-api-main` and no canary, so it composes like the rest.
     expect(asked).toContain('coach-coach-api-main');
     expect(asked).not.toContain('coach-coach-api-canary');
-    // Services scoped out of prod are never asked about at all.
-    expect(asked.some((s) => s.includes('content-api') || s.includes('ads-adm') || s.includes('transcripts'))).toBe(false);
+    // Services scoped out of prod are never asked about at all…
+    expect(asked.some((s) => s.includes('content-api') || s.includes('transcripts'))).toBe(false);
+    // …but ads-adm-api IS in prod scope now (deploy in flight, sds#369) and
+    // composes on the standard -main suffix like the rest of the mesh.
+    expect(asked).toContain('sds-ads-adm-api-main');
     // Nothing in prod reads as unroutable any more — the three services that
     // once did are probed over HTTP like the rest.
     expect(text()).not.toContain('no public route');
@@ -415,6 +430,8 @@ describe('env verify --ecs', () => {
     expect(probed).toContain('https://connectv3.saga.org/');
     // …alongside the services that were already probed on the plain apex.
     expect(probed).toContain('https://iam.saga.org/health');
+    // ads-adm-api is probed in prod too (deploy in flight, sds#369).
+    expect(probed).toContain('https://ads-adm-api.saga.org/health');
   });
 
   it('refuses on the wrong AWS account before any ECS call', async () => {

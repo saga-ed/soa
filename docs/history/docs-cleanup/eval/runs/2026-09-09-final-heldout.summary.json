@@ -1,0 +1,35 @@
+{
+  "n_runs": 48,
+  "pass_rate": 1.0,
+  "history_citation_rate": 0.208,
+  "authoritative_citation_rate": 0.0,
+  "read_current_tier_rate": 0.5,
+  "read_history_rate": 0.417,
+  "read_stale_history_rate": 0.146,
+  "median_turns": 6.0,
+  "median_tokens": 185950.0,
+  "median_context_tokens": 185950.0,
+  "by_kind": {
+    "fact": {
+      "n_runs": 24,
+      "pass_rate": 1.0,
+      "read_current_tier_rate": 0.167,
+      "read_history_rate": 0.625,
+      "read_stale_history_rate": 0.25
+    },
+    "negative": {
+      "n_runs": 9,
+      "pass_rate": 1.0,
+      "read_current_tier_rate": 1.0,
+      "read_history_rate": 0.444,
+      "read_stale_history_rate": 0.111
+    },
+    "pattern": {
+      "n_runs": 15,
+      "pass_rate": 1.0,
+      "read_current_tier_rate": 0.733,
+      "read_history_rate": 0.067,
+      "read_stale_history_rate": 0.0
+    }
+  }
+}

@@ -133,3 +133,47 @@ Phase B complete. Validator: 13 errors/7 warnings/17 info (Phase A baseline)
 no new findings introduced by any Phase B commit or the fact-check
 corrections, each checked individually before committing. Full report in
 the session transcript; commit SHAs on this branch (soa) and in saga-dash.
+
+## Phase C outcome
+
+Layout move (D9.1/D9.7, `1256eb57` + the `f110606a` fix for a
+multi-pathspec `git add` that silently dropped 32 files' worth of citer
+repoints on the first attempt): all 9 `claude/projects/<initiative>/`
+dirs and `multi/` moved to `docs/history/`; `claude/esm.md`,
+`claude/frontend/`, `claude/tooling/pnpm.md` promoted to `docs/` with
+verified banners (esm.md's stale code sample replaced with a current one
+from `tgql-api`); `claude/skills/documentation-system/` archived to
+`docs/history/vendored-documentation-system-skill/` (superseded by the
+marketplace plugin); `claude/` removed entirely. Every in-repo citer
+repointed — root `CLAUDE.md`, `.claude/rules/`, `.claude/skills/`, `apps/`
+and `packages/` `CLAUDE.md`/`README.md` files, one code comment
+(`saga-stack-cli/src/core/seed/datasets.ts:3`, comment-proof verified),
+and `tools/synthetic-dev/up.sh:1843` (manually reviewed, `.sh` isn't
+comment-proof-covered).
+
+Cross-repo citers (D9.1, one commit per repo, pushed): saga-dash
+(`48447113`, 4 occurrences across `playwright.stack.config.ts` and
+`topology-design.md`), coach (`0fa66aa0`, 3 occurrences across
+`apps/web/CLAUDE.md`, `module-viewer-port/README.md`, `quickstart.md`),
+student-data-system (`93ef8440`, 1 occurrence in `sds_92/README.md`).
+rostering, program-hub, qboard: swept, nothing found citing soa's moved
+paths — no commit.
+
+Archive (D9.7, `44b7dd50`): `gh_298` (research/+source/, 3 files, 408
+lines) and `gh_401_2` (research/+source/, 2 files, 184 lines) fully
+archived; `soa_75/research/` narrowed from D9.7's stated 3 files to 1
+(`02-fleet-mutation-audit.md`, 209 lines) — the carve-out check found
+the other 2 cited live from `soa_75/decisions/` itself
+(`d-broker-choice.md:36`, `d-poc-location.md:30`), which D9.7 keeps live,
+so they stay. Pre-archive SHA `f110606a8326a9cc8879399e3d2ee6a806874ca7`
+recorded in each banner and the index.
+
+D9.5 record-the-gap: `soa_75/README.md#missing-decisions` updated with a
+citer Phase C's sweep found that D9.5's own analysis missed
+(`packages/node/observability/README.md:54`) plus 4 bare cross-repo
+citers of `d-preview-deploy-isolation.md` in `rostering` and
+`program-hub` — see `followups.md`.
+
+Validator: 8 errors/3 warnings/11 info, unchanged from the Phase B exit
+state (`misplaced-history-dir` stays at 0; the 8 errors are the
+pre-existing `code-doc-refs`/`links` false positives, not new).

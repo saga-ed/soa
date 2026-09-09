@@ -12,6 +12,41 @@ This program records the gap; it doesn't file a GitHub issue on the user's
 behalf. Citer comment updates (`connection-manager.ts:70` and the 2 bare
 citers in `event-outbox`/`event-envelope`) are Phase D scope, not Phase A.
 
+Phase C's cross-repo citer sweep found this citer list was incomplete:
+`packages/node/observability/README.md:54` also names
+`d-consumer-resilience.md` (D9.5's own analysis counted only
+`event-consumer/README.md` ×2, `rabbitmq/README.md`, and
+`connection-manager.ts:70`). `d-preview-deploy-isolation.md` has bare
+citers outside `soa` entirely, in two sibling repos: `rostering`'s
+`apps/node/iam-api/src/inversify.config.ts:377`, and `program-hub`'s
+`apps/node/content-api/src/inversify.config.ts:84`,
+`apps/node/programs-api/src/inversify.config.ts:245`, and
+`apps/node/scheduling-api/src/inversify.config.ts:95` — 4 additional
+citers beyond the 2 D9.5 scoped. Phase D's citer-comment-update pass
+needs to cover all of these, not just the originally-counted set.
+
+## `project-kit` plugin's `/new` skill still emits `claude/projects/gh_<issue>` — different repo, undermines the migration going forward
+
+`claude-plugins/plugins/project-kit/skills/new/SKILL.md`,
+`references/naming-contract.md`, and `references/configuration.md` (all in
+the `claude-plugins` repo, outside this 7-repo docs-cleanup program's
+scope) still name `claude/projects/gh_<issue>/` as the layout a new
+initiative gets scaffolded into. Any new initiative created with `/new`
+after this program lands would recreate the layout Phase C just retired
+in every repo it touches, silently reopening the problem. Not fixed here —
+belongs to whoever owns `project-kit`.
+
+## `~/dev/sds-fixture/claude/projects/sds_80/phase-2/soa-infra-alignment.md` — stale wrong-repo-name reference
+
+Already flagged as **Unresolvable** in
+`docs/history/docs-cleanup/research/01-doc-state.md` (§ citer sweep):
+`infra/compose/projects/saga-mesh/README.md:42` names a `sds-fixture` repo
+that doesn't exist locally under `~/dev/` and a filename not present in
+`student-data-system`'s actual `sds_80/phase-2/` either — likely an old
+name for a repo later merged or renamed, plus a personal-path prefix. Not
+part of D9's fix list; tracked here only so it isn't independently
+rediscovered as new.
+
 ## `claude/projects/multi/` — wrongly removed in Phase B, restored
 
 D9.1's decision doc framed `multi/` as uncited and slated it for Phase C

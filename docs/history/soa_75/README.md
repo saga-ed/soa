@@ -141,13 +141,18 @@ fragment findable elsewhere in the repo:
 
 - `decisions/d-consumer-resilience.md` — cited from
   `packages/node/event-consumer/README.md` (×2),
-  `packages/node/rabbitmq/README.md`, and
-  `packages/node/rabbitmq/src/connection-manager.ts:70`. Describes numbered
+  `packages/node/rabbitmq/README.md`,
+  `packages/node/rabbitmq/src/connection-manager.ts:70`, and
+  `packages/node/observability/README.md:54`. Describes numbered
   poison-message-handling and non-fatal broker-startup patterns.
 - `decisions/d-preview-deploy-isolation.md` — cited from
   `packages/node/event-outbox/src/create-pool.ts:41` and
   `packages/node/event-envelope/src/preview-tag.ts:8`, both bare filenames
-  with no path component.
+  with no path component, plus bare citers in two sibling repos:
+  `rostering:apps/node/iam-api/src/inversify.config.ts:377` and, in
+  `program-hub`, `apps/node/content-api/src/inversify.config.ts:84`,
+  `apps/node/programs-api/src/inversify.config.ts:245`, and
+  `apps/node/scheduling-api/src/inversify.config.ts:95`.
 
 Neither file exists under this name or any other in `soa_75/decisions/`
 (12 other decision files, none matching). No tracking issue is filed by

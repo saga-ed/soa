@@ -10,6 +10,21 @@ Source of truth for Saga's OpenFGA authorization model. Ships:
 
 See [ADR 0005](../../../docs/auth/adr/0005-openfga-model-as-source-of-truth.md) for the governance model.
 
+## candidate-b/
+
+`candidate-b/` stages a validated, **not-yet-adopted** replacement model (a
+declarative StaffAssignment-roles-on-a-containment-ladder design, from the
+authz bake-off + 2026-09-05 use-case survey) alongside its own fixtures —
+`model.fga`, `balt.fga.yaml`, `contextual.fga.yaml`, `extensions.fga.yaml` —
+so it can be validated here without touching the live `model.fga` or
+`src/types.ts` above. `candidate-b/test.sh` runs the `fga` CLI's `model
+validate` and `model test` against those fixtures (in-memory, no store, no
+docker); the same two checks also run in CI (see `.github/workflows/`). See
+[`candidate-b/README.md`](candidate-b/README.md) for the model's shape and
+conventions, and for where the promotion decision is tracked. Promoting it to
+replace the live model is a separate, deliberate follow-up — not done by
+adding this directory.
+
 ## Today
 
 The package ships the model. **No FGA store is deployed yet** — services do not call `check` against this model in P1. The model lands ready for the sync worker (later phase) to begin writing tuples.

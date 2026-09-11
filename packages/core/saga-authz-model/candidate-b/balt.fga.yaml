@@ -1,0 +1,195 @@
+name: candidate-b v1 / district balt
+model_file: ./model.fga
+tuples:
+  - {user: saga_platform:root, relation: platform, object: staff_org:balt}
+  - {user: staff_org:balt, relation: org, object: district:balt}
+  - {user: district:balt, relation: parent_district, object: program:p1}
+  - {user: district:balt, relation: parent_district, object: program:p2}
+  - {user: program:p1, relation: parent_program, object: site:p1-s1}
+  - {user: program:p1, relation: parent_program, object: site:p1-s2}
+  - {user: program:p2, relation: parent_program, object: site:p2-s2}
+  - {user: program:p2, relation: parent_program, object: site:p2-s3}
+  - {user: program:p1, relation: parent_program, object: pod:a}
+  - {user: program:p1, relation: parent_program, object: pod:b}
+  - {user: program:p2, relation: parent_program, object: pod:c}
+  - {user: program:p2, relation: parent_program, object: pod:d}
+  - {user: pod:a, relation: parent_pod, object: session:a1}
+  - {user: user:t1, relation: host, object: session:a1}
+  - {user: pod:b, relation: parent_pod, object: session:b1}
+  - {user: user:t2, relation: host, object: session:b1}
+  - {user: pod:c, relation: parent_pod, object: session:c1}
+  - {user: user:t2, relation: host, object: session:c1}
+  - {user: pod:d, relation: parent_pod, object: session:d1}
+  - {user: user:t3, relation: host, object: session:d1}
+  - {user: pod:a, relation: parent_pod, object: session:x1}   # override: t3 (from p2) hosts a p1 session
+  - {user: user:t3, relation: host, object: session:x1}
+  - {user: user:dana, relation: admin, object: district:balt}
+  - {user: user:ines, relation: ipm, object: program:p1}
+  - {user: user:ivan, relation: ipm, object: program:p1}
+  - {user: user:ivan, relation: ipm, object: program:p2}
+  - {user: user:sam, relation: coordinator, object: site:p1-s1}
+  - {user: user:sue, relation: coordinator, object: site:p1-s2}
+  - {user: user:sue, relation: coordinator, object: site:p2-s2}
+  - {user: user:t1, relation: tutor, object: pod:a}
+  - {user: user:t2, relation: tutor, object: pod:b}
+  - {user: user:t2, relation: tutor, object: pod:c}
+  - {user: user:t3, relation: tutor, object: pod:d}
+  - {user: user:pat, relation: support, object: saga_platform:root}
+  - {user: user:oscar, relation: org_admin, object: saga_platform:root}
+  - {user: user:t1, relation: participant, object: program:p1}
+  - {user: user:t2, relation: participant, object: program:p1}
+  - {user: user:t2, relation: participant, object: program:p2}
+  - {user: user:t3, relation: participant, object: program:p2}
+  - {user: user:sam, relation: participant, object: program:p1}
+  - {user: user:sue, relation: participant, object: program:p1}
+  - {user: user:sue, relation: participant, object: program:p2}
+  - {user: program:p1, relation: parent_program, object: coach_progress:t1}
+  - {user: user:t1, relation: subject, object: coach_progress:t1}
+  - {user: program:p1, relation: parent_program, object: coach_progress:t2}
+  - {user: user:t2, relation: subject, object: coach_progress:t2}
+  - {user: program:p2, relation: parent_program, object: coach_progress:t2}
+  - {user: program:p1, relation: parent_program, object: coach_progress:sam}
+  - {user: user:sam, relation: subject, object: coach_progress:sam}
+  - {user: site:p1-s1, relation: parent_site, object: grade_upload:g-p1s1-001}
+  - {user: site:p1-s2, relation: parent_site, object: grade_upload:g-p1s2-001}
+  - {user: site:p2-s2, relation: parent_site, object: grade_upload:g-p2s2-001}
+tests:
+  - name: UC1 IPM reviews tutor sessions and releases feedback
+    check:
+      - user: user:ines
+        object: session:a1
+        assertions: {can_view: true, can_release: true}
+      - user: user:ines
+        object: session:c1
+        assertions: {can_view: false, can_release: false}
+  - name: UC2 IPM reviews coach progress of tutors AND SCs, per program only
+    check:
+      - user: user:ines
+        object: coach_progress:t1
+        assertions: {can_view: true}
+      - user: user:ines
+        object: coach_progress:sam
+        assertions: {can_view: true}
+      - user: user:ines
+        object: coach_progress:t2
+        assertions: {can_view: true, can_view_responses: true}
+      - user: user:sam
+        object: coach_progress:t2
+        assertions: {can_view: false, can_view_responses: false}
+      - user: user:t2
+        object: coach_progress:t2
+        assertions: {can_view: true}
+      - user: user:t1
+        object: coach_progress:t2
+        assertions: {can_view: false}
+  - name: UC3 IPM edits own program only
+    check:
+      - user: user:ines
+        object: program:p1
+        assertions: {can_edit: true}
+      - user: user:ines
+        object: program:p2
+        assertions: {can_edit: false, can_view: false}
+      - user: user:ivan
+        object: program:p2
+        assertions: {can_edit: true}
+  - name: UC4 tutor sees own program and own sessions; not pod-mate or override sessions
+    check:
+      - user: user:t1
+        object: program:p1
+        assertions: {can_view: true, can_edit: false}
+      - user: user:t1
+        object: session:a1
+        assertions: {can_view: true, can_release: false}
+      - user: user:t1
+        object: session:x1
+        assertions: {can_view: false}
+      - user: user:t1
+        object: session:b1
+        assertions: {can_view: false}
+      - user: user:t3
+        object: session:x1
+        assertions: {can_view: true}
+  - name: UC5 IPM sees program and tutors' sessions
+    check:
+      - user: user:ines
+        object: program:p1
+        assertions: {can_view: true, supervise_view: true}
+      - user: user:ines
+        object: session:b1
+        assertions: {can_view: true}
+      - user: user:ines
+        object: session:x1
+        assertions: {can_view: true}
+  - name: UC6 site coordinator uploads grades only for own site
+    check:
+      - user: user:sam
+        object: grade_upload:g-p1s1-001
+        assertions: {can_write: true}
+      - user: user:sam
+        object: grade_upload:g-p1s2-001
+        assertions: {can_write: false}
+      - user: user:sue
+        object: grade_upload:g-p2s2-001
+        assertions: {can_write: true}
+      - user: user:ines
+        object: grade_upload:g-p1s1-001
+        assertions: {can_write: true}
+      - user: user:ines
+        object: grade_upload:g-p2s2-001
+        assertions: {can_write: false}
+  - name: E-district admin reaches view AND write everywhere in district (graft 4)
+    check:
+      - user: user:dana
+        object: session:c1
+        assertions: {can_view: true, can_release: true}
+      - user: user:dana
+        object: grade_upload:g-p2s2-001
+        assertions: {can_write: true}
+      - user: user:dana
+        object: program:p2
+        assertions: {can_edit: true}
+  - name: E-staff support observes any session/recording but does not administer
+    check:
+      - user: user:pat
+        object: session:c1
+        assertions: {can_view: true, can_observe_recording: true, can_release: false}
+      - user: user:pat
+        object: program:p2
+        assertions: {can_view: false, can_edit: false}
+      - user: user:oscar
+        object: program:p2
+        assertions: {can_view: true, can_edit: false}
+  - name: E-site coordinator does NOT see pods/sessions (open product decision)
+    check:
+      - user: user:sam
+        object: pod:a
+        assertions: {can_view: false}
+      - user: user:sam
+        object: session:a1
+        assertions: {can_view: false}
+      - user: user:sam
+        object: program:p1
+        assertions: {can_view: true}
+  - name: check/list parity — sessions visible per subject
+    list_objects:
+      - user: user:ines
+        type: session
+        assertions:
+          can_view: [session:a1, session:b1, session:x1]
+      - user: user:t1
+        type: session
+        assertions:
+          can_view: [session:a1]
+      - user: user:t2
+        type: session
+        assertions:
+          can_view: [session:b1, session:c1]
+      - user: user:dana
+        type: session
+        assertions:
+          can_view: [session:a1, session:b1, session:c1, session:d1, session:x1]
+      - user: user:sam
+        type: grade_upload
+        assertions:
+          can_write: [grade_upload:g-p1s1-001]

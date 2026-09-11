@@ -1,0 +1,364 @@
+name: candidate-b v1 / extensions beyond the original six use cases
+model_file: ./model.fga
+tuples:
+  # --- base tuples copied verbatim from balt.fga.yaml ---
+  - {user: saga_platform:root, relation: platform, object: staff_org:balt}
+  - {user: staff_org:balt, relation: org, object: district:balt}
+  - {user: district:balt, relation: parent_district, object: program:p1}
+  - {user: district:balt, relation: parent_district, object: program:p2}
+  - {user: program:p1, relation: parent_program, object: site:p1-s1}
+  - {user: program:p1, relation: parent_program, object: site:p1-s2}
+  - {user: program:p2, relation: parent_program, object: site:p2-s2}
+  - {user: program:p2, relation: parent_program, object: site:p2-s3}
+  - {user: program:p1, relation: parent_program, object: pod:a}
+  - {user: program:p1, relation: parent_program, object: pod:b}
+  - {user: program:p2, relation: parent_program, object: pod:c}
+  - {user: program:p2, relation: parent_program, object: pod:d}
+  - {user: pod:a, relation: parent_pod, object: session:a1}
+  - {user: user:t1, relation: host, object: session:a1}
+  - {user: pod:b, relation: parent_pod, object: session:b1}
+  - {user: user:t2, relation: host, object: session:b1}
+  - {user: pod:c, relation: parent_pod, object: session:c1}
+  - {user: user:t2, relation: host, object: session:c1}
+  - {user: pod:d, relation: parent_pod, object: session:d1}
+  - {user: user:t3, relation: host, object: session:d1}
+  - {user: pod:a, relation: parent_pod, object: session:x1}   # override: t3 (from p2) hosts a p1 session
+  - {user: user:t3, relation: host, object: session:x1}
+  - {user: user:dana, relation: admin, object: district:balt}
+  - {user: user:ines, relation: ipm, object: program:p1}
+  - {user: user:ivan, relation: ipm, object: program:p1}
+  - {user: user:ivan, relation: ipm, object: program:p2}
+  - {user: user:sam, relation: coordinator, object: site:p1-s1}
+  - {user: user:sue, relation: coordinator, object: site:p1-s2}
+  - {user: user:sue, relation: coordinator, object: site:p2-s2}
+  - {user: user:t1, relation: tutor, object: pod:a}
+  - {user: user:t2, relation: tutor, object: pod:b}
+  - {user: user:t2, relation: tutor, object: pod:c}
+  - {user: user:t3, relation: tutor, object: pod:d}
+  - {user: user:pat, relation: support, object: saga_platform:root}
+  - {user: user:oscar, relation: org_admin, object: saga_platform:root}
+  - {user: user:t1, relation: participant, object: program:p1}
+  - {user: user:t2, relation: participant, object: program:p1}
+  - {user: user:t2, relation: participant, object: program:p2}
+  - {user: user:t3, relation: participant, object: program:p2}
+  - {user: user:sam, relation: participant, object: program:p1}
+  - {user: user:sue, relation: participant, object: program:p1}
+  - {user: user:sue, relation: participant, object: program:p2}
+  - {user: program:p1, relation: parent_program, object: coach_progress:t1}
+  - {user: user:t1, relation: subject, object: coach_progress:t1}
+  - {user: program:p1, relation: parent_program, object: coach_progress:t2}
+  - {user: user:t2, relation: subject, object: coach_progress:t2}
+  - {user: program:p2, relation: parent_program, object: coach_progress:t2}
+  - {user: program:p1, relation: parent_program, object: coach_progress:sam}
+  - {user: user:sam, relation: subject, object: coach_progress:sam}
+  - {user: site:p1-s1, relation: parent_site, object: grade_upload:g-p1s1-001}
+  - {user: site:p1-s2, relation: parent_site, object: grade_upload:g-p1s2-001}
+  - {user: site:p2-s2, relation: parent_site, object: grade_upload:g-p2s2-001}
+
+  # --- extension tuples: relations v1 added beyond the original six use cases ---
+  # EXT-CV3-1/EXT-PH-3 -> session.participant (materialized)
+  - {user: user:cara, relation: participant, object: session:a1}
+  # EXT-PH-4 -> program.observer (cascades to pod.observer, threads into session.can_view/can_observe_recording)
+  - {user: user:sam, relation: observer, object: program:p2}
+  # EXT-PH-2 -> program.qtf_access (renamed from access_qtf)
+  - {user: user:sue, relation: qtf_access, object: program:p2}
+  # EXT-PH-2 -> session.subject (materialized/frozen subject fact)
+  - {user: user:t2, relation: subject, object: session:c1}
+  # EXT-DASH-6 -> can_provision_sandbox (direct grant, support-tier operator)
+  - {user: user:pat, relation: can_provision_sandbox, object: saga_platform:root}
+  # EXT-DASH-7 -> district.can_view_pii threaded via staff_org.staff_view_pii (per-district PII grant, non-super_admin staff)
+  - {user: user:pat, relation: staff_view_pii, object: staff_org:balt}
+  # EXT-AZ-1 -> saga_platform.baseline (#440 floor grant)
+  - {user: user:newbie, relation: baseline, object: saga_platform:root}
+  # POL-DASH-2 -> district.can_view_all_programs (non-admin, directly-assignable holder)
+  - {user: user:vic, relation: can_view_all_programs, object: district:balt}
+  # POL-CV3-1 -> adhoc_room (district-scoped parent, option B)
+  - {user: district:balt, relation: parent_district, object: adhoc_room:ondemand1}
+  - {user: user:zed, relation: host, object: adhoc_room:ondemand1}
+  - {user: user:cara, relation: participant, object: adhoc_room:ondemand1}
+  - {user: user:quinn, relation: observer, object: adhoc_room:ondemand1}
+
+tests:
+  # ======================================================================
+  # EXT-PH-1 -> pod.can_edit_sessions / session.can_edit + session.can_release
+  # ======================================================================
+  - name: EXT-PH-1 session.can_edit -- host yes, IPM yes, pod-mate tutor no, participant no
+    check:
+      - user: user:t1                 # host
+        object: session:a1
+        assertions: {can_edit: true}
+      - user: user:ines               # ipm of p1 -> pod:b.can_edit_sessions -> session:b1.can_edit
+        object: session:b1
+        assertions: {can_edit: true}
+      - user: user:t2                 # tutor of pod:b/pod:c ("pod-mate" tutor elsewhere) -- NOT tutor of pod:a, not host
+        object: session:a1
+        assertions: {can_edit: false}
+      - user: user:cara                # participant only
+        object: session:a1
+        assertions: {can_edit: false}
+      - user: user:t1                 # not tutor of pod:b, not host, not ipm
+        object: session:b1
+        assertions: {can_edit: false}
+      - user: user:ines               # p2 session, ines not ipm of p2
+        object: session:c1
+        assertions: {can_edit: false}
+  - name: EXT-PH-1 session.can_release -- IPM yes, host no (grant-holders only, never host)
+    check:
+      - user: user:ines
+        object: session:a1
+        assertions: {can_release: true}
+      - user: user:t1
+        object: session:a1
+        assertions: {can_release: false}
+
+  - name: EXT-PH-1-CTX unmaterialized session resolves host/pod via contextual tuples only
+    tuples:
+      - {user: pod:c, relation: parent_pod, object: "session:2026-09-10-c-slot3"}
+      - {user: user:t2, relation: host, object: "session:2026-09-10-c-slot3"}
+    check:
+      - user: user:t2
+        object: "session:2026-09-10-c-slot3"
+        assertions: {can_edit: true, can_view: true}
+      - user: user:ines               # ines is ipm of p1, pod:c is under p2
+        object: "session:2026-09-10-c-slot3"
+        assertions: {can_edit: false}
+      - user: user:ivan               # ivan IS ipm of p2 -> grant arm, no host tuple needed
+        object: "session:2026-09-10-c-slot3"
+        assertions: {can_edit: true}
+
+  # ======================================================================
+  # SOA-08 -- D19 attribution: host / supervise_view / staff_observe stay separable
+  # ======================================================================
+  - name: SOA-08 D19 attribution stays separable
+    check:
+      - user: user:t2
+        object: session:b1
+        assertions: {can_view: true, can_release: false}
+      - user: user:ines
+        object: session:b1
+        assertions: {can_view: true, can_release: true}
+      - user: user:pat
+        object: session:b1
+        assertions: {can_view: true, can_release: false, can_observe_recording: true}
+
+  # ======================================================================
+  # EXT-CV3-1 -- session.participant (materialized) + contextual present/absent/wrong-pod
+  # ======================================================================
+  - name: EXT-CV3-1 materialized participant sees own session, not host-only/grant actions, not another session
+    check:
+      - user: user:cara
+        object: session:a1
+        assertions: {can_view: true, can_release: false, can_edit: false, can_observe_recording: false}
+      - user: user:cara
+        object: session:b1
+        assertions: {can_view: false}
+
+  - name: EXT-CV3-1 contextual -- present participant sees own occurrence, absent-override gets no tuple, wrong pod stays invisible
+    tuples:
+      - {user: pod:a, relation: parent_pod, object: "session:e1"}
+      - {user: user:t1, relation: host, object: "session:e1"}
+      - {user: user:cara, relation: participant, object: "session:e1"}      # cara present at this occurrence
+      - {user: pod:a, relation: parent_pod, object: "session:e2"}
+      - {user: user:t1, relation: host, object: "session:e2"}               # cara marked ABSENT here -- no participant tuple written
+      - {user: pod:b, relation: parent_pod, object: "session:e3"}
+      - {user: user:t2, relation: host, object: "session:e3"}               # a different pod's occurrence entirely
+    check:
+      - user: user:cara
+        object: "session:e1"
+        assertions: {can_view: true}
+      - user: user:cara
+        object: "session:e2"
+        assertions: {can_view: false}
+      - user: user:cara
+        object: "session:e3"
+        assertions: {can_view: false}
+
+  # ======================================================================
+  # EXT-CV3-2 -- session.observer (contextual)
+  # ======================================================================
+  - name: EXT-CV3-2 assigned observer without program supervise_view
+    tuples:
+      - {user: user:quinn, relation: observer, object: session:d1}
+    check:
+      - user: user:quinn
+        object: session:d1
+        assertions: {can_view: true}
+      - user: user:quinn
+        object: session:c1          # no observer tuple written here
+        assertions: {can_view: false}
+
+  # ======================================================================
+  # EXT-PH-4 -- program.observer (+ pod.observer): sessions yes, site/grade/release no
+  # ======================================================================
+  - name: EXT-PH-4 program observer sees pod/session under the observed program but gains no site/grade/release reach
+    check:
+      - user: user:sam
+        object: session:c1
+        assertions: {can_view: true, can_release: false, can_observe_recording: true}
+      - user: user:sam
+        object: pod:c
+        assertions: {can_view: true}    # v1.1: pod.can_view gained the observer arm (was a MODEL-FINDING in v1)
+      - user: user:sam
+        object: site:p2-s2
+        assertions: {can_view: false}         # sam is NOT coordinator here (only p1-s1) -- observer must not confer this
+      - user: user:sam
+        object: grade_upload:g-p2s2-001
+        assertions: {can_write: false}        # observer alone must not confer grade-upload write
+
+  # ======================================================================
+  # EXT-PH-2 -- program.qtf_access (renamed from access_qtf) + session.subject
+  # ======================================================================
+  - name: EXT-PH-2 qtf_access holder authors/reads/sets-next-steps; subject self-authors/reads only, never sets next steps; unrelated tutor fails closed
+    check:
+      - user: user:sue                # qtf_access on program:p2, not the subject
+        object: session:c1
+        assertions: {can_author_observation: true, can_read_observation: true, can_set_next_steps: true}
+      - user: user:t2                 # subject of session:c1 (materialized), no qtf_access
+        object: session:c1
+        assertions: {can_author_observation: true, can_read_observation: true, can_set_next_steps: false}
+      - user: user:t3                 # no subject tuple, no qtf_access on p2 -> fail closed
+        object: session:d1
+        assertions: {can_author_observation: false, can_read_observation: false}
+
+  # ======================================================================
+  # can_observe_recording -- excludes participant, includes support and program observer
+  # ======================================================================
+  - name: can_observe_recording excludes participant, includes support and program observer
+    check:
+      - user: user:cara
+        object: session:a1
+        assertions: {can_observe_recording: false}
+      - user: user:pat
+        object: session:c1
+        assertions: {can_observe_recording: true}
+      - user: user:sam
+        object: session:c1
+        assertions: {can_observe_recording: true}
+
+  # ======================================================================
+  # POL-CV3-1 -- adhoc_room: host/participant see it, IPM does NOT, support does via staff_observe
+  # ======================================================================
+  - name: POL-CV3-1 adhoc_room -- host/participant/observer see it, IPM never does, support reaches via staff_observe
+    check:
+      - user: user:zed
+        object: adhoc_room:ondemand1
+        assertions: {can_view: true, can_observe_recording: true}
+      - user: user:cara
+        object: adhoc_room:ondemand1
+        assertions: {can_view: true, can_observe_recording: false}   # participant excluded from recording, same as session
+      - user: user:quinn
+        object: adhoc_room:ondemand1
+        assertions: {can_view: true, can_observe_recording: true}
+      - user: user:ines
+        object: adhoc_room:ondemand1
+        assertions: {can_view: false}
+      - user: user:ivan
+        object: adhoc_room:ondemand1
+        assertions: {can_view: false}
+      - user: user:pat
+        object: adhoc_room:ondemand1
+        assertions: {can_view: true, can_observe_recording: true}
+
+  # ======================================================================
+  # POL-DASH-2 -- district.can_view_all_programs cascades into program.can_view only,
+  # NOT supervise_view/can_edit, and does not reach sessions.
+  # ======================================================================
+  - name: POL-DASH-2 can_view_all_programs holder sees program.can_view district-wide but nothing deeper
+    check:
+      - user: user:vic
+        object: program:p2
+        assertions: {can_view: true, supervise_view: false, can_edit: false}
+      - user: user:vic
+        object: program:p1
+        assertions: {can_view: true}
+      - user: user:vic
+        object: session:c1
+        assertions: {can_view: false}
+
+  # ======================================================================
+  # EXT-DASH-1/EXT-DASH-2/EXT-IAM-3/EXT-DASH-7 -- district staff-relations matrix
+  # ======================================================================
+  - name: district staff relations -- create_program (admin only), manage_admins/upload_roster/download_roster/view_pii (staff-threaded)
+    check:
+      - user: user:dana               # district admin
+        object: district:balt
+        assertions: {can_create_program: true, can_manage_admins: false, can_upload_roster: true, can_download_roster: true, can_view_pii: true}
+      - user: user:oscar              # org_admin staff -> staff_admin via can_admin_personas
+        object: district:balt
+        assertions: {can_create_program: false, can_manage_admins: true, can_upload_roster: true, can_download_roster: true, can_view_pii: false}
+      - user: user:pat                # support, with a direct per-district staff_view_pii grant only
+        object: district:balt
+        assertions: {can_create_program: false, can_manage_admins: false, can_upload_roster: false, can_download_roster: false, can_view_pii: true}
+      - user: user:t1                 # plain tutor
+        object: district:balt
+        assertions: {can_create_program: false, can_manage_admins: false, can_upload_roster: false, can_download_roster: false, can_view_pii: false}
+
+  # ======================================================================
+  # staff plane relations -- can_flip_prod_color / can_provision_sandbox / can_query_analytics /
+  # can_audit_authz / can_view_audit / baseline / can_manage_coach_playlists
+  # ======================================================================
+  - name: staff plane relations matrix
+    check:
+      - user: user:oscar               # org_admin
+        object: saga_platform:root
+        assertions: {can_flip_prod_color: true, can_provision_sandbox: true, can_query_analytics: false, can_audit_authz: false, can_view_audit: true, baseline: false, can_manage_coach_playlists: true}
+      - user: user:pat                 # support (+ direct can_provision_sandbox, staff_view_pii grants)
+        object: saga_platform:root
+        assertions: {can_flip_prod_color: false, can_provision_sandbox: true, can_query_analytics: true, can_audit_authz: true, can_view_audit: false, baseline: false, can_manage_coach_playlists: false}
+      - user: user:t1                  # plain tutor, no staff role
+        object: saga_platform:root
+        assertions: {can_flip_prod_color: false, can_provision_sandbox: false, can_query_analytics: false, can_audit_authz: false, can_view_audit: false, baseline: false, can_manage_coach_playlists: false}
+      - user: user:newbie              # EXT-AZ-1: org-less new user, real baseline tuple only
+        object: saga_platform:root
+        assertions: {baseline: true, can_flip_prod_color: false, can_provision_sandbox: false}
+
+  # ======================================================================
+  # EXT-COACH-1 -- coach_progress.can_view_responses (per-person keying, parent_program to p1 AND p2)
+  # ======================================================================
+  - name: EXT-COACH-1 coach_progress.can_view_responses -- IPM of any linked program yes, non-supervising SC no, subject yes for own
+    check:
+      - user: user:ines               # ipm of p1 only
+        object: coach_progress:t2     # parent_program edges to BOTH p1 and p2
+        assertions: {can_view_responses: true}
+      - user: user:sam                # coordinator only, no supervise_view anywhere
+        object: coach_progress:t2
+        assertions: {can_view_responses: false}
+      - user: user:t2                 # subject, own record
+        object: coach_progress:t2
+        assertions: {can_view_responses: true}
+
+  # ======================================================================
+  # check/list parity -- session.can_view per subject, recomputed under v1 (observer/participant additions)
+  # ======================================================================
+  - name: check/list parity -- sessions visible per subject under v1
+    list_objects:
+      - user: user:ines
+        type: session
+        assertions:
+          can_view: [session:a1, session:b1, session:x1]
+      - user: user:t1
+        type: session
+        assertions:
+          can_view: [session:a1]
+      - user: user:t2
+        type: session
+        assertions:
+          can_view: [session:b1, session:c1]
+      - user: user:dana
+        type: session
+        assertions:
+          can_view: [session:a1, session:b1, session:c1, session:d1, session:x1]
+      - user: user:cara               # NEW: materialized participant on session:a1 only
+        type: session
+        assertions:
+          can_view: [session:a1]
+      - user: user:sam                # NEW: program:p2 observer -> pod:c/pod:d -> session:c1, session:d1
+        type: session
+        assertions:
+          can_view: [session:c1, session:d1]
+  - name: check/list parity -- program.can_view for the can_view_all_programs holder
+    list_objects:
+      - user: user:vic
+        type: program
+        assertions:
+          can_view: [program:p1, program:p2]

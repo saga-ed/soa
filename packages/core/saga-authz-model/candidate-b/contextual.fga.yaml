@@ -1,0 +1,24 @@
+name: candidate-b v1 / contextual tuples (rostering D9)
+model_file: ./model.fga
+tuples:
+  - {user: district:balt, relation: parent_district, object: program:p1}
+  - {user: program:p1, relation: parent_program, object: pod:a}
+  - {user: user:t1, relation: tutor, object: pod:a}
+  - {user: user:ines, relation: ipm, object: program:p1}
+tests:
+  - name: unmaterialized session resolved via per-test contextual tuples (D9)
+    tuples:
+      - {user: pod:a, relation: parent_pod, object: session:2026-09-05_slot3_pod-a}
+      - {user: user:t1, relation: host, object: session:2026-09-05_slot3_pod-a}
+    check:
+      - user: user:t1
+        object: session:2026-09-05_slot3_pod-a
+        assertions: {can_view: true, can_release: false}
+      - user: user:ines
+        object: session:2026-09-05_slot3_pod-a
+        assertions: {can_view: true, can_release: true}
+  - name: without contextual tuples the same session is invisible
+    check:
+      - user: user:t1
+        object: session:2026-09-05_slot3_pod-a
+        assertions: {can_view: false}

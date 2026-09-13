@@ -128,7 +128,7 @@ describe('PartitionedParquetWriter + runSnapshotExport + LocalLandingSink', () =
     // Run manifest.
     const manifestKey = runManifestKey({
       sourceSystem: 'manual',
-      dataset: 'test_widget_manual',
+      dataset: 'test_widget',
       runId,
     });
     expect(manifestKey.startsWith('landing/')).toBe(false);

@@ -12,3 +12,4 @@ export * from './sink.js';
 export * from './export.js';
 export * from './dbt-render.js';
 export * from './drift.js';
+export * from './datasets/index.js';

@@ -111,6 +111,67 @@ await runSnapshotExport({
 });
 ```
 
+## Shared dataset descriptors
+
+`src/datasets/` ships ready-made `LandingDataset` descriptors for the first
+external-source lake exports — column contracts mirrored from
+`student-data-system/claude/projects/ledger-prod-lake/phase-4/dataset-catalog.md`
+(the catalog is the contract for columns/semantics; this package owns only
+the `LandingDataset` mechanics). Import a descriptor and its `Row` type
+instead of hand-rolling `defineLandingDataset` for these datasets — that
+keeps every exporter's schema, S3 location, and dbt registration text in
+lockstep.
+
+| `rosteringDatasets` key          | `programhubDatasets` key            |
+| -------------------------------- | ----------------------------------- |
+| `iam_group_rostering`            | `program_programhub`                |
+| `iam_group_membership_rostering` | `program_school_mapping_programhub` |
+| `identity_crosswalk_rostering`   | `program_period_programhub`         |
+| `district_sync_config_rostering` | `program_pod_programhub`            |
+|                                  | `pod_membership_programhub`         |
+|                                  | `session_occurrence_programhub`     |
+|                                  | `session_participant_programhub`    |
+
+`externalDatasets` is both merged, keyed by registry name (`${dataset}_${sourceSystem}`).
+
+Mapping a Prisma row to the identity crosswalk — the district-id bridge —
+looks like:
+
+```ts
+import {
+  studentYearHash,
+  districtStudentIdHash,
+  type IdentityCrosswalkRosteringRow,
+} from '@saga-ed/soa-lake-writer';
+
+function toCrosswalkRow(
+  user: IamUser,
+  districtExternalId: string | null,
+  schoolYear: string,
+  salt: string,
+  runId: string
+): IdentityCrosswalkRosteringRow {
+  return {
+    school_year: schoolYear,
+    source_system: 'rostering',
+    student_year_hash: studentYearHash(salt, schoolYear, user.id),
+    org_id: user.orgId,
+    // districtExternalId MUST come from auth_associations.district_external_id
+    // (via resolveDistrictExternalId()) — NEVER user_profiles.user_id_label,
+    // which is stale-by-construction (rostering#1128).
+    district_student_id_hash: districtStudentIdHash(salt, districtExternalId),
+    district_student_id_source: user.districtIdSource ?? null,
+    district_student_id_available: districtExternalId != null,
+    external_user_id_hash: null,
+    user_role: user.role,
+    user_status: user.status,
+    snapshot_at: new Date(),
+    ingest_run_id: runId,
+    ingested_at: new Date(),
+  };
+}
+```
+
 ## The landing-path contract
 
 | Helper                  | Shape                                                                                                         |

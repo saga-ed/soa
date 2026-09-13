@@ -93,7 +93,10 @@ export async function runSnapshotExport<Row extends { school_year: string }>(
 
     const manifestKey = runManifestKey({
       sourceSystem: dataset.sourceSystem,
-      dataset: dataset.name,
+      // Bare dataset segment — same as curatedLandingKey/rawEvidenceKey,
+      // NOT dataset.name (the `_<source>`-suffixed registry key, which
+      // belongs in the manifest BODY below, not the S3 key).
+      dataset: dataset.dataset,
       runId,
     });
     await sink.putManifest({

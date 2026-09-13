@@ -103,6 +103,7 @@ export function rawEvidenceKey(args: RawEvidenceKeyArgs): string {
 
 export interface RunManifestKeyArgs {
   sourceSystem: SourceSystem;
+  /** Bare dataset name, e.g. `student_identity_xwalk` — same segment `curatedLandingKey`/`rawEvidenceKey` use, NOT the `_<source>`-suffixed registry key. */
   dataset: string;
   runId: string;
 }

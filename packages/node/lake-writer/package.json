@@ -33,7 +33,8 @@
     "@types/node": "^24.0.3",
     "tsup": "^8.5.0",
     "typescript": "5.8.2",
-    "vitest": "^1.6.1"
+    "vitest": "^1.6.1",
+    "yaml": "^2.8.2"
   },
   "publishConfig": {
     "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",

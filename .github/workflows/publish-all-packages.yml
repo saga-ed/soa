@@ -160,11 +160,18 @@ jobs:
               return 0
             fi
             local out
-            if ! out=$(pnpm turbo run build --dry=json --filter="...[${base}]"); then
+            # `pnpm exec`, not `pnpm turbo`: pnpm's own command-proxying path
+            # prints its "Unsupported engine" warning to stdout ahead of the
+            # dry-run JSON; `pnpm exec` invokes the local turbo bin directly
+            # and skips that check.
+            if ! out=$(pnpm exec turbo run build --dry=json --filter="...[${base}]"); then
               echo "WARNING: turbo diff against '${base}' failed; publishing all packages" >&2
               echo "$ALL_PACKAGES"
               return 0
             fi
+            # Belt-and-braces: drop any stray non-JSON lines a future tool
+            # warning might still prepend to stdout.
+            out=$(printf '%s\n' "$out" | sed -n '/^[[{]/,$p')
             if ! jq -e . >/dev/null 2>&1 <<<"$out"; then
               echo "::error::turbo dry-run output is not valid JSON" >&2
               printf '%s\n' "$out" | head -20 >&2

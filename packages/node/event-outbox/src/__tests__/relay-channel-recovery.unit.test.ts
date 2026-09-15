@@ -70,8 +70,12 @@ function makeRelay(newChannel: ReturnType<typeof vi.fn>) {
         logger: logger as unknown as OutboxRelayOpts['logger'],
     });
     // Mark "started" — ensureChannel refuses to cache a channel acquired
-    // after stop(), and tick() suppresses post-stop failure logs.
-    (relay as unknown as { running: boolean }).running = true;
+    // after stop(), and tick() suppresses post-stop failure logs. isLeader
+    // is forced true too: these tests drive tick()/drainBatch() directly,
+    // bypassing start()'s leader-lock acquisition (covered separately in
+    // relay-leader-election.unit.test.ts).
+    (relay as unknown as { running: boolean; isLeader: boolean }).running = true;
+    (relay as unknown as { running: boolean; isLeader: boolean }).isLeader = true;
     return { relay, connectionManager, logger };
 }
 

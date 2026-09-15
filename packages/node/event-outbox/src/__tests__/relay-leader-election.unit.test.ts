@@ -43,7 +43,7 @@ function makeClient(lockState: { locked: boolean }): MockLeaderClient {
             return { rows: [] };
         }),
         release: vi.fn(),
-    });
+    }) as unknown as MockLeaderClient;
 }
 
 function makePool(lockState: { locked: boolean }) {

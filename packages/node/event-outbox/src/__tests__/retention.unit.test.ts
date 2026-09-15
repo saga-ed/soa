@@ -24,7 +24,7 @@ describe('OutboxRetention.sweepOnce', () => {
 
         expect(await sweep.sweepOnce()).toBe(3);
         expect(query).toHaveBeenCalledTimes(1);
-        const [sql, params] = query.mock.calls[0];
+        const [sql, params] = query.mock.calls[0]!;
         expect(sql).toMatch(/delete\s+from\s+outbox_event/i);
         expect(sql).toMatch(/insert\s+into\s+outbox_event_archive\s*\(/i);
         expect(sql).not.toMatch(/select\s+\*/i);
@@ -39,7 +39,7 @@ describe('OutboxRetention.sweepOnce', () => {
         const { pool, query } = stubPool(0);
         const sweep = new OutboxRetention({ pool, logger: mockLogger() });
         await sweep.sweepOnce();
-        expect(query.mock.calls[0][1]).toEqual([7, 1000]);
+        expect(query.mock.calls[0]![1]).toEqual([7, 1000]);
     });
 
     it('returns 0 when nothing is old enough to move', async () => {

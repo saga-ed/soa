@@ -26,8 +26,8 @@ const startRetentionTimer = (relay: OutboxRelay) =>
 // startRetentionTimer() only reads `this.retention` to schedule the interval
 // callback — a plain fake with a spy is enough to test the isLeader gate
 // without exercising OutboxRetention's own SQL (covered by retention.unit.test.ts).
-function stubRetention(relay: OutboxRelay, sweepOnce: ReturnType<typeof vi.fn>) {
-    (relay as unknown as { retention: { sweepOnce: typeof sweepOnce } }).retention = { sweepOnce };
+function stubRetention(relay: OutboxRelay, sweepOnce: () => Promise<number>) {
+    (relay as unknown as { retention: { sweepOnce: () => Promise<number> } }).retention = { sweepOnce };
 }
 
 function setLeader(relay: OutboxRelay, value: boolean) {

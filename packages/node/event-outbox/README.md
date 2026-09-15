@@ -81,19 +81,32 @@ forever. Enable it via the `retention` option:
 ```typescript
 const relay = new OutboxRelay({
     pool, connectionManager, logger, exchange: 'iam.events',
-    retention: { retentionDays: 7, batchSize: 1000, intervalMs: 60 * 60 * 1000 }, // all optional; these are the defaults
+    retention: {
+        retentionDays: 7, batchSize: 1000, intervalMs: 60 * 60 * 1000,
+        maxRowsPerSweep: 50_000, maxSweepDurationMs: 30_000,
+    }, // all optional; these are the defaults
 });
 ```
 
 The relay drives the sweep itself, gated on leadership at each interval —
 only the elected leader ever sweeps. Rows are moved (not deleted outright)
 into `outbox_event_archive` (`OUTBOX_EVENT_ARCHIVE_SQL`) so a bad sweep or an
-unexpected downstream gap can be replayed.
+unexpected downstream gap can be replayed. Each sweep loops single-batch
+DELETE/INSERT round-trips (size `batchSize`) until a short batch (backlog
+drained), `maxRowsPerSweep`, or `maxSweepDurationMs` is hit — one
+`batchSize`-sized batch per `intervalMs` alone can't clear a real backlog or
+keep up with sustained publish volume above `batchSize / (intervalMs / 1000)`
+events/sec. `maxRowsPerSweep` counts rows *removed from* `outbox_event`
+(moved), not rows newly archived, so a replay-heavy sweep still trips the cap
+even when most rows skip the insert. The archive insert uses
+`ON CONFLICT (event_id) DO NOTHING`, so a replayed event_id re-entering the
+sweep window (see the replay recipe below) doesn't fail the batch.
 
-If you're enabling retention on an existing table, also backfill the index
-retention's `published_at < ...` predicate needs — run
-`OUTBOX_PUBLISHED_AT_INDEX_SQL` (fresh tables get it for free from
-`OUTBOX_EVENT_SQL`).
+When `retention` is set, `indexAssert` also requires the partial index on
+`(published_at) WHERE published_at IS NOT NULL` that the sweep's
+`published_at < ...` predicate needs — run `OUTBOX_PUBLISHED_AT_INDEX_SQL` on
+an existing table before enabling retention (fresh tables get it for free
+from `OUTBOX_EVENT_SQL`). Same `indexAssert` mode governs both checks.
 
 `OutboxRetention` is also exported standalone (its own `start()`/`stop()`) for
 consumers who want to drive it outside `OutboxRelay`.

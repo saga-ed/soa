@@ -31,7 +31,7 @@ See `packages/node/claude/event-driven.md` for the fuller adopter conventions
 
 ## Migrating to 0.1.0 — every consumer must migrate BEFORE upgrading
 
-0.1.0 is the first stable release; its contents are identical to `0.1.0-dev.9`.
+0.1.0 (2026-09-15) is the first stable release; its contents are identical to `0.1.0-dev.9`.
 
 This version adds a startup check (`indexAssert`, default `'throw'`) that
 fails `OutboxRelay.start()` if `outbox_event` doesn't have a valid partial

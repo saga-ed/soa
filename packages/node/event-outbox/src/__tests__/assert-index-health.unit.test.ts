@@ -13,6 +13,8 @@ function makeLogger() {
 const partialDef = (name: string) =>
     `CREATE INDEX ${name} ON outbox_event USING btree (occurred_at) WHERE (published_at IS NULL)`;
 const nonPartialDef = (name: string) => `CREATE INDEX ${name} ON outbox_event USING btree (occurred_at)`;
+const publishedAtPartialDef = (name: string) =>
+    `CREATE INDEX ${name} ON outbox_event USING btree (published_at) WHERE (published_at IS NOT NULL)`;
 
 describe('assertOutboxIndexHealth', () => {
     it('passes silently when a valid partial index exists, matched on definition not name', async () => {
@@ -105,5 +107,82 @@ describe('assertOutboxIndexHealth', () => {
         const logger = makeLogger();
         await assertOutboxIndexHealth(pool as never, logger as never);
         expect(pool.query.mock.calls[0][0]).toContain('current_schema()');
+    });
+
+    it('does not treat a partial index on a DIFFERENT column as satisfying the (occurred_at) requirement', async () => {
+        const pool = makePool([
+            {
+                indexname: 'some_other_partial_idx',
+                indexdef: 'CREATE INDEX some_other_partial_idx ON outbox_event USING btree (aggregate_id) WHERE (published_at IS NULL)',
+                indisvalid: true,
+            },
+        ]);
+        const logger = makeLogger();
+        await expect(assertOutboxIndexHealth(pool as never, logger as never)).rejects.toThrow(
+            /CREATE INDEX CONCURRENTLY IF NOT EXISTS outbox_event_unpublished_idx/,
+        );
+    });
+});
+
+describe('assertOutboxIndexHealth requirePublishedAtIndex (retention enabled)', () => {
+    it('does not require the published_at index by default', async () => {
+        const pool = makePool([
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
+        ]);
+        const logger = makeLogger();
+        await expect(assertOutboxIndexHealth(pool as never, logger as never)).resolves.toBeUndefined();
+    });
+
+    it('throws with the published_at index DDL when retention is enabled but the index is missing', async () => {
+        const pool = makePool([
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
+        ]);
+        const logger = makeLogger();
+        await expect(
+            assertOutboxIndexHealth(pool as never, logger as never, 'throw', true),
+        ).rejects.toThrow(/CREATE INDEX CONCURRENTLY IF NOT EXISTS outbox_event_published_at_idx/);
+    });
+
+    it('passes silently when both partial indexes are present and valid', async () => {
+        const pool = makePool([
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
+            {
+                indexname: 'outbox_event_published_at_idx',
+                indexdef: publishedAtPartialDef('outbox_event_published_at_idx'),
+                indisvalid: true,
+            },
+        ]);
+        const logger = makeLogger();
+        await expect(
+            assertOutboxIndexHealth(pool as never, logger as never, 'throw', true),
+        ).resolves.toBeUndefined();
+        expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("mode: 'warn' logs at error level instead of throwing when the published_at index is missing", async () => {
+        const pool = makePool([
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
+        ]);
+        const logger = makeLogger();
+        await expect(
+            assertOutboxIndexHealth(pool as never, logger as never, 'warn', true),
+        ).resolves.toBeUndefined();
+        expect(logger.error).toHaveBeenCalledTimes(1);
+        expect(logger.error.mock.calls[0][0]).toContain('outbox_event_published_at_idx');
+    });
+
+    it('does not treat a non-partial (full) index on published_at as satisfying the requirement', async () => {
+        const pool = makePool([
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
+            {
+                indexname: 'some_full_published_at_idx',
+                indexdef: 'CREATE INDEX some_full_published_at_idx ON outbox_event USING btree (published_at)',
+                indisvalid: true,
+            },
+        ]);
+        const logger = makeLogger();
+        await expect(
+            assertOutboxIndexHealth(pool as never, logger as never, 'throw', true),
+        ).rejects.toThrow(/outbox_event_published_at_idx/);
     });
 });

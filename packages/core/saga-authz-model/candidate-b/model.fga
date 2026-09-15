@@ -1,9 +1,15 @@
-# Saga authorization model — Candidate B + grafts 1-4 + surveyed extensions (v1.1, 2026-09-05)
-# Validated with `fga model validate`; behaviour pinned by balt.fga.yaml / contextual.fga.yaml (`fga model test`).
+# Saga authorization model — Candidate B + grafts 1-4 + surveyed extensions (v1.2, 2026-09-15)
+# Validated with `fga model validate`; behaviour pinned by balt.fga.yaml / contextual.fga.yaml /
+# extensions.fga.yaml / roles.fga.yaml (`fga model test`).
 #
-# Shape: declarative StaffAssignment roles (one directly-assignable relation per resource type) on a pure
-# containment ladder  district ⊃ program ⊃ {site, pod} ; pod ⊃ session.  Every can_* below district is
-# "role here OR can_* from parent".  No roster-group walk, no persona/pgrant indirection.
+# Shape: capability-named relations (D1) granted directly to [user] (exception path, a genuinely
+# program/pod/school-scoped grant) or to a district-scoped `role` object's [user, role#assignee]
+# union (persona path) on a containment ladder district ⊃ {program, school, role} ; program ⊃
+# pod ; pod ⊃ session.  Every can_* below district is "capability here OR capability from parent".
+# No roster-group walk, no persona/pgrant indirection.
+#
+# D1 invariant: a role's capability tuples must target objects under its own parent_district.
+# FGA cannot enforce this — the tuple writer refuses any cross-district binding (app-side only).
 #
 # Tuple writers (see authz_candidate_b_fit.md §Tuple writers):
 #   SA   = StaffAssignment grant API in authz-api: ledger row + FGA tuple in the SAME request (north-star P1)
@@ -57,64 +63,90 @@ type staff_org
     define staff_view_pii: [user, group#member] or can_view_user_pii from platform  # DASH-29: per-district PII grant for non-super_admin staff
 
 # ---------------------------------------------------------------- resource ladder
+
+type role                                                    # D1: district persona bundle (custom-roles pattern)
+  relations
+    define parent_district: [district]                       # EV — audit-only; capability tuples must target objects under this district
+    define assignee: [user]                                  # SA — one tuple per person; revoke removes every derived capability
+
 type district                                                # id = iam Group.id (kind=district; id === orgId)
   relations
     define org: [staff_org]                                  # EV / provisioning
-    define admin: [user]                                     # SA role=DISTRICT_ADMIN scope=district
-    define can_view: admin or can_view from org
-    define can_edit: admin                                   # graft 4: district admin reaches write
+    define can_edit: [user, role#assignee]                                    # D1: district-wide edit, held directly or via a role
+    define can_view: can_edit or can_view from org
     define staff_observe: staff_observe from org
-    define can_view_all_programs: [user] or admin            # SA role=DISTRICT_PROGRAM_VIEWER — today's programs:view_district_programs (held by non-admins)
-    define can_create_program: admin                         # DASH-03  (POL: separate creator role?)
-    define can_manage_admins: staff_admin from org           # DASH-07/26 — staff only by default (POL: may district admins delegate?)
-    define can_upload_roster: admin or can_edit from org     # IAM-23 sis:upload_roster_csv
-    define can_download_roster: admin or can_edit from org   # IAM-23 sis:download_roster_csv
-    define can_view_pii: admin or staff_view_pii from org    # DASH-29 / IAM view_user_pii (district-scoped)
+    define can_view_all_programs: [user, role#assignee] or can_edit           # SA role=DISTRICT_PROGRAM_VIEWER — today's programs:view_district_programs (held by non-admins)
+    define can_create_program: [user, role#assignee] or can_edit              # D7/P1 — IPM-bundle-assignable; DA reaches it via can_edit
+    define can_manage_admins: staff_admin from org                            # D8/P5 — staff-only, unchanged
+    define can_upload_roster: can_edit or can_edit from org                   # IAM-23 sis:upload_roster_csv
+    define can_download_roster: can_edit or can_edit from org                 # IAM-23 sis:download_roster_csv
+    define can_view_pii: can_edit or staff_view_pii from org                  # DASH-29 / IAM view_user_pii (district-scoped)
+    define can_view_directory: [user, role#assignee] or can_edit              # D7/P1 — minimal name/email/role list, distinct from can_view_pii
+    define qtf_access: [user, role#assignee]                                  # D7/S18 — DA-bundle QTF grant, cascades into program.qtf_access
+    define can_grant: [user, role#assignee] or can_edit or staff_admin from org  # D8/P5 — delegated grant; subset rule enforced app-side (authz-api), not here
+    define affiliate: [user, role#assignee]                                   # D6 — district affiliation; a role's fan-out grants this alongside its other capabilities
+    define can_view_coaching_of_tutors: [user, role#assignee]                 # D3 — district-level mirror so a DA/DPP bundle reaches every program
+    define can_view_coaching_of_coordinators: [user, role#assignee]           # D3
+    define can_view_coaching_of_ipms: [user, role#assignee]                   # D3
 
 type program                                                 # id = program-hub Program.id
   relations
     define parent_district: [district]                       # EV programs.program.created
-    define ipm: [user]                                       # SA role=IPM scope=program
-    define participant: [user]                               # SA fan-out: written with TUTOR(pod)/SITE_COORDINATOR(site) assignment, refcounted on revoke
-    define observer: [user]                                  # SA role=OBSERVER scope=program — today's sessions:observe_sessions population (PH-03); NOT supervise_view (site leak)
-    define qtf_access: [user] or ipm                         # SA role=QTF_COACH scope=program — access_qtf / use_shared_qtf (PH-06..08, CV3-04/14)
-    define can_view: ipm or participant or can_view from parent_district or can_view_all_programs from parent_district
-    define supervise_view: ipm or can_view from parent_district
-    define can_edit: ipm or can_edit from parent_district
+    define participant: [user]                                # SA fan-out: written with TUTOR(pod)/SITE_COORDINATOR(school) assignment, refcounted on revoke — exception-path, never role-bound
+    define can_edit: [user, role#assignee] or can_edit from parent_district
+    define supervise_view: [user, role#assignee] or can_edit or can_view from parent_district
+    define can_view: can_edit or supervise_view or participant or can_view from parent_district or can_view_all_programs from parent_district
+    define can_observe_sessions: [user, role#assignee]                        # D1 — today's sessions:observe_sessions population (PH-03); NOT supervise_view (school leak)
+    define qtf_access: [user, role#assignee] or qtf_access from parent_district  # D7/S18 — access_qtf / use_shared_qtf (PH-06..08, CV3-04/14)
     define staff_observe: staff_observe from parent_district
     define can_clear_attendance: can_edit from parent_district   # SDS-06 destructive Clear: district admin only (POL-SDS-2)
+    define can_create_pod: [user, role#assignee]                              # D4 — one-off or standing pod creation (IPM/DA bundle)
+    define can_create_pod_hosted_by_self: [user, role#assignee]               # D4 — tutor bundle; app enforces host == caller
+    define can_view_coaching_of_tutors: [user, role#assignee] or can_view_coaching_of_tutors from parent_district        # D3
+    define can_view_coaching_of_coordinators: [user, role#assignee] or can_view_coaching_of_coordinators from parent_district  # D3
+    define can_view_coaching_of_ipms: [user, role#assignee] or can_view_coaching_of_ipms from parent_district            # D3
+    define affiliate: affiliate from parent_district                         # D6 — pass-through toward pod/session
 
-type site                                                    # id = program-hub ProgramSchoolMapping.id ; leaf, grade scope only (graft 1)
+type school                                                  # id = IAM school Group.id (D2/S2)
   relations
-    define parent_program: [program]                         # EV programs.program_school_mapping.created
-    define coordinator: [user]                               # SA role=SITE_COORDINATOR scope=site
-    define can_view: coordinator or supervise_view from parent_program
-    define can_upload_grades: coordinator or can_edit from parent_program
+    define parent_district: [district]                       # EV (iam/sis ingest: school created)
+    define program: [program]                                # EV (program-hub: ProgramSchoolMapping created/removed) — N:N, one edge per mapping row
+    define can_coordinate: [user, role#assignee]              # SA role=SITE_COORDINATOR scope=school
+    define can_upload_grades: can_coordinate or can_edit from program or can_edit from parent_district
+    define can_view_reports: can_coordinate or supervise_view from program or can_view from parent_district
+    define can_view: can_upload_grades or can_view_reports
 
 type pod                                                     # id = program-hub Pod.id ; hangs off program (graft 1)
   relations
-    define parent_program: [program]                         # EV programs.pod.created
-    define tutor: [user]                                     # SA role=TUTOR scope=pod  (== Pod.tutorId today)
-    define can_view: tutor or observer from parent_program or supervise_view from parent_program
+    define parent_program: [program]                          # EV programs.pod.created
+    define default_host: [user, role#assignee]                # D1 — the pod's default host (== Pod.tutorId today)
+    define can_view: default_host or can_observe_sessions from parent_program or supervise_view from parent_program
     define supervise_view: supervise_view from parent_program
-    define observer: observer from parent_program
+    define can_observe_sessions: can_observe_sessions from parent_program     # D1 — passthrough from the program's capability
     define qtf_access: qtf_access from parent_program
     define staff_observe: staff_observe from parent_program
-    define can_edit: can_edit from parent_program                       # structural/roster edits: grant-only, never tutor (PH-22..24)
-    define can_edit_sessions: tutor or can_edit from parent_program     # lifecycle of this pod's sessions: host OR edit_non_hosted grant (PH-04/05/11)
-    define can_create_session: can_edit_sessions                        # assertCanCreateAdhoc (PH-05, DASH-12, SOA-10)
+    define can_edit: can_edit from parent_program                       # structural/roster edits: grant-only, never default_host (PH-22..24)
+    define can_edit_sessions: default_host or can_edit from parent_program  # lifecycle of this pod's sessions: host OR edit_non_hosted grant (PH-04/05/11)
+    define can_create_session: can_edit_sessions                        # D4 — adding an occurrence to this existing pod only; whole-pod creation is program.can_create_pod(_hosted_by_self)
+    define affiliate: affiliate from parent_program                     # D6 — pass-through toward session
 
 type session                                                 # id = computed occurrence id; CTX until a row materializes, then EV-frozen (D9 ⨯ graft 2)
   relations
-    define parent_pod: [pod]                                 # CTX → EV
-    define host: [user]                                      # CTX (pod_tutor_projection + SessionInstanceOverride.hostIds) → EV
-    define participant: [user]                               # CTX (PodStudent + swap/absent; drop-in JWT subject) → EV  (PH-02, CV3-01/03)
-    define observer: [user]                                  # CTX per-session assigned observer (CV3-05/14)
-    define subject: [user]                                   # CTX: caller is the observed tutor at this date/pod AND holds author_own_observations; omitted on any doubt (PH-06..08)
-    define can_view: host or participant or observer or observer from parent_pod or supervise_view from parent_pod or staff_observe from parent_pod
-    define can_edit: host or can_edit_sessions from parent_pod          # lifecycle mutation (PH-04)
+    define parent_pod: [pod]                                  # CTX → EV
+    define host: [user]                                       # CTX (pod_tutor_projection + SessionInstanceOverride.hostIds) → EV
+    define participant: [user]                                # CTX (PodStudent + swap/absent; drop-in JWT subject) → EV  (PH-02, CV3-01/03)
+    define observer: [user]                                   # CTX per-session assigned observer (CV3-05/14)
+    define subject: [user]                                    # CTX: caller is the observed tutor at this date/pod AND holds author_own_observations; omitted on any doubt (PH-06..08)
+    define can_view_own_hosted: host and affiliate from parent_pod    # D6 — a retained host loses this the moment `affiliate` is pulled at district exit
+    define can_view_schedule: can_view_own_hosted or participant or observer or can_observe_sessions from parent_pod or supervise_view from parent_pod or staff_observe from parent_pod   # D5 — scheduling visibility only (time, pod, host); see can_view_outcome for what happened
+    define can_join_as_host: can_view_own_hosted              # D5, gated per D6
+    define can_join_as_participant: participant               # D5
+    define can_join_as_observer: observer or can_observe_sessions from parent_pod or supervise_view from parent_pod or staff_observe from parent_pod   # D5
+    define can_edit: host or can_edit_sessions from parent_pod          # lifecycle mutation (PH-04); D6 gate does NOT apply here
+    define can_reassign_host: can_edit from parent_pod                  # D4b — grant-only structural edit, same shape as can_release; never the default_host arm
     define can_release: can_edit from parent_pod                        # release observation/feedback to the tutor (PH-09) — grant-holders only, never host
-    define can_observe_recording: host or observer from parent_pod or supervise_view from parent_pod or staff_observe from parent_pod   # students excluded (CV3-08)
+    define can_observe_recording: can_view_own_hosted or can_observe_sessions from parent_pod or supervise_view from parent_pod or staff_observe from parent_pod   # students excluded (CV3-08); D6-gated per host arm
+    define can_view_outcome: can_observe_recording or can_read_observation   # D5 — attendance, recording, QTF read
     define can_author_observation: subject or qtf_access from parent_pod
     define can_read_observation: subject or qtf_access from parent_pod or supervise_view from parent_pod   # release timing stays an app-side row filter
     define can_set_next_steps: qtf_access from parent_pod                # deliberately no subject arm (PH-07)
@@ -122,20 +154,22 @@ type session                                                 # id = computed occ
 type adhoc_room                                              # connectv3 on-demand room: no program parent, district-scoped so staff support can still reach it (POL-CV3-1)
   relations
     define parent_district: [district]                       # EV at room create (creator's district)
-    define host: [user]                                      # CTX → EV
-    define participant: [user]                               # CTX
-    define observer: [user]                                  # CTX
+    define host: [user]                                       # CTX → EV
+    define participant: [user]                                # CTX
+    define observer: [user]                                   # CTX
     define can_view: host or participant or observer or staff_observe from parent_district
     define can_observe_recording: host or observer or staff_observe from parent_district
 
 type coach_progress                                          # id = userId (coach-db keys progress per person; no program dimension exists)
   relations
-    define parent_program: [program]                         # SA-derived: one edge per ACTIVE TUTOR/SITE_COORDINATOR assignment (resolved to program), removed on revoke/expiry
-    define subject: [user]                                   # SA-derived, written with the first parent_program edge
-    define can_view: subject or supervise_view from parent_program
-    define can_view_responses: subject or supervise_view from parent_program   # raw ModuleAnswers; kept separate so a later can_view widening cannot leak them (COACH-03)
+    define parent_program_as_tutor: [program]                # D3 — SA-derived viewee-class edge, one per active TUTOR assignment
+    define parent_program_as_coordinator: [program]           # D3 — SA-derived viewee-class edge, one per active SITE_COORDINATOR assignment
+    define parent_program_as_ipm: [program]                   # D3 — SA-derived viewee-class edge, one per active IPM assignment
+    define subject: [user]                                    # SA-derived, written with the first viewee-class edge
+    define can_view: subject or can_view_coaching_of_tutors from parent_program_as_tutor or can_view_coaching_of_coordinators from parent_program_as_coordinator or can_view_coaching_of_ipms from parent_program_as_ipm
+    define can_view_responses: subject or can_view_coaching_of_tutors from parent_program_as_tutor or can_view_coaching_of_coordinators from parent_program_as_coordinator or can_view_coaching_of_ipms from parent_program_as_ipm   # raw ModuleAnswers; kept separate so a later can_view widening cannot leak them (COACH-03)
 
-type grade_upload                                            # id = upload record; parent_site set at ingest
+type grade_upload                                            # id = upload record; parent_school set at ingest
   relations
-    define parent_site: [site]                               # EV (sis-api / ledger grade ingest)
-    define can_write: can_upload_grades from parent_site
+    define parent_school: [school]                            # EV (sis-api / ledger grade ingest)
+    define can_write: can_upload_grades from parent_school

@@ -66,18 +66,18 @@ describe('candidate-b/model.fga is a valid OpenFGA model', () => {
     expect(json.schema_version).toBe('1.1');
   });
 
-  it('declares exactly 12 types', () => {
+  it('declares exactly 13 types', () => {
     const json = transformer.transformDSLToJSONObject(candidateBModelText);
-    expect(json.type_definitions).toHaveLength(12);
+    expect(json.type_definitions).toHaveLength(13);
   });
 
-  it('declares exactly 88 relations across all types', () => {
+  it('declares exactly 112 relations across all types', () => {
     const json = transformer.transformDSLToJSONObject(candidateBModelText);
     const relationCount = json.type_definitions.reduce(
       (sum, t) => sum + Object.keys(t.relations ?? {}).length,
       0
     );
-    expect(relationCount).toBe(88);
+    expect(relationCount).toBe(112);
   });
 });
 

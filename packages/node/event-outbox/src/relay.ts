@@ -21,6 +21,13 @@ export interface OutboxMetrics {
     onLeaderAcquired?: () => void;
     /** Called when this instance loses leadership (connection lost, or stop()). */
     onLeaderLost?: () => void;
+    /**
+     * Called each time a non-leader instance fails to acquire the lock and
+     * schedules a retry. Lets ops distinguish "lock held elsewhere, working
+     * as intended" from low event volume on the graph — a wedged leader
+     * looks identical to a quiet one without this.
+     */
+    onLeaderWaiting?: () => void;
 }
 
 export interface OutboxRelayOpts {
@@ -89,7 +96,10 @@ export interface OutboxRelayOpts {
      * leader on its own timer. Omit to disable — outbox_event then keeps
      * every published row forever (see OUTBOX_EVENT_ARCHIVE_SQL).
      */
-    retention?: Pick<OutboxRetentionOptions, 'retentionDays' | 'batchSize' | 'intervalMs'>;
+    retention?: Pick<
+        OutboxRetentionOptions,
+        'retentionDays' | 'batchSize' | 'intervalMs' | 'maxRowsPerSweep' | 'maxSweepDurationMs'
+    >;
 }
 
 interface OutboxRow {
@@ -119,6 +129,7 @@ export class OutboxRelay {
     private consecutiveFailures = 0;
     private lastFailureMessage: string | null = null;
     private leaderClient: PoolClient | null = null;
+    private leaderClientErrorHandler: ((err: Error) => void) | null = null;
     private isLeader = false;
     private leaderTimer: NodeJS.Timeout | null = null;
     private retention: OutboxRetention | null = null;
@@ -136,9 +147,24 @@ export class OutboxRelay {
                 this.opts.pool,
                 this.opts.logger,
                 this.opts.indexAssert ?? 'throw',
+                this.opts.retention !== undefined,
             );
         } catch (err) {
             this.running = false;
+            this.opts.logger.error(
+                '[OutboxRelay] startup failed',
+                err instanceof Error ? err : undefined,
+            );
+            // ensureChannel() may have already opened a channel before the
+            // index assert threw — don't leak it on a failed start().
+            if (this.channel) {
+                try {
+                    await this.channel.close();
+                } catch {
+                    // Already closed/dead — nothing to clean up.
+                }
+                this.channel = null;
+            }
             throw err;
         }
         // Publishes use `persistent: true` for durability but do NOT wait for
@@ -413,16 +439,28 @@ export class OutboxRelay {
     }
 
     private async releaseLeadership(client: PoolClient): Promise<void> {
+        // Only strip the listener that pursueLeadership() attached to THIS
+        // client — a client passed in before that attachment (the
+        // stop()-raced-acquisition path below) never had one.
+        if (this.leaderClient === client && this.leaderClientErrorHandler) {
+            client.removeListener('error', this.leaderClientErrorHandler);
+            this.leaderClientErrorHandler = null;
+        }
+        let unlockErr: Error | undefined;
         try {
             await client.query(
                 'SELECT pg_advisory_unlock(hashtext($1)::int, hashtext(current_schema())::int)',
                 [OutboxRelay.LEADER_LOCK_NAMESPACE],
             );
-        } catch {
+        } catch (err) {
             // Connection is likely already dead — Postgres releases session-
-            // level advisory locks on disconnect, so the lock is gone either way.
+            // level advisory locks on disconnect, so the lock is gone either
+            // way. Capture the error so `release()` below destroys the
+            // client instead of recycling a connection that just failed a
+            // query back into the pool.
+            unlockErr = err instanceof Error ? err : new Error(String(err));
         } finally {
-            client.release();
+            client.release(unlockErr);
         }
     }
 
@@ -445,6 +483,8 @@ export class OutboxRelay {
             return;
         }
         if (!client) {
+            this.opts.metrics?.onLeaderWaiting?.();
+            this.opts.logger.debug('[OutboxRelay] leader lock held elsewhere; waiting');
             this.scheduleLeaderPoll();
             return;
         }
@@ -459,13 +499,27 @@ export class OutboxRelay {
         // process. A dead connection also drops the session-level advisory
         // lock on the Postgres side, so re-pursuing here is correct, not
         // just a log-and-continue.
-        client.on('error', (err: Error) => {
+        //
+        // Named (not inline-anonymous) so it can remove itself: pg-pool only
+        // frees a client's pool slot via `client.release(err)`, and a
+        // listener left attached after release/stop() could otherwise fire
+        // later and null out a NEWER leader's state — hence the `leaderClient
+        // === client` guard below rather than clearing unconditionally.
+        const onLeaderClientError = (err: Error): void => {
+            client.removeListener('error', onLeaderClientError);
+            if (this.leaderClientErrorHandler === onLeaderClientError) {
+                this.leaderClientErrorHandler = null;
+            }
+            client.release(err);
+            if (this.leaderClient !== client) return;
             this.opts.logger.warn(`[OutboxRelay] leader connection lost: ${err.message}; re-acquiring`);
             this.isLeader = false;
             this.leaderClient = null;
             this.opts.metrics?.onLeaderLost?.();
             if (this.running) void this.pursueLeadership();
-        });
+        };
+        this.leaderClientErrorHandler = onLeaderClientError;
+        client.on('error', onLeaderClientError);
         this.opts.metrics?.onLeaderAcquired?.();
         this.opts.logger.info('[OutboxRelay] acquired leader lock; polling outbox_event');
     }

@@ -1,16 +1,21 @@
 import { Pool, type PoolConfig } from 'pg';
+import type { ILogger } from '@saga-ed/soa-logger';
+import { OUTBOX_PUBLISHED_AT_INDEX_SQL, OUTBOX_UNPUBLISHED_INDEX_SQL } from './schema.js';
 
 export interface CreateOutboxPoolOpts {
     /**
      * Max connections in the dedicated relay pool. Defaults to 4 — enough
      * headroom for the polling tick, a concurrent retry of a failed batch,
-     * and a liveness probe without queuing. Keep it small so it cannot
-     * starve request-path Prisma traffic, especially in preview environments
-     * where many PRs share a single Postgres instance; outbox traffic is
-     * bursty and short-lived, so 4 saturates rare bursts without holding
-     * connections idle. program-hub's programs-api uses this value in
-     * production; rostering's iam-api leaves it at the default. Bump only
-     * if relay-tick latency shows actual queue depth on the pool.
+     * and a liveness probe without queuing. One slot is held for the whole
+     * process lifetime by the elected leader's advisory-lock connection
+     * (see OutboxRelay's leader election), so only 3 remain for ticks/
+     * retries/probes. Keep it small so it cannot starve request-path Prisma
+     * traffic, especially in preview environments where many PRs share a
+     * single Postgres instance; outbox traffic is bursty and short-lived, so
+     * 4 saturates rare bursts without holding connections idle. program-hub's
+     * programs-api uses this value in production; rostering's iam-api leaves
+     * it at the default. Bump only if relay-tick latency shows actual queue
+     * depth on the pool.
      */
     max?: number;
     /**
@@ -128,4 +133,119 @@ export function createOutboxPool(
 
 function truncate(s: string): string {
     return s.length > 80 ? `${s.slice(0, 77)}...` : s;
+}
+
+export type IndexAssertMode = 'throw' | 'warn' | 'off';
+
+interface OutboxIndexRow {
+    indexname: string;
+    indexdef: string;
+    indisvalid: boolean;
+}
+
+function isPartialUnpublishedIndex(row: OutboxIndexRow): boolean {
+    return (
+        row.indisvalid &&
+        row.indexdef.includes('(occurred_at)') &&
+        row.indexdef.includes('WHERE (published_at IS NULL)')
+    );
+}
+
+// A plain (non-partial) single-column btree on occurred_at — the shape the
+// old PRISMA_MODEL_FRAGMENT produced, under whatever name a given consumer's
+// migration happened to use. Matched on shape, not name, so this also
+// catches a stray duplicate that isn't the one known legacy name.
+function isNonPartialOccurredAtIndex(row: OutboxIndexRow): boolean {
+    return row.indexdef.includes('(occurred_at)') && !row.indexdef.includes('WHERE (published_at IS NULL)');
+}
+
+// Accepts either the recommended partial index (WHERE published_at IS NOT
+// NULL) or a plain, non-partial index on the same column — the sweep's
+// `published_at IS NOT NULL AND published_at < …` filter can still use a
+// plain btree on (published_at) to avoid a seq scan, just without excluding
+// the unpublished rows from the index. Rejects a partial index on the
+// column with some OTHER predicate, which wouldn't serve this filter either.
+function isPartialPublishedAtIndex(row: OutboxIndexRow): boolean {
+    return (
+        row.indisvalid &&
+        row.indexdef.includes('(published_at)') &&
+        (!row.indexdef.includes('WHERE') || row.indexdef.includes('WHERE (published_at IS NOT NULL)'))
+    );
+}
+
+/**
+ * Verify outbox_event carries a valid partial index on (occurred_at) WHERE
+ * published_at IS NULL — without it, OutboxRelay's poll query seq-scans the
+ * whole table every tick (iac#719). Matched on the index DEFINITION, not a
+ * fixed name, so it passes regardless of which name a consumer's migration
+ * created it under. Scoped to `current_schema()` so a per-PR preview schema
+ * is checked independently of the canonical one, same scope as the
+ * coherence assert above.
+ *
+ * `mode: 'throw'` (OutboxRelay's default) fails startup with the create DDL
+ * to run. `'warn'` logs at error level and continues. `'off'` skips the
+ * check. Separately (regardless of mode, since this is hygiene, not a
+ * correctness gate), warns if a non-partial index on occurred_at is still
+ * present alongside a healthy partial one — the expected mid-migration state
+ * before its DROP INDEX CONCURRENTLY step runs.
+ *
+ * `requirePublishedAtIndex` additionally requires an index on (published_at)
+ * — either the recommended partial form (OUTBOX_PUBLISHED_AT_INDEX_SQL) or a
+ * plain btree, both of which keep the sweep off a seq scan. Pass `true`
+ * whenever OutboxRetention is enabled — its sweep filters on
+ * `published_at IS NOT NULL AND published_at < …`, and without this index it
+ * seq-scans the table exactly like the unpublished-side gap this function
+ * already guards against. Same mode semantics as the unpublished check.
+ */
+export async function assertOutboxIndexHealth(
+    pool: Pool,
+    logger: ILogger,
+    mode: IndexAssertMode = 'throw',
+    requirePublishedAtIndex = false,
+): Promise<void> {
+    if (mode === 'off') return;
+
+    const { rows } = await pool.query<OutboxIndexRow>(
+        `SELECT c.relname AS indexname, pg_get_indexdef(ix.indexrelid) AS indexdef, ix.indisvalid
+         FROM pg_index ix
+         JOIN pg_class c ON c.oid = ix.indexrelid
+         JOIN pg_class t ON t.oid = ix.indrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+         WHERE t.relname = 'outbox_event' AND n.nspname = current_schema()`,
+    );
+
+    const healthy = rows.some(isPartialUnpublishedIndex);
+
+    if (!healthy) {
+        const message =
+            'outbox_event has no valid partial index on (occurred_at) WHERE published_at IS NULL ' +
+            `— the relay's poll query will seq-scan the table. Run:\n${OUTBOX_UNPUBLISHED_INDEX_SQL}`;
+        if (mode === 'throw') {
+            throw new Error(message);
+        }
+        // 'warn' logs and falls through — the checks below are independent
+        // conditions, and the stale-index warning at the bottom must still
+        // run rather than being skipped by an early return.
+        logger.error(`[assertOutboxIndexHealth] ${message}`);
+    }
+
+    if (requirePublishedAtIndex && !rows.some(isPartialPublishedAtIndex)) {
+        const message =
+            'outbox_event has no valid partial index on (published_at) WHERE published_at IS NOT NULL ' +
+            `— OutboxRetention's sweep will seq-scan the table. Run:\n${OUTBOX_PUBLISHED_AT_INDEX_SQL}`;
+        if (mode === 'throw') {
+            throw new Error(message);
+        }
+        logger.error(`[assertOutboxIndexHealth] ${message}`);
+    }
+
+    const stale = rows.filter(isNonPartialOccurredAtIndex);
+    if (stale.length > 0) {
+        logger.warn(
+            `[assertOutboxIndexHealth] a valid partial index exists, but ${stale.length} non-partial ` +
+                `index(es) on occurred_at are still present (${stale.map((r) => r.indexname).join(', ')}). ` +
+                `Drop once the replacement is confirmed in use: ` +
+                stale.map((r) => `DROP INDEX CONCURRENTLY IF EXISTS ${r.indexname};`).join(' '),
+        );
+    }
 }

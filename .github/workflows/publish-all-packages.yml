@@ -177,7 +177,10 @@ jobs:
               printf '%s\n' "$out" | head -20 >&2
               exit 1
             fi
-            echo "$out" | jq -r '.tasks[] | select(.package != "//") | .package' | sort -u | jq -R -s -c 'split("\n")[:-1]'
+            # `.directory` (packages/<dir>), not `.package` (the npm scoped
+            # name) — downstream steps read `packages/${matrix.package}/package.json`,
+            # so the array must hold directory paths, matching $ALL_PACKAGES.
+            echo "$out" | jq -r '.tasks[] | select(.package != "//") | .directory' | sed 's|^packages/||' | sort -u | jq -R -s -c 'split("\n")[:-1]'
           }
 
           # Get the list of changed packages

@@ -340,6 +340,29 @@ export class OutboxRelay {
         this.scheduleNext();
     }
 
+    /**
+     * pg emits 'error' on a checked-out client unconditionally when its
+     * socket dies mid-use — a fresh connection from pool.connect() has no
+     * listener yet, and Node's EventEmitter throws SYNCHRONOUSLY when
+     * 'error' fires with nothing attached, crashing the process outright
+     * (the surrounding try/catch on the query call doesn't help; the throw
+     * happens inside pg's own event dispatch, not in our code). Attaches a
+     * logging no-op guard for the duration of `fn`, removed in `finally`.
+     * Callers that need to react to the error themselves (the leader
+     * client's permanent handler) attach their own listener separately.
+     */
+    private async withErrorGuard<T>(client: PoolClient, fn: () => Promise<T>): Promise<T> {
+        const guard = (err: Error): void => {
+            this.opts.logger.warn(`[OutboxRelay] client error while checked out: ${err.message}`);
+        };
+        client.on('error', guard);
+        try {
+            return await fn();
+        } finally {
+            client.removeListener('error', guard);
+        }
+    }
+
     private async drainBatch(): Promise<void> {
         // Re-acquire the channel BEFORE opening the pg transaction: broker
         // recovery can take seconds-to-minutes and must not run while row
@@ -349,45 +372,47 @@ export class OutboxRelay {
         const client = await this.opts.pool.connect();
         let clientPoisoned = false;
         try {
-            await client.query('BEGIN');
-            // The relay holds this transaction open across the publish loop
-            // (idle-in-transaction during broker I/O). Override any pool-level
-            // idle_in_transaction_session_timeout for THIS tx so a server-side
-            // guard (e.g. soa-postgres' default-ON 30s gh-186 guard) can't
-            // terminate the relay mid-batch under backpressure. SET LOCAL is
-            // scoped to this transaction and reverts on COMMIT/ROLLBACK.
-            await client.query(
-                `SET LOCAL idle_in_transaction_session_timeout = ${this.opts.txIdleTimeoutMs ?? 300_000}`,
-            );
-            const result = await client.query<OutboxRow>(
-                `SELECT event_id, aggregate_type, aggregate_id, event_type,
-                        event_version, payload, meta, occurred_at, attempts
-                 FROM outbox_event
-                 WHERE published_at IS NULL
-                 ORDER BY occurred_at
-                 LIMIT $1
-                 FOR UPDATE SKIP LOCKED`,
-                [batchSize],
-            );
+            await this.withErrorGuard(client, async () => {
+                await client.query('BEGIN');
+                // The relay holds this transaction open across the publish loop
+                // (idle-in-transaction during broker I/O). Override any pool-level
+                // idle_in_transaction_session_timeout for THIS tx so a server-side
+                // guard (e.g. soa-postgres' default-ON 30s gh-186 guard) can't
+                // terminate the relay mid-batch under backpressure. SET LOCAL is
+                // scoped to this transaction and reverts on COMMIT/ROLLBACK.
+                await client.query(
+                    `SET LOCAL idle_in_transaction_session_timeout = ${this.opts.txIdleTimeoutMs ?? 300_000}`,
+                );
+                const result = await client.query<OutboxRow>(
+                    `SELECT event_id, aggregate_type, aggregate_id, event_type,
+                            event_version, payload, meta, occurred_at, attempts
+                     FROM outbox_event
+                     WHERE published_at IS NULL
+                     ORDER BY occurred_at
+                     LIMIT $1
+                     FOR UPDATE SKIP LOCKED`,
+                    [batchSize],
+                );
 
-            if (result.rows.length === 0) {
+                if (result.rows.length === 0) {
+                    await client.query('COMMIT');
+                    return;
+                }
+
+                const publishedIds: string[] = [];
+                for (const row of result.rows) {
+                    await this.publishRow(channel, row);
+                    publishedIds.push(row.event_id);
+                }
+
+                // Batch the published_at update — one round-trip instead of N.
+                await client.query(
+                    `UPDATE outbox_event SET published_at = NOW() WHERE event_id = ANY($1::uuid[])`,
+                    [publishedIds],
+                );
+
                 await client.query('COMMIT');
-                return;
-            }
-
-            const publishedIds: string[] = [];
-            for (const row of result.rows) {
-                await this.publishRow(channel, row);
-                publishedIds.push(row.event_id);
-            }
-
-            // Batch the published_at update — one round-trip instead of N.
-            await client.query(
-                `UPDATE outbox_event SET published_at = NOW() WHERE event_id = ANY($1::uuid[])`,
-                [publishedIds],
-            );
-
-            await client.query('COMMIT');
+            });
         } catch (err) {
             try {
                 await client.query('ROLLBACK');
@@ -422,35 +447,47 @@ export class OutboxRelay {
     /** Checks out a client and attempts the lock once. Releases it immediately on failure. */
     private async tryAcquireLeadership(): Promise<PoolClient | null> {
         const client = await this.opts.pool.connect();
-        try {
-            const { rows } = await client.query<{ locked: boolean }>(
-                'SELECT pg_try_advisory_lock(hashtext($1)::int, hashtext(current_schema())::int) AS locked',
-                [OutboxRelay.LEADER_LOCK_NAMESPACE],
-            );
-            if (rows[0]?.locked) {
-                return client;
+        return this.withErrorGuard(client, async () => {
+            try {
+                const { rows } = await client.query<{ locked: boolean }>(
+                    'SELECT pg_try_advisory_lock(hashtext($1)::int, hashtext(current_schema())::int) AS locked',
+                    [OutboxRelay.LEADER_LOCK_NAMESPACE],
+                );
+                if (rows[0]?.locked) {
+                    return client;
+                }
+                client.release();
+                return null;
+            } catch (err) {
+                client.release(err instanceof Error ? err : new Error(String(err)));
+                throw err;
             }
-            client.release();
-            return null;
-        } catch (err) {
-            client.release(err instanceof Error ? err : new Error(String(err)));
-            throw err;
-        }
+        });
     }
 
     private async releaseLeadership(client: PoolClient): Promise<void> {
         // Only strip the listener that pursueLeadership() attached to THIS
         // client — a client passed in before that attachment (the
-        // stop()-raced-acquisition path below) never had one.
+        // stop()-raced-acquisition path below) never had one. Removed
+        // BEFORE the unlock query starts (not after) and replaced in the
+        // same synchronous span by withErrorGuard's own listener below — a
+        // real 'error' event can't land in a gap with no `await` in it, so
+        // this ordering never leaves the client briefly listener-less.
+        // Leaving the old handler attached instead (removing it only once
+        // the unlock settles) would double up: the handler itself calls
+        // client.release(err), and this method's own finally would then
+        // call client.release() again on an already-released client.
         if (this.leaderClient === client && this.leaderClientErrorHandler) {
             client.removeListener('error', this.leaderClientErrorHandler);
             this.leaderClientErrorHandler = null;
         }
         let unlockErr: Error | undefined;
         try {
-            await client.query(
-                'SELECT pg_advisory_unlock(hashtext($1)::int, hashtext(current_schema())::int)',
-                [OutboxRelay.LEADER_LOCK_NAMESPACE],
+            await this.withErrorGuard(client, () =>
+                client.query(
+                    'SELECT pg_advisory_unlock(hashtext($1)::int, hashtext(current_schema())::int)',
+                    [OutboxRelay.LEADER_LOCK_NAMESPACE],
+                ),
             );
         } catch (err) {
             // Connection is likely already dead — Postgres releases session-

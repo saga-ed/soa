@@ -44,7 +44,10 @@ const ROW = {
 };
 
 function makePgPool() {
-    const client = {
+    // A real EventEmitter (not a plain object) — drainBatch attaches a
+    // temporary 'error' guard for the span it holds this client, same as
+    // the real pg.PoolClient it stands in for.
+    const client = Object.assign(new EventEmitter(), {
         query: vi.fn(async (sql: string) => {
             if (String(sql).includes('FROM outbox_event')) {
                 return { rows: [ROW], rowCount: 1 };
@@ -52,7 +55,7 @@ function makePgPool() {
             return { rows: [], rowCount: 1 };
         }),
         release: vi.fn(),
-    };
+    });
     return { pool: { connect: vi.fn().mockResolvedValue(client) }, client };
 }
 

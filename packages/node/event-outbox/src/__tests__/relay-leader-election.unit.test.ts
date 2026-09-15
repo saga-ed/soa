@@ -175,6 +175,43 @@ describe('OutboxRelay leader election', () => {
         expect(client?.release).toHaveBeenCalledWith(unlockErr);
     });
 
+    it('does not crash when the connection errors while the advisory-unlock query is in flight', async () => {
+        // Regression guard: pg emits 'error' on a checked-out client
+        // unconditionally when its socket dies, and Node's EventEmitter
+        // throws synchronously if nothing is listening. releaseLeadership
+        // must keep a listener attached for the whole span of the unlock
+        // query — an error arriving during that query's flight must not
+        // crash the process.
+        const lockState = { locked: false };
+        const pool = makePool(lockState);
+        const relay = makeRelay(pool, makeLogger());
+        (relay as unknown as { running: boolean }).running = true;
+
+        await pursue(relay);
+        const client = leaderClient(relay);
+        expect(isLeader(relay)).toBe(true);
+
+        let resolveUnlock: (() => void) | undefined;
+        client!.query.mockImplementation((sql: string) => {
+            if (sql.includes('pg_advisory_unlock')) {
+                return new Promise((resolve) => {
+                    resolveUnlock = () => resolve({ rows: [{}] });
+                });
+            }
+            return Promise.resolve({ rows: [] });
+        });
+
+        const stopPromise = relay.stop();
+        await Promise.resolve(); // let stop()'s synchronous prefix reach the in-flight unlock query
+
+        expect(() => client!.emit('error', new Error('socket died mid-unlock'))).not.toThrow();
+        expect(client!.listenerCount('error')).toBe(1); // the guard, still attached for the query's span
+
+        resolveUnlock?.();
+        await expect(stopPromise).resolves.toBeUndefined();
+        expect(client!.listenerCount('error')).toBe(0);
+    });
+
     it('a leader connection error removes its listener, releases the client WITH the error, and re-acquires', async () => {
         const lockState = { locked: false };
         const pool = makePool(lockState);

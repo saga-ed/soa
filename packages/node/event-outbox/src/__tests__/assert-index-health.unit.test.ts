@@ -171,7 +171,11 @@ describe('assertOutboxIndexHealth requirePublishedAtIndex (retention enabled)', 
         expect(logger.error.mock.calls[0][0]).toContain('outbox_event_published_at_idx');
     });
 
-    it('does not treat a non-partial (full) index on published_at as satisfying the requirement', async () => {
+    it('treats a non-partial (full) index on published_at as satisfying the requirement too', async () => {
+        // A plain btree still keeps the sweep's `published_at IS NOT NULL
+        // AND published_at < …` filter off a seq scan, just without
+        // excluding unpublished rows from the index — usable, if less
+        // space-efficient than the recommended partial form.
         const pool = makePool([
             { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
             {
@@ -183,6 +187,7 @@ describe('assertOutboxIndexHealth requirePublishedAtIndex (retention enabled)', 
         const logger = makeLogger();
         await expect(
             assertOutboxIndexHealth(pool as never, logger as never, 'throw', true),
-        ).rejects.toThrow(/outbox_event_published_at_idx/);
+        ).resolves.toBeUndefined();
+        expect(logger.error).not.toHaveBeenCalled();
     });
 });

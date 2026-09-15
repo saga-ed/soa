@@ -87,6 +87,7 @@ export class OutboxRetention {
     private readonly maxRowsPerSweep: number;
     private readonly maxSweepDurationMs: number;
     private timer: NodeJS.Timeout | null = null;
+    private sweeping = false;
 
     constructor(opts: OutboxRetentionOptions) {
         const retentionDays = opts.retentionDays ?? DEFAULT_RETENTION_DAYS;
@@ -123,8 +124,26 @@ export class OutboxRetention {
      *
      * Best-effort: a batch error is logged and stops the loop for this call
      * (returning what was archived so far) — the next interval retries.
+     *
+     * Re-entrancy guarded: a call that arrives while a previous sweepOnce()
+     * is still running (an overrun past `intervalMs`, or a caller invoking
+     * it directly alongside the timer) returns 0 immediately instead of
+     * running a second batch loop concurrently against the same table.
      */
     async sweepOnce(): Promise<number> {
+        if (this.sweeping) {
+            this.logger.debug('[outbox-retention] sweep already in progress; skipping this tick');
+            return 0;
+        }
+        this.sweeping = true;
+        try {
+            return await this.runSweep();
+        } finally {
+            this.sweeping = false;
+        }
+    }
+
+    private async runSweep(): Promise<number> {
         const startedAt = Date.now();
         // The cap/loop-exit logic below is keyed on `moved` (rows removed
         // from outbox_event), not `archived` (rows that landed in the

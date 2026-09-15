@@ -159,11 +159,17 @@ function isNonPartialOccurredAtIndex(row: OutboxIndexRow): boolean {
     return row.indexdef.includes('(occurred_at)') && !row.indexdef.includes('WHERE (published_at IS NULL)');
 }
 
+// Accepts either the recommended partial index (WHERE published_at IS NOT
+// NULL) or a plain, non-partial index on the same column — the sweep's
+// `published_at IS NOT NULL AND published_at < …` filter can still use a
+// plain btree on (published_at) to avoid a seq scan, just without excluding
+// the unpublished rows from the index. Rejects a partial index on the
+// column with some OTHER predicate, which wouldn't serve this filter either.
 function isPartialPublishedAtIndex(row: OutboxIndexRow): boolean {
     return (
         row.indisvalid &&
         row.indexdef.includes('(published_at)') &&
-        row.indexdef.includes('WHERE (published_at IS NOT NULL)')
+        (!row.indexdef.includes('WHERE') || row.indexdef.includes('WHERE (published_at IS NOT NULL)'))
     );
 }
 
@@ -183,9 +189,10 @@ function isPartialPublishedAtIndex(row: OutboxIndexRow): boolean {
  * present alongside a healthy partial one — the expected mid-migration state
  * before its DROP INDEX CONCURRENTLY step runs.
  *
- * `requirePublishedAtIndex` additionally requires the partial index on
- * (published_at) WHERE published_at IS NOT NULL (OUTBOX_PUBLISHED_AT_INDEX_SQL).
- * Pass `true` whenever OutboxRetention is enabled — its sweep filters on
+ * `requirePublishedAtIndex` additionally requires an index on (published_at)
+ * — either the recommended partial form (OUTBOX_PUBLISHED_AT_INDEX_SQL) or a
+ * plain btree, both of which keep the sweep off a seq scan. Pass `true`
+ * whenever OutboxRetention is enabled — its sweep filters on
  * `published_at IS NOT NULL AND published_at < …`, and without this index it
  * seq-scans the table exactly like the unpublished-side gap this function
  * already guards against. Same mode semantics as the unpublished check.
@@ -216,8 +223,10 @@ export async function assertOutboxIndexHealth(
         if (mode === 'throw') {
             throw new Error(message);
         }
+        // 'warn' logs and falls through — the checks below are independent
+        // conditions, and the stale-index warning at the bottom must still
+        // run rather than being skipped by an early return.
         logger.error(`[assertOutboxIndexHealth] ${message}`);
-        return;
     }
 
     if (requirePublishedAtIndex && !rows.some(isPartialPublishedAtIndex)) {
@@ -228,7 +237,6 @@ export async function assertOutboxIndexHealth(
             throw new Error(message);
         }
         logger.error(`[assertOutboxIndexHealth] ${message}`);
-        return;
     }
 
     const stale = rows.filter(isNonPartialOccurredAtIndex);

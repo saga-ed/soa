@@ -115,6 +115,12 @@ export class OutboxRetention {
      * `published_at IS NULL` poll, so it never contends with the relay for
      * row locks.
      *
+     * `sweepBatch` selects candidates with `FOR UPDATE SKIP LOCKED`, so a row
+     * held by another open transaction is skipped rather than blocking the
+     * sweep. A skipped row also shrinks the batch below `limit`, which trips
+     * the short-batch loop exit above even though rows remain — the next
+     * interval's sweep retries them once the lock releases.
+     *
      * Best-effort: a batch error is logged and stops the loop for this call
      * (returning what was archived so far) — the next interval retries.
      */
@@ -158,15 +164,16 @@ export class OutboxRetention {
     private async sweepBatch(limit: number): Promise<SweepBatchResult> {
         const columns = ARCHIVE_COLUMNS.join(', ');
         const result = await this.pool.query<{ moved_count: number; archived_count: number }>(
-            `WITH moved AS (
+            `WITH candidates AS (
+                SELECT event_id FROM outbox_event
+                WHERE published_at IS NOT NULL
+                  AND published_at < now() - make_interval(days => $1)
+                ORDER BY published_at
+                LIMIT $2
+                FOR UPDATE SKIP LOCKED
+            ), moved AS (
                 DELETE FROM outbox_event
-                WHERE event_id IN (
-                    SELECT event_id FROM outbox_event
-                    WHERE published_at IS NOT NULL
-                      AND published_at < now() - make_interval(days => $1)
-                    ORDER BY published_at
-                    LIMIT $2
-                )
+                WHERE event_id IN (SELECT event_id FROM candidates)
                 RETURNING ${columns}
             ), inserted AS (
                 INSERT INTO outbox_event_archive (${columns})

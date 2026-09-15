@@ -80,7 +80,12 @@ DROP INDEX CONCURRENTLY IF EXISTS ${LEGACY_UNPUBLISHED_INDEX_NAME};
 // `LIKE outbox_event INCLUDING DEFAULTS` only — INCLUDING INDEXES would also
 // copy the unpublished partial index, which is dead weight here since every
 // archived row has published_at set. The PK is added explicitly because
-// ADD PRIMARY KEY has no IF NOT EXISTS form.
+// ADD PRIMARY KEY has no IF NOT EXISTS form; the guard resolves
+// `outbox_event_archive` through search_path via `::regclass` and filters on
+// `contype = 'p'` rather than matching `conname` directly — `pg_constraint`
+// has no per-schema uniqueness on name, so a bare `conname =` match would
+// find another PR-preview schema's same-named constraint and wrongly skip
+// adding this schema's own PK.
 export const OUTBOX_EVENT_ARCHIVE_SQL = `
 CREATE TABLE IF NOT EXISTS outbox_event_archive (
     LIKE outbox_event INCLUDING DEFAULTS
@@ -89,7 +94,8 @@ CREATE TABLE IF NOT EXISTS outbox_event_archive (
 DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'outbox_event_archive_pkey'
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'outbox_event_archive'::regclass AND contype = 'p'
     ) THEN
         ALTER TABLE outbox_event_archive ADD PRIMARY KEY (event_id);
     END IF;

@@ -41,17 +41,20 @@ relay's poll query seq-scanned a 257k-row table ~12x/sec across 6 tasks).
 **Run the index migration first, then bump the package version** — not the
 other way around, or the service fails to boot.
 
-- Table already has no index of that name: run `OUTBOX_UNPUBLISHED_INDEX_SQL`.
-- Table has the old NON-PARTIAL (or `INVALID`, from an interrupted
-  `CONCURRENTLY` build) index under that name: run
-  `OUTBOX_UNPUBLISHED_INDEX_REPAIR_SQL` instead — it builds the correct index
-  under an interim name, then drops and renames, so the poll is never left
-  unindexed.
+Two migrations, one statement each, in this order:
+
+1. `OUTBOX_UNPUBLISHED_INDEX_SQL` — creates `outbox_event_unpublished_idx`,
+   the correct partial index. Safe regardless of whether the old broken
+   index exists: the name is new, so this is never a no-op.
+2. `OUTBOX_LEGACY_INDEX_DROP_SQL` — drops the old non-partial
+   `idx_outbox_event_unpublished` the pre-fix `PRISMA_MODEL_FRAGMENT` left
+   behind, once (1) is confirmed in use. A no-op if that index never
+   existed (fresh installs).
 
 Both are `CREATE/DROP INDEX CONCURRENTLY`, which cannot run inside a
-transaction block — run them as a standalone script or migration step outside
-your migration tool's transaction wrapper (e.g. Prisma Migrate wraps each
-`migration.sql` in one).
+transaction block. Prisma 7.8+ already runs a single-statement migration
+file outside a transaction; older Prisma or other migration tools need each
+split out as its own non-transactional step.
 
 If you can't migrate every consumer before the version bump, pass
 `indexAssert: 'warn'` (logs at error level, starts anyway) or `'off'`

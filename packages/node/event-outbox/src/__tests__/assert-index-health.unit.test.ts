@@ -10,14 +10,14 @@ function makeLogger() {
     return { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
 }
 
-const PARTIAL_DEF =
-    'CREATE INDEX idx_outbox_event_unpublished ON outbox_event USING btree (occurred_at) WHERE (published_at IS NULL)';
-const NON_PARTIAL_DEF = 'CREATE INDEX idx_outbox_event_unpublished ON outbox_event USING btree (occurred_at)';
+const partialDef = (name: string) =>
+    `CREATE INDEX ${name} ON outbox_event USING btree (occurred_at) WHERE (published_at IS NULL)`;
+const nonPartialDef = (name: string) => `CREATE INDEX ${name} ON outbox_event USING btree (occurred_at)`;
 
 describe('assertOutboxIndexHealth', () => {
-    it('passes silently when a valid partial index exists', async () => {
+    it('passes silently when a valid partial index exists, matched on definition not name', async () => {
         const pool = makePool([
-            { indexname: 'idx_outbox_event_unpublished', indexdef: PARTIAL_DEF, indisvalid: true },
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
         ]);
         const logger = makeLogger();
         await expect(
@@ -27,31 +27,34 @@ describe('assertOutboxIndexHealth', () => {
         expect(logger.warn).not.toHaveBeenCalled();
     });
 
-    it('throws with the plain create DDL when no index of that name exists at all', async () => {
+    it('throws with the create DDL when no partial index exists at all', async () => {
         const pool = makePool([]);
         const logger = makeLogger();
         await expect(assertOutboxIndexHealth(pool as never, logger as never)).rejects.toThrow(
-            /CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_outbox_event_unpublished/,
+            /CREATE INDEX CONCURRENTLY IF NOT EXISTS outbox_event_unpublished_idx/,
         );
     });
 
-    it('throws with the REPAIR ddl (not the plain create) when the canonical name is non-partial', async () => {
+    it('throws with the SAME create DDL (no branching) when only the legacy non-partial index is present', async () => {
         const pool = makePool([
-            { indexname: 'idx_outbox_event_unpublished', indexdef: NON_PARTIAL_DEF, indisvalid: true },
+            { indexname: 'idx_outbox_event_unpublished', indexdef: nonPartialDef('idx_outbox_event_unpublished'), indisvalid: true },
         ]);
         const logger = makeLogger();
+        // The new canonical name is different from the legacy one, so CREATE
+        // INDEX ... IF NOT EXISTS under the new name is never a no-op here —
+        // no repair/rename dance needed.
         await expect(assertOutboxIndexHealth(pool as never, logger as never)).rejects.toThrow(
-            /idx_outbox_event_unpublished_partial/,
+            /CREATE INDEX CONCURRENTLY IF NOT EXISTS outbox_event_unpublished_idx/,
         );
     });
 
-    it('throws when the canonical name exists but is INVALID (interrupted CONCURRENTLY build)', async () => {
+    it('throws when the only occurred_at index present is INVALID, even though its definition looks partial', async () => {
         const pool = makePool([
-            { indexname: 'idx_outbox_event_unpublished', indexdef: PARTIAL_DEF, indisvalid: false },
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: false },
         ]);
         const logger = makeLogger();
         await expect(assertOutboxIndexHealth(pool as never, logger as never)).rejects.toThrow(
-            /idx_outbox_event_unpublished_partial/,
+            /outbox_event_unpublished_idx/,
         );
     });
 
@@ -71,26 +74,33 @@ describe('assertOutboxIndexHealth', () => {
         expect(pool.query).not.toHaveBeenCalled();
     });
 
-    it('warns (not throws) when a valid partial index exists under a NEW name but the broken legacy one lingers', async () => {
+    it('warns (not throws) when a valid partial index exists but the legacy non-partial one still lingers — the expected mid-migration state', async () => {
         const pool = makePool([
-            {
-                indexname: 'idx_outbox_event_unpublished_partial',
-                indexdef: PARTIAL_DEF.replace('idx_outbox_event_unpublished', 'idx_outbox_event_unpublished_partial'),
-                indisvalid: true,
-            },
-            { indexname: 'idx_outbox_event_unpublished', indexdef: NON_PARTIAL_DEF, indisvalid: true },
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
+            { indexname: 'idx_outbox_event_unpublished', indexdef: nonPartialDef('idx_outbox_event_unpublished'), indisvalid: true },
         ]);
         const logger = makeLogger();
         await expect(
             assertOutboxIndexHealth(pool as never, logger as never),
         ).resolves.toBeUndefined();
         expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(logger.warn.mock.calls[0][0]).toContain('idx_outbox_event_unpublished');
         expect(logger.warn.mock.calls[0][0]).toContain('DROP INDEX CONCURRENTLY');
+    });
+
+    it('warns on a stray non-partial occurred_at index under an UNKNOWN name too — matched on shape, not the one known legacy name', async () => {
+        const pool = makePool([
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
+            { indexname: 'some_other_occurred_at_idx', indexdef: nonPartialDef('some_other_occurred_at_idx'), indisvalid: true },
+        ]);
+        const logger = makeLogger();
+        await assertOutboxIndexHealth(pool as never, logger as never);
+        expect(logger.warn.mock.calls[0][0]).toContain('some_other_occurred_at_idx');
     });
 
     it('scopes the lookup to current_schema()', async () => {
         const pool = makePool([
-            { indexname: 'idx_outbox_event_unpublished', indexdef: PARTIAL_DEF, indisvalid: true },
+            { indexname: 'outbox_event_unpublished_idx', indexdef: partialDef('outbox_event_unpublished_idx'), indisvalid: true },
         ]);
         const logger = makeLogger();
         await assertOutboxIndexHealth(pool as never, logger as never);

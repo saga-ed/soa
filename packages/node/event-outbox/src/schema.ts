@@ -8,8 +8,14 @@
 // model that points at the same table for queries — see PRISMA_MODEL_FRAGMENT
 // for the canonical declaration.
 
-export const OUTBOX_UNPUBLISHED_INDEX_NAME = 'idx_outbox_event_unpublished';
-export const OUTBOX_PUBLISHED_AT_INDEX_NAME = 'idx_outbox_event_published_at';
+export const OUTBOX_UNPUBLISHED_INDEX_NAME = 'outbox_event_unpublished_idx';
+export const OUTBOX_PUBLISHED_AT_INDEX_NAME = 'outbox_event_published_at_idx';
+
+// The pre-fix PRISMA_MODEL_FRAGMENT's @@index generated a non-partial index
+// under THIS name. OUTBOX_UNPUBLISHED_INDEX_NAME above is deliberately a
+// different string so the fix's CREATE INDEX ... IF NOT EXISTS is never a
+// no-op against it — see OUTBOX_LEGACY_INDEX_DROP_SQL.
+const LEGACY_UNPUBLISHED_INDEX_NAME = 'idx_outbox_event_unpublished';
 
 export const OUTBOX_EVENT_SQL = `
 CREATE TABLE IF NOT EXISTS outbox_event (
@@ -48,31 +54,24 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS ${OUTBOX_PUBLISHED_AT_INDEX_NAME}
     WHERE published_at IS NOT NULL;
 `.trim();
 
-// Only correct against a table with no index of this name at all (a fresh
-// table, or a migration generated straight from OUTBOX_EVENT_SQL above). A
-// same-named NON-PARTIAL index — the state left by the old
-// PRISMA_MODEL_FRAGMENT's `@@index` — makes `IF NOT EXISTS` a permanent
-// no-op; use OUTBOX_UNPUBLISHED_INDEX_REPAIR_SQL for that case instead.
-// CONCURRENTLY forbids running inside a transaction block, so this can't be
-// pasted into a Prisma Migrate file as-is — run it as a standalone script,
-// or split it out per Prisma's non-transactional migration convention.
+// Safe against every consumer's current state, migrated or not: the name is
+// new relative to the old PRISMA_MODEL_FRAGMENT's non-partial index (see
+// LEGACY_UNPUBLISHED_INDEX_NAME above), so IF NOT EXISTS can't collide with
+// and no-op against that broken one. CONCURRENTLY forbids running inside a
+// transaction block — Prisma 7.8+ already runs a single-statement migration
+// file outside one; older Prisma / other tools need this split out as its
+// own non-transactional step.
 export const OUTBOX_UNPUBLISHED_INDEX_SQL = `
 CREATE INDEX CONCURRENTLY IF NOT EXISTS ${OUTBOX_UNPUBLISHED_INDEX_NAME}
     ON outbox_event (occurred_at)
     WHERE published_at IS NULL;
 `.trim();
 
-// Repairs a same-named non-partial (or INVALID, e.g. from an interrupted
-// CONCURRENTLY build) index left by the old PRISMA_MODEL_FRAGMENT. Builds the
-// correct partial index under an interim name first, so the relay's poll is
-// never left unindexed, then drops the broken one and renames into place.
-// Same standalone-statement constraint as above.
-export const OUTBOX_UNPUBLISHED_INDEX_REPAIR_SQL = `
-CREATE INDEX CONCURRENTLY IF NOT EXISTS ${OUTBOX_UNPUBLISHED_INDEX_NAME}_partial
-    ON outbox_event (occurred_at)
-    WHERE published_at IS NULL;
-DROP INDEX CONCURRENTLY IF EXISTS ${OUTBOX_UNPUBLISHED_INDEX_NAME};
-ALTER INDEX ${OUTBOX_UNPUBLISHED_INDEX_NAME}_partial RENAME TO ${OUTBOX_UNPUBLISHED_INDEX_NAME};
+// Second migration, run AFTER OUTBOX_UNPUBLISHED_INDEX_SQL: drops the old
+// non-partial index the pre-fix PRISMA_MODEL_FRAGMENT left behind, once the
+// replacement above is in place. Same standalone-statement constraint.
+export const OUTBOX_LEGACY_INDEX_DROP_SQL = `
+DROP INDEX CONCURRENTLY IF EXISTS ${LEGACY_UNPUBLISHED_INDEX_NAME};
 `.trim();
 
 // Archive table for OutboxRetention: rows swept out of outbox_event land
@@ -108,12 +107,13 @@ CREATE INDEX IF NOT EXISTS outbox_event_archive_published_at_idx
 // No `@@index` here: Prisma's schema DSL cannot express a partial index
 // (`WHERE published_at IS NULL`), and shipping one anyway is exactly what
 // produced iac#719 — every consumer that migrated from this fragment got a
-// full, non-partial index under the poll index's name, silently seq-scanning
-// the relay's query forever. Create the real index via OUTBOX_UNPUBLISHED_INDEX_SQL
-// (or the repair variant) as a raw-SQL migration instead. If your Prisma
-// version diffs an index present in the DB but absent from schema.prisma as a
-// DROP on the next `migrate dev`, pin it out of the diff (baseline the
-// migration, or add it to your migrations lock) rather than re-adding `@@index`.
+// full, non-partial index under a fixed name, silently seq-scanning the
+// relay's query forever. Create the real index via two raw-SQL migrations,
+// in order: OUTBOX_UNPUBLISHED_INDEX_SQL, then OUTBOX_LEGACY_INDEX_DROP_SQL
+// to remove the old one. If your Prisma version diffs an index present in
+// the DB but absent from schema.prisma as a DROP on the next `migrate dev`,
+// pin it out of the diff (baseline the migration, or add it to your
+// migrations lock) rather than re-adding `@@index`.
 export const PRISMA_MODEL_FRAGMENT = `
 model OutboxEvent {
     eventId       String    @id @map("event_id") @db.Uuid

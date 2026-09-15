@@ -1,10 +1,6 @@
 import { Pool, type PoolConfig } from 'pg';
 import type { ILogger } from '@saga-ed/soa-logger';
-import {
-    OUTBOX_UNPUBLISHED_INDEX_NAME,
-    OUTBOX_UNPUBLISHED_INDEX_SQL,
-    OUTBOX_UNPUBLISHED_INDEX_REPAIR_SQL,
-} from './schema.js';
+import { OUTBOX_UNPUBLISHED_INDEX_SQL } from './schema.js';
 
 export interface CreateOutboxPoolOpts {
     /**
@@ -148,18 +144,29 @@ function isPartialUnpublishedIndex(row: OutboxIndexRow): boolean {
     return row.indisvalid && row.indexdef.includes('WHERE (published_at IS NULL)');
 }
 
+// A plain (non-partial) single-column btree on occurred_at — the shape the
+// old PRISMA_MODEL_FRAGMENT produced, under whatever name a given consumer's
+// migration happened to use. Matched on shape, not name, so this also
+// catches a stray duplicate that isn't the one known legacy name.
+function isNonPartialOccurredAtIndex(row: OutboxIndexRow): boolean {
+    return row.indexdef.includes('(occurred_at)') && !row.indexdef.includes('WHERE (published_at IS NULL)');
+}
+
 /**
  * Verify outbox_event carries a valid partial index on (occurred_at) WHERE
  * published_at IS NULL — without it, OutboxRelay's poll query seq-scans the
- * whole table every tick (iac#719). Scoped to `current_schema()` so a
- * per-PR preview schema is checked independently of the canonical one, same
- * scope as the coherence assert above.
+ * whole table every tick (iac#719). Matched on the index DEFINITION, not a
+ * fixed name, so it passes regardless of which name a consumer's migration
+ * created it under. Scoped to `current_schema()` so a per-PR preview schema
+ * is checked independently of the canonical one, same scope as the
+ * coherence assert above.
  *
- * `mode: 'throw'` (OutboxRelay's default) fails startup with the exact DDL
+ * `mode: 'throw'` (OutboxRelay's default) fails startup with the create DDL
  * to run. `'warn'` logs at error level and continues. `'off'` skips the
- * check. A same-named index that exists but is non-partial or INVALID always
- * gets the repair DDL, never the plain create DDL — `CREATE ... IF NOT
- * EXISTS` against that name is a no-op.
+ * check. Separately (regardless of mode, since this is hygiene, not a
+ * correctness gate), warns if a non-partial index on occurred_at is still
+ * present alongside a healthy partial one — the expected mid-migration state
+ * before its DROP INDEX CONCURRENTLY step runs.
  */
 export async function assertOutboxIndexHealth(
     pool: Pool,
@@ -178,14 +185,11 @@ export async function assertOutboxIndexHealth(
     );
 
     const healthy = rows.some(isPartialUnpublishedIndex);
-    const legacy = rows.find((r) => r.indexname === OUTBOX_UNPUBLISHED_INDEX_NAME);
-    const legacyBroken = legacy !== undefined && !isPartialUnpublishedIndex(legacy);
 
     if (!healthy) {
-        const ddl = legacyBroken ? OUTBOX_UNPUBLISHED_INDEX_REPAIR_SQL : OUTBOX_UNPUBLISHED_INDEX_SQL;
         const message =
             'outbox_event has no valid partial index on (occurred_at) WHERE published_at IS NULL ' +
-            `— the relay's poll query will seq-scan the table. Run:\n${ddl}`;
+            `— the relay's poll query will seq-scan the table. Run:\n${OUTBOX_UNPUBLISHED_INDEX_SQL}`;
         if (mode === 'throw') {
             throw new Error(message);
         }
@@ -193,11 +197,13 @@ export async function assertOutboxIndexHealth(
         return;
     }
 
-    if (legacyBroken) {
+    const stale = rows.filter(isNonPartialOccurredAtIndex);
+    if (stale.length > 0) {
         logger.warn(
-            `[assertOutboxIndexHealth] a valid partial index exists, but the legacy non-partial/invalid ` +
-                `${OUTBOX_UNPUBLISHED_INDEX_NAME} is still present. Drop it once the replacement is confirmed ` +
-                `in use: DROP INDEX CONCURRENTLY IF EXISTS ${OUTBOX_UNPUBLISHED_INDEX_NAME};`,
+            `[assertOutboxIndexHealth] a valid partial index exists, but ${stale.length} non-partial ` +
+                `index(es) on occurred_at are still present (${stale.map((r) => r.indexname).join(', ')}). ` +
+                `Drop once the replacement is confirmed in use: ` +
+                stale.map((r) => `DROP INDEX CONCURRENTLY IF EXISTS ${r.indexname};`).join(' '),
         );
     }
 }

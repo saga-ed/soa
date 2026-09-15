@@ -44,18 +44,26 @@ colour branch). Consequences today, when blue and green are both warm:
   be a task of the colour that is about to be retired. On `retire` the session drops, the lock
   releases, and the live colour picks it up within ~5 s. Acceptable, but accidental.
 - **Consumers:** both colours declare the identical durable queue and both `basic.consume`. Each
-  message goes to exactly one of them, chosen by the broker. The real hazard is version skew:
-  after an HTTP flip to green, green producers may emit `iam.user.created.v2`; if blue's consumer
-  receives it, `ConsumerVersionMismatchError` is treated as poison → nack-without-requeue → DLQ.
-  The message is *lost to the live system* even though green has a v2 handler. Frozen-once-published
-  versioning guarantees the reverse direction (new code handles old events); it does not protect
-  this direction.
+  message goes to exactly one of them, chosen by the broker. For a release that does not change
+  consumer behaviour this is harmless. For a release that *does* (a handler fix, a projection
+  shape change, a new pinned version) the old colour keeps processing a share of live traffic
+  after the flip, and the new colour processes a share before it, with no way to say otherwise.
+  Version skew on its own is **not** the hazard: `d-event-versioning.md` mandates a dual-emit
+  dance, so a producer never stops emitting a version a consumer still pins. A consumer DLQs a
+  version it did not pin only if that dance was skipped, which is contract-check CI's job to
+  catch, not the deploy flow's.
 - **Idempotency keys are colour-blind** (`consumed_events.consumer_name`, authz-api's
   `projection_readiness`), which is correct: one logical consumer moves between colours.
 
-So "isolation" in prod cannot mean data isolation (same DB). It means: **exactly one colour holds
-each consumer at a time, the operator chooses which, and the change is ordered against the HTTP
-flip so the consuming colour is never older than the producing colour.**
+So "isolation" in prod cannot mean data isolation (same DB). It means: **each consumer is held by
+one colour at a time, and a release that changes consumer behaviour can hand over cleanly.**
+
+## Operating principle: automatic by default, explicit only when flagged
+
+Most releases change HTTP behaviour and nothing on the event plane. Those must need no event-plane
+step at all, because a step that is usually unnecessary is a step that gets forgotten. Releases
+that change a consumer are the minority; they are flagged at deploy time, the flip enforces the
+flag, and a short pause in consumption during the hand-over is accepted.
 
 ## Options considered — consumer selection
 
@@ -63,8 +71,8 @@ flip so the consuming colour is never older than the producing colour.**
 |---|---|---|
 | Per-colour queue suffix (`…projection.blue`) | Both colours get every message; dark colour's queue backs up or is drained by dedup | Unbounded backlog on the retired colour, double delivery, still no operator choice. Rejected. |
 | Colour tag in the envelope / routing key | Producer stamps its colour | Producer colour ≠ desired consumer colour. Rejected. |
-| Derive active colour from the ALB live rule (`DescribeRules`) | Zero new state, events follow HTTP automatically | Ordering is wrong by construction (consumer flips *after* HTTP, inside the hazard window) and the planes cannot be flipped independently, which is the ask. Rejected as primary; fine as a `status` cross-check. |
-| **Explicit control parameter + consumer gate** *(recommended)* | SSM `/prod/bluegreen/<service>/active-color` ∈ `blue\|green`; each task compares it to its own identifier and only consumes when it matches | One lever, same shape as the ALB flip, orderable, absent-param = today's behaviour so adoption is per-service and dev/preview are untouched. |
+| Derive active colour from the ALB live rule (`DescribeRules`) | Zero new state, events follow HTTP automatically | Gives every app task an `elasticloadbalancing:Describe*` grant and a listener ARN to know about, and offers no way to express "paused". Kept as the `status` cross-check that catches a console flip bypassing the CLI. |
+| **Control parameter written by the flip command + consumer gate** *(recommended)* | SSM `/prod/bluegreen/<service>/active-color` ∈ `blue\|green\|none`, written by `saga-bluegreen flip` as part of the HTTP flip; each task compares it to its own identifier and only consumes when it matches | Nothing extra for the operator to remember: the one command that can move HTTP also moves events. `none` gives the flagged flow its pause. Absent param = today's behaviour, so adoption is per service and dev/preview are untouched. |
 | RabbitMQ `x-single-active-consumer` | Broker enforces ≤1 active consumer per queue | Excellent belt for the gate's braces, but it is a queue *argument* (not policy-settable) so every existing queue must be drained and re-declared, and it caps in-colour parallelism at one consumer per queue. Phase 2, optional. Whether SAC honours consumer `x-priority` varies by RabbitMQ version — do not design around priority. |
 
 ## Recommended design
@@ -72,12 +80,15 @@ flip so the consuming colour is never older than the producing colour.**
 ### 1. Control plane
 
 - SSM `String` parameter per service: `/prod/bluegreen/<service>/active-color`. Values `blue`,
-  `green`. Written only by `saga-bluegreen` (new subcommands `events flip <svc> <color>`,
-  `events status <svc>`), never by CFN or a deploy workflow.
-- `saga-bluegreen status` prints HTTP live colour (from the rule weights) and events colour (from
-  SSM) side by side and warns when they diverge for longer than the bake convention.
-- `saga-bluegreen flip <svc> <color>` grows a `--plane http|events|all` flag. `all` applies the
-  fixed ordering below. `retire` refuses if the colour being retired still owns the events plane.
+  `green`, `none` (paused). Written only by `saga-bluegreen`, never by CFN or a deploy workflow.
+- **Every `saga-bluegreen flip <svc> <color>` sets the parameter to `<color>` as part of the HTTP
+  flip.** There is no separate events command in the normal path. `retire` refuses if the
+  parameter still names the colour being retired.
+- `saga-bluegreen status` prints HTTP live colour (rule weights), events colour (SSM), and the
+  live consumer count on each of the service's queues (RabbitMQ management API), and warns on any
+  divergence. Divergence is the signature of a console flip that bypassed the CLI.
+- A queue with zero consumers for more than a minute, and an outbox with no leader, get CloudWatch
+  alarms. Strict gating means a bypassed flip stalls events silently otherwise.
 
 ### 2. Task-side gate (soa, one new small package)
 
@@ -87,8 +98,8 @@ flip so the consuming colour is never older than the producing colour.**
   `soa-health` does; returns `null` outside blue/green.
 - `ActiveColorGate({ parameterName, pollIntervalMs = 10_000 })` — polls `ssm:GetParameter`;
   exposes `isActive(): boolean` and `on('change', active => …)`. Semantics: parameter absent or
-  `getOwnColor()` null → always active (today's behaviour). SSM unreachable → keep last known
-  value, log at warn, never flap to inactive on a transient failure.
+  `getOwnColor()` null → always active (today's behaviour); value `none` → inactive on every
+  colour. SSM unreachable → keep last known value, log at warn, never flap on a transient failure.
 - Task role needs `ssm:GetParameter` on that one path, added under the existing `IsBlueGreen`
   condition in each `service-template.yaml`. Dev/preview stacks get no env var and no gate.
 
@@ -99,6 +110,8 @@ flip so the consuming colour is never older than the producing colour.**
   `gate.isActive()`.
 - New `pause()` / `resume()`: `pause` = `basic.cancel`, then await in-flight handlers; `resume` =
   `basic.consume` again on the same channel. The gate's `change` event drives these.
+- `soa-health` reports per consumer `{ queue, state: active|paused, inFlight }` so the flip
+  command can wait for a drain instead of sleeping.
 - Keep `consumerName` and `consumed_events` colour-blind.
 
 ### 4. Relay / producer (soa `event-outbox`, on top of the reference branch)
@@ -113,17 +126,39 @@ flip so the consuming colour is never older than the producing colour.**
   - `onLeaderWaiting` should carry the waiting task's colour so the dashboard can tell
     "dark colour idle by design" from "live colour cannot get the lock".
 
-### 5. Ordering rule (this is the whole point)
+### 5. Flagged releases and the two flip paths
 
-**Flip: events first, then HTTP. Rollback: HTTP first, then events.**
+**Unflagged (the common case, HTTP-only change).** `saga-bluegreen flip` sets the parameter to
+the new colour and reweights the ALB. Old-colour consumers notice within one poll interval and
+cancel; new-colour consumers resume. For a few seconds both may process, which is harmless because
+by definition the consumer code is equivalent. No pause, no operator decision, no ordering to get
+right. Producer-only changes are also unflagged for flip purposes: the relay ships stored bytes,
+and the dual-emit dance in `d-event-versioning.md` already covers consumers on either colour.
 
-The consuming colour must never be older than the producing colour. New code handles old event
-versions (frozen-once-published); old code cannot handle new ones. `saga-bluegreen flip --plane
-all` encodes this and waits for the outgoing colour's consumers to report paused (drain of
-in-flight messages) before reweighting the ALB. The residual window is a rollback that returns
-HTTP to the old colour while new-version messages are still queued; those land in the DLQ and
-are replayed after the forward fix, using the existing DLQ replay path. Document it, do not
-engineer around it.
+**Flagged (consumer behaviour changes).** `saga-bluegreen flip … --events-pause`:
+1. set the parameter to `none`; every colour cancels its consumers and finishes in-flight handlers;
+2. wait until `/health` on both colours reports every consumer paused with zero in flight;
+3. reweight the ALB;
+4. set the parameter to the new colour; only new-colour consumers resume and drain the backlog
+   that accumulated in the durable queues during the pause.
+Consumption is delayed by the drain time plus the flip, typically seconds. That delay is the
+accepted cost of a clean hand-over.
+
+**Making the flag unforgettable.** The deploy workflow, not the operator, decides whether a
+release is flagged:
+- Auto-detect from the release's commit range: any change under a consumer/handler directory,
+  to `consumed-events.json`, to an `@saga-ed/*-events` dependency version, or to the
+  `@saga-ed/soa-event-consumer` version. A manual `workflow_dispatch` input overrides in both
+  directions.
+- The deploy writes `/prod/bluegreen/<service>/<color>/pending-event-change` = `consumer` |
+  `producer` | `none` for the colour it deployed, and prints it in the deploy summary.
+- `saga-bluegreen flip` reads it. If it says `consumer` and `--events-pause` was not passed, the
+  flip refuses. After a successful flip the CLI clears it.
+
+**Rollback** is a flip in the other direction and follows the same rule: if the release being
+rolled back was flagged, the rollback flip must also pause. `saga-bluegreen` knows because the
+`pending-event-change` marker is moved, not deleted, on flip (`applied-event-change` on the now-live
+colour) and is only cleared at `retire`.
 
 ### 6. S2S HTTP plane
 
@@ -168,7 +203,9 @@ Glacier).
    the `OutboxEventArchive` fragment and loses the `@@index`). Same index-before-bump order.
    Remember the repo rule: template defaults are prod values, dev overrides explicit.
 4. **soa:** ship `soa-deploy-color`, consumer `gate`/`pause`/`resume`, relay gate.
-5. **saga-bluegreen CLI:** `events status|flip`, `--plane`, retire/originate guards.
+5. **saga-bluegreen CLI:** write the parameter on every flip, `--events-pause`, the
+   `pending-event-change` guard, retire/originate guards, `status` cross-checks. Deploy workflows
+   gain the auto-flag step.
 6. Adopt the gate one service at a time, starting with a consumer-only service (authz-api), then
    sessions-api (three consumers, one relay). Creating the SSM parameter is the switch; deleting it
    reverts to today's behaviour.
@@ -179,9 +216,12 @@ Glacier).
 1. SSM vs. a `deployment_control` row in each service's DB for the active-colour signal. SSM is
    proposed because the flip CLI already holds AWS credentials and no DB credentials; a DB row
    would make the gate transactional with the service's own writes but needs an admin endpoint.
-2. Is a 10 s poll acceptable for the flip latency, or should the CLI also poke tasks (SSM
-   parameter change → EventBridge → nothing today; a `SIGUSR2`-style refresh is possible via ECS
-   `execute-command` but ugly)?
-3. Do we want SAC on queues at all, given it requires draining and re-declaring every queue once?
-4. Does iam-api's `DesiredCount: 3` need more than one consumer per queue in future? If so, SAC
+2. Is a 10 s poll acceptable for the hand-over latency in the unflagged path? It only lengthens
+   the window where both colours process equivalent code, so probably yes.
+3. Should the auto-flag heuristic err toward flagging (a false positive costs a few seconds of
+   paused consumption) or toward not flagging (a false negative is today's behaviour)? Proposed:
+   err toward flagging.
+4. Do we want SAC on queues at all, given it requires draining and re-declaring every queue once,
+   now that the gate is the only thing that has to be right?
+5. Does iam-api's `DesiredCount: 3` need more than one consumer per queue in future? If so, SAC
    is off the table and the gate alone carries isolation.

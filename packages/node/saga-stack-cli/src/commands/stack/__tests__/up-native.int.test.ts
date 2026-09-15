@@ -339,7 +339,7 @@ describe('stack up --only — native partial-stack', () => {
         r.command === 'docker' &&
         r.args.includes('psql') &&
         r.args.includes('-c') &&
-        r.args[r.args.indexOf('-c') + 1].includes("tablename <> '_prisma_migrations'"),
+        r.args[r.args.indexOf('-c') + 1].includes("tablename NOT IN ('_prisma_migrations')"),
     );
     expect(truncs.length).toBeGreaterThan(0);
     // native seed steps still ran (roster baseline).

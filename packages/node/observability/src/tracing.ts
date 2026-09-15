@@ -188,29 +188,43 @@ export function resolveResourceAttributes(
  * Resolved as a lazy async Resource attribute (same pattern OTel's own
  * AwsEcsDetectorSync uses) so initTracing stays synchronous. Nothing in
  * NodeSDK/BatchSpanProcessor awaits Resource.waitForAsyncAttributes(), so
- * this races the metadata fetch against the first span export — spans
- * emitted before it resolves ship without container.id (and log one
- * diag.error) but every span after does carry it, and the fetch is a local
- * ECS-agent call that's reliably faster than a service's first real request.
+ * this races the metadata fetch against the first span export; spans
+ * emitted before it resolves ship without container.id. Retries on fetch
+ * failure (not on a successful-but-empty response) because the metadata
+ * proxy is not always routable yet at the process's true start — a single
+ * attempt can lose that race permanently for the process's entire life,
+ * with no visible signal (diag.error is a no-op unless initTracing gets a
+ * logger).
  *
- * Degrade-safe: {} outside ECS or on any fetch/parse failure. Exported for
+ * Degrade-safe: {} outside ECS, or if every attempt fails. Exported for
  * unit testing, same rationale as resolveResourceAttributes.
  */
+const METADATA_FETCH_ATTEMPTS = 5;
+const METADATA_FETCH_TIMEOUT_MS = 1000;
+const METADATA_RETRY_DELAY_MS = 250;
+
 export async function resolveContainerIdAttribute(): Promise<Record<string, string>> {
     const metadataUrl = process.env.ECS_CONTAINER_METADATA_URI_V4;
     if (!metadataUrl) return {};
 
-    try {
-        const response = await fetch(metadataUrl, { signal: AbortSignal.timeout(1000) });
-        const metadata = (await response.json()) as { DockerId?: string };
-        // 'container.id' — still under @opentelemetry/semantic-conventions'
-        // experimental/incubating umbrella, so imported as a literal rather
-        // than via its ./incubating subpath (which this repo's moduleResolution
-        // can't resolve the types for).
-        return metadata.DockerId ? { ['container.id']: metadata.DockerId } : {};
-    } catch {
-        return {};
+    for (let attempt = 1; attempt <= METADATA_FETCH_ATTEMPTS; attempt++) {
+        try {
+            const response = await fetch(metadataUrl, {
+                signal: AbortSignal.timeout(METADATA_FETCH_TIMEOUT_MS),
+            });
+            const metadata = (await response.json()) as { DockerId?: string };
+            // 'container.id' — still under @opentelemetry/semantic-conventions'
+            // experimental/incubating umbrella, so imported as a literal rather
+            // than via its ./incubating subpath (which this repo's moduleResolution
+            // can't resolve the types for).
+            return metadata.DockerId ? { ['container.id']: metadata.DockerId } : {};
+        } catch {
+            if (attempt < METADATA_FETCH_ATTEMPTS) {
+                await new Promise((resolve) => setTimeout(resolve, METADATA_RETRY_DELAY_MS));
+            }
+        }
     }
+    return {};
 }
 
 /**

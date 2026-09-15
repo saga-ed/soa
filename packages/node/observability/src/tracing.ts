@@ -45,15 +45,13 @@ export function initTracing(
     }
 
     const sdk = new NodeSDK({
-        // NOTE: no containerDetector on purpose. On ECS bridge networking the
-        // app container shares its cgroup with the pause container, so
-        // /proc/self/cgroup resolves to the pause container's ID. The Datadog
-        // Agent then enriches OTLP spans with the pause container's
-        // image_tag / ecs_container_name, shadowing our service.name +
-        // deployment.* resource attrs. Letting the DD Agent identify the source
-        // container via its own host-IP-based logic keeps the right task/service
-        // tags. (Resource attrs from OTEL_RESOURCE_ATTRIBUTES still merge in.)
-        resource: new Resource(resolveResourceAttributes(serviceName)),
+        // No OTel containerDetector: it cgroup-parses for container.id, which
+        // collides with ECS's shared pause container. See
+        // resolveContainerIdAttribute for how container.id is sourced instead.
+        resource: new Resource(
+            resolveResourceAttributes(serviceName),
+            resolveContainerIdAttribute(),
+        ),
         // Wrap the OTLP exporter so PII (ids/emails in URL paths + query
         // strings) is stripped from span attributes before they hit the wire.
         // See span-sanitizer.ts for why this is an exporter wrapper (not a
@@ -179,6 +177,40 @@ export function resolveResourceAttributes(
         attrs[ATTR_SERVICE_VERSION] = version;
     }
     return attrs;
+}
+
+/**
+ * `container.id` via the ECS Task Metadata Endpoint v4 (agent-injected per
+ * container, unsuffixed URL = the calling container's own DockerId) — never
+ * /proc/self/cgroup, which on ECS resolves to the shared pause container's ID
+ * instead of the app container's.
+ *
+ * Resolved as a lazy async Resource attribute (same pattern OTel's own
+ * AwsEcsDetectorSync uses) so initTracing stays synchronous. Nothing in
+ * NodeSDK/BatchSpanProcessor awaits Resource.waitForAsyncAttributes(), so
+ * this races the metadata fetch against the first span export — spans
+ * emitted before it resolves ship without container.id (and log one
+ * diag.error) but every span after does carry it, and the fetch is a local
+ * ECS-agent call that's reliably faster than a service's first real request.
+ *
+ * Degrade-safe: {} outside ECS or on any fetch/parse failure. Exported for
+ * unit testing, same rationale as resolveResourceAttributes.
+ */
+export async function resolveContainerIdAttribute(): Promise<Record<string, string>> {
+    const metadataUrl = process.env.ECS_CONTAINER_METADATA_URI_V4;
+    if (!metadataUrl) return {};
+
+    try {
+        const response = await fetch(metadataUrl, { signal: AbortSignal.timeout(1000) });
+        const metadata = (await response.json()) as { DockerId?: string };
+        // 'container.id' — still under @opentelemetry/semantic-conventions'
+        // experimental/incubating umbrella, so imported as a literal rather
+        // than via its ./incubating subpath (which this repo's moduleResolution
+        // can't resolve the types for).
+        return metadata.DockerId ? { ['container.id']: metadata.DockerId } : {};
+    } catch {
+        return {};
+    }
 }
 
 /**

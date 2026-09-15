@@ -1,4 +1,10 @@
 import { Pool, type PoolConfig } from 'pg';
+import type { ILogger } from '@saga-ed/soa-logger';
+import {
+    OUTBOX_UNPUBLISHED_INDEX_NAME,
+    OUTBOX_UNPUBLISHED_INDEX_SQL,
+    OUTBOX_UNPUBLISHED_INDEX_REPAIR_SQL,
+} from './schema.js';
 
 export interface CreateOutboxPoolOpts {
     /**
@@ -128,4 +134,70 @@ export function createOutboxPool(
 
 function truncate(s: string): string {
     return s.length > 80 ? `${s.slice(0, 77)}...` : s;
+}
+
+export type IndexAssertMode = 'throw' | 'warn' | 'off';
+
+interface OutboxIndexRow {
+    indexname: string;
+    indexdef: string;
+    indisvalid: boolean;
+}
+
+function isPartialUnpublishedIndex(row: OutboxIndexRow): boolean {
+    return row.indisvalid && row.indexdef.includes('WHERE (published_at IS NULL)');
+}
+
+/**
+ * Verify outbox_event carries a valid partial index on (occurred_at) WHERE
+ * published_at IS NULL — without it, OutboxRelay's poll query seq-scans the
+ * whole table every tick (iac#719). Scoped to `current_schema()` so a
+ * per-PR preview schema is checked independently of the canonical one, same
+ * scope as the coherence assert above.
+ *
+ * `mode: 'throw'` (OutboxRelay's default) fails startup with the exact DDL
+ * to run. `'warn'` logs at error level and continues. `'off'` skips the
+ * check. A same-named index that exists but is non-partial or INVALID always
+ * gets the repair DDL, never the plain create DDL — `CREATE ... IF NOT
+ * EXISTS` against that name is a no-op.
+ */
+export async function assertOutboxIndexHealth(
+    pool: Pool,
+    logger: ILogger,
+    mode: IndexAssertMode = 'throw',
+): Promise<void> {
+    if (mode === 'off') return;
+
+    const { rows } = await pool.query<OutboxIndexRow>(
+        `SELECT c.relname AS indexname, pg_get_indexdef(ix.indexrelid) AS indexdef, ix.indisvalid
+         FROM pg_index ix
+         JOIN pg_class c ON c.oid = ix.indexrelid
+         JOIN pg_class t ON t.oid = ix.indrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+         WHERE t.relname = 'outbox_event' AND n.nspname = current_schema()`,
+    );
+
+    const healthy = rows.some(isPartialUnpublishedIndex);
+    const legacy = rows.find((r) => r.indexname === OUTBOX_UNPUBLISHED_INDEX_NAME);
+    const legacyBroken = legacy !== undefined && !isPartialUnpublishedIndex(legacy);
+
+    if (!healthy) {
+        const ddl = legacyBroken ? OUTBOX_UNPUBLISHED_INDEX_REPAIR_SQL : OUTBOX_UNPUBLISHED_INDEX_SQL;
+        const message =
+            'outbox_event has no valid partial index on (occurred_at) WHERE published_at IS NULL ' +
+            `— the relay's poll query will seq-scan the table. Run:\n${ddl}`;
+        if (mode === 'throw') {
+            throw new Error(message);
+        }
+        logger.error(`[assertOutboxIndexHealth] ${message}`);
+        return;
+    }
+
+    if (legacyBroken) {
+        logger.warn(
+            `[assertOutboxIndexHealth] a valid partial index exists, but the legacy non-partial/invalid ` +
+                `${OUTBOX_UNPUBLISHED_INDEX_NAME} is still present. Drop it once the replacement is confirmed ` +
+                `in use: DROP INDEX CONCURRENTLY IF EXISTS ${OUTBOX_UNPUBLISHED_INDEX_NAME};`,
+        );
+    }
 }

@@ -1,0 +1,306 @@
+[
+ {
+  "id": "q01",
+  "kind": "fact",
+  "question": "In this repo's root CLAUDE.md, what pnpm script name is used for TypeScript type-checking (the doc explicitly flags the wrong guess)?",
+  "expect": {
+   "mode": "contains",
+   "answer": "check-types",
+   "paths": [
+    "CLAUDE.md"
+   ],
+   "detail": "Root CLAUDE.md line 28, Gotchas: 'Type-check script is `pnpm check-types` (not `pnpm typecheck`).'"
+  },
+  "authoritative": [
+   "CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "The doc itself names `pnpm typecheck` as the wrong guess -- a self-contained trap."
+ },
+ {
+  "id": "q02",
+  "kind": "fact",
+  "question": "Per package.json's `engines` field, what is the minimum major version of Node.js this repo's tooling requires?",
+  "expect": {
+   "mode": "contains",
+   "answer": "24",
+   "paths": [
+    "CLAUDE.md",
+    "package.json"
+   ],
+   "detail": "package.json line 2: `\"engines\": { \"node\": \">=24\" }`. Root CLAUDE.md lines 31-32 notes CI (`NODE_VERSION: 22` in .github/workflows/*.yml) disagrees and says to trust `engines` locally rather than 'fixing' CI to match."
+  },
+  "authoritative": [
+   "package.json (already canonical); root CLAUDE.md's Gotchas section restates it"
+  ],
+  "currently_only_in": [],
+  "notes": "Strong trap: CI's pinned NODE_VERSION is 22, and apps/node/CLAUDE.md separately says 'Node.js 20+' for its own runtime target -- three different numbers for three different things in the same repo."
+ },
+ {
+  "id": "q03",
+  "kind": "fact",
+  "question": "Per the db package's Saga conventions table, what is the MongoDB replica-set name used across ALL environments (dev, staging, prod)?",
+  "expect": {
+   "mode": "contains",
+   "answer": "saga-rs",
+   "paths": [
+    "packages/node/db/CLAUDE.md"
+   ],
+   "detail": "packages/node/db/CLAUDE.md line 117: '| Replica-set name | `saga-rs` (all envs) |'."
+  },
+  "authoritative": [
+   "packages/node/db/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Single unique token, low guess risk."
+ },
+ {
+  "id": "q04",
+  "kind": "fact",
+  "question": "What local dev-server port does the `docs` app (apps/web/docs) use, chosen specifically to avoid clashing with the example APIs?",
+  "expect": {
+   "mode": "contains",
+   "answer": "3001",
+   "paths": [
+    "apps/web/docs/CLAUDE.md"
+   ],
+   "detail": "apps/web/docs/CLAUDE.md line 25 ('pnpm dev # Start dev server (port 3001)') and line 46 ('Development server on port 3001 (avoids conflicts with APIs)')."
+  },
+  "authoritative": [
+   "apps/web/docs/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Trap: web-client's own dev server also runs on port 3000 (apps/web/web-client/CLAUDE.md line 25), and the example APIs default to the 4000-4003 range (same file's Environment Variables section) -- easy to conflate."
+ },
+ {
+  "id": "q05",
+  "kind": "fact",
+  "question": "Per ADR 0005, in which directory of this repo does the `.fga` DSL file -- the source of truth for Saga's OpenFGA authorization model -- live?",
+  "expect": {
+   "mode": "contains",
+   "answer": "saga-authz-model",
+   "paths": [
+    "docs/auth/adr/0005-openfga-model-as-source-of-truth.md"
+   ],
+   "detail": "docs/auth/adr/0005-openfga-model-as-source-of-truth.md line 48: '### Model lives in `packages/core/saga-authz-model/`'."
+  },
+  "authoritative": [
+   "docs/auth/adr/0005-openfga-model-as-source-of-truth.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "packages/core/CLAUDE.md's own package table lists only 5 'curated highlights' and omits saga-authz-model entirely, so this is only findable via the ADR, not the tier CLAUDE.md."
+ },
+ {
+  "id": "q06",
+  "kind": "fact",
+  "question": "What is pubsub-core's real npm package name (per its own package.json), under the @saga-ed scope?",
+  "expect": {
+   "mode": "contains",
+   "answer": "@saga-ed/soa-pubsub-core",
+   "paths": [
+    "packages/node/pubsub-core/package.json"
+   ],
+   "detail": "packages/node/pubsub-core/package.json line 2: `\"name\": \"@saga-ed/soa-pubsub-core\"`."
+  },
+  "authoritative": [
+   "packages/node/pubsub-core/package.json (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Trap: root file HowToAddPubsub.md's code examples (lines 93, 202, 377, 732) all import from `@saga-ed/pubsub-core` -- missing the `soa-` infix -- a stale package name a naive reader would copy verbatim."
+ },
+ {
+  "id": "q07",
+  "kind": "fact",
+  "question": "Besides `--force`, what other flag does the root `pnpm check` script pass to `turbo run build` (per package.json) to guarantee a full rebuild?",
+  "expect": {
+   "mode": "contains",
+   "answer": "--no-cache",
+   "paths": [
+    "package.json",
+    "README.md"
+   ],
+   "detail": "package.json line 17: `\"check\": \"turbo run build --no-cache --force && pnpm test\"`. README.md line 17 instructs running `pnpm check` before every commit/PR (also shown bare at lines 13 and 55)."
+  },
+  "authoritative": [
+   "package.json (already canonical); README.md restates the recommendation"
+  ],
+  "currently_only_in": [],
+  "notes": "Don't confuse with `turbo run build --dry` (a documented dry-run flag in docs/GETTING-STARTED.md, unrelated) or the separate `ci:check` script (`node scripts/local-ci-checks.js`, from LOCAL_DEVELOPMENT.md)."
+ },
+ {
+  "id": "q08",
+  "kind": "fact",
+  "question": "What base path do all four soa API examples (rest-api, gql-api, tgql-api, trpc-api) mount their business endpoints under?",
+  "expect": {
+   "mode": "contains",
+   "answer": "/saga-soa/v1",
+   "paths": [
+    "apps/node/rest-api/CLAUDE.md",
+    "apps/node/gql-api/CLAUDE.md",
+    "apps/node/tgql-api/CLAUDE.md",
+    "apps/node/trpc-api/CLAUDE.md"
+   ],
+   "detail": "Confirmed in source: apps/node/gql-api/src/inversify.config.ts:30 and main.ts:61, apps/node/tgql-api/src/inversify.config.ts:30, apps/node/trpc-api/src/inversify.config.ts:31. Documented identically in each app's CLAUDE.md Endpoints table (e.g. apps/node/gql-api/CLAUDE.md line 59)."
+  },
+  "authoritative": [
+   "apps/node/CLAUDE.md (already canonical; currently restated 4x in each leaf file rather than stated once at the area tier)"
+  ],
+  "currently_only_in": [],
+  "notes": "Every one of the four API example CLAUDE.md files restates this identically, so it is a low-ambiguity fact regardless of which leaf file is read."
+ },
+ {
+  "id": "q09",
+  "kind": "pattern",
+  "question": "soa has two separate real-time-eventing package families: pubsub-* and event-*. What's the rule for choosing between them?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "pubsub-* and event-* are two distinct systems and are not interchangeable."
+   ],
+   "paths": [
+    "packages/node/CLAUDE.md"
+   ],
+   "detail": "packages/node/CLAUDE.md lines 38-43: 'pubsub-* ... real-time UI push (browser <-> server) ... event-* + observability ... durable cross-service eventing (server <-> server) over RabbitMQ with transactional outbox + idempotency ... These are NOT interchangeable.'"
+  },
+  "authoritative": [
+   "packages/node/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "packages/node/CLAUDE.md's own citation for the rationale ('~/dev/soa/.claude/projects/soa_75/decisions/d-soa-pubsub-divorce.md') is itself a broken path (leading dot; the real file has no dot: claude/projects/soa_75/...) -- the stated rule in the parent CLAUDE.md text is still correct and current-tier regardless of that dead link."
+ },
+ {
+  "id": "q10",
+  "kind": "pattern",
+  "question": "Per ADR 0005, who is allowed to write OpenFGA tuples, and how do tuple writes actually happen?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "Application services never write OpenFGA tuples directly."
+   ],
+   "paths": [
+    "docs/auth/adr/0005-openfga-model-as-source-of-truth.md"
+   ],
+   "detail": "docs/auth/adr/0005-openfga-model-as-source-of-truth.md lines 25-33: 'Application services never write tuples directly. A dedicated sync worker ... subscribes to `iam.*` events from rostering and translates them to tuple writes ... Application services only call `check`, `list-objects`, `list-relations`. They do not call `write`, `delete`, `expand`.'"
+  },
+  "authoritative": [
+   "docs/auth/adr/0005-openfga-model-as-source-of-truth.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "The ADR states the same rule from both directions (services can't write; only the sync worker does) -- either half satisfies the essential claim."
+ },
+ {
+  "id": "q11",
+  "kind": "pattern",
+  "question": "How do soa's rest-api, gql-api, and tgql-api example apps register their controllers/resolvers -- what's the mechanism?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "Each app auto-discovers its controllers/resolvers via a filesystem glob under sectors/, rather than manual registration."
+   ],
+   "paths": [
+    "packages/node/api-core/CLAUDE.md",
+    "apps/node/rest-api/CLAUDE.md"
+   ],
+   "detail": "packages/node/api-core/CLAUDE.md 'Controller Auto-Loading': 'Scans directories for controllers/resolvers using glob patterns.' Restated per-app in each apps/node/*/CLAUDE.md Startup Flow (e.g. rest-api/CLAUDE.md line 43: 'Auto-discover REST controllers via glob: `./sectors/*.js`'). Confirmed trpc-api is the exception: its CLAUDE.md 'Startup Flow' globs only REST fallback routes (`./sectors/*/rest/*-routes.js`); its tRPC routers are composed statically ('export type AppRouter = typeof appRouter -- fully static, no codegen'), so trpc-api is excluded from this question."
+  },
+  "authoritative": [
+   "packages/node/api-core/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Restated per-app in rest-api/gql-api/tgql-api's CLAUDE.md Startup Flow sections with the exact glob for that API style. trpc-api only glob-discovers its REST fallback routes, not its tRPC routers -- deliberately excluded from the claim to avoid an overclaim a careful run would contradict."
+ },
+ {
+  "id": "q12",
+  "kind": "pattern",
+  "question": "How does infra-compose avoid redoing seed work when you re-run `up` on a volume that's already seeded?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "infra-compose's init containers check a _profile_meta marker first, so re-running up on the same volume is a near-instant no-op."
+   ],
+   "paths": [
+    "infra/CLAUDE.md"
+   ],
+   "detail": "infra/CLAUDE.md lines 38-41: 'Sentinel-based idempotent seeding. Each data service's `*_init` container checks for a `_profile_meta` marker ... If absent, it loads `seed/profile-<name>.{json,sql}` and writes the marker. Second `up` on the same volume is a ~1s no-op.'"
+  },
+  "authoritative": [
+   "infra/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Confirmed for real (not just asserted in docs) via `_profile_meta` usage in infra/src/ec2/profiles.js and infra/compose/services/mongo/seed/dump.js."
+ },
+ {
+  "id": "q13",
+  "kind": "pattern",
+  "question": "Per the db package's Saga conventions table, how are a project's Mongo database name and its SCRAM username derived?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "A project's Mongo database and SCRAM username are both derived from the project name: {project}_db and {project}_app."
+   ],
+   "paths": [
+    "packages/node/db/CLAUDE.md"
+   ],
+   "detail": "packages/node/db/CLAUDE.md lines 113-114: 'Project name -> Mongo DB | `{project_with_underscores}_db`' and 'Project name -> SCRAM user | `{project_with_underscores}_app`' (e.g. `ledger-api` -> `ledger_api_db` / `ledger_api_app`)."
+  },
+  "authoritative": [
+   "packages/node/db/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "The example given in the same table row (ledger-api) makes this easy to verify precisely."
+ },
+ {
+  "id": "q14",
+  "kind": "negative",
+  "question": "Is there a documented uptime, availability SLA, or SLO target for any of soa's example APIs (rest-api, gql-api, tgql-api, trpc-api) in production?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "NOT DOCUMENTED"
+   ],
+   "paths": [],
+   "detail": "NOT DOCUMENTED for the actual example APIs. Two near-misses exist: memory-bank/testing/README.md:28 and memory-bank/testing/performance-testing.md:75, both generic AI-prompt-template boilerplate about testing strategy in general, not a real SLA/SLO/uptime commitment for rest-api/gql-api/tgql-api/trpc-api."
+  },
+  "authoritative": [
+   "N/A -- does not exist"
+  ],
+  "currently_only_in": [],
+  "notes": "Clean negative, no near-miss noise."
+ },
+ {
+  "id": "q15",
+  "kind": "negative",
+  "question": "Has soa (or any of its packages) undergone a documented third-party penetration test or SOC 2 compliance audit?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "NOT DOCUMENTED"
+   ],
+   "paths": [],
+   "detail": "NOT DOCUMENTED. Repo-wide case-insensitive grep for 'pentest', 'penetration test', 'SOC 2'/'SOC2' turns up exactly one near-miss: claude/projects/gh_t54/research/phase-3-plan.md line 787, a TODO bullet ('3. Security Audit: Review Auth0 configuration and OpenFGA policies') in an unrelated research plan for a different initiative -- a proposed to-do item, not a claim that any audit was performed."
+  },
+  "authoritative": [
+   "N/A -- does not exist"
+  ],
+  "currently_only_in": [],
+  "notes": "The one grep hit is a plan bullet, not evidence an audit happened -- a good trap for a naive substring search."
+ },
+ {
+  "id": "q16",
+  "kind": "negative",
+  "question": "Is there a documented per-queue message TTL or max-queue-length policy for soa's RabbitMQ queues (packages/node/rabbitmq)?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "NOT DOCUMENTED"
+   ],
+   "paths": [],
+   "detail": "NOT DOCUMENTED / not implemented. Repo-wide case-insensitive grep (docs and code, excluding claude/) for 'message ttl', 'queue ttl', 'x-message-ttl', 'x-expires', and 'max queue length' returns zero hits. packages/node/rabbitmq/src/{publisher.ts,consumer.ts,connection-manager.ts} call `channel.assertQueue()` with no TTL/length arguments set."
+  },
+  "authoritative": [
+   "N/A -- does not exist"
+  ],
+  "currently_only_in": [],
+  "notes": "Clean negative, verified against both docs and the actual assertQueue call sites in code, not just prose."
+ }
+]

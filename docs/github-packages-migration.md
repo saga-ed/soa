@@ -186,7 +186,6 @@ pnpm install
 
 - 📦 [GitHub Packages](https://github.com/hipponot/saga-soa/packages)
 - ⚙️ [GitHub Actions](https://github.com/hipponot/saga-soa/actions)
-- 📖 [Publishing Guide](./npm-registry-publishing.md)
 - 🚀 [Getting Started](./GETTING-STARTED.md)
 - 🔑 [Create GitHub Token (publishing)](https://github.com/settings/tokens)
 

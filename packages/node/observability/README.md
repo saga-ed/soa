@@ -51,5 +51,6 @@ import { initTracing } from '@saga-ed/soa-observability';
 
 - `@saga-ed/soa-eslint-config` — the `saga-soa/init-tracing-first` lint
   rule wires this into CI; runs against any file named `main.ts`.
-- `claude/projects/soa_75/decisions/d-consumer-resilience.md` pattern 4 —
-  decision-doc rationale.
+- Pattern 4 decision-doc rationale was meant to live in
+  `d-consumer-resilience.md` — the file is missing; see
+  [soa_75's README](../../../docs/history/soa_75/README.md#missing-decisions).

@@ -62,7 +62,7 @@ None - follows all SOA patterns.
 - `../gql-api/` - GraphQL API example (SDL-first)
 - `../tgql-api/` - TypeGraphQL API example (code-first)
 - `/packages/node/api-core/` - Shared server utilities
-- `/apps/node/claude/testing.md` - Testing patterns
+- `.claude/rules/testing-node.md` - Testing patterns (auto-loads on this dir)
 
 ---
 

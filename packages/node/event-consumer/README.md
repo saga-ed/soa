@@ -44,9 +44,8 @@ Canonical example: `program-hub` PR #62, which split
 `GroupProjectionConsumer` from `IamProjectionConsumer` after a poison
 message in one family stalled the other.
 
-The decision-doc rule lives in
-[`d-consumer-resilience.md`](../../../claude/projects/soa_75/decisions/d-consumer-resilience.md)
-pattern 5.
+The decision-doc rule (pattern 5) was meant to live in `d-consumer-resilience.md` — the file is
+missing; see [soa_75's README](../../../docs/history/soa_75/README.md#missing-decisions).
 
 ## Idempotent UPSERT handlers — projection pattern
 
@@ -111,10 +110,9 @@ handler should not overwrite `created_at`; a `*.created` handler should
 not overwrite a more recent `updated_at`. The convergent steady state is
 each event leaving its imprint and nothing more.
 
-For soft-delete vs hard-delete projection rows on `*.deleted` events,
-see
-[`d-consumer-resilience.md`](../../../claude/projects/soa_75/decisions/d-consumer-resilience.md)
-pattern 2 (decision matrix + worked examples).
+For soft-delete vs hard-delete projection rows on `*.deleted` events, pattern 2 (decision matrix +
+worked examples) was meant to live in `d-consumer-resilience.md` — the file is missing; see
+[soa_75's README](../../../docs/history/soa_75/README.md#missing-decisions).
 
 ## See also
 

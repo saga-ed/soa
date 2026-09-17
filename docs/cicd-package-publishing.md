@@ -230,3 +230,8 @@ The workflow is defined in `.github/workflows/publish-codeartifact.yml` and incl
 - **Release Summaries**: Detailed output of what was published
 
 For more details, see the workflow file itself.
+
+## See also
+
+- [CODEARTIFACT_SETUP.md](./CODEARTIFACT_SETUP.md) — registry setup, IAM permissions, consuming packages
+- [package-registry-quickstart.md](./package-registry-quickstart.md) — cross-repo publish/link/resolve workflow

@@ -7,40 +7,48 @@ Server-side packages for Node.js applications.
 ## Runtime Environment
 
 **Type**: Node.js Server
-**Target**: Node.js 20+ (ESM)
+**Target**: Node.js >=24 (ESM)
 **Module**: ESM only
 
 ## Packages
 
 | Package | Description | Docs |
 |---------|-------------|------|
-| `api-core/` | Shared API server utilities with abstract controllers for REST/GraphQL/TypeGraphQL/tRPC, server bootstrapping, and dynamic controller loading. | [api-core/](./api-core/CLAUDE.md) |
+| `api-core/` | Shared API server utilities with abstract controllers for REST/GraphQL/TypeGraphQL, server bootstrapping, and dynamic controller loading. tRPC apps use `@saga-ed/soa-trpc-base` instead — see [how-to-add-pubsub.md](../../docs/how-to-add-pubsub.md). | [api-core/](./api-core/CLAUDE.md) |
 | `api-util/` | API helper utilities for request validation, response formatting, and error handling. Single-purpose utilities. | Tier |
 | `db/` | MongoDB connection management with DI integration, connection pooling, and mock provider for testing. | [db/](./db/CLAUDE.md) |
 | `fixture-serve/` | Ready-to-run Express server for test fixture lifecycle — provision/snapshot/restore endpoints, async jobs, Playwright credential export, infra-compose integration. Subclass `AbstractFixtureController` per service. | [fixture-serve/](./fixture-serve/CLAUDE.md) |
 | `logger/` | Simple Pino logger wrapper with sensible defaults and structured logging. Standard Node.js logging patterns. **Usage:** `import { logger } from '@saga-ed/soa-logger'` | Tier |
 | `pubsub-client/` | PubSub client library for subscribing to events. Connects to pubsub-server. Standard event emitter patterns. | Tier |
-| `pubsub-core/` | PubSub core types and interfaces. Pure TypeScript types. **Usage:** `import { PubSubEvent } from '@saga-ed/soa-pubsub-core'` | Tier |
-| `pubsub-server/` | PubSub server implementation for publishing events. Express middleware integration. Standard pub/sub patterns. | Tier |
+| `pubsub-core/` | PubSub core types and interfaces — `CSEEvent`/`SSEEvent`/`CSEEventWithResponse`, `ChannelConfig`, `ActionContext`. **Usage:** `import type { CSEEvent } from '@saga-ed/soa-pubsub-core'` | [how-to-add-pubsub.md](../../docs/how-to-add-pubsub.md) |
+| `pubsub-server/` | PubSub server implementation — `PubSubService`, `ChannelService`, `EventService`, `InMemoryAdapter`. Express/tRPC integration. | [how-to-add-pubsub.md](../../docs/how-to-add-pubsub.md) |
 | `rabbitmq/` | RabbitMQ client wrapper with connection pooling and channel management. Standard AMQP patterns. **Usage:** `import { RabbitMQ } from '@saga-ed/soa-rabbitmq'` | Tier |
 | `redis-core/` | Redis client wrapper with ioredis. Connection pooling and error handling. **Usage:** `import { RedisClient } from '@saga-ed/soa-redis-core'` | Tier |
 | `aws-util/` | AWS SDK utilities for S3, SQS, and SNS. Helper functions for common AWS operations. | Tier |
 | `test-util/` | Vitest testing utilities with custom matchers and test helpers. **Usage:** `import { createMockRequest } from '@saga-ed/soa-test-util'` | Tier |
-| `event-envelope/` | Zod-validated cross-service event envelope (id, type, version, occurredAt, traceparent, payload). **Usage:** `import { EventEnvelopeSchema } from '@saga-ed/soa-event-envelope'` | [event-driven.md](./claude/event-driven.md) |
-| `event-outbox/` | Transactional outbox: `writeOutbox()` writes inside the same pg tx as your domain change; `new OutboxRelay({...}).start()` ships rows to RabbitMQ with at-least-once delivery. | [event-driven.md](./claude/event-driven.md) |
-| `event-consumer/` | Idempotent RabbitMQ consumer with `consumed_events` dedup table, Zod runtime validation, OTel trace propagation. | [event-driven.md](./claude/event-driven.md) |
-| `observability/` | OpenTelemetry tracing setup, Prometheus metrics for outbox/consumer, Express error middleware. **Usage:** `import { initTracing } from '@saga-ed/soa-observability'` | [event-driven.md](./claude/event-driven.md) |
-| `event-test-harness/` | Testcontainers helpers for spinning up Postgres + RabbitMQ in integration tests. **Usage:** `import { startInfra } from '@saga-ed/soa-event-test-harness'` | [event-driven.md](./claude/event-driven.md) |
-| `event-integration-tests/` | Cross-package integration tests for the event-driven stack (outbox → broker → consumer round-trips). | [event-driven.md](./claude/event-driven.md) |
+| `event-envelope/` | Zod-validated cross-service event envelope (id, type, version, occurredAt, traceparent, payload). **Usage:** `import { EventEnvelopeSchema } from '@saga-ed/soa-event-envelope'` | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `event-outbox/` | Transactional outbox: `writeOutbox()` writes inside the same pg tx as your domain change; `new OutboxRelay({...}).start()` ships rows to RabbitMQ with at-least-once delivery. | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `event-consumer/` | Idempotent RabbitMQ consumer with `consumed_events` dedup table, Zod runtime validation, OTel trace propagation. | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `observability/` | OpenTelemetry tracing setup, Prometheus metrics for outbox/consumer, Express error middleware. **Usage:** `import { initTracing } from '@saga-ed/soa-observability'` | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `event-test-harness/` | Testcontainers helpers for spinning up Postgres + RabbitMQ in integration tests. **Usage:** `import { startInfra } from '@saga-ed/soa-event-test-harness'` | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `event-integration-tests/` | Cross-package integration tests for the event-driven stack (outbox → broker → consumer round-trips). | [event-driven.md](../../.claude/rules/event-driven.md) |
+| `saga-stack-cli/` | The `ss` CLI — unified stack up/seed/verify/reset/snapshot/e2e across the whole fleet, one OCLIF package over a frozen TypeScript service manifest. | [saga-stack-cli/](./saga-stack-cli/CLAUDE.md) |
+| `contract-check/` | CI gate for event-schema changes: catches in-place edits to frozen schemas, unpinned new versions, and dropped versions a consumer still pins. | Tier |
+| `health/` | Shared `/health` + `/health/details` route mounters for Node services, unmounted from any auth perimeter; reports build identity (colour/SHA/env) for blue/green smoke tests. | Tier |
+| `inspect/` | Standard introspection surface for the sandbox visibility console — a service mounts one router and declares its browsable entities. | Tier |
+| `mailer/` | Shared transactional-email primitive: template-free `MailService` over a pluggable `MailAdapter` (`StubMailAdapter` for dev/test, `SesMailAdapter` for prod). | Tier |
+| `postgres/` | `PostgresProvider` — Inversify-injectable, ORM-agnostic `pg.Pool` wrapper with an AWS SSM/Secrets Manager config loader. | Tier |
+| `preview-headers/` | Canonical HTTP-plane `x-saga-preview-<service>` sandbox-routing-header primitives (capture/forward/match), the HTTP sibling of the event-plane preview tag. | Tier |
+| `mesh-fixture-cli/` | **Deprecated** — superseded by `saga-stack-cli` (`ss stack snapshot`/`seed`). Left functional, not removed; cross-repo fixture authoring for the saga-mesh. | Tier |
 
-**Note:** Packages marked "Tier" are simple/single-purpose and adequately documented here. Complex packages have dedicated CLAUDE.md files. The event-driven family share [claude/event-driven.md](./claude/event-driven.md).
+**Note:** Packages marked "Tier" are simple/single-purpose and adequately documented here. Complex packages have dedicated CLAUDE.md files. The event-driven family share [event-driven.md](../../.claude/rules/event-driven.md).
 
 ## Two pubsub families — pick one
 
-- **`pubsub-*`** (`pubsub-core`, `pubsub-client`, `pubsub-server`) — real-time UI push (browser ↔ server). Lives on top of HTTP/SSE. Use for live dashboards, notifications, collaborative cursors.
+- **`pubsub-*`** (`pubsub-core`, `pubsub-client`, `pubsub-server`) — real-time UI push (browser ↔ server). Lives on top of HTTP/SSE. Use for live dashboards, notifications, collaborative cursors. See [how-to-add-pubsub.md](../../docs/how-to-add-pubsub.md) for a worked tRPC example.
 - **`event-*`** + `observability` — durable cross-service eventing (server ↔ server) over RabbitMQ with transactional outbox + idempotency. Use for domain events that must survive broker restarts and be replayed safely.
 
-These are NOT interchangeable. See `~/dev/soa/.claude/projects/soa_75/decisions/d-soa-pubsub-divorce.md` for the rationale.
+These are NOT interchangeable. See `docs/history/soa_75/decisions/d-soa-pubsub-divorce.md` for the rationale.
 
 ## Node.js Constraints
 
@@ -87,6 +95,12 @@ import { BaseController } from '@saga-ed/soa-api-core';
 import { logger } from '@saga-ed/soa-logger';
 import { db } from '@saga-ed/soa-db';
 ```
+
+## Rules that apply here
+
+- `testing-node.md`
+- `event-driven.md` — for the event-family packages (`event-envelope`, `event-outbox`,
+  `event-consumer`, `event-test-harness`, `event-integration-tests`, `observability`).
 
 ---
 

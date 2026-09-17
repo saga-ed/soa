@@ -18,7 +18,7 @@
 #                                          reflects HEAD, NOT the working tree —
 #                                          apply only ever pins a committed sha)
 #
-# What this does NOT do (see docs/promotion-pipeline.md's non-goals):
+# What this does NOT do:
 #   - No dbProfile capture. up.sh has no "what did I seed this local DB from"
 #     tracker for a running database, so a captured manifest carries no
 #     dbProfile — the same seed profile the cloud sandbox was already using

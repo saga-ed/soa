@@ -16,6 +16,7 @@
         "build": "tsup",
         "check-types": "tsc --noEmit",
         "test": "vitest run --passWithNoTests",
+        "test:int": "vitest run --config vitest.int.config.ts",
         "lint": "eslint src/",
         "clean": "rm -rf dist"
     },

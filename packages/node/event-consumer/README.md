@@ -116,6 +116,163 @@ see
 [`d-consumer-resilience.md`](../../../claude/projects/soa_75/decisions/d-consumer-resilience.md)
 pattern 2 (decision matrix + worked examples).
 
+## Recovering dead letters — targeted replay
+
+When a consumer dead-letters messages for a reason that has since been
+fixed (a deploy overlap, a database deadlock, a dependency that was
+briefly down), somebody has to put them back. Doing that through the
+RabbitMQ management UI needs the broker admin credential and network
+reach into the VPC, which almost nobody has.
+
+`inspectDeadLetterQueue` and `replayDeadLetters` do it over plain AMQP on
+the service's **own** broker credentials — no management HTTP API, no
+admin secret.
+
+A service's own entry point is the whole thing:
+
+```typescript
+import { parseArgs } from 'node:util';
+import { DLQ_REPLAY_CLI_OPTIONS, runDlqReplayCli } from '@saga-ed/soa-event-consumer';
+
+const { values } = parseArgs({ options: DLQ_REPLAY_CLI_OPTIONS });
+
+process.exitCode = await runDlqReplayCli({
+    values,
+    connection: connectionManager, // @saga-ed/soa-rabbitmq ConnectionManager
+    dlqQueue: 'iam.events.dlq.queue',
+    targetQueue: 'coach-api.instance-creation',
+    defaults: {
+        // The types THIS service has decided are safe to re-run. See
+        // "what not to replay" below — this list is a judgement, not a default.
+        eventTypes: ['iam.persona_assignment.added', 'iam.persona_assignment.removed'],
+    },
+    logger,
+});
+```
+
+`runDlqReplayCli` prints the report and returns the exit code, so a
+runbook step that half-succeeded cannot look like a clean run to whatever
+called it:
+
+| Code | Meaning |
+|---|---|
+| `0` | Did what was asked; nothing outstanding. |
+| `1` | A refusal, or a replay that stopped on a failed publish. |
+| `2` | A dry run that selected messages — work found, nothing published. |
+
+A refusal — no filter, a stale confirmation, a truncated scan — is
+printed with the `reason` that `DlqReplayRefusedError` carries, and exits
+`1`. Anything else (a broker error, a bug) propagates with its stack.
+
+**It closes the connection.** `runDlqReplayCli` takes ownership of the
+connection it is given and closes it on every path, including refusals,
+so the process ends by itself. This matters more than it sounds: an open
+AMQP socket keeps Node's event loop alive, so a CLI that merely finishes
+its work just sits there, and `process.exit()` to get around that
+discards whatever else was still pending. Don't pass a connection the
+process still needs.
+
+Call `inspectDeadLetterQueue` / `replayDeadLetters` directly instead when
+the caller is a long-running service that owns its connection — those
+take a `DlqChannelSource`, which has no `close()`, precisely so they
+cannot close somebody else's connection.
+
+### Nothing is ever acked or deleted
+
+Both operations read with `basic.get(noAck: false)` and requeue
+everything at the end, so the dead-letter queue is left exactly as
+found. A replay **publishes a copy** to the target queue and leaves the
+original in place. A botched run can therefore duplicate a message
+(harmless — see below) but can never lose one. **Emptying the DLQ stays a
+broker-admin action** and is deliberately not something this tool can do.
+
+### Targeting is mandatory
+
+`validateFilter` refuses to run unless the caller supplies at least one
+of:
+
+| Filter | Flag | Effect |
+|---|---|---|
+| `eventTypes` | `--event-type` (repeatable) | Exact match on `envelope.eventType` |
+| `eventIds` | `--event-id` (repeatable) | Exact match on `envelope.eventId` |
+| `deadLetteredAfter` / `deadLetteredBefore` | `--since` / `--until` | Window on the most recent `x-death` time |
+
+Two more narrow the run but **cannot stand in for a target**:
+
+- `firstDeathQueue` (`--first-death-queue`) defaults to the target queue,
+  so it always has a value and could never refuse anything.
+- `maxMessages` (`--max`) defaults to 25 and is capped at 500. A cap
+  bounds the damage; it does not say what you meant to select.
+
+A replay additionally needs `approve` **and** a `confirm` value that the
+dry run printed. The confirmation is a digest of the destination plus the
+ordered event ids selected; the approve recomputes it from a fresh read
+of the queue and refuses if anything has changed since the dry run.
+
+### Safe with a shared dead-letter queue
+
+Several services dead-letter into one queue (every consumer of
+`iam.events` shares `iam.events.dlq.queue`), and a service's broker user
+can technically read all of it. Every filter runs **before** anything is
+published, and a message whose first death was another service's queue is
+never republished.
+
+Replay publishes to the **default exchange** with the target queue's name
+as the routing key, so the copy reaches that one queue and nowhere else —
+the difference between "put my 15 messages back" and "re-broadcast 15
+events to everyone who was listening at the time".
+
+### Why replaying into an EventConsumer is safe
+
+`processEnvelope` inserts `(consumer_name, event_id)` into
+`consumed_events` in the **same transaction** as the handler's projection
+write, and both commit or both roll back. So:
+
+- An event that already succeeded has a committed row. The replayed copy
+  hits `ON CONFLICT DO NOTHING`, inserts nothing, and is acked without
+  running the handler. Redelivery is a no-op, not a double-apply.
+- An event that **failed** has no row — the insert rolled back with the
+  handler. The replayed copy runs the handler as if it were new.
+
+### What is NOT safe to replay generically
+
+Events that **replace a whole projection** rather than amend it: a
+persona's full permission set, a full policy set, "here is the complete
+list of X for aggregate Y". If a newer one already landed, replaying the
+older one rewinds the projection to a stale snapshot — and
+`consumed_events` will not stop it, because the old event has its own
+event id and has never been processed, so it looks brand new.
+`consumed_events` gives at-most-once-per-event, **not** ordering.
+
+This package deliberately does not guess which types those are; guessing
+wrong is silent data corruption. The `eventTypes` allowlist is how the
+service that owns the handlers states which types it is willing to have
+re-run. For coach-api that is the two `persona_assignment` events (each
+opens or closes one interval row, keyed on the iam membership row id, and
+then reconciles) and **not** `persona_definition.upserted` or
+`persona_policies.upserted`, which carry a whole permission or policy set.
+
+Two further messages are never selected, whatever the filter says:
+
+- a body that is not a parseable envelope — there is no event type to
+  check and no event id to dedup on, and the consumer would poison-nack
+  it straight back;
+- a message with no readable death time, when a time window was given.
+
+### Integration tests
+
+The unit tests fake the channel. `src/__tests__/dlq-replay.int.test.ts`
+runs the same paths against a real broker — including what RabbitMQ
+actually writes into `x-death`, and that the DLQ really is unchanged
+afterwards:
+
+```bash
+docker run -d --rm --name dlq-replay-rabbit -p 45672:5672 rabbitmq:3-management
+pnpm --filter @saga-ed/soa-event-consumer test:int
+```
+
+Point `RABBITMQ_TEST_URL` elsewhere to use an existing broker.
+
 ## See also
 
 - `@saga-ed/soa-event-outbox` — transactional outbox + relay.

@@ -73,6 +73,42 @@ The lock key combines a fixed namespace with `current_schema()`, so per-PR
 preview schemas on a shared Postgres instance each get their own lock instead
 of contending for one across every preview.
 
+### Stale-leader watchdog
+
+Leadership used to be lost only when the leader's advisory-lock client
+emitted `'error'`. That misses two failure modes where the client is fine but
+the relay itself is not:
+
+- **A tick that keeps failing.** A dead broker channel that never recovers, a
+  poisoned pg client, or pool exhaustion can make every `tick()` fail forever
+  without ever touching the advisory-lock client. `leaderYieldAfterMs`
+  (default `60_000`) tracks the wall-clock length of the current unbroken
+  failure streak (reset on the next successful drain) and, once it exceeds
+  the threshold, calls `yieldLeadership('failures')`. This does **not** apply
+  to the fatal-pg-error path (auth failure, missing table, …) — that already
+  halts the relay outright rather than handing the lock to a sibling that
+  would hit the same error immediately.
+- **A tick that never returns at all.** A separate watchdog timer tracks how
+  long the current leader tick has been in flight and, past
+  `leaderTickTimeoutMs` (default `(txIdleTimeoutMs ?? 300_000) +
+  (drainTimeoutMs ?? 30_000)`), calls `yieldLeadership('tick-timeout')`. The
+  wedged tick itself can't be aborted, but when it eventually settles it runs
+  through the normal `scheduleNext` → `tick` → `isLeader` check and finds
+  leadership already gone, so it does not drain again on its own.
+
+Either path releases the advisory lock (destroying the client instead of
+waiting forever if even the unlock query itself is wedged — Postgres drops
+session-level advisory locks on disconnect, so destroying is enough), waits
+`leaderYieldBackoffMs` (default `2 * leaderPollIntervalMs`) before
+re-pursuing so a healthy sibling task wins the lock first, and fires
+`metrics.onLeaderLost` + `metrics.onLeaderYielded(reason)`. If no sibling is
+running, the same task re-acquires after the backoff — that's the intended
+fallback, not a bug. Set either option to `0` to disable that watchdog.
+
+Set `instanceLabel` (e.g. your blue/green deployment color) to have it passed
+through, unexamined, to every leader metrics hook — so a dashboard can tell a
+dark color idling by design from a live color that can't get the lock.
+
 ## Retention — opt-in, leader-only
 
 `outbox_event` has no retention by default; published rows accumulate

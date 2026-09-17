@@ -17,17 +17,33 @@ export interface OutboxMetrics {
     onPublished: (eventType: string, eventVersion: number) => void;
     /** Called when publishing a row throws. */
     onPublishFailed: (eventType: string, eventVersion: number, reason: string) => void;
-    /** Called when this instance becomes the single leader that polls outbox_event. */
-    onLeaderAcquired?: () => void;
-    /** Called when this instance loses leadership (connection lost, or stop()). */
-    onLeaderLost?: () => void;
+    /**
+     * Called when this instance becomes the single leader that polls
+     * outbox_event. `instance` is the caller's `instanceLabel` opt (e.g. a
+     * blue/green deployment color), when set.
+     */
+    onLeaderAcquired?: (instance?: string) => void;
+    /**
+     * Called when this instance loses leadership (connection lost, a
+     * watchdog yield, or stop()).
+     */
+    onLeaderLost?: (instance?: string) => void;
     /**
      * Called each time a non-leader instance fails to acquire the lock and
      * schedules a retry. Lets ops distinguish "lock held elsewhere, working
      * as intended" from low event volume on the graph — a wedged leader
      * looks identical to a quiet one without this.
      */
-    onLeaderWaiting?: () => void;
+    onLeaderWaiting?: (instance?: string) => void;
+    /**
+     * Called when this instance voluntarily gives up leadership because it
+     * could no longer make progress: `'failures'` (a sustained tick-failure
+     * streak past `leaderYieldAfterMs`) or `'tick-timeout'` (a single tick
+     * in flight past `leaderTickTimeoutMs`). Distinguishes a stale leader
+     * that ops had to force off the lock from an ordinary connection-loss
+     * `onLeaderLost`.
+     */
+    onLeaderYielded?: (reason: 'failures' | 'tick-timeout', instance?: string) => void;
 }
 
 export interface OutboxRelayOpts {
@@ -92,6 +108,46 @@ export interface OutboxRelayOpts {
      */
     leaderPollIntervalMs?: number;
     /**
+     * Wall-clock duration a leader may spend with every `tick()` failing
+     * (e.g. a dead channel that never recovers, a poisoned client, pool
+     * exhaustion) before it yields leadership rather than sitting on the
+     * lock forever while every sibling task idles. The streak clock starts
+     * at the first failure and resets on the next successful `drainBatch`.
+     * Does NOT apply to the fatal-pg-error path (`isFatalPgError`) — that
+     * already halts the relay outright. Default: 60_000. Set 0 to disable.
+     */
+    leaderYieldAfterMs?: number;
+    /**
+     * Wall-clock duration a single leader tick may be in flight before a
+     * watchdog treats it as wedged and yields leadership — covers a loop
+     * that never returns at all (as opposed to `leaderYieldAfterMs`, which
+     * covers a loop that returns but keeps failing). The in-flight tick
+     * itself cannot be aborted; when it eventually settles it runs through
+     * the ordinary `scheduleNext` → `tick` → `isLeader` check and, finding
+     * leadership already yielded, does not drain again on its own. Default:
+     * `(txIdleTimeoutMs ?? 300_000) + (drainTimeoutMs ?? 30_000)` — long
+     * enough that a healthy batch under normal backpressure never trips it.
+     * Set 0 to disable the watchdog.
+     */
+    leaderTickTimeoutMs?: number;
+    /**
+     * Backoff before re-pursuing the lock after `yieldLeadership()`, so a
+     * healthy sibling task (if any) has time to win it first instead of the
+     * same stale-but-recovering instance immediately re-acquiring its own
+     * lock. Default: `2 * (leaderPollIntervalMs ?? 5000)`. If no sibling is
+     * running, this task re-acquires after the backoff — that is the
+     * intended fallback, not a bug.
+     */
+    leaderYieldBackoffMs?: number;
+    /**
+     * Opaque label (e.g. the blue/green deployment color) passed through
+     * unexamined to every `OutboxMetrics` leader hook, so dashboards can
+     * tell a dark color idling by design from a live color that cannot get
+     * the lock. The relay never parses or infers this — callers own reading
+     * it from their own env/config.
+     */
+    instanceLabel?: string;
+    /**
      * Opt-in retention sweep for published rows, run only by the elected
      * leader on its own timer. Omit to disable — outbox_event then keeps
      * every published row forever (see OUTBOX_EVENT_ARCHIVE_SQL).
@@ -128,10 +184,15 @@ export class OutboxRelay {
     private running = false;
     private consecutiveFailures = 0;
     private lastFailureMessage: string | null = null;
+    /** Wall-clock start of the current unbroken tick-failure streak, or null between streaks. */
+    private firstFailureAt: number | null = null;
     private leaderClient: PoolClient | null = null;
     private leaderClientErrorHandler: ((err: Error) => void) | null = null;
     private isLeader = false;
     private leaderTimer: NodeJS.Timeout | null = null;
+    /** Wall-clock start of the currently in-flight leader tick, or null when none is running. */
+    private tickStartedAt: number | null = null;
+    private leaderWatchdogTimer: NodeJS.Timeout | null = null;
     private retention: OutboxRetention | null = null;
     private retentionTimer: NodeJS.Timeout | null = null;
 
@@ -184,6 +245,7 @@ export class OutboxRelay {
         }
 
         this.opts.logger.info(`[OutboxRelay] started (exchange=${this.opts.exchange})`);
+        this.startLeaderWatchdog();
         void this.pursueLeadership();
         this.scheduleNext();
     }
@@ -256,6 +318,10 @@ export class OutboxRelay {
             clearTimeout(this.leaderTimer);
             this.leaderTimer = null;
         }
+        if (this.leaderWatchdogTimer) {
+            clearInterval(this.leaderWatchdogTimer);
+            this.leaderWatchdogTimer = null;
+        }
         if (this.retentionTimer) {
             clearInterval(this.retentionTimer);
             this.retentionTimer = null;
@@ -293,10 +359,12 @@ export class OutboxRelay {
             this.scheduleNext();
             return;
         }
+        this.tickStartedAt = Date.now();
         try {
             await this.drainBatch();
             this.consecutiveFailures = 0;
             this.lastFailureMessage = null;
+            this.firstFailureAt = null;
         } catch (err) {
             // A tick interrupted by stop() isn't a failure worth reporting.
             if (!this.running) return;
@@ -305,7 +373,9 @@ export class OutboxRelay {
                 // Configuration / permission errors aren't going to fix
                 // themselves on the next tick — log loudly and stop the loop
                 // so the orchestrator notices instead of burying 2 errors/sec
-                // in Sentry forever.
+                // in Sentry forever. Never yield here: the relay is halting
+                // outright, not handing the lock to a sibling that would hit
+                // the same fatal error immediately.
                 this.opts.logger.error(
                     '[OutboxRelay] fatal pg error; halting',
                     e,
@@ -324,6 +394,9 @@ export class OutboxRelay {
             // (first of a streak, or the failure mode changing mid-outage)
             // immediately, then one heartbeat per ~60s of poll ticks.
             this.consecutiveFailures++;
+            if (this.firstFailureAt === null) {
+                this.firstFailureAt = Date.now();
+            }
             const ticksPerHeartbeat = Math.max(
                 1,
                 Math.round(60_000 / (this.opts.pollIntervalMs ?? 500)),
@@ -336,6 +409,22 @@ export class OutboxRelay {
                     e,
                 );
             }
+            // A wedged leader (dead channel that never recovers, poisoned
+            // client, pool exhaustion) would otherwise sit on the advisory
+            // lock forever while every sibling idles. `isLeader` re-checked
+            // here (not just at tick()'s top) because a concurrent watchdog
+            // yield (leaderTickTimeoutMs, below) can flip it mid-tick.
+            const yieldAfterMs = this.opts.leaderYieldAfterMs ?? 60_000;
+            if (
+                this.isLeader &&
+                yieldAfterMs > 0 &&
+                this.firstFailureAt !== null &&
+                Date.now() - this.firstFailureAt >= yieldAfterMs
+            ) {
+                void this.yieldLeadership('failures');
+            }
+        } finally {
+            this.tickStartedAt = null;
         }
         this.scheduleNext();
     }
@@ -483,18 +572,50 @@ export class OutboxRelay {
         }
         let unlockErr: Error | undefined;
         try {
-            await this.withErrorGuard(client, () =>
-                client.query(
+            // Guard against the leader client itself being the wedged one
+            // (e.g. mid-yieldLeadership on a client whose socket is silently
+            // dead): without a bound, this query could hang as long as the
+            // dead TCP connection, keeping the advisory lock held the whole
+            // time. Postgres drops session-level advisory locks on
+            // disconnect, so destroying the client on timeout is enough —
+            // the unlock query itself is then moot. The real query is left
+            // to settle on its own (still under withErrorGuard for the whole
+            // span so a late 'error' event doesn't crash the process); we
+            // just stop waiting on it.
+            const timeoutMs = this.opts.leaderPollIntervalMs ?? 5000;
+            await this.withErrorGuard(client, () => {
+                const unlockQuery = client.query(
                     'SELECT pg_advisory_unlock(hashtext($1)::int, hashtext(current_schema())::int)',
                     [OutboxRelay.LEADER_LOCK_NAMESPACE],
-                ),
-            );
+                );
+                return new Promise<void>((resolve, reject) => {
+                    const timer = setTimeout(() => {
+                        reject(
+                            new Error(
+                                `advisory unlock timed out after ${timeoutMs}ms; destroying client`,
+                            ),
+                        );
+                    }, timeoutMs);
+                    timer.unref?.();
+                    unlockQuery.then(
+                        () => {
+                            clearTimeout(timer);
+                            resolve();
+                        },
+                        (err: unknown) => {
+                            clearTimeout(timer);
+                            reject(err);
+                        },
+                    );
+                });
+            });
         } catch (err) {
-            // Connection is likely already dead — Postgres releases session-
-            // level advisory locks on disconnect, so the lock is gone either
-            // way. Capture the error so `release()` below destroys the
-            // client instead of recycling a connection that just failed a
-            // query back into the pool.
+            // Either the unlock query itself failed (connection likely
+            // already dead — Postgres releases session-level advisory locks
+            // on disconnect, so the lock is gone either way) or it timed
+            // out. Capture the error so `release()` below destroys the
+            // client instead of recycling a connection that just failed, or
+            // may still be wedged, back into the pool.
             unlockErr = err instanceof Error ? err : new Error(String(err));
         } finally {
             client.release(unlockErr);
@@ -520,7 +641,7 @@ export class OutboxRelay {
             return;
         }
         if (!client) {
-            this.opts.metrics?.onLeaderWaiting?.();
+            this.opts.metrics?.onLeaderWaiting?.(this.opts.instanceLabel);
             this.opts.logger.debug('[OutboxRelay] leader lock held elsewhere; waiting');
             this.scheduleLeaderPoll();
             return;
@@ -532,6 +653,12 @@ export class OutboxRelay {
         }
         this.leaderClient = client;
         this.isLeader = true;
+        // Fresh leadership cycle — don't carry a failure streak from a
+        // *previous* stint (e.g. right after yieldLeadership('failures')
+        // backed off and this task re-acquired) into this one.
+        this.consecutiveFailures = 0;
+        this.lastFailureMessage = null;
+        this.firstFailureAt = null;
         // Must have a listener — an unhandled EventEmitter 'error' crashes the
         // process. A dead connection also drops the session-level advisory
         // lock on the Postgres side, so re-pursuing here is correct, not
@@ -552,20 +679,105 @@ export class OutboxRelay {
             this.opts.logger.warn(`[OutboxRelay] leader connection lost: ${err.message}; re-acquiring`);
             this.isLeader = false;
             this.leaderClient = null;
-            this.opts.metrics?.onLeaderLost?.();
+            this.opts.metrics?.onLeaderLost?.(this.opts.instanceLabel);
             if (this.running) void this.pursueLeadership();
         };
         this.leaderClientErrorHandler = onLeaderClientError;
         client.on('error', onLeaderClientError);
-        this.opts.metrics?.onLeaderAcquired?.();
+        this.opts.metrics?.onLeaderAcquired?.(this.opts.instanceLabel);
         this.opts.logger.info('[OutboxRelay] acquired leader lock; polling outbox_event');
     }
 
     private scheduleLeaderPoll(): void {
+        this.scheduleLeaderPursue(this.opts.leaderPollIntervalMs ?? 5000);
+    }
+
+    /** Schedules the next `pursueLeadership()` attempt after `delayMs`, replacing any pending one. */
+    private scheduleLeaderPursue(delayMs: number): void {
         if (!this.running) return;
+        if (this.leaderTimer) {
+            clearTimeout(this.leaderTimer);
+        }
         this.leaderTimer = setTimeout(() => {
             void this.pursueLeadership();
-        }, this.opts.leaderPollIntervalMs ?? 5000);
+        }, delayMs);
+    }
+
+    /**
+     * Voluntarily give up leadership because this instance can no longer
+     * make progress: `'failures'` (tick()'s catch path, a sustained
+     * failure streak past `leaderYieldAfterMs`) or `'tick-timeout'` (the
+     * watchdog below, a single tick in flight past `leaderTickTimeoutMs`).
+     * Idempotent — a no-op once `isLeader` is already false, which also
+     * covers the two triggers racing each other (whichever runs its
+     * synchronous prefix first wins; the loser's guard trivially returns).
+     *
+     * `isLeader` flips to false synchronously, before any `await`, so a
+     * tick already in flight when this runs (the tick-timeout case, by
+     * construction) finds leadership gone the moment it settles and does
+     * NOT re-enter `drainBatch` — it just falls through to `scheduleNext()`
+     * like any other non-leader tick.
+     */
+    private async yieldLeadership(reason: 'failures' | 'tick-timeout'): Promise<void> {
+        if (!this.isLeader) return;
+        this.isLeader = false;
+        const client = this.leaderClient;
+        const detail =
+            reason === 'failures'
+                ? `${this.consecutiveFailures} consecutive tick failures over ${
+                      this.firstFailureAt !== null ? Date.now() - this.firstFailureAt : 0
+                  }ms`
+                : `tick in flight for ${
+                      this.tickStartedAt !== null ? Date.now() - this.tickStartedAt : 0
+                  }ms`;
+        this.opts.logger.error(`[OutboxRelay] yielding leadership (${reason}): ${detail}`);
+        this.opts.metrics?.onLeaderLost?.(this.opts.instanceLabel);
+        this.opts.metrics?.onLeaderYielded?.(reason, this.opts.instanceLabel);
+        if (client) {
+            // releaseLeadership's own listener-cleanup guard checks
+            // `this.leaderClient === client`, so that field is nulled AFTER
+            // this call returns (mirrors stop()'s ordering) rather than
+            // before it.
+            await this.releaseLeadership(client);
+        }
+        if (this.leaderClient === client) {
+            this.leaderClient = null;
+        }
+        this.consecutiveFailures = 0;
+        this.lastFailureMessage = null;
+        this.firstFailureAt = null;
+        if (!this.running) return;
+        // Back off before re-pursuing so a healthy sibling task (if any)
+        // has time to win the lock first, rather than this same
+        // stale-but-recovering instance immediately re-acquiring it. If no
+        // sibling exists, this task re-acquires after the backoff — that is
+        // the intended fallback, not a bug.
+        this.scheduleLeaderPursue(
+            this.opts.leaderYieldBackoffMs ?? 2 * (this.opts.leaderPollIntervalMs ?? 5000),
+        );
+    }
+
+    /**
+     * Watchdog for a leader tick that never returns at all (as opposed to
+     * one that returns but keeps failing, covered by `leaderYieldAfterMs`
+     * in `tick()`'s own catch path). Runs on its own unref'd interval,
+     * independent of the tick loop itself — a wedged tick can't run its own
+     * watchdog check. Set `leaderTickTimeoutMs: 0` (or a computed default
+     * that resolves to <= 0) to disable.
+     */
+    private startLeaderWatchdog(): void {
+        const timeoutMs =
+            this.opts.leaderTickTimeoutMs ??
+            (this.opts.txIdleTimeoutMs ?? 300_000) + (this.opts.drainTimeoutMs ?? 30_000);
+        if (timeoutMs <= 0) return;
+        const periodMs = Math.min(timeoutMs / 4, 30_000);
+        this.leaderWatchdogTimer = setInterval(() => {
+            if (!this.isLeader || this.tickStartedAt === null) return;
+            if (Date.now() - this.tickStartedAt >= timeoutMs) {
+                void this.yieldLeadership('tick-timeout');
+            }
+        }, periodMs);
+        this.leaderWatchdogTimer.unref?.();
     }
 
     /**

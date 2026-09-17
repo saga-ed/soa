@@ -1,6 +1,7 @@
 # D13 — Outbox hardening and blue/green isolation for the event plane
 
-**Status:** PROPOSED 2026-09-15 — needs review by Seth. Spans `soa`, `rostering`, `program-hub`
+**Status:** RESOLVED 2026-09-17 — design and the five open questions agreed with Seth; see
+"Resolved questions" at the end. Implementation not started. Spans `soa`, `rostering`, `program-hub`
 (and the `saga-bluegreen` CLI). Research for this record was gathered on branch
 `claude/outbox-optimization-isolation-os89ee` in each repo.
 
@@ -96,7 +97,8 @@ flag, and a short pause in consumption during the hand-over is accepted.
 
 - `getOwnColor()` — parse `deployment.identifier` out of `OTEL_RESOURCE_ATTRIBUTES`, exactly as
   `soa-health` does; returns `null` outside blue/green.
-- `ActiveColorGate({ parameterName, pollIntervalMs = 10_000 })` — polls `ssm:GetParameter`;
+- `ActiveColorGate({ parameterName, pollIntervalMs = 10_000 })` — polls `ssm:GetParameter` with
+  jitter (see resolved question 2 for the account-wide throughput budget);
   exposes `isActive(): boolean` and `on('change', active => …)`. Semantics: parameter absent or
   `getOwnColor()` null → always active (today's behaviour); value `none` → inactive on every
   colour. SSM unreachable → keep last known value, log at warn, never flap on a transient failure.
@@ -211,17 +213,30 @@ Glacier).
    reverts to today's behaviour.
 7. Archive exporter last; it changes nothing operator-facing.
 
-## Open questions for review
+## Resolved questions (2026-09-17)
 
-1. SSM vs. a `deployment_control` row in each service's DB for the active-colour signal. SSM is
-   proposed because the flip CLI already holds AWS credentials and no DB credentials; a DB row
-   would make the gate transactional with the service's own writes but needs an admin endpoint.
-2. Is a 10 s poll acceptable for the hand-over latency in the unflagged path? It only lengthens
-   the window where both colours process equivalent code, so probably yes.
-3. Should the auto-flag heuristic err toward flagging (a false positive costs a few seconds of
-   paused consumption) or toward not flagging (a false negative is today's behaviour)? Proposed:
-   err toward flagging.
-4. Do we want SAC on queues at all, given it requires draining and re-declaring every queue once,
-   now that the gate is the only thing that has to be right?
-5. Does iam-api's `DesiredCount: 3` need more than one consumer per queue in future? If so, SAC
-   is off the table and the gate alone carries isolation.
+1. **SSM, not a DB control row.** The flip CLI already holds AWS credentials and already makes one
+   AWS API call per flip. A DB row would need prod DB credentials on an operator machine or a new
+   admin endpoint per service, and that endpoint on a dark colour is reachable only with the
+   preview header, which is the kind of routing subtlety the flip should not depend on. Nothing in
+   the design needs the transactional coupling a DB row would give.
+2. **10 s poll with jitter is acceptable.** The flagged path waits on `/health`, not on a sleep, so
+   the interval only widens the unflagged overlap, where both colours run equivalent code. Budget:
+   `ssm:GetParameter` has a default account-wide limit of 40 requests/s shared with
+   CloudFormation's parameter resolution during deploys; the fleet at two colours and a few tasks
+   each is ~4 requests/s. Raise the interval to 15 s before raising the SSM throughput tier if
+   task counts grow.
+3. **Auto-flag errs toward flagging.** A false positive costs seconds of paused consumption once; a
+   false negative is today's behaviour. The per-service path list lives in a small reviewable file
+   beside the deploy workflow, and the deploy summary prints which rule fired. A
+   `@saga-ed/soa-event-consumer` bump flagging every consuming service at once is correct.
+4. **No single-active-consumer on queues.** The gate is deterministic on its own; SAC is a queue
+   argument, not a policy, so adoption means draining and re-declaring every queue once, and it
+   caps parallelism at one consumer per queue permanently. The zero-consumers alarm covers the
+   only failure SAC would have caught (a console flip bypassing the CLI). Revisit only if that
+   alarm fires for a reason the gate should have prevented.
+5. **Scale-out is the gate's job, which SAC could not do.** Today no consuming service runs more
+   than one task per prod colour (iam-api's three tasks run a relay only). If a consumer service
+   scales out, every task of the active colour consumes and the broker balances. Relay
+   parallelism stays one per leader by design; batch size and poll interval are the first knobs,
+   a partitioned lock is the later step if one relay ever cannot keep up.

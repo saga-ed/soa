@@ -42,7 +42,11 @@ export {
 export {
     DLQ_REPLAY_CLI_OPTIONS,
     filterFromCliValues,
+    runDlqReplayCli,
+    type DlqReplayCliDefaults,
     type DlqReplayCliValues,
+    type DlqReplayConnection,
+    type RunDlqReplayCliOptions,
 } from './dlq-replay-cli.js';
 export {
     EventConsumer,

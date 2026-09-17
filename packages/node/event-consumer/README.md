@@ -128,43 +128,54 @@ reach into the VPC, which almost nobody has.
 the service's **own** broker credentials — no management HTTP API, no
 admin secret.
 
+A service's own entry point is the whole thing:
+
 ```typescript
-import {
-    DLQ_REPLAY_CLI_OPTIONS,
-    filterFromCliValues,
-    formatReplayReport,
-    replayDeadLetters,
-} from '@saga-ed/soa-event-consumer';
+import { parseArgs } from 'node:util';
+import { DLQ_REPLAY_CLI_OPTIONS, runDlqReplayCli } from '@saga-ed/soa-event-consumer';
 
-const args = filterFromCliValues(values, {
-    // The types THIS service has decided are safe to re-run. See
-    // "what not to replay" below — this list is a judgement, not a default.
-    eventTypes: ['iam.persona_assignment.added', 'iam.persona_assignment.removed'],
-});
+const { values } = parseArgs({ options: DLQ_REPLAY_CLI_OPTIONS });
 
-const result = await replayDeadLetters({
-    connectionManager,          // @saga-ed/soa-rabbitmq ConnectionManager
+process.exitCode = await runDlqReplayCli({
+    values,
+    connection: connectionManager, // @saga-ed/soa-rabbitmq ConnectionManager
     dlqQueue: 'iam.events.dlq.queue',
     targetQueue: 'coach-api.instance-creation',
-    filter: args.filter,
-    approve: args.approve,      // without this it is a dry run
-    confirm: args.confirm,      // the value the dry run printed
+    defaults: {
+        // The types THIS service has decided are safe to re-run. See
+        // "what not to replay" below — this list is a judgement, not a default.
+        eventTypes: ['iam.persona_assignment.added', 'iam.persona_assignment.removed'],
+    },
     logger,
 });
-console.log(formatReplayReport(result));
-
-// A publish failure is REPORTED, not thrown — the run stops where it stands and
-// tells you which messages went. Map it to an exit code, or a runbook step that
-// half-succeeded will look like a clean run to whatever called it.
-if (result.failure) process.exitCode = 1;
-// A dry run that selected something: 2, so "found work" is distinguishable
-// from "nothing to do" without parsing the report.
-else if (!result.approved && result.selection.selected.length > 0) process.exitCode = 2;
 ```
 
-A refusal — no filter, a stale confirmation, a truncated scan — throws
-`DlqReplayRefusedError` instead, carrying a `reason` a caller can map to
-its own exit code without having to tell it apart from a broker error.
+`runDlqReplayCli` prints the report and returns the exit code, so a
+runbook step that half-succeeded cannot look like a clean run to whatever
+called it:
+
+| Code | Meaning |
+|---|---|
+| `0` | Did what was asked; nothing outstanding. |
+| `1` | A refusal, or a replay that stopped on a failed publish. |
+| `2` | A dry run that selected messages — work found, nothing published. |
+
+A refusal — no filter, a stale confirmation, a truncated scan — is
+printed with the `reason` that `DlqReplayRefusedError` carries, and exits
+`1`. Anything else (a broker error, a bug) propagates with its stack.
+
+**It closes the connection.** `runDlqReplayCli` takes ownership of the
+connection it is given and closes it on every path, including refusals,
+so the process ends by itself. This matters more than it sounds: an open
+AMQP socket keeps Node's event loop alive, so a CLI that merely finishes
+its work just sits there, and `process.exit()` to get around that
+discards whatever else was still pending. Don't pass a connection the
+process still needs.
+
+Call `inspectDeadLetterQueue` / `replayDeadLetters` directly instead when
+the caller is a long-running service that owns its connection — those
+take a `DlqChannelSource`, which has no `close()`, precisely so they
+cannot close somebody else's connection.
 
 ### Nothing is ever acked or deleted
 

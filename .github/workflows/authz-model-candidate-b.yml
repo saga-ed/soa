@@ -1,0 +1,67 @@
+name: authz model validate
+
+# Validates saga-authz-model's live model.fga AND the staged (not-yet-adopted)
+# candidate-b/model.fga against the real `fga` CLI — a live compile + fixture
+# round-trip that the package's vitest suite cannot provide on its own (it
+# only proves the DSL transforms and matches src/types.ts, not that a real
+# OpenFGA server would accept it or that the pinned use-case behavior holds).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "packages/core/saga-authz-model/**"
+      - ".github/workflows/authz-model-candidate-b.yml"
+  pull_request:
+    paths:
+      - "packages/core/saga-authz-model/**"
+      - ".github/workflows/authz-model-candidate-b.yml"
+
+concurrency:
+  group: authz-model-candidate-b-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: fga CLI validate + model test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install fga CLI
+        env:
+          # The openfga/cli module (and its go.mod `toolchain` directive) requires
+          # Go >= 1.25; GOTOOLCHAIN=auto lets `go install` fetch a newer point
+          # release automatically instead of failing on a slightly older 1.25.x.
+          # Pinned to the latest tag as of 2026-09-05 — bump deliberately, don't
+          # float on @latest (a CLI regression would otherwise fail this job with
+          # no corresponding repo change to explain why).
+          GOTOOLCHAIN: auto
+        run: |
+          go install github.com/openfga/cli/cmd/fga@v0.7.20
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: fga --version
+        run: fga --version
+
+      - name: Validate the live model
+        run: fga model validate --file packages/core/saga-authz-model/model.fga
+
+      - name: Validate candidate-b model
+        run: fga model validate --file packages/core/saga-authz-model/candidate-b/model.fga
+
+      - name: Run candidate-b fixtures (fga model test)
+        working-directory: packages/core/saga-authz-model/candidate-b
+        run: ./test.sh

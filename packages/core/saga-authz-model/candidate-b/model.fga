@@ -101,7 +101,9 @@ type program                                                 # id = program-hub 
     define staff_observe: staff_observe from parent_district
     define can_clear_attendance: can_edit from parent_district   # SDS-06 destructive Clear: district admin only (POL-SDS-2)
     define can_create_pod: [user, role#assignee]                              # D4 — one-off or standing pod creation (IPM/DA bundle)
-    define can_create_pod_hosted_by_self: [user, role#assignee]               # D4 — tutor bundle; app enforces host == caller
+    define can_self_schedule: [user, role#assignee]                           # D-TSS1 — tutor bundle, removable per district; program-only, no district cascade
+    define can_edit_own_sessions: [user, role#assignee]                       # D-TSS1 — tutor bundle, removable per district
+    define can_create_pod_hosted_by_self: can_self_schedule                   # D4 — app enforces host == caller
     define can_view_coaching_of_tutors: [user, role#assignee] or can_view_coaching_of_tutors from parent_district        # D3
     define can_view_coaching_of_coordinators: [user, role#assignee] or can_view_coaching_of_coordinators from parent_district  # D3
     define can_view_coaching_of_ipms: [user, role#assignee] or can_view_coaching_of_ipms from parent_district            # D3
@@ -126,8 +128,11 @@ type pod                                                     # id = program-hub 
     define qtf_access: qtf_access from parent_program
     define staff_observe: staff_observe from parent_program
     define can_edit: can_edit from parent_program                       # structural/roster edits: grant-only, never default_host (PH-22..24)
-    define can_edit_sessions: default_host or can_edit from parent_program  # lifecycle of this pod's sessions: host OR edit_non_hosted grant (PH-04/05/11)
-    define can_create_session: can_edit_sessions                        # D4 — adding an occurrence to this existing pod only; whole-pod creation is program.can_create_pod(_hosted_by_self)
+    define can_self_create_session: default_host and can_self_schedule from parent_program    # D-TSS1 — feeds can_create_session only
+    define can_self_edit_sessions: default_host and can_edit_own_sessions from parent_program   # D-TSS1 — feeds can_edit_sessions only
+    define can_edit_own_sessions: can_edit_own_sessions from parent_program  # D-TSS1 — pass-through for session.can_self_edit
+    define can_create_session: can_self_create_session or can_edit from parent_program  # D4 — existing pod only; must not alias can_edit_sessions (D-TSS1)
+    define can_edit_sessions: can_self_edit_sessions or can_edit from parent_program  # grant-holder arm stays ungated (PH-04/05/11)
     define affiliate: affiliate from parent_program                     # D6 — pass-through toward session
 
 type session                                                 # id = computed occurrence id; CTX until a row materializes, then EV-frozen (D9 ⨯ graft 2)
@@ -142,7 +147,8 @@ type session                                                 # id = computed occ
     define can_join_as_host: can_view_own_hosted              # D5, gated per D6
     define can_join_as_participant: participant               # D5
     define can_join_as_observer: observer or can_observe_sessions from parent_pod or supervise_view from parent_pod or staff_observe from parent_pod   # D5
-    define can_edit: host or can_edit_sessions from parent_pod          # lifecycle mutation (PH-04); D6 gate does NOT apply here
+    define can_self_edit: host and can_edit_own_sessions from parent_pod   # D-TSS1 — checks the session's host, not the pod's default_host
+    define can_edit: can_self_edit or can_edit_sessions from parent_pod    # grant-holder arm stays ungated (PH-04); D6 gate does NOT apply here
     define can_reassign_host: can_edit from parent_pod                  # D4b — grant-only structural edit, same shape as can_release; never the default_host arm
     define can_release: can_edit from parent_pod                        # release observation/feedback to the tutor (PH-09) — grant-holders only, never host
     define can_observe_recording: can_view_own_hosted or can_observe_sessions from parent_pod or supervise_view from parent_pod or staff_observe from parent_pod   # students excluded (CV3-08); D6-gated per host arm

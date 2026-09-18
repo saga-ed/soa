@@ -103,7 +103,12 @@ tuples:
 
   # --- D4/D4b: ad-hoc pod creation ---
   - {user: user:ines, relation: can_create_pod, object: program:p1}                        # IPM/DA bundle: any pod, any host
-  - {user: user:t1, relation: can_create_pod_hosted_by_self, object: program:p1}           # tutor bundle: app enforces host == caller
+  - {user: user:t1, relation: can_self_schedule, object: program:p1}                      # tutor bundle: app enforces host == caller
+
+  # --- D-TSS1: tutor session self-service (can_self_schedule / can_edit_own_sessions), default bundle ---
+  - {user: user:t1, relation: can_edit_own_sessions, object: program:p1}
+  - {user: user:t2, relation: can_edit_own_sessions, object: program:p2}                   # t2 hosts session:2026-09-10-c-slot3 under pod:c/p2 (EXT-PH-1-CTX)
+  - {user: user:tex, relation: can_edit_own_sessions, object: program:p1}                  # D6 retained-host fixture: pod:a is under p1
 
   # --- D6: retained host, no district affiliation (simulates a departed host) ---
   - {user: pod:a, relation: parent_pod, object: session:tex1}

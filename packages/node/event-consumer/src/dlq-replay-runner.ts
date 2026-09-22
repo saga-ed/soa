@@ -22,7 +22,11 @@
 // Two caveats worth knowing before running it:
 //   - Requeueing at the end of a scan does not guarantee the DLQ's original
 //     order is preserved. For a recovery queue nobody consumes, that costs
-//     nothing; it is still worth knowing.
+//     nothing — and NOTHING HERE MAY DEPEND ON THAT ORDER, because the dry run
+//     reshuffles the queue for the approve that follows it. Which messages are
+//     selected, which order they are published in, and the confirmation digest
+//     are all derived from the messages themselves (see `selectForReplay` and
+//     `computeConfirmation`), never from where they happened to sit.
 //   - While a scan holds messages unacked they are invisible to anything else
 //     reading the same DLQ. Runs are short; do not run two at once.
 
@@ -34,6 +38,7 @@ import {
     REPLAY_DEATH_QUEUE_HEADER,
     REPLAY_SOURCE_HEADER,
     SCAN_LIMIT_CEILING,
+    countSkipReasons,
     describeDlqMessage,
     groupDlqMessages,
     selectForReplay,
@@ -190,11 +195,18 @@ export async function inspectDeadLetterQueue(opts: DlqInspectOptions): Promise<D
 
 /**
  * Select a targeted subset of a dead-letter queue and, when approved, republish
- * each one to the caller's own queue — one at a time, stopping on the first
- * failure so a broken broker cannot turn into a partial fan-out nobody noticed.
+ * each one to the caller's own queue — oldest first, one at a time, stopping on
+ * the first failure so a broken broker cannot turn into a partial fan-out nobody
+ * noticed.
  *
  * The filter is validated BEFORE the broker is touched, so a run that could
  * never have been safe fails without reading anybody's messages.
+ *
+ * An approved run then passes three refusals, in an order chosen so that the one
+ * that fires is the one an operator can act on: `scan-truncated`, then
+ * `nothing-selected`, then `confirmation-mismatch`. The comment at that point in
+ * the body has the reasoning; it is not arbitrary and swapping two of them
+ * reintroduces a refusal that cannot be cleared by retrying.
  */
 export async function replayDeadLetters(opts: DlqReplayOptions): Promise<DlqReplayResult> {
     validateFilter(opts.filter);
@@ -240,12 +252,15 @@ export async function replayDeadLetters(opts: DlqReplayOptions): Promise<DlqRepl
         logDecisions(selection.decisions, opts.logger, opts.dlqQueue);
 
         if (!opts.approve) {
+            // The confirmation is deliberately NOT logged. Its whole job is to
+            // make an approve follow a report somebody read, and a value sitting
+            // in CloudWatch or Datadog is a way to approve without ever having
+            // opened one. The printed report is the only place it appears.
             opts.logger.info('[DlqReplay] dry run complete', {
                 dlqQueue: opts.dlqQueue,
                 targetQueue: opts.targetQueue,
                 scanned: inspection.messages.length,
                 selected: selection.selected.length,
-                confirmation: selection.confirmation,
             });
             return {
                 dlqQueue: opts.dlqQueue,
@@ -258,36 +273,62 @@ export async function replayDeadLetters(opts: DlqReplayOptions): Promise<DlqRepl
             };
         }
 
-        // The selection is recomputed from a fresh read of the queue, so a
-        // confirmation minted against a different set — messages drained, new
-        // ones arrived, a filter retyped — no longer matches, and the approve is
-        // refused rather than acting on a stale report.
-        if (opts.confirm !== selection.confirmation) {
+        // THE ORDER OF THE THREE REFUSALS BELOW IS LOAD-BEARING, and the rule
+        // behind it is: every refusal this tool emits has to tell the operator
+        // something they can act on. Being merely true is not enough — the
+        // refusal that fires must be the one that explains what they are
+        // actually looking at.
+        //
+        // 1. scan-truncated. A partial scan makes the confirmation meaningless:
+        //    each run reads a different window of the queue and mints a
+        //    different digest from it. Checked FIRST because otherwise the
+        //    mismatch below fires on every attempt, tells the operator the queue
+        //    changed when nothing has, and cannot be cleared by retrying — the
+        //    one refusal a retry can never resolve, hiding the one refusal that
+        //    says what to do about it.
+        // 2. nothing-selected. Once the window is not in doubt, an empty
+        //    selection is a complete statement of fact that needs no dry run to
+        //    interpret, and it comes with the skip counts that explain it. It
+        //    cannot publish anything either way, so checking it ahead of the
+        //    confirmation weakens nothing — and when both are true, "the filter
+        //    selected no messages" is the more useful of the two.
+        // 3. confirmation-mismatch. Only meaningful once the selection is both
+        //    reproducible and non-empty. It stays last and unconditional: it is
+        //    the guard every publish passes through.
+        if (!confirmationIsReproducible(inspection, selection)) {
             throw new DlqReplayRefusedError(
-                'confirmation-mismatch',
-                'Refusing to replay: the confirmation does not match what is on the queue now ' +
-                    `(given ${String(opts.confirm)}, current ${selection.confirmation}). The ` +
-                    'dead-letter queue has changed since the dry run. Re-run the dry run and use ' +
-                    'its value.',
+                'scan-truncated',
+                describeTruncatedScan(inspection, selection, scanLimit),
             );
         }
         if (selection.selected.length === 0) {
             throw new DlqReplayRefusedError(
                 'nothing-selected',
-                'Refusing to replay: the filter selected no messages.',
+                'Refusing to replay: the filter selected no messages. ' +
+                    `${describeSkips(selection)} Nothing was published. Re-run without ` +
+                    '--approve for the full report, or use --inspect to see what is on the queue.',
             );
         }
-        // A scan that stopped early saw an arbitrary window of the queue, and
-        // the dry run's window need not be this one — so the selection, and
-        // therefore the confirmation, is not reproducible. Left alone this is
-        // the one refusal an operator cannot clear by retrying: every attempt
-        // reads a different window and mismatches again.
-        if (inspection.scanTruncated) {
+        // The selection is recomputed from a fresh read of the queue, so a
+        // confirmation minted against a different set — messages drained, new
+        // ones arrived, a filter retyped — no longer matches, and the approve is
+        // refused rather than acting on a stale report.
+        //
+        // The current value is NOT printed back. Handing it over would let
+        // `--approve --confirm anything` fetch the real one and a second command
+        // publish, with nobody having read a dry-run report — which is the only
+        // thing the confirmation step is for. Echoing what the operator supplied
+        // is fine; it is what they already have in front of them.
+        if (opts.confirm !== selection.confirmation) {
             throw new DlqReplayRefusedError(
-                'scan-truncated',
-                `Refusing to replay: the dead-letter queue has more than ${scanLimit} messages, ` +
-                    'so this run only saw part of it and the selection is not reproducible. ' +
-                    'Raise --scan-limit past the queue depth and run the dry run again.',
+                'confirmation-mismatch',
+                `Refusing to replay: the confirmation "${String(opts.confirm)}" does not ` +
+                    'describe what this run selected. Re-run the same command without ' +
+                    '--approve and use the confirmation at the bottom of that report — it is ' +
+                    'printed there and nowhere else, so that an approve always follows a report ' +
+                    'somebody has read. If that value came from an earlier dry run, the queue ' +
+                    'or the filter has changed since, and the new report shows what is selected ' +
+                    'now.',
             );
         }
 
@@ -329,7 +370,10 @@ export function formatInspectionReport(inspection: DlqInspection): string {
     lines.push(`Depth reported by the broker: ${inspection.queueDepth}`);
     lines.push(`Messages read: ${inspection.messages.length}`);
     if (inspection.scanTruncated) {
-        lines.push('NOTE: the scan limit was reached — there may be more. Raise --scan-limit.');
+        lines.push(
+            `${truncationNote(inspection)} Raise --scan-limit (ceiling ${SCAN_LIMIT_CEILING}) ` +
+                'to see more.',
+        );
     }
     lines.push('');
     lines.push('Grouped by first-death queue, routing key and death minute:');
@@ -363,26 +407,52 @@ export function formatReplayReport(result: DlqReplayResult): string {
     }
     lines.push(`Messages read:     ${result.inspection.messages.length}`);
     if (result.inspection.scanTruncated) {
-        lines.push('NOTE: the scan limit was reached — there may be more. Raise --scan-limit.');
+        lines.push(truncationNote(result.inspection));
+        // Say now whether the approve will be accepted, rather than letting the
+        // operator find out by typing it. Read off the SAME predicate the guard
+        // uses, so the report cannot promise something the approve then refuses.
+        lines.push(
+            confirmationIsReproducible(result.inspection, result.selection)
+                ? '  Every event id named with --event-id was selected, once each, so this ' +
+                  'selection is the same in any run that gets this far, and an approve is ' +
+                  'allowed.'
+                : '  An approve will be REFUSED while this is true: each run reads a different ' +
+                  'part and selects a different set. Raise --scan-limit (ceiling ' +
+                  `${SCAN_LIMIT_CEILING}) past the queue depth, or name the messages with ` +
+                  '--event-id.',
+        );
     }
     lines.push(`Selected:          ${result.selection.selected.length}`);
     lines.push('');
 
-    const skipped = result.selection.decisions.filter(d => !d.selected);
-    if (skipped.length > 0) {
+    const counts = countSkipReasons(result.selection.decisions);
+    if (counts.length > 0) {
         lines.push('Skipped:');
-        const counts = new Map<string, number>();
-        for (const decision of skipped) {
-            const reason = decision.reason ?? 'unknown';
-            counts.set(reason, (counts.get(reason) ?? 0) + 1);
-        }
-        for (const [reason, count] of [...counts].sort((a, b) => b[1] - a[1])) {
+        for (const [reason, count] of counts) {
             lines.push(`  ${String(count).padStart(5)}  ${reason}`);
+        }
+        // A cap that bit is not a skip like the others: those messages matched
+        // everything, and nothing about them will change on a re-run. Say what
+        // to do instead of leaving an `over-max` count to be puzzled over.
+        const overMax = counts.find(([reason]) => reason === 'over-max')?.[1];
+        if (overMax !== undefined) {
+            lines.push(
+                `  ${overMax} more matched than --max allows. The originals stay on the ` +
+                    'dead-letter queue, so running this again replays the SAME oldest batch, ' +
+                    'not the next one. Raise --max, or move --since past the batch below.',
+            );
         }
         lines.push('');
     }
 
-    lines.push(result.approved ? 'Replayed:' : 'Would replay:');
+    // Say what the order is. The list is sorted by death time then event id, not
+    // by the `#position` each message came off the queue at, so the positions
+    // read out of sequence — which looks like a bug unless the header says
+    // otherwise. (Within one second every death time is equal, because `x-death`
+    // records whole seconds, so a burst sorts by event id and looks arbitrary.)
+    lines.push(
+        result.approved ? 'Replayed (oldest first):' : 'Would replay, in this order (oldest first):',
+    );
     if (result.selection.selected.length === 0) lines.push('  (nothing matched the filter)');
     // Keyed on position rather than object identity: position is unique within
     // a scan, and the report should not quietly mislabel everything if a future
@@ -414,6 +484,18 @@ export function formatReplayReport(result: DlqReplayResult): string {
     }
     lines.push(UNTOUCHED_NOTE);
     return lines.join('\n');
+}
+
+/**
+ * How much of the queue a truncated run actually read. Shared so the inspect
+ * report and the replay report cannot end up describing the same queue
+ * differently — each adds its own advice after it.
+ */
+function truncationNote(inspection: DlqInspection): string {
+    return (
+        `NOTE: the scan limit was reached — this is ${inspection.messages.length} of the ` +
+        `${inspection.queueDepth} messages on the queue, not all of it.`
+    );
 }
 
 const UNTOUCHED_NOTE =
@@ -459,10 +541,123 @@ function resolveScanLimit(requested: number | undefined): number {
         throw new DlqReplayRefusedError(
             'bad-scan-limit',
             `Scan limit must be a whole number between 1 and ${SCAN_LIMIT_CEILING} ` +
-                `(got ${String(requested)}).`,
+                `(got ${String(requested)}). The ceiling bounds what one run holds unacked, ` +
+                'on this side and on the broker, during exactly the incident that made the ' +
+                'queue deep. A queue deeper than that cannot be taken in whole: name the ' +
+                'messages you need with --event-id instead — see the refusal a truncated ' +
+                'scan prints.',
         );
     }
     return scanLimit;
+}
+
+/**
+ * Why a truncated scan is being refused, and what the operator can do about it.
+ *
+ * "Raise --scan-limit past the queue depth" on its own is advice that runs out:
+ * the ceiling is `SCAN_LIMIT_CEILING`, and a dead-letter queue deeper than that
+ * is entirely plausible in the kind of incident this tool is for. So the message
+ * names the depth it is up against, offers the raise only when a raise would
+ * actually reach, and otherwise points at `--event-id`, which is reproducible at
+ * any depth (see `DlqSelection.windowIndependent`). When ids WERE named, it says
+ * which of them this window could not account for — that is the fact the
+ * operator needs and the one they cannot get any other way.
+ */
+function describeTruncatedScan(
+    inspection: DlqInspection,
+    selection: DlqSelection,
+    scanLimit: number,
+): string {
+    const parts = [
+        `Refusing to replay: this run read ${inspection.messages.length} messages of the ` +
+            `${inspection.queueDepth} the broker reports on "${inspection.dlqQueue}", so it saw ` +
+            'only part of the queue. Another run reads a different part and selects a ' +
+            'different set, so the confirmation cannot be reproduced and this cannot be ' +
+            'approved as it stands.',
+    ];
+
+    // Rendered from the coverage the SELECTION already worked out, never
+    // re-derived here — see `describeNamedIdCoverage`. A refusal that disagreed
+    // with the rule that raised it would be worse than no detail at all.
+    const { notFound, readButSkipped, duplicated } = selection.namedIdCoverage;
+    if (notFound.length > 0) {
+        parts.push(`Not in the part of the queue this run saw: ${notFound.join(', ')}.`);
+    }
+    if (readButSkipped.length > 0) {
+        // Not a truncation problem at all, but it is what is keeping the run
+        // from the --event-id path, so it belongs in the same message.
+        parts.push(
+            'Read, but skipped by another rule (--max, the event-type allowlist, the ' +
+                `first-death-queue guard, an unparseable body): ${readButSkipped.join(', ')}. ` +
+                'The dry-run report gives the reason for each.',
+        );
+    }
+    if (duplicated.length > 0) {
+        // This tool makes these itself: a replayed copy that fails again
+        // dead-letters next to the original under the same event id.
+        parts.push(
+            'On this queue more than once, so a partial scan cannot tell how many copies ' +
+                `there are: ${duplicated.join(', ')}.`,
+        );
+    }
+
+    // A scan can be truncated with a depth at or under the limit — messages
+    // arriving mid-scan — so ask for one past what this run actually read.
+    const needed = Math.max(inspection.queueDepth, scanLimit + 1);
+    parts.push(
+        needed > SCAN_LIMIT_CEILING
+            ? `This queue is past the ${SCAN_LIMIT_CEILING}-message scan ceiling, so no run ` +
+              'can take all of it in and raising --scan-limit will not help.'
+            : `One way is to raise --scan-limit to at least ${needed} (it is ${scanLimit}, the ` +
+              `ceiling is ${SCAN_LIMIT_CEILING}) and run the dry run again.`,
+    );
+    parts.push(NAME_THE_IDS_ADVICE);
+    parts.push(
+        needed > SCAN_LIMIT_CEILING
+            ? 'If they are not in the part a scan can reach, they are past what a targeted ' +
+              'replay can do — that is a broker-admin drain or a purpose-built backfill, not ' +
+              'this tool.'
+            : '--inspect lists what is there.',
+    );
+    return parts.join(' ');
+}
+
+/**
+ * The one way through a queue too deep to scan, worded once. Both arms of the
+ * refusal above offer it, and rewording it in only one of them is how the two
+ * halves of a refusal start telling an operator different things.
+ */
+const NAME_THE_IDS_ADVICE =
+    'Name the messages you need with --event-id: a run that selects exactly the ids it was ' +
+    'given, one copy each, picks the same set whatever else is on the queue, and is allowed ' +
+    'through.';
+
+/** The skip counts that explain an empty selection, for a refusal that prints no report. */
+function describeSkips(selection: DlqSelection): string {
+    const counts = countSkipReasons(selection.decisions);
+    if (selection.decisions.length === 0) {
+        return 'Nothing was read off the dead-letter queue at all.';
+    }
+    const summary = counts.map(([reason, count]) => `${count} ${reason}`).join(', ');
+    return `The ${selection.decisions.length} messages read were skipped as: ${summary}.`;
+}
+
+/**
+ * Can another run reproduce this run's confirmation?
+ *
+ * The one predicate behind both the `scan-truncated` refusal and the note the
+ * dry-run report prints about it. Those two must agree — the report's whole job
+ * is to say in advance what the approve will do — and the way to guarantee that
+ * is for there to be one of them, not two expressions that have to be kept in
+ * step. A third reason a run might not be reproducible belongs here, once.
+ */
+function confirmationIsReproducible(inspection: DlqInspection, selection: DlqSelection): boolean {
+    // A scan that reached the end saw the whole queue: any two runs over the
+    // same messages select the same set, whatever order they came off in.
+    if (!inspection.scanTruncated) return true;
+    // A partial scan only agrees with another partial scan when the selection is
+    // pinned to ids the operator named — see `DlqNamedIdCoverage`.
+    return selection.namedIdCoverage.complete;
 }
 
 /** An open channel plus the two bits of state its own events carry. */
@@ -612,6 +807,9 @@ function logDecisions(decisions: readonly DlqDecision[], logger: ILogger, dlqQue
  * Serial rather than batched on purpose: a recovery run is small, and "the
  * first four went, the fifth failed, the rest were left alone" is a state an
  * operator can reason about. A pipelined batch that half-confirms is not.
+ *
+ * `selection.selected` arrives ordered oldest death first, so a run that stops
+ * half way has replayed a prefix in time rather than an arbitrary handful.
  */
 async function publishSelected(
     channel: DlqChannel,

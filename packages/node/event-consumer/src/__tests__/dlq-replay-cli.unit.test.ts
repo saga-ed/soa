@@ -199,7 +199,7 @@ describe('runDlqReplayCli', () => {
         const code = await run(connection, { approve: true, confirm }, out.write);
 
         expect(code).toBe(0);
-        expect(out.output()).toContain('Replayed:');
+        expect(out.output()).toContain('Replayed (oldest first):');
         expect(connection.closeCount).toBe(1);
     });
 

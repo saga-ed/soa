@@ -127,8 +127,14 @@ export interface DlqReplayFilter {
     /** Only these event ids. The narrowest filter there is. */
     eventIds?: readonly string[];
     /**
-     * Refuse to select more than this many messages. Defaults to
-     * `DEFAULT_MAX_MESSAGES`; capped at `MAX_MESSAGES_CEILING`.
+     * Select at most this many messages: the oldest that many, by death time.
+     * Defaults to `DEFAULT_MAX_MESSAGES`; capped at `MAX_MESSAGES_CEILING`.
+     *
+     * Note what a second run does NOT do. Nothing is ever acked, so the
+     * originals are still on the dead-letter queue afterwards and re-running the
+     * same command selects the SAME oldest batch again. To reach the rest, raise
+     * this or move the `deadLetteredAfter` bound past the batch just replayed —
+     * which is why the cap takes the oldest rather than an arbitrary handful.
      */
     maxMessages?: number;
 }
@@ -184,6 +190,57 @@ export interface DlqSelection {
      * its dry run printed, and is refused if the queue has moved on since.
      */
     confirmation: string;
+    /**
+     * How completely this run accounted for the event ids the filter named —
+     * and, when it did not, exactly which ids are why.
+     */
+    namedIdCoverage: DlqNamedIdCoverage;
+}
+
+/**
+ * Whether a selection is pinned to the event ids the operator typed, plus the
+ * evidence for the answer.
+ *
+ * WHY THIS EXISTS. A scan that stops early sees an arbitrary part of the queue,
+ * so in general the selection — and the `confirmation` over it — differs from
+ * run to run and an approve could never be confirmed. There is one case where
+ * that is not so: the filter named `eventIds` and every one of them was
+ * SELECTED EXACTLY ONCE. The selected set is then the list the operator typed,
+ * one message per id, and `computeConfirmation` hashes the target queue, the
+ * first-death queue and that same sorted list of ids — identical in any run that
+ * gets this far. `replayDeadLetters` uses that to let a targeted replay through
+ * on a queue too deep to scan whole.
+ *
+ * Say the guarantee precisely, because the loose version is not true: any two
+ * runs that are ALLOWED THROUGH select the same messages and mint the same
+ * confirmation. A run that happens to see a second copy of a named id does not
+ * quietly select something different — it refuses, and names the id. So the
+ * outcomes are "same answer" or "a refusal that says why", never "a different
+ * answer that looks the same".
+ *
+ * Both halves are load-bearing. A missing id means a copy of it may be sitting
+ * outside the part of the queue this run read, so a wider run would select more.
+ * A duplicate means the queue holds more than one copy — which this tool creates
+ * itself, because a replayed copy that fails again dead-letters alongside the
+ * original — and then one run could hash one copy and another two.
+ *
+ * This is NOT a licence to skip the confirmation. The approve still has to quote
+ * the value the dry run printed.
+ */
+export interface DlqNamedIdCoverage {
+    /**
+     * True only when the filter named event ids AND all three lists below are
+     * empty. A filter that named no ids is never complete, whatever else it
+     * matched: a type or a time window still selects "whichever of those this
+     * run happened to see".
+     */
+    complete: boolean;
+    /** Named, but no message carrying that id was read at all. */
+    notFound: readonly string[];
+    /** Read, but some other rule skipped it. The decisions say which. */
+    readButSkipped: readonly string[];
+    /** Selected more than once — this queue holds more than one copy. */
+    duplicated: readonly string[];
 }
 
 /** One row of the "what is sitting on this DLQ" summary. */
@@ -300,6 +357,19 @@ export function describeDlqMessage(
  * `maxMessages` is applied LAST, to messages that already passed every other
  * rule — capping first would silently drop matches in favour of non-matches
  * that happened to sit closer to the head of the queue.
+ *
+ * WHICH matches the cap keeps does not depend on queue order. That order is not
+ * stable: a scan holds every message it reads unacked and requeues the lot at
+ * the end, so the approve is always reading a just-reshuffled queue. Taking "the
+ * first `max` off the head" would therefore take a different subset each run,
+ * hash to a different `confirmation`, and refuse the approve as a mismatch that
+ * no amount of retrying could clear — while nothing about the queue had actually
+ * changed. The matches are sorted by death time and then event id instead, which
+ * is stable for a given SET of messages however they come off the queue, and
+ * which replays the oldest first — the right order to put events back in anyway.
+ *
+ * `selected` is returned in that same order, and `publishSelected` republishes
+ * in it.
  */
 export function selectForReplay(
     messages: readonly DlqMessage[],
@@ -313,9 +383,8 @@ export function selectForReplay(
     const allowedTypes = filter.eventTypes?.length ? new Set(filter.eventTypes) : null;
     const allowedIds = filter.eventIds?.length ? new Set(filter.eventIds) : null;
 
-    const decisions: DlqDecision[] = [];
-    let taken = 0;
-    for (const message of messages) {
+    // Pass 1, in queue order: every rule except the cap.
+    const decisions: DlqDecision[] = messages.map(message => {
         const reason = skipReasonFor(message, {
             firstDeathQueue,
             allowedTypes,
@@ -323,25 +392,28 @@ export function selectForReplay(
             after: filter.deadLetteredAfter,
             before: filter.deadLetteredBefore,
         });
-        if (reason !== null) {
-            decisions.push({ message, selected: false, reason });
-            continue;
-        }
-        if (taken >= max) {
-            decisions.push({ message, selected: false, reason: 'over-max' });
-            continue;
-        }
-        taken++;
-        decisions.push({ message, selected: true, reason: null });
-    }
+        return { message, selected: reason === null, reason };
+    });
 
-    const selected = decisions.filter(d => d.selected).map(d => d.message);
+    // Pass 2: cap the matches in the stable order described above. `decisions`
+    // stays in queue order — the report walks the queue as it was read — so the
+    // cap is applied by demoting the ones that fall past it in rank.
+    const matched = decisions
+        .filter(decision => decision.selected)
+        .sort((a, b) => compareForReplay(a.message, b.message));
+    for (const decision of matched.slice(max)) {
+        decision.selected = false;
+        decision.reason = 'over-max';
+    }
+    const selected = matched.slice(0, max).map(decision => decision.message);
+
     return {
         targetQueue,
         firstDeathQueue,
         decisions,
         selected,
         confirmation: computeConfirmation(targetQueue, firstDeathQueue, selected),
+        namedIdCoverage: describeNamedIdCoverage(allowedIds, decisions, selected),
     };
 }
 
@@ -361,6 +433,11 @@ export function selectForReplay(
  * harmless reshuffle into "the dead-letter queue has changed since the dry
  * run" — a refusal that is untrue and that the operator has no way to clear.
  * What has to match is the same set of messages, not the same sequence.
+ *
+ * Sorting here is only half of that. It makes the digest blind to the order the
+ * same messages arrive in; `selectForReplay` has to CHOOSE the same ones, which
+ * is why its cap sorts too. Both halves are needed, and neither is enough on its
+ * own.
  */
 export function computeConfirmation(
     targetQueue: string,
@@ -452,6 +529,102 @@ function skipReasonFor(
         if (rules.before && at > rules.before.getTime()) return 'outside-time-window';
     }
     return null;
+}
+
+/**
+ * Order matched messages so the cap keeps the same ones however the queue was
+ * shuffled: oldest death first, ties broken by event id.
+ *
+ * Both keys are properties of the MESSAGE, not of the run — requeueing never
+ * rewrites `x-death`, so a message's death time is the same on every pass. The
+ * id comparison is by code point rather than `localeCompare`, because a
+ * collation that differs between two machines would put the whole point of this
+ * back where it started.
+ *
+ * A message with no readable death time sorts last. It cannot be placed in the
+ * sequence, and claiming it is the oldest thing on the queue would be a guess.
+ * (With a `--since`/`--until` window such a message is already skipped as
+ * `unknown-death-time`; without one it can still be selected.)
+ */
+function compareForReplay(a: DlqMessage, b: DlqMessage): number {
+    const aTime = a.deadLetteredAt?.getTime();
+    const bTime = b.deadLetteredAt?.getTime();
+    if (aTime !== bTime) {
+        if (aTime === undefined) return 1;
+        if (bTime === undefined) return -1;
+        return aTime - bTime;
+    }
+    const aId = a.eventId ?? '';
+    const bId = b.eventId ?? '';
+    return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
+/**
+ * The `DlqNamedIdCoverage` rule, computed ONCE with its evidence attached.
+ *
+ * The verdict and the reasons for it have to come from the same place. The
+ * verdict decides whether a truncated scan may be approved; the reasons are the
+ * refusal message the operator reads when it may not. Derive them separately and
+ * they can drift into contradicting each other — a refusal that names no ids, or
+ * a report promising an approve that then fails — which is precisely the "true
+ * but useless" failure this whole guard sequence exists to avoid.
+ */
+function describeNamedIdCoverage(
+    allowedIds: ReadonlySet<string> | null,
+    decisions: readonly DlqDecision[],
+    selected: readonly DlqMessage[],
+): DlqNamedIdCoverage {
+    if (!allowedIds) {
+        return { complete: false, notFound: [], readButSkipped: [], duplicated: [] };
+    }
+
+    const read = new Set(decisions.map(decision => decision.message.eventId));
+    const selectedCounts = new Map<string, number>();
+    for (const message of selected) {
+        if (message.eventId === null) continue;
+        selectedCounts.set(message.eventId, (selectedCounts.get(message.eventId) ?? 0) + 1);
+    }
+
+    const notFound: string[] = [];
+    const readButSkipped: string[] = [];
+    for (const id of allowedIds) {
+        if (selectedCounts.has(id)) continue;
+        (read.has(id) ? readButSkipped : notFound).push(id);
+    }
+    const duplicated = [...selectedCounts]
+        .filter(([, count]) => count > 1)
+        .map(([id]) => id)
+        .sort();
+
+    return {
+        complete:
+            notFound.length === 0 && readButSkipped.length === 0 && duplicated.length === 0,
+        notFound: notFound.sort(),
+        readButSkipped: readButSkipped.sort(),
+        duplicated,
+    };
+}
+
+/**
+ * Tally the skip reasons in a selection, busiest first, ties broken by name.
+ *
+ * One tally, because there are two places that print it — the report's `Skipped`
+ * block and the `nothing-selected` refusal, which prints no report — and two
+ * tallies drift. The name tie-break matters for the same reason everything else
+ * here sorts: equal counts left in Map insertion order come out in QUEUE order,
+ * and queue order is reshuffled between runs, so the same command would print
+ * its reasons in a different sequence each time.
+ */
+export function countSkipReasons(
+    decisions: readonly DlqDecision[],
+): ReadonlyArray<readonly [string, number]> {
+    const counts = new Map<string, number>();
+    for (const decision of decisions) {
+        if (decision.selected) continue;
+        const reason = decision.reason ?? 'unknown';
+        counts.set(reason, (counts.get(reason) ?? 0) + 1);
+    }
+    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
 function parseEnvelope(content: Buffer): EventEnvelope | null {

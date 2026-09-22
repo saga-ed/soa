@@ -231,6 +231,174 @@ describe('selectForReplay', () => {
     });
 });
 
+/**
+ * WHICH matches the cap keeps must not depend on where they sat in the queue.
+ * A scan holds everything it reads unacked and requeues the lot, so the approve
+ * always reads a reshuffled queue: "the first `max` off the head" would take a
+ * different subset each run, hash to a different confirmation, and refuse the
+ * approve as a mismatch that retrying could never clear — with nothing about the
+ * queue having actually changed.
+ */
+const TYPES = { eventTypes: ['iam.persona_assignment.added'] };
+
+describe('selectForReplay ordering', () => {
+
+    it('keeps the same messages under --max however the queue was shuffled', () => {
+        const oldest = message({ deadLetteredAt: new Date('2026-09-16T14:00:00Z') });
+        const middle = message({ deadLetteredAt: new Date('2026-09-16T15:00:00Z') });
+        const newest = message({ deadLetteredAt: new Date('2026-09-16T16:00:00Z') });
+        const filter = { ...TYPES, maxMessages: 2 };
+
+        const inOrder = selectForReplay([oldest, middle, newest], filter, TARGET_QUEUE);
+        const shuffled = selectForReplay([newest, oldest, middle], filter, TARGET_QUEUE);
+
+        expect(inOrder.selected).toEqual([oldest, middle]);
+        expect(shuffled.selected).toEqual([oldest, middle]);
+        expect(shuffled.confirmation).toBe(inOrder.confirmation);
+        // Decisions stay in queue order — the report walks the queue as read —
+        // and over-max lands on the same message either way.
+        expect(shuffled.decisions[0]).toMatchObject({ message: newest, reason: 'over-max' });
+        expect(inOrder.decisions[2]).toMatchObject({ message: newest, reason: 'over-max' });
+    });
+
+    it('replays oldest first', () => {
+        const oldest = message({ deadLetteredAt: new Date('2026-09-16T14:00:00Z') });
+        const newest = message({ deadLetteredAt: new Date('2026-09-16T16:00:00Z') });
+        expect(selectForReplay([newest, oldest], TYPES, TARGET_QUEUE).selected).toEqual([
+            oldest,
+            newest,
+        ]);
+    });
+
+    it('breaks a death-time tie on event id, by code point', () => {
+        // Everything dead-lettered in the same second by one bad deploy is the
+        // normal case, not the exotic one — the tie-break carries the weight.
+        const at = new Date('2026-09-16T14:30:00Z');
+        const id = (lead: string) => `${lead.repeat(8)}-0000-4000-8000-000000000000`;
+        const first = message({ eventId: id('a'), deadLetteredAt: at });
+        const second = message({ eventId: id('b'), deadLetteredAt: at });
+        const filter = { ...TYPES, maxMessages: 1 };
+        expect(selectForReplay([second, first], filter, TARGET_QUEUE).selected).toEqual([first]);
+        expect(selectForReplay([first, second], filter, TARGET_QUEUE).selected).toEqual([first]);
+    });
+
+    it('puts a message with no death time last rather than calling it the oldest', () => {
+        const known = message({ deadLetteredAt: new Date('2026-09-16T18:00:00Z') });
+        const unknown = message({ deadLetteredAt: null });
+        const filter = { ...TYPES, maxMessages: 1 };
+        expect(selectForReplay([unknown, known], filter, TARGET_QUEUE).selected).toEqual([known]);
+    });
+});
+
+/**
+ * `namedIdCoverage` is what lets a targeted replay proceed on a queue too deep to
+ * scan whole — so the conditions on it have to be exactly right. Each incomplete
+ * case below is one where two runs could select different things and mismatch,
+ * and each carries the ids that say why, because those become the refusal an
+ * operator reads.
+ */
+describe('selectForReplay namedIdCoverage', () => {
+
+    it('is true when every named event id was selected, exactly once', () => {
+        const a = message();
+        const b = message();
+        const selection = selectForReplay(
+            [a, b, message()],
+            { eventIds: [a.eventId as string, b.eventId as string] },
+            TARGET_QUEUE,
+        );
+        expect(selection.selected).toHaveLength(2);
+        expect(selection.namedIdCoverage.complete).toBe(true);
+    });
+
+    it('is false without --event-id, however narrow the other filters are', () => {
+        // A type or a time window still selects "whatever of those is in this
+        // part of the queue", which is a different set from a different window.
+        const selection = selectForReplay([message()], TYPES, TARGET_QUEUE);
+        expect(selection.selected).toHaveLength(1);
+        expect(selection.namedIdCoverage.complete).toBe(false);
+    });
+
+    it('is false when a named id was not found', () => {
+        const a = message();
+        const selection = selectForReplay(
+            [a],
+            { eventIds: [a.eventId as string, 'ffffffff-0000-4000-8000-000000000000'] },
+            TARGET_QUEUE,
+        );
+        expect(selection.namedIdCoverage).toMatchObject({
+            complete: false,
+            notFound: ['ffffffff-0000-4000-8000-000000000000'],
+            readButSkipped: [],
+            duplicated: [],
+        });
+    });
+
+    it('is false when a named id was found twice', () => {
+        // Which this tool creates itself: a replayed copy that fails again
+        // dead-letters next to the original under the same event id. One window
+        // sees one copy, another sees two, and the digests differ.
+        const a = message();
+        const duplicate = message({ eventId: a.eventId });
+        const selection = selectForReplay(
+            [a, duplicate],
+            { eventIds: [a.eventId as string] },
+            TARGET_QUEUE,
+        );
+        expect(selection.selected).toHaveLength(2);
+        expect(selection.namedIdCoverage).toMatchObject({
+            complete: false,
+            notFound: [],
+            readButSkipped: [],
+            duplicated: [a.eventId],
+        });
+    });
+
+    it('is complete when --max cuts a duplicate copy back to one', () => {
+        // Deliberate, not an oversight. With only one copy selected, the set of
+        // ids hashed is exactly the named list whichever copy was taken — so the
+        // confirmation IS reproducible, which is all `complete` promises. The
+        // rule is about the SELECTION, not about what else the queue holds.
+        const a = message();
+        const duplicate = message({ eventId: a.eventId });
+        const selection = selectForReplay(
+            [a, duplicate],
+            { eventIds: [a.eventId as string], maxMessages: 1 },
+            TARGET_QUEUE,
+        );
+        expect(selection.selected).toHaveLength(1);
+        expect(selection.namedIdCoverage.complete).toBe(true);
+    });
+
+    it('is false when a named id was found but skipped by another rule', () => {
+        const mine = message();
+        const theirs = message({ firstDeathQueue: 'sessions-api.iam-projection' });
+        const selection = selectForReplay(
+            [mine, theirs],
+            { eventIds: [mine.eventId as string, theirs.eventId as string] },
+            TARGET_QUEUE,
+        );
+        // Read, not missing — the distinction the refusal message turns on.
+        expect(selection.namedIdCoverage).toMatchObject({
+            complete: false,
+            notFound: [],
+            readButSkipped: [theirs.eventId],
+            duplicated: [],
+        });
+    });
+
+    it('is false when the cap cut one of the named ids', () => {
+        const a = message();
+        const b = message();
+        const selection = selectForReplay(
+            [a, b],
+            { eventIds: [a.eventId as string, b.eventId as string], maxMessages: 1 },
+            TARGET_QUEUE,
+        );
+        expect(selection.namedIdCoverage.complete).toBe(false);
+    });
+});
+
 describe('computeConfirmation', () => {
     it('is stable for the same selection and changes when the selection does', () => {
         const a = message();

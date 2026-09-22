@@ -22,6 +22,11 @@ import { DLQ_REPLAY_CLI_OPTIONS, filterFromCliValues } from '../dlq-replay-cli.j
 
 const TARGET_QUEUE = 'coach-api.instance-creation';
 const DLQ = 'iam.events.dlq.queue';
+const EVENT_TYPE = 'iam.persona_assignment.added';
+const TYPES = [EVENT_TYPE];
+const idA = '11111111-1111-4111-8111-111111111111';
+const idB = '22222222-2222-4222-8222-222222222222';
+const idC = '44444444-4444-4444-8444-444444444444';
 
 const logger: ILogger = { info() {}, warn() {}, error() {}, debug() {} };
 
@@ -101,6 +106,11 @@ function makeChannel(
         strayReturnOnNth?: number;
         /** Accept the publish but never call back — a blocked broker. */
         neverConfirm?: boolean;
+        /**
+         * What `checkQueue` reports, when that has to differ from what the fake
+         * actually holds — a queue deeper than any scan could take in.
+         */
+        queueDepth?: number;
     } = {},
 ): FakeChannel {
     const queue = [...messages];
@@ -130,7 +140,8 @@ function makeChannel(
                 closeListener?.();
                 throw new Error('Channel ended, no reply will be forthcoming');
             }
-            return { messageCount: name === DLQ ? messages.length : 0 };
+            if (name !== DLQ) return { messageCount: 0 };
+            return { messageCount: behaviour.queueDepth ?? messages.length };
         },
         async get() {
             // basic.get hands back each message once while it stays unacked.
@@ -253,8 +264,6 @@ describe('inspectDeadLetterQueue', () => {
 });
 
 describe('replayDeadLetters', () => {
-    const idA = '11111111-1111-4111-8111-111111111111';
-    const idB = '22222222-2222-4222-8222-222222222222';
 
     it('refuses an untargeted run before it opens a channel', async () => {
         const newConfirmChannel = vi.fn();
@@ -328,7 +337,7 @@ describe('replayDeadLetters', () => {
                 confirm: dryRun.selection.confirmation,
                 logger,
             }),
-        ).rejects.toThrow(/does not match what is on the queue now/);
+        ).rejects.toThrow(/does not describe what this run selected/);
         expect(changed.published).toHaveLength(0);
         // Still gave everything back.
         expect(changed.nackAllCalls).toEqual([true]);
@@ -435,7 +444,7 @@ describe('replayDeadLetters', () => {
     });
 
     it('stops on the first publish failure and reports where it stopped', async () => {
-        const messages = [raw(idA), raw(idB), raw('44444444-4444-4444-8444-444444444444')];
+        const messages = [raw(idA), raw(idB), raw(idC)];
         const dryRun = await replayDeadLetters({
             connectionManager: source(makeChannel(messages.map(m => ({ ...m })))),
             dlqQueue: DLQ,
@@ -569,7 +578,7 @@ describe('replayDeadLetters', () => {
     it('refuses an approve when the scan only saw part of the queue', async () => {
         // Otherwise the dry run and the approve can read different windows and
         // disagree forever: the one refusal a retry can never clear.
-        const messages = [raw(idA), raw(idB), raw('44444444-4444-4444-8444-444444444444')];
+        const messages = [raw(idA), raw(idB), raw(idC)];
         const dryRun = await replayDeadLetters({
             connectionManager: source(makeChannel(messages)),
             dlqQueue: DLQ,
@@ -592,7 +601,7 @@ describe('replayDeadLetters', () => {
                 confirm: dryRun.selection.confirmation,
                 logger,
             }),
-        ).rejects.toThrow(/more than 2 messages.*Raise --scan-limit/s);
+        ).rejects.toThrow(/read 2 messages of the 3.*raise --scan-limit to at least 3/s);
         expect(channel.published).toHaveLength(0);
     });
 
@@ -650,6 +659,360 @@ describe('replayDeadLetters', () => {
             logger,
         });
         expect(ensureConnected).toHaveBeenCalledOnce();
+    });
+});
+
+/**
+ * The refusals an approve passes through, and the ORDER they fire in.
+ *
+ * Every one of these is about the same failure mode: a refusal that is true but
+ * useless, or true and impossible to clear. An operator who cannot act on what
+ * the tool told them is, in an incident, no better off than one who got no
+ * output at all — and worse off if the message sent them somewhere else.
+ */
+describe('replayDeadLetters refusals an operator can act on', () => {
+
+    /** Three messages with distinct death times, so "oldest first" is testable. */
+    function trio(): [DlqRawMessage, DlqRawMessage, DlqRawMessage] {
+        return [
+            raw(idA, { time: 1789000001 }),
+            raw(idB, { time: 1789000002 }),
+            raw(idC, { time: 1789000003 }),
+        ];
+    }
+
+    async function refusalFrom(work: Promise<unknown>): Promise<DlqReplayRefusedError> {
+        const error: unknown = await work.then(
+            () => null,
+            (err: unknown) => err,
+        );
+        if (!(error instanceof DlqReplayRefusedError)) {
+            throw new Error(`expected a refusal, got ${String(error)}`);
+        }
+        return error;
+    }
+
+    it('blames the truncated scan, not the confirmation, when a partial scan is all it saw', async () => {
+        // THE BUG THIS ORDER EXISTS FOR. On a queue deeper than --scan-limit
+        // every run reads a different part of it and mints a different
+        // confirmation. With the mismatch checked first, the operator is told
+        // "the dead-letter queue has changed since the dry run" — which is
+        // false — and the next attempt says it again, forever. The refusal that
+        // says what to do was unreachable in precisely the case it was for.
+        const [a, b, c] = trio();
+        const dryRun = await replayDeadLetters({
+            connectionManager: source(makeChannel([a, b, c])),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventTypes: TYPES },
+            scanLimit: 2,
+            logger,
+        });
+        expect(dryRun.inspection.scanTruncated).toBe(true);
+
+        // The requeue put the queue back in a different order, so the approve
+        // reads a different window. Prove that first: without a genuinely
+        // different digest this test would pass for the wrong reason.
+        const reshuffled = await replayDeadLetters({
+            connectionManager: source(makeChannel([c, a, b])),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventTypes: TYPES },
+            scanLimit: 2,
+            logger,
+        });
+        expect(reshuffled.selection.confirmation).not.toBe(dryRun.selection.confirmation);
+
+        const channel = makeChannel([c, a, b]);
+        const error = await refusalFrom(
+            replayDeadLetters({
+                connectionManager: source(channel),
+                dlqQueue: DLQ,
+                targetQueue: TARGET_QUEUE,
+                filter: { eventTypes: TYPES },
+                scanLimit: 2,
+                approve: true,
+                confirm: dryRun.selection.confirmation,
+                logger,
+            }),
+        );
+        expect(error.reason).toBe('scan-truncated');
+        expect(error.message).toContain('only part of the queue');
+        expect(channel.published).toHaveLength(0);
+    });
+
+    it('blames the truncated scan, not the empty selection, when both are true', async () => {
+        // The third precedence pair, and the one a reorder would break most
+        // quietly. Hoisting `nothing-selected` above `scan-truncated` — the
+        // natural move if you decide it is the cheaper check — makes this run
+        // report "the filter selected no messages" about a window that is not
+        // the whole queue. The messages may well be sitting just past it.
+        const channel = makeChannel([
+            raw(idA, { eventType: 'iam.persona_definition.upserted' }),
+            raw(idB, { eventType: 'iam.persona_definition.upserted' }),
+            raw(idC),
+        ]);
+        const error = await refusalFrom(
+            replayDeadLetters({
+                connectionManager: source(channel),
+                dlqQueue: DLQ,
+                targetQueue: TARGET_QUEUE,
+                filter: { eventTypes: TYPES },
+                scanLimit: 2,
+                approve: true,
+                confirm: 'abcabcabcabc',
+                logger,
+            }),
+        );
+        expect(error.reason).toBe('scan-truncated');
+        expect(channel.published).toHaveLength(0);
+    });
+
+    it('says the filter matched nothing rather than blaming the confirmation', async () => {
+        // Both refusals are true here — the digest of an empty selection is not
+        // the one the operator typed. "The filter selected no messages", with
+        // the skip counts, is the fact they can do something with; "the queue
+        // changed" sends them to re-run a dry run that will say the same thing.
+        const channel = makeChannel([raw(idA)]);
+        const error = await refusalFrom(
+            replayDeadLetters({
+                connectionManager: source(channel),
+                dlqQueue: DLQ,
+                targetQueue: TARGET_QUEUE,
+                filter: { eventTypes: ['nobody.emits.this'] },
+                approve: true,
+                confirm: 'abcabcabcabc',
+                logger,
+            }),
+        );
+        expect(error.reason).toBe('nothing-selected');
+        expect(error.message).toContain('1 event-type-not-allowed');
+        expect(channel.published).toHaveLength(0);
+    });
+
+    it('does not hand back the confirmation it is refusing to accept', async () => {
+        // Printing `current <digest>` turned `--approve --confirm bogus` into a
+        // way of FETCHING the real value: a second command then publishes with
+        // nobody having read a dry-run report, which is the only thing the
+        // confirmation step is there to force.
+        const dryRun = await replayDeadLetters({
+            connectionManager: source(makeChannel([raw(idA), raw(idB)])),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventTypes: TYPES },
+            logger,
+        });
+
+        const channel = makeChannel([raw(idA), raw(idB)]);
+        const error = await refusalFrom(
+            replayDeadLetters({
+                connectionManager: source(channel),
+                dlqQueue: DLQ,
+                targetQueue: TARGET_QUEUE,
+                filter: { eventTypes: TYPES },
+                approve: true,
+                confirm: 'bogus0000000',
+                logger,
+            }),
+        );
+
+        expect(error.reason).toBe('confirmation-mismatch');
+        expect(error.message).not.toContain(dryRun.selection.confirmation);
+        // Echoing back what they supplied is fine — they already have it.
+        expect(error.message).toContain('bogus0000000');
+        expect(error.message).toMatch(/without --approve/);
+        expect(channel.published).toHaveLength(0);
+    });
+
+    it('never logs the confirmation — the printed report is the only place it appears', async () => {
+        // A digest sitting in CloudWatch or Datadog is another way to approve
+        // without opening a report.
+        const info = vi.fn();
+        const debug = vi.fn();
+        const result = await replayDeadLetters({
+            connectionManager: source(makeChannel([raw(idA), raw(idB)])),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventTypes: TYPES },
+            logger: { ...logger, info, debug },
+        });
+
+        const logged = JSON.stringify([...info.mock.calls, ...debug.mock.calls]);
+        expect(logged).not.toContain(result.selection.confirmation);
+        expect(formatReplayReport(result)).toContain(result.selection.confirmation);
+    });
+
+    it('picks the same messages for --max however the queue came back', async () => {
+        // The same unclearable loop as a truncated scan, with no truncation in
+        // it: more matches than --max, taken off the head of a queue the
+        // previous run reshuffled.
+        const [a, b, c] = trio();
+        const dryRun = await replayDeadLetters({
+            connectionManager: source(makeChannel([a, b, c])),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventTypes: TYPES, maxMessages: 2 },
+            logger,
+        });
+        expect(dryRun.selection.selected.map(m => m.eventId)).toEqual([idA, idB]);
+
+        const channel = makeChannel([c, b, a]);
+        const result = await replayDeadLetters({
+            connectionManager: source(channel),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventTypes: TYPES, maxMessages: 2 },
+            approve: true,
+            confirm: dryRun.selection.confirmation,
+            logger,
+        });
+
+        // Same two, oldest first, published in that order.
+        expect(result.replayed.map(m => m.eventId)).toEqual([idA, idB]);
+        expect(channel.published.map(p => JSON.parse(p.content.toString()).eventId)).toEqual([
+            idA,
+            idB,
+        ]);
+    });
+
+    it('warns that a capped run does not advance when it is run again', async () => {
+        // An `over-max` count on its own invites the obvious wrong move: run it
+        // again for the next batch. Nothing is acked, so the same oldest batch
+        // comes back — the report has to say so.
+        const [a, b, c] = trio();
+        const result = await replayDeadLetters({
+            connectionManager: source(makeChannel([a, b, c])),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventTypes: TYPES, maxMessages: 2 },
+            logger,
+        });
+        const report = formatReplayReport(result);
+        expect(report).toContain('1  over-max');
+        expect(report).toMatch(/replays the SAME oldest batch, not the next one/);
+        expect(report).toContain('Raise --max');
+    });
+
+    it('lets a truncated scan through when --event-id names exactly what it found', async () => {
+        // The escape hatch, and the 15-event incident this tool was written
+        // for: the operator asked for specific ids, every one was found once,
+        // so the selection is the list they typed and no other part of the
+        // queue could change it.
+        const [a, b, c] = trio();
+        const dryRun = await replayDeadLetters({
+            connectionManager: source(makeChannel([a, b, c])),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventIds: [idA, idB] },
+            scanLimit: 2,
+            logger,
+        });
+        expect(dryRun.inspection.scanTruncated).toBe(true);
+        expect(dryRun.selection.namedIdCoverage.complete).toBe(true);
+        expect(formatReplayReport(dryRun)).toContain('an approve is allowed');
+
+        // A different window of the same queue — same two ids, same digest.
+        const channel = makeChannel([b, a, c]);
+        const result = await replayDeadLetters({
+            connectionManager: source(channel),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventIds: [idA, idB] },
+            scanLimit: 2,
+            approve: true,
+            confirm: dryRun.selection.confirmation,
+            logger,
+        });
+        expect(result.replayed.map(m => m.eventId)).toEqual([idA, idB]);
+        expect(channel.published).toHaveLength(2);
+    });
+
+    it('names the ids a truncated scan could not account for', async () => {
+        const [a, b, c] = trio();
+        const channel = makeChannel([a, b, c]);
+        const error = await refusalFrom(
+            replayDeadLetters({
+                connectionManager: source(channel),
+                dlqQueue: DLQ,
+                targetQueue: TARGET_QUEUE,
+                filter: { eventIds: [idA, idC] },
+                scanLimit: 2,
+                approve: true,
+                confirm: 'abcabcabcabc',
+                logger,
+            }),
+        );
+        expect(error.reason).toBe('scan-truncated');
+        expect(error.message).toContain(`Not in the part of the queue this run saw: ${idC}`);
+        expect(error.message).toContain('--event-id');
+    });
+
+    it('will not call a truncated scan reproducible when an id is on the queue twice', async () => {
+        // This tool makes these itself: a replayed copy that fails again
+        // dead-letters next to the original under the same event id. One window
+        // sees one copy, another sees two, and the digests differ.
+        const channel = makeChannel([raw(idA), raw(idA), raw(idB)]);
+        const error = await refusalFrom(
+            replayDeadLetters({
+                connectionManager: source(channel),
+                dlqQueue: DLQ,
+                targetQueue: TARGET_QUEUE,
+                filter: { eventIds: [idA] },
+                scanLimit: 2,
+                approve: true,
+                confirm: 'abcabcabcabc',
+                logger,
+            }),
+        );
+        expect(error.reason).toBe('scan-truncated');
+        expect(error.message).toContain('more than once');
+        expect(error.message).toContain(idA);
+    });
+
+    it('stops telling the operator to raise --scan-limit when no limit could reach', async () => {
+        // "Raise --scan-limit past the queue depth" is advice that runs out:
+        // the ceiling is 10,000 and a dead-letter queue deeper than that is
+        // exactly what an incident produces. Past the ceiling the message has
+        // to offer something else, and does.
+        const channel = makeChannel(trio(), { queueDepth: 50_000 });
+        const error = await refusalFrom(
+            replayDeadLetters({
+                connectionManager: source(channel),
+                dlqQueue: DLQ,
+                targetQueue: TARGET_QUEUE,
+                filter: { eventTypes: TYPES },
+                scanLimit: 2,
+                approve: true,
+                confirm: 'abcabcabcabc',
+                logger,
+            }),
+        );
+        expect(error.reason).toBe('scan-truncated');
+        expect(error.message).toContain('past the 10000-message scan ceiling');
+        expect(error.message).not.toMatch(/raise --scan-limit to at least/i);
+        expect(error.message).toContain('--event-id');
+        // And when even that cannot reach, it names what can.
+        expect(error.message).toMatch(/broker-admin drain|backfill/);
+    });
+
+    it('asks for a limit past what it actually read, not past a stale depth', async () => {
+        // A scan can stop early on a queue whose reported depth is no bigger
+        // than the limit — messages arriving mid-scan. "Raise --scan-limit to
+        // at least 2" when it is already 2 is advice that goes in a circle.
+        const channel = makeChannel(trio(), { queueDepth: 2 });
+        const error = await refusalFrom(
+            replayDeadLetters({
+                connectionManager: source(channel),
+                dlqQueue: DLQ,
+                targetQueue: TARGET_QUEUE,
+                filter: { eventTypes: TYPES },
+                scanLimit: 2,
+                approve: true,
+                confirm: 'abcabcabcabc',
+                logger,
+            }),
+        );
+        expect(error.message).toContain('raise --scan-limit to at least 3');
     });
 });
 

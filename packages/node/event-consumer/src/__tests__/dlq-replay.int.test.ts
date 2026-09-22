@@ -42,6 +42,8 @@ const TARGET_QUEUE = `dlq-replay-test.target.${suffix}`;
 const OTHER_QUEUE = `dlq-replay-test.other.${suffix}`;
 const DLX = `dlq-replay-test.dlx.${suffix}`;
 const DLQ = `dlq-replay-test.dlq.${suffix}`;
+/** The type the imaginary wiring service has allowlisted as safe to re-run. */
+const REPLAYABLE_TYPE = 'iam.persona_assignment.added';
 
 let connection: ChannelModel | null = null;
 let available = false;
@@ -121,12 +123,12 @@ beforeAll(async () => {
     await setup.close();
 
     await deadLetter(TARGET_QUEUE, [
-        { routingKey: 'iam.persona_assignment.added', content: envelope('iam.persona_assignment.added', 'agg-1') },
-        { routingKey: 'iam.persona_assignment.added', content: envelope('iam.persona_assignment.added', 'agg-2') },
+        { routingKey: REPLAYABLE_TYPE, content: envelope(REPLAYABLE_TYPE, 'agg-1') },
+        { routingKey: REPLAYABLE_TYPE, content: envelope(REPLAYABLE_TYPE, 'agg-2') },
         { routingKey: 'iam.persona_definition.upserted', content: envelope('iam.persona_definition.upserted', 'persona-1') },
     ]);
     await deadLetter(OTHER_QUEUE, [
-        { routingKey: 'iam.persona_assignment.added', content: envelope('iam.persona_assignment.added', 'agg-other') },
+        { routingKey: REPLAYABLE_TYPE, content: envelope(REPLAYABLE_TYPE, 'agg-other') },
     ]);
 });
 
@@ -186,7 +188,7 @@ describe.runIf(process.env.RABBITMQ_TEST_URL !== 'skip')('dead-letter replay aga
             connectionManager: source(),
             dlqQueue: DLQ,
             targetQueue: TARGET_QUEUE,
-            filter: { eventTypes: ['iam.persona_assignment.added'] },
+            filter: { eventTypes: [REPLAYABLE_TYPE] },
             logger,
         });
 
@@ -203,7 +205,7 @@ describe.runIf(process.env.RABBITMQ_TEST_URL !== 'skip')('dead-letter replay aga
             connectionManager: source(),
             dlqQueue: DLQ,
             targetQueue: TARGET_QUEUE,
-            filter: { eventTypes: ['iam.persona_assignment.added'] },
+            filter: { eventTypes: [REPLAYABLE_TYPE] },
             approve: true,
             confirm: dryRun.selection.confirmation,
             logger,
@@ -244,7 +246,7 @@ describe.runIf(process.env.RABBITMQ_TEST_URL !== 'skip')('dead-letter replay aga
             connectionManager: source(),
             dlqQueue: DLQ,
             targetQueue: TARGET_QUEUE,
-            filter: { eventTypes: ['iam.persona_assignment.added'] },
+            filter: { eventTypes: [REPLAYABLE_TYPE] },
             logger,
         });
 
@@ -255,20 +257,75 @@ describe.runIf(process.env.RABBITMQ_TEST_URL !== 'skip')('dead-letter replay aga
                 targetQueue: TARGET_QUEUE,
                 // Same confirmation, wider filter — refused.
                 filter: {
-                    eventTypes: [
-                        'iam.persona_assignment.added',
-                        'iam.persona_definition.upserted',
-                    ],
+                    eventTypes: [REPLAYABLE_TYPE, 'iam.persona_definition.upserted'],
                 },
                 approve: true,
                 confirm: dryRun.selection.confirmation,
                 logger,
             }),
-        ).rejects.toThrow(/does not match what is on the queue now/);
+        ).rejects.toThrow(/does not describe what this run selected/);
 
         if (!connection) throw new Error('no broker connection');
         const check = await connection.createChannel();
         expect((await check.checkQueue(DLQ)).messageCount).toBe(4);
+        await check.close();
+    });
+
+    it('replays a scan it could only see part of, when --event-id names what it found', async () => {
+        // The incident shape, against a real broker: a dead-letter queue too
+        // deep to take in whole, and an operator who knows exactly which event
+        // ids they want. The selection is the list they typed, so it is the
+        // same from any part of the queue — which the assertions below check by
+        // approving against a SECOND scan, of a queue the first one requeued.
+        // Smaller than the queue, so every run sees only part of it. Without
+        // the event-id rule no approve here could ever be confirmed.
+        const SCAN_LIMIT = 3;
+        // Take the ids out of a scan of the same size, so this test asserts the
+        // rule rather than a guess about which part the broker hands back.
+        const window = await inspectDeadLetterQueue({
+            connectionManager: source(),
+            dlqQueue: DLQ,
+            scanLimit: SCAN_LIMIT,
+            logger,
+        });
+        expect(window.scanTruncated).toBe(true);
+        const wanted = window.messages
+            .filter(m => m.firstDeathQueue === TARGET_QUEUE && m.eventType === REPLAYABLE_TYPE)
+            .map(m => m.eventId as string);
+        expect(wanted.length).toBeGreaterThan(0);
+
+        const dryRun = await replayDeadLetters({
+            connectionManager: source(),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventIds: wanted },
+            scanLimit: SCAN_LIMIT,
+            logger,
+        });
+        expect(dryRun.inspection.scanTruncated).toBe(true);
+        expect(dryRun.selection.namedIdCoverage.complete).toBe(true);
+
+        const replay = await replayDeadLetters({
+            connectionManager: source(),
+            dlqQueue: DLQ,
+            targetQueue: TARGET_QUEUE,
+            filter: { eventIds: wanted },
+            scanLimit: SCAN_LIMIT,
+            approve: true,
+            confirm: dryRun.selection.confirmation,
+            logger,
+        });
+        expect(replay.failure).toBeNull();
+        // Sorted for comparison: the replay order is by death time, and these
+        // all died inside the same second.
+        expect(replay.replayed.map(m => m.eventId).sort()).toEqual([...wanted].sort());
+
+        if (!connection) throw new Error('no broker connection');
+        const check = await connection.createChannel();
+        // The originals are all still there, and only the two copies landed.
+        expect((await check.checkQueue(DLQ)).messageCount).toBe(4);
+        expect((await check.checkQueue(TARGET_QUEUE)).messageCount).toBe(2);
+        await check.purgeQueue(TARGET_QUEUE);
         await check.close();
     });
 
@@ -278,7 +335,7 @@ describe.runIf(process.env.RABBITMQ_TEST_URL !== 'skip')('dead-letter replay aga
                 connectionManager: source(),
                 dlqQueue: DLQ,
                 targetQueue: `${TARGET_QUEUE}.typo`,
-                filter: { eventTypes: ['iam.persona_assignment.added'] },
+                filter: { eventTypes: [REPLAYABLE_TYPE] },
                 logger,
             }),
         ).rejects.toThrow(/NOT_FOUND|no queue/i);

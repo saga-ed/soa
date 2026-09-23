@@ -29,6 +29,53 @@ new ConnectionManager(logger, {
 });
 ```
 
+## Shutting down — `close()`
+
+Services hold their connection for their whole lifetime and never need
+this. Processes that are meant to **end** — a one-shot operator CLI, a
+migration, a test — do:
+
+```typescript
+try {
+    await doTheWork(connectionManager);
+} finally {
+    await connectionManager.close();
+}
+```
+
+An open AMQP socket keeps Node's event loop alive, so without the close
+the process finishes its work and then just sits there. `process.exit()`
+gets around that by discarding whatever else was still pending, which is
+not the same thing.
+
+`close()` is:
+
+- **final** — it suppresses automatic reconnection, including the one the
+  connection's own `'close'` event would otherwise trigger. A later
+  `connect()` or `ensureConnected()` throws **`ConnectionManagerClosedError`**
+  rather than reviving the manager; construct a new `ConnectionManager` if
+  you want a new connection. (Reviving would let a stray recovery tick
+  resurrect the socket mid-shutdown — the hang this exists to prevent.)
+  `state()` reads `'CLOSED'`, which is distinct from `'DISCONNECTED'`: the
+  latter means a reconnect is expected.
+
+  A long-running service that adds `close()` to its shutdown path should
+  catch that error in its recovery loop and stop, rather than treat it as a
+  broker outage and retry forever:
+
+  ```typescript
+  catch (err) {
+      if (err instanceof ConnectionManagerClosedError) return; // shutting down
+      this.scheduleReconnect();
+  }
+  ```
+- **idempotent** — calling it twice awaits the same teardown, and calling
+  it on a manager that never connected is a clean no-op.
+- **quiet** — a broker that already dropped the socket makes the teardown
+  throw; that is logged and swallowed, never raised at the caller.
+- **complete** — a pending retry sleep is cancelled, so nothing is left
+  holding the event loop open once it resolves.
+
 Rationale and the full pattern set (idempotent UPSERT handlers, soft-delete
 projections, OTel `initTracing` ordering, queue-per-event-family) are
 captured in

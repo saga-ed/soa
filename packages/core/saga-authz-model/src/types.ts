@@ -89,7 +89,8 @@ export interface FgaRelationsByType {
         | 'can_manage_staff'
         | 'can_view_district_programs'
         | 'can_view_user_pii'
-        | 'can_observe_session_recordings';
+        | 'can_observe_session_recordings'
+        | 'can_configure_scope_values';
     staff_org:
         | 'platform'
         | 'staff_admin'
@@ -161,6 +162,7 @@ export const FGA_RELATIONS = {
         'can_view_district_programs',
         'can_view_user_pii',
         'can_observe_session_recordings',
+        'can_configure_scope_values',
     ],
     staff_org: [
         'platform',

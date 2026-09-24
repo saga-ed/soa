@@ -229,6 +229,7 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
                 'can_view_district_programs',
                 'can_view_user_pii',
                 'can_observe_session_recordings',
+                'can_configure_scope_values',
             ]),
         );
     });
@@ -245,6 +246,11 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
 
     it('can_observe_session_recordings resolves from support (program-hub#760)', () => {
         const rel = byType.saga_platform.relations?.can_observe_session_recordings;
+        expect(rel?.computedUserset?.relation).toBe('support');
+    });
+
+    it('can_configure_scope_values resolves from support (rostering#1453)', () => {
+        const rel = byType.saga_platform.relations?.can_configure_scope_values;
         expect(rel?.computedUserset?.relation).toBe('support');
     });
 

@@ -1,5 +1,5 @@
 import type { Channel } from 'amqplib';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { ILogger } from '@saga-ed/soa-logger';
 import type { ConnectionManager } from '@saga-ed/soa-rabbitmq';
 import {
@@ -9,12 +9,25 @@ import {
     propagation,
     trace,
 } from '@opentelemetry/api';
+import { assertOutboxIndexHealth, type IndexAssertMode } from './create-pool.js';
+import { OutboxRetention, type OutboxRetentionOptions } from './retention.js';
 
 export interface OutboxMetrics {
     /** Called after a row is successfully published. */
     onPublished: (eventType: string, eventVersion: number) => void;
     /** Called when publishing a row throws. */
     onPublishFailed: (eventType: string, eventVersion: number, reason: string) => void;
+    /** Called when this instance becomes the single leader that polls outbox_event. */
+    onLeaderAcquired?: () => void;
+    /** Called when this instance loses leadership (connection lost, or stop()). */
+    onLeaderLost?: () => void;
+    /**
+     * Called each time a non-leader instance fails to acquire the lock and
+     * schedules a retry. Lets ops distinguish "lock held elsewhere, working
+     * as intended" from low event volume on the graph — a wedged leader
+     * looks identical to a quiet one without this.
+     */
+    onLeaderWaiting?: () => void;
 }
 
 export interface OutboxRelayOpts {
@@ -63,6 +76,30 @@ export interface OutboxRelayOpts {
     /** Optional Prometheus hooks. No-op when undefined. */
     metrics?: OutboxMetrics;
     logger: ILogger;
+    /**
+     * Startup check that outbox_event has a valid partial index on
+     * (occurred_at) WHERE published_at IS NULL (see assertOutboxIndexHealth).
+     * 'throw' (default) fails `start()` when the index is missing or broken —
+     * every consumer must run the index migration BEFORE upgrading to a
+     * version of this package with this default, or boot will fail until it
+     * does. 'warn' logs at error level and starts anyway. 'off' skips the
+     * check entirely.
+     */
+    indexAssert?: IndexAssertMode;
+    /**
+     * Retry cadence for the single-relay leader-lock acquisition attempt
+     * while this instance is not currently the leader. Default: 5000.
+     */
+    leaderPollIntervalMs?: number;
+    /**
+     * Opt-in retention sweep for published rows, run only by the elected
+     * leader on its own timer. Omit to disable — outbox_event then keeps
+     * every published row forever (see OUTBOX_EVENT_ARCHIVE_SQL).
+     */
+    retention?: Pick<
+        OutboxRetentionOptions,
+        'retentionDays' | 'batchSize' | 'intervalMs' | 'maxRowsPerSweep' | 'maxSweepDurationMs'
+    >;
 }
 
 interface OutboxRow {
@@ -91,6 +128,12 @@ export class OutboxRelay {
     private running = false;
     private consecutiveFailures = 0;
     private lastFailureMessage: string | null = null;
+    private leaderClient: PoolClient | null = null;
+    private leaderClientErrorHandler: ((err: Error) => void) | null = null;
+    private isLeader = false;
+    private leaderTimer: NodeJS.Timeout | null = null;
+    private retention: OutboxRetention | null = null;
+    private retentionTimer: NodeJS.Timeout | null = null;
 
     constructor(private readonly opts: OutboxRelayOpts) {}
 
@@ -100,8 +143,28 @@ export class OutboxRelay {
         this.running = true;
         try {
             await this.ensureChannel();
+            await assertOutboxIndexHealth(
+                this.opts.pool,
+                this.opts.logger,
+                this.opts.indexAssert ?? 'throw',
+                this.opts.retention !== undefined,
+            );
         } catch (err) {
             this.running = false;
+            this.opts.logger.error(
+                '[OutboxRelay] startup failed',
+                err instanceof Error ? err : undefined,
+            );
+            // ensureChannel() may have already opened a channel before the
+            // index assert threw — don't leak it on a failed start().
+            if (this.channel) {
+                try {
+                    await this.channel.close();
+                } catch {
+                    // Already closed/dead — nothing to clean up.
+                }
+                this.channel = null;
+            }
             throw err;
         }
         // Publishes use `persistent: true` for durability but do NOT wait for
@@ -111,7 +174,17 @@ export class OutboxRelay {
         // soa-rabbitmq with `newConfirmChannel()` to restore strict
         // at-least-once.
 
+        if (this.opts.retention) {
+            this.retention = new OutboxRetention({
+                pool: this.opts.pool,
+                logger: this.opts.logger,
+                ...this.opts.retention,
+            });
+            this.startRetentionTimer();
+        }
+
         this.opts.logger.info(`[OutboxRelay] started (exchange=${this.opts.exchange})`);
+        void this.pursueLeadership();
         this.scheduleNext();
     }
 
@@ -179,6 +252,19 @@ export class OutboxRelay {
             clearTimeout(this.timer);
             this.timer = null;
         }
+        if (this.leaderTimer) {
+            clearTimeout(this.leaderTimer);
+            this.leaderTimer = null;
+        }
+        if (this.retentionTimer) {
+            clearInterval(this.retentionTimer);
+            this.retentionTimer = null;
+        }
+        if (this.leaderClient) {
+            await this.releaseLeadership(this.leaderClient);
+            this.leaderClient = null;
+            this.isLeader = false;
+        }
         if (this.channel) {
             try {
                 await this.channel.close();
@@ -199,6 +285,14 @@ export class OutboxRelay {
     }
 
     private async tick(): Promise<void> {
+        // Every task ticks on the same pollIntervalMs — cheap when not
+        // leader (an in-memory flag check, no DB round-trip). Leadership
+        // acquisition itself runs on its own slower loop (pursueLeadership),
+        // decoupled from this one.
+        if (!this.isLeader) {
+            this.scheduleNext();
+            return;
+        }
         try {
             await this.drainBatch();
             this.consecutiveFailures = 0;
@@ -246,6 +340,29 @@ export class OutboxRelay {
         this.scheduleNext();
     }
 
+    /**
+     * pg emits 'error' on a checked-out client unconditionally when its
+     * socket dies mid-use — a fresh connection from pool.connect() has no
+     * listener yet, and Node's EventEmitter throws SYNCHRONOUSLY when
+     * 'error' fires with nothing attached, crashing the process outright
+     * (the surrounding try/catch on the query call doesn't help; the throw
+     * happens inside pg's own event dispatch, not in our code). Attaches a
+     * logging no-op guard for the duration of `fn`, removed in `finally`.
+     * Callers that need to react to the error themselves (the leader
+     * client's permanent handler) attach their own listener separately.
+     */
+    private async withErrorGuard<T>(client: PoolClient, fn: () => Promise<T>): Promise<T> {
+        const guard = (err: Error): void => {
+            this.opts.logger.warn(`[OutboxRelay] client error while checked out: ${err.message}`);
+        };
+        client.on('error', guard);
+        try {
+            return await fn();
+        } finally {
+            client.removeListener('error', guard);
+        }
+    }
+
     private async drainBatch(): Promise<void> {
         // Re-acquire the channel BEFORE opening the pg transaction: broker
         // recovery can take seconds-to-minutes and must not run while row
@@ -255,45 +372,47 @@ export class OutboxRelay {
         const client = await this.opts.pool.connect();
         let clientPoisoned = false;
         try {
-            await client.query('BEGIN');
-            // The relay holds this transaction open across the publish loop
-            // (idle-in-transaction during broker I/O). Override any pool-level
-            // idle_in_transaction_session_timeout for THIS tx so a server-side
-            // guard (e.g. soa-postgres' default-ON 30s gh-186 guard) can't
-            // terminate the relay mid-batch under backpressure. SET LOCAL is
-            // scoped to this transaction and reverts on COMMIT/ROLLBACK.
-            await client.query(
-                `SET LOCAL idle_in_transaction_session_timeout = ${this.opts.txIdleTimeoutMs ?? 300_000}`,
-            );
-            const result = await client.query<OutboxRow>(
-                `SELECT event_id, aggregate_type, aggregate_id, event_type,
-                        event_version, payload, meta, occurred_at, attempts
-                 FROM outbox_event
-                 WHERE published_at IS NULL
-                 ORDER BY occurred_at
-                 LIMIT $1
-                 FOR UPDATE SKIP LOCKED`,
-                [batchSize],
-            );
+            await this.withErrorGuard(client, async () => {
+                await client.query('BEGIN');
+                // The relay holds this transaction open across the publish loop
+                // (idle-in-transaction during broker I/O). Override any pool-level
+                // idle_in_transaction_session_timeout for THIS tx so a server-side
+                // guard (e.g. soa-postgres' default-ON 30s gh-186 guard) can't
+                // terminate the relay mid-batch under backpressure. SET LOCAL is
+                // scoped to this transaction and reverts on COMMIT/ROLLBACK.
+                await client.query(
+                    `SET LOCAL idle_in_transaction_session_timeout = ${this.opts.txIdleTimeoutMs ?? 300_000}`,
+                );
+                const result = await client.query<OutboxRow>(
+                    `SELECT event_id, aggregate_type, aggregate_id, event_type,
+                            event_version, payload, meta, occurred_at, attempts
+                     FROM outbox_event
+                     WHERE published_at IS NULL
+                     ORDER BY occurred_at
+                     LIMIT $1
+                     FOR UPDATE SKIP LOCKED`,
+                    [batchSize],
+                );
 
-            if (result.rows.length === 0) {
+                if (result.rows.length === 0) {
+                    await client.query('COMMIT');
+                    return;
+                }
+
+                const publishedIds: string[] = [];
+                for (const row of result.rows) {
+                    await this.publishRow(channel, row);
+                    publishedIds.push(row.event_id);
+                }
+
+                // Batch the published_at update — one round-trip instead of N.
+                await client.query(
+                    `UPDATE outbox_event SET published_at = NOW() WHERE event_id = ANY($1::uuid[])`,
+                    [publishedIds],
+                );
+
                 await client.query('COMMIT');
-                return;
-            }
-
-            const publishedIds: string[] = [];
-            for (const row of result.rows) {
-                await this.publishRow(channel, row);
-                publishedIds.push(row.event_id);
-            }
-
-            // Batch the published_at update — one round-trip instead of N.
-            await client.query(
-                `UPDATE outbox_event SET published_at = NOW() WHERE event_id = ANY($1::uuid[])`,
-                [publishedIds],
-            );
-
-            await client.query('COMMIT');
+            });
         } catch (err) {
             try {
                 await client.query('ROLLBACK');
@@ -315,6 +434,153 @@ export class OutboxRelay {
                 client.release();
             }
         }
+    }
+
+    /**
+     * Fixed namespace for the leader lock, combined with `current_schema()`
+     * so per-PR preview schemas on a shared Postgres instance each contend
+     * for their OWN lock instead of one lock across every preview (mirrors
+     * createOutboxPool's search_path-based isolation).
+     */
+    private static readonly LEADER_LOCK_NAMESPACE = 'soa-event-outbox:outbox_event';
+
+    /** Checks out a client and attempts the lock once. Releases it immediately on failure. */
+    private async tryAcquireLeadership(): Promise<PoolClient | null> {
+        const client = await this.opts.pool.connect();
+        return this.withErrorGuard(client, async () => {
+            try {
+                const { rows } = await client.query<{ locked: boolean }>(
+                    'SELECT pg_try_advisory_lock(hashtext($1)::int, hashtext(current_schema())::int) AS locked',
+                    [OutboxRelay.LEADER_LOCK_NAMESPACE],
+                );
+                if (rows[0]?.locked) {
+                    return client;
+                }
+                client.release();
+                return null;
+            } catch (err) {
+                client.release(err instanceof Error ? err : new Error(String(err)));
+                throw err;
+            }
+        });
+    }
+
+    private async releaseLeadership(client: PoolClient): Promise<void> {
+        // Only strip the listener that pursueLeadership() attached to THIS
+        // client — a client passed in before that attachment (the
+        // stop()-raced-acquisition path below) never had one. Removed
+        // BEFORE the unlock query starts (not after) and replaced in the
+        // same synchronous span by withErrorGuard's own listener below — a
+        // real 'error' event can't land in a gap with no `await` in it, so
+        // this ordering never leaves the client briefly listener-less.
+        // Leaving the old handler attached instead (removing it only once
+        // the unlock settles) would double up: the handler itself calls
+        // client.release(err), and this method's own finally would then
+        // call client.release() again on an already-released client.
+        if (this.leaderClient === client && this.leaderClientErrorHandler) {
+            client.removeListener('error', this.leaderClientErrorHandler);
+            this.leaderClientErrorHandler = null;
+        }
+        let unlockErr: Error | undefined;
+        try {
+            await this.withErrorGuard(client, () =>
+                client.query(
+                    'SELECT pg_advisory_unlock(hashtext($1)::int, hashtext(current_schema())::int)',
+                    [OutboxRelay.LEADER_LOCK_NAMESPACE],
+                ),
+            );
+        } catch (err) {
+            // Connection is likely already dead — Postgres releases session-
+            // level advisory locks on disconnect, so the lock is gone either
+            // way. Capture the error so `release()` below destroys the
+            // client instead of recycling a connection that just failed a
+            // query back into the pool.
+            unlockErr = err instanceof Error ? err : new Error(String(err));
+        } finally {
+            client.release(unlockErr);
+        }
+    }
+
+    /**
+     * Try once to become the single relay leader. On failure, retry every
+     * `leaderPollIntervalMs` without running the outbox query — the losing
+     * task(s) (e.g. every green-color ECS task during a blue/green deploy)
+     * sit idle instead of all polling the same table.
+     */
+    private async pursueLeadership(): Promise<void> {
+        if (!this.running) return;
+        let client: PoolClient | null;
+        try {
+            client = await this.tryAcquireLeadership();
+        } catch (err) {
+            this.opts.logger.warn(
+                `[OutboxRelay] leader-lock attempt failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            this.scheduleLeaderPoll();
+            return;
+        }
+        if (!client) {
+            this.opts.metrics?.onLeaderWaiting?.();
+            this.opts.logger.debug('[OutboxRelay] leader lock held elsewhere; waiting');
+            this.scheduleLeaderPoll();
+            return;
+        }
+        if (!this.running) {
+            // stop() raced the acquisition.
+            await this.releaseLeadership(client);
+            return;
+        }
+        this.leaderClient = client;
+        this.isLeader = true;
+        // Must have a listener — an unhandled EventEmitter 'error' crashes the
+        // process. A dead connection also drops the session-level advisory
+        // lock on the Postgres side, so re-pursuing here is correct, not
+        // just a log-and-continue.
+        //
+        // Named (not inline-anonymous) so it can remove itself: pg-pool only
+        // frees a client's pool slot via `client.release(err)`, and a
+        // listener left attached after release/stop() could otherwise fire
+        // later and null out a NEWER leader's state — hence the `leaderClient
+        // === client` guard below rather than clearing unconditionally.
+        const onLeaderClientError = (err: Error): void => {
+            client.removeListener('error', onLeaderClientError);
+            if (this.leaderClientErrorHandler === onLeaderClientError) {
+                this.leaderClientErrorHandler = null;
+            }
+            client.release(err);
+            if (this.leaderClient !== client) return;
+            this.opts.logger.warn(`[OutboxRelay] leader connection lost: ${err.message}; re-acquiring`);
+            this.isLeader = false;
+            this.leaderClient = null;
+            this.opts.metrics?.onLeaderLost?.();
+            if (this.running) void this.pursueLeadership();
+        };
+        this.leaderClientErrorHandler = onLeaderClientError;
+        client.on('error', onLeaderClientError);
+        this.opts.metrics?.onLeaderAcquired?.();
+        this.opts.logger.info('[OutboxRelay] acquired leader lock; polling outbox_event');
+    }
+
+    private scheduleLeaderPoll(): void {
+        if (!this.running) return;
+        this.leaderTimer = setTimeout(() => {
+            void this.pursueLeadership();
+        }, this.opts.leaderPollIntervalMs ?? 5000);
+    }
+
+    /**
+     * Drives OutboxRetention.sweepOnce() directly on the relay's own timer —
+     * gated by `isLeader` at each firing — instead of calling
+     * OutboxRetention.start(), which would run its own always-on timer with
+     * no leader check and sweep from every task.
+     */
+    private startRetentionTimer(): void {
+        if (!this.retention || this.retentionTimer) return;
+        const intervalMs = this.opts.retention?.intervalMs ?? 60 * 60 * 1000;
+        this.retentionTimer = setInterval(() => {
+            if (this.isLeader) void this.retention?.sweepOnce();
+        }, intervalMs);
+        this.retentionTimer.unref?.();
     }
 
     private async publishRow(channel: Channel, row: OutboxRow): Promise<void> {

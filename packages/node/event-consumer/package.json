@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-event-consumer",
-    "version": "0.1.0-dev.7",
+    "version": "0.1.0-dev.8",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -16,6 +16,7 @@
         "build": "tsup",
         "check-types": "tsc --noEmit",
         "test": "vitest run --passWithNoTests",
+        "test:int": "vitest run --config vitest.int.config.ts",
         "lint": "eslint src/",
         "clean": "rm -rf dist"
     },

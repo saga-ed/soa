@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-observability",
-    "version": "0.1.0-dev.8",
+    "version": "0.1.1",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -11,7 +11,9 @@
             "default": "./dist/index.js"
         }
     },
-    "files": ["dist"],
+    "files": [
+        "dist"
+    ],
     "scripts": {
         "build": "tsup",
         "check-types": "tsc --noEmit",

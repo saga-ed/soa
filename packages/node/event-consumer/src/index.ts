@@ -5,6 +5,52 @@ export {
 } from './consumed-events-retention.js';
 export { applyPreviewTag } from '@saga-ed/soa-event-envelope';
 export {
+    DEFAULT_MAX_MESSAGES,
+    DEFAULT_SCAN_LIMIT,
+    MAX_MESSAGES_CEILING,
+    REPLAY_AT_HEADER,
+    REPLAY_DEATH_QUEUE_HEADER,
+    REPLAY_SOURCE_HEADER,
+    SCAN_LIMIT_CEILING,
+    DlqReplayRefusedError,
+    computeConfirmation,
+    countSkipReasons,
+    describeDlqMessage,
+    groupDlqMessages,
+    selectForReplay,
+    validateFilter,
+    type DlqDecision,
+    type DlqGroupCount,
+    type DlqMessage,
+    type DlqNamedIdCoverage,
+    type DlqReplayFilter,
+    type DlqSelection,
+    type DlqSkipReason,
+} from './dlq-replay.js';
+export {
+    DEFAULT_PUBLISH_TIMEOUT_MS,
+    formatInspectionReport,
+    formatReplayReport,
+    inspectDeadLetterQueue,
+    replayDeadLetters,
+    type DlqChannel,
+    type DlqChannelSource,
+    type DlqInspectOptions,
+    type DlqInspection,
+    type DlqRawMessage,
+    type DlqReplayOptions,
+    type DlqReplayResult,
+} from './dlq-replay-runner.js';
+export {
+    DLQ_REPLAY_CLI_OPTIONS,
+    filterFromCliValues,
+    runDlqReplayCli,
+    type DlqReplayCliDefaults,
+    type DlqReplayCliValues,
+    type DlqReplayConnection,
+    type RunDlqReplayCliOptions,
+} from './dlq-replay-cli.js';
+export {
     EventConsumer,
     ConsumerVersionMismatchError,
     DuplicateHandlerError,

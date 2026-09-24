@@ -47,6 +47,7 @@ import {
   splitSpaPaths,
 } from './core/flow/index.js';
 import type { FlowDef, ResolvedFlow, SpaDescriptor } from './core/flow/index.js';
+import { featureSet } from './core/bundles.js';
 import { buildDevLoginRequest } from './core/login.js';
 import type { PersonaPreflight, SettleBarrier } from './runtime/settle-barrier.js';
 import { deriveInstance } from './core/derive-instance.js';
@@ -1115,7 +1116,9 @@ export async function executeResolvedFlow(
         // up() set — a prereq-closure DB dump must land in a provisioned DB.
         const union = [...new Set<ServiceId>([...prereqServices, ...services])];
         deps.log(`==> up: ${union.length} service(s) [${union.join(', ')}] (prerequisite union)`);
-        const up = await deps.api.up(union);
+        // The features union too: this one `up` covers BOTH closures, so gating it
+        // on either flow's set alone would drop the other's mesh units.
+        const up = await deps.api.up(union, featureSet([...prereq.features, ...resolved.features]));
         if (!up.ok) {
           throw new FlowExecError(`native bring-up failed${up.failedAt ? ` at ${up.failedAt}` : ''}`);
         }
@@ -1191,7 +1194,7 @@ export async function executeResolvedFlow(
   if (opts.lane === 'stack') {
     // 1. native bring-up.
     deps.log(`==> up: ${services.length} service(s) [${services.join(', ')}]`);
-    const up = await deps.api.up(services);
+    const up = await deps.api.up(services, resolved.features);
     if (!up.ok) {
       throw new FlowExecError(`native bring-up failed${up.failedAt ? ` at ${up.failedAt}` : ''}`);
     }

@@ -22,7 +22,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { combineRequested, effectiveWithPlayback } from '../../../core/bundles.js';
+import { combineRequested, featuresFor } from '../../../core/bundles.js';
 import { computeClosure } from '../../../core/closure.js';
 import { manifest } from '../../../core/manifest/index.js';
 import type { ServiceId } from '../../../core/manifest/index.js';
@@ -73,7 +73,7 @@ describe('stack up --dry-run — closure planning path', () => {
     // Mirrors StackUp.run: requested = combineRequested(only, with) → computeClosure.
     const requested = combineRequested(undefined, ['coach'], fail);
     const closure = computeClosure(manifest, requested, {
-      withPlayback: effectiveWithPlayback(['coach']),
+      features: featuresFor(undefined, ['coach'], fail),
     });
     // programs-api rides in on coach-web's `browser` edge (coach#329): the Reports
     // program filter fetches programs.list from the browser, so an interactive
@@ -89,7 +89,7 @@ describe('stack up --dry-run — closure planning path', () => {
   it('--with playback (dry-run) plans the playback closure, not the full stack', () => {
     const requested = combineRequested(undefined, ['playback'], fail);
     const closure = computeClosure(manifest, requested, {
-      withPlayback: effectiveWithPlayback(['playback']),
+      features: featuresFor(undefined, ['playback'], fail),
     });
     expect(new Set(closure.services)).toEqual(
       new Set(['transcripts-api', 'insights-api', 'chat-api']),

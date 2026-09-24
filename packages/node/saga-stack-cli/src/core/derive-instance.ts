@@ -43,7 +43,7 @@
  */
 
 import { homedir } from 'node:os';
-import { getMesh, manifest as defaultManifest } from './manifest/index.js';
+import { manifest as defaultManifest } from './manifest/index.js';
 import type { Manifest, ServiceId } from './manifest/index.js';
 
 /** The stride between adjacent slots' port bands. `offset = slot * STRIDE`. */
@@ -200,24 +200,26 @@ function containerEnvFor(slot: number): Record<string, string> {
 
 /**
  * Assert the fully-resolved port set for one slot is collision-free: every
- * service port + the five mesh ports (postgres/redis/rabbitmq/rabbitmq-mgmt/
- * connect-mongo), each + offset. Throws a clear error on the first duplicate.
- * Stride 1000 is collision-free by construction today; this guards a FUTURE
- * service whose base could sit a multiple of the stride from another.
+ * service port + every mesh port a unit publishes (its `port`, plus `mgmtPort`
+ * and `readinessHttp.port` where present), each + offset. Throws a clear error
+ * on the first duplicate. Stride 1000 is collision-free by construction today;
+ * this guards a FUTURE service whose base could sit a multiple of the stride
+ * from another.
+ *
+ * Derived from the manifest rather than hand-listed: the hand-list this replaces
+ * covered five ports and silently omitted openfga's, so a service banded onto
+ * 8180 would have passed the guard and then failed at compose bind time.
  */
 function assertPortsDisjoint(slot: number, offset: number, m: Manifest): void {
   const ports: number[] = [];
   for (const id of Object.keys(m.services) as ServiceId[]) {
     ports.push(m.services[id].port + offset);
   }
-  const rabbit = getMesh('rabbitmq', m);
-  ports.push(
-    getMesh('postgres', m).port + offset,
-    getMesh('redis', m).port + offset,
-    rabbit.port + offset,
-    (rabbit.mgmtPort ?? 15672) + offset,
-    getMesh('connect-mongo', m).port + offset,
-  );
+  for (const unit of Object.values(m.mesh)) {
+    ports.push(unit.port + offset);
+    if (unit.mgmtPort !== undefined) ports.push(unit.mgmtPort + offset);
+    if (unit.readinessHttp !== undefined) ports.push(unit.readinessHttp.port + offset);
+  }
 
   const seen = new Set<number>();
   for (const p of ports) {

@@ -68,8 +68,12 @@ export interface PortProbe {
 
 /**
  * Derive the mesh host-port list from the manifest: each mesh unit's `port`, plus
- * `mgmtPort` where present (rabbitmq's 15672). Declaration order is preserved, so
- * the output reads postgres, redis, rabbitmq (+ mgmt), connect-mongo.
+ * `mgmtPort` where present (rabbitmq's 15672) and `readinessHttp.port` where the
+ * unit is HTTP-probed (otel-collector's 13133). Declaration order is preserved.
+ *
+ * Every port a unit's compose fragment PUBLISHES belongs here — an unpreflighted
+ * one surfaces as a raw "port is already allocated" that fails the whole `make
+ * up`, rather than the named conflict this preflight exists to report.
  *
  * M7: `offset` shifts every host port by the slot's `slot * 1000` so the preflight
  * probes the SLOT's ports, not base. At offset 0 (slot 0) this is byte-identical.
@@ -80,6 +84,9 @@ export function meshPortSpecs(m: Manifest = defaultManifest, offset = 0): MeshPo
     specs.push({ port: unit.port + offset, name: unit.id });
     if (unit.mgmtPort !== undefined) {
       specs.push({ port: unit.mgmtPort + offset, name: `${unit.id}-mgmt` });
+    }
+    if (unit.readinessHttp !== undefined) {
+      specs.push({ port: unit.readinessHttp.port + offset, name: `${unit.id}-health` });
     }
   }
   return specs;

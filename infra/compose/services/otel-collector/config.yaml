@@ -1,0 +1,51 @@
+## Local OTLP collector config — receives spans and prints them.
+##
+## The point is to make a span's SHAPE readable on a laptop: whether an
+## exception event is attached, whether `error.type` is set. Those are the
+## fields the Datadog error-message/stack gap turns on, and until this existed
+## they could only be inspected after a deploy.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Bounded queue so a burst from a local service can't grow memory unchecked.
+  batch:
+    timeout: 1s
+
+exporters:
+  # `detailed` prints resource attributes, span attributes, and events (which is
+  # where recordException lands) — the whole reason to run this locally.
+  debug:
+    verbosity: detailed
+
+  ## Optional Datadog passthrough — compare the LOCAL span against what the
+  ## deployed pipeline receives, end to end, without a deploy.
+  ##
+  ## Commented rather than profile-gated because it needs a credential: enabling
+  ## it by default would fail the collector for everyone without a DD_API_KEY.
+  ## To use: uncomment this block, add `datadog` to the traces exporters below,
+  ## and export DD_API_KEY before `ss stack up --with otel`.
+  #
+  # datadog:
+  #   api:
+  #     key: ${env:DD_API_KEY}
+  #     site: datadoghq.com
+
+extensions:
+  # The CLI's readiness gate probes this from the host. The collector image
+  # ships no shell and no probe binary, so an HTTP extension is the only way
+  # this unit can report ready at all.
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

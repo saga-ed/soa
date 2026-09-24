@@ -14,8 +14,7 @@
  * PURE: this module carries zero IO.
  */
 
-import type { ClosureOpts } from './closure.js';
-import type { ServiceId } from './manifest/index.js';
+import type { DbId, MeshId, ServiceId } from './manifest/index.js';
 
 /** The named features a `--with` value may select (services, a seed add-on, or both). */
 export type BundleName =
@@ -25,7 +24,8 @@ export type BundleName =
   | 'playback'
   | 'qtf'
   | 'authz'
-  | 'staff-admin';
+  | 'staff-admin'
+  | 'otel';
 
 /** A seed add-on a bundle may layer onto the composed seed plan. */
 export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz';
@@ -34,6 +34,21 @@ export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz';
 export interface BundleDef {
   /** Service-ids unioned into the requested set (`[]` for a seed-only feature like qtf). */
   services: readonly ServiceId[];
+  /**
+   * Mesh units this feature brings up DIRECTLY, independent of any service.
+   *
+   * The closure's mesh is otherwise a union over the closure's SERVICES
+   * (closure.ts), which means an infra unit can only be gated by hanging it off
+   * an `optional:true` service — the way `openfga` rides on `authz-sync`. That
+   * breaks down for a unit wanted by an `optional:false` service (e.g. a local
+   * OTLP collector for `programs-api`): declaring it there would start it on
+   * every `stack up`, and there is nowhere else to put it.
+   *
+   * A bundle listing mesh here closes that gap without inventing a second
+   * gating concept — `qtf` already proves a bundle can contribute zero services
+   * and still be meaningful; this is the same idea one axis over.
+   */
+  mesh?: readonly MeshId[];
   /** Seed add-on layered onto the seed plan when this feature is selected (independent of services). */
   seedAddOn?: BundleSeedAddOn;
   /** Brief human description (shown by `stack bundle list`). */
@@ -43,9 +58,9 @@ export interface BundleDef {
 /**
  * The bundle registry — the ONE source of truth. A feature may contribute
  * services (`dash`/`connect`/`coach`/`playback`), a seed add-on (`playback`/
- * `qtf`), or both. `playback`'s services are the three `optional:true` APIs, so
- * they only resolve when the closure's `withPlayback` is set (see
- * `effectiveWithPlayback`). `qtf` is seed-only (no services).
+ * `qtf`), mesh units, or a combination. `playback`'s services are the three
+ * `optional:true` APIs, so they resolve only when the closure's `features`
+ * select `playback`. `qtf` is seed-only (no services).
  */
 export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
   dash: {
@@ -86,6 +101,18 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
       'iam/programs/sis closure they read. Log in with `ss stack login` — the console ' +
       'reads that operator cookie. Impersonate is HIDDEN (the synthetic seed mints no ' +
       'staff:* claims) and the COACH pages 401 (coach-api verifies a janus_session).',
+  },
+  otel: {
+    // The first bundle to use `mesh` rather than contributing infra through a
+    // service: an OTLP collector is wanted by `programs-api`, which is
+    // `optional:false`, so there is no optional service to hang it off.
+    services: [],
+    mesh: ['otel-collector'],
+    description:
+      'Local OTLP collector (:4318) that prints received spans to its container log — ' +
+      'so a span-level change is verifiable on a laptop instead of first in a deployed ' +
+      'environment. Services already default to localhost:4318, so this only gives those ' +
+      'exports somewhere to land. `docker logs soa-otel-collector-1` to read them.',
   },
 };
 
@@ -166,104 +193,159 @@ export function combineRequested(
   return out;
 }
 
+// ─── FeatureSet: the variable-arity selection value ───────────────────────────
+//
+// One value threaded as a unit, replacing a `withX?: boolean` per family — a
+// fixed-arity encoding of a variable-arity fact that cost ~70 refs across 13
+// files and a hand-sweep to add a family. Because every field was `?:`, a caller
+// could pass `{}`, typecheck, and silently resolve an EMPTY closure (exit 0, no
+// error); that bug shipped three times. The brand is what forecloses it: `{}`
+// and a bare `Set` are not assignable, so only `featureSet()` can mint one and
+// "forgot to thread it" is a COMPILE error.
+
+declare const FEATURE_SET_BRAND: unique symbol;
+
+/** The features selected for a run. Mint via `featureSet()` / `featuresFor()`. */
+export type FeatureSet = ReadonlySet<BundleName> & { readonly [FEATURE_SET_BRAND]: true };
+
 /**
- * Whether the closure should keep the `optional:true` playback services: true
- * iff the `playback` bundle was requested via `--with`. `computeClosure`
- * (closure.ts) DROPS a requested optional service unless `withPlayback` is set,
- * so `--with playback` must flip this or the playback ids get filtered out. PURE.
+ * Mint a `FeatureSet`. Dedupes; order is irrelevant (membership-only).
+ *
+ * The double cast is the standard branded-type hop: the brand exists only in
+ * the type system (`declare const`, never assigned at runtime), so a plain
+ * `Set` does not structurally satisfy it. Minting is deliberately funnelled
+ * through here — that is what stops a caller hand-rolling `new Set()` and
+ * bypassing the compile-time guarantee. PURE.
  */
-export function effectiveWithPlayback(withBundles: string[] | undefined): boolean {
-  return (withBundles ?? []).includes('playback');
+export function featureSet(names: Iterable<BundleName>): FeatureSet {
+  return new Set(names) as unknown as FeatureSet;
 }
 
 /**
- * Whether the closure should keep the `optional:true` `authz-sync` service AND
- * iam-api should get FGA_ENABLED=true + the openfga mesh unit: true iff the
- * `authz` bundle was requested via `--with`. Same shape as
- * `effectiveWithPlayback` — `computeClosure` drops `authz-sync` unless this is
- * set, and `defaultLaunchContext`/`resolveLaunchEnv` use it to gate iam-api's
- * FGA_ENABLED token and the `openfga` mesh unit's inclusion, keeping the
- * OpenFGA footprint opt-in rather than part of every default `stack up`. PURE.
+ * `optional:true` service-id → the bundle that admits it, inverted from
+ * `BUNDLES` once.
+ *
+ * Adding a family is a registry edit here with no code change anywhere else —
+ * `admitsOptional` and every id→feature consumer read this map.
+ *
+ * Bundles MAY list `optional:false` ids (`dash`/`connect`/`coach` all do) — those
+ * are pure `--only` sugar and need no gate, so a mapping for them is harmless.
+ * PURE.
  */
-export function effectiveWithAuthz(withBundles: string[] | undefined): boolean {
-  return (withBundles ?? []).includes('authz');
+export const BUNDLE_FOR_SERVICE: ReadonlyMap<ServiceId, BundleName> = new Map(
+  BUNDLE_NAMES.flatMap((name) =>
+    BUNDLES[name].services.map((id) => [id, name] as const),
+  ),
+);
+
+/**
+ * The bundle that admits a database, via its owning service — `undefined` when
+ * the db belongs to no bundle (every `meshProvisioned:true` db, which no feature
+ * gates).
+ *
+ * Ownership is only derivable service→db (`svc.databases`), so this walks that
+ * direction once and composes with `BUNDLE_FOR_SERVICE`. Callers gating an
+ * opt-in db ask `features.has(bundleForDb(...))` rather than hand-listing db ids
+ * per family — a hand-list silently mis-gates a db the moment a family gains one.
+ *
+ * ⚠️ Keyed on OWNERSHIP, never on the db's name or `ownerRole`. `authz_local`
+ * is owned by authz-api and is UNCONDITIONAL (a hard sessions-api dep, soa#402);
+ * it merely shares a prefix with the `--with authz` OpenFGA opt-in. Callers gate
+ * on `meshProvisioned:false`, which excludes it structurally. PURE.
+ */
+export function bundleForDb(
+  db: DbId,
+  m: { services: Record<ServiceId, { databases: readonly DbId[] }> },
+): BundleName | undefined {
+  for (const [id, svc] of Object.entries(m.services) as [
+    ServiceId,
+    { databases: readonly DbId[] },
+  ][]) {
+    if (svc.databases.includes(db)) return BUNDLE_FOR_SERVICE.get(id);
+  }
+  return undefined;
 }
 
 /**
- * Whether the closure should keep the `optional:true` staff-admin pair
- * (`staff-admin-bff` + `staff-admin-console`): true iff the `staff-admin`
- * bundle was requested via `--with`. Same shape as `effectiveWithAuthz` —
- * `computeClosure` drops both unless this is set, keeping the operator console
- * out of every default `stack up`. PURE.
- */
-export function effectiveWithStaffAdmin(withBundles: string[] | undefined): boolean {
-  return (withBundles ?? []).includes('staff-admin');
-}
-
-/**
- * The `optional:true` service ids each opt-in flag admits, derived from the
- * bundle registry so they cannot drift from `BUNDLES`.
+ * The features implied by a run's selection flags — from BOTH `--only` and
+ * `--with`.
  *
- * Consumers that must map an optional id BACK to its flag (flow resolution,
- * workspace run-sets) use these instead of hand-listing ids — every optional
- * service needs its OWN flag (see `admitsOptional`), and a stale hand-list is
- * exactly how one gets silently dropped into an empty closure.
- */
-export const PLAYBACK_IDS: readonly ServiceId[] = BUNDLES.playback.services;
-export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
-export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
-
-/**
- * The fully-resolved opt-in flags for every `optional:true` family — one field
- * per flag, none omittable.
+ * 🔑 Deriving from `--only` too is a BUG FIX. `combineRequested` unions both
+ * flags into the requested set, but only `--with` ever fed the feature
+ * derivation — so `stack up --only transcripts-api` resolved an EMPTY closure
+ * (the id was requested, then dropped by `admitsOptional` because nothing
+ * admitted it). You had to know to write `--only transcripts-api --with
+ * playback`. Naming an optional service now implies its family.
  *
- * `Required` is load-bearing: every `ClosureOpts` field is declared `?:`, so a
- * bare `Pick` would leave them all optional and a caller could pass `{}` — which
- * typechecks and then silently resolves an EMPTY closure (exit 0, no error). The
- * alias exists so adding a fourth family is ONE edit here rather than a hand-sweep
- * of every signature that spells the shape out.
+ * No currently-working invocation changes meaning: this only ADMITS ids that
+ * were previously dropped. PURE.
  */
-export type ResolvedClosureOpts = Required<
-  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin'>
->;
-
-/**
- * Every optional-service opt-in flag, derived from one `--with` list.
- *
- * THE point of this helper: each `optional:true` family needs its OWN flag, and
- * every flag defaults to FALSE — so a `computeClosure` caller that forgets one
- * silently resolves an EMPTY closure (exit 0, no error, no compiler help). That
- * failure has now been shipped three times (snapshot store, snapshot restore,
- * flow resolution). Deriving all flags in ONE place means adding a bundle is a
- * single edit here rather than a hand-sweep of every call site.
- *
- * Returns a `Required<…>` shape so a caller cannot partially spread it. PURE.
- */
-export function closureOptsFor(
+export function featuresFor(
+  only: string | undefined,
   withBundles: string[] | undefined,
-): ResolvedClosureOpts {
-  return {
-    withPlayback: effectiveWithPlayback(withBundles),
-    withAuthz: effectiveWithAuthz(withBundles),
-    withStaffAdmin: effectiveWithStaffAdmin(withBundles),
-  };
+  fail: (msg: string) => never,
+): FeatureSet {
+  const named: BundleName[] = [];
+  for (const name of withBundles ?? []) {
+    if (!(name in BUNDLES)) {
+      fail(`unknown bundle: ${name}\nvalid bundles: ${BUNDLE_NAMES.join(', ')}`);
+    }
+    named.push(name as BundleName);
+  }
+  const implied = parseOnly(only)
+    .map((id) => BUNDLE_FOR_SERVICE.get(id))
+    .filter((b): b is BundleName => b !== undefined);
+  return featureSet([...named, ...implied]);
 }
 
 /**
- * The opt-in flags implied by a set of service ids already known to be wanted
- * (a workspace run-set, a flow's `requiredSystems`) — the id→flag direction of
- * `closureOptsFor`. Derived from the same `BUNDLES`-backed id sets, so it cannot
- * drift. PURE.
+ * The features implied by a set of service-ids already known to be wanted (a
+ * workspace run-set, a flow's `requiredSystems`) — the id→feature direction of
+ * `featuresFor`, over the same derived map so the two cannot drift. PURE.
  */
-export function closureOptsForIds(
+export function featuresForIds(ids: readonly ServiceId[]): FeatureSet {
+  return featureSet(
+    ids.map((id) => BUNDLE_FOR_SERVICE.get(id)).filter((b): b is BundleName => b !== undefined),
+  );
+}
+
+/**
+ * Features from bundle NAMES plus already-resolved service IDS — for callers
+ * that have both (a `--with` list and a `requested` array they built earlier).
+ *
+ * Unknown bundle names are ignored rather than fatal: callers in this shape have
+ * already validated their `--with` values while building `requested`
+ * (`combineRequested` fails on an unknown name), so re-failing here would be
+ * dead code with a second error path to keep in sync. PURE.
+ */
+export function featuresOf(
+  withBundles: string[] | undefined,
   ids: readonly ServiceId[],
-): ResolvedClosureOpts {
-  const has = (family: readonly ServiceId[]): boolean => ids.some((id) => family.includes(id));
-  return {
-    withPlayback: has(PLAYBACK_IDS),
-    withAuthz: has(AUTHZ_IDS),
-    withStaffAdmin: has(STAFF_ADMIN_IDS),
-  };
+): FeatureSet {
+  const named = (withBundles ?? []).filter((n): n is BundleName => n in BUNDLES);
+  return featureSet([...named, ...featuresForIds(ids)]);
+}
+
+/**
+ * Mesh units the selected features contribute DIRECTLY (`BundleDef.mesh`),
+ * independent of any service — the only route into the mesh for a bundle with
+ * `services: []`.
+ *
+ * 🔑 THE canonical feature→mesh union: `computeClosure` (`closure.mesh`, what
+ * `--dry-run` reports) and the launch path's `neededMesh` (what starts the
+ * container, via `COMPOSE_PROFILES`) must BOTH route through it. They union over
+ * different sets, so a separate application of `BundleDef.mesh` in either lets
+ * the planner promise a unit the launcher never starts. PURE.
+ */
+export function meshForFeatures(features: FeatureSet): MeshId[] {
+  const out: MeshId[] = [];
+  for (const name of BUNDLE_NAMES) {
+    if (!features.has(name)) continue;
+    for (const u of BUNDLES[name].mesh ?? []) {
+      if (!out.includes(u)) out.push(u);
+    }
+  }
+  return out;
 }
 
 /**

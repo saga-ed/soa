@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { closureOptsForIds } from '../bundles.js';
+import { featuresForIds } from '../bundles.js';
 import { parseWorkspace } from '../workspace.js';
 
 describe('parseWorkspace — mode mapping → run-set / iam-sandbox / playback', () => {
@@ -79,23 +79,22 @@ describe('parseWorkspace — mode mapping → run-set / iam-sandbox / playback',
 
   it('a workspace run-set naming staff-admin admits the pair into the closure', () => {
     // A workspace names services DIRECTLY, so naming the console IS the ask.
-    // `up --workspace` derives the opt-in flags from the run-set via
-    // `closureOptsForIds` (it previously hard-coded withAuthz false, dropping a
-    // workspace-named service while reporting a successful bring-up), so assert
-    // the derivation `up.ts` actually performs rather than a parse-time field.
+    // `up --workspace` derives the features from the run-set via
+    // `featuresForIds`, so assert the derivation `up.ts` actually performs
+    // rather than a parse-time field.
     const sel = parseWorkspace({
       version: '1',
       services: { 'staff-admin-console': { mode: 'local-source' } },
     });
-    expect(closureOptsForIds(sel.runSet).withStaffAdmin).toBe(true);
+    expect(featuresForIds(sel.runSet).has('staff-admin')).toBe(true);
   });
 
-  it('leaves the staff-admin flag off when no staff-admin service is named', () => {
+  it('leaves the staff-admin feature off when no staff-admin service is named', () => {
     const sel = parseWorkspace({
       version: '1',
       services: { 'iam-api': { mode: 'local-source' } },
     });
-    expect(closureOptsForIds(sel.runSet).withStaffAdmin).toBe(false);
+    expect(featuresForIds(sel.runSet).has('staff-admin')).toBe(false);
   });
 
   it('records per-service dbProfiles for local-source services', () => {

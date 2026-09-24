@@ -1,0 +1,30 @@
+## OpenTelemetry collector — local OTLP sink for the synthetic dev mesh.
+##
+## Services in this mesh already export to http://localhost:4318 by default
+## (@saga-ed/soa-observability's `resolveOtlpTracesUrl()`), so before this unit
+## existed those exports failed silently against a closed port. Bringing it up
+## gives them somewhere to land: `docker logs soa-otel-collector-1` renders the
+## spans, exception events included.
+##
+## Selected with `ss stack up --with otel`.
+
+services:
+
+  otel-collector:
+    # Pinned, not `:latest`. The image is distroless — no shell, no probe binary
+    # — so the CLI must probe it over HTTP (MeshDef.readinessHttp). A floating
+    # tag could change what the image contains and silently reopen that.
+    image: otel/opentelemetry-collector-contrib:0.158.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    # Opt-in: only started when the `otel` compose profile is active
+    # (COMPOSE_PROFILES=otel), so an unconditional `include:` of this fragment
+    # doesn't start a collector on every mesh `up`.
+    profiles: ["otel"]
+    volumes:
+      - ./config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      # Both ports MUST also be exported by the CLI's `meshMakeArgs` as
+      # `base + slot offset`, or they fall through to the fixed defaults below on
+      # every slot and a second slot's `up` dies on "port is already allocated".
+      - "${OTEL_COLLECTOR_OTLP_HTTP_PORT:-4318}:4318"
+      - "${OTEL_COLLECTOR_HEALTH_PORT:-13133}:13133"

@@ -27,7 +27,7 @@
 
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
-import { BUNDLE_NAMES, closureOptsFor, combineRequested } from '../../core/bundles.js';
+import { BUNDLE_NAMES, combineRequested, featuresOf } from '../../core/bundles.js';
 import { computeClosure } from '../../core/closure.js';
 import { deriveInstance } from '../../core/derive-instance.js';
 import { healthProbes } from '../../core/probe-plan.js';
@@ -256,9 +256,9 @@ function provenanceDetail(p?: ProvenanceRow): string[] {
 
 /**
  * Turn the `--only`/`--with` flags into the ordered service-id list to probe.
- * The requested set is `parseOnly(only) ∪ expandBundles(with)`; `--with playback`
- * sets `withPlayback` and `--with authz` sets `withAuthz` so their optional
- * service ids survive the closure's optional filter.
+ * The requested set is `parseOnly(only) ∪ expandBundles(with)`; each `--with
+ * <bundle>` also selects that feature, so the bundle's optional service ids
+ * survive the closure's optional filter.
  *  - EMPTY requested (no `--only`, no `--with`) ⇒ every NON-optional service.
  *  - else ⇒ the dependency closure of the requested set (launch order).
  * `fail` renders a friendly oclif error and does not return. Shared by
@@ -283,7 +283,11 @@ export function resolveServiceSet(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  return computeClosure(manifest, requested, closureOptsFor(withBundles)).services;
+  // Features come from the bundle flags AND from any explicitly-requested ids —
+  // naming an optional service is itself a request for it (see `featuresFor`).
+  return computeClosure(manifest, requested, {
+    features: featuresOf(withBundles, requested),
+  }).services;
 }
 
 /** A service excluded from the health pass because its sibling repo isn't cloned. */

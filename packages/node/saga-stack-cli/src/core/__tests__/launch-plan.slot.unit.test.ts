@@ -25,6 +25,7 @@ const REPO_ROOTS: Record<RepoKey, string> = {
   QBOARD: '/w/qboard',
   RTSM: '/w/rtsm',
   FLEEK: '/w/fleek',
+  JANUS: '/w/janus',
 };
 
 const baseInputs = { repoRoots: REPO_ROOTS, vendorDir: '/w/vendor' };

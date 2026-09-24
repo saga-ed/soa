@@ -42,6 +42,7 @@ const SERVICE_IDS = [
   'authz-sync',
   'staff-admin-bff',
   'staff-admin-console',
+  'janus-mock-signer',
 ] as const;
 
 // Compile guard: every literal above must be a real ServiceId (catches typos /

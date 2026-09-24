@@ -35,9 +35,9 @@ export const GITHUB_ORG = 'saga-ed';
 
 /**
  * Repos EXCLUDED from bootstrap's required set (bootstrap.sh's step-1 loop lists 7 of the
- * 9 manifest repos — coach + fleek are optional and not provisioned here).
+ * 10 manifest repos — coach, fleek, and janus are optional and not provisioned here).
  */
-const EXCLUDED_FROM_BOOTSTRAP: readonly RepoKey[] = ['COACH', 'FLEEK'];
+const EXCLUDED_FROM_BOOTSTRAP: readonly RepoKey[] = ['COACH', 'FLEEK', 'JANUS'];
 
 /**
  * The 7 REQUIRED bootstrap repos, derived from the manifest repo set MINUS coach/fleek —

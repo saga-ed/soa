@@ -41,6 +41,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -228,6 +235,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -427,6 +441,13 @@
           "name": "hold",
           "type": "boolean"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -560,6 +581,192 @@
       "slotClaimWritten": false,
       "strict": false
     },
+    "e2e:connect": {
+      "aliases": [],
+      "args": {},
+      "description": "Open a live interactive Connect session: 1 tutor + 2 students (in-process; builds the journey prerequisite, then a headed Connect room).",
+      "enableJsonFlag": false,
+      "examples": [
+        "<%= config.bin %> <%= command.id %>",
+        "<%= config.bin %> <%= command.id %> --reuse -- --debug",
+        "<%= config.bin %> <%= command.id %> --fake-media",
+        "<%= config.bin %> <%= command.id %> --refresh-snapshot"
+      ],
+      "flags": {
+        "coach": {
+          "description": "override path to the coach repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "coach",
+          "type": "option"
+        },
+        "dev": {
+          "description": "sibling-repo workspace root (where the saga repos are checked out)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "dev",
+          "noCacheDefault": true,
+          "type": "option"
+        },
+        "fake-media": {
+          "allowNo": false,
+          "description": "swap real mic/cam capture for Chromium's synthetic camera (moving test pattern) + mic (beep) and auto-accept the getUserMedia prompt — for a machine with no camera or where v4l2loopback won't build. Sets FAKE_MEDIA=1 on the headed interactive-connect run (mirrors connect-session.sh --fake-media); the journey prerequisite is unaffected.",
+          "name": "fake-media",
+          "type": "boolean"
+        },
+        "fleek": {
+          "description": "override path to the fleek repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
+        "output-json": {
+          "allowNo": false,
+          "description": "emit structured JSON on stdout instead of human-readable text",
+          "name": "output-json",
+          "type": "boolean"
+        },
+        "porcelain": {
+          "allowNo": false,
+          "description": "machine-readable output; no color, minimal noise",
+          "name": "porcelain",
+          "type": "boolean"
+        },
+        "prereq-from-snapshot": {
+          "allowNo": true,
+          "description": "M14-C: restore the journey@schedule checkpoint (when a valid one is baked) instead of replaying the whole journey headless — the big Connect-session accelerant. Falls back to the replay when absent/invalid; --reuse trumps this entirely.",
+          "name": "prereq-from-snapshot",
+          "type": "boolean"
+        },
+        "program-hub": {
+          "description": "override path to the program-hub repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "program-hub",
+          "type": "option"
+        },
+        "qboard": {
+          "description": "override path to the qboard repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "qboard",
+          "type": "option"
+        },
+        "refresh-snapshot": {
+          "allowNo": false,
+          "description": "bake the journey prerequisite checkpoints FRESH (headless replay through `schedule`, --snapshot-stages) BEFORE opening the room, then restore that just-made checkpoint — a one-command reseed for when the baked state has gone stale (>7d) or the journey changed. Deterministic fixtureIds ⇒ the bake overwrites. Requires --prereq-from-snapshot (the default); mutually exclusive with --reuse.",
+          "name": "refresh-snapshot",
+          "type": "boolean"
+        },
+        "reuse": {
+          "allowNo": false,
+          "description": "skip the journey-prerequisite rebuild + reset; run the live session against the current stack state",
+          "name": "reuse",
+          "type": "boolean"
+        },
+        "rostering": {
+          "description": "override path to the rostering repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rostering",
+          "type": "option"
+        },
+        "rtsm": {
+          "description": "override path to the rtsm repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "rtsm",
+          "type": "option"
+        },
+        "saga-dash": {
+          "description": "override path to the saga-dash repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "saga-dash",
+          "type": "option"
+        },
+        "sds": {
+          "description": "override path to the sds (student-data-system) repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "sds",
+          "type": "option"
+        },
+        "set": {
+          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "set",
+          "type": "option"
+        },
+        "slot": {
+          "default": 0,
+          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "slot",
+          "type": "option"
+        },
+        "soa": {
+          "description": "override path to the soa repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "soa",
+          "type": "option"
+        },
+        "spa-path": {
+          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "spa-path",
+          "type": "option"
+        },
+        "state-dir": {
+          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "state-dir",
+          "type": "option"
+        },
+        "student-login": {
+          "default": 2,
+          "description": "how many of the 2 students THIS run logs in + joins locally (0, 1, or 2; default 2). The rest stay OPEN for a REMOTE peer to take — pair with --tunnel to invite coworkers. The tutor always auto-hosts and starts the session; login URLs for EVERY participant are printed regardless. Sets CONNECT_LOCAL_STUDENTS on the headed interactive-connect run.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "student-login",
+          "type": "option"
+        },
+        "tunnel": {
+          "allowNo": false,
+          "description": "point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints these Playwright browsers’ URLs — it does NOT relaunch the stack, flip connect-web/rtsm/cookie env, or start frpc. You must have already run `ss stack up --tunnel` so the stack itself is tunnel-served. Connect is slot-0 only, so no slot guard is needed.",
+          "name": "tunnel",
+          "type": "boolean"
+        }
+      },
+      "hasDynamicHelp": false,
+      "hiddenAliases": [],
+      "id": "e2e:connect",
+      "isESM": true,
+      "pluginAlias": "@saga-ed/saga-stack-cli",
+      "pluginName": "@saga-ed/saga-stack-cli",
+      "pluginType": "core",
+      "relativePath": [
+        "dist",
+        "commands",
+        "e2e",
+        "connect.js"
+      ],
+      "slotClaimWritten": false,
+      "strict": false
+    },
     "e2e:list": {
       "aliases": [],
       "args": {},
@@ -590,6 +797,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -775,6 +989,13 @@
           "description": "Plan 13: after the run goes green, mint the dev-persona cookie jar and open a logged-in browser at the SPA (slot-offset URL), print a held-state summary, and exit 0 — the stack stays up. Best-effort browser (a headless host warns, never errors).",
           "name": "hold",
           "type": "boolean"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
         },
         "lane": {
           "default": "stack",
@@ -980,6 +1201,13 @@
           "name": "flow",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "open": {
           "allowNo": false,
           "description": "open the newest preserved run: PREFERS the whole-run HTML report (`playwright show-report`) when one exists, else falls back to the newest trace (`show-trace`). Best-effort; a headless host warns.",
@@ -1147,6 +1375,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "host",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "local-port": {
@@ -1333,6 +1568,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -1470,6 +1712,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -1624,6 +1873,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "org": {
@@ -1800,6 +2056,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "offline": {
           "allowNo": false,
           "description": "catalog-derived ids only — no live id resolution even if anchor URLs are given.",
@@ -1970,6 +2233,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "org": {
           "description": "also assert this fixture org's seed skeleton (emptyOrg); needs --url iam=<conn>.",
           "hasDynamicHelp": false,
@@ -2135,6 +2405,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -2293,6 +2570,13 @@
           "name": "install",
           "type": "boolean"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "note": {
           "description": "optional note stored on the set",
           "hasDynamicHelp": false,
@@ -2348,7 +2632,8 @@
             "sds",
             "qboard",
             "rtsm",
-            "fleek"
+            "fleek",
+            "janus"
           ],
           "required": true,
           "type": "option"
@@ -2457,6 +2742,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -2609,6 +2901,13 @@
           "name": "force",
           "type": "boolean"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -2758,6 +3057,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -2889,6 +3195,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "no-refresh": {
@@ -3047,6 +3360,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -3192,6 +3512,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -3356,6 +3683,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "mesh": {
           "allowNo": false,
           "description": "Also tear the mesh (postgres/rabbitmq/redis/connect-mongo) down (make down PROJECT=saga-mesh in $SOA/infra); default leaves the mesh up.",
@@ -3516,6 +3850,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "jump-host": {
@@ -3738,6 +4079,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -3903,6 +4251,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -4231,6 +4586,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -4326,7 +4688,8 @@
             "playback",
             "qtf",
             "authz",
-            "staff-admin"
+            "staff-admin",
+            "janus-mock"
           ],
           "type": "option"
         }
@@ -4376,6 +4739,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -4533,6 +4903,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -4638,7 +5015,8 @@
             "playback",
             "qtf",
             "authz",
-            "staff-admin"
+            "staff-admin",
+            "janus-mock"
           ],
           "type": "option"
         }
@@ -4690,6 +5068,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -4829,6 +5214,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "output-json": {
           "allowNo": false,
           "description": "emit structured JSON on stdout instead of human-readable text",
@@ -4961,6 +5353,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -5122,6 +5521,13 @@
           "name": "force",
           "type": "boolean"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "only": {
           "description": "restore only the DBs in the dependency closure of these services (comma-list)",
           "hasDynamicHelp": false,
@@ -5277,6 +5683,13 @@
           "name": "force",
           "type": "boolean"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "only": {
           "description": "scope the dump to the dependency closure of these services (comma-list). `--with` bundle services union into this closure.",
           "hasDynamicHelp": false,
@@ -5387,7 +5800,8 @@
             "playback",
             "qtf",
             "authz",
-            "staff-admin"
+            "staff-admin",
+            "janus-mock"
           ],
           "type": "option"
         }
@@ -5451,6 +5865,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -5587,6 +6008,13 @@
           "name": "fleek",
           "type": "option"
         },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
+        },
         "only": {
           "description": "scope the health report to the dependency closure of these services (comma-list)",
           "hasDynamicHelp": false,
@@ -5695,7 +6123,8 @@
             "playback",
             "qtf",
             "authz",
-            "staff-admin"
+            "staff-admin",
+            "janus-mock"
           ],
           "type": "option"
         }
@@ -5761,6 +6190,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -5921,6 +6357,13 @@
           "hidden": true,
           "name": "forbid-foreign",
           "type": "boolean"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
         },
         "login": {
           "allowNo": false,
@@ -6099,7 +6542,8 @@
             "playback",
             "qtf",
             "authz",
-            "staff-admin"
+            "staff-admin",
+            "janus-mock"
           ],
           "type": "option"
         },
@@ -6185,6 +6629,13 @@
           "description": "native health gate only (the default). On --full, narrows the delegated verify.sh to its health gate (VERIFY_HEALTH_ONLY=1).",
           "name": "health-only",
           "type": "boolean"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
+          "type": "option"
         },
         "only": {
           "description": "scope the NATIVE health gate to the dependency closure of these services (comma-list) — so a partial `stack up --only …` verifies just what it launched, instead of failing on the services it never started. Ignored with --full (verify.sh checks the whole stack).",
@@ -6295,7 +6746,8 @@
             "playback",
             "qtf",
             "authz",
-            "staff-admin"
+            "staff-admin",
+            "janus-mock"
           ],
           "type": "option"
         }
@@ -6356,6 +6808,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {
@@ -6501,6 +6960,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "output-json": {

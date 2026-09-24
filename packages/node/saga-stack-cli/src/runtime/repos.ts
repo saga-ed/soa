@@ -53,6 +53,7 @@ export const REPO_ENV_VAR: Record<RepoKey, ManifestRepoKey> = {
   qboard: 'QBOARD',
   rtsm: 'RTSM',
   fleek: 'FLEEK',
+  janus: 'JANUS',
 };
 
 /**

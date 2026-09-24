@@ -29,7 +29,7 @@ const throwFail = (msg: string): never => {
 };
 
 describe('bundle registry', () => {
-  it('exposes the seven bundle names in registry order', () => {
+  it('exposes the eight bundle names in registry order', () => {
     expect(BUNDLE_NAMES).toEqual([
       'dash',
       'connect',
@@ -38,6 +38,7 @@ describe('bundle registry', () => {
       'qtf',
       'authz',
       'staff-admin',
+      'janus-mock',
     ]);
   });
 
@@ -55,7 +56,12 @@ describe('bundle registry', () => {
     expect(SERVICE_BUNDLES.qtf).toEqual([]);
     expect(SERVICE_BUNDLES.authz).toEqual(['authz-sync']);
     // BFF before SPA: the console's vite proxy is useless without it.
-    expect(SERVICE_BUNDLES['staff-admin']).toEqual(['staff-admin-bff', 'staff-admin-console']);
+    expect(SERVICE_BUNDLES['staff-admin']).toEqual([
+      'staff-admin-bff',
+      'staff-admin-console',
+      'janus-mock-signer',
+    ]);
+    expect(SERVICE_BUNDLES['janus-mock']).toEqual(['janus-mock-signer']);
   });
 
   it('derives BUNDLE_SEED_ADDONS only for the seed-bearing bundles', () => {

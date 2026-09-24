@@ -25,6 +25,7 @@ Server-side packages for Node.js applications.
 | `rabbitmq/` | RabbitMQ client wrapper with connection pooling and channel management. Standard AMQP patterns. **Usage:** `import { RabbitMQ } from '@saga-ed/soa-rabbitmq'` | Tier |
 | `redis-core/` | Redis client wrapper with ioredis. Connection pooling and error handling. **Usage:** `import { RedisClient } from '@saga-ed/soa-redis-core'` | Tier |
 | `aws-util/` | AWS SDK utilities for S3, SQS, and SNS. Helper functions for common AWS operations. | Tier |
+| `lake-writer/` | Shared library every Saga service uses to export pseudonymised snapshots to the SDS FERPA data lake's S3 landing zone (HMAC hashing, school-year derivation, Parquet writing, dbt/Athena registration text). Library only — no CLI. **Usage:** `import { runSnapshotExport, studentYearHash } from '@saga-ed/soa-lake-writer'` | [lake-writer/](./lake-writer/README.md) |
 | `test-util/` | Vitest testing utilities with custom matchers and test helpers. **Usage:** `import { createMockRequest } from '@saga-ed/soa-test-util'` | Tier |
 | `event-envelope/` | Zod-validated cross-service event envelope (id, type, version, occurredAt, traceparent, payload). **Usage:** `import { EventEnvelopeSchema } from '@saga-ed/soa-event-envelope'` | [event-driven.md](./claude/event-driven.md) |
 | `event-outbox/` | Transactional outbox: `writeOutbox()` writes inside the same pg tx as your domain change; `new OutboxRelay({...}).start()` ships rows to RabbitMQ with at-least-once delivery. | [event-driven.md](./claude/event-driven.md) |

@@ -85,6 +85,10 @@ trpc-api/
 - `/packages/node/api-core/` - Shared server utilities
 - `/packages/core/trpc-base/` - Shared tRPC initialization factory
 
+## Rules that apply here
+
+- `testing-node.md`
+
 ---
 
 *Last updated: 2026-03*

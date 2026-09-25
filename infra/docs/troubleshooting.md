@@ -122,7 +122,7 @@ Or run `pg_dump` yourself and write the output to `~/.fixtures/profiles/postgres
 +  - path: node_modules/@saga-ed/infra-compose/compose/services/mongo/compose.yml
 ```
 
-See the [CHANGELOG](../CHANGELOG.md) or commit `refactor!: restructure …` for the full move map.
+See commit `refactor!: restructure …` for the full move map.
 
 ## `docker compose up` works but fixture-serve's `/infra/switch` fails
 

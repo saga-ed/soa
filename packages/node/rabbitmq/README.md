@@ -77,10 +77,9 @@ not the same thing.
   holding the event loop open once it resolves.
 
 Rationale and the full pattern set (idempotent UPSERT handlers, soft-delete
-projections, OTel `initTracing` ordering, queue-per-event-family) are
-captured in
-[`d-consumer-resilience.md`](../../../claude/projects/soa_75/decisions/d-consumer-resilience.md)
-on `soa_75`.
+projections, OTel `initTracing` ordering, queue-per-event-family) were meant to be
+captured in `d-consumer-resilience.md` — the file is missing; see
+[soa_75's README](../../../docs/history/soa_75/README.md#missing-decisions).
 
 ## See also
 

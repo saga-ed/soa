@@ -67,8 +67,8 @@ export interface RabbitMQConfig {
    * `'log-and-continue'` otherwise. Set explicitly to override that default
    * — e.g. a CI/staging environment where you want fail-loud behavior.
    *
-   * See `claude/projects/soa_75/decisions/d-consumer-resilience.md` pattern
-   * 3 ("non-fatal broker startup") for the rationale.
+   * Design rationale for pattern 3 ("non-fatal broker startup") not
+   * written up; see `docs/history/soa_75/README.md#missing-decisions`.
    */
   failureMode?: 'fatal' | 'log-and-continue';
 }

@@ -186,5 +186,5 @@ the hand-maintained `verify.sh` list missed, a missing sibling repo is skipped-w
 ## Plan
 
 Authoritative design, research, decisions, and the elevator pitch:
-`soa/claude/projects/gh_214/` (saga-ed/soa#214) — start with `plans/01-saga-stack-cli-plan.md`
+`soa/docs/history/gh_214/` (saga-ed/soa#214) — start with `plans/01-saga-stack-cli-plan.md`
 and `ELEVATOR-PITCH.md`.

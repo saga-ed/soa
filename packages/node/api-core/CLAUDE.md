@@ -88,6 +88,10 @@ None - exemplary package following all SOA patterns.
 - `/apps/node/tgql-api/` - TypeGraphQL API example
 - `/packages/node/CLAUDE.md` - Node.js package patterns
 
+## Rules that apply here
+
+- `testing-node.md`
+
 ---
 
 *Last updated: 2026-02*

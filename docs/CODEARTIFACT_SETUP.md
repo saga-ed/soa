@@ -263,3 +263,8 @@ aws codeartifact list-packages \
   --domain-owner 531314149529 \
   --repository saga_js
 ```
+
+## See also
+
+- [package-registry-quickstart.md](./package-registry-quickstart.md) — cross-repo publish/link/resolve workflow
+- [cicd-package-publishing.md](./cicd-package-publishing.md) — the automated CI/CD publish pipeline

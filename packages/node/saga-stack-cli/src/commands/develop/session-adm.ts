@@ -1,6 +1,6 @@
 /**
  * `saga-stack develop session-adm` — the live SESSION-attendance ADM demo as a
- * durable concierge (gh session-adm plan, claude/projects/ss-develop-session-adm-plan.md).
+ * durable concierge (gh session-adm plan, docs/history/ss-develop-session-adm/plan.md).
  *
  * Promotes saga-dash's `telemetry-demo-multi.sh` into the `develop` family: a
  * tutor (alex.tutor) + Alex's 3 pod-A students (ann.lee / cara.diaz / gina.park)

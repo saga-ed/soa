@@ -23,7 +23,7 @@ A guided walkthrough of the `@saga-ed/infra-compose` package — composable Dock
   - [4.2 Create project seed profiles](#42-create-project-seed-profiles)
   - [4.3 Define a project-specific mongo_init service](#43-define-a-project-specific-mongo_init-service)
   - [4.4 Test profile switching with different data](#44-test-profile-switching-with-different-data)
-  - [4.5 Alternative: docker-entrypoint-initdb.d](#45-alternative-docker-entrypoint-initdbd)
+  - [4.5 Alternative: docker-entrypoint-initdb.d](#45-alternative-docker-entrypoint-initdbd-simpler-no-profiles)
 - [Appendix: Command Cheat Sheet](#appendix-command-cheat-sheet)
 
 ## Prerequisites

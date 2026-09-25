@@ -72,7 +72,7 @@ None - follows all SOA patterns.
 - `../gql-api/` - Apollo GraphQL API (SDL-first approach)
 - `../rest-api/` - REST API example
 - `/packages/node/api-core/` - Shared server utilities
-- `/apps/node/claude/testing.md` - Testing patterns
+- `.claude/rules/testing-node.md` - Testing patterns (auto-loads on this dir)
 
 ---
 

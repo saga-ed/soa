@@ -1,7 +1,7 @@
 /**
  * Shared SagaAuth login-URL primitives for Saga backends.
  *
- * @spec specs/contracts/saga-auth-signal.spec.md (janus repo)
+ * @spec specs/contracts/drafts/saga-auth-signal.spec.md (janus repo)
  *
  * These are the framework-agnostic leaf helpers that every SagaAuth-emitting
  * service needs to build its `WWW-Authenticate: SagaAuth …` challenge:

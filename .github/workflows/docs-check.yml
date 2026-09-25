@@ -1,0 +1,29 @@
+# Tier 1 of the documentation-system plugin's two-tier upkeep (docs-cleanup
+# program decision d1.7): deterministic docs-check.py via saga-ed/ci-actions.
+#   pull_request -> scoped to changed files, advisory (never fails the check)
+#   schedule     -> repo-wide, advisory; upserts one "docs-check weekly report" issue
+# Caller shape: claude-plugins plugins/documentation-system/references/ci-snippet.md
+name: docs-check
+on:
+  pull_request:
+    paths:
+      - "**/*.md"
+      - ".claude/**"
+      - "**/*.ts"
+      - "**/*.js"
+      - "**/*.py"
+      - "**/*.sh"
+      - "**/*.yaml"
+      - "**/*.yml"
+      - "**/*.svelte"
+  schedule:
+    - cron: "0 13 * * 1"  # weekly, Monday 13:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  docs-check:
+    uses: saga-ed/ci-actions/.github/workflows/docs-check.yml@v2.30
+    with:
+      mode: ${{ github.event_name == 'pull_request' && 'pr' || 'weekly' }}
+      # Docs findings are advisory until this repo is clean; "error" makes them gate.
+      fail-on: never

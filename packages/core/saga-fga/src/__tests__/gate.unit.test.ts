@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   loadFgaGateConfig,
   enforceFgaRelation,
@@ -380,6 +380,7 @@ describe('listUsersDiagnostic — the reverse (debug-tier) question', () => {
       object: { type: 'qtf_review', id: 'r1' },
       relation: 'can_view',
       user_filters: [{ type: 'user' }],
+      context: { current_time: expect.any(String) },
     });
     expect(listUsersMock.mock.calls[1]?.[0]).toMatchObject({
       user_filters: [{ type: 'group', relation: 'member' }],
@@ -541,5 +542,60 @@ describe('an unreachable verdict is NOT a deny', () => {
         () => new Error('MASKED-AS-DENY')
       )
     ).rejects.toThrow(FgaUnavailableError);
+  });
+});
+
+describe('server-clock condition context (current_time)', () => {
+  // Time-conditioned tuples make OpenFGA ERROR (code 2000), not deny, when
+  // `current_time` is absent — so every wire call must carry it, from our clock.
+  const NOW = new Date('2026-09-25T12:00:00.000Z');
+  const expectedContext = { current_time: NOW.toISOString() };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('check sends the gate clock as context.current_time', async () => {
+    checkMock.mockReset().mockResolvedValue({ allowed: true });
+    await gateWithStore().check('user:a', 'can_edit', 'program:p1');
+    expect(checkMock.mock.calls[0]?.[0]).toMatchObject({ context: expectedContext });
+  });
+
+  it('checkDetailed sends one shared instant on every branch', async () => {
+    checkMock.mockReset().mockImplementation(async () => {
+      vi.setSystemTime(new Date(Date.now() + 1000));
+      return { allowed: false };
+    });
+    await gateWithStore().checkDetailed('user:a', ['host', 'can_edit', 'owner'], 'program:p1');
+    expect(checkMock).toHaveBeenCalledTimes(3);
+    for (const call of checkMock.mock.calls) {
+      expect(call[0]).toMatchObject({ context: expectedContext });
+    }
+  });
+
+  it('batchCheck stamps the same current_time on every item', async () => {
+    respondAllowing(() => true);
+    await gateWithStore().batchCheck([
+      { user: 'user:a', relation: 'can_view', object: 'program:p1' },
+      { user: 'user:a', relation: 'can_view', object: 'program:p2' },
+    ]);
+    const sent = batchCheckMock.mock.calls[0]?.[0] as { checks: { context?: unknown }[] };
+    expect(sent.checks).toHaveLength(2);
+    for (const c of sent.checks) {
+      expect(c.context).toEqual(expectedContext);
+    }
+  });
+
+  it('listUsersDiagnostic sends current_time on every fanned-out call', async () => {
+    listUsersMock.mockReset().mockResolvedValue({ users: [] });
+    await gateWithStore().listUsersDiagnostic('can_view', 'program:p1', ['user', 'group#member']);
+    expect(listUsersMock).toHaveBeenCalledTimes(2);
+    for (const call of listUsersMock.mock.calls) {
+      expect(call[0]).toMatchObject({ context: expectedContext });
+    }
   });
 });

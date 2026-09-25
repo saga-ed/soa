@@ -202,6 +202,16 @@ await fga.checkDetailed(`user:${callerId}`, ['host', 'edit_grant'], `session:${i
 Contextual-tuple relations are marked as such in the partition registry
 (ADR 0006 §3) — they are **never also stored**.
 
+## Condition context: `current_time`
+
+Every wire call (`check`, `checkDetailed`, `batchCheck`, `listUsersDiagnostic`)
+carries `context: { current_time }` stamped from the gate's own clock, so
+time-conditioned tuples (e.g. a grant window on `role#assignee`) evaluate.
+Without it OpenFGA returns an error (code 2000), which surfaces as
+`FgaUnavailableError`. There is deliberately no caller-supplied context:
+a caller-set clock could backdate into an expired grant. One instant is shared
+across a `checkDetailed`'s branches and a `batchCheck`'s items.
+
 ## An unreachable verdict is not a denial
 
 `check` returns a bare boolean, so a swallowed failure would be

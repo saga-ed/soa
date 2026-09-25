@@ -297,6 +297,14 @@ const contextualTuplesField = (tuples?: readonly FgaContextualTuple[]) =>
   tuples?.length ? { contextualTuples: [...tuples] } : {};
 
 /**
+ * Condition context sent on every wire call: `current_time` from THIS process's
+ * clock. Required once any reachable tuple is time-conditioned — OpenFGA errors
+ * (code 2000), not denies, when it is missing. Never accept it from a caller:
+ * a caller-set clock could backdate into an expired grant.
+ */
+const serverClockContext = (now: Date) => ({ current_time: now.toISOString() });
+
+/**
  * Build a gate from config. The OpenFGA client is created lazily on first
  * `check`, so a disabled gate (enforce=false, no storeId) never constructs a
  * client and never reaches the network.
@@ -328,7 +336,8 @@ export function createFgaGate(
     return client;
   };
 
-  const checkOne = async (
+  const checkAt = async (
+    now: Date,
     user: string,
     relation: string,
     object: string,
@@ -340,6 +349,7 @@ export function createFgaGate(
         user,
         relation,
         object,
+        context: serverClockContext(now),
         ...contextualTuplesField(contextualTuples),
       });
     } catch (cause) {
@@ -358,10 +368,11 @@ export function createFgaGate(
     // chars of [A-Za-z0-9-], which our `user:<uuid>`/`<type>:<uuid>` triples blow
     // past. Map them back to natural keys ourselves.
     const keyByCorrelationId = new Map<string, string>();
+    const context = serverClockContext(new Date());
     const items = checks.map((c, i) => {
       const correlationId = `c${i}`;
       keyByCorrelationId.set(correlationId, fgaBatchKey(c.user, c.relation, c.object));
-      return { user: c.user, relation: c.relation, object: c.object, correlationId };
+      return { user: c.user, relation: c.relation, object: c.object, correlationId, context };
     });
 
     let res;
@@ -435,6 +446,7 @@ export function createFgaGate(
       return m[2] ? { type: m[1], relation: m[2] } : { type: m[1] };
     });
     const contextualField = contextualTuplesField(contextualTuples);
+    const context = serverClockContext(new Date());
     // The wire accepts exactly ONE user_filter per ListUsers call
     // (ListUsersRequest.user_filters: "Only accepts exactly one value"), so a
     // multi-shape query fans out one call per filter and merges.
@@ -443,7 +455,7 @@ export function createFgaGate(
         let res;
         try {
           res = await clientFor().listUsers(
-            { object: wireObject, relation, user_filters: [filter], ...contextualField },
+            { object: wireObject, relation, user_filters: [filter], context, ...contextualField },
             // A stale read here misreads as a missing tuple (the very thing a
             // debugger comes to verify), so trade latency for consistency.
             { consistency: ConsistencyPreference.HigherConsistency }
@@ -484,12 +496,15 @@ export function createFgaGate(
 
   return {
     enforce: config.enforce,
-    check: checkOne,
+    check: (user, relation, object, contextualTuples) =>
+      checkAt(new Date(), user, relation, object, contextualTuples),
     batchCheck,
     listUsersDiagnostic,
     async checkDetailed(user, relations, object, contextualTuples) {
+      // One instant for every branch, so a window edge can't split the verdict.
+      const now = new Date();
       const held = await Promise.all(
-        relations.map(relation => checkOne(user, relation, object, contextualTuples))
+        relations.map(relation => checkAt(now, user, relation, object, contextualTuples))
       );
       const branches = relations.filter((_, i) => held[i]);
       return {

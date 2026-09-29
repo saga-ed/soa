@@ -82,6 +82,8 @@ export interface FgaRelationsByType {
         | 'super_admin'
         | 'support'
         | 'org_admin'
+        | 'people_admin'
+        | 'viewer'
         | 'can_impersonate'
         | 'can_set_temporary_password'
         | 'can_create_org'
@@ -90,7 +92,8 @@ export interface FgaRelationsByType {
         | 'can_view_district_programs'
         | 'can_view_user_pii'
         | 'can_observe_session_recordings'
-        | 'can_configure_scope_values';
+        | 'can_configure_scope_values'
+        | 'can_manage_memberships';
     staff_org:
         | 'platform'
         | 'staff_admin'
@@ -154,6 +157,8 @@ export const FGA_RELATIONS = {
         'super_admin',
         'support',
         'org_admin',
+        'people_admin',
+        'viewer',
         'can_impersonate',
         'can_set_temporary_password',
         'can_create_org',
@@ -163,6 +168,7 @@ export const FGA_RELATIONS = {
         'can_view_user_pii',
         'can_observe_session_recordings',
         'can_configure_scope_values',
+        'can_manage_memberships',
     ],
     staff_org: [
         'platform',

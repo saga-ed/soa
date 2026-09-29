@@ -279,6 +279,10 @@ type saga_platform
     define super_admin: [user, group#member]
     define support: [user, group#member] or super_admin
     define org_admin: [user, group#member] or super_admin
+    # Platform-wide membership administration (JumpCloud "People Admin" group).
+    define people_admin: [user, group#member] or super_admin
+    # Read-only troubleshooting access; every other staff role includes it.
+    define viewer: [user, group#member] or support or people_admin or org_admin
 
     # Computed capabilities — app code (fgaCheck) evaluates these, never the
     # role nouns above.
@@ -289,18 +293,20 @@ type saga_platform
     define can_manage_staff: super_admin
     # District-scoped user PII on iam-api user reads, for a STAFF session (no
     # district persona can grant `iam:view_user_pii` to an operator who holds no
-    # district membership). super_admin only (rostering#1126).
-    define can_view_user_pii: super_admin
+    # district membership).
+    define can_view_user_pii: org_admin
     # Breadth over every district's program list. Staff hold no roster
     # membership, so without this iam-api returns them no program permissions
     # and program lists render empty.
-    define can_view_district_programs: org_admin
+    define can_view_district_programs: viewer
     # Staff read access to a session and its recording regardless of grant
     # group (program-hub#760).
-    define can_observe_session_recordings: support
+    define can_observe_session_recordings: viewer
     # Staff-only write gate for value-plane grants on programs/pods
     # (programs-api ScopeValueGrant), rostering#1453.
-    define can_configure_scope_values: support
+    define can_configure_scope_values: org_admin
+    # Create/remove memberships across all districts.
+    define can_manage_memberships: org_admin or people_admin
 
 # An organization staff create/administer. Maps 1:1 to an iam-api group
 # (kind=district): object id is the rostering group id. DISTINCT from the

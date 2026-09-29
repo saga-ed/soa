@@ -239,9 +239,10 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
         expect(rel?.computedUserset?.relation).toBe('super_admin');
     });
 
-    it('can_view_district_programs resolves from org_admin, not super_admin alone', () => {
+    it('can_view_district_programs resolves from support or org_admin (rostering#1506)', () => {
         const rel = byType.saga_platform.relations?.can_view_district_programs;
-        expect(rel?.computedUserset?.relation).toBe('org_admin');
+        const branches = (rel?.union?.child ?? []).map((c) => c.computedUserset?.relation);
+        expect(branches.sort()).toEqual(['org_admin', 'support']);
     });
 
     it('can_observe_session_recordings resolves from support (program-hub#760)', () => {

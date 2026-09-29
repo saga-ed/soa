@@ -293,8 +293,8 @@ type saga_platform
     define can_view_user_pii: super_admin
     # Breadth over every district's program list. Staff hold no roster
     # membership, so without this iam-api returns them no program permissions
-    # and program lists render empty.
-    define can_view_district_programs: org_admin
+    # and program lists render empty. Held by support and org_admin (rostering#1506).
+    define can_view_district_programs: support or org_admin
     # Staff read access to a session and its recording regardless of grant
     # group (program-hub#760).
     define can_observe_session_recordings: support

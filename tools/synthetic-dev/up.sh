@@ -2,68 +2,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # synthetic-dev/up.sh — stand up the local synthetic-dev stack for sds_92.
 #
-# Goal: dockerized postgres + redis + rabbitmq + mongo + the nine services,
-# EMPTY, ready to seed SYNTHETIC iam rosters / programs via the deterministic `db:seed`
-# (@saga-ed/*-seed-ids — same data as preview/CI, stable ids across --reset; no
-# VPN, no prod-mirror fixture). See synthetic-dev-align. The old scenario-runner
-# seed was retired here (scenario scripts stay in-repo for future journey data).
-#
-# The sixth API is sis-api (rostering, on main as of 2026-06 — Adam's SIS
-# reconciliation / CSV-roster service). It runs on :3100 against a dedicated
-# `sis_db`, and calls iam-api's `service.*` S2S surface. No S2S credentials are
-# needed locally: iam-api's auth.middleware synthesizes a dev-bypass service
-# actor when authEnabled=false ("for the SIS CSV pilot"), which is the mode we
-# run iam-api in here. See decisions/d1.7. Its `sis_db` is created by the
-# canonical mesh seed (soa profile-empty.sql, soa#112) like the other app DBs.
-#
-# The seventh API is sessions-api (program-hub, :3007 — harvested out of
-# programs-api in program-hub #148, 2026-06). It owns a `sessions` DB of
-# event-built projections (programs.* / scheduling.* / iam.* consumers over the
-# mesh broker) + TutoringSession, and serves the dash's /sessions page
-# (sessions.dayList / rangeList / lifecycle). On the canonical --reset --seed
-# lane it's up before any program exists, so projections build live. If your
-# mesh ALREADY had program data when sessions-api first joined, catch it up
-# once with the manual per-program replay CLIs (program-hub #160/#161:
-# `pnpm replay:program-outbox <id>` / `replay:schedule-outbox <id>` — see
-# getting-started.md). See soa#146.
-#
-# Services eight + nine are the Connect app (qboard repo): connect-api (:6106,
-# Express + MongoDB) and connect-web (:6210, Vite). Connect needs NO seed
-# fixtures — its mongo collections auto-create on first write; "session data"
-# comes from sessions-api (:3007). Its mongo is part of the MESH (infra-compose
-# saga-mesh includes services/connect-mongo → soa-connect-mongo-1, :27037 —
-# standalone, no auth; NOT the legacy saga-api/wootmath template, NOT qboard's
-# bespoke :27017 container).
-# AV comes from qboard's livekit+coturn containers (best-effort). No HTTPS /
-# domain-spoof proxy (qboard's proxy-dev.sh) is needed here: iam is local, so
-# localhost host-scoped cookies reach every port — same trick the dash uses.
-#
-# Service ten is rtsm-api (rtsm repo, :6110) — the CRDT/socket service Connect
-# syncs through. It runs as a ONE-NODE FLEET (FLEET_CONFIG_PATH=
-# rtsm-fleet-local.json + FLEET_NODE_NAME=local): rtsm-client always
-# discovers via GET /fleet/discover, which only fleet mode serves, so bare
-# single-instance mode 404s the client. With itself as the only member the
-# mesh half stays idle. Still stateless: in-memory, no DB/redis,
-# SOCKET_AUTHMODE=none, ws:// — no migrate/seed step, and rooms die ~20s
-# after the last client leaves (by design). connect-web reaches it via
-# VITE_RTSM_BOOTSTRAP_URL (qboard plumbs it through to rtsm-client's
-# bootstrapUrl; on a qboard checkout without that plumb the env var is
-# ignored and connect-web falls back to the wootdev.com fleet).
-#
-# Deferred: the fleek recording stack, dash→connect linking. SAGA_API_TARGET
-# (legacy poll content, unauthenticated endpoint) stays remote until
-# content-api lands.
-#
-# Branch posture (see decisions/d1.1): iam/programs/scheduling/saga-dash/soa on
-# MAIN; ads-adm from the canonical ~/dev/student-data-system checkout (sds_92 is
-# merged to main; the sds_92 worktree has been retired). Override with SDS=...
-#
-# This wraps + corrects the concierge (student-data-system-demo.sh). The
-# concierge's `up` does NOT work out-of-the-box on these mains: it doesn't pass
-# RABBITMQ_URL to program-hub (apps default to :5673, mesh is :5672), its
-# .env.local template predates main's required AUTH_* secrets, and it launches
-# iam-api via `pnpm dev` which (on main) fails to copy a runtime asset. Every
-# such drift + fix is documented in README.md and applied idempotently below.
+# Dockerized postgres + redis + rabbitmq + mongo + ten services (iam,
+# programs, scheduling, sis, sessions, ads-adm, saga-dash, Connect's
+# connect-api/connect-web, rtsm), EMPTY, seeded with deterministic SYNTHETIC
+# iam rosters / programs (no VPN, no prod-mirror fixture). Wraps + corrects
+# the concierge (student-data-system-demo.sh) — see README.md for
+# per-service topology, branch posture, ports, and the concierge drift/fixes
+# this applies idempotently below.
 #
 # Usage:
 #   ./up.sh                      bring up mesh + 10 services (empty)
@@ -414,9 +359,8 @@ svc_repo_dir(){ # svc
 
 # checkout_workspace_shas: a --workspace manifest's `sha` field pins a
 # local-source service's repo to an EXACT commit (typically captured off a
-# running sandbox — see docs/promotion-pipeline.md's cloud→local capture
-# direction) rather than "whatever branch happens to be checked out", which is
-# check_branches' warn-only default. A workspace run needs the stronger
+# running sandbox) rather than "whatever branch happens to be checked out",
+# which is check_branches' warn-only default. A workspace run needs the stronger
 # guarantee: fail loudly on a dirty tree rather than silently launching the
 # wrong code. No-op when the manifest carries no sha (older manifests, or rows
 # that only pin mode/dbProfile) — leaves check_branches' warn-only behavior as
@@ -1141,6 +1085,22 @@ prep(){
   migrate_db "$COACH/packages/node/coach-db"         coach_api  "$COACH_DB_URL"
   migrate_db "$ROSTERING/packages/node/sis-db"       sis_db   # sis-api schema (d1.7); uses sis-db's own config
   db_step "ads-adm-db migrate deploy" "$SDS/packages/node/ads-adm-db"       pnpm prisma migrate deploy
+  # Student Surveys sector hosted in ads-adm-api (student-data-system#495): its
+  # OWN database + role triplet via surveys-db/seed/local-bootstrap.sql (idempotent:
+  # IF NOT EXISTS / \gexec, so it is safe on every up and on a volume whose
+  # profile-empty.sql predates surveys_api_local), then migrate as the local
+  # owner login (surveys_api) through the package's checked-in .env, exactly
+  # like ads-adm-db above. Guarded on the package dir so an SDS checkout without
+  # the PR (or the sector extracted later) still boots.
+  if [[ -d "$SDS/packages/node/surveys-db" ]]; then
+    if docker exec -i soa-postgres-1 psql -U postgres_admin -d postgres -v ON_ERROR_STOP=1 \
+         < "$SDS/packages/node/surveys-db/seed/local-bootstrap.sql" >"$STATE/surveys-bootstrap.log" 2>&1; then
+      ok "db+role: surveys_api_local / surveys_api"
+    else
+      printf "\033[31m✗\033[0m surveys-db bootstrap failed:\n"; tail -10 "$STATE/surveys-bootstrap.log" | sed 's/^/    /'; exit 1
+    fi
+    db_step "surveys-db migrate deploy" "$SDS/packages/node/surveys-db"    pnpm prisma migrate deploy
+  fi
   # sds_93 playback DBs (transcripts/insights/chat) — opt-in, own their DB+role
   # via each package's local-bootstrap.sql (see provision_playback_dbs).
   [[ $DO_PLAYBACK == 1 ]] && provision_playback_dbs
@@ -1387,7 +1347,13 @@ tunnel_env(){ # svc
       # drives sis directly, and setting CORS_ORIGIN overrides sis's built-in
       # localhost:3010 default (rostering #391)
       printf '%s\n' "CORS_ORIGIN=$DASH_URL,http://localhost:$IAM_PORT,https://dash.$TUNNEL_DOMAIN,https://iam.$TUNNEL_DOMAIN" ;;
-    programs-api|scheduling-api|sessions-api|ads-adm-api)
+    ads-adm-api)
+      # dash AND connect-web: Connect dials the surveys sector browser-direct
+      # (student-data-system#495 / qboard#900), so the tunnel connect origin
+      # must be on the allowlist too. Same JANUS_LOGIN_HOST note as below.
+      printf '%s\n' "CORS_ORIGIN=$DASH_URL,$CONNECT_WEB_URL,https://dash.$TUNNEL_DOMAIN,https://connect.$TUNNEL_DOMAIN" \
+                    "JANUS_LOGIN_HOST=iam.$TUNNEL_DOMAIN/demo" ;;
+    programs-api|scheduling-api|sessions-api)
       # JANUS_LOGIN_HOST drives the SagaAuth login= base on programs/scheduling
       # 401s (sessions/ads-adm don't emit it) → tunnelled iam demo, not prod.
       # Bare host; the services' resolveLoginBaseUrl prefixes https for it.
@@ -1644,7 +1610,8 @@ services_up(){
      SERVICE_TOKEN_SERVICESLUG=ads-adm-api \
      ADS_ADM_DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
      DATABASE_URL=postgresql://ads_adm:ads_adm@localhost:5432/ads_adm_local \
-     CORS_ORIGIN=http://localhost:8900 RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)
+     SURVEYS_DATABASE_URL=postgresql://surveys_api:surveys_api@localhost:5432/surveys_api_local \
+     CORS_ORIGIN="$DASH_URL,$CONNECT_WEB_URL" RABBITMQ_URL="$MESH_MQ" $(tunnel_env ads-adm-api)
   # ── sds_93 playback APIs (opt-in: --with-playback) ──────────────────────────
   # transcripts/insights/chat. Each boots as its OWN least-privilege app role via
   # discrete POSTGRES_* (provision_playback_dbs migrated the schema as master).
@@ -1778,6 +1745,7 @@ services_up(){
   launch_if connect-web "$CONNECT_WEB_PORT" "$QBOARD/apps/web/connectv3" \
      VITE_CONNECTV3_API_URL="$CONNECT_API_URL" \
      VITE_IAM_API_URL="$IAM_URL" \
+     VITE_SURVEYS_API_URL="http://localhost:5005" \
      VITE_SAGA_API_TARGET="$SAGA_API_TARGET" \
      VITE_RTSM_BOOTSTRAP_URL="$RTSM_URL" \
      VITE_DASHBOARD_URL="$DASH_URL" \
@@ -1795,7 +1763,22 @@ services_up(){
 # (postgres_admin) so it can truncate tables owned by iam / saga_user / etc.
 reset_data(){
   say "resetting synthetic data → empty baseline (iam, programs, scheduling, sessions, sis, ads-adm, connect)…"
-  local trunc="DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> '_prisma_migrations' LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;"
+  # $1 (optional): extra single-quoted table names to spare, e.g. "'a', 'b'".
+  trunc_sql(){
+    local extra="${1:-}"
+    local keep="'_prisma_migrations'${extra:+, $extra}"
+    printf "DO \$\$ DECLARE r RECORD; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN (%s) LOOP EXECUTE 'TRUNCATE TABLE public.'||quote_ident(r.tablename)||' RESTART IDENTITY CASCADE'; END LOOP; END \$\$;" "$keep"
+  }
+  local trunc; trunc="$(trunc_sql)"
+  # surveys_api_local keeps its SEEDED REFERENCE DATA (the #1324 question bank and
+  # the named sets). Those rows are inserted by a DATA MIGRATION, not a seed
+  # script, so a generic truncate destroys data that nothing restores: this reset
+  # preserves _prisma_migrations, so the next `prisma migrate deploy` sees the
+  # seeding migration already applied and does nothing. The stack would then serve
+  # an empty bank — a question set whose questions never load — with no error.
+  # Mirrors the CLI manifest's `resetPreserveTables` (saga-stack-cli
+  # core/manifest/databases.ts); keep the two in step.
+  local trunc_surveys; trunc_surveys="$(trunc_sql "'question_bank', 'question_set', 'question_set_item'")"
   # `sessions` truncation also clears its consumed-event cursors, so its
   # event-built projections re-converge from the producers' outbox replay.
   # playback DBs are truncated only under --with-playback, so a bare `--reset`
@@ -1809,8 +1792,13 @@ reset_data(){
   # _prisma_migrations, so the schema survives.
   local dbs=(iam_local iam_pii_local programs scheduling sessions content coach_api sis_db ads_adm_local)
   [[ $DO_PLAYBACK == 1 ]] && dbs+=(transcripts_local insights_local chat_local ledger_local)
+  # surveys_api_local: submissions/launches are per school-year synthetic data too
+  # — but its question bank is NOT (see trunc_surveys above).
+  [[ -d "$SDS/packages/node/surveys-db" ]] && dbs+=(surveys_api_local)
   for db in "${dbs[@]}"; do
-    if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$trunc" >/dev/null 2>&1; then
+    local sql="$trunc"
+    [[ $db == surveys_api_local ]] && sql="$trunc_surveys"
+    if docker exec -i soa-postgres-1 psql -U postgres_admin -d "$db" -v ON_ERROR_STOP=1 -c "$sql" >/dev/null 2>&1; then
       ok "truncated $db"
     else
       printf "\033[33m⚠\033[0m could not truncate %s (does it exist? is mesh up?)\n" "$db"
@@ -1840,7 +1828,7 @@ reset_data(){
 # (LOGIN still uses iam-api devLogin + JANUS_REQUIRED=false — see login_user();
 # that bypass is independent of seeding and is preserved.) The scenario scripts
 # remain in their repos as the future "journey" layer. See plan
-# soa/claude/projects/synthetic-dev-align/plans/up-sh-db-seed-transition.md and
+# soa/docs/history/synthetic-dev-align/plans/up-sh-db-seed-transition.md and
 # d2.1 (db:seed = 205 users: 190 roster + 6 personas + dev + 8 Connect Demo).
 seed_iam(){
   say "seeding iam roster (db:seed — deterministic seed-ids, direct DB)…"

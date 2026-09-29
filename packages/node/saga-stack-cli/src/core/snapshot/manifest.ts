@@ -43,6 +43,7 @@ const DB_IDS = [
   'coach_api',
   'sis_db',
   'ads_adm_local',
+  'surveys_api_local',
   'ledger_local',
   'transcripts_local',
   'insights_local',

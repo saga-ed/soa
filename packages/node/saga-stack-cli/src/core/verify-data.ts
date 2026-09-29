@@ -14,6 +14,17 @@
  *   D3  admin personas present     count(personas WHERE name='admin') ≥ 6    (HARD; #397 per-district admins)
  *   D4  sis_db migrated            _prisma_migrations present     (HARD)
  *   D5  connect-mongo reachable    mongosh ping ok                (HARD)
+ *   D6  surveys_api_local          ONLY when the DB exists: _prisma_migrations present
+ *       migrated + bank seeded     AND question_bank ≥ 6 (the sds#495 seed migration).
+ *                                  An ABSENT DB emits no check (an SDS checkout without
+ *                                  the sector is not a failure — verify.sh parity). A
+ *                                  PROVISIONED-BUT-EMPTY DB (0 tables, no history) is a
+ *                                  skipped NOTE, not a failure: R2 provisions it on every
+ *                                  up while R3 skips the migrate when surveys-db is not
+ *                                  checked out, so that is the steady state of every
+ *                                  checkout without student-data-system#495 and must not
+ *                                  redden bootstrap/cold-start. Migrated-but-underseeded,
+ *                                  or tables-without-history, is a HARD failure.
  *
  * `users == 205` is the canonical db:seed count (190 roster + 6 personas + dev + 8
  * Connect Demo) but a NON-205 count is NOT a failure — journey/partial seeds vary it.
@@ -33,6 +44,9 @@ export const DEV_USER_ID = '1e2ca0d8-8f6a-5a97-a141-b38d472a1186';
 /** The canonical `db:seed` roster count (190 roster + 6 personas + dev + 8 Connect Demo). */
 export const CANONICAL_USERS = 205;
 
+/** The `20260904120100_seed_question_bank` migration inserts six `question_bank` rows (saga-dash#1324). */
+export const CANONICAL_QUESTION_BANK = 6;
+
 /** SQL for the three scalar DATA reads (run on `iam_local` as postgres_admin). */
 export const DATA_SQL = {
   /** D1 — iam roster size. */
@@ -41,7 +55,19 @@ export const DATA_SQL = {
   devId: `SELECT 1 FROM users WHERE id='${DEV_USER_ID}'`,
   /** D3 — admin personas (seed + Lincoln + 4 per-district = 6, #397). */
   adminPersonas: "SELECT count(*) FROM personas WHERE name='admin'",
+  /** D6 — the seeded question bank (run on `surveys_api_local`; `''` when the table is absent). */
+  questionBank: 'SELECT count(*) FROM question_bank',
 } as const;
+
+/** D6 readings for `surveys_api_local`, gathered ONLY when the DB exists. */
+export interface SurveysReadings {
+  /** `_prisma_migrations` present (`PgProbe.hasMigrationsTable`). */
+  migrated: boolean;
+  /** Public table count (`PgProbe.publicTableCount`; `NaN` on a probe error). */
+  publicTables: number;
+  /** `count(*) FROM question_bank` (trimmed scalar). `''` ⇒ table absent / read error. */
+  bankRaw: string;
+}
 
 /** The raw readings the runtime gathered for the DATA checks. */
 export interface DataReadings {
@@ -55,11 +81,16 @@ export interface DataReadings {
   sisMigrated: boolean;
   /** D5 — connect-mongo answered a ping (`MeshExec.ready`). */
   mongoReachable: boolean;
+  /**
+   * D6 — `surveys_api_local` readings, or `null`/absent when the DB does not exist
+   * (`PgProbe.databaseExists` false ⇒ no check is emitted at all).
+   */
+  surveys?: SurveysReadings | null;
 }
 
 /** One rendered DATA check. */
 export interface DataCheck {
-  id: 'D1' | 'D2' | 'D3' | 'D4' | 'D5';
+  id: 'D1' | 'D2' | 'D3' | 'D4' | 'D5' | 'D6';
   /** Human line (mirrors verify.sh's `✓`/`✗` message text). */
   label: string;
   ok: boolean;
@@ -153,5 +184,41 @@ export function assessData(r: DataReadings): DataAssessment {
     ok: r.mongoReachable,
   });
 
+  // D6 — surveys_api_local (sds#495): asserted ONLY when the DB exists.
+  if (r.surveys) {
+    checks.push(assessSurveys(r.surveys, notes));
+  }
+
   return { checks, passed: checks.every((c) => c.ok), notes };
+}
+
+/**
+ * D6 verdict for an EXISTING `surveys_api_local`. Mirrors verify.sh's data line
+ * (`surveys_api_local migrated + bank seeded (questions=N)`), with one native
+ * refinement: a provisioned-but-empty DB is a skipped NOTE (see the header) —
+ * the R2/R3 steady state of a checkout without surveys-db, never a red gate.
+ */
+function assessSurveys(s: SurveysReadings, notes: string[]): DataCheck {
+  const bank = parseCount(s.bankRaw);
+  if (s.migrated && Number.isFinite(bank) && bank >= CANONICAL_QUESTION_BANK) {
+    return { id: 'D6', label: `surveys_api_local migrated + bank seeded (questions=${bank})`, ok: true };
+  }
+  if (!s.migrated && s.publicTables === 0) {
+    notes.push(
+      'note: surveys_api_local is provisioned but unmigrated — surveys-db (student-data-system#495) is not in the SDS checkout; the Student Surveys sector is off',
+    );
+    return {
+      id: 'D6',
+      label: 'surveys_api_local — skipped (provisioned, not migrated: surveys-db package not checked out)',
+      ok: true,
+    };
+  }
+  const shown = Number.isNaN(bank) ? 0 : bank;
+  return {
+    id: 'D6',
+    label: s.migrated
+      ? `surveys_api_local present but bank=${shown} (<${CANONICAL_QUESTION_BANK}) — run stack up (surveys-db migrate deploy)`
+      : `surveys_api_local present but not migrated (tables=${s.publicTables}) — run stack up (surveys-db migrate deploy)`,
+    ok: false,
+  };
 }

@@ -152,7 +152,7 @@ describe('e2e run — native orchestration (stack lane)', () => {
           r.command === 'docker' &&
           r.args.includes('psql') &&
           r.args.includes('-c') &&
-          r.args[r.args.indexOf('-c') + 1].includes("tablename <> '_prisma_migrations'"),
+          r.args[r.args.indexOf('-c') + 1].includes("tablename NOT IN ('_prisma_migrations')"),
       ),
     ).toBe(true);
     expect(runs.some((r) => r.args.includes('db:seed'))).toBe(true);

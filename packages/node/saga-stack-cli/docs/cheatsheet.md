@@ -75,6 +75,17 @@ ss stack down --mesh                 # also stop postgres/redis/rabbitmq/mongo (
 ss stack down --slot 1               # stop a specific slot   (--set <name> for a set)
 ```
 
+## Profiling a running service
+
+```bash
+ss stack profile iam-api             # 15s CPU profile → .cpuprofile (Chrome DevTools / VS Code)
+ss stack profile sessions-api --duration 30s   # drive load while it samples
+ss stack profile coach-api --out /tmp/coach.cpuprofile
+```
+
+Attaches to the live process (SIGUSR1 + CDP) — nothing is restarted or injected at
+launch. One service at a time per slot; backends only. → [instrumentation](./instrumentation.md)
+
 ## Clean slate & baselines (slot-0 only)
 
 ```bash
@@ -176,6 +187,7 @@ defined set; `ss stack status --slot N` probes one slot.
 
 [sub-stacks](./sub-stacks-and-bundles.md) · [slots](./slots.md) · [worktree-sets](./worktree-sets.md) ·
 [verify](./verify.md) · [snapshots](./snapshots.md) · [e2e](./e2e.md) · [e2e-flows](./e2e-flows.md) ·
-[integration](./integration.md) · [cold-start](./cold-start.md) · [faq](./faq.md)
+[integration](./integration.md) · [cold-start](./cold-start.md) ·
+[instrumentation](./instrumentation.md) · [faq](./faq.md)
 </content>
 </invoke>

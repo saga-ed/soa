@@ -186,4 +186,4 @@ These can be versioned in git to track compliance trends over time.
 
 - [audit-engine.md](./audit-engine.md) - Detailed audit logic and violation detection rules
 - [rating-criteria.md](./rating-criteria.md) - 5-point scale definitions for each dimension
-- [/soa/docs/claude-audit.md](../../docs/claude-audit.md) - User-facing documentation
+- [/soa/docs/claude-audit.md](../../../docs/claude-audit.md) - User-facing documentation

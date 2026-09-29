@@ -1,120 +1,112 @@
 # Getting Started & Build Cheatsheet
 
-## Quickstart
+Setup, build/test commands, and the local-CI checks for the saga-soa monorepo,
+merged from the root README's Quickstart, `LOCAL_DEVELOPMENT.md`, and
+`docs/quickstart.md`. For architecture, see [overview.md](./overview.md) and
+[saga-soa-tlrd.md](./saga-soa-tlrd.md).
 
-1. Install dependencies:
-   ```sh
-   pnpm install
-   ```
-2. Verify everything works:
-   ```sh
-   pnpm check
-   ```
+## Prerequisites
 
-- Always run `pnpm install` before building or running any commands for the first time.
-- Run `pnpm check` before every commit or PR to ensure you haven't regressed functionality.
-
----
-
-This guide covers initial setup and common build/test commands for the saga-soa monorepo.
-
----
-
-## 1. Setup Instructions
-
-### 1. Install pnpm (if not already installed)
+- **Node.js**: `>=24` (per `package.json` `engines`)
+- **pnpm**: `9.0.0` (pinned via `package.json` `packageManager`)
 
 ```sh
+# Install pnpm via corepack (bundled with Node.js)
+corepack enable
+corepack prepare pnpm@9.0.0 --activate
+
+# Or via npm
 npm install -g pnpm
 ```
 
-### 2. Install dependencies
+## Quickstart
 
 ```sh
+git clone https://github.com/saga-ed/soa.git
+cd soa
 pnpm install
+pnpm check
 ```
 
----
+- Always run `pnpm install` before building or running any commands for the first time.
+- Run `pnpm check` before every commit or PR — it forces a full, no-cache build of every
+  package and app, then runs all unit tests.
 
-## 2. Build & Workspace Cheatsheet
-
-### Build All Projects Recursively
+## Build & Workspace Cheatsheet
 
 ```sh
-turbo run build
+turbo run build                 # Build all projects
+turbo run test                  # Run all tests
+pnpm clean && turbo run build   # Clean, then rebuild everything
+pnpm list -r --depth 0          # List all workspace projects
 ```
 
-### Clean and Then Build All Projects Recursively
+Build or test a single project (filters use the package's own `name` field,
+not its directory path):
 
 ```sh
-pnpm clean
-# Then:
-turbo run build
+turbo run build --filter=@saga-ed/soa-logger
+turbo run build --filter=rest-api
+turbo run test --filter=trpc-api
 ```
 
-### List All Projects in the Monorepo
+Other useful commands:
 
 ```sh
-pnpm list -r --depth 0
-# Or, to see workspace projects:
-pnpm m ls
+pnpm install --filter ./packages/node/logger        # Install deps for one package
+pnpm add <package> --filter ./packages/node/logger   # Add a dep to one package
+pnpm --filter ./packages/node/logger run <script>     # Run a script in one package
+pnpm --filter web-client dev                          # Start a dev server
+turbo run build --dry                                 # Dry run: show what would run
 ```
 
-### Run All Tests in All Projects
+**Use `turbo`** for orchestrated, cached, dependency-aware tasks across the monorepo
+(`build`, `test`, `lint`) — it runs independent tasks in parallel and skips unchanged
+work. **Use `pnpm`** for package management and running scripts in a single package.
+
+## Local CI Checks
+
+Run the same checks CI runs, before pushing:
 
 ```sh
-turbo run test
+pnpm ci:check              # Lint + type-check + build + test, changed packages only
+pnpm ci:check:all          # Same, but every package
+pnpm ci:check @saga-ed/config   # Same, one named package
+pnpm quick:check @saga-ed/config  # Fast subset: lint + type-check + build only
 ```
 
-### Build or Run Tests for a Particular Subproject
+| Local script | Purpose |
+|---|---|
+| `pnpm ci:check` | Same checks as the `test-and-lint` CI job, changed packages only |
+| `pnpm quick:check` | Fast feedback: lint, type-check, build (no test) |
+| `pnpm ci:check:all` | Full workflow, every package |
 
-- **Build:**
-  ```sh
-  turbo run build --filter=packages/logger
-  turbo run build --filter=apps/examples/rest_api
-  ```
-- **Test:**
-  ```sh
-  turbo run test --filter=packages/config
-  turbo run test --filter=apps/examples/rest_api
-  ```
+Common failures:
 
-### Other Useful Commands
+- **"Cannot find module '@saga-ed/...'"** — build the dependency first
+  (`turbo run build --filter=@saga-ed/<dep>`) or check its `package.json` exports.
+- **"Could not find task `test` in project"** — the package is missing a `test` script;
+  add one to its `package.json`.
+- **Strange build issues after switching branches** — `pnpm clean && rm -rf .turbo && pnpm install && pnpm build`.
 
-- **Install dependencies for a specific package:**
-  ```sh
-  pnpm install --filter ./packages/logger
-  ```
-- **Add a dependency to a specific package:**
-  ```sh
-  pnpm add <package> --filter ./packages/logger
-  ```
-- **Run a script in a specific package:**
-  ```sh
-  pnpm --filter ./packages/logger run <script>
-  ```
-- **Start a dev server for an app:**
-  ```sh
-  pnpm --filter ./apps/web dev
-  pnpm --filter ./apps/docs dev
-  ```
-- **Show which tasks will run (dry run):**
-  ```sh
-  turbo run build --dry
-  ```
+## Package Structure
 
----
+```
+soa/
+├── packages/
+│   ├── core/       # Config, DI-friendly cross-cutting packages (config, eslint-config, trpc-base, ...)
+│   ├── node/       # Server-side packages (api-core, db, logger, event-*, pubsub-*, ...)
+│   └── web/        # Browser packages (ui, rum-util)
+├── apps/
+│   ├── node/       # Backend example APIs (rest-api, tgql-api, gql-api, trpc-api)
+│   └── web/        # Frontend apps (docs — the Next.js doc site, web-client)
+```
 
-## When to Use Turbo vs. pnpm
+See `packages/node/CLAUDE.md` and `packages/core`/`packages/web`'s own tier files for
+the full package index.
 
-- **Use `turbo`** for orchestrated, cached, and dependency-aware tasks across the monorepo (like `build`, `test`, `lint`). Turbo ensures tasks run in the correct order, leverages caching to skip unchanged work, and runs independent tasks in parallel for speed. It's ideal for CI/CD and large monorepos with complex dependencies.
-- **Use `pnpm`** for package management (installing, adding, removing dependencies) and for running scripts or dev servers in a single package. pnpm is also useful for ad-hoc or one-off commands in a specific workspace project.
+## NPM Registry
 
-**In short:**
-
-- Use `turbo run <task>` for monorepo-wide pipelines.
-- Use `pnpm` for dependency management and single-package scripts.
-
----
-
-> **Tip:** Use `--filter <package>`
+Packages use the `@saga-ed` scope, published to AWS CodeArtifact
+(`@saga-ed:registry` in `.npmrc`). Authenticate first — see
+[CODEARTIFACT_SETUP.md](./CODEARTIFACT_SETUP.md).

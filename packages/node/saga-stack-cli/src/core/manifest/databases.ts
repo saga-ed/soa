@@ -12,7 +12,7 @@
  *
  * Migrate order (plan §2.2 blocker fix):
  *   iam-db → iam-pii-db (db push) → programs → scheduling → sessions → content
- *   → coach-db → sis-db → ads-adm-db.
+ *   → coach-db → sis-db → ads-adm-db → surveys-db (skipped when the package is absent).
  */
 
 import type { DatabaseDef, DbId } from './types.js';
@@ -130,6 +130,47 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     ownerPw: 'ads_adm',
     resettable: true,
     resetMode: 'truncate',
+    meshProvisioned: true,
+  },
+  surveys_api_local: {
+    name: 'surveys_api_local',
+    engine: 'postgres',
+    // Student Surveys sector, hosted in ads-adm-api with its OWN database + owner
+    // login (student-data-system#495; saga-dash#1277). Schema owner is the
+    // surveys-db package. Its prisma.config.ts reads `SURVEYS_DATABASE_URL ??
+    // DATABASE_URL` — DELIBERATELY the reverse of ads-adm-db, so a container
+    // second-pass migrate that only exports DATABASE_URL fails loudly instead of
+    // writing the surveys schema into ads_adm — and its checked-in .env bakes the
+    // base-port localhost SURVEYS_DATABASE_URL (`import 'dotenv/config'` never
+    // overrides a pre-set var). Injecting SURVEYS_DATABASE_URL (slot-offset pgUrl)
+    // is byte-identical to the .env value at slot 0 and slot-correct above it.
+    // Fixed db_step (`prisma migrate deploy`) right after ads-adm-db, like up.sh.
+    // The package may be ABSENT from an SDS checkout (PR not overlaid, or the
+    // sector extracted later): R3 skips the migrate with a note (optionalPackage).
+    migrate: {
+      dir: 'packages/node/surveys-db',
+      cmd: 'prisma migrate deploy',
+      migrateEnvVar: 'SURVEYS_DATABASE_URL',
+      optionalPackage: true,
+    },
+    ownerRole: 'surveys_api',
+    ownerPw: 'surveys_api',
+    resettable: true,
+    resetMode: 'truncate',
+    // The question bank and its named sets are SEEDED REFERENCE DATA, inserted by
+    // the data migration 20260904120100_seed_question_bank (and amended by later
+    // set migrations) — surveys-db's seed.ts is deliberately empty so prod gets
+    // the bank from the ordinary `db:deploy` chain. A generic truncate therefore
+    // destroys rows that NOTHING restores: the reset preserves
+    // `_prisma_migrations`, so the next `prisma migrate deploy` sees the seeding
+    // migration already applied and does nothing. The stack then serves an EMPTY
+    // bank — the admin editor offers a question set whose questions never load —
+    // with no error raised anywhere. Reset only the INSTANCE tables (survey,
+    // survey_question, survey_launch, submission, answer), which is the
+    // per-school-year synthetic residue this DB's reset actually exists to clear.
+    resetPreserveTables: ['question_bank', 'question_set', 'question_set_item'],
+    // profile-empty.sql creates the login + DB on a FRESH volume (soa#450); on a
+    // pre-existing volume R2 creates them idempotently (the authz_local pattern).
     meshProvisioned: true,
   },
   ledger_local: {

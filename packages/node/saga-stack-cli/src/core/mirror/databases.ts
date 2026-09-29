@@ -120,6 +120,10 @@ export const MIRROR_DATABASES: readonly MirrorDbDef[] = [
 export const NO_MIRROR_SOURCE: readonly { local: DbId; why: string }[] = [
   { local: 'insights_local', why: 'no insights_* database exists in the mirror.' },
   {
+    local: 'surveys_api_local',
+    why: 'the Student Surveys sector (student-data-system#495) is pre-release — no surveys_* database exists in the mirror yet.',
+  },
+  {
     local: 'connectv3',
     why: 'mongo (soa-connect-mongo-1) — the mirror is Postgres-only, so Connect data can never be hydrated from it.',
   },

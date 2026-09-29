@@ -86,7 +86,7 @@ fast with a `re-bake with a wider --through` error instead of half-restoring.
 - **tunnel-mode bridge** — build launchable state under localhost, snapshot, then restore it under
   the tunnel cookie domain (`ss stack snapshot` covers all 10 pg DBs + `connectv3` mongo, so
   sessions survive the bridge; the legacy `mesh-fixture-cli` omitted `sessions`). See
-  [tunnel.md → the snapshot bridge](./tunnel.md#seed-launchable-connect-sessions--the-snapshot-bridge).
+  [tunnel.md → the snapshot bridge](./tunnel.md#why-the-two-phase-build-step-1--2).
 
 ← [verify](./verify.md) · [e2e →](./e2e.md) · [tunnel →](./tunnel.md)
 

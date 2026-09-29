@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { OutboxRelay } from '../relay.js';
 import type { OutboxRelayOpts } from '../relay.js';
 
@@ -11,7 +12,12 @@ import type { OutboxRelayOpts } from '../relay.js';
  * its own transaction. These tests pin that behavior (0-row path — no broker).
  */
 function makeRelay(opts: Partial<OutboxRelayOpts> = {}) {
-	const client = { query: vi.fn().mockResolvedValue({ rows: [] }), release: vi.fn() };
+	// A real EventEmitter — drainBatch attaches a temporary 'error' guard
+	// for the span it holds this client, same as the real pg.PoolClient.
+	const client = Object.assign(new EventEmitter(), {
+		query: vi.fn().mockResolvedValue({ rows: [] }),
+		release: vi.fn(),
+	});
 	const pool = { connect: vi.fn().mockResolvedValue(client) };
 	const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
 	const relay = new OutboxRelay({

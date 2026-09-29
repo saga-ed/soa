@@ -168,6 +168,10 @@ None — mirrors the api-core / db CLAUDE.md pattern.
 - `/packages/node/api-core/CLAUDE.md` — the ExpressServer it extends
 - `/packages/node/db/CLAUDE.md` — MongoProvider + MockMongoProvider used in tests
 
+## Rules that apply here
+
+- `testing-node.md`
+
 ---
 
 *Last updated: 2026-04*

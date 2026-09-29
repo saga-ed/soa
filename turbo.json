@@ -3,7 +3,13 @@
   "ui": "tui",
   "globalEnv": [
     "EVENT_PREVIEW_TAG",
-    "PREVIEW_ORIGINATE_MAP"
+    "PREVIEW_ORIGINATE_MAP",
+    // Read only by event-consumer's test:int (run via pnpm --filter, not a turbo
+    // task). It lives here rather than on a task because eslint-plugin-turbo
+    // 2.6.3 only reads globalEnv, so a task-level `env` still trips
+    // turbo/no-undeclared-env-vars. Unset everywhere except a developer running
+    // int tests against their own broker, so the cost to task hashes is nil.
+    "RABBITMQ_TEST_URL"
   ],
   "tasks": {
     "build": {

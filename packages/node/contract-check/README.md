@@ -9,8 +9,8 @@ CI gate for event-schema changes across services. Catches three classes of mista
 The same shape works in single-repo and multi-repo settings. The publisher repo's `pins/` directory is the source of truth; in a multi-repo fleet, downstream consumers in other repos open PRs against the publisher repo's pins.
 
 See the canonical decision docs in the `soa_75` branch:
-- `claude/projects/soa_75/decisions/d-contract-testing.md`
-- `claude/projects/soa_75/decisions/d-event-versioning.md`
+- `docs/history/soa_75/decisions/d-contract-testing.md`
+- `docs/history/soa_75/decisions/d-event-versioning.md`
 
 ## Install
 

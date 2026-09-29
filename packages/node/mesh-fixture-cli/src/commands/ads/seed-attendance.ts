@@ -1,9 +1,9 @@
 /**
  * ads:seed-attendance — thin spawn-and-relay shell.
  *
- * Per the architecture pattern audit (claude/projects/sds_80/phase-3/
+ * Per the architecture pattern audit (student-data-system:claude/projects/sds_80/phase-3/
  * architecture-pattern-audit.md) and D3.6 Phase B decisions
- * (claude/projects/sds_80/decisions/d3.6-phase-b-transform.md §Decision 3c):
+ * (student-data-system:claude/projects/sds_80/decisions/d3.6-phase-b-transform.md §Decision 3c):
  * the heavy lifting (prod-mirror extract, de-identify, transform, load)
  * lives in `@saga-ed/ads-adm-seed` inside the sds-fixture repo. This command
  * is just a lightweight wrapper that spawns the sds-fixture binary and

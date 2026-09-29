@@ -2,6 +2,29 @@
 
 Shared infrastructure monorepo for Saga platform applications.
 
+## Authority by location
+
+Current pattern = this file, `.claude/rules/`, `docs/` (except `docs/history/`),
+`docs/decisions/` entries marked `Accepted`/`RESOLVED`, non-draft `specs/`.
+History = `docs/history/` (index: [docs/history/README.md](docs/history/README.md))
+— never a current pattern; a fact found only there is a harvest gap. Newer of
+doc vs. code wins (`git log -1`).
+
+<!-- docs-check: history-dir: docs/history -->
+
+## Path-scoped rules (`.claude/rules/`)
+
+- `testing-node.md` — loads on `apps/node/**` or `packages/node/**`: DI/Inversify,
+  DB isolation, controller-loading, package unit/smoke test patterns.
+- `testing-web.md` — loads on `apps/web/**`: Vitest browser mode, Playwright E2E.
+- `event-driven.md` — loads on `packages/node/event-*/**` or
+  `packages/node/observability/**`: outbox/consumer wiring, event versioning.
+- `python-uv.md` — loads on `python/**`: uv package-management conventions.
+
+Shared cross-runtime testing conventions (naming, ARES purposes, builders) live
+in [`docs/testing/`](docs/testing/README.md), not in a rule — they're reference
+material, not a path-scoped instruction.
+
 ## Saga tooling
 
 This repo registers the [`saga-tools`](https://github.com/saga-ed/claude-plugins) marketplace
@@ -33,12 +56,10 @@ doc-routing rules (repo-wide vs. nested vs. `.claude/rules/*.md` vs. skills).
 
 ## Detailed Documentation
 
-- See `claude/` for Claude-specific context
-- See `claude/esm.md` for ESM patterns (__dirname, imports, top-level await)
-- See `claude/frontend/` for web framework patterns
-- See `claude/tooling/pnpm.md` for pnpm installation rules
+- See `docs/esm.md` for ESM patterns (__dirname, imports, top-level await)
+- See `docs/frontend/` for web framework patterns
+- See `docs/tooling/pnpm.md` for pnpm installation rules
 - See `apps/CLAUDE.md` for application details
-- See `apps/node/claude/testing.md` for Node.js testing patterns (DI, controller loading)
 - See `packages/CLAUDE.md` for package details
 - See `docs/cross-repo-linking-summary.md` for cross-repo package linking (development workflow)
 - See `tools/walkthrough-video/CLAUDE.md` for generating narrated demo videos of any saga-soa frontend

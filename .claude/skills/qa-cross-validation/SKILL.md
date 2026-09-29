@@ -184,7 +184,7 @@ Key sections:
 |-------------|-------------|---------|
 | `<project>` | Short project name | `jw-fixture`, `coach-api` |
 | `<feature>` | What's being tested | `User auth flow`, `Fixture v3` |
-| `<path>` | Report output directory | `claude/projects/gh_123/` |
+| `<path>` | Report output directory | `docs/history/gh_123/` |
 | Test access | How testers query the system | SSH+mongosh, curl, psql |
 
 ## Example Configurations

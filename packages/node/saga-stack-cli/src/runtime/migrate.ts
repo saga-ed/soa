@@ -41,6 +41,12 @@
  * (the VERIFIED schema owner — NOT ads-adm-db). R3 skips any `resetMode:'migrate-reset'`
  * DB for that reason.
  *
+ * OPTIONAL PACKAGE (`MigrateSpec.optionalPackage`): a DB whose owning package may be
+ * ABSENT from the checkout (surveys-db until student-data-system#495 is overlaid) is
+ * SKIPPED with a note when its `migrate.dir` is not on disk — up.sh's `[[ -d $dir ]]`
+ * guard around the surveys-db db_step. Only flagged DBs get this tolerance: a missing
+ * iam-db/ads-adm-db dir is a broken checkout and still fails loudly.
+ *
  * PER-PACKAGE DEDUP: a general guard for two DBs sharing one owning `(repo, dir)`
  * package — the first in canonical order migrates, the later same-package DB is
  * skipped (up.sh migrates a package once). No current DB pair trips it (ledger_local
@@ -54,6 +60,8 @@
  * INVARIANT: docker/process IO lives only in `src/runtime/**`; `src/core/**`
  * never imports this and stays pure. Repo/dir/cmd/owner all come from the manifest.
  */
+
+import { existsSync } from 'node:fs';
 
 import { getDb, manifest as defaultManifest } from '../core/manifest/index.js';
 import type { DbId, Manifest, MigrateSpec, RepoKey } from '../core/manifest/index.js';
@@ -77,6 +85,12 @@ export interface MigrateContext {
   runner: Runner;
   /** Read-only probe seam — the `_prisma_migrations` / table-count branch selection. */
   probe: PgProbe;
+  /**
+   * `[[ -d <dir> ]]` predicate for `optionalPackage` DBs (is the owning package
+   * checked out?). Default `fs.existsSync`; tests inject it to drive the skip
+   * fs-free. Consulted ONLY for `optionalPackage` migrate specs.
+   */
+  dirExists?: (path: string) => boolean;
   /** Manifest (defaults to the frozen one). */
   manifest?: Manifest;
 }
@@ -89,7 +103,7 @@ export interface MigrateDbResult {
   ok: boolean;
   /** The exact command run (for reporting), e.g. `pnpm db:deploy`. */
   command?: string;
-  /** Reason the DB was skipped (no-schema / non-postgres / not-provisioned / dup-package). */
+  /** Reason the DB was skipped (no-schema / non-postgres / not-provisioned / dup-package / package-absent). */
   skipped?: string;
 }
 
@@ -187,6 +201,7 @@ export function planMigrate(
 export async function migrateClosure(ctx: MigrateContext): Promise<MigrateResult> {
   const m = ctx.manifest ?? defaultManifest;
   const meshOffset = ctx.meshOffset ?? 0;
+  const dirExists = ctx.dirExists ?? ((p: string) => existsSync(p));
   const results: MigrateDbResult[] = [];
 
   // Iterate in CANONICAL MANIFEST ORDER, not the (arbitrary) closure order —
@@ -223,6 +238,22 @@ export async function migrateClosure(ctx: MigrateContext): Promise<MigrateResult
     if (!repo) {
       results.push({ db: id, branch: null, ok: true, skipped: 'no owning service/repo' });
       continue;
+    }
+
+    // optionalPackage (surveys-db): the owning package may legitimately be absent
+    // from this checkout — skip with a note (up.sh's `[[ -d $dir ]]` guard) rather
+    // than spawn pnpm in a missing cwd. The DB stays provisioned (R2) and empty.
+    if (def.migrate.optionalPackage) {
+      const pkgDir = `${ctx.repoRoots[repo].replace(/\/+$/, '')}/${def.migrate.dir.replace(/^\/+/, '')}`;
+      if (!dirExists(pkgDir)) {
+        results.push({
+          db: id,
+          branch: null,
+          ok: true,
+          skipped: `owning package ${def.migrate.dir} absent from the ${repo} checkout (sector not overlaid) — left unmigrated`,
+        });
+        continue;
+      }
     }
 
     const pkgKey = `${repo}::${def.migrate.dir}`;

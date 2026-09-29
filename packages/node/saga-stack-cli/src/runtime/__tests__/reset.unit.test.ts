@@ -80,8 +80,22 @@ describe('truncateSql / truncateArgs (R4)', () => {
   it('the DO block truncates public tables EXCEPT _prisma_migrations, RESTART IDENTITY CASCADE', () => {
     const sql = truncateSql();
     expect(sql).toContain("schemaname='public'");
-    expect(sql).toContain("tablename <> '_prisma_migrations'");
+    expect(sql).toContain("tablename NOT IN ('_prisma_migrations')");
     expect(sql).toContain('RESTART IDENTITY CASCADE');
+  });
+
+  it('resetPreserveTables are spared alongside _prisma_migrations', () => {
+    const sql = truncateSql(['question_bank', 'question_set', 'question_set_item']);
+    expect(sql).toContain(
+      "tablename NOT IN ('_prisma_migrations', 'question_bank', 'question_set', 'question_set_item')",
+    );
+    // Still a truncate of everything else — the instance tables must go.
+    expect(sql).toContain('RESTART IDENTITY CASCADE');
+    expect(sql).not.toContain("'survey'");
+  });
+
+  it('a preserved name carrying a quote cannot break out of the DO block', () => {
+    expect(truncateSql(["od'd"])).toContain("tablename NOT IN ('_prisma_migrations', 'od''d')");
   });
 
   it('truncateArgs uses postgres_admin, the target db, and ON_ERROR_STOP', () => {
@@ -110,6 +124,24 @@ describe('resetClosure — per-DB reset plan (R4)', () => {
     expect(calls[0].command).toBe('docker');
     expect(calls[0].args[1]).toBe(PG);
     expect(sqlOf(calls[0])).toBe(truncateSql());
+  });
+
+  // The question bank + sets are seeded by a DATA MIGRATION. Truncating them
+  // is unrecoverable in place: this reset preserves `_prisma_migrations`, so a
+  // later `migrate deploy` treats the seeding migration as applied and restores
+  // nothing, leaving the stack serving an empty bank with no error raised.
+  it('surveys_api_local spares the migration-seeded question bank, but still clears instances', async () => {
+    const { runner, calls } = fakeRunner();
+    const res = await resetClosure(baseCtx(['surveys_api_local'] as DbId[], { runner }));
+    expect(res.dbs).toEqual([{ db: 'surveys_api_local', action: 'truncated', ok: true }]);
+    const sql = sqlOf(calls[0]);
+    for (const t of ['question_bank', 'question_set', 'question_set_item']) {
+      expect(sql).toContain(`'${t}'`);
+    }
+    expect(sql).toBe(truncateSql(['question_bank', 'question_set', 'question_set_item']));
+    // The instance tables are NOT exempted — they are the synthetic residue.
+    expect(sql).not.toContain("'submission'");
+    expect(sql).not.toContain("'survey_launch'");
   });
 
   it('ledger_local takes migrate-reset (prisma migrate reset --force), NOT truncate', async () => {

@@ -918,6 +918,10 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
           repoRoots,
           runner,
           probe: runtime.pgProbe,
+          // `optionalPackage` DBs (surveys-db, sds#495) skip their migrate when the
+          // owning package is not checked out — reuse the injected repo-dir predicate
+          // (fs.existsSync in production); absent ⇒ migrateClosure defaults to existsSync.
+          dirExists: runtime.repoDirExists,
           manifest,
         });
         if (!migrate.ok) return { ok: false, autoPull, av, mesh, prep, provision, migrate, launched: [], skipped };

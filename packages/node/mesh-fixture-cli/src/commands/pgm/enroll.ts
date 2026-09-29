@@ -1,7 +1,7 @@
 /**
  * pgm:enroll — thin spawn-and-relay shell.
  *
- * Per the architecture pattern audit (claude/projects/sds_80/phase-3/
+ * Per the architecture pattern audit (student-data-system:claude/projects/sds_80/phase-3/
  * architecture-pattern-audit.md) and D3.8: the composite enrollment logic
  * lives in `@saga-ed/pgm-seed` inside the program-hub repo. This command
  * is a lightweight wrapper that spawns the pgm-seed binary and relays its

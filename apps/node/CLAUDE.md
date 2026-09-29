@@ -7,7 +7,7 @@ Backend applications running in Node.js environment.
 ## Runtime Environment
 
 **Type**: Backend/Server
-**Target**: Node.js 20+ (ESM)
+**Target**: Node.js >=24 (ESM)
 **Build**: tsup → Docker → ECS deployment
 
 ## Projects
@@ -58,12 +58,11 @@ All APIs expose:
 
 ## Testing
 
-See [claude/testing.md](./claude/testing.md) for:
-- Controller loading patterns
-- DI/Inversify testing
-- Database isolation for parallel tests
+See [docs/esm.md](../../docs/esm.md) for ESM patterns (__dirname workaround, imports).
 
-See [claude/esm.md](../../claude/esm.md) for ESM patterns (__dirname workaround, imports).
+## Rules that apply here
+
+- `testing-node.md` — controller loading, DI/Inversify, DB isolation for parallel tests.
 
 ---
 

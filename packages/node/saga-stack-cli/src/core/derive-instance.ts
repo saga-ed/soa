@@ -251,9 +251,14 @@ export function deriveInstance(
   // Generic port-override map: every manifest service, offset applied. At slot 0
   // (offset 0) this is the base-port map, so `defaultLaunchContext` resolves the
   // same ports it would with no overrides — the byte-identical guard.
+  //
+  // Slot-excluded services are exempt: they keep their literal port at every slot,
+  // so an offset entry would name a port they never bind. Every value in this map
+  // is a port the service actually listens on.
+  const excluded = new Set(slotExcludedServices(slot));
   const portOverrides: Partial<Record<ServiceId, number>> = {};
   for (const id of Object.keys(m.services) as ServiceId[]) {
-    portOverrides[id] = m.services[id].port + offset;
+    portOverrides[id] = excluded.has(id) ? m.services[id].port : m.services[id].port + offset;
   }
 
   assertPortsDisjoint(slot, offset, m);

@@ -6,7 +6,7 @@ import {
 } from './dev-perimeter-production.js';
 
 /**
- * @spec specs/contracts/saga-auth-signal.spec.md (janus repo)
+ * @spec specs/contracts/drafts/saga-auth-signal.spec.md (janus repo)
  *
  * Boot guard for the dev recon perimeter. INVERTED from the old
  * janusProductionViolation: prod *.saga.org services are end-user facing and

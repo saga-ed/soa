@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-rabbitmq",
-  "version": "1.4.0-dev.2",
+  "version": "1.4.0-dev.3",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +10,8 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ __tests__/",
+    "check-types": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {

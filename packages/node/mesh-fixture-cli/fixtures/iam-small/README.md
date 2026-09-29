@@ -34,7 +34,7 @@ authoring command for those yet (tracked in **rostering#667**). Concretely, in v
 - memberships carry **no** `personaId` — no persona until `iam:create-persona` / `--persona`.
 
 When #667 lands, this fixture upgrades in place to add admin/tutor/student personas wired to
-`STANDARD_BUNDLES` (see `rostering:claude/projects/r_123/02-proposed-iam-fixture.md`).
+`STANDARD_BUNDLES` (see `rostering:docs/history/iam-small-fixture-r123/02-proposed-iam-fixture.md`).
 
 ## Permissions — preserved, not redefined
 

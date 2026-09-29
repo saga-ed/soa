@@ -264,7 +264,6 @@ Once your packages are working and you're ready for production:
 
 ## 🔗 Related Documentation
 
-- [GitHub Packages Publishing Guide](./npm-registry-publishing.md)
-- [GitHub Actions Workflow](../.github/workflows/publish-packages.yml)
+- [GitHub Actions Workflow](../.github/workflows/publish-all-packages.yml)
 - [Migration Guide](./github-packages-migration.md)
 - [GitHub Personal Access Tokens (for publishing)](https://github.com/settings/tokens) 

@@ -1,0 +1,316 @@
+[
+ {
+  "id": "q17",
+  "kind": "fact",
+  "question": "What file path does infra-compose write the currently-active seed profile to (as JSON), read back by `get_active_profile()`?",
+  "expect": {
+   "mode": "contains",
+   "answer": ".fixtures/active-profile",
+   "paths": [
+    "infra/CLAUDE.md"
+   ],
+   "detail": "infra/CLAUDE.md lines 56-57: '`~/.fixtures/active-profile` is a JSON file written by every mutating function (`up`, `switch_profile`, `reset`, `restore`) and read by `get_active_profile()`.' Verified in code: infra/src/api.js:15 (`const ACTIVE_PROFILE_FILE = resolve(homedir(), '.fixtures', 'active-profile')`)."
+  },
+  "authoritative": [
+   "infra/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Trap: don't confuse with the three env files infra-compose also loads in precedence order (.env.defaults, .env, ~/.fixtures/.env) -- a different mechanism (config, not state), documented two bullets earlier in the same file."
+ },
+ {
+  "id": "q18",
+  "kind": "fact",
+  "question": "What AWS account ID appears in the CodeArtifact registry URL that soa's .npmrc points the @saga-ed scope at?",
+  "expect": {
+   "mode": "contains",
+   "answer": "531314149529",
+   "paths": [
+    ".npmrc",
+    "docs/quickstart.md"
+   ],
+   "detail": ".npmrc line 1 and docs/quickstart.md line 248: '@saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/'."
+  },
+  "authoritative": [
+   ".npmrc (already canonical); docs/CODEARTIFACT_SETUP.md is the fuller setup guide"
+  ],
+  "currently_only_in": [],
+  "notes": "This directly contradicts SETUP_SUMMARY.md and SCOPE_FIX_SUMMARY.md, two stale root-level 'SUMMARY' files describing an older GitHub-Packages-based registry (npm.pkg.github.com) -- those are abandoned one-off snapshots, not current."
+ },
+ {
+  "id": "q19",
+  "kind": "fact",
+  "question": "What environment variable, set to 1, gives a free/fast silent smoke pass of a walkthrough-video recording (no TTS narration)?",
+  "expect": {
+   "mode": "contains",
+   "answer": "SKIP_NARRATE",
+   "paths": [
+    "tools/walkthrough-video/CLAUDE.md",
+    "tools/walkthrough-video/README.md"
+   ],
+   "detail": "tools/walkthrough-video/CLAUDE.md line 10 and README.md lines 61/82; also directly consumed in lib/narrate.mjs:18 and lib/stitch.mjs:55."
+  },
+  "authoritative": [
+   "tools/walkthrough-video/README.md (already canonical; CLAUDE.md is the on-ramp pointer)"
+  ],
+  "currently_only_in": [],
+  "notes": "Confirmed as a real, code-consumed env var (not just doc prose) in lib/narrate.mjs and lib/stitch.mjs."
+ },
+ {
+  "id": "q20",
+  "kind": "fact",
+  "question": "Per the soa_75 POC's event-package-shape decision, what is the exact npm package name of the shared event-envelope/meta-types package?",
+  "expect": {
+   "mode": "contains",
+   "answer": "@example/envelope",
+   "paths": [
+    "claude/projects/soa_75/decisions/d-event-package-shape.md"
+   ],
+   "detail": "claude/projects/soa_75/decisions/d-event-package-shape.md line 3: 'Four packages -- `@example/envelope` + per-publisher `@example/{identity,catalog,admissions}-events`.' Restated in the file's Layout section ('envelope/ # @example/envelope -- EventEnvelope Zod schema + meta types')."
+  },
+  "authoritative": [
+   "N/A -- POC-specific package naming for the external ~/dev/soa_event_driven_example repo; never backported into any current-tier soa doc"
+  ],
+  "currently_only_in": [
+   "claude/projects/soa_75/decisions/d-event-package-shape.md"
+  ],
+  "notes": "Confirmed genuinely claude-only: repo-wide grep for '@example/envelope' and the three per-publisher names returns zero hits outside claude/. This POC package never existed in the soa repo itself, so there is no code to cross-check against (same as q21/q23's POC-decision-doc facts)."
+ },
+ {
+  "id": "q21",
+  "kind": "fact",
+  "question": "The soa_75 initiative's event-driven-microservices POC -- the one whose patterns backported into soa's current event-* packages -- was built as its own throwaway repo at which path?",
+  "expect": {
+   "mode": "contains",
+   "answer": "soa_event_driven_example",
+   "paths": [
+    "claude/projects/soa_75/decisions/d-poc-location.md"
+   ],
+   "detail": "claude/projects/soa_75/decisions/d-poc-location.md line 3: 'RESOLVED 2026-04-30: POC code lives in a brand-new single-repo at `~/dev/soa_event_driven_example`.'"
+  },
+  "authoritative": [
+   "N/A -- inherently historical POC-location trivia; the POC repo is external/throwaway and was never meant to be current-tier documentation in soa"
+  ],
+  "currently_only_in": [
+   "claude/projects/soa_75/decisions/d-poc-location.md"
+  ],
+  "notes": "Genuinely claude-only by design, not just a harvest gap -- the POC repo itself is external and disposable."
+ },
+ {
+  "id": "q22",
+  "kind": "fact",
+  "question": "Which rostering pull request number fixed the per-district-admin-personas gap that the synthetic-dev-align initiative's Track 1 was blocked on?",
+  "expect": {
+   "mode": "contains",
+   "answer": "397",
+   "paths": [
+    "claude/projects/synthetic-dev-align/decisions/d1.1-base-journey-split.md"
+   ],
+   "detail": "claude/projects/synthetic-dev-align/decisions/d1.1-base-journey-split.md line 125: 'Track 1 DONE 2026-06-04 -> rostering PR #397 (feat/per-district-admin-personas, reviewer nerisaurus).'"
+  },
+  "authoritative": [
+   "N/A -- a cross-repo PR reference belongs in synthetic-dev-align's own history, not promoted into soa's current-tier docs"
+  ],
+  "currently_only_in": [
+   "claude/projects/synthetic-dev-align/decisions/d1.1-base-journey-split.md"
+  ],
+  "notes": "The PR itself lives in the separate rostering repo; this is soa's own initiative history referencing it, confirmed DONE and merged (not a pending proposal)."
+ },
+ {
+  "id": "q23",
+  "kind": "fact",
+  "question": "In the soa_75 POC's observability design, what hostname (not an IP address) does Prometheus use to scrape each service's /metrics endpoint from outside the Docker network?",
+  "expect": {
+   "mode": "contains",
+   "answer": "host.docker.internal",
+   "paths": [
+    "claude/projects/soa_75/decisions/d-observability.md"
+   ],
+   "detail": "claude/projects/soa_75/decisions/d-observability.md line 51: 'Prometheus scrapes `host.docker.internal:300{1..4}/metrics` every 5s.'"
+  },
+  "authoritative": [
+   "N/A -- POC-specific local dev observability config, not backported verbatim into any current-tier doc"
+  ],
+  "currently_only_in": [
+   "claude/projects/soa_75/decisions/d-observability.md"
+  ],
+  "notes": "Scoped to the soa_75 POC's own dev-time observability stack (Prometheus + Grafana), distinct from the current-tier `observability` package's OTel/prom-client setup described in packages/node/CLAUDE.md."
+ },
+ {
+  "id": "q24",
+  "kind": "fact",
+  "question": "The soa_75 POC's lifecycle-dimensions decision doc says the POC exercises how many total lifecycle dimensions in code?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "The POC exercises 14 lifecycle dimensions in code."
+   ],
+   "paths": [
+    "claude/projects/soa_75/decisions/d-lifecycle-dimensions.md"
+   ],
+   "detail": "claude/projects/soa_75/decisions/d-lifecycle-dimensions.md line 3: 'RESOLVED 2026-04-30: 14 lifecycle dimensions covered in code. Original 6 named by user; 8 operational dimensions added...'."
+  },
+  "authoritative": [
+   "N/A -- a POC-scoping decision, not a number any current-tier doc restates"
+  ],
+  "currently_only_in": [
+   "claude/projects/soa_75/decisions/d-lifecycle-dimensions.md"
+  ],
+  "notes": "Confirmed via repo-wide grep for '14 dimensions'/'14 lifecycle dimensions' -- the only other hit is a self-reference from a sibling decision doc in the same claude/projects/soa_75/decisions/ directory."
+ },
+ {
+  "id": "q25",
+  "kind": "pattern",
+  "question": "How are soa's packages/ organized by runtime, and what's the import restriction between the node and web tiers?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "soa packages split into web, node, and core runtime tiers, and node and web packages must not import each other."
+   ],
+   "paths": [
+    "packages/CLAUDE.md",
+    "packages/web/CLAUDE.md",
+    "packages/node/CLAUDE.md"
+   ],
+   "detail": "packages/CLAUDE.md lines 5-11 (Runtime Categories table); packages/web/CLAUDE.md 'Browser Constraints' ('Must NOT use Node.js APIs'); packages/node/CLAUDE.md 'Node.js Constraints' ('Cannot run in browser')."
+  },
+  "authoritative": [
+   "packages/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "This is a documented convention, not code-enforced -- no ESLint import-boundary rule exists for it (checked packages/core/eslint-config); an answer claiming ESLint enforcement would be an unverified overstatement."
+ },
+ {
+  "id": "q26",
+  "kind": "pattern",
+  "question": "Why does infra-compose live as a sibling of packages/ instead of inside it?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "infra-compose ships outside packages/ because it predates the monorepo and is a standalone npm package with its own CI."
+   ],
+   "paths": [
+    "infra/CLAUDE.md"
+   ],
+   "detail": "infra/CLAUDE.md lines 14-16: 'infra-compose predates the monorepo layout and ships as a standalone npm package with its own `package.json`, test runner config, and CI.'"
+  },
+  "authoritative": [
+   "infra/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Called out twice in the same file: once under 'Why infra/ is a sibling of packages/' and again under 'Convention Deviations' -- a doubly-flagged deviation."
+ },
+ {
+  "id": "q27",
+  "kind": "pattern",
+  "question": "When package.json's `engines.node` and CI's pinned Node version disagree, what should you actually do?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "Trust engines.node locally when it disagrees with CI's pinned Node version, and don't 'fix' CI to match it."
+   ],
+   "paths": [
+    "CLAUDE.md"
+   ],
+   "detail": "Root CLAUDE.md lines 31-32: 'Node version disagrees across sources: `package.json` `engines` says `>=24`, but CI pins `NODE_VERSION: 22`. Trust `engines` locally; don't \"fix\" CI to match without checking why.'"
+  },
+  "authoritative": [
+   "CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Directly answers the visible set's q02 trap from the guidance side -- explicit written instruction for what to do about the disagreement, not just the raw fact of it."
+ },
+ {
+  "id": "q28",
+  "kind": "pattern",
+  "question": "How does soa's transactional-outbox event pattern guarantee an event isn't lost if the process crashes right after the domain write?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "writeOutbox writes in the same Postgres transaction as the domain change."
+   ],
+   "paths": [
+    "packages/node/CLAUDE.md"
+   ],
+   "detail": "packages/node/CLAUDE.md line 30: '`writeOutbox()` writes inside the same pg tx as your domain change; `new OutboxRelay({...}).start()` ships rows to RabbitMQ with at-least-once delivery.' Verified against actual exports in packages/node/event-outbox/src/index.ts (writeOutbox, OutboxRelay class)."
+  },
+  "authoritative": [
+   "packages/node/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "Verified against the real exports in packages/node/event-outbox/src/write-outbox.ts and relay.ts, not just the doc's description."
+ },
+ {
+  "id": "q29",
+  "kind": "pattern",
+  "question": "What happens if you try to start a new fixture-serve provision while one is already running?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "fixture-serve rejects a new provision request while one is already running, until it reaches ready or failed."
+   ],
+   "paths": [
+    "packages/node/fixture-serve/CLAUDE.md"
+   ],
+   "detail": "packages/node/fixture-serve/CLAUDE.md lines 145-147: 'Provision state machine ... Concurrent provisions are rejected until the current run reaches `ready` or `failed`.' Confirmed against the actual state union in packages/node/fixture-serve/src/types.ts line 49 (ProvisionStatus = 'idle'|'resetting'|'creating'|'switching'|'verifying'|'ready'|'failed')."
+  },
+  "authoritative": [
+   "packages/node/fixture-serve/CLAUDE.md (already canonical)"
+  ],
+  "currently_only_in": [],
+  "notes": "The doc's prose lists 5 of the 7 actual ProvisionStatus values (omits the initial 'idle' state) -- the essential claim (concurrent-provision rejection) holds regardless."
+ },
+ {
+  "id": "q30",
+  "kind": "negative",
+  "question": "Is there a documented encryption-at-rest policy or data-retention policy for the MongoDB data soa's packages/apps manage?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "NOT DOCUMENTED"
+   ],
+   "paths": [],
+   "detail": "NOT DOCUMENTED. Repo-wide case-insensitive grep for 'encryption at rest', 'data retention', and 'backup policy' returns zero hits."
+  },
+  "authoritative": [
+   "N/A -- does not exist"
+  ],
+  "currently_only_in": [],
+  "notes": "Clean negative -- the db package's CLAUDE.md documents TLS-in-transit (TLS + SCRAM) extensively but never addresses at-rest encryption or retention."
+ },
+ {
+  "id": "q31",
+  "kind": "negative",
+  "question": "Is there a documented security-vulnerability disclosure or reporting policy (e.g. a SECURITY.md) for this repo?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "NOT DOCUMENTED"
+   ],
+   "paths": [],
+   "detail": "NOT DOCUMENTED. No SECURITY.md or CONTRIBUTING.md exists anywhere in the repo root; no *.md file anywhere describes a vulnerability-reporting process."
+  },
+  "authoritative": [
+   "N/A -- does not exist"
+  ],
+  "currently_only_in": [],
+  "notes": "Same absence pattern as the visible set's q15 (no pentest/audit docs) -- this repo has essentially no security-process documentation, a consistent finding across both negatives."
+ },
+ {
+  "id": "q32",
+  "kind": "negative",
+  "question": "Is there a documented on-call rotation or PagerDuty paging policy currently in effect for soa's example APIs (rest-api, gql-api, tgql-api, trpc-api)?",
+  "expect": {
+   "mode": "judge",
+   "answer": [
+    "NOT DOCUMENTED"
+   ],
+   "paths": [],
+   "detail": "NOT DOCUMENTED for the actual example apps. The only 'PagerDuty'/'on-call' hits repo-wide are inside claude/projects/soa_75/decisions/ -- a hypothetical POC's own observability design proposing 'PagerDuty/Slack' as a future alert destination (d-observability.md line 82) and an 'on-call rookie' exit-criteria drill scenario (d-poc-scope.md line 57, d-scenario-scripts.md line 56) -- neither is a real, current operational policy for soa's actual example apps."
+  },
+  "authoritative": [
+   "N/A -- does not exist for the real example apps"
+  ],
+  "currently_only_in": [],
+  "notes": "Good trap: 3 separate near-miss hits across claude/projects/soa_75/, all describing a hypothetical/POC framing rather than real ops policy -- a naive grep-and-stop search would wrongly conclude this IS documented."
+ }
+]

@@ -64,9 +64,9 @@ A comprehensive testing approach using these prompts:
 
 ## Integration with Other Phases
 
-- **From Development**: Use tests to validate code created with [Development Phase](../development/) prompts
-- **From Planning**: Use requirements from [Planning Phase](../planning/) to guide test scenarios
-- **To Deployment**: Integrate tests into CI/CD using [Deployment Phase](../deployment/) prompts
+- **From Development**: Use tests to validate code created with Development Phase prompts
+- **From Planning**: Use requirements from Planning Phase to guide test scenarios
+- **To Deployment**: Integrate tests into CI/CD using Deployment Phase prompts
 
 ## Testing Strategy Quick Reference
 
@@ -81,6 +81,6 @@ A comprehensive testing approach using these prompts:
 
 After creating your tests:
 
-- Use [Documentation Phase](../documentation/) prompts to document your testing approach
-- Use [Deployment Phase](../deployment/) prompts to integrate tests into your CI/CD pipeline
-- Use [Maintenance Phase](../maintenance/) prompts for ongoing test maintenance
+- Use Documentation Phase prompts to document your testing approach
+- Use Deployment Phase prompts to integrate tests into your CI/CD pipeline
+- Use Maintenance Phase prompts for ongoing test maintenance

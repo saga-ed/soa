@@ -71,7 +71,11 @@ API endpoints default to `localhost:4000-4003` for development.
 - `/apps/node/trpc-api/` - tRPC API consumed by this client
 - `/apps/node/rest-api/` - REST API example
 - `/packages/web/ui/` - React component library
-- `/claude/frontend/nextjs/` - Next.js specific patterns
+- `/docs/frontend/nextjs/` - Next.js specific patterns
+
+## Rules that apply here
+
+- `testing-web.md`
 
 ---
 

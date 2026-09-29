@@ -44,7 +44,10 @@ const ROW = {
 };
 
 function makePgPool() {
-    const client = {
+    // A real EventEmitter (not a plain object) — drainBatch attaches a
+    // temporary 'error' guard for the span it holds this client, same as
+    // the real pg.PoolClient it stands in for.
+    const client = Object.assign(new EventEmitter(), {
         query: vi.fn(async (sql: string) => {
             if (String(sql).includes('FROM outbox_event')) {
                 return { rows: [ROW], rowCount: 1 };
@@ -52,7 +55,7 @@ function makePgPool() {
             return { rows: [], rowCount: 1 };
         }),
         release: vi.fn(),
-    };
+    });
     return { pool: { connect: vi.fn().mockResolvedValue(client) }, client };
 }
 
@@ -70,8 +73,12 @@ function makeRelay(newChannel: ReturnType<typeof vi.fn>) {
         logger: logger as unknown as OutboxRelayOpts['logger'],
     });
     // Mark "started" — ensureChannel refuses to cache a channel acquired
-    // after stop(), and tick() suppresses post-stop failure logs.
-    (relay as unknown as { running: boolean }).running = true;
+    // after stop(), and tick() suppresses post-stop failure logs. isLeader
+    // is forced true too: these tests drive tick()/drainBatch() directly,
+    // bypassing start()'s leader-lock acquisition (covered separately in
+    // relay-leader-election.unit.test.ts).
+    (relay as unknown as { running: boolean; isLeader: boolean }).running = true;
+    (relay as unknown as { running: boolean; isLeader: boolean }).isLeader = true;
     return { relay, connectionManager, logger };
 }
 

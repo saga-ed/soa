@@ -302,8 +302,8 @@ The skill can be extended by:
 - [audit-engine.md](../.claude/skills/claude-audit/audit-engine.md) - Violation detection rules
 - [rating-criteria.md](../.claude/skills/claude-audit/rating-criteria.md) - Scoring rubrics
 - [CLAUDE.md](../CLAUDE.md) - SOA repository standards
-- [claude/esm.md](../claude/esm.md) - ESM patterns
-- [apps/node/claude/testing.md](../apps/node/claude/testing.md) - Testing patterns
+- [esm.md](esm.md) - ESM patterns
+- [.claude/rules/testing-node.md](../.claude/rules/testing-node.md) - Testing patterns
 
 ---
 

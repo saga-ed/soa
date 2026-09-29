@@ -228,18 +228,42 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
                 'can_manage_staff',
                 'can_view_district_programs',
                 'can_view_user_pii',
+                'can_observe_session_recordings',
+                'can_configure_scope_values',
+                'can_manage_memberships',
             ]),
         );
     });
 
-    it('can_view_user_pii resolves from super_admin only (rostering#1126)', () => {
-        const rel = byType.saga_platform.relations?.can_view_user_pii;
-        expect(rel?.computedUserset?.relation).toBe('super_admin');
+    const staffRel = (name: string) => byType.saga_platform.relations?.[name];
+    const unionOf = (name: string) =>
+        (staffRel(name)?.union?.child ?? []).map((c) => c.computedUserset?.relation ?? 'this').sort();
+
+    it('declares the people_admin and viewer roles with direct grants (rostering#1506)', () => {
+        expect(unionOf('people_admin')).toEqual(['super_admin', 'this']);
+        expect(unionOf('viewer')).toEqual(['org_admin', 'people_admin', 'support', 'this']);
     });
 
-    it('can_view_district_programs resolves from org_admin, not super_admin alone', () => {
-        const rel = byType.saga_platform.relations?.can_view_district_programs;
-        expect(rel?.computedUserset?.relation).toBe('org_admin');
+    it('can_view_user_pii resolves from org_admin (rostering#1506)', () => {
+        expect(staffRel('can_view_user_pii')?.computedUserset?.relation).toBe('org_admin');
+    });
+
+    it('can_view_district_programs and can_observe_session_recordings resolve from viewer', () => {
+        expect(staffRel('can_view_district_programs')?.computedUserset?.relation).toBe('viewer');
+        expect(staffRel('can_observe_session_recordings')?.computedUserset?.relation).toBe('viewer');
+    });
+
+    it('can_configure_scope_values resolves from org_admin', () => {
+        expect(staffRel('can_configure_scope_values')?.computedUserset?.relation).toBe('org_admin');
+    });
+
+    it('can_manage_memberships resolves from org_admin or people_admin', () => {
+        expect(unionOf('can_manage_memberships')).toEqual(['org_admin', 'people_admin']);
+    });
+
+    it('impersonation stays on support', () => {
+        expect(staffRel('can_impersonate')?.computedUserset?.relation).toBe('support');
+        expect(staffRel('can_set_temporary_password')?.computedUserset?.relation).toBe('support');
     });
 
     it('staff_org uses staff_admin and NEVER admin (SEC-CRIT-2)', () => {

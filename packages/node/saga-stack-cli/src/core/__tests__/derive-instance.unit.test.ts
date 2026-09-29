@@ -70,9 +70,23 @@ describe('deriveInstance(N) for N ∈ {1,2,3}', () => {
       SAGA_MESH_CONNECT_MONGO_CONTAINER: `soa-s${slot}-connect-mongo-1`,
     });
 
-    // every service port offset by exactly N*1000.
+    // every service port offset by exactly N*1000, EXCEPT the slot-excluded trio,
+    // which keeps its literal port at every slot.
+    const excluded = new Set(p.excludedServices);
     for (const id of Object.keys(manifest.services) as ServiceId[]) {
-      expect(p.portOverrides[id]).toBe(manifest.services[id].port + offset);
+      const expected = manifest.services[id].port + (excluded.has(id) ? 0 : offset);
+      expect(p.portOverrides[id]).toBe(expected);
+    }
+  });
+
+  it('never maps a slot-excluded service to a port it does not bind', () => {
+    // Every value here must be a port the service actually listens on — callers
+    // read this map directly rather than re-deriving the exclusion rule.
+    for (const slot of [0, 1, 5, 9]) {
+      const p = deriveInstance({ slot });
+      for (const id of p.excludedServices) {
+        expect(p.portOverrides[id]).toBe(manifest.services[id].port);
+      }
     }
   });
 });
@@ -83,9 +97,11 @@ describe('no-collision property — union of ALL resolved ports is duplicate-fre
     for (let slot = 0; slot <= 8; slot += 1) {
       const p = deriveInstance({ slot });
       const offset = slot * SLOT_PORT_STRIDE;
-      // service ports
+      // service ports. The slot-excluded trio keeps ONE literal port across every
+      // slot by design, so it is the one thing this disjointness cannot cover.
+      const excluded = new Set(p.excludedServices);
       for (const id of Object.keys(p.portOverrides) as ServiceId[]) {
-        all.push(p.portOverrides[id] as number);
+        if (!excluded.has(id)) all.push(p.portOverrides[id] as number);
       }
       // mesh ports (postgres/redis/rabbitmq/rabbitmq-mgmt/connect-mongo)
       const rabbit = getMesh('rabbitmq');
@@ -140,8 +156,13 @@ describe('two-slot (1 vs 2) — the full resolved port set is disjoint', () => {
       const p = deriveInstance({ slot });
       const offset = slot * SLOT_PORT_STRIDE;
       const rabbit = getMesh('rabbitmq');
+      // The excluded trio is SHARED across slots on purpose — disjointness is a
+      // claim about the slotted services only.
+      const excluded = new Set(p.excludedServices);
       return [
-        ...(Object.keys(p.portOverrides) as ServiceId[]).map((id) => p.portOverrides[id] as number),
+        ...(Object.keys(p.portOverrides) as ServiceId[])
+          .filter((id) => !excluded.has(id))
+          .map((id) => p.portOverrides[id] as number),
         getMesh('postgres').port + offset,
         getMesh('redis').port + offset,
         rabbit.port + offset,

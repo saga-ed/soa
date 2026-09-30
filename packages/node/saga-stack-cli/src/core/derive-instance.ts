@@ -43,7 +43,7 @@
  */
 
 import { homedir } from 'node:os';
-import { getMesh, manifest as defaultManifest } from './manifest/index.js';
+import { allMesh, getMesh, manifest as defaultManifest, meshContainerEnvKey } from './manifest/index.js';
 import type { Manifest, ServiceId } from './manifest/index.js';
 
 /** The stride between adjacent slots' port bands. `offset = slot * STRIDE`. */
@@ -153,9 +153,9 @@ export interface InstanceProfile {
   snapshotsDir: string | undefined;
   /**
    * Mesh container-name overrides (the existing `SAGA_MESH_*_CONTAINER` seam).
-   * Empty at slot 0 (manifest defaults win); for N ≥ 1 points every mesh
-   * container at `soa-s<N>-<unit>-1`. Both mongo reader names are set — see the
-   * note by `containerEnvFor`.
+   * Empty at slot 0 (manifest defaults win); for N ≥ 1 points every manifest mesh
+   * unit's container at `soa-s<N>-<unit>-1`. Both mongo reader names are set — see
+   * the note by `containerEnvFor`.
    */
   containerEnv: Record<string, string>;
   /** Seed profile — ALWAYS `empty` (load-bearing, plan §3): isolation comes from
@@ -175,27 +175,31 @@ export interface InstanceProfile {
 /**
  * The mesh container-name override env for slot N ≥ 1.
  *
+ * Derived GENERICALLY over `manifest.mesh` (never a hand-maintained table): every
+ * unit — including profile-gated ones like `openfga` — gets
+ * `meshContainerEnvKey(id)` → `soa-s<N>-<id>-1` (compose's default
+ * `<project>-<service>-1` name). A unit missing here makes the runtime readers
+ * fall back to slot 0's container, so readiness polls a container that doesn't
+ * exist and the port preflight flags the slot's own container as a conflict.
+ *
  * IMPORTANT — two readers, two mongo names. The mesh readiness resolver
  * (`runtime/mesh.ts` `meshContainer`) derives its key from the unit id, so the
  * connect-mongo unit reads `SAGA_MESH_CONNECT_MONGO_CONTAINER`; the snapshot
  * store (`runtime/snapshot-store.ts` `mongoContainer`) reads the SHORTER
- * `SAGA_MESH_MONGO_CONTAINER`. postgres/redis/rabbitmq agree across both
- * readers. To isolate the mongo container for BOTH code paths at slot > 0 we set
- * both mongo keys to the same value. (At slot 0 this map is empty, so slot 0 is
- * unaffected regardless.)
+ * `SAGA_MESH_MONGO_CONTAINER`. To isolate the mongo container for BOTH code paths
+ * at slot > 0 we also set the short alias to the same value. (At slot 0 this map
+ * is empty, so slot 0 is unaffected regardless.)
  */
-function containerEnvFor(slot: number): Record<string, string> {
+function containerEnvFor(slot: number, m: Manifest): Record<string, string> {
   if (slot === 0) return {};
   const project = `soa-s${slot}`;
-  return {
-    SAGA_MESH_POSTGRES_CONTAINER: `${project}-postgres-1`,
-    SAGA_MESH_REDIS_CONTAINER: `${project}-redis-1`,
-    SAGA_MESH_RABBITMQ_CONTAINER: `${project}-rabbitmq-1`,
-    // snapshot-store's `mongoContainer` reader:
-    SAGA_MESH_MONGO_CONTAINER: `${project}-connect-mongo-1`,
-    // mesh.ts's `meshContainer` reader (unit-id-derived key):
-    SAGA_MESH_CONNECT_MONGO_CONTAINER: `${project}-connect-mongo-1`,
-  };
+  const env: Record<string, string> = {};
+  for (const unit of allMesh(m)) {
+    env[meshContainerEnvKey(unit.id)] = `${project}-${unit.id}-1`;
+  }
+  // snapshot-store's `mongoContainer` reader (short alias, not unit-id-derived):
+  env.SAGA_MESH_MONGO_CONTAINER = `${project}-connect-mongo-1`;
+  return env;
 }
 
 /**
@@ -269,7 +273,7 @@ export function deriveInstance(
     project: slot === 0 ? 'soa' : `soa-s${slot}`,
     stateDir: slot === 0 ? '/tmp/sds-synthetic' : `/tmp/sds-synthetic-s${slot}`,
     snapshotsDir: slot === 0 ? undefined : `${homedir()}/.saga-mesh/snapshots-s${slot}`,
-    containerEnv: containerEnvFor(slot),
+    containerEnv: containerEnvFor(slot, m),
     seedProfile: 'empty',
     portOverrides,
     meshOffset: offset,

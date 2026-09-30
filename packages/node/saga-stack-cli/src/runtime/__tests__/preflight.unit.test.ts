@@ -8,7 +8,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { manifest } from '../../core/manifest/index.js';
+import { deriveInstance } from '../../core/derive-instance.js';
+import { getMesh, manifest } from '../../core/manifest/index.js';
 import {
   checkPorts,
   meshOwnedContainers,
@@ -83,6 +84,31 @@ describe('meshPortSpecs / meshOwnedContainers', () => {
       else process.env.SAGA_MESH_POSTGRES_CONTAINER = saved.pg;
       if (saved.mongo === undefined) delete process.env.SAGA_MESH_CONNECT_MONGO_CONTAINER;
       else process.env.SAGA_MESH_CONNECT_MONGO_CONTAINER = saved.mongo;
+    }
+  });
+
+  it("M7 slot > 0 re-run: the slot's own running mesh (incl. openfga) is owned, not a conflict", async () => {
+    // Applied exactly as base-command's `applyInstanceEnv` does. Before openfga had
+    // a slot override, a re-run failed here with "held by container 'soa-s2-openfga-1'".
+    const profile = deriveInstance({ slot: 2 });
+    const saved = Object.fromEntries(
+      Object.keys(profile.containerEnv).map((k) => [k, process.env[k]]),
+    );
+    Object.assign(process.env, profile.containerEnv);
+    try {
+      const specs = meshPortSpecs(manifest, profile.meshOffset);
+      const owned = meshOwnedContainers(manifest);
+      const probe = fakeProbe({
+        [getMesh('openfga').port + profile.meshOffset]: 'soa-s2-openfga-1',
+        [getMesh('openfga').mgmtPort! + profile.meshOffset]: 'soa-s2-openfga-1',
+        [getMesh('postgres').port + profile.meshOffset]: 'soa-s2-postgres-1',
+      });
+      expect(await checkPorts(specs, probe, owned)).toEqual([]);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
     }
   });
 });

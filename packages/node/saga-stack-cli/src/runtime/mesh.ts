@@ -38,7 +38,7 @@
 
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
-import { getMesh, manifest as defaultManifest } from '../core/manifest/index.js';
+import { getMesh, manifest as defaultManifest, meshContainerEnvKey } from '../core/manifest/index.js';
 import type { Manifest, MeshDef, MeshId } from '../core/manifest/index.js';
 import type { Runner } from './exec.js';
 import { checkPorts, makeRealPortProbe, meshOwnedContainers, meshPortSpecs } from './preflight.js';
@@ -134,8 +134,7 @@ export interface MeshResult {
 
 /** Resolved container name for a mesh unit: `SAGA_MESH_<UNIT>_CONTAINER` env override ?? manifest. */
 export function meshContainer(unit: MeshDef): string {
-  const envKey = `SAGA_MESH_${unit.id.toUpperCase().replace(/-/g, '_')}_CONTAINER`;
-  return process.env[envKey] ?? unit.container;
+  return process.env[meshContainerEnvKey(unit.id)] ?? unit.container;
 }
 
 /**

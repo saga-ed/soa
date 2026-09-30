@@ -82,3 +82,15 @@ export function allDatabases(m: Manifest = manifest): DatabaseDef[] {
 export function allMesh(m: Manifest = manifest): MeshDef[] {
   return Object.values(m.mesh);
 }
+
+/**
+ * The env var that overrides a mesh unit's container name:
+ * `SAGA_MESH_<UNIT>_CONTAINER`, derived from the unit id (`connect-mongo` →
+ * `SAGA_MESH_CONNECT_MONGO_CONTAINER`). The ONE derivation shared by the writer
+ * (`derive-instance` `containerEnvFor`) and the readers (`runtime/mesh.ts`
+ * `meshContainer`, `runtime/preflight.ts` `meshOwnedContainers`), so they can't
+ * disagree on a key.
+ */
+export function meshContainerEnvKey(id: MeshId): string {
+  return `SAGA_MESH_${id.toUpperCase().replace(/-/g, '_')}_CONTAINER`;
+}

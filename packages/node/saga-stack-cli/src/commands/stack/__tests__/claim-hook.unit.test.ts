@@ -97,7 +97,7 @@ describe('a claiming command writes ONE claim on entry', () => {
     // typed `--soa` pin wins; every SET_REPO_KEYS key is present (the writer
     // skips the ones that don't exist on disk).
     expect(claim.repoRoots.soa).toBe(SOA_ROOT);
-    expect(Object.keys(claim.repoRoots)).toHaveLength(9);
+    expect(Object.keys(claim.repoRoots)).toHaveLength(10);
     expect(claim.repoRoots).toHaveProperty('sds');
   });
 

@@ -197,6 +197,14 @@ export type NativeOverlays = {
    * feature existed.
    */
   authz?: { withAuthz: boolean; storeId?: string };
+  /**
+   * `--with janus-mock` / `--with staff-admin` ⇒ the local janus mock-signer
+   * overlay: `withJanusMock: true` (drives `JANUS_JWKS_URL`/
+   * `JANUS_CLAIMS_ENABLED`). Absent for every command that doesn't select
+   * either bundle, so its runtime is byte-identical to before this feature
+   * existed. Same shape as `authz` minus the extra store-id IO.
+   */
+  janusMock?: { withJanusMock: boolean };
 };
 
 export abstract class BaseCommand extends Command {
@@ -997,6 +1005,7 @@ export abstract class BaseCommand extends Command {
       rtsmFleetPath,
       withAuthz: authzOverlay?.withAuthz,
       openfgaStoreId: authzOverlay?.storeId,
+      withJanusMock: overlays.janusMock?.withJanusMock,
     });
 
     return {

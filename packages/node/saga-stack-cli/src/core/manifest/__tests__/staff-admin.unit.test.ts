@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { closureDatabases } from '../../../commands/stack/snapshot/store.js';
 import {
   AUTHZ_IDS,
+  JANUS_MOCK_IDS,
   PLAYBACK_IDS,
   STAFF_ADMIN_IDS,
   closureOptsFor,
@@ -157,15 +158,21 @@ describe('optional-service id sets (derived from BUNDLES)', () => {
     // Consumers that map an optional id BACK to its flag (flow resolution,
     // workspace run-sets) read these instead of hand-listing ids, so they
     // cannot drift from the bundle registry.
-    expect(STAFF_ADMIN_IDS).toEqual(['staff-admin-bff', 'staff-admin-console']);
+    expect(STAFF_ADMIN_IDS).toEqual(['staff-admin-bff', 'staff-admin-console', 'janus-mock-signer']);
     expect(AUTHZ_IDS).toEqual(['authz-sync']);
     expect(PLAYBACK_IDS).toEqual(['transcripts-api', 'insights-api', 'chat-api']);
+    expect(JANUS_MOCK_IDS).toEqual(['janus-mock-signer']);
   });
 
   it('every optional manifest service belongs to exactly one opt-in set', () => {
     // The gap this whole class of bug came from: an optional service with no
     // flag mapping silently resolves to an EMPTY closure at every caller.
-    const mapped = new Set<string>([...PLAYBACK_IDS, ...AUTHZ_IDS, ...STAFF_ADMIN_IDS]);
+    const mapped = new Set<string>([
+      ...PLAYBACK_IDS,
+      ...AUTHZ_IDS,
+      ...STAFF_ADMIN_IDS,
+      ...JANUS_MOCK_IDS,
+    ]);
     const optional = Object.values(manifest.services)
       .filter((s) => s.optional)
       .map((s) => s.id);
@@ -179,11 +186,13 @@ describe('closureOptsFor / closureOptsForIds', () => {
       withPlayback: false,
       withAuthz: false,
       withStaffAdmin: true,
+      withJanusMock: true,
     });
     expect(closureOptsFor(undefined)).toEqual({
       withPlayback: false,
       withAuthz: false,
       withStaffAdmin: false,
+      withJanusMock: false,
     });
   });
 
@@ -192,11 +201,13 @@ describe('closureOptsFor / closureOptsForIds', () => {
       withPlayback: false,
       withAuthz: false,
       withStaffAdmin: true,
+      withJanusMock: false,
     });
     expect(closureOptsForIds(['iam-api'])).toEqual({
       withPlayback: false,
       withAuthz: false,
       withStaffAdmin: false,
+      withJanusMock: false,
     });
   });
 

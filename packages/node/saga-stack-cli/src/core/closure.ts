@@ -28,7 +28,7 @@
  * would wrongly resolve transcripts-api), so the gate dispatches per service id.
  */
 
-import { AUTHZ_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from './bundles.js';
+import { AUTHZ_IDS, JANUS_MOCK_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from './bundles.js';
 import { launchOrder } from './launch-order.js';
 import type { DbId, Manifest, MeshId, ServiceId } from './manifest/index.js';
 
@@ -50,6 +50,8 @@ export interface ClosureOpts {
   withAuthz?: boolean;
   /** Keep the `optional:true` staff-admin console pair (SPA + its BFF). */
   withStaffAdmin?: boolean;
+  /** Keep the `optional:true` `janus-mock-signer` service. */
+  withJanusMock?: boolean;
   /**
    * Whether to traverse `depKind: 'browser'` edges (default `true`).
    *
@@ -77,6 +79,7 @@ export function computeClosure(
   const withPlayback = opts.withPlayback ?? false;
   const withAuthz = opts.withAuthz ?? false;
   const withStaffAdmin = opts.withStaffAdmin ?? false;
+  const withJanusMock = opts.withJanusMock ?? false;
   const followBrowserEdges = opts.followBrowserEdges ?? true;
 
   // Each optional service is admitted by its OWN flag — never a blanket OR of
@@ -97,6 +100,7 @@ export function computeClosure(
     if (PLAYBACK_IDS.includes(id)) return withPlayback;
     if (AUTHZ_IDS.includes(id)) return withAuthz;
     if (STAFF_ADMIN_IDS.includes(id)) return withStaffAdmin;
+    if (JANUS_MOCK_IDS.includes(id)) return withJanusMock;
     throw new Error(
       `closure: optional service '${id}' has no opt-in flag — add it to a BUNDLES entry ` +
         `(and its *_IDS export), or it will silently resolve an empty closure.`,

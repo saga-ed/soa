@@ -28,6 +28,7 @@ const REPO_ROOTS: Record<RepoKey, string> = {
   QBOARD: '/w/qboard',
   RTSM: '/w/rtsm',
   FLEEK: '/w/fleek',
+  JANUS: '/w/janus',
 };
 
 const ctx: LaunchContext = defaultLaunchContext({
@@ -84,6 +85,30 @@ describe('global PINO logger env (up.sh services_up export ~1384-1385)', () => {
   });
 });
 
+describe('withJanusMock: true — local mock signer overlay (soa#446)', () => {
+  // Nothing previously asserted what withJanusMock:true actually produces — the
+  // soa#446 bug lived one layer up (resolveOverlays never threading the flag
+  // here at all), but this default-only coverage left the flip itself unpinned.
+  const mockCtx: LaunchContext = defaultLaunchContext({
+    repoRoots: REPO_ROOTS,
+    vendorDir: '/w/vendor',
+    withJanusMock: true,
+  });
+  const mockEnv = (id: ServiceId) => resolveLaunchEnv(id, 'stack', mockCtx);
+
+  it('iam-api: points at the local signer + turns claims verification on', () => {
+    const e = mockEnv('iam-api');
+    expect(e.JANUS_JWKS_URL).toBe('http://localhost:3099/.well-known/jwks.json');
+    expect(e.JANUS_CLAIMS_ENABLED).toBe('true');
+  });
+
+  it('programs-api / scheduling-api: JWKS URL flips, no claims-verification toggle (iam-api only)', () => {
+    expect(mockEnv('programs-api').JANUS_JWKS_URL).toBe('http://localhost:3099/.well-known/jwks.json');
+    expect(mockEnv('scheduling-api').JANUS_JWKS_URL).toBe('http://localhost:3099/.well-known/jwks.json');
+    expect(mockEnv('programs-api').JANUS_CLAIMS_ENABLED).toBeUndefined();
+  });
+});
+
 describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () => {
   it('iam-api', () => {
     expect(env('iam-api')).toEqual({
@@ -117,6 +142,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       // 8180 (the HOST port from infra/.env.defaults), NOT 8080 (in-container).
       FGA_API_URL: 'http://localhost:8180',
       FGA_STORE_ID: '',
+      // janus-mock bundle (opt-in, --with janus-mock / --with staff-admin): the
+      // real (unreachable-from-localhost) gate default when not selected, and
+      // verification stays off (CLAIMS_ENABLED 'false') — see launch-plan.ts.
+      JANUS_JWKS_URL: 'https://gate.wootdev.com/.well-known/jwks.json',
+      JANUS_CLAIMS_ENABLED: 'false',
     });
   });
 
@@ -138,6 +168,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       IAM_API_URL: 'http://localhost:3010',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       JANUS_REQUIRED: 'false',
+      // janus-mock bundle (opt-in): unset ⇒ the real gate default (see iam-api).
+      JANUS_JWKS_URL: 'https://gate.wootdev.com/.well-known/jwks.json',
       // dash AND coach-web: coach-web's browser calls programs.list direct, and
       // that call preflights (x-organization-id), so an unlisted origin gets a
       // 204 with no ACAO → "Failed to fetch" (coach#329).
@@ -154,6 +186,8 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
       IAM_API_URL: 'http://localhost:3010',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
       JANUS_REQUIRED: 'false',
+      // janus-mock bundle (opt-in): unset ⇒ the real gate default (see iam-api).
+      JANUS_JWKS_URL: 'https://gate.wootdev.com/.well-known/jwks.json',
       CORS_ORIGIN: 'http://localhost:8900',
       JANUS_LOGIN_HOST: 'localhost:3010/demo',
       JWT_ISSUER: 'https://iam.wootdev.com',

@@ -29,7 +29,7 @@ no janus cookie, no API layer.
 
 ```bash
 ss env list                              # environments + control-plane ledger footprint
-ss env discover --env dev                # SSM params (data-store wiring) + the SSM jump host
+ss env discover --env dev                # SSM params (data-store wiring) + the SSM + db jump hosts
 ss env connect iam --env dev             # SSM tunnel to shared Postgres; prints DATABASE_URL; Ctrl-C closes
 ss env connect programs --local-port 15433 --print-only   # resolve only, no tunnel
 ss env verify --env dev                  # health-gate every deployed service (non-zero if a required one is down)
@@ -86,7 +86,13 @@ store on `training` differs only by name suffix. Routing (live-verified
 2026-07-21): `.dbs-v2.local` targets tunnel **via the container's own db-host
 instance with a 127.0.0.1 dial** (CloudMap `discover-instances` → host + port;
 the shared jump host's SG cannot reach the containers — a dial from it hangs);
-anything else (shared RDS) goes via the shared jump host. Resolution is
+anything else (shared RDS) goes via the env's dedicated **db jump host**
+(`dev-db-jump-host` / `prod-db-jump-host`, iac `ssm_jump_host` stack), which
+idles itself off: `connect` starts it if stopped (`ec2:StartInstances`) and waits
+up to ~3 min for SSM Online. AppRuntime/AppDeploy suffice. `--jump-host <NameTag>`
+overrides the tag; `--print-only` never starts it (prints `stopped — will be
+started on connect`). If no db jump host exists, it falls back to the shared-ECS
+tag. Resolution is
 transparent (every candidate printed) and overridable: `--host`,
 `--remote-port`, `--username`, `--database`. The tunnel holds in the
 foreground — it dies with the command, never orphaned. Postgres-first; Mongo

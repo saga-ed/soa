@@ -1330,7 +1330,8 @@
         "<%= config.bin %> <%= command.id %> programs --env dev --local-port 15433",
         "<%= config.bin %> <%= command.id %> iam --host mydb.dbs-v2.local --remote-port 5440 --database rostering-iam-canonical --print-only",
         "<%= config.bin %> <%= command.id %> iam --env prod --print-only",
-        "<%= config.bin %> <%= command.id %> iam --env prod --local-port 15442"
+        "<%= config.bin %> <%= command.id %> iam --env prod --local-port 15442",
+        "<%= config.bin %> <%= command.id %> iam --env prod --jump-host prod-db-jump-host"
       ],
       "flags": {
         "coach": {
@@ -1382,6 +1383,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "janus",
+          "type": "option"
+        },
+        "jump-host": {
+          "description": "EC2 Name tag of the SSM jump host (overrides the env's db jump host; started if stopped).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "jump-host",
           "type": "option"
         },
         "local-port": {

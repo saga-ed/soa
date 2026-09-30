@@ -396,6 +396,114 @@ export async function resolveJumpHost(
   return (online ?? [])[0];
 }
 
+export type JumpHostState = 'online' | 'running' | 'pending' | 'stopping' | 'stopped';
+
+export interface JumpHostStatus {
+  id: string;
+  state: JumpHostState;
+}
+
+const JUMP_HOST_RANK: Record<JumpHostState, number> = { online: 0, running: 1, pending: 2, stopped: 3, stopping: 4 };
+
+/**
+ * Read-only: the best instance tagged `Name=<nameTag>` in any non-terminal
+ * state. `online` = running AND Online in SSM. Never starts anything.
+ */
+export async function findJumpHost(
+  aws: EnvAws,
+  nameTag: string,
+  opts: { profile?: string; region: string },
+): Promise<JumpHostStatus | undefined> {
+  const rows = (await aws.json(
+    [
+      'ec2',
+      'describe-instances',
+      '--filters',
+      `Name=tag:Name,Values=${nameTag}`,
+      'Name=instance-state-name,Values=pending,running,stopping,stopped',
+      '--query',
+      'Reservations[].Instances[].[InstanceId,State.Name]',
+    ],
+    opts,
+  )) as [string, string][] | null;
+  const instances = rows ?? [];
+  if (instances.length === 0) return undefined;
+  const runningIds = instances.filter(([, st]) => st === 'running').map(([id]) => id);
+  const online =
+    runningIds.length === 0
+      ? []
+      : (((await aws.json(
+          [
+            'ssm',
+            'describe-instance-information',
+            '--filters',
+            `Key=InstanceIds,Values=${runningIds.join(',')}`,
+            '--query',
+            "InstanceInformationList[?PingStatus=='Online'].InstanceId",
+          ],
+          opts,
+        )) as string[] | null) ?? []);
+  const statuses = instances.map(([id, st]): JumpHostStatus => ({
+    id,
+    state: st === 'running' && online.includes(id) ? 'online' : (st as JumpHostState),
+  }));
+  return statuses.sort((a, b) => JUMP_HOST_RANK[a.state] - JUMP_HOST_RANK[b.state])[0];
+}
+
+export interface EnsureJumpHostOptions {
+  log?: (msg: string) => void;
+  /** Give up waiting for Online after this long (default 180s). */
+  timeoutMs?: number;
+  pollMs?: number;
+  /** Injectable so tests do not actually wait. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Resolve the jump host, starting it if it is idle-stopped, and wait until it
+ * is Online in SSM. Returns undefined when no instance carries the tag; throws
+ * on start failure or timeout.
+ */
+export async function ensureJumpHost(
+  aws: EnvAws,
+  nameTag: string,
+  opts: { profile?: string; region: string },
+  ensure: EnsureJumpHostOptions = {},
+): Promise<string | undefined> {
+  const timeoutMs = ensure.timeoutMs ?? 180_000;
+  const pollMs = ensure.pollMs ?? 5_000;
+  const sleep = ensure.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let status = await findJumpHost(aws, nameTag, opts);
+  let started = false;
+  let waited = 0;
+  while (status !== undefined) {
+    if (status.state === 'online') return status.id;
+    if (status.state === 'stopped' && !started) {
+      ensure.log?.(`starting db jump host ${status.id} (idle-stopped)…`);
+      try {
+        await aws.json(['ec2', 'start-instances', '--instance-ids', status.id, '--query', 'StartingInstances[0].InstanceId'], opts);
+      } catch (err) {
+        throw new Error(
+          `could not start jump host ${status.id} (Name=${nameTag}): ${err instanceof Error ? err.message : String(err)} — ` +
+            'needs ec2:StartInstances on saga:role=db-jump-host (AppRuntime/AppDeploy or higher).',
+        );
+      }
+      started = true;
+    }
+    if (waited >= timeoutMs) {
+      throw new Error(
+        `jump host ${status.id} (Name=${nameTag}) still ${status.state} after ${Math.round(waited / 1000)}s — ` +
+          'check the instance and its SSM agent, then retry.',
+      );
+    }
+    await sleep(pollMs);
+    waited += pollMs;
+    status = await findJumpHost(aws, nameTag, opts);
+  }
+  if (started) throw new Error(`jump host Name=${nameTag} disappeared while starting.`);
+  return undefined;
+}
+
 function capture(command: string, args: string[]): Promise<EnvAwsResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });

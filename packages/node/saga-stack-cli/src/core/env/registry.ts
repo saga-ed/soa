@@ -51,6 +51,12 @@ export interface DeployedEnv {
   /** EC2 Name tag of the SSM jump host (the shared ECS instances double as it). */
   jumpHostNameTag: string;
   /**
+   * EC2 Name tag of the dedicated tier-scoped SSM db jump host (iac
+   * `ssm_jump_host` stack). Idles itself off, so `env connect` starts it on
+   * demand. ABSENT = use `jumpHostNameTag`.
+   */
+  dbJumpHostNameTag?: string;
+  /**
    * Shared ECS clusters, in lookup order — services live on one or the other
    * (live 2026-07-21: dev's arm cluster carries most of the mesh).
    */
@@ -115,6 +121,7 @@ export const DEPLOYED_ENVS: Record<string, DeployedEnv> = {
     ssmDiscoveryRoots: ['/shared/infra/dev', '/dev'],
     ledgerTable: 'dev-platform-control-plane-environments-dev',
     jumpHostNameTag: 'dev-shared-ecs-instance',
+    dbJumpHostNameTag: 'dev-db-jump-host',
     ecsClusters: ['dev-shared-arm', 'dev-shared'],
     dbHostNamespace: 'dbs-v2.local',
     description: 'Shared dev fleet (*.wootdev.com) — CI-deployed on merge to main; data accumulates (no reset).',
@@ -148,6 +155,7 @@ export const DEPLOYED_ENVS: Record<string, DeployedEnv> = {
     awsAccountId: PROD_ACCOUNT_ID,
     ssmDiscoveryRoots: ['/shared/infra/prod'],
     jumpHostNameTag: 'prod-shared-ecs-instance',
+    dbJumpHostNameTag: 'prod-db-jump-host',
     // One cluster only — there is no `prod-shared-arm` (the iac samconfig
     // asymmetry against dev is real, not an omission).
     ecsClusters: ['prod-shared'],

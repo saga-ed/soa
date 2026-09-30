@@ -32,7 +32,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { allMesh, manifest as defaultManifest } from '../core/manifest/index.js';
+import { allMesh, manifest as defaultManifest, meshContainerEnvKey } from '../core/manifest/index.js';
 import type { Manifest } from '../core/manifest/index.js';
 
 /** One mesh host port to preflight, with the human label up.sh prints. */
@@ -90,15 +90,11 @@ export function meshPortSpecs(m: Manifest = defaultManifest, offset = 0): MeshPo
  * via the `SAGA_MESH_<UNIT>_CONTAINER` env override (set from the slot's
  * `InstanceProfile.containerEnv`) so a running `soa-s<N>-postgres-1` is recognised
  * as ours at slot > 0; unset (slot 0) ⇒ the manifest default container names, so
- * slot 0 is byte-identical. Kept in lock-step with `mesh.ts`'s `meshContainer`.
+ * slot 0 is byte-identical. Shares `meshContainerEnvKey` with `mesh.ts`'s
+ * `meshContainer` and `derive-instance`'s `containerEnvFor`, so the key can't drift.
  */
 export function meshOwnedContainers(m: Manifest = defaultManifest): Set<string> {
-  return new Set(
-    allMesh(m).map((u) => {
-      const envKey = `SAGA_MESH_${u.id.toUpperCase().replace(/-/g, '_')}_CONTAINER`;
-      return process.env[envKey] ?? u.container;
-    }),
-  );
+  return new Set(allMesh(m).map((u) => process.env[meshContainerEnvKey(u.id)] ?? u.container));
 }
 
 /**

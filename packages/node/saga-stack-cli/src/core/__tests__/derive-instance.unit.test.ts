@@ -16,7 +16,7 @@ import {
   deriveInstance,
   slotExcludedServices,
 } from '../derive-instance.js';
-import { getMesh, manifest } from '../manifest/index.js';
+import { allMesh, getMesh, manifest, meshContainerEnvKey } from '../manifest/index.js';
 import type { ServiceId } from '../manifest/index.js';
 
 /** The base-port override map (offset 0) — what slot 0 must produce verbatim. */
@@ -68,6 +68,7 @@ describe('deriveInstance(N) for N ∈ {1,2,3}', () => {
       SAGA_MESH_RABBITMQ_CONTAINER: `soa-s${slot}-rabbitmq-1`,
       SAGA_MESH_MONGO_CONTAINER: `soa-s${slot}-connect-mongo-1`,
       SAGA_MESH_CONNECT_MONGO_CONTAINER: `soa-s${slot}-connect-mongo-1`,
+      SAGA_MESH_OPENFGA_CONTAINER: `soa-s${slot}-openfga-1`,
     });
 
     // every service port offset by exactly N*1000, EXCEPT the slot-excluded trio,
@@ -78,6 +79,21 @@ describe('deriveInstance(N) for N ∈ {1,2,3}', () => {
       expect(p.portOverrides[id]).toBe(expected);
     }
   });
+
+  it.each([1, 2, 3])(
+    'slot %i overrides the container of EVERY manifest mesh unit (incl. profile-gated openfga)',
+    (slot) => {
+      // A unit missing here makes the runtime readers fall back to slot 0's
+      // `soa-<unit>-1`: readiness polls a container that doesn't exist and the port
+      // preflight flags the slot's own container as a conflict.
+      const { containerEnv } = deriveInstance({ slot });
+      for (const unit of allMesh(manifest)) {
+        expect(containerEnv[meshContainerEnvKey(unit.id)], unit.id).toBe(
+          `soa-s${slot}-${unit.id}-1`,
+        );
+      }
+    },
+  );
 
   it('never maps a slot-excluded service to a port it does not bind', () => {
     // Every value here must be a port the service actually listens on — callers

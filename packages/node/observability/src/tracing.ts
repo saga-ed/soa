@@ -9,6 +9,7 @@ import { ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import type { ILogger } from '@saga-ed/soa-logger';
 import { PiiSanitizingSpanExporter } from './span-sanitizer.js';
 import { recordSpanException } from './record-exception.js';
+import { mongoDbStatementSerializer } from './mongo-statement.js';
 
 /**
  * Opaque handle to an initialized OTel SDK. Services don't need to import
@@ -88,6 +89,9 @@ export function initTracing(
                 '@opentelemetry/instrumentation-dns': { enabled: false },
                 '@opentelemetry/instrumentation-net': { enabled: false },
                 '@opentelemetry/instrumentation-pg': { requireParentSpan: true },
+                '@opentelemetry/instrumentation-mongodb': {
+                    dbStatementSerializer: mongoDbStatementSerializer,
+                },
             }),
             new RuntimeNodeInstrumentation(),
         ],

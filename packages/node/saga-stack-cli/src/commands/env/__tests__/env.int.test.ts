@@ -229,8 +229,12 @@ describe('env discover — SSM walk + jump host', () => {
     expect(text()).toContain('/shared/infra/dev/mongodb-hosts');
     expect(text()).not.toContain('app-alb-443-listener-arn');
     expect(text()).toContain('jump host: i-0abc');
-    expect(ec2NameTagFilters()).toEqual(['Name=tag:Name,Values=dev-shared-ecs-instance']);
+    expect(ec2NameTagFilters()).toEqual([
+      'Name=tag:Name,Values=dev-shared-ecs-instance',
+      'Name=tag:Name,Values=dev-db-jump-host',
+    ]);
     expect(text()).toContain('tag Name=dev-shared-ecs-instance');
+    expect(text()).toContain('db jump host: ✗ missing');
   });
 
   it('--env prod walks the PROD root and filters EC2 by the PROD jump-host tag', async () => {
@@ -251,7 +255,10 @@ describe('env discover — SSM walk + jump host', () => {
     await expect(EnvDiscover.run(['--env', 'prod'], config)).resolves.toBeUndefined();
 
     expect(text()).toContain('/shared/infra/prod/postgres-endpoint');
-    expect(ec2NameTagFilters()).toEqual(['Name=tag:Name,Values=prod-shared-ecs-instance']);
+    expect(ec2NameTagFilters()).toEqual([
+      'Name=tag:Name,Values=prod-shared-ecs-instance',
+      'Name=tag:Name,Values=prod-db-jump-host',
+    ]);
     expect(text()).toContain('jump host: i-0prodjump');
     expect(text()).toContain('tag Name=prod-shared-ecs-instance');
     // Prod declares ONE discovery root — dev's legacy roots must not leak in.
@@ -371,7 +378,10 @@ describe('env connect — task-definition resolution + tunnel', () => {
       EnvConnect.run(['coach', '--host', 'shared.rds.amazonaws.com', '--database', 'coach', '--print-only'], config),
     ).resolves.toBeUndefined();
     expect(text()).toContain('route:     jump host i-0jump');
-    expect(ec2NameTagFilters()).toEqual(['Name=tag:Name,Values=dev-shared-ecs-instance']);
+    expect(ec2NameTagFilters()).toEqual([
+      'Name=tag:Name,Values=dev-db-jump-host',
+      'Name=tag:Name,Values=dev-shared-ecs-instance',
+    ]);
   });
 });
 
@@ -432,8 +442,12 @@ describe('env connect --env prod — the RDS data-plane style (I#375)', () => {
     // Straight from the PROD jump host — no CloudMap, no 127.0.0.1 dial. The
     // tag is the registry's, not dev's constant (which matches nothing here).
     expect(text()).toContain('route:     jump host i-0prodjump');
-    expect(ec2NameTagFilters()).toEqual(['Name=tag:Name,Values=prod-shared-ecs-instance']);
-    expect(text()).not.toContain('db-host');
+    expect(ec2NameTagFilters()).toEqual([
+      'Name=tag:Name,Values=prod-db-jump-host',
+      'Name=tag:Name,Values=prod-shared-ecs-instance',
+    ]);
+    expect(text()).toContain('falling back to Name=prod-shared-ecs-instance');
+    expect(text()).not.toContain('db-host i-');
     expect(text()).toContain('DATABASE_URL=postgres://iam_app:pw@127.0.0.1:15432/iam');
     expect(portForwards).toHaveLength(0);
     // The endpoint is NEVER a registry literal — it was read at run time.
@@ -512,6 +526,120 @@ describe('env connect --env dev — the db-host style is untouched by the prod w
     expect(awsCalls.some((c) => c.args.includes('Arn'))).toBe(false);
     expect(text()).not.toContain('this is PRODUCTION');
     expect(text()).toContain('db-host i-0dbhost (CloudMap x, local dial :5440)');
+  });
+});
+
+describe('env connect — dedicated db jump host', () => {
+  const RDS = 'prod-shared-pg.cluster-abc123.us-west-2.rds.amazonaws.com';
+  let state = 'running';
+  let online = true;
+  let onlineAfterStart = true;
+
+  const awsWithDbJump = (args: string[]): unknown => {
+    if (args[1] === 'describe-services') return 'arn:td/prod-iam:9';
+    if (args[1] === 'describe-task-definition') {
+      return [{ name: 'iam-api', secrets: [{ name: 'DATABASE_URL', valueFrom: 'arn:aws:secretsmanager:x:secret:db' }] }];
+    }
+    if (args[0] === 'secretsmanager') return 'postgresql://iam_app:pw@iam.dbs.internal:5432/iam';
+    if (args[1] === 'get-parameter') return args[args.indexOf('--name') + 1].endsWith('endpoint') ? RDS : '5432';
+    if (args[1] === 'start-instances') {
+      state = 'running';
+      online = onlineAfterStart;
+      return 'i-0dbjump';
+    }
+    if (args[0] === 'ec2') {
+      return args.includes('Name=tag:Name,Values=prod-db-jump-host') || args.includes('Name=tag:Name,Values=custom-jump')
+        ? [['i-0dbjump', state]]
+        : args.includes('Name=tag:Name,Values=prod-shared-ecs-instance')
+          ? [['i-0shared', 'running']]
+          : [];
+    }
+    if (args[1] === 'describe-instance-information') {
+      const ids = args[args.indexOf('--filters') + 1];
+      if (ids.includes('i-0shared')) return ['i-0shared'];
+      return online ? ['i-0dbjump'] : [];
+    }
+    return null;
+  };
+  const runWithTimers = async (argv: string[]): Promise<void> => {
+    vi.useFakeTimers();
+    try {
+      const run = EnvConnect.run(argv, config);
+      let done = false;
+      const settled = run.then(() => undefined, (e: unknown) => e).finally(() => (done = true));
+      for (let i = 0; i < 100 && !done; i++) await vi.advanceTimersByTimeAsync(5_000);
+      const err = await settled;
+      if (err !== undefined) throw err;
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+  const startCalls = (): string[][] => awsCalls.filter((c) => c.args[1] === 'start-instances').map((c) => c.args);
+
+  beforeEach(() => {
+    callerAccount = PROD_ACCOUNT;
+    state = 'running';
+    online = true;
+    onlineAfterStart = true;
+    installEnvAws(awsWithDbJump);
+  });
+
+  it('prod connect uses prod-db-jump-host when running + Online', async () => {
+    await EnvConnect.run(['iam', '--env', 'prod'], config);
+    expect(portForwards[0]?.target).toBe('i-0dbjump');
+    expect(text()).toContain('route:     db jump host i-0dbjump');
+    expect(startCalls()).toHaveLength(0);
+  });
+
+  it('a stopped host is started, awaited until Online, then used for the tunnel', async () => {
+    state = 'stopped';
+    online = false;
+    await runWithTimers(['iam', '--env', 'prod']);
+    expect(startCalls()).toEqual([['ec2', 'start-instances', '--instance-ids', 'i-0dbjump', '--query', 'StartingInstances[0].InstanceId']]);
+    expect(text()).toContain('starting db jump host i-0dbjump (idle-stopped)');
+    expect(portForwards[0]?.target).toBe('i-0dbjump');
+  });
+
+  it('--print-only with a stopped host does NOT start it', async () => {
+    state = 'stopped';
+    online = false;
+    await EnvConnect.run(['iam', '--env', 'prod', '--print-only'], config);
+    expect(startCalls()).toHaveLength(0);
+    expect(text()).toContain('db jump host i-0dbjump (stopped — will be started/awaited on connect)');
+    expect(portForwards).toHaveLength(0);
+  });
+
+  it('no db jump host at all falls back to the shared-ecs tag', async () => {
+    installEnvAws((args) =>
+      args[0] === 'ec2' && args.includes('Name=tag:Name,Values=prod-db-jump-host') ? [] : awsWithDbJump(args),
+    );
+    await EnvConnect.run(['iam', '--env', 'prod'], config);
+    expect(text()).toContain('falling back to Name=prod-shared-ecs-instance');
+    expect(portForwards[0]?.target).toBe('i-0shared');
+  });
+
+  it('--jump-host overrides the tag (and starts it if stopped)', async () => {
+    state = 'stopped';
+    online = false;
+    await runWithTimers(['iam', '--env', 'prod', '--jump-host', 'custom-jump']);
+    expect([...new Set(ec2NameTagFilters())]).toEqual(['Name=tag:Name,Values=custom-jump']);
+    expect(startCalls()).toHaveLength(1);
+    expect(portForwards[0]?.target).toBe('i-0dbjump');
+  });
+
+  it('--jump-host naming a missing tag is an error naming it, with no fallback', async () => {
+    await expect(EnvConnect.run(['iam', '--env', 'prod', '--jump-host', 'nope'], config)).rejects.toThrow(
+      /Name=nope \(--jump-host\)/,
+    );
+    expect(portForwards).toHaveLength(0);
+  });
+
+  it('never-Online after start times out with an actionable error', async () => {
+    state = 'stopped';
+    online = false;
+    onlineAfterStart = false;
+    await expect(runWithTimers(['iam', '--env', 'prod'])).rejects.toThrow(/i-0dbjump.*still running after 180s/s);
+    expect(portForwards).toHaveLength(0);
   });
 });
 

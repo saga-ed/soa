@@ -5,8 +5,9 @@
  * The registry deliberately hardcodes no endpoint that can drift; this command
  * is how the live values are found: it pages `ssm get-parameters-by-path` under
  * the env's discovery roots, filters to data-store-shaped names, and resolves
- * the SSM jump host (EC2 tag `Name=<env.jumpHostNameTag>`, Online only) that
- * `env connect` tunnels through. Use it once per session to fill/verify the
+ * the SSM jump host (EC2 tag `Name=<env.jumpHostNameTag>`, Online only) and the
+ * dedicated db jump host (`env.dbJumpHostNameTag`, state only — never started)
+ * that `env connect` tunnels through. Use it once per session to fill/verify the
  * values `env connect` needs.
  */
 
@@ -14,7 +15,7 @@ import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import { bold, cyan, dim, green, red } from '../../color.js';
 import { ENV_NAMES, accountMismatchError, resolveEnv } from '../../core/env/index.js';
-import { resolveCallerAccount, resolveJumpHost } from '../../runtime/index.js';
+import { findJumpHost, resolveCallerAccount, resolveJumpHost } from '../../runtime/index.js';
 
 const DEFAULT_FILTER = 'postgres|mongo|mongodb|db-host|rabbit|redis|rds|secret';
 
@@ -81,6 +82,8 @@ export default class EnvDiscover extends BaseCommand {
     // ── the SSM jump host (running + Online) ──
     const jump = await resolveJumpHost(aws, env.jumpHostNameTag, opts);
 
+    const dbJump = env.dbJumpHostNameTag === undefined ? undefined : await findJumpHost(aws, env.dbJumpHostNameTag, opts);
+
     const lines: string[] = [
       `${bold('▶ env discover')} — ${bold(cyan(env.name))} ${dim(`(roots: ${env.ssmDiscoveryRoots.join(', ')}; filter: /${flags.filter}/i)`)}`,
       ...params.map((p) => `  ${p.name}  ${dim(`[${p.type}]`)}`),
@@ -88,7 +91,16 @@ export default class EnvDiscover extends BaseCommand {
       jump === undefined
         ? `  ${dim('jump host:')} ${red(`✗ no running+Online instance tagged Name=${env.jumpHostNameTag}`)}`
         : `  ${dim('jump host:')} ${green(jump)} ${dim(`(tag Name=${env.jumpHostNameTag}, Online)`)}`,
+      env.dbJumpHostNameTag === undefined
+        ? ''
+        : dbJump === undefined
+          ? `  ${dim('db jump host:')} ${red(`✗ missing (no instance tagged Name=${env.dbJumpHostNameTag})`)}`
+          : `  ${dim('db jump host:')} ${dbJump.state === 'online' ? green(dbJump.id) : dbJump.id} ${dim(`(tag Name=${env.dbJumpHostNameTag}, ${dbJump.state === 'online' ? 'Online' : dbJump.state})`)}`,
     ].filter((l) => l !== '');
-    this.emit(flags, { env: env.name, parameters: params, jumpHost: jump ?? null }, lines);
+    this.emit(
+      flags,
+      { env: env.name, parameters: params, jumpHost: jump ?? null, dbJumpHost: dbJump ?? null },
+      lines,
+    );
   }
 }

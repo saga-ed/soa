@@ -15,8 +15,10 @@
  *   2. Its task definition yields either the DATABASE_URL secret or the split
  *      POSTGRES_* fields (`core/env/taskdef.ts`); referenced secrets are
  *      fetched (Secrets Manager or SSM parameter refs both handled).
- *   3. Jump host = newest running EC2 tagged `Name=<env.jumpHostNameTag>` that
- *      is Online in SSM; CloudMap `.<env.dbHostNamespace>` names resolve THERE.
+ *   3. Jump host = the env's dedicated db jump host (`env.dbJumpHostNameTag`,
+ *      or `--jump-host`), STARTED if idle-stopped and awaited until Online in
+ *      SSM; falls back to a running+Online EC2 tagged `Name=<env.jumpHostNameTag>`
+ *      when no db jump host exists. `--print-only` never starts it.
  *
  * REACHABILITY branches on the env's DATA-PLANE STYLE (`core/env/data-plane.ts`,
  * I#375), never on its name:
@@ -36,8 +38,11 @@
  * `--host/--remote-port/--database/--username` skip resolution entirely;
  * `--print-only` stops before the tunnel. Once the session-manager plugin
  * reports listening, prints a rewritten `DATABASE_URL` (127.0.0.1:local-port)
- * and HOLDS until Ctrl-C — the tunnel dies with the command. Requires
- * app-infra tier (SagaCap-SSMPortForward) or app-deploy. Postgres-first;
+ * and HOLDS until Ctrl-C — the tunnel dies with the command. Works on the
+ * AppRuntime or AppDeploy tier via the db jump host (ssm:StartSession +
+ * ec2:StartInstances are scoped to `saga:role=db-jump-host`); the CloudMap
+ * db-host route and the shared-ECS fallback need app-infra
+ * (SagaCap-SSMPortForward). Postgres-first;
  * Mongo (needs `directConnection=true` through tunnels) is a follow-up.
  */
 
@@ -56,7 +61,7 @@ import {
 } from '../../core/env/index.js';
 import type { DeployedEnv, SecretRef, TaskDefContainer } from '../../core/env/index.js';
 import { bold, cyan, dim, green, yellow } from '../../color.js';
-import { resolveCallerAccount, resolveCallerArn, resolveJumpHost } from '../../runtime/index.js';
+import { ensureJumpHost, findJumpHost, resolveCallerAccount, resolveCallerArn, resolveJumpHost } from '../../runtime/index.js';
 
 interface ResolvedTarget {
   host: string;
@@ -79,6 +84,7 @@ export default class EnvConnect extends BaseCommand {
     // (Observer is refused here; the endpoint is read live from SSM).
     '<%= config.bin %> <%= command.id %> iam --env prod --print-only',
     '<%= config.bin %> <%= command.id %> iam --env prod --local-port 15442',
+    '<%= config.bin %> <%= command.id %> iam --env prod --jump-host prod-db-jump-host',
   ];
 
   static args = {
@@ -97,6 +103,9 @@ export default class EnvConnect extends BaseCommand {
     'local-port': Flags.integer({ description: 'local end of the tunnel', default: 15432 }),
     username: Flags.string({ description: 'override the resolved user (URL carries no password then).' }),
     database: Flags.string({ description: 'override the resolved database name.' }),
+    'jump-host': Flags.string({
+      description: "EC2 Name tag of the SSM jump host (overrides the env's db jump host; started if stopped).",
+    }),
     'print-only': Flags.boolean({ description: 'resolve and print everything, but do not open the tunnel.', default: false }),
   };
 
@@ -197,13 +206,10 @@ export default class EnvConnect extends BaseCommand {
       dialPort = found.port ?? target.port;
       route = `db-host ${found.instanceId} (CloudMap ${serviceName}, local dial :${dialPort})`;
     } else {
-      const jump = await resolveJumpHost(this.getEnvAws(), env.jumpHostNameTag, opts);
-      if (jump === undefined) {
-        this.error(`no running+Online SSM jump host tagged Name=${env.jumpHostNameTag} — check tier/region/profile.`);
-      }
-      ssmTarget = jump;
+      const resolved = await this.resolveJumpRoute(env, flags['jump-host'], flags['print-only'], opts);
+      ssmTarget = resolved.id;
       dialHost = target.host;
-      route = `jump host ${jump}`;
+      route = resolved.route;
     }
 
     const url = localUrl(target, flags['local-port']);
@@ -236,6 +242,48 @@ export default class EnvConnect extends BaseCommand {
     this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
     const code = await handle.exited;
     this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
+  }
+
+  /**
+   * The jump host for non-CloudMap targets. `--jump-host` / `env.dbJumpHostNameTag`
+   * is started on demand (never under --print-only); when the env's own db jump
+   * host does not exist at all, the shared ECS tag is used as before.
+   */
+  private async resolveJumpRoute(
+    env: DeployedEnv,
+    override: string | undefined,
+    printOnly: boolean,
+    opts: { profile?: string; region: string },
+  ): Promise<{ id: string; route: string }> {
+    const aws = this.getEnvAws();
+    const dbTag = override ?? env.dbJumpHostNameTag;
+    if (dbTag !== undefined) {
+      if (printOnly) {
+        const found = await findJumpHost(aws, dbTag, opts);
+        if (found !== undefined) {
+          const note = found.state === 'online' ? '' : ` (${found.state} — will be started/awaited on connect)`;
+          return { id: found.id, route: `db jump host ${found.id}${note}` };
+        }
+      } else {
+        let id: string | undefined;
+        try {
+          id = await ensureJumpHost(aws, dbTag, opts, { log: (m) => this.log(`  ${dim(m)}`) });
+        } catch (err) {
+          this.error(err instanceof Error ? err.message : String(err));
+        }
+        if (id !== undefined) return { id, route: `db jump host ${id}` };
+      }
+      if (override !== undefined) {
+        this.error(`no SSM jump host tagged Name=${override} (--jump-host) — check tier/region/profile.`);
+      }
+      this.log(`  ${dim(`no db jump host tagged Name=${dbTag}; falling back to Name=${env.jumpHostNameTag}`)}`);
+    }
+    const jump = await resolveJumpHost(aws, env.jumpHostNameTag, opts);
+    if (jump === undefined) {
+      const tried = dbTag === undefined ? env.jumpHostNameTag : `${dbTag}, ${env.jumpHostNameTag}`;
+      this.error(`no running+Online SSM jump host tagged Name=${tried} — check tier/region/profile.`);
+    }
+    return { id: jump, route: `jump host ${jump}` };
   }
 
   /** ECS service → task definition → DB target, secrets fetched through the aws seam. */

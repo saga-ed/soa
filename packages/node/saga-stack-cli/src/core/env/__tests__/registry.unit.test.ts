@@ -28,6 +28,7 @@ describe('registry — the built-in envs, pinned field for field', () => {
       ssmDiscoveryRoots: ['/shared/infra/dev', '/dev'],
       ledgerTable: 'dev-platform-control-plane-environments-dev',
       jumpHostNameTag: 'dev-shared-ecs-instance',
+      dbJumpHostNameTag: 'dev-db-jump-host',
       ecsClusters: ['dev-shared-arm', 'dev-shared'],
       dbHostNamespace: 'dbs-v2.local',
       description:
@@ -67,6 +68,7 @@ describe('registry — the built-in envs, pinned field for field', () => {
       awsAccountId: '531314149529',
       ssmDiscoveryRoots: ['/shared/infra/prod'],
       jumpHostNameTag: 'prod-shared-ecs-instance',
+      dbJumpHostNameTag: 'prod-db-jump-host',
       ecsClusters: ['prod-shared'],
       // Parameter NAMES, not the endpoint value — the address is read live.
       postgresEndpointParams: {

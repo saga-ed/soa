@@ -13,6 +13,7 @@
 
 import { Config } from '@oclif/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { STORES } from '../../../core/env/index.js';
 import { BaseCommand } from '../../../base-command.js';
 import type { EnvAws, EnvPsql, PortForwardHandle, PortForwardRequest } from '../../../runtime/index.js';
 import EnvConnect from '../connect.js';
@@ -106,6 +107,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -577,6 +579,7 @@ describe('env connect — dedicated db jump host', () => {
   const startCalls = (): string[][] => awsCalls.filter((c) => c.args[1] === 'start-instances').map((c) => c.args);
 
   beforeEach(() => {
+    vi.setConfig({ testTimeout: 30_000 });
     callerAccount = PROD_ACCOUNT;
     state = 'running';
     online = true;
@@ -707,6 +710,74 @@ describe('env connect — blue/green service selection', () => {
     await expect(EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config)).rejects.toThrow(
       /coach-coach-api-main, coach-coach-api-blue, coach-coach-api-green in prod-shared/,
     );
+  });
+});
+
+describe('env connect --env prod — IAM-auth fallback (task def has no DB config)', () => {
+  const RDS = 'prod-shared-pg.cluster-abc123.us-west-2.rds.amazonaws.com';
+  const awsNoDbConfig = (containers: unknown[]) => (args: string[]): unknown => {
+    if (args[1] === 'describe-services') return [[args[args.indexOf('--services') + 1], 'ACTIVE', 1, 1, 'arn:td/x:1']];
+    if (args[1] === 'describe-task-definition') return containers;
+    if (args[0] === 'secretsmanager') return 'split-pw';
+    if (args[1] === 'get-parameter') return args[args.indexOf('--name') + 1].endsWith('endpoint') ? RDS : '5432';
+    if (args[0] === 'ec2') return [['i-0dbjump', 'running']];
+    if (args[1] === 'describe-instance-information') return ['i-0dbjump'];
+    return null;
+  };
+  const noConfig = [{ name: 'api', secrets: [{ name: 'RABBITMQ_URL', valueFrom: 'arn:x' }], environment: [{ name: 'MONGO_HOST', value: 'm' }] }];
+
+  beforeEach(() => {
+    callerAccount = PROD_ACCOUNT;
+  });
+
+  it('coach: registry database, <db>_ro user, sslmode + token hint, and NO instance start', async () => {
+    installEnvAws(awsNoDbConfig(noConfig));
+    await EnvConnect.run(['coach', '--env', 'prod', '--print-only', '--profile', 'saga-runtime-prod'], config);
+    expect(text()).toContain(`target:    ${RDS}:5432/coach_api (store registry (IAM auth) + SSM /shared/infra/prod/postgres-endpoint)`);
+    expect(text()).toContain('DATABASE_URL=postgres://coach_api_ro@127.0.0.1:15432/coach_api?sslmode=require');
+    expect(text()).toContain(
+      `PGPASSWORD="$(aws rds generate-db-auth-token --hostname ${RDS} --port 5432 --username coach_api_ro --region us-west-2 --profile saga-runtime-prod)" psql 'postgres://coach_api_ro@127.0.0.1:15432/coach_api?sslmode=require'`,
+    );
+    expect(awsCalls.some((c) => c.args[1] === 'start-instances')).toBe(false);
+    expect(awsCalls.some((c) => c.args[1] === 'generate-db-auth-token')).toBe(false);
+  });
+
+  it('--username overrides the default role; no --profile -> none in the hint', async () => {
+    installEnvAws(awsNoDbConfig(noConfig));
+    await EnvConnect.run(['coach', '--env', 'prod', '--print-only', '--username', 'me_ro'], config);
+    expect(text()).toContain('--username me_ro --region us-west-2)" psql');
+  });
+
+  it('ads-adm with POSTGRES_* env keeps the task-def path (no IAM hint when a password exists)', async () => {
+    installEnvAws(
+      awsNoDbConfig([
+        {
+          name: 'api',
+          environment: [
+            { name: 'POSTGRES_HOST', value: 'h.internal' },
+            { name: 'POSTGRES_DATABASE', value: 'ads_adm' },
+            { name: 'POSTGRES_USERNAME', value: 'ads_user' },
+          ],
+          secrets: [{ name: 'POSTGRES_PASSWORD', valueFrom: 'arn:aws:secretsmanager:x:secret:p' }],
+        },
+      ]),
+    );
+    await EnvConnect.run(['ads-adm', '--env', 'prod', '--print-only'], config);
+    expect(text()).toContain('DATABASE_URL=postgres://ads_user:split-pw@127.0.0.1:15432/ads_adm');
+    expect(text()).not.toContain('IAM auth');
+  });
+
+  it('a store without rdsDatabase and no DB config is an actionable error', async () => {
+    installEnvAws(awsNoDbConfig(noConfig));
+    const spy = vi.spyOn(STORES.find((x) => x.key === 'coach')!, 'rdsDatabase', 'get').mockReturnValue(undefined);
+    await expect(EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config)).rejects.toThrow(/no rdsDatabase/);
+    spy.mockRestore();
+  });
+
+  it('dev keeps the strict task-def error when there is no DB config', async () => {
+    callerAccount = DEV_ACCOUNT;
+    installEnvAws(awsNoDbConfig(noConfig));
+    await expect(EnvConnect.run(['coach', '--print-only'], config)).rejects.toThrow(/carries neither a DATABASE_URL/);
   });
 });
 

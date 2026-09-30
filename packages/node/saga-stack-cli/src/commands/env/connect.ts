@@ -160,7 +160,23 @@ export default class EnvConnect extends BaseCommand {
       };
     } else {
       const candidates = serviceCandidates(store!.ecsService, env.ledgerIdentifier);
-      target = await this.resolveFromTaskDef(env, candidates, opts);
+      const fromTaskDef = await this.resolveFromTaskDef(env, candidates, opts, style === 'rds-endpoint');
+      // Prod task definitions carry no DB config (services derive it in code,
+      // IAM auth): name the database from the registry and default to `<db>_ro`.
+      if (fromTaskDef === undefined) {
+        if (store!.rdsDatabase === undefined) {
+          this.error(`store '${store!.key}' has no rdsDatabase in the registry and its task definition carries no DB config — pass --host/--database.`);
+        }
+        target = {
+          host: '',
+          port: 0,
+          database: store!.rdsDatabase,
+          username: `${store!.rdsDatabase}_ro`,
+          source: 'store registry (IAM auth)',
+        };
+      } else {
+        target = fromTaskDef;
+      }
       // ── 'rds-endpoint' style: the task definition supplied the DATABASE and
       // USER (that is why it is still consulted), but the ADDRESS is the shared
       // Postgres endpoint discovered live from SSM — the task def may name a
@@ -168,7 +184,9 @@ export default class EnvConnect extends BaseCommand {
       // failover. `--host` (above) opts out of this too. ──
       if (style === 'rds-endpoint') {
         const rds = await this.resolveSharedEndpoint(env, opts);
-        if (rds.host !== target.host || rds.port !== target.port) {
+        if (target.host === '') {
+          this.log(`  ${dim('endpoint:')}  ${green(`${rds.host}:${rds.port}`)} ${dim(`(${rds.source})`)}`);
+        } else if (rds.host !== target.host || rds.port !== target.port) {
           this.log(
             `  ${dim('endpoint:')}  ${green(`${rds.host}:${rds.port}`)} ${dim(`(${rds.source}; task def named ${target.host}:${target.port})`)}`,
           );
@@ -217,7 +235,12 @@ export default class EnvConnect extends BaseCommand {
       route = resolved.route;
     }
 
-    const url = localUrl(target, flags['local-port']);
+    const iamAuth = style === 'rds-endpoint' && target.username !== undefined && target.password === undefined;
+    // RDS IAM auth requires TLS.
+    const url = localUrl(target, flags['local-port']) + (iamAuth ? '?sslmode=require' : '');
+    const tokenHint = iamAuth
+      ? `PGPASSWORD="$(aws rds generate-db-auth-token --hostname ${target.host} --port ${target.port} --username ${target.username} --region ${env.awsRegion}${flags.profile === undefined ? '' : ` --profile ${flags.profile}`})" psql '${url}'`
+      : undefined;
     this.log(`${bold('▶ env connect')} — ${bold(cyan(env.name))}${dim('/')}${cyan(args.store)}`);
     this.log(`  ${dim('target:')}    ${target.host}:${target.port}/${target.database} ${dim(`(${target.source})`)}`);
     this.log(`  ${dim('route:')}     ${route}`);
@@ -227,6 +250,7 @@ export default class EnvConnect extends BaseCommand {
         { env: env.name, store: args.store, host: target.host, port: target.port, database: target.database, ssmTarget, url },
         `DATABASE_URL=${url}`,
       );
+      if (tokenHint !== undefined && !flags['output-json'] && !flags.porcelain) this.log(`  ${dim('IAM auth — connect with:')} ${tokenHint}`);
       return;
     }
 
@@ -243,7 +267,7 @@ export default class EnvConnect extends BaseCommand {
     await handle.ready;
     this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(flags['local-port']))} → ${target.host}:${target.port}`);
     this.log(`  DATABASE_URL=${url}`); // left plain — meant to be copy-pasted
-    this.log(`  ${dim(`psql '${url}'`)}`);
+    this.log(`  ${dim(tokenHint ?? `psql '${url}'`)}`);
     this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
     const code = await handle.exited;
     this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
@@ -296,7 +320,8 @@ export default class EnvConnect extends BaseCommand {
     env: DeployedEnv,
     candidates: string[],
     opts: { profile?: string; region: string },
-  ): Promise<ResolvedTarget> {
+    allowNoDbConfig = false,
+  ): Promise<ResolvedTarget | undefined> {
     const aws = this.getEnvAws();
     let taskDefArn: string | undefined;
     let clusterUsed: string | undefined;
@@ -336,6 +361,7 @@ export default class EnvConnect extends BaseCommand {
     )) as TaskDefContainer[] | null;
     const dbTarget = extractDbTarget(td ?? []);
     if (dbTarget === undefined) {
+      if (allowNoDbConfig) return undefined;
       this.error(`task definition ${taskDefArn} carries neither a DATABASE_URL secret nor POSTGRES_* env — cannot resolve.`);
     }
 

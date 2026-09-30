@@ -65,6 +65,8 @@ export interface StoreDef {
   engine: 'postgres';
   /** Logical database name hint (authoritative names come from live discovery). */
   database: string;
+  /** Database name on the shared RDS ('rds-endpoint' data plane); the task definition carries none there. */
+  rdsDatabase?: string;
   /** Where the table map was verified from. */
   schemaSource: string;
   tables: TableRule[];
@@ -95,6 +97,7 @@ export function assertUuids(ids: readonly string[], label: string): void {
 export const STORES: StoreDef[] = [
   {
     key: 'iam',
+    rdsDatabase: 'iam_db',
     ecsService: 'rostering-iam-api',
     service: 'iam-api (rostering)',
     engine: 'postgres',
@@ -110,6 +113,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'programs',
+    rdsDatabase: 'programs_api',
     ecsService: 'program-hub-programs-api',
     service: 'programs-api (program-hub)',
     engine: 'postgres',
@@ -125,6 +129,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'scheduling',
+    rdsDatabase: 'scheduling_api',
     ecsService: 'program-hub-scheduling-api',
     service: 'scheduling-api (program-hub)',
     engine: 'postgres',
@@ -137,6 +142,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'sessions',
+    rdsDatabase: 'sessions_api',
     ecsService: 'program-hub-sessions-api',
     service: 'sessions-api (program-hub)',
     engine: 'postgres',
@@ -150,6 +156,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'ads-adm',
+    rdsDatabase: 'ads_adm',
     ecsService: 'sds-ads-adm-api',
     service: 'ads-adm-api (student-data-system)',
     engine: 'postgres',
@@ -165,6 +172,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'coach',
+    rdsDatabase: 'coach_api',
     ecsService: 'coach-coach-api',
     service: 'coach-api (coach)',
     engine: 'postgres',

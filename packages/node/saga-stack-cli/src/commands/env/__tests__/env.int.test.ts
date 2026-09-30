@@ -273,9 +273,9 @@ describe('env connect — task-definition resolution + tunnel', () => {
     if (args[1] === 'describe-services') {
       const cluster = args[args.indexOf('--cluster') + 1];
       const service = args[args.indexOf('--services') + 1];
-      if (service === 'rostering-iam-api-main' && cluster === 'dev-shared-arm') return 'arn:td/iam:251';
-      if (service === 'sds-ads-adm-api-main' && cluster === 'dev-shared') return 'arn:td/adsadm:26';
-      return null; // oclif --query yields null for a missing service
+      if (service === 'rostering-iam-api-main' && cluster === 'dev-shared-arm') return [[service, 'ACTIVE', 1, 1, 'arn:td/iam:251']];
+      if (service === 'sds-ads-adm-api-main' && cluster === 'dev-shared') return [[service, 'ACTIVE', 1, 1, 'arn:td/adsadm:26']];
+      return []; // no ACTIVE match
     }
     if (args[1] === 'describe-task-definition') {
       const td = args[args.indexOf('--task-definition') + 1];
@@ -319,7 +319,7 @@ describe('env connect — task-definition resolution + tunnel', () => {
 
     await expect(EnvConnect.run(['iam', '--print-only'], config)).resolves.toBeUndefined();
 
-    expect(text()).toContain('service candidate dev-shared-arm/rostering-iam-api-main: arn:td/iam:251');
+    expect(text()).toContain('service candidate dev-shared-arm/rostering-iam-api-main: 1/1 running');
     expect(text()).toContain('rostering-iam-canonical.dbs-v2.local:5440/rostering-iam-canonical');
     // .dbs-v2.local ⇒ the CloudMap route via the container's own host instance.
     expect(text()).toContain('db-host i-0dbhost (CloudMap rostering-iam-canonical, local dial :5440)');
@@ -349,7 +349,7 @@ describe('env connect — task-definition resolution + tunnel', () => {
   it('a service deployed on neither cluster is a hard error naming both', async () => {
     installEnvAws((args) => (args[1] === 'describe-services' ? null : ['i-0jump']));
 
-    await expect(EnvConnect.run(['coach'], config)).rejects.toThrow(/not found in dev-shared-arm or dev-shared/);
+    await expect(EnvConnect.run(['coach'], config)).rejects.toThrow(/no ACTIVE ECS service among coach-coach-api-main, coach-coach-api-blue, coach-coach-api-green in dev-shared-arm or dev-shared/);
     expect(portForwards).toHaveLength(0);
   });
 
@@ -398,7 +398,7 @@ describe('env connect --env prod — the RDS data-plane style (I#375)', () => {
     if (args[1] === 'describe-services') {
       const cluster = args[args.indexOf('--cluster') + 1];
       const service = args[args.indexOf('--services') + 1];
-      return cluster === 'prod-shared' && service === 'rostering-iam-api-main' ? 'arn:td/prod-iam:9' : null;
+      return cluster === 'prod-shared' && service === 'rostering-iam-api-main' ? [[service, 'ACTIVE', 1, 1, 'arn:td/prod-iam:9']] : [];
     }
     if (args[1] === 'describe-task-definition') {
       return [
@@ -434,7 +434,7 @@ describe('env connect --env prod — the RDS data-plane style (I#375)', () => {
     expect(text()).toContain('this is PRODUCTION');
     expect(text()).toContain('Resolving only (--print-only)');
     // The task def still supplies database + user…
-    expect(text()).toContain('service candidate prod-shared/rostering-iam-api-main: arn:td/prod-iam:9');
+    expect(text()).toContain('service candidate prod-shared/rostering-iam-api-main: 1/1 running');
     // …but the ADDRESS comes from SSM, and the substitution is stated, not silent.
     expect(text()).toContain(`endpoint:  ${RDS}:5432`);
     expect(text()).toContain('SSM /shared/infra/prod/postgres-endpoint; task def named iam.dbs.internal:5432');
@@ -536,7 +536,7 @@ describe('env connect — dedicated db jump host', () => {
   let onlineAfterStart = true;
 
   const awsWithDbJump = (args: string[]): unknown => {
-    if (args[1] === 'describe-services') return 'arn:td/prod-iam:9';
+    if (args[1] === 'describe-services') return [['rostering-iam-api-main', 'ACTIVE', 1, 1, 'arn:td/prod-iam:9']];
     if (args[1] === 'describe-task-definition') {
       return [{ name: 'iam-api', secrets: [{ name: 'DATABASE_URL', valueFrom: 'arn:aws:secretsmanager:x:secret:db' }] }];
     }
@@ -640,6 +640,73 @@ describe('env connect — dedicated db jump host', () => {
     onlineAfterStart = false;
     await expect(runWithTimers(['iam', '--env', 'prod'])).rejects.toThrow(/i-0dbjump.*still running after 180s/s);
     expect(portForwards).toHaveLength(0);
+  }, 30_000);
+});
+
+describe('env connect — blue/green service selection', () => {
+  const awsWith = (rows: [string, number][]) => (args: string[]): unknown => {
+    if (args[1] === 'describe-services') {
+      const asked = args.slice(args.indexOf('--services') + 1, args.indexOf('--query'));
+      return rows
+        .filter(([n]) => asked.includes(n))
+        .map(([n, run]) => [n, 'ACTIVE', run, 1, `arn:td/${n}:1`]);
+    }
+    if (args[1] === 'describe-task-definition') {
+      return [{ name: 'c', secrets: [{ name: 'DATABASE_URL', valueFrom: 'arn:aws:secretsmanager:x:secret:db' }] }];
+    }
+    if (args[0] === 'secretsmanager') return 'postgresql://u:pw@h.dbs.internal:5432/d';
+    if (args[1] === 'get-parameter') return args[args.indexOf('--name') + 1].endsWith('endpoint') ? 'rds.example' : '5432';
+    if (args[0] === 'ec2') return [['i-0dbjump', 'running']];
+    if (args[1] === 'describe-instance-information') return ['i-0dbjump'];
+    return null;
+  };
+  const tdCalls = (): string[] => awsCalls.filter((c) => c.args[1] === 'describe-task-definition').map((c) => c.args[c.args.indexOf('--task-definition') + 1]!);
+
+  beforeEach(() => {
+    callerAccount = PROD_ACCOUNT;
+  });
+
+  it('prod: blue running, green at 0 -> blue; one describe call per cluster', async () => {
+    installEnvAws(awsWith([['coach-coach-api-blue', 1], ['coach-coach-api-green', 0]]));
+    await EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config);
+    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-blue:1']);
+    expect(text()).toContain('coach-coach-api-blue (only running service)');
+    expect(text()).toContain('prod-shared/coach-coach-api-green: 0/1 running');
+    expect(awsCalls.filter((c) => c.args[1] === 'describe-services')).toHaveLength(1);
+  });
+
+  it('both running -> deterministic (blue before green), and says both are live', async () => {
+    installEnvAws(awsWith([['coach-coach-api-green', 1], ['coach-coach-api-blue', 1]]));
+    await EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config);
+    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-blue:1']);
+    expect(text()).toContain('all live');
+  });
+
+  it('dev: -main running is chosen exactly as before', async () => {
+    callerAccount = DEV_ACCOUNT;
+    installEnvAws(awsWith([['coach-coach-api-main', 1]]));
+    await EnvConnect.run(['coach', '--print-only'], config);
+    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-main:1']);
+  });
+
+  it('stopped -main but running blue -> blue', async () => {
+    installEnvAws(awsWith([['coach-coach-api-main', 0], ['coach-coach-api-blue', 1]]));
+    await EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config);
+    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-blue:1']);
+  });
+
+  it('nothing running -> first ACTIVE in order, with a warning', async () => {
+    installEnvAws(awsWith([['coach-coach-api-green', 0]]));
+    await EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config);
+    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-green:1']);
+    expect(text()).toContain('none running');
+  });
+
+  it('nothing found -> error naming every candidate', async () => {
+    installEnvAws(awsWith([]));
+    await expect(EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config)).rejects.toThrow(
+      /coach-coach-api-main, coach-coach-api-blue, coach-coach-api-green in prod-shared/,
+    );
   });
 });
 

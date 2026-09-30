@@ -10,8 +10,9 @@
  * db-host-v2 CloudMap DNS like `rostering-iam-canonical.dbs-v2.local:5440` to
  * the shared RDS):
  *
- *   1. ECS service `<store.ecsService>-<env.ledgerIdentifier>` looked up across
- *      the env's shared clusters (`env.ecsClusters`).
+ *   1. ECS service `<store.ecsService>-{<env.ledgerIdentifier>,blue,green}` looked
+ *      up across the env's shared clusters (`env.ecsClusters`); a running one wins,
+ *      in that preference order (prod runs blue/green pairs).
  *   2. Its task definition yields either the DATABASE_URL secret or the split
  *      POSTGRES_* fields (`core/env/taskdef.ts`); referenced secrets are
  *      fetched (Secrets Manager or SSM parameter refs both handled).
@@ -53,11 +54,15 @@ import {
   STORES,
   accountMismatchError,
   connectTierRefusal,
+  ECS_SERVICE_ROW_QUERY,
   dataPlaneStyle,
   extractDbTarget,
   localUrl,
   parseDatabaseUrl,
+  parseServiceRows,
+  pickService,
   resolveEnv,
+  serviceCandidates,
 } from '../../core/env/index.js';
 import type { DeployedEnv, SecretRef, TaskDefContainer } from '../../core/env/index.js';
 import { bold, cyan, dim, green, yellow } from '../../color.js';
@@ -154,8 +159,8 @@ export default class EnvConnect extends BaseCommand {
         source: '--host',
       };
     } else {
-      const serviceName = `${store!.ecsService}-${env.ledgerIdentifier}`;
-      target = await this.resolveFromTaskDef(env, serviceName, opts);
+      const candidates = serviceCandidates(store!.ecsService, env.ledgerIdentifier);
+      target = await this.resolveFromTaskDef(env, candidates, opts);
       // ── 'rds-endpoint' style: the task definition supplied the DATABASE and
       // USER (that is why it is still consulted), but the ADDRESS is the shared
       // Postgres endpoint discovered live from SSM — the task def may name a
@@ -289,29 +294,39 @@ export default class EnvConnect extends BaseCommand {
   /** ECS service → task definition → DB target, secrets fetched through the aws seam. */
   private async resolveFromTaskDef(
     env: DeployedEnv,
-    serviceName: string,
+    candidates: string[],
     opts: { profile?: string; region: string },
   ): Promise<ResolvedTarget> {
     const aws = this.getEnvAws();
     let taskDefArn: string | undefined;
     let clusterUsed: string | undefined;
+    let serviceName = candidates[0]!;
     for (const cluster of env.ecsClusters) {
-      const described = (await aws.json(
-        ['ecs', 'describe-services', '--cluster', cluster, '--services', serviceName, '--query', 'services[0].taskDefinition'],
-        opts,
-      )) as string | null;
-      this.log(
-        `  ${dim('service candidate')} ${cluster}/${serviceName}: ${described === null ? dim('not found') : green(described)}`,
+      const rows = parseServiceRows(
+        await aws.json(
+          ['ecs', 'describe-services', '--cluster', cluster, '--services', ...candidates, '--query', ECS_SERVICE_ROW_QUERY],
+          opts,
+        ),
       );
-      if (described !== null) {
-        taskDefArn = described;
+      for (const c of candidates) {
+        const r = rows.find((x) => x.serviceName === c);
+        this.log(
+          `  ${dim('service candidate')} ${cluster}/${c}: ${r === undefined ? dim('not found') : green(`${r.runningCount}/${r.desiredCount} running`)}`,
+        );
+      }
+      const pick = pickService(rows, candidates);
+      if (pick !== undefined) {
+        taskDefArn = pick.row.taskDefinition;
         clusterUsed = cluster;
+        serviceName = pick.row.serviceName;
+        const line = `  ${dim('service chosen:')} ${cluster}/${serviceName} ${dim(`(${pick.reason})`)}`;
+        this.log(pick.row.runningCount > 0 ? line : yellow(line));
         break;
       }
     }
     if (taskDefArn === undefined) {
       this.error(
-        `ECS service '${serviceName}' not found in ${env.ecsClusters.join(' or ')} — is the store deployed on this env? (--host overrides resolution)`,
+        `no ACTIVE ECS service among ${candidates.join(', ')} in ${env.ecsClusters.join(' or ')} — is the store deployed on this env? (--host overrides resolution)`,
       );
     }
 

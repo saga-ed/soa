@@ -1318,7 +1318,7 @@
       "aliases": [],
       "args": {
         "store": {
-          "description": "store key (iam | programs | scheduling | sessions | ads-adm | coach)",
+          "description": "store key (iam | programs | scheduling | sessions | ads-adm | coach | authz | authz-sync | sis | content | surveys | chat | insights | ledger | transcripts)",
           "name": "store",
           "required": true
         }

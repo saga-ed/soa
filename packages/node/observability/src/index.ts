@@ -19,6 +19,12 @@ export {
     type TRPCFormattableError,
 } from './record-trpc-exception.js';
 export {
+    createTRPCErrorLogger,
+    TRPC_WARN_CODES,
+    type TRPCErrorLogSink,
+    type TRPCOnErrorOpts,
+} from './log-trpc-error.js';
+export {
     PiiSanitizingSpanExporter,
     sanitizeUrl,
     sanitizeText,

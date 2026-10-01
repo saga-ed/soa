@@ -435,12 +435,11 @@ describe('env connect --env prod — the RDS data-plane style (I#375)', () => {
 
     expect(text()).toContain('this is PRODUCTION');
     expect(text()).toContain('Resolving only (--print-only)');
-    // The task def still supplies database + user…
+    // The ECS service only proves the store is deployed; database + user come
+    // from the registry and the ADDRESS from SSM.
     expect(text()).toContain('service candidate prod-shared/rostering-iam-api-main: 1/1 running');
-    // …but the ADDRESS comes from SSM, and the substitution is stated, not silent.
-    expect(text()).toContain(`endpoint:  ${RDS}:5432`);
-    expect(text()).toContain('SSM /shared/infra/prod/postgres-endpoint; task def named iam.dbs.internal:5432');
-    expect(text()).toContain(`target:    ${RDS}:5432/iam`);
+    expect(text()).toContain(`endpoint:  ${RDS}:5432 (SSM /shared/infra/prod/postgres-endpoint)`);
+    expect(text()).toContain(`target:    ${RDS}:5432/iam_db`);
     // Straight from the PROD jump host — no CloudMap, no 127.0.0.1 dial. The
     // tag is the registry's, not dev's constant (which matches nothing here).
     expect(text()).toContain('route:     jump host i-0prodjump');
@@ -450,7 +449,9 @@ describe('env connect --env prod — the RDS data-plane style (I#375)', () => {
     ]);
     expect(text()).toContain('falling back to Name=prod-shared-ecs-instance');
     expect(text()).not.toContain('CloudMap');
-    expect(text()).toContain('DATABASE_URL=postgres://iam_app:pw@127.0.0.1:15432/iam');
+    // Never the service's own credentials, even though its task def carries a DATABASE_URL.
+    expect(text()).toContain('DATABASE_URL=postgres://iam_api_ro@127.0.0.1:15432/iam_db?sslmode=require');
+    expect(awsCalls.some((c) => c.args[0] === 'secretsmanager' || c.args[1] === 'describe-task-definition')).toBe(false);
     expect(portForwards).toHaveLength(0);
     // The endpoint is NEVER a registry literal — it was read at run time.
     const reads = awsCalls.filter((c) => c.args[1] === 'get-parameter').map((c) => c.args[c.args.indexOf('--name') + 1]);
@@ -665,6 +666,7 @@ describe('env connect — blue/green service selection', () => {
     return null;
   };
   const tdCalls = (): string[] => awsCalls.filter((c) => c.args[1] === 'describe-task-definition').map((c) => c.args[c.args.indexOf('--task-definition') + 1]!);
+  const chosen = (): string | undefined => /service chosen: (\S+)/.exec(text())?.[1];
 
   beforeEach(() => {
     callerAccount = PROD_ACCOUNT;
@@ -673,7 +675,8 @@ describe('env connect — blue/green service selection', () => {
   it('prod: blue running, green at 0 -> blue; one describe call per cluster', async () => {
     installEnvAws(awsWith([['coach-coach-api-blue', 1], ['coach-coach-api-green', 0]]));
     await EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config);
-    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-blue:1']);
+    expect(chosen()).toBe('prod-shared/coach-coach-api-blue');
+    expect(tdCalls()).toEqual([]);
     expect(text()).toContain('coach-coach-api-blue (only running service)');
     expect(text()).toContain('prod-shared/coach-coach-api-green: 0/1 running');
     expect(awsCalls.filter((c) => c.args[1] === 'describe-services')).toHaveLength(1);
@@ -682,7 +685,7 @@ describe('env connect — blue/green service selection', () => {
   it('both running -> deterministic (blue before green), and says both are live', async () => {
     installEnvAws(awsWith([['coach-coach-api-green', 1], ['coach-coach-api-blue', 1]]));
     await EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config);
-    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-blue:1']);
+    expect(chosen()).toBe('prod-shared/coach-coach-api-blue');
     expect(text()).toContain('all live');
   });
 
@@ -696,13 +699,13 @@ describe('env connect — blue/green service selection', () => {
   it('stopped -main but running blue -> blue', async () => {
     installEnvAws(awsWith([['coach-coach-api-main', 0], ['coach-coach-api-blue', 1]]));
     await EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config);
-    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-blue:1']);
+    expect(chosen()).toBe('prod-shared/coach-coach-api-blue');
   });
 
   it('nothing running -> first ACTIVE in order, with a warning', async () => {
     installEnvAws(awsWith([['coach-coach-api-green', 0]]));
     await EnvConnect.run(['coach', '--env', 'prod', '--print-only'], config);
-    expect(tdCalls()).toEqual(['arn:td/coach-coach-api-green:1']);
+    expect(chosen()).toBe('prod-shared/coach-coach-api-green');
     expect(text()).toContain('none running');
   });
 
@@ -755,7 +758,7 @@ describe('env connect --env prod — IAM-auth fallback (task def has no DB confi
     expect(text()).toContain('--username me_ro --region us-west-2)" psql');
   });
 
-  it('ads-adm with POSTGRES_* env keeps the task-def path (no IAM hint when a password exists)', async () => {
+  it('ads-adm with POSTGRES_* env + password still gets <db>_ro over IAM auth, never the task-def credential', async () => {
     installEnvAws(
       awsNoDbConfig([
         {
@@ -770,8 +773,63 @@ describe('env connect --env prod — IAM-auth fallback (task def has no DB confi
       ]),
     );
     await EnvConnect.run(['ads-adm', '--env', 'prod', '--print-only'], config);
-    expect(text()).toContain('DATABASE_URL=postgres://ads_user:split-pw@127.0.0.1:15432/ads_adm');
-    expect(text()).not.toContain('IAM auth');
+    expect(text()).toContain('DATABASE_URL=postgres://ads_adm_ro@127.0.0.1:15432/ads_adm?sslmode=require');
+    expect(text()).not.toContain('split-pw');
+    expect(awsCalls.some((c) => c.args[0] === 'secretsmanager' || c.args[1] === 'describe-task-definition')).toBe(false);
+  });
+
+  it('a store with no prod read-only role refuses before touching AWS secrets', async () => {
+    installEnvAws(awsNoDbConfig(noConfig));
+    await expect(EnvConnect.run(['chat', '--env', 'prod', '--print-only'], config)).rejects.toThrow(/no read-only role on 'prod'/);
+    expect(awsCalls.some((c) => c.args[0] === 'secretsmanager' || c.args[0] === 'ecs')).toBe(false);
+  });
+
+  it('dev: a per-store env prefix picks the second database in a shared task (surveys in ads-adm)', async () => {
+    callerAccount = DEV_ACCOUNT;
+    installEnvAws(
+      awsNoDbConfig([
+        {
+          name: 'api',
+          environment: [
+            { name: 'POSTGRES_HOST', value: 'ads-adm-postgres.internal' },
+            { name: 'POSTGRES_DATABASE', value: 'ads_adm' },
+            { name: 'SURVEYS_POSTGRES_HOST', value: 'surveys-api-postgres.internal' },
+            { name: 'SURVEYS_POSTGRES_PORT', value: '5473' },
+            { name: 'SURVEYS_POSTGRES_DATABASE', value: 'surveys_api' },
+            { name: 'SURVEYS_POSTGRES_USERNAME', value: 'surveys_api_app' },
+          ],
+          secrets: [{ name: 'SURVEYS_POSTGRES_PASSWORD', valueFrom: 'arn:aws:secretsmanager:x:secret:s' }],
+        },
+      ]),
+    );
+    await EnvConnect.run(['surveys', '--print-only'], config);
+    expect(text()).toContain('target:    surveys-api-postgres.internal:5473/surveys_api');
+    expect(text()).toContain('DATABASE_URL=postgres://surveys_api_app:split-pw@127.0.0.1:15432/surveys_api');
+  });
+
+  it('dev: a per-store URL secret name (authz uses AUTHZ_DATABASE_URL)', async () => {
+    callerAccount = DEV_ACCOUNT;
+    installEnvAws((args) => {
+      if (args[1] === 'describe-task-definition') {
+        return [
+          {
+            name: 'authz-api',
+            secrets: [
+              { name: 'DATABASE_URL', valueFrom: 'arn:aws:secretsmanager:x:secret:wrong' },
+              { name: 'AUTHZ_DATABASE_URL', valueFrom: 'arn:aws:secretsmanager:x:secret:authz' },
+            ],
+          },
+        ];
+      }
+      if (args[0] === 'secretsmanager') {
+        return args[args.indexOf('--secret-id') + 1]!.endsWith(':authz')
+          ? 'postgresql://postgres_admin:pw@authz.internal:5472/authz'
+          : 'postgresql://wrong:pw@wrong.internal:5432/wrong';
+      }
+      return awsNoDbConfig(noConfig)(args);
+    });
+    await EnvConnect.run(['authz', '--print-only'], config);
+    expect(text()).toContain('target:    authz.internal:5472/authz');
   });
 
   it('a store without rdsDatabase and no DB config is an actionable error', async () => {

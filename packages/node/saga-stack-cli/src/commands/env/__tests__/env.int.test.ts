@@ -310,7 +310,6 @@ describe('env connect — task-definition resolution + tunnel', () => {
     if (args[0] === 'servicediscovery') {
       return { Instances: [{ Attributes: { AWS_INSTANCE_IPV4: '10.3.0.9', AWS_INSTANCE_PORT: '5440' } }] };
     }
-    if (args[0] === 'ec2' && args.some((a) => a.includes('private-ip-address'))) return ['i-0dbhost'];
     if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=dev-shared-ecs-instance') ? ['i-0jump'] : [];
     if (args[1] === 'describe-instance-information') return ['i-0jump'];
     return null;
@@ -323,13 +322,13 @@ describe('env connect — task-definition resolution + tunnel', () => {
 
     expect(text()).toContain('service candidate dev-shared-arm/rostering-iam-api-main: 1/1 running');
     expect(text()).toContain('rostering-iam-canonical.dbs-v2.local:5440/rostering-iam-canonical');
-    // .dbs-v2.local ⇒ the CloudMap route via the container's own host instance.
-    expect(text()).toContain('db-host i-0dbhost (CloudMap rostering-iam-canonical, local dial :5440)');
+    // .dbs-v2.local ⇒ CloudMap resolves the container; the jump host dials it.
+    expect(text()).toContain('jump host i-0jump → 10.3.0.9:5440 (CloudMap rostering-iam-canonical)');
     expect(text()).toContain('DATABASE_URL=postgres://postgres_admin:p%40ss@127.0.0.1:15432/rostering-iam-canonical');
     expect(portForwards).toHaveLength(0);
   });
 
-  it('resolves a split POSTGRES_* service (second cluster) and tunnels via the db-host with a local dial', async () => {
+  it('resolves a split POSTGRES_* service (second cluster) and tunnels via the jump host to the container', async () => {
     installEnvAws(awsForConnect);
 
     await expect(EnvConnect.run(['ads-adm', '--local-port', '15433'], config)).resolves.toBeUndefined();
@@ -337,8 +336,8 @@ describe('env connect — task-definition resolution + tunnel', () => {
     expect(text()).toContain('service candidate dev-shared-arm/sds-ads-adm-api-main: not found');
     expect(portForwards).toEqual([
       {
-        target: 'i-0dbhost',
-        host: '127.0.0.1',
+        target: 'i-0jump',
+        host: '10.3.0.9',
         remotePort: 5440, // the CloudMap-registered port wins over the env var
         localPort: 15433,
         region: 'us-west-2',
@@ -355,10 +354,11 @@ describe('env connect — task-definition resolution + tunnel', () => {
     expect(portForwards).toHaveLength(0);
   });
 
-  it('--host skips task-def resolution but still routes .dbs-v2.local via CloudMap', async () => {
+  it('--host skips task-def resolution but still resolves .dbs-v2.local via CloudMap', async () => {
     installEnvAws((args) => {
       if (args[0] === 'servicediscovery') return { Instances: [{ Attributes: { AWS_INSTANCE_IPV4: '10.3.0.9' } }] };
-      if (args[0] === 'ec2' && args.some((a) => a.includes('private-ip-address'))) return ['i-0dbhost'];
+      if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=dev-shared-ecs-instance') ? ['i-0jump'] : [];
+      if (args[1] === 'describe-instance-information') return ['i-0jump'];
       throw new Error(`unexpected aws call: ${args.join(' ')}`);
     });
 
@@ -366,7 +366,7 @@ describe('env connect — task-definition resolution + tunnel', () => {
       EnvConnect.run(['iam', '--host', 'x.dbs-v2.local', '--remote-port', '5440', '--database', 'iamdb', '--print-only'], config),
     ).resolves.toBeUndefined();
     expect(text()).toContain('x.dbs-v2.local:5440/iamdb (--host)');
-    expect(text()).toContain('db-host i-0dbhost (CloudMap x, local dial :5440)');
+    expect(text()).toContain('jump host i-0jump → 10.3.0.9:5440 (CloudMap x)');
   });
 
   it('a non-CloudMap host (shared RDS) routes via the shared jump host', async () => {
@@ -449,7 +449,7 @@ describe('env connect --env prod — the RDS data-plane style (I#375)', () => {
       'Name=tag:Name,Values=prod-shared-ecs-instance',
     ]);
     expect(text()).toContain('falling back to Name=prod-shared-ecs-instance');
-    expect(text()).not.toContain('db-host i-');
+    expect(text()).not.toContain('CloudMap');
     expect(text()).toContain('DATABASE_URL=postgres://iam_app:pw@127.0.0.1:15432/iam');
     expect(portForwards).toHaveLength(0);
     // The endpoint is NEVER a registry literal — it was read at run time.
@@ -516,7 +516,8 @@ describe('env connect --env dev — the db-host style is untouched by the prod w
     // showing up would mean the style branch leaked into the dev path.
     installEnvAws((args) => {
       if (args[0] === 'servicediscovery') return { Instances: [{ Attributes: { AWS_INSTANCE_IPV4: '10.3.0.9' } }] };
-      if (args[0] === 'ec2') return ['i-0dbhost'];
+      if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=dev-shared-ecs-instance') ? ['i-0jump'] : [];
+      if (args[1] === 'describe-instance-information') return ['i-0jump'];
       return null;
     });
 
@@ -527,7 +528,7 @@ describe('env connect --env dev — the db-host style is untouched by the prod w
     expect(awsCalls.some((c) => c.args[1] === 'get-parameter')).toBe(false);
     expect(awsCalls.some((c) => c.args.includes('Arn'))).toBe(false);
     expect(text()).not.toContain('this is PRODUCTION');
-    expect(text()).toContain('db-host i-0dbhost (CloudMap x, local dial :5440)');
+    expect(text()).toContain('jump host i-0jump → 10.3.0.9:5440 (CloudMap x)');
   });
 });
 

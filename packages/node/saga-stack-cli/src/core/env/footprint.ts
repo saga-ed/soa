@@ -67,6 +67,8 @@ export interface StoreDef {
   database: string;
   /** Database name on the shared RDS ('rds-endpoint' data plane); the task definition carries none there. */
   rdsDatabase?: string;
+  /** IAM-auth read-only role on the shared RDS when it is not `<rdsDatabase>_ro`. */
+  rdsReadOnlyUser?: string;
   /** Where the table map was verified from. */
   schemaSource: string;
   tables: TableRule[];
@@ -98,6 +100,7 @@ export const STORES: StoreDef[] = [
   {
     key: 'iam',
     rdsDatabase: 'iam_db',
+    rdsReadOnlyUser: 'iam_api_ro',
     ecsService: 'rostering-iam-api',
     service: 'iam-api (rostering)',
     engine: 'postgres',

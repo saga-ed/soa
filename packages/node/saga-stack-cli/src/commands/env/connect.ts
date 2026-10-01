@@ -171,7 +171,7 @@ export default class EnvConnect extends BaseCommand {
           host: '',
           port: 0,
           database: store!.rdsDatabase,
-          username: `${store!.rdsDatabase}_ro`,
+          username: store!.rdsReadOnlyUser ?? `${store!.rdsDatabase}_ro`,
           source: 'store registry (IAM auth)',
         };
       } else {

@@ -742,6 +742,12 @@ describe('env connect --env prod — IAM-auth fallback (task def has no DB confi
     expect(awsCalls.some((c) => c.args[1] === 'generate-db-auth-token')).toBe(false);
   });
 
+  it('iam: read-only role is iam_api_ro (store override), not iam_db_ro', async () => {
+    installEnvAws(awsNoDbConfig(noConfig));
+    await EnvConnect.run(['iam', '--env', 'prod', '--print-only'], config);
+    expect(text()).toContain('DATABASE_URL=postgres://iam_api_ro@127.0.0.1:15432/iam_db?sslmode=require');
+  });
+
   it('--username overrides the default role; no --profile -> none in the hint', async () => {
     installEnvAws(awsNoDbConfig(noConfig));
     await EnvConnect.run(['coach', '--env', 'prod', '--print-only', '--username', 'me_ro'], config);

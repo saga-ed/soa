@@ -13,13 +13,8 @@ export interface TRPCFormattableError {
 }
 
 /**
- * Record a tRPC procedure's error on the active span — call this from your
- * service's `createExpressMiddleware({ onError })` (or `errorFormatter`):
- *
- *   onError({ error, path }) {
- *       recordTRPCSpanException(error);
- *       logger.error(`tRPC error on ${path ?? 'unknown'}`, error);
- *   }
+ * Record a tRPC procedure's error on the active span. For `onError`, prefer
+ * `createTRPCErrorLogger`, which calls this and dedupes batched auth faults.
  *
  * Only `INTERNAL_SERVER_ERROR` is recorded, and only when its `cause` isn't
  * itself a `TRPCError` instance. Recording every tRPC error unfiltered

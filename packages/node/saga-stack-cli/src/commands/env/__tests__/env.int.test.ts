@@ -780,7 +780,7 @@ describe('env connect --env prod — IAM-auth fallback (task def has no DB confi
 
   it('a store with no prod read-only role refuses before touching AWS secrets', async () => {
     installEnvAws(awsNoDbConfig(noConfig));
-    await expect(EnvConnect.run(['chat', '--env', 'prod', '--print-only'], config)).rejects.toThrow(/no read-only role on 'prod'/);
+    await expect(EnvConnect.run(['sis', '--env', 'prod', '--print-only'], config)).rejects.toThrow(/no read-only role on 'prod'/);
     expect(awsCalls.some((c) => c.args[0] === 'secretsmanager' || c.args[0] === 'ecs')).toBe(false);
   });
 

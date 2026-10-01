@@ -194,8 +194,8 @@ export const STORES: StoreDef[] = [
     ],
   },
   // ── connect-only stores (no org footprint). `rdsDatabase` is set only where a
-  // prod `_ro` role exists; without it, prod refuses rather than hand out
-  // service credentials. Not stores: transcription (plain-env URL, ECS names
+  // prod `_ro` role exists (verified 2026-10-01); without it, prod refuses
+  // rather than hand out service credentials. Not stores: transcription (plain-env URL, ECS names
   // `transcription-*-<env>`; use --host), openfga (no DB config), connectv3 (Mongo). ──
   {
     key: 'authz',
@@ -211,6 +211,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'authz-sync',
+    rdsDatabase: 'authz_sync',
     ecsService: 'rostering-authz-sync',
     service: 'authz-sync (rostering)',
     engine: 'postgres',
@@ -230,6 +231,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'content',
+    rdsDatabase: 'content_api',
     ecsService: 'program-hub-content-api',
     service: 'content-api (program-hub)',
     engine: 'postgres',
@@ -239,6 +241,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'surveys',
+    rdsDatabase: 'surveys_api',
     ecsService: 'sds-ads-adm-api',
     dbEnvPrefix: 'SURVEYS_POSTGRES_',
     service: 'surveys (in ads-adm-api, student-data-system)',
@@ -249,6 +252,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'chat',
+    rdsDatabase: 'chat',
     ecsService: 'sds-chat-api',
     service: 'chat-api (student-data-system)',
     engine: 'postgres',
@@ -276,6 +280,7 @@ export const STORES: StoreDef[] = [
   },
   {
     key: 'transcripts',
+    rdsDatabase: 'transcripts',
     ecsService: 'sds-transcripts-api',
     service: 'transcripts-api (student-data-system)',
     engine: 'postgres',

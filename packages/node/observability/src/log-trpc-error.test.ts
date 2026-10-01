@@ -3,7 +3,7 @@ import { trace, type Span } from '@opentelemetry/api';
 import { createTRPCErrorLogger } from './log-trpc-error.js';
 
 function sink() {
-    return { warn: vi.fn(), error: vi.fn() };
+    return { error: vi.fn() };
 }
 
 function trpcError(code: string, message = 'boom', cause?: unknown) {
@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe('createTRPCErrorLogger', () => {
-    it('logs UNAUTHORIZED at warn once per request across a batch', () => {
+    it('logs UNAUTHORIZED once per request across a batch', () => {
         const log = sink();
         const onError = createTRPCErrorLogger(log);
         const req = {};
@@ -25,12 +25,14 @@ describe('createTRPCErrorLogger', () => {
         onError({ error: err, path: 'pods.list', req });
         onError({ error: err, path: 'periods.list', req });
 
-        expect(log.warn).toHaveBeenCalledTimes(1);
-        expect(log.warn).toHaveBeenCalledWith('tRPC UNAUTHORIZED on pods.list: Authentication required');
-        expect(log.error).not.toHaveBeenCalled();
+        expect(log.error).toHaveBeenCalledTimes(1);
+        expect(log.error).toHaveBeenCalledWith(
+            'tRPC error on pods.list [UNAUTHORIZED]: Authentication required',
+            err,
+        );
     });
 
-    it('logs each warn code once per request, and again for a new request', () => {
+    it('logs each per-request code once per request, and again for a new request', () => {
         const log = sink();
         const onError = createTRPCErrorLogger(log);
         const req = {};
@@ -39,20 +41,20 @@ describe('createTRPCErrorLogger', () => {
         onError({ error: trpcError('FORBIDDEN'), path: 'b', req });
         onError({ error: trpcError('UNAUTHORIZED'), path: 'a', req: {} });
 
-        expect(log.warn).toHaveBeenCalledTimes(3);
+        expect(log.error).toHaveBeenCalledTimes(3);
     });
 
-    it('logs every warn-code call when no request is supplied', () => {
+    it('logs every call when no request is supplied', () => {
         const log = sink();
         const onError = createTRPCErrorLogger(log);
 
         onError({ error: trpcError('FORBIDDEN'), path: 'a' });
         onError({ error: trpcError('FORBIDDEN'), path: 'a' });
 
-        expect(log.warn).toHaveBeenCalledTimes(2);
+        expect(log.error).toHaveBeenCalledTimes(2);
     });
 
-    it('logs other codes at error per procedure with the underlying cause', () => {
+    it('logs other codes per procedure with the underlying cause', () => {
         const log = sink();
         const onError = createTRPCErrorLogger(log);
         const req = {};
@@ -64,18 +66,19 @@ describe('createTRPCErrorLogger', () => {
 
         expect(log.error).toHaveBeenCalledTimes(3);
         expect(log.error).toHaveBeenNthCalledWith(1, 'tRPC error on a [INTERNAL_SERVER_ERROR]: oops', cause);
-        expect(log.warn).not.toHaveBeenCalled();
     });
 
-    it('honours a custom warn-code set', () => {
+    it('honours a custom per-request code set', () => {
         const log = sink();
         const onError = createTRPCErrorLogger(log, new Set(['NOT_FOUND']));
+        const req = {};
 
-        onError({ error: trpcError('NOT_FOUND'), path: 'a' });
-        onError({ error: trpcError('UNAUTHORIZED'), path: 'a' });
+        onError({ error: trpcError('NOT_FOUND'), path: 'a', req });
+        onError({ error: trpcError('NOT_FOUND'), path: 'b', req });
+        onError({ error: trpcError('UNAUTHORIZED'), path: 'a', req });
+        onError({ error: trpcError('UNAUTHORIZED'), path: 'b', req });
 
-        expect(log.warn).toHaveBeenCalledTimes(1);
-        expect(log.error).toHaveBeenCalledTimes(1);
+        expect(log.error).toHaveBeenCalledTimes(3);
     });
 
     it('records unexpected INTERNAL_SERVER_ERRORs on the active span', () => {

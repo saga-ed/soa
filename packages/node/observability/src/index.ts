@@ -20,7 +20,7 @@ export {
 } from './record-trpc-exception.js';
 export {
     createTRPCErrorLogger,
-    TRPC_WARN_CODES,
+    TRPC_PER_REQUEST_CODES,
     type TRPCErrorLogSink,
     type TRPCOnErrorOpts,
 } from './log-trpc-error.js';

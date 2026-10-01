@@ -10,8 +10,9 @@
  * db-host-v2 CloudMap DNS like `rostering-iam-canonical.dbs-v2.local:5440` to
  * the shared RDS):
  *
- *   1. ECS service `<store.ecsService>-<env.ledgerIdentifier>` looked up across
- *      the env's shared clusters (`env.ecsClusters`).
+ *   1. ECS service `<store.ecsService>-{<env.ledgerIdentifier>,blue,green}` looked
+ *      up across the env's shared clusters (`env.ecsClusters`); a running one wins,
+ *      in that preference order (prod runs blue/green pairs).
  *   2. Its task definition yields either the DATABASE_URL secret or the split
  *      POSTGRES_* fields (`core/env/taskdef.ts`); referenced secrets are
  *      fetched (Secrets Manager or SSM parameter refs both handled).
@@ -53,11 +54,15 @@ import {
   STORES,
   accountMismatchError,
   connectTierRefusal,
+  ECS_SERVICE_ROW_QUERY,
   dataPlaneStyle,
   extractDbTarget,
   localUrl,
   parseDatabaseUrl,
+  parseServiceRows,
+  pickService,
   resolveEnv,
+  serviceCandidates,
 } from '../../core/env/index.js';
 import type { DeployedEnv, SecretRef, TaskDefContainer } from '../../core/env/index.js';
 import { bold, cyan, dim, green, yellow } from '../../color.js';
@@ -154,8 +159,24 @@ export default class EnvConnect extends BaseCommand {
         source: '--host',
       };
     } else {
-      const serviceName = `${store!.ecsService}-${env.ledgerIdentifier}`;
-      target = await this.resolveFromTaskDef(env, serviceName, opts);
+      const candidates = serviceCandidates(store!.ecsService, env.ledgerIdentifier);
+      const fromTaskDef = await this.resolveFromTaskDef(env, candidates, opts, style === 'rds-endpoint');
+      // Prod task definitions carry no DB config (services derive it in code,
+      // IAM auth): name the database from the registry and default to `<db>_ro`.
+      if (fromTaskDef === undefined) {
+        if (store!.rdsDatabase === undefined) {
+          this.error(`store '${store!.key}' has no rdsDatabase in the registry and its task definition carries no DB config — pass --host/--database.`);
+        }
+        target = {
+          host: '',
+          port: 0,
+          database: store!.rdsDatabase,
+          username: store!.rdsReadOnlyUser ?? `${store!.rdsDatabase}_ro`,
+          source: 'store registry (IAM auth)',
+        };
+      } else {
+        target = fromTaskDef;
+      }
       // ── 'rds-endpoint' style: the task definition supplied the DATABASE and
       // USER (that is why it is still consulted), but the ADDRESS is the shared
       // Postgres endpoint discovered live from SSM — the task def may name a
@@ -163,7 +184,9 @@ export default class EnvConnect extends BaseCommand {
       // failover. `--host` (above) opts out of this too. ──
       if (style === 'rds-endpoint') {
         const rds = await this.resolveSharedEndpoint(env, opts);
-        if (rds.host !== target.host || rds.port !== target.port) {
+        if (target.host === '') {
+          this.log(`  ${dim('endpoint:')}  ${green(`${rds.host}:${rds.port}`)} ${dim(`(${rds.source})`)}`);
+        } else if (rds.host !== target.host || rds.port !== target.port) {
           this.log(
             `  ${dim('endpoint:')}  ${green(`${rds.host}:${rds.port}`)} ${dim(`(${rds.source}; task def named ${target.host}:${target.port})`)}`,
           );
@@ -212,7 +235,12 @@ export default class EnvConnect extends BaseCommand {
       route = resolved.route;
     }
 
-    const url = localUrl(target, flags['local-port']);
+    const iamAuth = style === 'rds-endpoint' && target.username !== undefined && target.password === undefined;
+    // RDS IAM auth requires TLS.
+    const url = localUrl(target, flags['local-port']) + (iamAuth ? '?sslmode=require' : '');
+    const tokenHint = iamAuth
+      ? `PGPASSWORD="$(aws rds generate-db-auth-token --hostname ${target.host} --port ${target.port} --username ${target.username} --region ${env.awsRegion}${flags.profile === undefined ? '' : ` --profile ${flags.profile}`})" psql '${url}'`
+      : undefined;
     this.log(`${bold('▶ env connect')} — ${bold(cyan(env.name))}${dim('/')}${cyan(args.store)}`);
     this.log(`  ${dim('target:')}    ${target.host}:${target.port}/${target.database} ${dim(`(${target.source})`)}`);
     this.log(`  ${dim('route:')}     ${route}`);
@@ -222,6 +250,7 @@ export default class EnvConnect extends BaseCommand {
         { env: env.name, store: args.store, host: target.host, port: target.port, database: target.database, ssmTarget, url },
         `DATABASE_URL=${url}`,
       );
+      if (tokenHint !== undefined && !flags['output-json'] && !flags.porcelain) this.log(`  ${dim('IAM auth — connect with:')} ${tokenHint}`);
       return;
     }
 
@@ -238,7 +267,7 @@ export default class EnvConnect extends BaseCommand {
     await handle.ready;
     this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(flags['local-port']))} → ${target.host}:${target.port}`);
     this.log(`  DATABASE_URL=${url}`); // left plain — meant to be copy-pasted
-    this.log(`  ${dim(`psql '${url}'`)}`);
+    this.log(`  ${dim(tokenHint ?? `psql '${url}'`)}`);
     this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
     const code = await handle.exited;
     this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
@@ -289,29 +318,40 @@ export default class EnvConnect extends BaseCommand {
   /** ECS service → task definition → DB target, secrets fetched through the aws seam. */
   private async resolveFromTaskDef(
     env: DeployedEnv,
-    serviceName: string,
+    candidates: string[],
     opts: { profile?: string; region: string },
-  ): Promise<ResolvedTarget> {
+    allowNoDbConfig = false,
+  ): Promise<ResolvedTarget | undefined> {
     const aws = this.getEnvAws();
     let taskDefArn: string | undefined;
     let clusterUsed: string | undefined;
+    let serviceName = candidates[0]!;
     for (const cluster of env.ecsClusters) {
-      const described = (await aws.json(
-        ['ecs', 'describe-services', '--cluster', cluster, '--services', serviceName, '--query', 'services[0].taskDefinition'],
-        opts,
-      )) as string | null;
-      this.log(
-        `  ${dim('service candidate')} ${cluster}/${serviceName}: ${described === null ? dim('not found') : green(described)}`,
+      const rows = parseServiceRows(
+        await aws.json(
+          ['ecs', 'describe-services', '--cluster', cluster, '--services', ...candidates, '--query', ECS_SERVICE_ROW_QUERY],
+          opts,
+        ),
       );
-      if (described !== null) {
-        taskDefArn = described;
+      for (const c of candidates) {
+        const r = rows.find((x) => x.serviceName === c);
+        this.log(
+          `  ${dim('service candidate')} ${cluster}/${c}: ${r === undefined ? dim('not found') : green(`${r.runningCount}/${r.desiredCount} running`)}`,
+        );
+      }
+      const pick = pickService(rows, candidates);
+      if (pick !== undefined) {
+        taskDefArn = pick.row.taskDefinition;
         clusterUsed = cluster;
+        serviceName = pick.row.serviceName;
+        const line = `  ${dim('service chosen:')} ${cluster}/${serviceName} ${dim(`(${pick.reason})`)}`;
+        this.log(pick.row.runningCount > 0 ? line : yellow(line));
         break;
       }
     }
     if (taskDefArn === undefined) {
       this.error(
-        `ECS service '${serviceName}' not found in ${env.ecsClusters.join(' or ')} — is the store deployed on this env? (--host overrides resolution)`,
+        `no ACTIVE ECS service among ${candidates.join(', ')} in ${env.ecsClusters.join(' or ')} — is the store deployed on this env? (--host overrides resolution)`,
       );
     }
 
@@ -321,6 +361,7 @@ export default class EnvConnect extends BaseCommand {
     )) as TaskDefContainer[] | null;
     const dbTarget = extractDbTarget(td ?? []);
     if (dbTarget === undefined) {
+      if (allowNoDbConfig) return undefined;
       this.error(`task definition ${taskDefArn} carries neither a DATABASE_URL secret nor POSTGRES_* env — cannot resolve.`);
     }
 

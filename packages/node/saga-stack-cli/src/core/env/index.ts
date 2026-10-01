@@ -12,3 +12,4 @@ export * from './footprint.js';
 export * from './reset-plan.js';
 export * from './taskdef.js';
 export * from './services.js';
+export * from './ecs-service.js';

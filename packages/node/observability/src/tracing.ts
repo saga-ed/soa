@@ -8,6 +8,7 @@ import { RuntimeNodeInstrumentation } from '@opentelemetry/instrumentation-runti
 import { ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import type { ILogger } from '@saga-ed/soa-logger';
 import { PiiSanitizingSpanExporter } from './span-sanitizer.js';
+import { SpanDroppingExporter } from './span-filter.js';
 import { recordSpanException } from './record-exception.js';
 import { mongoDbStatementSerializer } from './mongo-statement.js';
 
@@ -56,9 +57,12 @@ export function initTracing(
         // Wrap the OTLP exporter so PII (ids/emails in URL paths + query
         // strings) is stripped from span attributes before they hit the wire.
         // See span-sanitizer.ts for why this is an exporter wrapper (not a
-        // SpanProcessor) and the degrade-safe contract.
-        traceExporter: new PiiSanitizingSpanExporter(
-            new OTLPTraceExporter({ url: resolveOtlpTracesUrl() }),
+        // SpanProcessor) and the degrade-safe contract. SpanDroppingExporter
+        // runs first so dropped spans skip sanitization; see span-filter.ts.
+        traceExporter: new SpanDroppingExporter(
+            new PiiSanitizingSpanExporter(
+                new OTLPTraceExporter({ url: resolveOtlpTracesUrl() }),
+            ),
         ),
         // Auto-instrumentations register HTTP / Express / pg / amqplib / dns /
         // net span emitters at SDK start, so each inbound request gets a real
@@ -74,15 +78,8 @@ export function initTracing(
         // transport plumbing, not application work. The useful latency is already
         // on the parent HTTP/pg span that triggered the connection.
         //
-        // pg uses requireParentSpan so it only emits inside an existing trace.
-        // Connection-pool churn happens on background reconnects with no active
-        // parent, which produced a standing ~44 KB/s of `pg - pool.connect` spans
-        // in dev — ~65% of the whole dev APM ingest baseline, and the largest
-        // single contributor to the APM per-host density monitor firing
-        // (2026-07-28). Query + connect spans raised inside a real request or
-        // amqplib consumer still have a parent, so they are unaffected; only the
-        // parentless churn is dropped. See instrumentation-pg's
-        // shouldSkipInstrumentation(), which gates POOL_CONNECT/CONNECT/query.
+        // pg requireParentSpan drops parentless background churn; in-request
+        // connect spans are dropped by SpanDroppingExporter instead.
         instrumentations: [
             getNodeAutoInstrumentations({
                 '@opentelemetry/instrumentation-fs': { enabled: false },

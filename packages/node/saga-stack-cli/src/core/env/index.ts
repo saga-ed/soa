@@ -14,3 +14,4 @@ export * from './taskdef.js';
 export * from './services.js';
 export * from './ecs-service.js';
 export * from './shared-stores.js';
+export * from './next-steps.js';

@@ -83,12 +83,16 @@ import {
   rabbitmqHost,
   rabbitmqParamsFor,
   rabbitmqPasswordHint,
+  renderNextSteps,
   resolveEnv,
   serviceCandidates,
 } from '../../core/env/index.js';
-import type { DeployedEnv, SecretRef, StoreDef, TaskDefContainer } from '../../core/env/index.js';
+import type { DeployedEnv, NextStep, NextStepsBlock, SecretRef, StoreDef, TaskDefContainer } from '../../core/env/index.js';
 import { bold, cyan, dim, green, yellow } from '../../color.js';
 import { ensureJumpHost, findJumpHost, resolveCallerAccount, resolveCallerArn, resolveJumpHost } from '../../runtime/index.js';
+
+const LIVE_HEADING = 'Tunnel is up — leave this running. In ANOTHER terminal, copy-paste each command in order:';
+const HOLDING_LINE = '(holding — Ctrl-C here closes the tunnel)';
 
 interface ResolvedTarget {
   host: string;
@@ -261,7 +265,12 @@ export default class EnvConnect extends BaseCommand {
         { env: env.name, store: args.store, host: target.host, port: target.port, database: target.database, ssmTarget, url },
         `DATABASE_URL=${url}`,
       );
-      if (tokenHint !== undefined && !flags['output-json'] && !flags.porcelain) this.log(`  ${dim('IAM auth — connect with:')} ${tokenHint}`);
+      if (tokenHint !== undefined && !flags['output-json'] && !flags.porcelain) {
+        this.printSteps({
+          heading: 'No tunnel opened (--print-only). Rerun without it to open one; then, in another terminal:',
+          steps: [{ label: 'Connect (IAM auth token minted inline):', command: tokenHint }],
+        });
+      }
       return;
     }
 
@@ -277,9 +286,12 @@ export default class EnvConnect extends BaseCommand {
     process.on('SIGTERM', () => handle.stop());
     await handle.ready;
     this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(localPort))} → ${target.host}:${target.port}`);
-    this.log(`  DATABASE_URL=${url}`); // left plain — meant to be copy-pasted
-    this.log(`  ${dim(tokenHint ?? `psql '${url}'`)}`);
-    this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
+    this.log(`  ${dim('DATABASE_URL=')}${url}`);
+    this.printSteps({
+      heading: LIVE_HEADING,
+      steps: [{ label: tokenHint === undefined ? 'Connect:' : 'Connect (IAM auth token minted inline):', command: tokenHint ?? `psql '${url}'` }],
+    });
+    this.log(dim(HOLDING_LINE));
     const code = await handle.exited;
     this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
   }
@@ -304,7 +316,6 @@ export default class EnvConnect extends BaseCommand {
     const quiet = flags['output-json'] || flags.porcelain;
     let host: string;
     let port: number;
-    let hints: string[];
     let urlTemplate: string;
     let caCertParam: string | undefined;
     let caFile = '<ca file>';
@@ -332,15 +343,32 @@ export default class EnvConnect extends BaseCommand {
     }
 
     const resolved = await this.resolveJumpRoute(env, flags['jump-host'], printOnly, opts);
-    const buildOutput = (): void => {
+    const buildSteps = (heading: string): NextStepsBlock => {
       if (key === 'mongo') {
         urlTemplate = mongoUrlTemplate(localPort, caFile);
-        hints = [mongoPasswordHint(readOnlySecret, env.awsRegion, flags.profile), `mongosh "${urlTemplate}"`, MONGO_MEMBER_CHECK_HINT];
-        if (env.productionDataPlane === true) hints.push(MONGO_PROD_QUERY_HYGIENE);
-      } else {
-        urlTemplate = rabbitmqCurlHint(host, localPort);
-        hints = [rabbitmqPasswordHint(readOnlySecret, env.awsRegion, flags.profile)];
+        const steps: NextStep[] = printOnly
+          ? [{ label: 'Fetch the CA cert (public — no key material):', command: mongoCaFetchHint(caCertParam!, env.awsRegion, flags.profile) }]
+          : [];
+        steps.push(
+          { label: 'Load the read-only password into your shell (nothing is printed):', command: mongoPasswordHint(readOnlySecret, env.awsRegion, flags.profile) },
+          { label: 'Connect:', command: `mongosh "${urlTemplate}"` },
+        );
+        const notes = [MONGO_MEMBER_CHECK_HINT];
+        if (env.productionDataPlane === true) notes.push(MONGO_PROD_QUERY_HYGIENE);
+        return { heading, steps, notes };
       }
+      urlTemplate = rabbitmqCurlHint(host, localPort);
+      return {
+        heading,
+        steps: [
+          { label: 'Load the read-only password into your shell (nothing is printed):', command: rabbitmqPasswordHint(readOnlySecret, env.awsRegion, flags.profile) },
+          { label: 'Query the management API:', command: urlTemplate },
+        ],
+        notes: [
+          'swap /api/overview for /api/queues (or /api/queues/<vhost>) to list queues.',
+          'stats only: publish, consume and declare are refused for saga_ro.',
+        ],
+      };
     };
 
     this.log(`${bold('▶ env connect')} — ${bold(cyan(env.name))}${dim('/')}${cyan(key)}`);
@@ -360,17 +388,17 @@ export default class EnvConnect extends BaseCommand {
       caFile = join(dir, `mongo-ca-${env.name}.pem`);
       await writeFile(caFile, pem.endsWith('\n') ? pem : `${pem}\n`);
     }
-    buildOutput();
 
     if (printOnly) {
-      this.emit(
-        flags,
-        { env: env.name, store: key, host, port, ssmTarget: resolved.id, urlTemplate: urlTemplate! },
-        urlTemplate!,
-      );
-      if (!quiet) {
-        if (key === 'mongo') this.log(`  ${dim('fetch the CA:')} ${mongoCaFetchHint(caCertParam!, env.awsRegion, flags.profile)}`);
-        for (const h of hints!) this.log(`  ${dim(h)}`);
+      const block = buildSteps('No tunnel opened (--print-only). Rerun without it to open one; then, in another terminal:');
+      if (quiet) {
+        this.emit(
+          flags,
+          { env: env.name, store: key, host, port, ssmTarget: resolved.id, urlTemplate: urlTemplate! },
+          urlTemplate!,
+        );
+      } else {
+        this.printSteps(block);
       }
       return;
     }
@@ -387,11 +415,14 @@ export default class EnvConnect extends BaseCommand {
     process.on('SIGTERM', () => handle.stop());
     await handle.ready;
     this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(localPort))} → ${host}:${port}`);
-    for (const h of hints!) this.log(`  ${h}`);
-    if (key === 'rabbitmq') this.log(`  ${urlTemplate!}`);
-    this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
+    this.printSteps(buildSteps(LIVE_HEADING));
+    this.log(dim(HOLDING_LINE));
     const code = await handle.exited;
     this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
+  }
+
+  private printSteps(block: NextStepsBlock): void {
+    for (const line of renderNextSteps(block, { bold, cyan, dim, yellow })) this.log(line);
   }
 
   /**

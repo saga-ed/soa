@@ -231,6 +231,7 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
                 'can_observe_session_recordings',
                 'can_configure_scope_values',
                 'can_manage_memberships',
+                'can_operate_platform',
             ]),
         );
     });
@@ -241,7 +242,7 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
 
     it('declares the people_admin and viewer roles with direct grants (rostering#1506)', () => {
         expect(unionOf('people_admin')).toEqual(['super_admin', 'this']);
-        expect(unionOf('viewer')).toEqual(['org_admin', 'people_admin', 'support', 'this']);
+        expect(unionOf('viewer')).toEqual(['engineer', 'org_admin', 'people_admin', 'support', 'this']);
     });
 
     it('can_view_user_pii resolves from org_admin (rostering#1506)', () => {
@@ -259,6 +260,34 @@ describe('staff control-plane namespace (SEC-CRIT-2)', () => {
 
     it('can_manage_memberships resolves from org_admin or people_admin', () => {
         expect(unionOf('can_manage_memberships')).toEqual(['org_admin', 'people_admin']);
+    });
+
+    it('engineer is a direct grant that super_admin includes and viewer includes', () => {
+        expect(unionOf('engineer')).toEqual(['super_admin', 'this']);
+        expect(unionOf('viewer')).toContain('engineer');
+    });
+
+    it('can_operate_platform resolves from engineer only', () => {
+        expect(staffRel('can_operate_platform')?.computedUserset?.relation).toBe('engineer');
+        for (const role of ['support', 'org_admin', 'people_admin']) {
+            expect(unionOf(role)).not.toContain('engineer');
+        }
+    });
+
+    it('engineer does not reach identity/staff-admin capabilities', () => {
+        for (const cap of [
+            'can_impersonate',
+            'can_admin_personas',
+            'can_manage_memberships',
+            'can_manage_staff',
+        ]) {
+            const rel = staffRel(cap);
+            const targets = [
+                rel?.computedUserset?.relation,
+                ...(rel?.union?.child ?? []).map((c) => c.computedUserset?.relation),
+            ];
+            expect(targets).not.toContain('engineer');
+        }
     });
 
     it('impersonation stays on support', () => {

@@ -89,6 +89,14 @@ export interface DeployedEnv {
    */
   postgresEndpointParams?: { endpoint: string; port: string };
   /**
+   * Names (never values) of the SSM params / secrets `ss env connect mongo`
+   * reads at run time: the replica-set `host:port,…` list, the CA secret ARN,
+   * and the read-only user's secret. Absent = no shared Mongo on this env.
+   */
+  mongoParams?: { hosts: string; caCertParam: string; readOnlySecret: string };
+  /** As `mongoParams`, for the Amazon MQ broker (id param + read-only user secret). */
+  rabbitmqParams?: { brokerIdParam: string; readOnlySecret: string };
+  /**
    * DECLARES that this environment's data plane holds REAL PRODUCTION data.
    * A posture, not a name test — a second production account inherits it by
    * setting the field. Two consequences today, both in `ss env connect`:
@@ -124,6 +132,7 @@ export const DEPLOYED_ENVS: Record<string, DeployedEnv> = {
     dbJumpHostNameTag: 'dev-db-jump-host',
     ecsClusters: ['dev-shared-arm', 'dev-shared'],
     dbHostNamespace: 'dbs-v2.local',
+    rabbitmqParams: { brokerIdParam: '/dev/shared/rabbitmq-broker-id', readOnlySecret: 'shared-dev-mq-readonly' },
     description: 'Shared dev fleet (*.wootdev.com) — CI-deployed on merge to main; data accumulates (no reset).',
   },
   training: {
@@ -169,6 +178,12 @@ export const DEPLOYED_ENVS: Record<string, DeployedEnv> = {
       endpoint: '/shared/infra/prod/postgres-endpoint',
       port: '/shared/infra/prod/postgres-port',
     },
+    mongoParams: {
+      hosts: '/shared/infra/prod/mongodb-hosts',
+      caCertParam: '/prod/mongodb-shared/ca-cert-pem',
+      readOnlySecret: 'prod/mongodb-shared/readonly-password',
+    },
+    rabbitmqParams: { brokerIdParam: '/prod/shared/rabbitmq-broker-id', readOnlySecret: 'shared-prod-mq-readonly' },
     productionDataPlane: true,
     resetForbidden: true,
     description: 'Production (*.saga.org) — not dev-platform ledger-tracked; RDS Postgres; env org reset refuses it.',

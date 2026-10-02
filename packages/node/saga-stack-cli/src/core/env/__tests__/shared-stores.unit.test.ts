@@ -3,6 +3,7 @@ import {
   DEPLOYED_ENVS,
   defaultLocalPort,
   isSharedStore,
+  mongoCaFetchHint,
   mongoParamsFor,
   mongoPasswordHint,
   mongoUrlTemplate,
@@ -84,5 +85,15 @@ describe('default local ports', () => {
     expect(defaultLocalPort('rabbitmq')).toBe(15443);
     expect(isSharedStore('mongo')).toBe(true);
     expect(isSharedStore('iam')).toBe(false);
+  });
+});
+
+describe('mongo CA source', () => {
+  it('reads the public cert param, never the CA secret (it holds the CA private key)', () => {
+    const ca = DEPLOYED_ENVS['prod']!.mongoParams!.caCertParam;
+    expect(ca).toBe('/prod/mongodb-shared/ca-cert-pem');
+    const hint = mongoCaFetchHint(ca, 'us-west-2', 'saga-runtime-prod');
+    expect(hint).toContain('aws ssm get-parameter --name /prod/mongodb-shared/ca-cert-pem');
+    expect(hint).not.toContain('secretsmanager');
   });
 });

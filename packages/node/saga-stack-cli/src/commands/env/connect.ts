@@ -306,7 +306,7 @@ export default class EnvConnect extends BaseCommand {
     let port: number;
     let hints: string[];
     let urlTemplate: string;
-    let caSecretArn: string | undefined;
+    let caCertParam: string | undefined;
     let caFile = '<ca file>';
     let readOnlySecret: string;
     let members: ReturnType<typeof parseMongoHosts> = [];
@@ -321,7 +321,7 @@ export default class EnvConnect extends BaseCommand {
       } catch (err) {
         this.error(err instanceof Error ? err.message : String(err));
       }
-      caSecretArn = await this.fetchParam(params.caSecretArn, opts);
+      caCertParam = params.caCertParam;
       if (printOnly) caFile = 'mongo-ca.pem';
     } else {
       const { params, refusal } = rabbitmqParamsFor(env);
@@ -353,11 +353,8 @@ export default class EnvConnect extends BaseCommand {
 
     let caDir: string | undefined;
     if (key === 'mongo' && !printOnly) {
-      const pem = (await this.getEnvAws().json(
-        ['secretsmanager', 'get-secret-value', '--secret-id', caSecretArn!, '--query', 'SecretString'],
-        opts,
-      )) as string | null;
-      if (pem === null || pem === '') this.error(`CA secret ${caSecretArn} resolved to nothing.`);
+      // Public cert param only: the CA secret also holds the CA private key.
+      const pem = await this.fetchParam(caCertParam!, opts);
       caDir = await mkdtemp(join(tmpdir(), 'ss-mongo-ca-'));
       caFile = join(caDir, 'ca.pem');
       await writeFile(caFile, pem, { mode: 0o600 });
@@ -371,7 +368,7 @@ export default class EnvConnect extends BaseCommand {
         urlTemplate!,
       );
       if (!quiet) {
-        if (key === 'mongo') this.log(`  ${dim('fetch the CA:')} ${mongoCaFetchHint(caSecretArn!, env.awsRegion, flags.profile)}`);
+        if (key === 'mongo') this.log(`  ${dim('fetch the CA:')} ${mongoCaFetchHint(caCertParam!, env.awsRegion, flags.profile)}`);
         for (const h of hints!) this.log(`  ${dim(h)}`);
       }
       return;

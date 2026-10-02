@@ -74,9 +74,9 @@ const profileArg = (profile: string | undefined): string => (profile === undefin
 export const mongoPasswordHint = (secretId: string, region: string, profile?: string): string =>
   `MONGO_PW="$(aws secretsmanager get-secret-value --secret-id ${secretId} --query SecretString --output text${profileArg(profile)} --region ${region} | python3 -c 'import json,sys,urllib.parse;print(urllib.parse.quote(json.load(sys.stdin)["password"],safe=""))')"`;
 
-/** The CA fetch command, for --print-only (the CLI writes the file itself on a live tunnel). */
-export const mongoCaFetchHint = (caSecretArn: string, region: string, profile?: string): string =>
-  `aws secretsmanager get-secret-value --secret-id ${caSecretArn} --query SecretString --output text${profileArg(profile)} --region ${region} > mongo-ca.pem`;
+/** The CA cert fetch command, for --print-only (the CLI writes the file itself on a live tunnel). */
+export const mongoCaFetchHint = (caCertParam: string, region: string, profile?: string): string =>
+  `aws ssm get-parameter --name ${caCertParam} --query Parameter.Value --output text${profileArg(profile)} --region ${region} > mongo-ca.pem`;
 
 export const MONGO_RO_USER = 'saga_ro';
 

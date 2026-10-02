@@ -78,7 +78,7 @@ describe('registry — the built-in envs, pinned field for field', () => {
       },
       mongoParams: {
         hosts: '/shared/infra/prod/mongodb-hosts',
-        caSecretArn: '/shared/infra/prod/mongodb-ca-secret-arn',
+        caCertParam: '/prod/mongodb-shared/ca-cert-pem',
         readOnlySecret: 'prod/mongodb-shared/readonly-password',
       },
       rabbitmqParams: { brokerIdParam: '/prod/shared/rabbitmq-broker-id', readOnlySecret: 'shared-prod-mq-readonly' },

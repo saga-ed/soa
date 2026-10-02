@@ -93,7 +93,7 @@ export interface DeployedEnv {
    * reads at run time: the replica-set `host:port,…` list, the CA secret ARN,
    * and the read-only user's secret. Absent = no shared Mongo on this env.
    */
-  mongoParams?: { hosts: string; caSecretArn: string; readOnlySecret: string };
+  mongoParams?: { hosts: string; caCertParam: string; readOnlySecret: string };
   /** As `mongoParams`, for the Amazon MQ broker (id param + read-only user secret). */
   rabbitmqParams?: { brokerIdParam: string; readOnlySecret: string };
   /**
@@ -180,7 +180,7 @@ export const DEPLOYED_ENVS: Record<string, DeployedEnv> = {
     },
     mongoParams: {
       hosts: '/shared/infra/prod/mongodb-hosts',
-      caSecretArn: '/shared/infra/prod/mongodb-ca-secret-arn',
+      caCertParam: '/prod/mongodb-shared/ca-cert-pem',
       readOnlySecret: 'prod/mongodb-shared/readonly-password',
     },
     rabbitmqParams: { brokerIdParam: '/prod/shared/rabbitmq-broker-id', readOnlySecret: 'shared-prod-mq-readonly' },

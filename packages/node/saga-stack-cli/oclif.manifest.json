@@ -581,192 +581,6 @@
       "slotClaimWritten": false,
       "strict": false
     },
-    "e2e:connect": {
-      "aliases": [],
-      "args": {},
-      "description": "Open a live interactive Connect session: 1 tutor + 2 students (in-process; builds the journey prerequisite, then a headed Connect room).",
-      "enableJsonFlag": false,
-      "examples": [
-        "<%= config.bin %> <%= command.id %>",
-        "<%= config.bin %> <%= command.id %> --reuse -- --debug",
-        "<%= config.bin %> <%= command.id %> --fake-media",
-        "<%= config.bin %> <%= command.id %> --refresh-snapshot"
-      ],
-      "flags": {
-        "coach": {
-          "description": "override path to the coach repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "coach",
-          "type": "option"
-        },
-        "dev": {
-          "description": "sibling-repo workspace root (where the saga repos are checked out)",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "dev",
-          "noCacheDefault": true,
-          "type": "option"
-        },
-        "fake-media": {
-          "allowNo": false,
-          "description": "swap real mic/cam capture for Chromium's synthetic camera (moving test pattern) + mic (beep) and auto-accept the getUserMedia prompt — for a machine with no camera or where v4l2loopback won't build. Sets FAKE_MEDIA=1 on the headed interactive-connect run (mirrors connect-session.sh --fake-media); the journey prerequisite is unaffected.",
-          "name": "fake-media",
-          "type": "boolean"
-        },
-        "fleek": {
-          "description": "override path to the fleek repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "fleek",
-          "type": "option"
-        },
-        "janus": {
-          "description": "override path to the janus repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "janus",
-          "type": "option"
-        },
-        "output-json": {
-          "allowNo": false,
-          "description": "emit structured JSON on stdout instead of human-readable text",
-          "name": "output-json",
-          "type": "boolean"
-        },
-        "porcelain": {
-          "allowNo": false,
-          "description": "machine-readable output; no color, minimal noise",
-          "name": "porcelain",
-          "type": "boolean"
-        },
-        "prereq-from-snapshot": {
-          "allowNo": true,
-          "description": "M14-C: restore the journey@schedule checkpoint (when a valid one is baked) instead of replaying the whole journey headless — the big Connect-session accelerant. Falls back to the replay when absent/invalid; --reuse trumps this entirely.",
-          "name": "prereq-from-snapshot",
-          "type": "boolean"
-        },
-        "program-hub": {
-          "description": "override path to the program-hub repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "program-hub",
-          "type": "option"
-        },
-        "qboard": {
-          "description": "override path to the qboard repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "qboard",
-          "type": "option"
-        },
-        "refresh-snapshot": {
-          "allowNo": false,
-          "description": "bake the journey prerequisite checkpoints FRESH (headless replay through `schedule`, --snapshot-stages) BEFORE opening the room, then restore that just-made checkpoint — a one-command reseed for when the baked state has gone stale (>7d) or the journey changed. Deterministic fixtureIds ⇒ the bake overwrites. Requires --prereq-from-snapshot (the default); mutually exclusive with --reuse.",
-          "name": "refresh-snapshot",
-          "type": "boolean"
-        },
-        "reuse": {
-          "allowNo": false,
-          "description": "skip the journey-prerequisite rebuild + reset; run the live session against the current stack state",
-          "name": "reuse",
-          "type": "boolean"
-        },
-        "rostering": {
-          "description": "override path to the rostering repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "rostering",
-          "type": "option"
-        },
-        "rtsm": {
-          "description": "override path to the rtsm repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "rtsm",
-          "type": "option"
-        },
-        "saga-dash": {
-          "description": "override path to the saga-dash repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "saga-dash",
-          "type": "option"
-        },
-        "sds": {
-          "description": "override path to the sds (student-data-system) repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "sds",
-          "type": "option"
-        },
-        "set": {
-          "description": "worktree set to run against (M13): a named repo→path map bound to a slot, from $SAGA_STACK_SETS ?? ~/.saga-stack/worktree-sets.json. Supplies the slot and any repo path you did not pin explicitly (--<repo> flags win; env vars lose to the set).",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "set",
-          "type": "option"
-        },
-        "slot": {
-          "default": 0,
-          "description": "stack instance slot (0 = default; N in 1..9 offsets ports by N*1000 into an isolated soa-s<N> sub-stack — backend services AND the saga-dash/coach-web/connect-web frontends run on their offset port; only the literal-port playback trio stays on slot 0). Ceiling is 9: slot 10 would collide rabbitmq (:15672) with slot 0 rabbitmq-mgmt.",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "slot",
-          "type": "option"
-        },
-        "soa": {
-          "description": "override path to the soa repo checkout",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "soa",
-          "type": "option"
-        },
-        "spa-path": {
-          "description": "explicit path to a flows.json (file or dir) — highest-priority discovery override",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "spa-path",
-          "type": "option"
-        },
-        "state-dir": {
-          "description": "scratch dir for pid files, snapshots, and other run state (default /tmp/sds-synthetic, or /tmp/sds-synthetic-s<N> for --slot N)",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "state-dir",
-          "type": "option"
-        },
-        "student-login": {
-          "default": 2,
-          "description": "how many of the 2 students THIS run logs in + joins locally (0, 1, or 2; default 2). The rest stay OPEN for a REMOTE peer to take — pair with --tunnel to invite coworkers. The tutor always auto-hosts and starts the session; login URLs for EVERY participant are printed regardless. Sets CONNECT_LOCAL_STUDENTS on the headed interactive-connect run.",
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "name": "student-login",
-          "type": "option"
-        },
-        "tunnel": {
-          "allowNo": false,
-          "description": "point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). NOTE: this ONLY repoints these Playwright browsers’ URLs — it does NOT relaunch the stack, flip connect-web/rtsm/cookie env, or start frpc. You must have already run `ss stack up --tunnel` so the stack itself is tunnel-served. Connect is slot-0 only, so no slot guard is needed.",
-          "name": "tunnel",
-          "type": "boolean"
-        }
-      },
-      "hasDynamicHelp": false,
-      "hiddenAliases": [],
-      "id": "e2e:connect",
-      "isESM": true,
-      "pluginAlias": "@saga-ed/saga-stack-cli",
-      "pluginName": "@saga-ed/saga-stack-cli",
-      "pluginType": "core",
-      "relativePath": [
-        "dist",
-        "commands",
-        "e2e",
-        "connect.js"
-      ],
-      "slotClaimWritten": false,
-      "strict": false
-    },
     "e2e:list": {
       "aliases": [],
       "args": {},
@@ -1318,12 +1132,12 @@
       "aliases": [],
       "args": {
         "store": {
-          "description": "store key (iam | programs | scheduling | sessions | ads-adm | coach | authz | authz-sync | sis | content | surveys | chat | insights | ledger | transcripts)",
+          "description": "store key (iam | programs | scheduling | sessions | ads-adm | coach | authz | authz-sync | sis | content | surveys | chat | insights | ledger | transcripts | mongo | rabbitmq)",
           "name": "store",
           "required": true
         }
       },
-      "description": "Open an SSM port-forward to a shared environment's Postgres, resolved from the service's live ECS task definition, and print a ready DATABASE_URL. Holds until Ctrl-C; --print-only resolves without connecting.",
+      "description": "Open an SSM port-forward to a shared environment's Postgres (resolved from the service's live ECS task definition, printing a ready DATABASE_URL) or to its shared MongoDB / RabbitMQ with read-only credentials. Holds until Ctrl-C; --print-only resolves without connecting.",
       "enableJsonFlag": false,
       "examples": [
         "<%= config.bin %> <%= command.id %> iam --env dev --profile dev_admin",
@@ -1331,7 +1145,10 @@
         "<%= config.bin %> <%= command.id %> iam --host mydb.dbs-v2.local --remote-port 5440 --database rostering-iam-canonical --print-only",
         "<%= config.bin %> <%= command.id %> iam --env prod --print-only",
         "<%= config.bin %> <%= command.id %> iam --env prod --local-port 15442",
-        "<%= config.bin %> <%= command.id %> iam --env prod --jump-host prod-db-jump-host"
+        "<%= config.bin %> <%= command.id %> iam --env prod --jump-host prod-db-jump-host",
+        "<%= config.bin %> <%= command.id %> mongo --env prod --print-only",
+        "<%= config.bin %> <%= command.id %> mongo --env prod --member 1",
+        "<%= config.bin %> <%= command.id %> rabbitmq --env dev"
       ],
       "flags": {
         "coach": {
@@ -1393,11 +1210,18 @@
           "type": "option"
         },
         "local-port": {
-          "default": 15432,
-          "description": "local end of the tunnel",
+          "description": "local end of the tunnel (default: postgres 15432, mongo 27018, rabbitmq 15443)",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "local-port",
+          "type": "option"
+        },
+        "member": {
+          "default": 0,
+          "description": "mongo only: 0-based replica-set member to tunnel to (the full list is logged).",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "member",
           "type": "option"
         },
         "output-json": {
@@ -2169,7 +1993,7 @@
           "type": "option"
         },
         "url": {
-          "description": "store connection as <store>=<connString> (repeatable; store keys: iam, programs, scheduling, sessions, ads-adm, coach)",
+          "description": "store connection as <store>=<connString> (repeatable; store keys: iam, programs, scheduling, sessions, ads-adm, coach, authz, authz-sync, sis, content, surveys, chat, insights, ledger, transcripts)",
           "hasDynamicHelp": false,
           "multiple": true,
           "name": "url",
@@ -4411,7 +4235,8 @@
             "insights-api",
             "chat-api",
             "authz-sync",
-            "staff-admin-bff"
+            "staff-admin-bff",
+            "janus-mock-signer"
           ],
           "required": true
         }
@@ -4453,6 +4278,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "fleek",
+          "type": "option"
+        },
+        "janus": {
+          "description": "override path to the janus repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "janus",
           "type": "option"
         },
         "out": {

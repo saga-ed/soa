@@ -31,6 +31,7 @@ describe('registry — the built-in envs, pinned field for field', () => {
       dbJumpHostNameTag: 'dev-db-jump-host',
       ecsClusters: ['dev-shared-arm', 'dev-shared'],
       dbHostNamespace: 'dbs-v2.local',
+      rabbitmqParams: { brokerIdParam: '/dev/shared/rabbitmq-broker-id', readOnlySecret: 'shared-dev-mq-readonly' },
       description:
         'Shared dev fleet (*.wootdev.com) — CI-deployed on merge to main; data accumulates (no reset).',
     });
@@ -75,6 +76,12 @@ describe('registry — the built-in envs, pinned field for field', () => {
         endpoint: '/shared/infra/prod/postgres-endpoint',
         port: '/shared/infra/prod/postgres-port',
       },
+      mongoParams: {
+        hosts: '/shared/infra/prod/mongodb-hosts',
+        caSecretArn: '/shared/infra/prod/mongodb-ca-secret-arn',
+        readOnlySecret: 'prod/mongodb-shared/readonly-password',
+      },
+      rabbitmqParams: { brokerIdParam: '/prod/shared/rabbitmq-broker-id', readOnlySecret: 'shared-prod-mq-readonly' },
       productionDataPlane: true,
       resetForbidden: true,
       description:

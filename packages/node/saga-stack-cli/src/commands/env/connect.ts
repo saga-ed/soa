@@ -40,10 +40,19 @@
  * and HOLDS until Ctrl-C — the tunnel dies with the command. Works on the
  * AppRuntime tier and above via the db jump host (SagaCap-SSMDbJumpHost, or
  * SagaCap-SSMPortForward on AppInfra); the shared-ECS fallback needs AppInfra.
- * Postgres-first;
- * Mongo (needs `directConnection=true` through tunnels) is a follow-up.
+ *
+ * SHARED INFRA — the reserved stores `mongo` and `rabbitmq` skip service
+ * resolution: the env's registry names the SSM params (replica-set hosts,
+ * broker id) and the READ-ONLY secrets. Tunnels go through the db jump host;
+ * mongo dials `--member <n>` (directConnection, secondaryPreferred, CA fetched
+ * to a 0600 temp file), rabbitmq dials the broker's management API on 443.
+ * Passwords are never fetched or printed — output carries shell hints that
+ * substitute them at run time.
  */
 
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import {
@@ -52,12 +61,28 @@ import {
   accountMismatchError,
   connectTierRefusal,
   ECS_SERVICE_ROW_QUERY,
+  MONGO_MEMBER_CHECK_HINT,
+  MONGO_PROD_QUERY_HYGIENE,
+  RABBITMQ_PORT,
   dataPlaneStyle,
+  defaultLocalPort,
   extractDbTarget,
+  isSharedStore,
   localUrl,
+  mongoCaFetchHint,
+  mongoMemberList,
+  mongoParamsFor,
+  mongoPasswordHint,
+  mongoUrlTemplate,
   parseDatabaseUrl,
+  parseMongoHosts,
   parseServiceRows,
+  pickMongoMember,
   pickService,
+  rabbitmqCurlHint,
+  rabbitmqHost,
+  rabbitmqParamsFor,
+  rabbitmqPasswordHint,
   resolveEnv,
   serviceCandidates,
 } from '../../core/env/index.js';
@@ -76,7 +101,7 @@ interface ResolvedTarget {
 
 export default class EnvConnect extends BaseCommand {
   static description =
-    "Open an SSM port-forward to a shared environment's Postgres, resolved from the service's live ECS task definition, and print a ready DATABASE_URL. Holds until Ctrl-C; --print-only resolves without connecting.";
+    "Open an SSM port-forward to a shared environment's Postgres (resolved from the service's live ECS task definition, printing a ready DATABASE_URL) or to its shared MongoDB / RabbitMQ with read-only credentials. Holds until Ctrl-C; --print-only resolves without connecting.";
 
   static examples = [
     '<%= config.bin %> <%= command.id %> iam --env dev --profile dev_admin',
@@ -87,11 +112,15 @@ export default class EnvConnect extends BaseCommand {
     '<%= config.bin %> <%= command.id %> iam --env prod --print-only',
     '<%= config.bin %> <%= command.id %> iam --env prod --local-port 15442',
     '<%= config.bin %> <%= command.id %> iam --env prod --jump-host prod-db-jump-host',
+    // Shared infra, read-only credentials (password substituted by a printed shell hint).
+    '<%= config.bin %> <%= command.id %> mongo --env prod --print-only',
+    '<%= config.bin %> <%= command.id %> mongo --env prod --member 1',
+    '<%= config.bin %> <%= command.id %> rabbitmq --env dev',
   ];
 
   static args = {
     store: Args.string({
-      description: `store key (${STORES.map((s) => s.key).join(' | ')})`,
+      description: `store key (${STORES.map((s) => s.key).join(' | ')} | mongo | rabbitmq)`,
       required: true,
     }),
   };
@@ -102,7 +131,8 @@ export default class EnvConnect extends BaseCommand {
     profile: Flags.string({ description: 'AWS profile to use (defaults to the ambient credential chain).' }),
     host: Flags.string({ description: 'remote DB endpoint (skips task-definition resolution).' }),
     'remote-port': Flags.integer({ description: 'remote DB port (with --host)', default: 5432 }),
-    'local-port': Flags.integer({ description: 'local end of the tunnel', default: 15432 }),
+    'local-port': Flags.integer({ description: 'local end of the tunnel (default: postgres 15432, mongo 27018, rabbitmq 15443)' }),
+    member: Flags.integer({ description: 'mongo only: 0-based replica-set member to tunnel to (the full list is logged).', default: 0 }),
     username: Flags.string({ description: 'override the resolved user (URL carries no password then).' }),
     database: Flags.string({ description: 'override the resolved database name.' }),
     'jump-host': Flags.string({
@@ -115,9 +145,12 @@ export default class EnvConnect extends BaseCommand {
     const { args, flags } = await this.parse(EnvConnect);
     const env = resolveEnv(flags.env);
     if (env === undefined) this.error(`unknown --env '${flags.env}' — expected one of: ${ENV_NAMES.join(', ')}`);
+    const shared = isSharedStore(args.store);
     const store = STORES.find((s) => s.key === args.store);
-    if (store === undefined && flags.host === undefined) {
-      this.error(`unknown store '${args.store}' — expected one of: ${STORES.map((s) => s.key).join(', ')} (or pass --host)`);
+    if (!shared && store === undefined && flags.host === undefined) {
+      this.error(
+        `unknown store '${args.store}' — expected one of: ${STORES.map((s) => s.key).join(', ')}, mongo, rabbitmq (or pass --host)`,
+      );
     }
     const opts = { profile: flags.profile, region: env.awsRegion };
 
@@ -140,6 +173,12 @@ export default class EnvConnect extends BaseCommand {
         );
       }
     }
+
+    if (isSharedStore(args.store)) {
+      await this.runShared(args.store, env, flags, opts);
+      return;
+    }
+    const localPort = flags['local-port'] ?? defaultLocalPort(args.store);
 
     // The reachability style this env's data plane needs — derived from the
     // registry (db-host fleet present or not), never from `env.name`.
@@ -209,7 +248,7 @@ export default class EnvConnect extends BaseCommand {
 
     const iamAuth = style === 'rds-endpoint' && target.username !== undefined && target.password === undefined;
     // RDS IAM auth requires TLS.
-    const url = localUrl(target, flags['local-port']) + (iamAuth ? '?sslmode=require' : '');
+    const url = localUrl(target, localPort) + (iamAuth ? '?sslmode=require' : '');
     const tokenHint = iamAuth
       ? `PGPASSWORD="$(aws rds generate-db-auth-token --hostname ${target.host} --port ${target.port} --username ${target.username} --region ${env.awsRegion}${flags.profile === undefined ? '' : ` --profile ${flags.profile}`})" psql '${url}'`
       : undefined;
@@ -230,19 +269,135 @@ export default class EnvConnect extends BaseCommand {
       target: ssmTarget,
       host: dialHost,
       remotePort: dialPort,
-      localPort: flags['local-port'],
+      localPort,
       region: env.awsRegion,
       profile: flags.profile,
     });
     process.on('SIGINT', () => handle.stop());
     process.on('SIGTERM', () => handle.stop());
     await handle.ready;
-    this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(flags['local-port']))} → ${target.host}:${target.port}`);
+    this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(localPort))} → ${target.host}:${target.port}`);
     this.log(`  DATABASE_URL=${url}`); // left plain — meant to be copy-pasted
     this.log(`  ${dim(tokenHint ?? `psql '${url}'`)}`);
     this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
     const code = await handle.exited;
     this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
+  }
+
+  /** `mongo` / `rabbitmq`: shared infra, read-only credentials, no service resolution. */
+  private async runShared(
+    key: 'mongo' | 'rabbitmq',
+    env: DeployedEnv,
+    flags: {
+      member: number;
+      'local-port'?: number;
+      'jump-host'?: string;
+      'print-only': boolean;
+      'output-json': boolean;
+      porcelain: boolean;
+      profile?: string;
+    },
+    opts: { profile?: string; region: string },
+  ): Promise<void> {
+    const printOnly = flags['print-only'];
+    const localPort = flags['local-port'] ?? defaultLocalPort(key);
+    const quiet = flags['output-json'] || flags.porcelain;
+    let host: string;
+    let port: number;
+    let hints: string[];
+    let urlTemplate: string;
+    let caSecretArn: string | undefined;
+    let caFile = '<ca file>';
+    let readOnlySecret: string;
+    let members: ReturnType<typeof parseMongoHosts> = [];
+
+    if (key === 'mongo') {
+      const { params, refusal } = mongoParamsFor(env);
+      if (params === undefined) this.error(refusal!);
+      readOnlySecret = params.readOnlySecret;
+      try {
+        members = parseMongoHosts(await this.fetchParam(params.hosts, opts));
+        ({ host, port } = pickMongoMember(members, flags.member));
+      } catch (err) {
+        this.error(err instanceof Error ? err.message : String(err));
+      }
+      caSecretArn = await this.fetchParam(params.caSecretArn, opts);
+      if (printOnly) caFile = 'mongo-ca.pem';
+    } else {
+      const { params, refusal } = rabbitmqParamsFor(env);
+      if (params === undefined) this.error(refusal!);
+      readOnlySecret = params.readOnlySecret;
+      host = rabbitmqHost(await this.fetchParam(params.brokerIdParam, opts), env.awsRegion);
+      port = RABBITMQ_PORT;
+    }
+
+    const resolved = await this.resolveJumpRoute(env, flags['jump-host'], printOnly, opts);
+    const buildOutput = (): void => {
+      if (key === 'mongo') {
+        urlTemplate = mongoUrlTemplate(localPort, caFile);
+        hints = [mongoPasswordHint(readOnlySecret, env.awsRegion, flags.profile), `mongosh "${urlTemplate}"`, MONGO_MEMBER_CHECK_HINT];
+        if (env.productionDataPlane === true) hints.push(MONGO_PROD_QUERY_HYGIENE);
+      } else {
+        urlTemplate = rabbitmqCurlHint(host, localPort);
+        hints = [rabbitmqPasswordHint(readOnlySecret, env.awsRegion, flags.profile)];
+      }
+    };
+
+    this.log(`${bold('▶ env connect')} — ${bold(cyan(env.name))}${dim('/')}${cyan(key)}`);
+    this.log(`  ${dim('target:')}    ${host}:${port} ${dim(`(shared ${key}, read-only secret ${readOnlySecret})`)}`);
+    this.log(`  ${dim('route:')}     ${resolved.route}`);
+    if (key === 'mongo') {
+      this.log(`  ${dim('members:')}`);
+      for (const line of mongoMemberList(members, flags.member)) this.log(`    ${line}`);
+    }
+
+    let caDir: string | undefined;
+    if (key === 'mongo' && !printOnly) {
+      const pem = (await this.getEnvAws().json(
+        ['secretsmanager', 'get-secret-value', '--secret-id', caSecretArn!, '--query', 'SecretString'],
+        opts,
+      )) as string | null;
+      if (pem === null || pem === '') this.error(`CA secret ${caSecretArn} resolved to nothing.`);
+      caDir = await mkdtemp(join(tmpdir(), 'ss-mongo-ca-'));
+      caFile = join(caDir, 'ca.pem');
+      await writeFile(caFile, pem, { mode: 0o600 });
+    }
+    buildOutput();
+
+    if (printOnly) {
+      this.emit(
+        flags,
+        { env: env.name, store: key, host, port, ssmTarget: resolved.id, urlTemplate: urlTemplate! },
+        urlTemplate!,
+      );
+      if (!quiet) {
+        if (key === 'mongo') this.log(`  ${dim('fetch the CA:')} ${mongoCaFetchHint(caSecretArn!, env.awsRegion, flags.profile)}`);
+        for (const h of hints!) this.log(`  ${dim(h)}`);
+      }
+      return;
+    }
+
+    const handle = this.getEnvAws().portForward({
+      target: resolved.id,
+      host,
+      remotePort: port,
+      localPort,
+      region: env.awsRegion,
+      profile: flags.profile,
+    });
+    process.on('SIGINT', () => handle.stop());
+    process.on('SIGTERM', () => handle.stop());
+    try {
+      await handle.ready;
+      this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(localPort))} → ${host}:${port}`);
+      for (const h of hints!) this.log(`  ${h}`);
+      if (key === 'rabbitmq') this.log(`  ${urlTemplate!}`);
+      this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
+      const code = await handle.exited;
+      this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
+    } finally {
+      if (caDir !== undefined) await rm(caDir, { recursive: true, force: true });
+    }
   }
 
   /**

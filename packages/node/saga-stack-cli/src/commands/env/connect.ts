@@ -45,13 +45,13 @@
  * resolution: the env's registry names the SSM params (replica-set hosts,
  * broker id) and the READ-ONLY secrets. Tunnels go through the db jump host;
  * mongo dials `--member <n>` (directConnection, secondaryPreferred, CA fetched
- * to a 0600 temp file), rabbitmq dials the broker's management API on 443.
+ * from its public SSM param to ~/.saga-stack/mongo-ca-<env>.pem), rabbitmq dials the broker's management API on 443.
  * Passwords are never fetched or printed — output carries shell hints that
  * substitute them at run time.
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Args, Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
@@ -351,13 +351,14 @@ export default class EnvConnect extends BaseCommand {
       for (const line of mongoMemberList(members, flags.member)) this.log(`    ${line}`);
     }
 
-    let caDir: string | undefined;
     if (key === 'mongo' && !printOnly) {
       // Public cert param only: the CA secret also holds the CA private key.
+      // Stable path: the CAFile must outlive this process for clients started elsewhere.
       const pem = await this.fetchParam(caCertParam!, opts);
-      caDir = await mkdtemp(join(tmpdir(), 'ss-mongo-ca-'));
-      caFile = join(caDir, 'ca.pem');
-      await writeFile(caFile, pem, { mode: 0o600 });
+      const dir = join(homedir(), '.saga-stack');
+      await mkdir(dir, { recursive: true });
+      caFile = join(dir, `mongo-ca-${env.name}.pem`);
+      await writeFile(caFile, pem.endsWith('\n') ? pem : `${pem}\n`);
     }
     buildOutput();
 
@@ -384,17 +385,13 @@ export default class EnvConnect extends BaseCommand {
     });
     process.on('SIGINT', () => handle.stop());
     process.on('SIGTERM', () => handle.stop());
-    try {
-      await handle.ready;
-      this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(localPort))} → ${host}:${port}`);
-      for (const h of hints!) this.log(`  ${h}`);
-      if (key === 'rabbitmq') this.log(`  ${urlTemplate!}`);
-      this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
-      const code = await handle.exited;
-      this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
-    } finally {
-      if (caDir !== undefined) await rm(caDir, { recursive: true, force: true });
-    }
+    await handle.ready;
+    this.log(`${green('✓ tunnel up')} — 127.0.0.1:${bold(String(localPort))} → ${host}:${port}`);
+    for (const h of hints!) this.log(`  ${h}`);
+    if (key === 'rabbitmq') this.log(`  ${urlTemplate!}`);
+    this.log(dim('  (holding — Ctrl-C closes the tunnel)'));
+    const code = await handle.exited;
+    this.log(dim(`tunnel closed (${code ?? 'signal'}).`));
   }
 
   /**

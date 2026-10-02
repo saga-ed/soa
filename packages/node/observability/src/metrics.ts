@@ -116,6 +116,40 @@ function createOutboxMetrics(
         },
     });
 
+    // `instance` (e.g. the caller's blue/green deployment color, from
+    // OutboxRelayOpts#instanceLabel) is always present as a label, using ''
+    // when the caller didn't set one — Prometheus requires every series for
+    // a metric to carry the same label set, so the alternative (omitting the
+    // label entirely when unset) would fragment the same metric name into
+    // two incompatible series shapes across deploys.
+    const leaderAcquiredTotal = new Counter({
+        name: 'outbox_leader_acquired_total',
+        help: 'Times this instance became the single leader that polls outbox_event.',
+        labelNames: ['instance'] as const,
+        registers: [registry],
+    });
+
+    const leaderLostTotal = new Counter({
+        name: 'outbox_leader_lost_total',
+        help: 'Times this instance lost leadership (connection lost, a watchdog yield, or stop()).',
+        labelNames: ['instance'] as const,
+        registers: [registry],
+    });
+
+    const leaderWaitingTotal = new Counter({
+        name: 'outbox_leader_waiting_total',
+        help: 'Times a non-leader instance failed to acquire the lock and scheduled a retry — distinguishes "lock held elsewhere" from low event volume.',
+        labelNames: ['instance'] as const,
+        registers: [registry],
+    });
+
+    const leaderYieldedTotal = new Counter({
+        name: 'outbox_leader_yielded_total',
+        help: 'Times this instance voluntarily gave up leadership because it could no longer make progress (a stale leader forced off the lock, not an ordinary connection-loss leader change).',
+        labelNames: ['reason', 'instance'] as const,
+        registers: [registry],
+    });
+
     return {
         onPublished: (eventType, eventVersion) => {
             eventsPublishedTotal.inc({
@@ -129,6 +163,18 @@ function createOutboxMetrics(
                 event_version: String(eventVersion),
                 reason_class: classifyReason(reason),
             });
+        },
+        onLeaderAcquired: (instance) => {
+            leaderAcquiredTotal.inc({ instance: instance ?? '' });
+        },
+        onLeaderLost: (instance) => {
+            leaderLostTotal.inc({ instance: instance ?? '' });
+        },
+        onLeaderWaiting: (instance) => {
+            leaderWaitingTotal.inc({ instance: instance ?? '' });
+        },
+        onLeaderYielded: (reason, instance) => {
+            leaderYieldedTotal.inc({ reason, instance: instance ?? '' });
         },
     };
 }

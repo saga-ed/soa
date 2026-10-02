@@ -1,0 +1,96 @@
+name: candidate-b v1.2 / role-object mechanics (D1)
+model_file: ./model.fga
+tuples:
+  - {user: district:balt, relation: parent_district, object: program:p1}
+  - {user: district:other, relation: parent_district, object: program:op1}
+  - {user: district:balt, relation: parent_district, object: role:balt/ipm}
+  - {user: district:other, relation: parent_district, object: role:other/ipm}
+  # role:balt/ipm's capabilities, all bound to objects under its own district
+  - {user: role:balt/ipm#assignee, relation: qtf_access, object: district:balt}
+  - {user: role:balt/ipm#assignee, relation: can_edit, object: program:p1}
+  - {user: role:balt/ipm#assignee, relation: supervise_view, object: program:p1}
+  # role:other/ipm's capabilities, bound only to its own district's objects
+  - {user: role:other/ipm#assignee, relation: qtf_access, object: district:other}
+  - {user: role:other/ipm#assignee, relation: can_edit, object: program:op1}
+  # assignee tuples
+  - {user: user:amy, relation: assignee, object: role:balt/ipm}
+  - {user: user:carla, relation: assignee, object: role:other/ipm}
+  # direct [user] exception-path grant, no role involved at all
+  - {user: user:dara, relation: can_edit, object: program:p1}
+tests:
+  - name: one assignee tuple grants every capability the role holds
+    check:
+      - user: user:amy
+        object: district:balt
+        assertions: {qtf_access: true}
+      - user: user:amy
+        object: program:p1
+        assertions: {can_edit: true, supervise_view: true}
+  - name: revoking the assignee tuple removes every derived capability (contrast -- bob is never assigned)
+    check:
+      - user: user:bob
+        object: district:balt
+        assertions: {qtf_access: false}
+      - user: user:bob
+        object: program:p1
+        assertions: {can_edit: false, supervise_view: false}
+  - name: roles never span districts -- a user assigned to the other district's role gets nothing on balt
+    check:
+      - user: user:carla
+        object: district:balt
+        assertions: {qtf_access: false}
+      - user: user:carla
+        object: program:p1
+        assertions: {can_edit: false, supervise_view: false}
+      - user: user:carla
+        object: program:op1
+        assertions: {can_edit: true}
+  - name: direct [user] grant on a program still works standalone, with no role at all
+    check:
+      - user: user:dara
+        object: program:p1
+        assertions: {can_edit: true}
+      - user: user:dara
+        object: district:balt
+        assertions: {qtf_access: false}
+  - name: ipm role instance scoped to two of three programs
+    tuples:
+      - {user: district:balt, relation: parent_district, object: program:p2}
+      - {user: district:balt, relation: parent_district, object: program:p3}
+      - {user: district:balt, relation: parent_district, object: role:balt/ipm/a1}
+      - {user: district:balt, relation: parent_district, object: role:balt/ipm/a2}
+      - {user: role:balt/ipm/a1#assignee, relation: can_edit, object: program:p1}
+      - {user: role:balt/ipm/a1#assignee, relation: supervise_view, object: program:p1}
+      - {user: role:balt/ipm/a1#assignee, relation: qtf_access, object: program:p1}
+      - {user: role:balt/ipm/a1#assignee, relation: can_edit, object: program:p2}
+      - {user: role:balt/ipm/a1#assignee, relation: supervise_view, object: program:p2}
+      - {user: role:balt/ipm/a1#assignee, relation: qtf_access, object: program:p2}
+      - {user: user:ipm1, relation: assignee, object: role:balt/ipm/a1}
+      - {user: role:balt/ipm/a2#assignee, relation: can_edit, object: program:p3}
+      - {user: role:balt/ipm/a2#assignee, relation: supervise_view, object: program:p3}
+      - {user: role:balt/ipm/a2#assignee, relation: qtf_access, object: program:p3}
+      - {user: user:ipm2, relation: assignee, object: role:balt/ipm/a2}
+    check:
+      - user: user:ipm1
+        object: program:p1
+        assertions: {can_edit: true, supervise_view: true, qtf_access: true}
+      - user: user:ipm1
+        object: program:p2
+        assertions: {can_edit: true, supervise_view: true, qtf_access: true}
+      - user: user:ipm1
+        object: program:p3
+        assertions: {can_edit: false}
+      - user: user:ipm1
+        object: district:balt
+        assertions: {can_edit: false}
+      - user: user:ipm2
+        object: program:p3
+        assertions: {can_edit: true}
+      - user: user:ipm2
+        object: program:p1
+        assertions: {can_edit: false}
+    list_objects:
+      - user: user:ipm1
+        type: program
+        assertions:
+          can_edit: [program:p1, program:p2]

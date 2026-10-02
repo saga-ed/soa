@@ -24,13 +24,11 @@
  * REACHABILITY branches on the env's DATA-PLANE STYLE (`core/env/data-plane.ts`,
  * I#375), never on its name:
  *
- *   'db-host-cloudmap' (dev, training) — a `.<dbHostNamespace>` target is a DB
- *      CONTAINER the shared jump host's SG cannot reach, so the tunnel goes via
- *      the container's own EC2 host with a 127.0.0.1 dial (step 3 above).
- *   'rds-endpoint' (prod) — no db-host fleet: the task definition still supplies
- *      the DATABASE and USER, but the address dialled is the shared Postgres
- *      endpoint read at RUN TIME from `env.postgresEndpointParams` (SSM), and the
- *      jump host forwards straight to it. Nothing about it is hardcoded here.
+ *   'db-host-cloudmap' (dev, training) — a `.<dbHostNamespace>` target is
+ *      resolved via CloudMap to the container's IP + port; the jump host dials it.
+ *   'rds-endpoint' (prod) — never the service's credentials: IAM auth as the
+ *      store's `_ro` (registry `rdsDatabase`), to the shared endpoint read at run
+ *      time from `env.postgresEndpointParams` (SSM). No `rdsDatabase` = refusal.
  *
  * An env that declares `productionDataPlane` additionally REFUSES the read-only
  * Observer tier (read-only `list`/`discover`/`verify` still accept it) and
@@ -40,10 +38,9 @@
  * `--print-only` stops before the tunnel. Once the session-manager plugin
  * reports listening, prints a rewritten `DATABASE_URL` (127.0.0.1:local-port)
  * and HOLDS until Ctrl-C — the tunnel dies with the command. Works on the
- * AppRuntime or AppDeploy tier via the db jump host (ssm:StartSession +
- * ec2:StartInstances are scoped to `saga:role=db-jump-host`); the CloudMap
- * db-host route and the shared-ECS fallback need app-infra
- * (SagaCap-SSMPortForward). Postgres-first;
+ * AppRuntime tier and above via the db jump host (SagaCap-SSMDbJumpHost, or
+ * SagaCap-SSMPortForward on AppInfra); the shared-ECS fallback needs AppInfra.
+ * Postgres-first;
  * Mongo (needs `directConnection=true` through tunnels) is a follow-up.
  */
 
@@ -64,7 +61,7 @@ import {
   resolveEnv,
   serviceCandidates,
 } from '../../core/env/index.js';
-import type { DeployedEnv, SecretRef, TaskDefContainer } from '../../core/env/index.js';
+import type { DeployedEnv, SecretRef, StoreDef, TaskDefContainer } from '../../core/env/index.js';
 import { bold, cyan, dim, green, yellow } from '../../color.js';
 import { ensureJumpHost, findJumpHost, resolveCallerAccount, resolveCallerArn, resolveJumpHost } from '../../runtime/index.js';
 
@@ -160,40 +157,28 @@ export default class EnvConnect extends BaseCommand {
       };
     } else {
       const candidates = serviceCandidates(store!.ecsService, env.ledgerIdentifier);
-      const fromTaskDef = await this.resolveFromTaskDef(env, candidates, opts, style === 'rds-endpoint');
-      // Prod task definitions carry no DB config (services derive it in code,
-      // IAM auth): name the database from the registry and default to `<db>_ro`.
-      if (fromTaskDef === undefined) {
-        if (store!.rdsDatabase === undefined) {
-          this.error(`store '${store!.key}' has no rdsDatabase in the registry and its task definition carries no DB config — pass --host/--database.`);
-        }
-        target = {
-          host: '',
-          port: 0,
-          database: store!.rdsDatabase,
-          username: store!.rdsReadOnlyUser ?? `${store!.rdsDatabase}_ro`,
-          source: 'store registry (IAM auth)',
-        };
-      } else {
-        target = fromTaskDef;
-      }
-      // ── 'rds-endpoint' style: the task definition supplied the DATABASE and
-      // USER (that is why it is still consulted), but the ADDRESS is the shared
-      // Postgres endpoint discovered live from SSM — the task def may name a
-      // private alias the jump host does not resolve, and the endpoint moves on
-      // failover. `--host` (above) opts out of this too. ──
       if (style === 'rds-endpoint') {
-        const rds = await this.resolveSharedEndpoint(env, opts);
-        if (target.host === '') {
-          this.log(`  ${dim('endpoint:')}  ${green(`${rds.host}:${rds.port}`)} ${dim(`(${rds.source})`)}`);
-        } else if (rds.host !== target.host || rds.port !== target.port) {
-          this.log(
-            `  ${dim('endpoint:')}  ${green(`${rds.host}:${rds.port}`)} ${dim(`(${rds.source}; task def named ${target.host}:${target.port})`)}`,
+        // Shared RDS: people never get a service's credentials, even when its
+        // task definition carries them. Access is IAM auth as the store's `_ro`;
+        // the task definition only proves the store is deployed here.
+        if (store!.rdsDatabase === undefined) {
+          this.error(
+            `store '${store!.key}' has no read-only role on '${env.name}' (no rdsDatabase in the registry) — pass --host/--database/--username.`,
           );
         }
-        target.host = rds.host;
-        target.port = rds.port;
-        target.source = `${target.source} + ${rds.source}`;
+        await this.resolveFromTaskDef(env, candidates, opts, store!, false);
+        // The endpoint is discovered live from SSM: it moves on failover.
+        const rds = await this.resolveSharedEndpoint(env, opts);
+        this.log(`  ${dim('endpoint:')}  ${green(`${rds.host}:${rds.port}`)} ${dim(`(${rds.source})`)}`);
+        target = {
+          host: rds.host,
+          port: rds.port,
+          database: store!.rdsDatabase,
+          username: store!.rdsReadOnlyUser ?? `${store!.rdsDatabase}_ro`,
+          source: `store registry (IAM auth) + ${rds.source}`,
+        };
+      } else {
+        target = (await this.resolveFromTaskDef(env, candidates, opts, store!, true))!;
       }
       if (flags.database !== undefined) target.database = flags.database;
       if (flags.username !== undefined) {
@@ -307,7 +292,8 @@ export default class EnvConnect extends BaseCommand {
     env: DeployedEnv,
     candidates: string[],
     opts: { profile?: string; region: string },
-    allowNoDbConfig = false,
+    store: Pick<StoreDef, 'dbUrlSecretName' | 'dbEnvPrefix'>,
+    withCredentials: boolean,
   ): Promise<ResolvedTarget | undefined> {
     const aws = this.getEnvAws();
     let taskDefArn: string | undefined;
@@ -342,14 +328,17 @@ export default class EnvConnect extends BaseCommand {
       );
     }
 
+    if (!withCredentials) return undefined;
+
     const td = (await aws.json(
       ['ecs', 'describe-task-definition', '--task-definition', taskDefArn, '--query', 'taskDefinition.containerDefinitions'],
       opts,
     )) as TaskDefContainer[] | null;
-    const dbTarget = extractDbTarget(td ?? []);
+    const urlName = store.dbUrlSecretName ?? 'DATABASE_URL';
+    const prefix = store.dbEnvPrefix ?? 'POSTGRES_';
+    const dbTarget = extractDbTarget(td ?? [], { urlSecret: urlName, envPrefix: prefix });
     if (dbTarget === undefined) {
-      if (allowNoDbConfig) return undefined;
-      this.error(`task definition ${taskDefArn} carries neither a DATABASE_URL secret nor POSTGRES_* env — cannot resolve.`);
+      this.error(`task definition ${taskDefArn} carries neither a ${urlName} secret nor ${prefix}* env — cannot resolve.`);
     }
 
     if (dbTarget.shape === 'url') {

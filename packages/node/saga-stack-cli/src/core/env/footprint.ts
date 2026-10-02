@@ -69,8 +69,13 @@ export interface StoreDef {
   rdsDatabase?: string;
   /** IAM-auth read-only role on the shared RDS when it is not `<rdsDatabase>_ro`. */
   rdsReadOnlyUser?: string;
+  /** Task-def secret holding the full URL, when not `DATABASE_URL`. */
+  dbUrlSecretName?: string;
+  /** Task-def split-env prefix, when not `POSTGRES_` (e.g. a second DB in the same task). */
+  dbEnvPrefix?: string;
   /** Where the table map was verified from. */
   schemaSource: string;
+  /** Org-footprint rules; empty for stores that are only reachable via `env connect`. */
   tables: TableRule[];
 }
 
@@ -187,6 +192,101 @@ export const STORES: StoreDef[] = [
       { table: 'persona_assignment', param: 'userIds', column: 'user_id', projection: true, note: 'converges from IAM replay' },
       { table: 'group_track_map', param: 'groupIds', column: 'group_id', projection: true },
     ],
+  },
+  // ── connect-only stores (no org footprint). `rdsDatabase` is set only where a
+  // prod `_ro` role exists (verified 2026-10-01); without it, prod refuses
+  // rather than hand out service credentials. Not stores: transcription (plain-env URL, ECS names
+  // `transcription-*-<env>`; use --host), openfga (no DB config), connectv3 (Mongo). ──
+  {
+    key: 'authz',
+    rdsDatabase: 'authz_db',
+    rdsReadOnlyUser: 'authz_api_ro',
+    ecsService: 'rostering-authz-api',
+    dbUrlSecretName: 'AUTHZ_DATABASE_URL',
+    service: 'authz-api (rostering)',
+    engine: 'postgres',
+    database: 'authz',
+    schemaSource: 'rostering',
+    tables: [],
+  },
+  {
+    key: 'authz-sync',
+    rdsDatabase: 'authz_sync',
+    ecsService: 'rostering-authz-sync',
+    service: 'authz-sync (rostering)',
+    engine: 'postgres',
+    database: 'authz_sync',
+    schemaSource: 'rostering',
+    tables: [],
+  },
+  {
+    key: 'sis',
+    ecsService: 'rostering-sis-api',
+    dbUrlSecretName: 'SIS_DATABASE_URL',
+    service: 'sis-api (rostering)',
+    engine: 'postgres',
+    database: 'sis',
+    schemaSource: 'rostering',
+    tables: [],
+  },
+  {
+    key: 'content',
+    rdsDatabase: 'content_api',
+    ecsService: 'program-hub-content-api',
+    service: 'content-api (program-hub)',
+    engine: 'postgres',
+    database: 'content',
+    schemaSource: 'program-hub',
+    tables: [],
+  },
+  {
+    key: 'surveys',
+    rdsDatabase: 'surveys_api',
+    ecsService: 'sds-ads-adm-api',
+    dbEnvPrefix: 'SURVEYS_POSTGRES_',
+    service: 'surveys (in ads-adm-api, student-data-system)',
+    engine: 'postgres',
+    database: 'surveys_api',
+    schemaSource: 'student-data-system',
+    tables: [],
+  },
+  {
+    key: 'chat',
+    rdsDatabase: 'chat',
+    ecsService: 'sds-chat-api',
+    service: 'chat-api (student-data-system)',
+    engine: 'postgres',
+    database: 'chat',
+    schemaSource: 'student-data-system',
+    tables: [],
+  },
+  {
+    key: 'insights',
+    ecsService: 'sds-insights-api',
+    service: 'insights-api (student-data-system)',
+    engine: 'postgres',
+    database: 'insights',
+    schemaSource: 'student-data-system',
+    tables: [],
+  },
+  {
+    key: 'ledger',
+    ecsService: 'sds-ledger-api',
+    service: 'ledger-api (student-data-system)',
+    engine: 'postgres',
+    database: 'ledger_api',
+    schemaSource: 'student-data-system',
+    tables: [],
+  },
+  {
+    key: 'transcripts',
+    rdsDatabase: 'transcripts',
+    ecsService: 'sds-transcripts-api',
+    service: 'transcripts-api (student-data-system)',
+    engine: 'postgres',
+    database: 'transcripts',
+    schemaSource: 'student-data-system',
+    tables: [],
   },
 ];
 

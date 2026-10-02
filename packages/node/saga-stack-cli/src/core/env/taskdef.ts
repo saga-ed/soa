@@ -51,24 +51,29 @@ const refKind = (valueFrom: string): SecretRef['kind'] =>
  * Find the database target in a task definition's containers. URL shape wins
  * when both somehow exist; undefined when neither shape is present.
  */
-export function extractDbTarget(containers: readonly TaskDefContainer[]): DbTarget | undefined {
+export function extractDbTarget(
+  containers: readonly TaskDefContainer[],
+  names: { urlSecret?: string; envPrefix?: string } = {},
+): DbTarget | undefined {
+  const urlName = names.urlSecret ?? 'DATABASE_URL';
+  const pre = names.envPrefix ?? 'POSTGRES_';
   for (const c of containers) {
-    const urlSecret = (c.secrets ?? []).find((s) => s.name === 'DATABASE_URL' && s.valueFrom !== undefined);
+    const urlSecret = (c.secrets ?? []).find((s) => s.name === urlName && s.valueFrom !== undefined);
     if (urlSecret?.valueFrom !== undefined) {
       return { shape: 'url', urlSecret: { valueFrom: urlSecret.valueFrom, kind: refKind(urlSecret.valueFrom) } };
     }
   }
   for (const c of containers) {
     const env = new Map((c.environment ?? []).map((e) => [e.name ?? '', e.value ?? '']));
-    const host = env.get('POSTGRES_HOST');
+    const host = env.get(`${pre}HOST`);
     if (host === undefined || host === '') continue;
-    const password = (c.secrets ?? []).find((s) => s.name === 'POSTGRES_PASSWORD' && s.valueFrom !== undefined);
+    const password = (c.secrets ?? []).find((s) => s.name === `${pre}PASSWORD` && s.valueFrom !== undefined);
     return {
       shape: 'split',
       host,
-      port: Number(env.get('POSTGRES_PORT') ?? '5432'),
-      database: env.get('POSTGRES_DATABASE') ?? 'postgres',
-      username: env.get('POSTGRES_USERNAME'),
+      port: Number(env.get(`${pre}PORT`) ?? '5432'),
+      database: env.get(`${pre}DATABASE`) ?? 'postgres',
+      username: env.get(`${pre}USERNAME`),
       passwordSecret:
         password?.valueFrom === undefined ? undefined : { valueFrom: password.valueFrom, kind: refKind(password.valueFrom) },
     };

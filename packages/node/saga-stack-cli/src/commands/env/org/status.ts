@@ -106,7 +106,7 @@ export default class EnvOrgStatus extends BaseCommand {
 
     // ── per-store footprint ──
     const stores: StoreFootprint[] = [];
-    for (const store of STORES) {
+    for (const store of STORES.filter((s) => s.tables.length > 0)) {
       const url = urls.get(store.key);
       const footprint: StoreFootprint = { store: store.key, service: store.service, tables: [] };
       for (const rule of store.tables) {

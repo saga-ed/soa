@@ -17,6 +17,7 @@ import type { SeedAddOn, SeedEnv, SeedProfile, SeedStep } from './types.js';
 
 /** The canonical seed-step ids (superset of `SeedStepRef` — incl. `scheduling`/`coach-pg`). */
 export type SeedStepId =
+  | 'ap-founders'
   | 'iam-registry' //         soa#253: iam seed:registry (Permission/Policy catalog) — MUST precede iam-dev-user
   | 'iam-dev-user'
   | 'iam'
@@ -58,6 +59,7 @@ export const PROFILE_STEPS: Readonly<Record<SeedProfile, readonly SeedStepId[]>>
 
 /** Add-on → the seed-step ids it contributes (plan §4.1). */
 export const ADDON_STEPS: Readonly<Record<SeedAddOn, readonly SeedStepId[]>> = {
+  wootmath: ['ap-founders'],
   // M8 R5: the playback DBs are meshProvisioned:false, so they need their
   // bootstrap SQL + migrate (`*-provision`) BEFORE the fixture seed (`pnpm seed`).
   // Now expressible via stdinFile, so native `--with playback` is un-gated.
@@ -109,6 +111,7 @@ export const SEED_RUN_ORDER: readonly SeedStepId[] = [
   'insights',
   'chat',
   'fga-bootstrap',
+  'ap-founders',
 ];
 
 // ── connection derivation (from the manifest's DatabaseDef) ──────────────────
@@ -265,6 +268,24 @@ function playbackStep(m: Manifest, id: SeedStepId, service: ServiceId, dbId: DbI
  */
 export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, SeedStep> {
   return {
+    'ap-founders': {
+      id: 'ap-founders',
+      service: 'ap-api',
+      databases: ['ap'],
+      cwd: getService('ap-api', m).subpath,
+      command: ['pnpm', 'db:seed'],
+      env: {
+        kind: 'inline-multi',
+        vars: {
+          DATABASE_URL: pgUrl(getDb('ap', m)),
+          NODE_ENV: 'development',
+          AP_AUTH_MODE: 'synthetic',
+          AP_SYNTHETIC_PASSWORD: 'Founders-local-2026!',
+        },
+      },
+      requiresServiceUp: [],
+      failureMode: 'fatal',
+    },
     // soa#253 — iam seed:registry (`node dist/seed-registry.js`), the iam
     // Permission/Policy catalog. Rostering added registry-gated nav-tab permissions
     // (view_rosters_tab/view_sessions_tab, session perms …a005-000000000053/054/055);

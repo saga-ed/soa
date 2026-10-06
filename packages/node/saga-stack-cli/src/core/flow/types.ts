@@ -43,6 +43,9 @@ const SERVICE_IDS = [
   'staff-admin-bff',
   'staff-admin-console',
   'janus-mock-signer',
+  'ap-api',
+  'ap-dash',
+  'ap-student',
 ] as const;
 
 // Compile guard: every literal above must be a real ServiceId (catches typos /
@@ -56,7 +59,7 @@ export const serviceIdSchema = z.enum(SERVICE_IDS);
 export const flowLaneSchema = z.enum(['stack', 'sandbox', 'tunnel']);
 
 const seedProfileSchema = z.enum(['roster', 'full']);
-const seedAddOnSchema = z.enum(['playback', 'qtf', 'authz']);
+const seedAddOnSchema = z.enum(['playback', 'qtf', 'authz', 'wootmath']);
 
 /**
  * Seed selection authored inline in a flow/stage. Structurally compatible with

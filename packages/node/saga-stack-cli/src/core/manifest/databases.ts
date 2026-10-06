@@ -280,4 +280,15 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     // on PRE-EXISTING mesh volumes, whose profile-empty.sql predates this entry.
     meshProvisioned: true,
   },
+  ap: {
+    name: 'ap',
+    engine: 'postgres',
+    migrate: { dir: 'apps/node/ap-api', cmd: 'db:migrate', databaseUrlOverride: true },
+    ownerRole: 'ap',
+    ownerPw: 'synthetic-ap-only',
+    resettable: true,
+    resetMode: 'truncate',
+    // The native provision pass creates this role/database; it is not in profile-empty.sql.
+    meshProvisioned: true,
+  },
 };

@@ -13,6 +13,7 @@ import {
   AUTHZ_IDS,
   JANUS_MOCK_IDS,
   PLAYBACK_IDS,
+  WOOTMATH_IDS,
   STAFF_ADMIN_IDS,
   closureOptsFor,
   closureOptsForIds,
@@ -169,6 +170,7 @@ describe('optional-service id sets (derived from BUNDLES)', () => {
     // flag mapping silently resolves to an EMPTY closure at every caller.
     const mapped = new Set<string>([
       ...PLAYBACK_IDS,
+      ...WOOTMATH_IDS,
       ...AUTHZ_IDS,
       ...STAFF_ADMIN_IDS,
       ...JANUS_MOCK_IDS,
@@ -184,12 +186,14 @@ describe('closureOptsFor / closureOptsForIds', () => {
   it('derives every flag from one --with list', () => {
     expect(closureOptsFor(['staff-admin'])).toEqual({
       withPlayback: false,
+      withWootmath: false,
       withAuthz: false,
       withStaffAdmin: true,
       withJanusMock: true,
     });
     expect(closureOptsFor(undefined)).toEqual({
       withPlayback: false,
+      withWootmath: false,
       withAuthz: false,
       withStaffAdmin: false,
       withJanusMock: false,
@@ -199,12 +203,14 @@ describe('closureOptsFor / closureOptsForIds', () => {
   it('derives the same flags from wanted ids (workspace run-set / flow systems)', () => {
     expect(closureOptsForIds(['staff-admin-console'])).toEqual({
       withPlayback: false,
+      withWootmath: false,
       withAuthz: false,
       withStaffAdmin: true,
       withJanusMock: false,
     });
     expect(closureOptsForIds(['iam-api'])).toEqual({
       withPlayback: false,
+      withWootmath: false,
       withAuthz: false,
       withStaffAdmin: false,
       withJanusMock: false,

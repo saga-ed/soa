@@ -72,9 +72,20 @@ plus tab-completion work at every level.
 
 ### Bundles — common shapes in one word
 
-`--with dash|connect|coach|playback|qtf|authz|staff-admin` expand to a set of `--only`
+`--with dash|connect|coach|playback|qtf|authz|staff-admin|wootmath` expand to a set of `--only`
 includes (sugar over the closure, composable: `--with dash --with coach`). Shared across
 `up`/`status`/`verify`/`seed`/`reset`/`snapshot store`. See `ss stack bundle list`.
+
+#### `--with wootmath` — adaptive practice only
+
+```bash
+ss stack up --with wootmath --wootmath ~/dev/wootmath
+```
+
+Starts `ap-api` (:4310), `ap-dash` (:5180), and `ap-student` (:5174), with
+PostgreSQL and RabbitMQ only. The synthetic Founders seed is additive. Use
+`--slot N` for separate ports/data; an existing standalone Woot Math database
+is not automatically imported. See [Woot Math setup and verification](./docs/sub-stacks-and-bundles.md#woot-math-adaptive-practice).
 
 #### `--with staff-admin` — the staff-admin console
 

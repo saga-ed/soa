@@ -1,39 +1,5 @@
-/**
- * The minimal native mesh bring-up (plan §7.2 "M4"). A FAITHFUL-IN-SPIRIT port
- * of up.sh's `mesh_up` (~521-566), trimmed to the essentials M4 needs:
- *
- *   1. `check_ports` preflight (preflight.ts) — abort with named conflicts before
- *      we touch docker.
- *   2. `make up PROJECT=saga-mesh PROFILE=empty POSTGRES_PORT=… REDIS_PORT=…
- *      RABBITMQ_PORT=… RABBITMQ_MGMT_PORT=… CONNECT_MONGO_PORT=…` in `$SOA/infra`
- *      (with `EXTRA_POSTGRES_SEED_DIR=../../projects/saga-mesh/seed`) via the
- *      shared `Runner`. The mesh starts as ONE unit regardless of the closure, so
- *      all five port vars are always passed — exactly up.sh.
- *   3. per-unit readiness gating — poll each NEEDED mesh unit's manifest readiness
- *      command (`pg_isready` / `redis-cli ping` / `rabbitmq-diagnostics ping` /
- *      `mongosh ping`) up to its manifest `timeoutSec`, via the injectable
- *      `MeshExec` (`docker exec <container> …`).
- *
- * The port vars + readiness commands + container names are DERIVED FROM THE
- * MANIFEST (`mesh.ts`), not hardcoded, so they can't drift from the topology.
- * Only the closure's mesh units are readiness-gated (a postgres-only partial
- * stack doesn't wait on rabbitmq), even though `make up` still starts the whole
- * mesh — matching up.sh starting everything but the launcher only needing a
- * subset healthy.
- *
- * DELIBERATELY OMITTED (vs up.sh `mesh_up`, this being the MINIMAL bring-up):
- * the "all 4 containers already running ⇒ skip" docker-ps fast path and the
- * one-time legacy standalone-connect-mongo migration. Those are docker-ps
- * niceties, not correctness; noted as TODOs for the full M6 port. The readiness
- * poll is still idempotent (a healthy unit passes on the first probe), so a
- * re-run is safe.
- *
- * Production wires `makeRealMeshExec()` (the only place `docker exec` runs for
- * readiness) + the shared real Runner; tests inject fakes so the make-up
- * invocation and the readiness gating are asserted with NO real make/docker.
- *
- * INVARIANT (plan hard constraint): make/docker IO lives only in
- * `src/runtime/**`; `src/core/**` never imports this and stays pure.
+/** Native mesh startup: preflight and start only the closure's infrastructure,
+ * then wait for its readiness probes. Omitted units retain the full-mesh API.
  */
 
 import { execFile } from 'node:child_process';
@@ -44,21 +10,7 @@ import type { Runner } from './exec.js';
 import { checkPorts, makeRealPortProbe, meshOwnedContainers, meshPortSpecs } from './preflight.js';
 import type { PortConflict, PortProbe } from './preflight.js';
 
-/**
- * Mesh units gated behind a docker-compose `profiles:` entry — NOT started by a
- * bare `docker compose up -d` unless their profile is active. `openfga` (+ its
- * `openfga_migrate` one-shot sidecar, unmodeled as a `MeshId`) is the first: the
- * `authz` bundle is opt-in (plan decision), but `make up`'s `$(COMPOSE) up -d` has
- * no per-service filter (confirmed in `infra/Makefile`) — profiles are the only
- * way to keep it out of every OTHER `stack up`'s footprint without touching the
- * shared Makefile that every project's mesh depends on.
- *
- * Keyed by mesh unit id, valued by the compose `profiles:` name that unit's
- * service definition actually carries (`../services/openfga/compose.yml` uses
- * `profiles: ["authz"]`, NOT `["openfga"]` — the unit id and the compose
- * profile name are independent strings, so this map, not the unit id itself,
- * is what `COMPOSE_PROFILES` must be built from).
- */
+/** Compose profile names for explicitly selected optional infrastructure. */
 const PROFILE_GATED_MESH: ReadonlyMap<MeshId, string> = new Map<MeshId, string>([['openfga', 'authz']]);
 
 /** Strip a `meshPortSpecs` mgmt-port suffix (`'<id>-mgmt'` → `'<id>'`) back to its unit id. */
@@ -96,12 +48,8 @@ export interface MeshContext {
   /** The readiness-probe seam. Default `makeRealMeshExec()`. */
   exec?: MeshExec;
   /**
-   * Which mesh units the active closure needs (typically `closure.mesh`).
-   * Omitted ⇒ all manifest mesh units. Narrows what we readiness-WAIT on for
-   * every unit; for `PROFILE_GATED_MESH` units specifically (`openfga`) it also
-   * decides whether they're preflighted/started at all — the base mesh
-   * (postgres/redis/rabbitmq/connect-mongo) always starts via `make up`
-   * regardless, since that target has no per-service filter.
+   * Infrastructure to start and readiness-check. Omitted means every mesh unit;
+   * an empty list is a no-op (never a bare Compose up).
    */
   units?: MeshId[];
   /** Port probe for the `check_ports` preflight. Default `makeRealPortProbe()`. */
@@ -157,7 +105,7 @@ const OPENFGA_PLAYGROUND_BASE_PORT = 3105;
 
 export function meshMakeArgs(
   m: Manifest = defaultManifest,
-  opts: { project?: string; offset?: number } = {},
+  opts: { project?: string; offset?: number; units?: MeshId[] } = {},
 ): string[] {
   const offset = opts.offset ?? 0;
   const pg = getMesh('postgres', m);
@@ -170,6 +118,10 @@ export function meshMakeArgs(
     ...(opts.project ? [`COMPOSE_PROJECT_NAME=${opts.project}`] : []),
     'PROJECT=saga-mesh',
     'PROFILE=empty',
+    ...(opts.units ? [
+      `SERVICES=${opts.units.flatMap((id) => id === 'postgres' ? [id, 'postgres_init'] : [id]).join(' ')}`,
+      `CHECK_PORTS=${selectedPorts(m, offset, opts.units).map((spec) => spec.port).join(' ')}`,
+    ] : []),
     `POSTGRES_PORT=${pg.port + offset}`,
     `REDIS_PORT=${redis.port + offset}`,
     `RABBITMQ_PORT=${rabbit.port + offset}`,
@@ -193,6 +145,13 @@ export function meshMakeArgs(
     // it — so it is derived from the same base the compose default uses.
     `OPENFGA_PLAYGROUND_PORT=${OPENFGA_PLAYGROUND_BASE_PORT + offset}`,
   ];
+}
+
+/** Include every published port, including OpenFGA's development playground. */
+function selectedPorts(m: Manifest, offset: number, units: MeshId[]) {
+  const ports = meshPortSpecs(m, offset).filter((spec) => units.includes(baseUnitId(spec.name) as MeshId));
+  if (units.includes('openfga')) ports.push({ name: 'openfga-playground', port: OPENFGA_PLAYGROUND_BASE_PORT + offset });
+  return ports;
 }
 
 /** Inputs to a native mesh teardown. */
@@ -261,6 +220,7 @@ export async function meshUp(ctx: MeshContext): Promise<MeshResult> {
   const probe = ctx.portProbe ?? makeRealPortProbe();
   const gatedIds = ctx.units ?? (Object.keys(m.mesh) as MeshId[]);
   const offset = ctx.meshOffset ?? 0;
+  if (gatedIds.length === 0) return { ok: true, conflicts: [], makeOk: true, units: [] };
 
   // Profile-gated units (e.g. `openfga`) only actually start when their compose
   // `profiles:` entry is active — derive the active profile set from which gated
@@ -276,28 +236,19 @@ export async function meshUp(ctx: MeshContext): Promise<MeshResult> {
   // by a container that won't be started, so checking them would be a false
   // conflict against whatever else happens to be bound to that host port.
   if (!ctx.skipPreflight) {
-    const ports = meshPortSpecs(m, offset).filter(
-      (spec) => !PROFILE_GATED_MESH.has(baseUnitId(spec.name) as MeshId) || activeGatedIds.includes(baseUnitId(spec.name) as MeshId),
-    );
+    const ports = selectedPorts(m, offset, gatedIds);
     const conflicts = await checkPorts(ports, probe, meshOwnedContainers(m));
     if (conflicts.length > 0) {
       return { ok: false, conflicts, makeOk: false, units: [] };
     }
   }
 
-  // 2. make up — the BASE mesh always starts as a whole; ports are
-  // manifest-derived (+ the slot offset). Profile-gated units (`openfga`) only
-  // join via `COMPOSE_PROFILES`, set iff the caller's closure needs them — `make
-  // up`'s `$(COMPOSE) up -d` has no per-service filter (confirmed: the shared
-  // Makefile's `up:` target is bare), so compose profiles are the only seam that
-  // keeps an opt-in unit out of every OTHER project's mesh footprint without
-  // touching that shared target. COMPOSE_PROJECT_NAME goes both as a make arg and
-  // via env (the Makefile's `?=` env-override path). At slot 0 both are omitted
-  // ⇒ identical to pre-M7/pre-profile behavior when no gated unit is needed.
+  // 2. Select Compose services as well as readiness checks. postgres_init is
+  // a sibling (not a dependency of postgres), so include it explicitly.
   const { code } = await ctx.runner.run({
     cwd: join(ctx.soaRoot, 'infra'),
     command: 'make',
-    args: meshMakeArgs(m, { project: ctx.project, offset }),
+    args: meshMakeArgs(m, { project: ctx.project, offset, units: gatedIds }),
     env: {
       EXTRA_POSTGRES_SEED_DIR: '../../projects/saga-mesh/seed',
       ...(ctx.project ? { COMPOSE_PROJECT_NAME: ctx.project } : {}),

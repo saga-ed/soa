@@ -28,7 +28,7 @@
  * would wrongly resolve transcripts-api), so the gate dispatches per service id.
  */
 
-import { AUTHZ_IDS, JANUS_MOCK_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from './bundles.js';
+import { WOOTMATH_IDS, AUTHZ_IDS, JANUS_MOCK_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from './bundles.js';
 import { launchOrder } from './launch-order.js';
 import type { DbId, Manifest, MeshId, ServiceId } from './manifest/index.js';
 
@@ -44,6 +44,8 @@ export interface Closure {
 }
 
 export interface ClosureOpts {
+  /** Keep the optional Woot Math application services. */
+  withWootmath?: boolean;
   /** Keep `optional:true` playback services (transcripts/insights/chat). */
   withPlayback?: boolean;
   /** Keep the `optional:true` `authz-sync` service. */
@@ -97,6 +99,7 @@ export function computeClosure(
   // closure (exit 0, no error) until someone noticed. An unmapped id now THROWS,
   // which surfaces at the first test that touches it rather than in the field.
   const admitsOptional = (id: ServiceId): boolean => {
+    if (WOOTMATH_IDS.includes(id)) return opts.withWootmath ?? false;
     if (PLAYBACK_IDS.includes(id)) return withPlayback;
     if (AUTHZ_IDS.includes(id)) return withAuthz;
     if (STAFF_ADMIN_IDS.includes(id)) return withStaffAdmin;

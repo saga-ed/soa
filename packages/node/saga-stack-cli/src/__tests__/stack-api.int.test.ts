@@ -147,7 +147,7 @@ function makeRuntime(launchFail: Set<string> = new Set()): { runtime: Runtime; f
 const FOUR: ServiceId[] = ['iam-api', 'programs-api', 'scheduling-api', 'sessions-api'];
 
 describe('StackApi.up — full native bring-up over a concrete closure', () => {
-  it('preflights every mesh port, runs make up ONCE, gates only the closure units, launches the closure in topo order', async () => {
+  it('preflights only selected mesh ports, runs make up ONCE, gates only the closure units, launches the closure in topo order', async () => {
     const { runtime, fakes } = makeRuntime();
     const api = makeStackApi(manifest, runtime);
 
@@ -155,9 +155,8 @@ describe('StackApi.up — full native bring-up over a concrete closure', () => {
 
     expect(res.ok).toBe(true);
 
-    // checkPorts preflight: every mesh host port was probed before make up
-    // (postgres 5432, redis 6379, rabbitmq 5672 + mgmt 15672, connect-mongo 27037).
-    expect(fakes.probedPorts).toEqual([5432, 6379, 5672, 15672, 27037]);
+    // Only postgres, redis and RabbitMQ belong to this closure; MongoDB is not probed.
+    expect(fakes.probedPorts).toEqual([5432, 6379, 5672, 15672]);
 
     // meshUp once: exactly one `make up`, in <soa>/infra, with manifest-derived ports.
     const makeRuns = fakes.runs.filter((r) => r.command === 'make');

@@ -54,6 +54,7 @@ export const REPO_ENV_VAR: Record<RepoKey, ManifestRepoKey> = {
   rtsm: 'RTSM',
   fleek: 'FLEEK',
   janus: 'JANUS',
+  wootmath: 'WOOTMATH',
 };
 
 /**

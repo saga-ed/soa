@@ -37,10 +37,14 @@ export SEED_PROFILE := $(PROFILE)
 
 ## ─── Lifecycle ───────────────────────────────────────────────
 
+# Optional service selection for partial stacks; empty retains the project default.
+SERVICES ?=
+CHECK_PORTS ?= $(POSTGRES_PORT) $(MONGO_PORT) $(CONNECT_MONGO_PORT) $(MYSQL_PORT) $(REDIS_PORT) $(RABBITMQ_PORT) $(RABBITMQ_MGMT_PORT)
+
 ## Pre-flight check: fail fast if any required port is already taken.
 check-ports:
 	@conflicts=""; stop_cmds=""; down_projects=""; \
-	for port in $(POSTGRES_PORT) $(MONGO_PORT) $(CONNECT_MONGO_PORT) $(MYSQL_PORT) $(REDIS_PORT) $(RABBITMQ_PORT) $(RABBITMQ_MGMT_PORT); do \
+	for port in $(CHECK_PORTS); do \
 		[ -z "$$port" ] && continue; \
 		match=$$(docker ps --format '{{.Names}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}' \
 			| grep -E "0\.0\.0\.0:$$port->" | head -1); \
@@ -73,7 +77,7 @@ check-ports:
 
 ## Start a project's services with the given profile.
 up: check-ports
-	$(COMPOSE) up -d
+	$(COMPOSE) up -d $(SERVICES)
 	@echo ""
 	@echo "  Project: $(PROJECT)  Profile: $(PROFILE)"
 	@echo "  Services started. Use 'make status' to see what's running."

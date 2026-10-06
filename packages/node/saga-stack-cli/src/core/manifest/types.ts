@@ -33,9 +33,12 @@ export type ServiceId =
   | 'authz-sync' //      optional: true (--with authz) — RabbitMQ-only OpenFGA tuple projector
   | 'staff-admin-bff' //     optional: true (--with staff-admin) — the console's own Express BFF
   | 'staff-admin-console' // optional: true (--with staff-admin) — staff-only SvelteKit SPA (:8910)
+  | 'ap-api'
+  | 'ap-dash'
+  | 'ap-student'
   | 'janus-mock-signer'; // optional: true (--with janus-mock / --with staff-admin) — local EdDSA JWKS signer for janus_session claims
 
-/** Mesh infra units, started as a single `make up PROFILE=empty`. */
+/** Mesh infrastructure selected from the active service closure. */
 export type MeshId = 'postgres' | 'redis' | 'rabbitmq' | 'connect-mongo' | 'openfga';
 
 /** Sibling-repo env-var keys (mirror up.sh:173-181). `repoRoot = $<key> ?? $DEV/<default>`. */
@@ -49,7 +52,8 @@ export type RepoKey =
   | 'QBOARD'
   | 'RTSM'
   | 'FLEEK'
-  | 'JANUS';
+  | 'JANUS'
+  | 'WOOTMATH';
 
 /** The three URL lanes a service can be addressed on. */
 export type Lane = 'stack' | 'sandbox' | 'tunnel';
@@ -82,7 +86,8 @@ export type DbId =
   | 'connectv3'
   | 'openfga'
   | 'authz_sync_local'
-  | 'authz_local';
+  | 'authz_local'
+  | 'ap';
 
 /** Canonical SeedStep ids (see §4). Referenced by `ServiceDef.seed`. */
 export type SeedStepRef =
@@ -96,13 +101,14 @@ export type SeedStepRef =
   | 'transcripts'
   | 'insights'
   | 'chat'
+  | 'ap-founders'
   | 'fga-bootstrap';
 
 /** How a DB's schema is applied. `dir` is repo-relative to the OWNING service's repo. */
 export interface MigrateSpec {
   /** Repo-relative dir that OWNS the schema (e.g. `packages/node/iam-db`). */
   dir: string;
-  cmd: 'db:deploy' | 'prisma migrate deploy' | 'prisma db push';
+  cmd: 'db:deploy' | 'db:migrate' | 'prisma migrate deploy' | 'prisma db push';
   /** Force the mesh :5432 DATABASE_URL (program-hub apps default to their own :5433). */
   databaseUrlOverride?: boolean;
   /**

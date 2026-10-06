@@ -569,6 +569,7 @@ const AUTO_PULL_REPO_ORDER: RepoKey[] = [
   'SDS',
   'QBOARD',
   'RTSM',
+  'WOOTMATH',
 ];
 
 /**
@@ -786,7 +787,7 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
         });
       }
 
-      // 1+2. mesh: check_ports preflight → `make up` (whole mesh) → readiness-gate
+      // 1+2. mesh: check_ports preflight → `make up` (selected mesh) → readiness-gate
       // the closure's mesh units. meshUp runs the preflight internally.
       const mesh = await meshUp({
         soaRoot: runtime.soaRoot,

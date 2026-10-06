@@ -46,6 +46,13 @@ import type { Lane, Manifest, RepoKey, ServiceId } from './manifest/index.js';
  * runtime context builder is the one place these become host-specific.
  */
 export interface LaunchTokens {
+  AP_API_PORT: string;
+  AP_DASH_PORT: string;
+  AP_STUDENT_PORT: string;
+  AP_API_URL: string;
+  AP_DASH_URL: string;
+  AP_STUDENT_URL: string;
+  AP_DB_URL: string;
   // ── ports, string form (used as `${…}` inside launch env) ──
   /** iam-api port — up.sh `IAM_PORT` (3010). */
   IAM_PORT: string;
@@ -296,7 +303,7 @@ export interface LaunchSpec {
   id: ServiceId;
   /** Absolute working dir the child runs in (`repoRoots[repo]/subpath`). */
   cwd: string;
-  /** The launch command (e.g. `pnpm dev`) — `ServiceDef.launch.cmd`, verbatim. */
+  /** The launch command (e.g. `pnpm dev`) — `ServiceDef.launch.cmd` with manifest tokens expanded. */
   command: string;
   /** The resolved launch env (token templates expanded; faithful to up.sh). */
   env: Record<string, string>;
@@ -617,7 +624,7 @@ export function launchPlan(
     return {
       id,
       cwd: joinPath(ctx.repoRoots[def.repo], def.subpath),
-      command: def.launch.cmd,
+      command: expand(def.launch.cmd, ctx.tokens as unknown as Record<string, string>, `${id}.launch.cmd`),
       env: resolveLaunchEnv(id, lane, ctx, m),
       healthUrl: healthUrlFor(base, def.healthPath),
       healthPath: def.healthPath,
@@ -729,6 +736,13 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
   const recordingsApiPort = inputs.recordingsApiPort ?? 8444;
 
   const tokens: LaunchTokens = {
+    AP_API_PORT: String(ports['ap-api']),
+    AP_DASH_PORT: String(ports['ap-dash']),
+    AP_STUDENT_PORT: String(ports['ap-student']),
+    AP_API_URL: `http://127.0.0.1:${ports['ap-api']}`,
+    AP_DASH_URL: `http://127.0.0.1:${ports['ap-dash']}`,
+    AP_STUDENT_URL: `http://127.0.0.1:${ports['ap-student']}`,
+    AP_DB_URL: pgUrl('ap', pgPort, m),
     // ports (string form)
     IAM_PORT: String(ports['iam-api']),
     SIS_PORT: String(ports['sis-api']),

@@ -28,8 +28,9 @@ reasons:
 ```
 
 The `reasons` block shows *why* each service is in the closure — `url` (a hard runtime
-dependency) vs `event` (async projection over the mesh). A missing sibling repo is
-skipped-with-a-warning, not a hard failure.
+dependency) vs `event` (async projection over the mesh). With bare `up` or
+`--only`, a missing sibling repo is skipped with a warning. Explicit `--with`
+bundles instead require their local dependency checkouts (see below).
 </details>
 
 ## `--with` — convenience bundles
@@ -63,6 +64,77 @@ ss stack up --with dash --with playback
 ```
 
 `--with` is shared across `up` / `status` / `verify` / `seed` / `reset` / `snapshot store`.
+
+Before starting an explicitly requested bundle, `stack up` checks that every
+required local repository has a checkout with a `.git` directory or worktree
+`.git` file. Missing checkouts fail with a nonzero exit and show the resolved
+path, clone URL, and override flag/environment variable, before auto-pull,
+application prep, or infrastructure startup. Sandbox-hosted dependencies and
+services excluded from the selected slot do not require local checkouts.
+`--dry-run` remains a planner and does not require checkouts; seed-only bundles
+such as `qtf` introduce no checkout requirements.
+
+## Woot Math adaptive practice
+
+`--with wootmath` selects the independent student app, teacher dashboard, and
+AP API. It uses local synthetic identity; IAM, Redis, MongoDB, and other Saga
+applications are not dependencies of this bundle.
+
+```bash
+ss stack up --with wootmath --wootmath ~/dev/wootmath --dry-run
+ss stack up --with wootmath --wootmath ~/dev/wootmath
+ss stack status --with wootmath --wootmath ~/dev/wootmath
+```
+
+The default checkout is `$DEV/wootmath-adaptive-practice`; `--wootmath` or
+`WOOTMATH` overrides it. The checkout needs the AP workspace and staged
+curriculum assets. Normal prep installs dependencies and builds that checkout;
+use `--skip-prep` only when it is already prepared. Add `--no-auto-pull` to keep
+repo revisions pinned during investigation.
+
+| Component | Slot 0 URL/port |
+|---|---|
+| Student app | http://127.0.0.1:5174/ |
+| Teacher dashboard | http://127.0.0.1:5180/ |
+| AP API health | http://127.0.0.1:4310/health |
+| PostgreSQL / database | localhost:5432 / `ap` |
+| RabbitMQ AMQP / management | localhost:5672 / localhost:15672 |
+
+`--slot N` adds `N * 1000` to these ports and uses that slot's PostgreSQL and
+RabbitMQ volumes. Origins, frontend proxy targets and sign-in redirects follow
+the same slot. For example, slot 6 uses student :11174, teacher :11180, API
+:10310, PostgreSQL :11432, RabbitMQ :11672 and management :21672.
+
+Startup provisions the `ap` role/database, runs the application's idempotent
+`db:migrate`, and invokes its additive `db:seed` for Brent, Krista, Tom and Jeff
+in Woot Math Founders. Synthetic accounts use `<name>@founders.example.test`
+and the local fixture password `Founders-local-2026!`; they have student and
+teacher memberships. Existing passwords, attempts and progress are preserved
+by that seed. `--no-seed` skips it. This bundle does not exercise external
+Saga/OIDC login, and `ss stack login` is still the Saga/IAM login helper; use
+Woot Math's sign-in screen.
+
+This starts a separate database from the standalone `synthetic:up` launcher;
+existing standalone progress is not automatically moved. Choose an unused
+slot when both launchers are running. Partial startup adds only the required
+infrastructure; it does not stop unrelated containers already running in the
+chosen slot. PostgreSQL's existing initializer still runs, and may create
+baseline Saga databases on fresh volumes, but no other application services
+are launched.
+
+For an explicitly scoped Founders reseed or snapshot:
+
+```bash
+ss stack seed --with wootmath --only ap-api --wootmath ~/dev/wootmath
+ss stack snapshot store --with wootmath --only ap-api --fixture-id founders --wootmath ~/dev/wootmath
+```
+
+### Infrastructure selection
+
+All native partial-stack launches now pass their mesh closure to Compose,
+including `postgres_init` when PostgreSQL is selected. Host-port checks cover
+only selected units. A service with no mesh dependencies starts no containers.
+The shared Makefile retains full-project behavior when `SERVICES` is omitted.
 
 ## Seeding
 

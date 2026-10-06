@@ -29,8 +29,9 @@ const throwFail = (msg: string): never => {
 };
 
 describe('bundle registry', () => {
-  it('exposes the eight bundle names in registry order', () => {
+  it('exposes the nine bundle names in registry order', () => {
     expect(BUNDLE_NAMES).toEqual([
+      'wootmath',
       'dash',
       'connect',
       'coach',
@@ -65,7 +66,7 @@ describe('bundle registry', () => {
   });
 
   it('derives BUNDLE_SEED_ADDONS only for the seed-bearing bundles', () => {
-    expect(BUNDLE_SEED_ADDONS).toEqual({ playback: 'playback', qtf: 'qtf', authz: 'authz' });
+    expect(BUNDLE_SEED_ADDONS).toEqual({ playback: 'playback', qtf: 'qtf', authz: 'authz', wootmath: 'wootmath' });
   });
 });
 

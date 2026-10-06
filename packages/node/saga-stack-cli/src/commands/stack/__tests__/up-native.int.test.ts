@@ -13,7 +13,7 @@
  * wrappers.int.test.ts (which only mocks getRunner).
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Config } from '@oclif/core';
@@ -820,5 +820,89 @@ describe('stack up — Phase 2 native --sandbox / --tunnel / --record / --worksp
     });
     expect(launches).toEqual([]);
     expect(runs.some((r) => r.command.endsWith('up.sh'))).toBe(false);
+  });
+});
+
+
+describe('explicit bundle checkout preflight', () => {
+  const proto = BaseCommand.prototype as unknown as {
+    getRepoDirCheck: () => (path: string) => boolean;
+    getGitRunner: () => GitRunner;
+  };
+  let env: EnvSnapshot;
+
+  beforeEach(() => {
+    env = saveEnv(['WOOTMATH', 'COACH', 'ROSTERING']);
+    delete process.env.WOOTMATH;
+    delete process.env.COACH;
+    delete process.env.ROSTERING;
+  });
+  afterEach(() => restoreEnv(env));
+
+  it.each([
+    { label: 'default checkout', args: [], root: `${DEV_ROOT}/wootmath-adaptive-practice` },
+    { label: 'flag override', args: ['--wootmath', '/missing/wootmath'], root: '/missing/wootmath' },
+    { label: 'environment override', args: [], root: '/env/wootmath', envRoot: '/env/wootmath' },
+  ])('rejects missing $label before pull, overlays, mesh, prep or launch', async ({ args, root, envRoot }) => {
+    if (envRoot) process.env.WOOTMATH = envRoot;
+    vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue((path) => path !== root);
+    const git = vi.spyOn(proto, 'getGitRunner');
+
+    await expect(StackUp.run(['--with', 'wootmath', '--tunnel', ...WS, ...args], config))
+      .rejects.toThrow(`WOOTMATH: missing checkout or .git marker at ${root}`);
+    expect(git).not.toHaveBeenCalled();
+    expect(runs).toEqual([]);
+    expect(meshGated).toEqual([]);
+    expect(launches).toEqual([]);
+    expect(fleetGenCalls).toEqual([]);
+  });
+
+  it('rejects an existing directory without a .git marker and gives recovery instructions', async () => {
+    vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue((path) => path !== '/existing/wootmath/.git');
+    const error = await StackUp.run(['--with', 'wootmath', '--wootmath', '/existing/wootmath', ...WS], config)
+      .catch((e: Error) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain('git@github.com:saga-ed/wootmath-adaptive-practice.git');
+    expect((error as Error).message).toContain('--wootmath <path> / WOOTMATH=<path>');
+    expect(runs).toEqual([]);
+    expect(launches).toEqual([]);
+  });
+
+  it.each(['directory', 'file'])('accepts a checkout with a .git %s, with the flag overriding the environment', async (kind) => {
+    const root = mkdtempSync(join(tmpdir(), 'ss-bundle-checkout-'));
+    try {
+      if (kind === 'file') writeFileSync(join(root, '.git'), 'gitdir: /worktree/common/.git/worktrees/test\n');
+      else mkdirSync(join(root, '.git'));
+      process.env.WOOTMATH = '/ignored/wootmath';
+      vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue((path) =>
+        path.startsWith(root) ? existsSync(path) : path !== '/ignored/wootmath',
+      );
+      await StackUp.run(['--with', 'wootmath', '--wootmath', root, '--skip-prep', '--no-auto-pull', ...WS], config);
+      expect(launches.map((s) => s.id).sort()).toEqual(['ap-api', 'ap-dash', 'ap-student']);
+      expect(launches.every((s) => s.cwd.startsWith(root))).toBe(true);
+      expect(runs.some((r) => r.args.includes('db:seed'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('also requires a bundle dependency checkout', async () => {
+    vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue((path) => path !== `${DEV_ROOT}/rostering`);
+    await expect(StackUp.run(['--with', 'coach', ...WS], config)).rejects.toThrow('ROSTERING: missing checkout');
+    expect(runs).toEqual([]);
+    expect(launches).toEqual([]);
+  });
+
+  it('does not require dependencies hosted by the sandbox', async () => {
+    vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue((path) => !path.startsWith(`${DEV_ROOT}/rostering`));
+    await StackUp.run(['--with', 'coach', '--sandbox', 'dev', '--skip-prep', '--no-auto-pull', ...WS], config);
+    expect(launches.map((s) => s.id).sort()).toEqual(['coach-api', 'coach-web']);
+  });
+
+  it('keeps dry-run available before any checkouts are cloned', async () => {
+    vi.spyOn(proto, 'getRepoDirCheck').mockReturnValue(() => false);
+    await expect(StackUp.run(['--with', 'wootmath', '--dry-run', ...WS], config)).resolves.toBeUndefined();
+    expect(runs).toEqual([]);
+    expect(launches).toEqual([]);
   });
 });

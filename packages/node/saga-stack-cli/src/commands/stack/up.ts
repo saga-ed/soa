@@ -35,7 +35,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { Flags } from '@oclif/core';
 import { BaseCommand } from '../../base-command.js';
 import type { NativeOverlays, WorkspaceFlags } from '../../base-command.js';
@@ -44,6 +44,7 @@ import {
   closureOptsFor,
   closureOptsForIds,
   combineRequested,
+  expandBundles,
   seedAddOnsFor,
 } from '../../core/bundles.js';
 import type { ResolvedClosureOpts } from '../../core/bundles.js';
@@ -60,6 +61,9 @@ import type { SeedAddOn, SeedPlan, SeedProfile, SeedSelection } from '../../core
 import { parseWorkspace } from '../../core/workspace.js';
 import type { WorkspaceSelection } from '../../core/workspace.js';
 import { resolveVendorScript } from '../../runtime/index.js';
+import { cloneUrl } from '../../runtime/ensure-repos.js';
+import { REPO_ENV_VAR } from '../../runtime/repos.js';
+import { REPO_DEFAULT_DIR, resolveRepoRoot } from '../../runtime/scripts.js';
 import { makeStackApi } from '../../stack-api.js';
 import type { Runtime, SeedResult, StackApi } from '../../stack-api.js';
 
@@ -262,12 +266,54 @@ export default class StackUp extends BaseCommand {
     //  - `--sandbox <name>` accompanies `--only`: launch the run-set ALONE (subtract the
     //    deps the closure pulled in — iam-api et al. live at the cloud sandbox).
     //  - `--workspace`: subtract EVERY mode:sandbox service id (`ws.sandboxServices`).
+    this.checkBundleCheckouts(flags, requested, closureOpts, {
+      sandboxHybrid: flags.sandbox !== undefined,
+      sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
+    });
     const overlays = await this.resolveOverlays(flags, sandboxName, withAuthz, withJanusMock);
     await this.runNative(flags, requested, closureOpts, overlays, {
       sandboxHybrid: flags.sandbox !== undefined,
       sandboxServices: ws ? new Set(ws.sandboxServices) : undefined,
       sandboxName,
     });
+  }
+
+  /** Explicit bundles require their local checkouts before overlays, pull, prep or mesh startup. */
+  private checkBundleCheckouts(
+    flags: NativeFlags,
+    requested: ServiceId[],
+    closureOpts: ResolvedClosureOpts,
+    prune: LaunchPrune,
+  ): void {
+    const bundleServices = expandBundles(flags.with ?? [], (m) => this.error(m));
+    if (bundleServices.length === 0) return;
+    const closure = computeClosure(manifest, bundleServices, closureOpts);
+    const excluded = new Set(deriveInstance({ slot: flags.slot }).excludedServices);
+    const sandboxDrop = sandboxDropSet(prune, requested, closure.services);
+    const repos = new Set(
+      closure.services
+        .filter((id) => !excluded.has(id) && !sandboxDrop.has(id))
+        .map((id) => manifest.services[id].repo),
+    );
+    const ctx = this.scriptContextFromFlags(flags);
+    const exists = this.getRepoDirCheck();
+    const errors: string[] = [];
+    for (const repo of repos) {
+      const root = resolve(resolveRepoRoot(repo, ctx));
+      // existsSync accepts both normal .git directories and worktree .git files.
+      if (exists(root) && exists(join(root, '.git'))) continue;
+      const flag = Object.entries(REPO_ENV_VAR).find(([, key]) => key === repo)![0];
+      errors.push(
+        `${repo}: missing checkout or .git marker at ${root}\n` +
+          `  Clone ${cloneUrl(REPO_DEFAULT_DIR[repo])} into that path, or select an existing checkout with --${flag} <path> / ${repo}=<path>.`,
+      );
+    }
+    if (errors.length > 0) {
+      this.error(
+        `Cannot start explicit bundle(s) ${flags.with!.join(', ')}:\n${errors.join('\n')}\n` +
+          'No repositories were pulled, infrastructure started, or applications prepared.',
+      );
+    }
   }
 
   /**

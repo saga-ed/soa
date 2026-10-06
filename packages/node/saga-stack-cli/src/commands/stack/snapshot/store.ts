@@ -139,6 +139,7 @@ export default class SnapshotStore extends BaseCommand {
       only,
       withPlayback: closureOpts.withPlayback,
       withAuthz: closureOpts.withAuthz,
+      withWootmath: closureOpts.withWootmath,
     });
 
     const io = this.getSnapshotIO();

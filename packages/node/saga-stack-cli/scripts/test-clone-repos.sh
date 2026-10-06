@@ -13,7 +13,7 @@
 #      so `clone-repos.sh && ss stack bootstrap` stops here.
 #   6. clone failure      → exit non-zero.
 #   7. --dry-run          → reports, clones nothing, exit 0.
-#   8. --with-optional    → adds coach + fleek (9 repos).
+#   8. --with-optional    → adds coach + fleek + janus + Woot Math (11 repos).
 #   9. --help             → prints usage and exits 0 even when `$0` is not a
 #      readable file (the `gh api … | bash -s -- --help` pipe).
 #  10. unknown flag       → exit 1.
@@ -124,9 +124,10 @@ assert "dry-run: nothing on disk" "$(ls -A "$D")" ""
 D="$TMP/optional"; mkdir -p "$D"
 run "$D" --with-optional --dry-run
 assert "with-optional: exit 0" "$RC" 0
-assert_contains "with-optional: 9 repos" "$o" "9 to clone"
+assert_contains "with-optional: 11 repos" "$o" "11 to clone"
 assert_contains "with-optional: includes coach" "$o" "coach"
 assert_contains "with-optional: includes fleek" "$o" "fleek"
+assert_contains "with-optional: includes Woot Math" "$o" "wootmath-adaptive-practice"
 
 # ── 9. --help works when $0 is NOT a readable file (the `| bash -s --` pipe) ──
 out="$(PATH="$FAKE_BIN:$PATH" bash -s -- --help < "$SCRIPT" 2>&1)"; RC=$?

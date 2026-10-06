@@ -26,10 +26,11 @@ export type BundleName =
   | 'qtf'
   | 'authz'
   | 'staff-admin'
+  | 'wootmath'
   | 'janus-mock';
 
 /** A seed add-on a bundle may layer onto the composed seed plan. */
-export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz';
+export type BundleSeedAddOn = 'playback' | 'qtf' | 'authz' | 'wootmath';
 
 /** One bundle: the services it contributes to the closure, its optional seed add-on, and a one-line blurb. */
 export interface BundleDef {
@@ -49,6 +50,11 @@ export interface BundleDef {
  * `effectiveWithPlayback`). `qtf` is seed-only (no services).
  */
 export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
+  wootmath: {
+    services: ['ap-api', 'ap-dash', 'ap-student'],
+    seedAddOn: 'wootmath',
+    description: 'Woot Math student app + teacher dashboard + AP API (synthetic Founders identity, PostgreSQL and RabbitMQ only).',
+  },
   dash: {
     services: ['saga-dash'],
     description: 'saga-dash teacher SPA + its full journey backend (closure).',
@@ -234,6 +240,7 @@ export function effectiveWithJanusMock(withBundles: string[] | undefined): boole
  * service needs its OWN flag (see `admitsOptional`), and a stale hand-list is
  * exactly how one gets silently dropped into an empty closure.
  */
+export const WOOTMATH_IDS: readonly ServiceId[] = BUNDLES.wootmath.services;
 export const PLAYBACK_IDS: readonly ServiceId[] = BUNDLES.playback.services;
 export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
 export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
@@ -250,7 +257,7 @@ export const JANUS_MOCK_IDS: readonly ServiceId[] = BUNDLES['janus-mock'].servic
  * of every signature that spells the shape out.
  */
 export type ResolvedClosureOpts = Required<
-  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin' | 'withJanusMock'>
+  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin' | 'withJanusMock' | 'withWootmath'>
 >;
 
 /**
@@ -269,6 +276,7 @@ export function closureOptsFor(
   withBundles: string[] | undefined,
 ): ResolvedClosureOpts {
   return {
+    withWootmath: (withBundles ?? []).includes('wootmath'),
     withPlayback: effectiveWithPlayback(withBundles),
     withAuthz: effectiveWithAuthz(withBundles),
     withStaffAdmin: effectiveWithStaffAdmin(withBundles),
@@ -287,6 +295,7 @@ export function closureOptsForIds(
 ): ResolvedClosureOpts {
   const has = (family: readonly ServiceId[]): boolean => ids.some((id) => family.includes(id));
   return {
+    withWootmath: has(WOOTMATH_IDS),
     withPlayback: has(PLAYBACK_IDS),
     withAuthz: has(AUTHZ_IDS),
     withStaffAdmin: has(STAFF_ADMIN_IDS),

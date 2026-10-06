@@ -91,6 +91,7 @@ export const FATAL_BUILD_REPOS: ReadonlySet<RepoKey> = new Set<RepoKey>([
   'QBOARD',
   'RTSM',
   'COACH',
+  'WOOTMATH',
 ]);
 
 /** up.sh's canonical prep order. Non-built repos (SOA/FLEEK) omitted. */
@@ -102,6 +103,7 @@ const PREP_REPO_ORDER: readonly RepoKey[] = [
   'QBOARD',
   'RTSM',
   'COACH',
+  'WOOTMATH',
 ];
 
 /** Inputs to the R1 prep pass. */

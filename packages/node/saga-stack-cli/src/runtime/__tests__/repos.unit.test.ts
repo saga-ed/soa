@@ -22,6 +22,7 @@ describe('REPO_ENV_VAR', () => {
       rtsm: 'RTSM',
       fleek: 'FLEEK',
       janus: 'JANUS',
+      wootmath: 'WOOTMATH',
     });
   });
 });

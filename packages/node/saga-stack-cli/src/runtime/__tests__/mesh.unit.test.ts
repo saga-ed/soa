@@ -378,3 +378,30 @@ function shortTimeoutManifest(): typeof manifest {
     },
   };
 }
+
+describe('selective infrastructure startup', () => {
+  it('starts only PostgreSQL, its initializer and RabbitMQ; unrelated occupied ports are ignored', async () => {
+    const { runner, calls } = fakeRunner();
+    const checked: number[] = [];
+    const portProbe: PortProbe = {
+      async dockerHolder(port) { checked.push(port); return [6379, 27037].includes(port) ? 'unrelated-container' : null; },
+      async listening() { return false; },
+    };
+    const result = await meshUp({ soaRoot: SOA, runner, units: ['postgres', 'rabbitmq'], exec: fakeExec().exec, portProbe });
+    expect(result.ok).toBe(true);
+    expect(checked).toEqual([5432, 5672, 15672]);
+    expect(calls[0].args).toContain('SERVICES=postgres postgres_init rabbitmq');
+    expect(calls[0].args).toContain('CHECK_PORTS=5432 5672 15672');
+  });
+
+  it('never starts a whole mesh when the closure has no infrastructure', async () => {
+    const { runner, calls } = fakeRunner();
+    const result = await meshUp({ soaRoot: SOA, runner, units: [], exec: fakeExec().exec, portProbe: FREE_PROBE });
+    expect(result).toEqual({ ok: true, conflicts: [], makeOk: true, units: [] });
+    expect(calls).toEqual([]);
+  });
+
+  it('filters Makefile checks to slot-offset selected ports, including OpenFGA playground', () => {
+    expect(meshMakeArgs(manifest, { units: ['postgres', 'openfga'], offset: 2000 })).toContain('CHECK_PORTS=7432 10180 10181 5105');
+  });
+});

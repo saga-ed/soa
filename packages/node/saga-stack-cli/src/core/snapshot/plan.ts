@@ -46,7 +46,7 @@ function dumpFileFor(db: DbId, engine: Engine): string {
  * that drives BOTH the store-time capture and the restore snapshot-ahead guard.
  */
 function hasMigrationHistory(def: DatabaseDef): boolean {
-  return def.engine === 'postgres' && def.migrate?.cmd !== 'prisma db push';
+  return def.engine === 'postgres' && def.migrate?.cmd !== 'prisma db push' && def.migrate?.cmd !== 'db:migrate';
 }
 
 /** Build db → owning ServiceId (first service whose `databases` includes the db). */
@@ -120,6 +120,8 @@ export interface StorePlanOptions {
   only?: DbId[];
   /** Include the optional playback trio (transcripts/insights/chat). Ignored when `only` is set. */
   withPlayback?: boolean;
+  /** Include the optional Woot Math AP database in an unscoped snapshot. */
+  withWootmath?: boolean;
   /** Include the optional authz DBs (openfga/authz_sync_local). Ignored when `only` is set. */
   withAuthz?: boolean;
 }
@@ -149,6 +151,7 @@ export function storePlan(m: Manifest, opts: StorePlanOptions): StorePlan {
   const selected = allDbIds.filter((db) => {
     if (onlySet) return onlySet.has(db);
     if (isPlaybackDb(db, m, owner)) {
+      if (owner.get(db) === 'ap-api') return opts.withWootmath ?? false;
       return isAuthzDb(db, owner) ? (opts.withAuthz ?? false) : (opts.withPlayback ?? false);
     }
     return true;

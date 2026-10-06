@@ -73,6 +73,10 @@ export const repoFlags = {
     description: 'override path to the fleek repo checkout',
     default: process.env.FLEEK,
   }),
+  wootmath: Flags.string({
+    description: 'override path to the wootmath-adaptive-practice repo checkout',
+    default: process.env.WOOTMATH,
+  }),
   janus: Flags.string({
     description: 'override path to the janus repo checkout',
     default: process.env.JANUS,

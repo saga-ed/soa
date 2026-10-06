@@ -52,6 +52,7 @@ const DB_IDS = [
   'openfga',
   'authz_sync_local',
   'authz_local',
+  'ap',
 ] as const;
 const _dbIdsAreDbIds: readonly DbId[] = DB_IDS;
 void _dbIdsAreDbIds;
@@ -79,6 +80,9 @@ const SERVICE_IDS = [
   'staff-admin-bff',
   'staff-admin-console',
   'janus-mock-signer',
+  'ap-api',
+  'ap-dash',
+  'ap-student',
 ] as const;
 const _serviceIdsAreServiceIds: readonly ServiceId[] = SERVICE_IDS;
 void _serviceIdsAreServiceIds;

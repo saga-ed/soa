@@ -168,6 +168,13 @@
           "description": "point THIS run's flow browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). Services ALREADY UP are reused untouched; any service this run must launch itself comes up WITH the tunnel browser-env overlay (soa#322). It does NOT start frpc — run `ss stack up --tunnel` first for the tunnel itself. Slot-0 only.",
           "name": "tunnel",
           "type": "boolean"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -371,6 +378,13 @@
           "description": "point THIS run’s Connect browsers at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can reach the same room. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`). Services ALREADY UP are reused untouched; any service this run must launch itself comes up WITH the tunnel browser-env overlay (soa#322). It does NOT start frpc or fetch LiveKit creds — run `ss stack up --tunnel` first for the tunnel itself (and real A/V). Slot-0 only.",
           "name": "tunnel",
           "type": "boolean"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -563,6 +577,13 @@
           "multiple": false,
           "name": "state-dir",
           "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -708,6 +729,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -957,6 +985,13 @@
           "description": "point the Playwright browser at the vms tunnel hosts (https://<label>.<moniker>.<VMS_BASE>) instead of localhost, so a REMOTE peer can drive this slot-0 stack. Resolves the moniker via the vendored tunnel.sh (same machinery as `stack up --tunnel`); writes the dash tunnel config; exports PLAYWRIGHT_TUNNEL_TIMEOUT_MS for the SPA config. Slot-0 only (hard-errors at --slot > 0 / --set).",
           "name": "tunnel",
           "type": "boolean"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -1109,6 +1144,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -1334,6 +1376,13 @@
           "multiple": false,
           "name": "username",
           "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -1496,6 +1545,13 @@
           "multiple": false,
           "name": "state-dir",
           "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -1641,6 +1697,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -1832,6 +1895,13 @@
           "name": "url",
           "type": "option"
         },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
+        },
         "yes": {
           "allowNo": false,
           "description": "non-interactive: skip the destructive-action prompt (CI / agents).",
@@ -1997,6 +2067,13 @@
           "hasDynamicHelp": false,
           "multiple": true,
           "name": "url",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -2182,6 +2259,13 @@
           "multiple": true,
           "name": "url",
           "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -2326,6 +2410,13 @@
           "multiple": false,
           "name": "state-dir",
           "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -2465,7 +2556,8 @@
             "qboard",
             "rtsm",
             "fleek",
-            "janus"
+            "janus",
+            "wootmath"
           ],
           "required": true,
           "type": "option"
@@ -2525,6 +2617,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -2664,6 +2763,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -2823,6 +2929,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
+        },
         "yes": {
           "allowNo": false,
           "description": "confirm the destructive --and-worktrees removal (required with it)",
@@ -2977,6 +3090,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -3137,6 +3257,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
+        },
         "yes": {
           "allowNo": false,
           "description": "non-interactive auto-confirm: clone any missing sibling repos WITHOUT a TTY prompt (for CI / background agents).",
@@ -3280,6 +3407,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -3460,6 +3594,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
+        },
         "yes": {
           "allowNo": false,
           "description": "non-interactive: skip the destructive-action prompt AND auto-clone missing repos (CI / agents).",
@@ -3609,6 +3750,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -3814,6 +3962,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
+        },
         "yes": {
           "allowNo": false,
           "description": "non-interactive: skip the destructive-action prompt AND override the live-claim guard (CI / agents). Only meaningful with --execute.",
@@ -4007,6 +4162,13 @@
           "multiple": false,
           "name": "url",
           "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -4195,6 +4357,13 @@
           "multiple": false,
           "name": "ttl-hours",
           "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -4236,7 +4405,8 @@
             "chat-api",
             "authz-sync",
             "staff-admin-bff",
-            "janus-mock-signer"
+            "janus-mock-signer",
+            "ap-api"
           ],
           "required": true
         }
@@ -4375,6 +4545,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -4522,6 +4699,7 @@
           "multiple": true,
           "name": "with",
           "options": [
+            "wootmath",
             "dash",
             "connect",
             "coach",
@@ -4531,6 +4709,13 @@
             "staff-admin",
             "janus-mock"
           ],
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -4669,6 +4854,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -4849,6 +5041,7 @@
           "multiple": true,
           "name": "with",
           "options": [
+            "wootmath",
             "dash",
             "connect",
             "coach",
@@ -4858,6 +5051,13 @@
             "staff-admin",
             "janus-mock"
           ],
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -4998,6 +5198,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -5142,6 +5349,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -5291,6 +5505,13 @@
           "description": "list each DB and its migration head under every snapshot",
           "name": "verbose",
           "type": "boolean"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
         }
       },
       "hasDynamicHelp": false,
@@ -5456,6 +5677,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -5634,6 +5862,7 @@
           "multiple": true,
           "name": "with",
           "options": [
+            "wootmath",
             "dash",
             "connect",
             "coach",
@@ -5643,6 +5872,13 @@
             "staff-admin",
             "janus-mock"
           ],
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -5795,6 +6031,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -5957,6 +6200,7 @@
           "multiple": true,
           "name": "with",
           "options": [
+            "wootmath",
             "dash",
             "connect",
             "coach",
@@ -5966,6 +6210,13 @@
             "staff-admin",
             "janus-mock"
           ],
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -6127,6 +6378,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "vms-base",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -6376,6 +6634,7 @@
           "multiple": true,
           "name": "with",
           "options": [
+            "wootmath",
             "dash",
             "connect",
             "coach",
@@ -6385,6 +6644,13 @@
             "staff-admin",
             "janus-mock"
           ],
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         },
         "workspace": {
@@ -6580,6 +6846,7 @@
           "multiple": true,
           "name": "with",
           "options": [
+            "wootmath",
             "dash",
             "connect",
             "coach",
@@ -6589,6 +6856,13 @@
             "staff-admin",
             "janus-mock"
           ],
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },
@@ -6746,6 +7020,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
+          "type": "option"
+        },
         "yes": {
           "allowNo": false,
           "description": "non-interactive: skip the destructive-action prompt AND override the live-claim guard (CI / agents). With --slot all, also INCLUDES live-claimed slots the sweep would otherwise skip.",
@@ -6890,6 +7171,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "wootmath": {
+          "description": "override path to the wootmath-adaptive-practice repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "wootmath",
           "type": "option"
         }
       },

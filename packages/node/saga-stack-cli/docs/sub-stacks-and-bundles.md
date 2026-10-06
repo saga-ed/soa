@@ -28,8 +28,9 @@ reasons:
 ```
 
 The `reasons` block shows *why* each service is in the closure — `url` (a hard runtime
-dependency) vs `event` (async projection over the mesh). A missing sibling repo is
-skipped-with-a-warning, not a hard failure.
+dependency) vs `event` (async projection over the mesh). With bare `up` or
+`--only`, a missing sibling repo is skipped with a warning. Explicit `--with`
+bundles instead require their local dependency checkouts (see below).
 </details>
 
 ## `--with` — convenience bundles
@@ -63,6 +64,15 @@ ss stack up --with dash --with playback
 ```
 
 `--with` is shared across `up` / `status` / `verify` / `seed` / `reset` / `snapshot store`.
+
+Before starting an explicitly requested bundle, `stack up` checks that every
+required local repository has a checkout with a `.git` directory or worktree
+`.git` file. Missing checkouts fail with a nonzero exit and show the resolved
+path, clone URL, and override flag/environment variable, before auto-pull,
+application prep, or infrastructure startup. Sandbox-hosted dependencies and
+services excluded from the selected slot do not require local checkouts.
+`--dry-run` remains a planner and does not require checkouts; seed-only bundles
+such as `qtf` introduce no checkout requirements.
 
 ## Woot Math adaptive practice
 

@@ -1,6 +1,10 @@
 import { diag, DiagLogLevel, type DiagLogger } from '@opentelemetry/api';
-import { NodeSDK } from '@opentelemetry/sdk-node';
+import { NodeSDK, metrics } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import {
+    AggregationTemporalityPreference,
+    OTLPMetricExporter,
+} from '@opentelemetry/exporter-metrics-otlp-http';
 import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
@@ -36,7 +40,9 @@ export interface InitTracingOpts {
  * @saga-ed/soa-event-outbox / @saga-ed/soa-event-consumer silently no-op.
  *
  * Disable at runtime with OTEL_TRACES_DISABLED=true (handy in tests where
- * the OTLP exporter would just dump errors to stderr).
+ * the OTLP exporter would just dump errors to stderr). Also exports OTel
+ * metrics (runtime + any `metrics.getMeter()` instrument); see
+ * resolveOtlpMetricsUrl for when that's on.
  */
 export function initTracing(
     serviceName: string,
@@ -45,6 +51,17 @@ export function initTracing(
     if (opts.logger) {
         diag.setLogger(makeDiagLogger(opts.logger), DiagLogLevel.WARN);
     }
+
+    const metricsUrl = resolveOtlpMetricsUrl();
+    const metricReader = metricsUrl
+        ? new metrics.PeriodicExportingMetricReader({
+              exporter: new OTLPMetricExporter({
+                  url: metricsUrl,
+                  // Datadog's OTLP intake expects DELTA for counters/histograms.
+                  temporalityPreference: AggregationTemporalityPreference.DELTA,
+              }),
+          })
+        : undefined;
 
     const sdk = new NodeSDK({
         // No OTel containerDetector: it cgroup-parses for container.id, which
@@ -64,14 +81,15 @@ export function initTracing(
                 new OTLPTraceExporter({ url: resolveOtlpTracesUrl() }),
             ),
         ),
+        metricReader,
         // Auto-instrumentations register HTTP / Express / pg / amqplib / dns /
         // net span emitters at SDK start, so each inbound request gets a real
         // server-entry span + downstream waterfall WITHOUT per-call manual
         // instrumentation. The HTTP server-entry span is also what carries the
         // incoming W3C traceparent from the browser (RUM), so RUM sessions link
         // to the backend trace. fs is excluded — noisy and rarely actionable.
-        // RuntimeNodeInstrumentation feeds DD APM's Runtime Metrics panel
-        // (heap, event-loop lag, GC).
+        // RuntimeNodeInstrumentation emits v8js.* / nodejs.* (heap, event-loop
+        // delay, GC) through metricReader.
         //
         // dns + net are excluded for the same reason as fs: they emit a span per
         // socket/lookup (tcp.connect, dns.lookup, tls.connect) that describes
@@ -103,7 +121,17 @@ export function initTracing(
         installProcessErrorHandlers(opts.logger);
     }
 
-    return sdk;
+    return {
+        shutdown: async () => {
+            // sdk-metrics 1.x reader shutdown drops the pending interval
+            // without exporting it; flush first.
+            try {
+                await metricReader?.forceFlush();
+            } finally {
+                await sdk.shutdown();
+            }
+        },
+    };
 }
 
 /**
@@ -249,6 +277,26 @@ function resolveOtlpTracesUrl(): string {
     return 'http://localhost:4318/v1/traces';
 }
 
+/**
+ * OTLP/HTTP metrics URL, or undefined when metrics export is off:
+ * OTEL_TRACES_DISABLED=true, OTEL_METRICS_EXPORTER=none, or no endpoint env
+ * set. Unlike traces there is no localhost fallback, so local dev without a
+ * collector stays quiet. sdk-node 0.55 ignores OTEL_METRICS_EXPORTER, so
+ * this is the only place it's honored. Exported for unit testing.
+ */
+export function resolveOtlpMetricsUrl(): string | undefined {
+    if (process.env.OTEL_TRACES_DISABLED === 'true') return undefined;
+    if (process.env.OTEL_METRICS_EXPORTER === 'none') return undefined;
+
+    const metricsEndpoint = process.env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT;
+    if (metricsEndpoint) return metricsEndpoint;
+
+    const baseEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+    if (!baseEndpoint) return undefined;
+    const base = baseEndpoint.replace(/\/$/, '').replace(/\/v1\/traces$/, '');
+    return `${base}/v1/metrics`;
+}
+
 function makeDiagLogger(logger: ILogger): DiagLogger {
     return {
         verbose: () => {},
@@ -271,11 +319,11 @@ export async function shutdownTracing(
     try {
         await handle.shutdown();
     } catch (err) {
-        // Pending spans in the BatchSpanProcessor's queue are dropped on
-        // shutdown failure — typically the most interesting window if the
-        // shutdown was triggered by a crash or OOM kill.
+        // Pending spans and the last metric interval are dropped on shutdown
+        // failure — typically the most interesting window if the shutdown was
+        // triggered by a crash or OOM kill.
         logger.error(
-            'OTel SDK shutdown failed — pending spans likely lost',
+            'OTel SDK shutdown failed — pending spans/metrics likely lost',
             err instanceof Error ? err : new Error(String(err)),
         );
     }

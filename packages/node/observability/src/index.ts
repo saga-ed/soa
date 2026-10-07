@@ -2,6 +2,7 @@ export {
     initTracing,
     shutdownTracing,
     resolveResourceAttributes,
+    resolveOtlpMetricsUrl,
     type InitTracingOpts,
     type TracingHandle,
 } from './tracing.js';

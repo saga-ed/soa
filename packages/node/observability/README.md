@@ -47,6 +47,24 @@ import { initTracing } from '@saga-ed/soa-observability';
 > await startServer();
 > ```
 
+## Metrics
+
+`initTracing()` also exports OTel metrics (OTLP/HTTP, DELTA temporality) to the
+same Datadog agent receiver as traces: `RuntimeNodeInstrumentation`'s
+`nodejs.eventloop.*` / `v8js.memory.*` plus any `metrics.getMeter(...)`
+instrument, tagged with the trace resource (`service.name`, `service.version`,
+`OTEL_RESOURCE_ATTRIBUTES`).
+
+| Env | Effect |
+|---|---|
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Full URL, used as-is |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Base URL; `/v1/metrics` appended |
+| neither set | Metrics off (no localhost fallback) |
+| `OTEL_METRICS_EXPORTER=none` / `OTEL_TRACES_DISABLED=true` | Metrics off |
+
+Don't register a second global `MeterProvider` in the service; it competes
+with this one.
+
 ## See also
 
 - `@saga-ed/soa-eslint-config` — the `saga-soa/init-tracing-first` lint

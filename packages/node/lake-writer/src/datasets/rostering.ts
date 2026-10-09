@@ -239,6 +239,10 @@ export type IdentityCrosswalkRosteringRow = {
   district_student_id_hash: string | null;
   district_student_id_source: string | null;
   district_student_id_available: boolean;
+  state_student_id_hash: string | null;
+  state_student_id_source: string | null;
+  state_student_id_available: boolean;
+  state_student_id_conflict: boolean;
   external_user_id_hash: string | null;
   user_role: string;
   user_status: string;
@@ -299,6 +303,30 @@ export const identityCrosswalkRosteringDataset: LandingDataset<IdentityCrosswalk
           name: 'district_student_id_available',
           type: 'boolean',
           description: 'Whether a district student id was resolvable for this user.',
+        },
+        {
+          name: 'state_student_id_hash',
+          type: 'string',
+          optional: true,
+          description:
+            'HMAC(salt, "state_student_id:{ST}:{trimmed state student id}") — stable across school years.',
+        },
+        {
+          name: 'state_student_id_source',
+          type: 'string',
+          optional: true,
+          description:
+            'Provider/sourceType that carried the state id: CLEVER|ONE_ROSTER|MANUAL|CSV.',
+        },
+        {
+          name: 'state_student_id_available',
+          type: 'boolean',
+          description: 'Whether a state student id was resolvable for this user.',
+        },
+        {
+          name: 'state_student_id_conflict',
+          type: 'boolean',
+          description: 'Whether conflicting state student ids were found for this user.',
         },
         {
           name: 'external_user_id_hash',

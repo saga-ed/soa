@@ -109,6 +109,94 @@ export function districtStudentIdHash(salt: string, id: string | null | undefine
   return namespacedHash(salt, HashNamespace.district_student_id, id);
 }
 
+const US_STATE_CODES: ReadonlySet<string> = new Set([
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
+  'DC',
+  'PR',
+  'VI',
+  'GU',
+  'AS',
+  'MP',
+  'UM',
+]);
+
+/**
+ * Trim + uppercase `s` and return it if it is a USPS 2-letter code for a
+ * US state, DC, PR or another US territory; otherwise null.
+ */
+export function normalizeUsState(s: string | null | undefined): string | null {
+  if (s == null) return null;
+  const code = s.trim().toUpperCase();
+  return US_STATE_CODES.has(code) ? code : null;
+}
+
+/**
+ * HMAC(salt, "state_student_id:{ST}:{trimmed id}") — the cross-year,
+ * cross-source bridge for state-issued student ids. Stable across school
+ * years (not year-salted). The id gets trim only; no zero-stripping or
+ * case folding. Null when the state is invalid or the id is empty.
+ */
+export function stateStudentIdHash(
+  salt: string,
+  usState: string | null | undefined,
+  stateId: string | null | undefined
+): string | null {
+  const st = normalizeUsState(usState);
+  if (st == null || stateId == null) return null;
+  const trimmed = stateId.trim();
+  if (trimmed === '') return null;
+  return hmacHex(salt, `${HashNamespace.state_student_id}:${st}:${trimmed}`);
+}
+
 /**
  * Heuristic: does `value` look like a numeric district/SIS student id
  * (as opposed to a UUID-shaped internal identifier)? Saga's observed
@@ -135,6 +223,7 @@ export function looksLikeNumericDistrictId(value: string): boolean {
 export const HashNamespace = {
   // Salesforce
   district_student_id: 'district_student_id',
+  state_student_id: 'state_student_id',
   sf_contact: 'sf_contact',
   sf_math_grades: 'sf_math_grades',
   sf_participation: 'sf_participation',

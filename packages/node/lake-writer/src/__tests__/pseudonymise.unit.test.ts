@@ -6,7 +6,9 @@ import {
   hmacHex,
   looksLikeNumericDistrictId,
   namespacedHash,
+  normalizeUsState,
   recordIdHash,
+  stateStudentIdHash,
   studentYearHash,
 } from '../pseudonymise.js';
 
@@ -93,5 +95,75 @@ describe('recordIdHash', () => {
     expect(recordIdHash(SALT, 'saga_program_membership', 'group-1', null)).toBeNull();
     expect(recordIdHash(SALT, 'saga_program_membership', undefined, 'user-1')).toBeNull();
     expect(recordIdHash(SALT, 'saga_program_membership', 'group-1', '   ')).toBeNull();
+  });
+});
+
+describe('normalizeUsState', () => {
+  it('trims and uppercases valid USPS codes (states, DC, territories)', () => {
+    expect(normalizeUsState(' md ')).toBe('MD');
+    expect(normalizeUsState('dc')).toBe('DC');
+    expect(normalizeUsState('Pr')).toBe('PR');
+    expect(normalizeUsState('GU')).toBe('GU');
+  });
+
+  it('rejects anything else', () => {
+    for (const bad of ['', '  ', 'XX', 'MARYLAND', 'M', 'M D', 'ZZ', null, undefined]) {
+      expect(normalizeUsState(bad)).toBeNull();
+    }
+  });
+});
+
+describe('stateStudentIdHash', () => {
+  const GOLDEN_SALT = 'golden-test-salt';
+
+  it('matches golden vectors computed independently', () => {
+    expect(stateStudentIdHash(GOLDEN_SALT, 'md', ' 0012345 ')).toBe(
+      '702833e19bfdfd9ef63d3517b75ebcf8d0d373d10632b75e0d848f49291e6cd0'
+    );
+    expect(stateStudentIdHash(GOLDEN_SALT, ' PR', 'A1b2C3')).toBe(
+      'a9cfb87e0cc3dcfd43547afdcf36bb8c97f9f37e709ce3a96c642e8370291d03'
+    );
+    expect(stateStudentIdHash(GOLDEN_SALT, 'DC', '9876543210')).toBe(
+      'dc30b0ae3483dd94c7d182e8e549bc6fdf4892f45dbd9aa68e81145acfec38f7'
+    );
+  });
+
+  it('hashes "state_student_id:{ST}:{trimmed id}" through the shared HMAC path', () => {
+    expect(stateStudentIdHash(SALT, 'MD', '0012345')).toBe(
+      expectedHash('state_student_id:MD:0012345')
+    );
+    expect(stateStudentIdHash(SALT, 'MD', '0012345')).toBe(
+      namespacedHash(SALT, 'state_student_id', 'MD:0012345')
+    );
+  });
+
+  it('is case- and whitespace-insensitive on the state, whitespace-insensitive on the id', () => {
+    const base = stateStudentIdHash(SALT, 'MD', '0012345');
+    expect(stateStudentIdHash(SALT, ' md\t', '  0012345\n')).toBe(base);
+  });
+
+  it('does not normalize the id beyond trim (no zero-stripping, no case folding)', () => {
+    expect(stateStudentIdHash(SALT, 'MD', '12345')).not.toBe(
+      stateStudentIdHash(SALT, 'MD', '0012345')
+    );
+    expect(stateStudentIdHash(SALT, 'MD', 'ab1')).not.toBe(stateStudentIdHash(SALT, 'MD', 'AB1'));
+  });
+
+  it('differs by state and is not year-salted', () => {
+    expect(stateStudentIdHash(SALT, 'MD', '1')).not.toBe(stateStudentIdHash(SALT, 'VA', '1'));
+  });
+
+  it('returns null for an invalid state', () => {
+    expect(stateStudentIdHash(SALT, 'XX', '123')).toBeNull();
+    expect(stateStudentIdHash(SALT, '', '123')).toBeNull();
+    expect(stateStudentIdHash(SALT, null, '123')).toBeNull();
+    expect(stateStudentIdHash(SALT, undefined, '123')).toBeNull();
+  });
+
+  it('returns null for an empty id', () => {
+    expect(stateStudentIdHash(SALT, 'MD', '')).toBeNull();
+    expect(stateStudentIdHash(SALT, 'MD', '   ')).toBeNull();
+    expect(stateStudentIdHash(SALT, 'MD', null)).toBeNull();
+    expect(stateStudentIdHash(SALT, 'MD', undefined)).toBeNull();
   });
 });

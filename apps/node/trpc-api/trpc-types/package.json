@@ -23,6 +23,10 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@saga-ed/soa-logger": "workspace:^",
+    "@saga-ed/soa-pubsub-core": "workspace:^",
+    "@saga-ed/soa-pubsub-server": "workspace:^",
+    "@saga-ed/soa-trpc-base": "workspace:*",
     "@trpc/client": "^11.4.3",
     "@trpc/server": "^11.0.0",
     "@types/node": "^24.0.12",

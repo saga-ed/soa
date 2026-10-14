@@ -148,7 +148,7 @@ export interface PostgresPoolConfig {
   connectionTimeoutMs?: number;
   statementTimeoutMs?: number;
   lockTimeoutMs?: number;
-  // Safety guard (gh-186); the provider defaults it ON (30s) when omitted.
+  // gh-186 guard; the provider defaults it to 0 (off) when omitted.
   idleInTransactionSessionTimeoutMs?: number;
 }
 

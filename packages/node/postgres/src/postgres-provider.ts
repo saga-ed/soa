@@ -56,9 +56,8 @@ const POOL_DEFAULTS = {
   connectionTimeoutMs: 10_000,
   statementTimeoutMs: 0,
   lockTimeoutMs: 0,
-  // Safety guard, defaults ON (see PostgresProviderSchema) — bounds the
-  // adapter-pg ack'd-but-not-durable leak (gh-186).
-  idleInTransactionSessionTimeoutMs: 30_000,
+  // Off; the gh-186 guard is server-side on RDS (see PostgresProviderSchema).
+  idleInTransactionSessionTimeoutMs: 0,
 } as const;
 
 /** Internal canonical shape both accepted configs normalize into. */

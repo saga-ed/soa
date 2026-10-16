@@ -36,6 +36,7 @@ Server-side packages for Node.js applications.
 | `saga-stack-cli/` | The `ss` CLI — unified stack up/seed/verify/reset/snapshot/e2e across the whole fleet, one OCLIF package over a frozen TypeScript service manifest. | [saga-stack-cli/](./saga-stack-cli/CLAUDE.md) |
 | `contract-check/` | CI gate for event-schema changes: catches in-place edits to frozen schemas, unpinned new versions, and dropped versions a consumer still pins. | Tier |
 | `health/` | Shared health/readiness route mounters (`/health`, `/health/live`, `/health/ready`, `/health/deep`), cached DB readiness, boot DB wait, drain signal; mounted outside any auth perimeter; reports build identity for blue/green smoke tests. Wiring: see its README. | Tier |
+| `deploy-color/` | Blue/green activity gate (D13): reads SSM `/prod/bluegreen/<svc>/active-color` and answers `isActive()` for this task's colour, with `change` events; fail-open, keep-last on read error. Library for `EventConsumer`/`OutboxRelay` gating and scheduled jobs. | [deploy-color/](./deploy-color/README.md) |
 | `inspect/` | Standard introspection surface for the sandbox visibility console — a service mounts one router and declares its browsable entities. | Tier |
 | `mailer/` | Shared transactional-email primitive: template-free `MailService` over a pluggable `MailAdapter` (`StubMailAdapter` for dev/test, `SesMailAdapter` for prod). | Tier |
 | `postgres/` | `PostgresProvider` — Inversify-injectable, ORM-agnostic `pg.Pool` wrapper with an AWS SSM/Secrets Manager config loader. | Tier |

@@ -1,0 +1,16 @@
+export {
+    createActiveColorGate,
+    getOwnColor,
+    decide,
+    resolveGate,
+    isParameterNotFound,
+    type ActiveColorGate,
+    type ActiveColorGateOpts,
+    type GateChangeListener,
+    type GateDecision,
+    type GateLogger,
+    type GateState,
+    type ResolveGateArgs,
+    type ResolveGateResult,
+    type EnvLike,
+} from './gate.js';

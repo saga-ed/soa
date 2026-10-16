@@ -271,7 +271,7 @@ BEGIN
              AND c.relname LIKE '%\_real' AND v.relname = regexp_replace(c.relname, '_real$', '')
        WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema')
          AND n.nspname !~ '^pg_(toast|temp)' AND c.relname <> '_prisma_migrations'
-         AND NOT (t.typcategory IN ('N', 'B', 'D', 'T', 'E') OR t.typname IN ('uuid', '_uuid', '_int2', '_int4', '_int8'))
+         AND NOT (t.typcategory IN ('N', 'B', 'D', 'T', 'E') OR t.oid IN ('uuid'::regtype, 'uuid[]'::regtype, 'int2[]'::regtype, 'int4[]'::regtype, 'int8[]'::regtype))
     )
     SELECT * FROM cols
      WHERE NOT (attname = ANY (overridden))
@@ -309,7 +309,7 @@ BEGIN
       FOR r2 IN
         SELECT a.attname FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid
          WHERE a.attrelid = r.oid AND a.attnum > 0 AND NOT a.attisdropped
-           AND NOT (t.typcategory IN ('N', 'B', 'D', 'T', 'E') OR t.typname IN ('uuid', '_uuid', '_int2', '_int4', '_int8'))
+           AND NOT (t.typcategory IN ('N', 'B', 'D', 'T', 'E') OR t.oid IN ('uuid'::regtype, 'uuid[]'::regtype, 'int2[]'::regtype, 'int4[]'::regtype, 'int8[]'::regtype))
            AND NOT EXISTS (SELECT 1 FROM pg_temp.mirror_allow m
                             WHERE m.db = current_database() AND m.tbl = r.relname AND m.col = a.attname)
       LOOP

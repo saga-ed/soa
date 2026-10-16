@@ -114,6 +114,24 @@ For soft-delete vs hard-delete projection rows on `*.deleted` events, pattern 2 
 worked examples) was meant to live in `d-consumer-resilience.md` — the file is missing; see
 [soa_75's README](../../../docs/history/soa_75/README.md#missing-decisions).
 
+## Activity gate — pause/resume for the idle colour
+
+Pass `gate` (`{ isActive(), on('change', cb) }`) to gate consumption on
+blue/green colour. `start()` always asserts the queue, DLQ and bindings, but
+only subscribes (`basic.consume`) while the gate is active. On `change`:
+
+- inactive → `pause()`: `basic.cancel`, keep the channel and prefetch, then
+  wait for in-flight handlers (bounded by `pauseDrainTimeoutMs`, default 30s;
+  a timeout warns and resolves). Unacked deliveries ack normally; deliveries
+  racing the cancel are still handled.
+- active → `resume()`: re-subscribe on the same channel, or via the reconnect
+  loop if the channel is gone. Channel loss while paused reconnects without
+  consuming.
+
+`getStatus()` returns `{ queue, state: 'active' | 'paused', inFlight }`. A
+paused consumer is healthy — never fail readiness on it. `consumerName` stays
+colour-blind so `consumed_events` dedup spans both colours.
+
 ## Recovering dead letters — targeted replay
 
 When a consumer dead-letters messages for a reason that has since been

@@ -116,6 +116,10 @@ await consumer.start();
 
 The consumer inserts into `consumed_events(consumer_name, event_id)` inside the same tx as the projection — duplicates short-circuit on the unique constraint. Malformed envelopes and unknown handler keys always nack-without-requeue (poison messages never loop).
 
+## Blue/green idle colour (activity gate)
+
+Both `OutboxRelay` and `EventConsumer` take an optional structural `gate` (`{ isActive(), on('change', cb) }`). Inactive → the consumer cancels its subscription (topology still asserted, paused is healthy) and the relay stands by without the leader lock. See each package README.
+
 ## Hybrid contract testing
 
 Three layers, all required:

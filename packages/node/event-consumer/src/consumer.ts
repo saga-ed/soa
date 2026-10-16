@@ -109,6 +109,19 @@ export interface ConsumerMetrics {
     onDuplicate: (eventType: string, eventVersion: number) => void;
 }
 
+/** Structural activity gate (blue/green idle colour). Inactive => consumer pauses. */
+export type ActivityGate = {
+    isActive(): boolean;
+    on(event: 'change', cb: (active: boolean, value: string | undefined) => void): unknown;
+};
+
+export interface ConsumerStatus {
+    queue: string;
+    /** `paused` is a healthy state (gated inactive); never fail readiness on it. */
+    state: 'active' | 'paused';
+    inFlight: number;
+}
+
 export interface EventConsumerOpts {
     /** Stable identifier used for the consumed_events idempotency key. */
     consumerName: string;
@@ -146,6 +159,14 @@ export interface EventConsumerOpts {
     /** Optional Prometheus hooks. No-op when undefined. */
     metrics?: ConsumerMetrics;
     logger: ILogger;
+    /**
+     * Optional activity gate. Topology (queue, DLQ, bindings) is always
+     * asserted; `basic.consume` only runs while the gate is active. A 'change'
+     * event pauses (cancel consumer, drain in-flight) or resumes consumption.
+     */
+    gate?: ActivityGate;
+    /** Max wait for in-flight handlers to settle during pause(). Default 30_000. */
+    pauseDrainTimeoutMs?: number;
 }
 
 const tracer = trace.getTracer('@saga-ed/soa-event-consumer');
@@ -170,6 +191,11 @@ export class EventConsumer {
     private stopped = true;
     private reconnectTimer: NodeJS.Timeout | null = null;
     private reconnectAttempts = 0;
+    private paused = false;
+    private setupInFlight = false;
+    private gateWired = false;
+    private readonly inFlight = new Set<Promise<void>>();
+    private transition: Promise<void> = Promise.resolve();
 
     constructor(private readonly opts: EventConsumerOpts) {
         this.handlerMap = buildHandlerMap(opts.handlers);
@@ -177,6 +203,10 @@ export class EventConsumer {
 
     async start(): Promise<void> {
         this.stopped = false;
+        if (this.opts.gate) {
+            this.paused = !this.opts.gate.isActive();
+            this.wireGate(this.opts.gate);
+        }
         try {
             await this.setupChannel();
         } catch (err) {
@@ -191,9 +221,174 @@ export class EventConsumer {
         }
         if (!this.stopped) {
             this.opts.logger.info(
-                `[EventConsumer:${this.opts.consumerName}] started (queue=${this.opts.queue})`,
+                `[EventConsumer:${this.opts.consumerName}] started (queue=${this.opts.queue}${this.paused ? ', paused' : ''})`,
             );
         }
+    }
+
+    getStatus(): ConsumerStatus {
+        return {
+            queue: this.opts.queue,
+            state: this.paused ? 'paused' : 'active',
+            inFlight: this.inFlight.size,
+        };
+    }
+
+    /**
+     * Stop consuming (basic.cancel) but keep the channel, prefetch and
+     * topology, then wait for in-flight handlers to settle (bounded by
+     * `pauseDrainTimeoutMs`). Unacked deliveries stay on the channel and ack
+     * normally; deliveries racing the cancel are dispatched, not dropped.
+     */
+    pause(): Promise<void> {
+        this.paused = true;
+        return this.serialize(() => this.applyState());
+    }
+
+    /** Re-subscribe after pause(). Routes through reconnect if the channel is gone. */
+    resume(): Promise<void> {
+        this.paused = false;
+        return this.serialize(() => this.applyState());
+    }
+
+    private wireGate(gate: ActivityGate): void {
+        if (this.gateWired) return;
+        this.gateWired = true;
+        gate.on('change', (active) => {
+            const op = active ? this.resume() : this.pause();
+            op.catch((err: unknown) => {
+                this.opts.logger.warn(
+                    `[EventConsumer:${this.opts.consumerName}] gate ${active ? 'resume' : 'pause'} failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+            });
+        });
+    }
+
+    private serialize(fn: () => Promise<void>): Promise<void> {
+        const run = this.transition.then(fn, fn);
+        this.transition = run.catch(() => {});
+        return run;
+    }
+
+    /** Reconciles the broker subscription with the *current* `paused` flag. */
+    private async applyState(): Promise<void> {
+        if (this.stopped) return;
+        if (this.paused) {
+            await this.cancelConsumer();
+            if (this.paused) await this.drainInFlight();
+            return;
+        }
+        const channel = this.channel;
+        if (!channel) {
+            // Channel gone (or mid-setup, whose tail reconciles): setupChannel
+            // consumes once it runs.
+            if (!this.setupInFlight) this.scheduleReconnect();
+            return;
+        }
+        if (this.consumerTag) return;
+        try {
+            this.consumerTag = await this.consumeOn(channel);
+        } catch (err) {
+            this.opts.logger.warn(
+                `[EventConsumer:${this.opts.consumerName}] resume consume failed; re-establishing channel: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            this.dropChannel(channel);
+            this.scheduleReconnect();
+            return;
+        }
+        // Paused again while the consume was in flight.
+        if (this.paused) await this.cancelConsumer();
+    }
+
+    private async cancelConsumer(): Promise<void> {
+        const channel = this.channel;
+        const tag = this.consumerTag;
+        if (!channel || !tag) return;
+        // Cleared first so the consume callback's null-message branch can tell
+        // our own cancel from a broker-initiated one.
+        this.consumerTag = null;
+        try {
+            await channel.cancel(tag);
+        } catch (err) {
+            this.opts.logger.warn(
+                `[EventConsumer:${this.opts.consumerName}] cancel failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+    }
+
+    private async drainInFlight(): Promise<void> {
+        if (this.inFlight.size === 0) return;
+        const timeoutMs = this.opts.pauseDrainTimeoutMs ?? 30_000;
+        let timer: NodeJS.Timeout | undefined;
+        const timedOut = await Promise.race([
+            Promise.allSettled([...this.inFlight]).then(() => false),
+            new Promise<boolean>((resolve) => {
+                timer = setTimeout(() => resolve(true), timeoutMs);
+            }),
+        ]);
+        clearTimeout(timer);
+        if (timedOut) {
+            this.opts.logger.warn(
+                `[EventConsumer:${this.opts.consumerName}] pause drain timed out after ${timeoutMs}ms with ${this.inFlight.size} handler(s) in flight`,
+            );
+        }
+    }
+
+    private dropChannel(channel: Channel): void {
+        if (this.channel === channel) {
+            this.channel = null;
+            this.consumerTag = null;
+        }
+        void Promise.resolve()
+            .then(() => channel.close())
+            .catch(() => {});
+    }
+
+    private async consumeOn(channel: Channel): Promise<string> {
+        const res = await channel.consume(
+            this.opts.queue,
+            (msg) => {
+                if (!msg) {
+                    // Broker-initiated consumer cancel (queue deleted, HA
+                    // failover) — amqplib signals it with a null message.
+                    // The channel stays open, so no 'close' fires; recover
+                    // explicitly or the consumer stalls silently. Ignored
+                    // while paused / mid-cancel: nothing is subscribed then,
+                    // and resume() re-subscribes (or reconnects) itself.
+                    if (
+                        this.channel === channel &&
+                        !this.stopped &&
+                        !this.paused &&
+                        this.consumerTag !== null
+                    ) {
+                        this.channel = null;
+                        this.consumerTag = null;
+                        this.opts.logger.warn(
+                            `[EventConsumer:${this.opts.consumerName}] consumer cancelled by broker; scheduling re-subscribe`,
+                        );
+                        void Promise.resolve()
+                            .then(() => channel.close())
+                            .catch(() => {});
+                        this.scheduleReconnect();
+                    }
+                    return;
+                }
+                // Bind dispatch to THIS channel: delivery tags are
+                // channel-scoped, so a message must never be acked/nacked on
+                // a replacement channel.
+                this.track(this.dispatch(channel, msg));
+            },
+            { noAck: false },
+        );
+        return res.consumerTag;
+    }
+
+    private track(p: Promise<void>): void {
+        this.inFlight.add(p);
+        const done = (): void => {
+            this.inFlight.delete(p);
+        };
+        p.then(done, done);
     }
 
     /**
@@ -205,6 +400,15 @@ export class EventConsumer {
      * consuming while messages pile up in the queue.
      */
     private async setupChannel(): Promise<void> {
+        this.setupInFlight = true;
+        try {
+            await this.doSetupChannel();
+        } finally {
+            this.setupInFlight = false;
+        }
+    }
+
+    private async doSetupChannel(): Promise<void> {
         // Covers the case where the manager's own post-'close' reconnect
         // exhausted its retries — nothing else would retry the connection.
         // Older soa-rabbitmq versions predate ensureConnected(); the consumer
@@ -271,37 +475,10 @@ export class EventConsumer {
             );
         }
 
-        const consumeRes = await channel.consume(
-            this.opts.queue,
-            (msg) => {
-                if (!msg) {
-                    // Broker-initiated consumer cancel (queue deleted, HA
-                    // failover) — amqplib signals it with a null message.
-                    // The channel stays open, so no 'close' fires; recover
-                    // explicitly or the consumer stalls silently.
-                    if (this.channel === channel && !this.stopped) {
-                        this.channel = null;
-                        this.consumerTag = null;
-                        this.opts.logger.warn(
-                            `[EventConsumer:${this.opts.consumerName}] consumer cancelled by broker; scheduling re-subscribe`,
-                        );
-                        void Promise.resolve()
-                            .then(() => channel.close())
-                            .catch(() => {});
-                        this.scheduleReconnect();
-                    }
-                    return;
-                }
-                // Bind dispatch to THIS channel: delivery tags are
-                // channel-scoped, so a message must never be acked/nacked on
-                // a replacement channel.
-                void this.dispatch(channel, msg);
-            },
-            { noAck: false },
-        );
+        const consumerTag = this.paused ? null : await this.consumeOn(channel);
 
         this.channel = channel;
-        this.consumerTag = consumeRes.consumerTag;
+        this.consumerTag = consumerTag;
         // Setup can race a channel death ('close' fired before the
         // assignments above, so the listener's identity guard missed it) or
         // a concurrent stop(). Either way this channel must not stay live.
@@ -314,6 +491,10 @@ export class EventConsumer {
             if (closed && !this.stopped) {
                 throw new Error('channel closed during setup');
             }
+        }
+        // pause()/resume() landed while setup was in flight and saw no channel.
+        if (this.channel === channel && this.paused === (this.consumerTag !== null)) {
+            void this.serialize(() => this.applyState());
         }
     }
 

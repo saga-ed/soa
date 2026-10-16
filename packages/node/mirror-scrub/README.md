@@ -16,7 +16,7 @@ Per scrubbed table `t` in a database, as the mirror master:
 2. `t` → `t_real` (re-owned by the master; every grantee loses all access), `t_public` → `t`.
    Table- and column-level SELECT grants move to the view.
 3. Views/matviews over `t_real` are re-owned by the master, ungranted and (matviews) emptied.
-4. **Closed-world audit:** every text/varchar/json/bytea/array column of every base table must be
+4. **Closed-world audit:** every column of every base table must be
    overridden or allow-listed by exact `(db, table, column)` unless its type is numeric, bool,
    date/time, interval, enum or uuid (fail-closed: inet, xml, composites, domains over text are
    flagged); non-scrub views are audited too.

@@ -117,6 +117,25 @@ describe('mirror-scrub check', () => {
         expect(r.out).toContain(`UNREVIEWED COLUMN ${db} .org.contact_name`);
     });
 
+    it('fails closed on non-text types that can carry personal data (inet, xml, composite, domain)', () => {
+        const { db, allow } = freshDb();
+        expect(
+            psql(
+                db,
+                `CREATE DOMAIN contact_email AS text; CREATE TYPE addr AS (street text, zip int);
+                 ALTER TABLE org ADD COLUMN last_ip inet, ADD COLUMN profile xml, ADD COLUMN mail_to addr,
+                   ADD COLUMN owner_email contact_email, ADD COLUMN size_n numeric, ADD COLUMN ok boolean;`,
+            ).code,
+        ).toBe(0);
+        const r = cliRun(['check', '--db', db, '--scrub', scrubFile, '--allow', allow], { MIRROR_SCRUB_THROWAWAY: '1' });
+        expect(r.code).toBe(10);
+        for (const col of ['last_ip', 'profile', 'mail_to', 'owner_email']) {
+            expect(r.out).toContain(`UNREVIEWED COLUMN ${db} .org.${col}`);
+        }
+        expect(r.out).not.toContain('.org.size_n');
+        expect(r.out).not.toContain('.org.ok');
+    });
+
     it('exits 20 when the database is missing', () => {
         const r = cliRun(['check', '--db', 'no_such_db', '--scrub', scrubFile, '--allow', allowFile], {
             MIRROR_SCRUB_THROWAWAY: '1',
@@ -203,6 +222,8 @@ describe('mirror-scrub lint', () => {
         ['\\c other_db\n'],
         ["SELECT 1;\n\\i '/tmp/x.sql'\n"],
         ['SELECT 1 \\gexec\n'],
+        ["SELECT 'x'\\gexec\n"],
+        ["SELECT pg_temp.mirror_scrub('public', 't', '{}'::jsonb);\\! id\n"],
         ['COMMIT;\n'],
         ["SELECT pg_temp.mirror_scrub('public', 't', '{}'::jsonb); commit;\n"],
         ['BEGIN WORK;\n'],

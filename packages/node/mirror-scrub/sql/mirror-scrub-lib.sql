@@ -20,11 +20,12 @@
 --   same SELECT on the view; column-level SELECT grants move to the view's columns.
 --   Views/matviews over {base}_real are re-owned, ungranted and (matviews) emptied.
 -- pg_temp.mirror_audit()
---   Counts (and NOTICEs) text/varchar/json/bytea/array columns of base tables that
---   are neither overridden nor allow-listed by EXACT (db, table, column) match
+--   Counts (and NOTICEs) columns of base tables that are neither overridden nor
+--   allow-listed by EXACT (db, table, column) match
 --   (pg_temp.mirror_allow, filled by the service's <db>.allow.sql), plus views and
---   matviews that are not locked down. uuid/int columns and arrays of them are never
---   flagged; a text column named *_id is flagged like any other. Does not raise.
+--   matviews that are not locked down. Fail-closed on type: only numeric, bool,
+--   date/time, interval, enum, uuid and uuid/int arrays are exempt (domains follow
+--   their base type); a text column named *_id is flagged like any other. Does not raise.
 -- pg_temp.mirror_expect_db(name)
 --   RAISES unless current_database() = name.
 
@@ -270,8 +271,7 @@ BEGIN
              AND c.relname LIKE '%\_real' AND v.relname = regexp_replace(c.relname, '_real$', '')
        WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema')
          AND n.nspname !~ '^pg_(toast|temp)' AND c.relname <> '_prisma_migrations'
-         AND (t.typcategory IN ('S', 'A') OR t.typname IN ('json', 'jsonb', 'bytea'))
-         AND t.typname NOT IN ('_uuid', '_int2', '_int4', '_int8')
+         AND NOT (t.typcategory IN ('N', 'B', 'D', 'T', 'E') OR t.typname IN ('uuid', '_uuid', '_int2', '_int4', '_int8'))
     )
     SELECT * FROM cols
      WHERE NOT (attname = ANY (overridden))
@@ -309,8 +309,7 @@ BEGIN
       FOR r2 IN
         SELECT a.attname FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid
          WHERE a.attrelid = r.oid AND a.attnum > 0 AND NOT a.attisdropped
-           AND (t.typcategory IN ('S', 'A') OR t.typname IN ('json', 'jsonb', 'bytea'))
-           AND t.typname NOT IN ('_uuid', '_int2', '_int4', '_int8')
+           AND NOT (t.typcategory IN ('N', 'B', 'D', 'T', 'E') OR t.typname IN ('uuid', '_uuid', '_int2', '_int4', '_int8'))
            AND NOT EXISTS (SELECT 1 FROM pg_temp.mirror_allow m
                             WHERE m.db = current_database() AND m.tbl = r.relname AND m.col = a.attname)
       LOOP

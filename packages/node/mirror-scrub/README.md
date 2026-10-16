@@ -17,13 +17,17 @@ Per scrubbed table `t` in a database, as the mirror master:
    Table- and column-level SELECT grants move to the view.
 3. Views/matviews over `t_real` are re-owned by the master, ungranted and (matviews) emptied.
 4. **Closed-world audit:** every text/varchar/json/bytea/array column of every base table must be
-   overridden or allow-listed by exact `(db, table, column)`; non-scrub views are audited too.
+   overridden or allow-listed by exact `(db, table, column)` unless its type is numeric, bool,
+   date/time, interval, enum or uuid (fail-closed: inet, xml, composites, domains over text are
+   flagged); non-scrub views are audited too.
 
 `ss stack hydrate --source real` reads `t_real`; `--source scrubbed` reads the view.
 
-The SQL lib (`sql/mirror-scrub-lib.sql`) is design-reviewed: function bodies are byte-identical to
+The SQL lib (`sql/mirror-scrub-lib.sql`) is design-reviewed: function bodies match
 rostering@`bf110ac5` (`iam-mirror-bootstrap/sql/mirror-scrub-lib.sql`) except the audit NOTICE
-text. A body change needs a new design review.
+text and its fail-closed type filter (flags every type but numeric, bool, date/time, interval,
+enum, uuid and uuid/int arrays; a strict superset of the reviewed filter). A body change needs a
+new design review.
 
 ## Per-database file contract (owning repo)
 
@@ -52,7 +56,7 @@ Two files per database, shipped in the service's rules package:
   Never names, free text, credentials, contact data or external student identifiers.
 
 `run-db.sql` owns the `\connect`, the transaction and the db assertion (before and after your file).
-`lint` rejects psql meta-commands, transaction control and `SET ROLE`/`SET SESSION` in either file.
+`lint` rejects any backslash (psql meta-commands), transaction control and `SET ROLE`/`SET SESSION` in either file.
 
 ## CLI
 

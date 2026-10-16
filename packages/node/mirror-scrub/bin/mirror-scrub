@@ -22,11 +22,11 @@ lint() {
   local f bad=0
   for f in "$@"; do
     [[ -r "$f" ]] || { echo "lint: $f: not readable" >&2; bad=1; continue; }
-    if grep -nE '^[[:space:]]*\\' "$f" >&2 \
-      || grep -nE '(^|[[:space:];])\\(c|connect|i|ir|include|include_relative|!|g|gexec|gset|o|out|w|write|set|unset|if|elif|else|endif|copy|q|quit|e|edit)([[:space:]]|$)' "$f" >&2 \
+    # Any backslash is rejected: psql runs a meta-command wherever one appears outside a literal.
+    if grep -nF '\' "$f" >&2 \
       || grep -niE '(^|;)[[:space:]]*(BEGIN|COMMIT|ROLLBACK|ABORT|END|START[[:space:]]+TRANSACTION|SAVEPOINT|RELEASE|PREPARE[[:space:]]+TRANSACTION)([[:space:]]+(WORK|TRANSACTION))?[[:space:]]*;' "$f" >&2 \
       || grep -niE '(^|;)[[:space:]]*(SET|RESET)[[:space:]]+(ROLE|SESSION)' "$f" >&2; then
-      echo "lint: $f: psql meta-commands, transaction control and role switching are owned by run-db.sql" >&2
+      echo "lint: $f: backslashes (psql meta-commands), transaction control and role switching are not allowed; run-db.sql owns them" >&2
       bad=1
     fi
   done
@@ -53,7 +53,7 @@ require_db_files() {
   [[ -n "$db" && -n "$scrub" && -n "$allow" ]] || usage
   [[ "$db" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid database name: $db"
   scrub="$(realpath "$scrub")" allow="$(realpath "$allow")"
-  [[ "$scrub$allow" != *[[:space:]\'\"]* ]] || die "file paths must not contain whitespace or quotes"
+  [[ "$scrub$allow" != *[[:space:]\'\"\`\$\\]* ]] || die "file paths must not contain whitespace, quotes, backticks, \$ or backslashes"
   lint "$scrub" "$allow" || exit "$EXIT_USAGE"
 }
 psql_() { psql -X -v ON_ERROR_STOP=1 "${PSQL_ARGS[@]}" "$@"; }

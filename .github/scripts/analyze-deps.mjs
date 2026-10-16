@@ -1,6 +1,6 @@
 /**
  * Analyzes workspace dependencies and calculates package layers for parallel CI execution.
- * Used by the calculate-dependency-layers job in publish-all-packages.yml
+ * Used by the calculate-dependency-layers job in package-ci.yml
  *
  * Usage: node analyze-deps.mjs '["pkg1", "pkg2", ...]'
  *

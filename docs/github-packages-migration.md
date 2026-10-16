@@ -94,16 +94,8 @@ For packages to be publicly accessible, your repository must be public:
 ### 2. Test Publishing Process (Maintainers Only)
 
 ```bash
-# Option 1: Trigger GitHub Actions manually
-# Go to: Actions → "Publish Packages to GitHub Packages" → "Run workflow"
-
-# Option 2: Make a small change and push to main
-git add .
-git commit -m "chore: trigger package publishing"
-git push origin main
-
-# Option 3: Create a GitHub release
-gh release create v1.0.1 --title "Release v1.0.1" --notes "Initial GitHub Packages release"
+gh workflow run publish-codeartifact.yml -R saga-ed/soa --ref main \
+  -f single_package=packages/<runtime>/<pkg> -f publish_target=github
 ```
 
 ### 3. Test Public Installation (No Authentication)

@@ -1,58 +1,22 @@
-name: Publish Packages to GitHub Packages
+name: Package CI
 
-# This workflow uses a LAYERED MATRIX STRATEGY to handle package dependencies efficiently:
-# 1. calculate-dependency-layers: Analyzes @saga-ed workspace dependencies and groups packages into layers
-# 2. test-and-lint-layer-N: Runs testing/linting for each layer in parallel within the layer, sequential between layers
-# 3. version-and-publish: Publishes packages in dependency order using the calculated layers
-#
-# Benefits:
-# - Maximum parallelism within each dependency layer
-# - Ensures dependencies are built/published before dependents
-# - Handles circular dependency detection
-# - Scales automatically with workspace changes
+# PR CI for publishable packages. Layered matrix:
+# 1. calculate-dependency-layers: groups @saga-ed workspace packages into dependency layers
+# 2. test-and-lint-layer-N: layers run in sequence, packages within a layer run in parallel
+# Publishing is manual: see publish-codeartifact.yml.
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "packages/**"
-      - "build-tools/**"
-      - "turbo.json"
-      - "pnpm-workspace.yaml"
   pull_request:
     paths:
       - "packages/**"
       - "build-tools/**"
       - "turbo.json"
       - "pnpm-workspace.yaml"
-      - ".github/workflows/publish-all-packages.yml"
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version bump type"
-        required: true
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-      force_publish_all:
-        description: "Force publish all packages (ignore change detection)"
-        required: false
-        default: false
-        type: boolean
+      - ".github/workflows/package-ci.yml"
 
-# Rapid PR pushes were stacking full ~6-min pipeline runs. Cancel superseded
-# runs on PRs; real publishes (push/release/dispatch) are never cancelled
-# mid-flight — they share one serial group so they queue instead of racing
-# on version commits.
 concurrency:
-  group: publish-all-packages-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'publish-serial' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: package-ci-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 env:
   NODE_VERSION: "22"
@@ -61,11 +25,9 @@ env:
   CODEARTIFACT_DOMAIN: saga
   CODEARTIFACT_OWNER: "531314149529"
 
-# Permission can be added at job level or workflow level
 permissions:
-  id-token: write # This is required for requesting the JWT
-  contents: write # This is required for actions/checkout and version commits
-  packages: write # This is required for publishing to GitHub Packages
+  id-token: write # OIDC for CodeArtifact install auth
+  contents: read
 
 jobs:
   detect-changes:
@@ -78,8 +40,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0 # Need full history for change detection
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -111,7 +71,6 @@ jobs:
       - name: Configure CodeArtifact registry
         run: |
           pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
-          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
 
       - name: Get pnpm store directory
         shell: bash
@@ -131,84 +90,13 @@ jobs:
 
       - name: Get changed packages using Turborepo
         id: get-changed-packages
-        env:
-          # turbo's one-time telemetry banner would otherwise land on stdout ahead of --dry=json.
-          TURBO_TELEMETRY_DISABLED: "1"
-          DO_NOT_TRACK: "1"
         run: |
           set -eo pipefail
 
-          # Every package, as a compact JSON array. The safe fallback whenever
-          # we can't reliably compute a diff.
+          # Every package, as a compact JSON array; PR CI tests all of them.
           ALL_PACKAGES=$(find packages -name "package.json" -exec dirname {} \; | sed 's|packages/||' | jq -R -s -c 'split("\n")[:-1]')
 
-          # Resolve changed packages from a turbo SCM diff against a base ref.
-          #
-          # A turbo failure or an unreachable base ref (shallow clone,
-          # force-push, freshly created branch) must NOT be silently treated as
-          # "no changes" — that skips EVERY publish, which is exactly how
-          # soa-postgres 0.1.2 failed to publish on merge. On any such
-          # uncertainty, fall back to ALL packages: the publish step is
-          # idempotent (npm publish skips versions that already exist), so a
-          # superset is safe, whereas an empty set silently drops real releases.
-          # stderr is surfaced (not /dev/null'd) so the cause is visible in logs.
-          changed_since() {
-            local base="$1"
-            if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
-              echo "WARNING: base ref '${base}' is not reachable; publishing all packages" >&2
-              echo "$ALL_PACKAGES"
-              return 0
-            fi
-            local out
-            # `pnpm exec`, not `pnpm turbo`: pnpm's own command-proxying path
-            # prints its "Unsupported engine" warning to stdout ahead of the
-            # dry-run JSON; `pnpm exec` invokes the local turbo bin directly
-            # and skips that check.
-            if ! out=$(pnpm exec turbo run build --dry=json --filter="...[${base}]"); then
-              echo "WARNING: turbo diff against '${base}' failed; publishing all packages" >&2
-              echo "$ALL_PACKAGES"
-              return 0
-            fi
-            # Belt-and-braces: drop any stray non-JSON lines a future tool
-            # warning might still prepend to stdout.
-            out=$(printf '%s\n' "$out" | sed -n '/^[[{]/,$p')
-            if ! jq -e . >/dev/null 2>&1 <<<"$out"; then
-              echo "::error::turbo dry-run output is not valid JSON" >&2
-              printf '%s\n' "$out" | head -20 >&2
-              exit 1
-            fi
-            # `.directory` (packages/<dir>), not `.package` (the npm scoped
-            # name) — downstream steps read `packages/${matrix.package}/package.json`,
-            # so the array must hold directory paths, matching $ALL_PACKAGES.
-            echo "$out" | jq -r '.tasks[] | select(.package != "//") | .directory' | sed 's|^packages/||' | sort -u | jq -R -s -c 'split("\n")[:-1]'
-          }
-
-          # Get the list of changed packages
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.force_publish_all }}" == "true" ]; then
-            echo "Force publishing all packages requested"
-            CHANGED_PACKAGES="$ALL_PACKAGES"
-          elif [ "${{ github.event_name }}" == "push" ]; then
-            # For push events, compare with previous commit
-            BASE_REF="${{ github.event.before }}"
-            if [ "$BASE_REF" == "0000000000000000000000000000000000000000" ]; then
-              # Initial push (no parent) — check all packages
-              CHANGED_PACKAGES="$ALL_PACKAGES"
-            else
-              CHANGED_PACKAGES=$(changed_since "$BASE_REF")
-            fi
-          elif [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # For manual triggers, get packages changed since last tag or main
-            LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-            if [ -n "$LAST_TAG" ]; then
-              BASE_REF="$LAST_TAG"
-            else
-              BASE_REF="origin/main"
-            fi
-            CHANGED_PACKAGES=$(changed_since "$BASE_REF")
-          else
-            # Default: check all packages
-            CHANGED_PACKAGES="$ALL_PACKAGES"
-          fi
+          CHANGED_PACKAGES="$ALL_PACKAGES"
 
           echo "Changed packages: $CHANGED_PACKAGES"
           echo "packages=$CHANGED_PACKAGES" >> $GITHUB_OUTPUT
@@ -686,282 +574,3 @@ jobs:
           script: |
             const script = require('./.github/scripts/post-test-summary.cjs');
             await script({ github, context, core });
-
-  version-and-publish:
-    name: Version and Publish Packages
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs:
-      [
-        detect-changes,
-        calculate-dependency-layers,
-        test-and-lint-layer-0,
-        test-and-lint-layer-1,
-        test-and-lint-layer-2,
-        test-and-lint-layer-3,
-      ]
-    if: |
-      always() && 
-      needs.detect-changes.outputs.has-changes == 'true' && 
-      (github.ref == 'refs/heads/main' || github.event_name == 'release' || github.event_name == 'workflow_dispatch') &&
-      (
-        needs.test-and-lint-layer-0.result == 'success' ||
-        needs.test-and-lint-layer-1.result == 'success' ||
-        needs.test-and-lint-layer-2.result == 'success' ||
-        needs.test-and-lint-layer-3.result == 'success'
-      )
-    outputs:
-      published-packages: ${{ steps.publish-packages.outputs.published-packages }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          registry-url: "https://npm.pkg.github.com"
-          scope: "@saga-ed"
-          package-manager-cache: false
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Get CodeArtifact auth token
-        run: |
-          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
-            --domain ${{ env.CODEARTIFACT_DOMAIN }} \
-            --domain-owner ${{ env.CODEARTIFACT_OWNER }} \
-            --query authorizationToken \
-            --output text)
-          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
-          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
-
-      - name: Configure CodeArtifact registry
-        run: |
-          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
-          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build packages
-        run: pnpm turbo run build
-
-      - name: Configure git
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-
-      - name: Version bump packages (if workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
-          echo "Bumping version for changed packages: $CHANGED_PACKAGES"
-
-          # Loop through each changed package and bump its version
-          echo "$CHANGED_PACKAGES" | jq -r '.[]' | while read -r package; do
-            if [ -n "$package" ] && [ "$package" != "" ]; then
-              echo "Bumping version for packages/$package"
-              cd "packages/$package"
-              npm version ${{ github.event.inputs.version }} --no-git-tag-version
-              cd ../..
-            fi
-          done
-
-          # Commit version changes
-          git add packages/*/package.json
-          if git diff --staged --quiet; then
-            echo "No version changes to commit"
-          else
-            git commit -m "chore: bump package versions (${{ github.event.inputs.version }})"
-            
-            # Only push if we're on main branch or it's a workflow dispatch
-            if [ "${{ github.ref }}" == "refs/heads/main" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-              git push
-            fi
-          fi
-
-      - name: Setup .npmrc for GitHub Packages
-        run: |
-          echo "@saga-ed:registry=https://npm.pkg.github.com" >> .npmrc
-          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
-
-      - name: Publish changed packages in dependency order
-        id: publish-packages
-        run: |
-          CHANGED_PACKAGES='${{ needs.detect-changes.outputs.changed-packages }}'
-          PUBLISHED_PACKAGES=()
-
-          echo "Publishing changed packages in layer order: $CHANGED_PACKAGES"
-
-          # Function to check if package is publishable
-          is_publishable() {
-            local package_path="$1"
-            if [ -f "$package_path/package.json" ]; then
-              # Check if package is not private
-              local is_private=$(jq -r '.private // false' "$package_path/package.json")
-              if [ "$is_private" != "true" ]; then
-                return 0  # publishable
-              fi
-            fi
-            return 1  # not publishable
-          }
-
-          # Function to publish a single package
-          publish_single_package() {
-            local package="$1"
-            local context="$2"
-            
-            if [ -n "$package" ] && [ "$package" != "" ]; then
-              PACKAGE_PATH="packages/$package"
-              
-              if is_publishable "$PACKAGE_PATH"; then
-                echo "Publishing $package ($context)..."
-                cd "$PACKAGE_PATH"
-                
-                # Try to publish, continue on error (e.g., if version already exists)
-                if npm publish --access public; then
-                  echo "✅ Successfully published $package"
-                  echo "$package" >> /tmp/published_packages.txt
-                else
-                  echo "⚠️  Failed to publish $package (may already exist)"
-                fi
-                
-                cd ../..
-              else
-                echo "⏭️  Skipping $package (private package)"
-              fi
-            fi
-          }
-
-          # Function to publish packages from a layer
-          publish_layer() {
-            local layer_packages="$1"
-            local layer_name="$2"
-            
-            if [ "$layer_packages" == "[]" ] || [ "$layer_packages" == "null" ]; then
-              echo "No packages in $layer_name, skipping"
-              return
-            fi
-            
-            echo "Publishing $layer_name: $layer_packages"
-            
-            echo "$layer_packages" | jq -r '.[]' | while read -r package; do
-              if [ -n "$package" ] && [ "$package" != "" ]; then
-                # Check if package was actually changed and tested successfully
-                if echo "$CHANGED_PACKAGES" | jq -e --arg pkg "$package" 'index($pkg) != null' > /dev/null; then
-                  publish_single_package "$package" "$layer_name"
-                else
-                  echo "⏭️  Skipping $package (not in changed packages or tests failed)"
-                fi
-              fi
-            done
-          }
-
-          # Initialize published packages file
-          echo "" > /tmp/published_packages.txt
-
-          # Publish packages layer by layer
-          publish_layer '${{ needs.calculate-dependency-layers.outputs.layer-0 }}' "Layer 0 (Base)"
-          publish_layer '${{ needs.calculate-dependency-layers.outputs.layer-1 }}' "Layer 1"
-          publish_layer '${{ needs.calculate-dependency-layers.outputs.layer-2 }}' "Layer 2"
-          publish_layer '${{ needs.calculate-dependency-layers.outputs.layer-3 }}' "Layer 3"
-
-          # Handle any additional layers beyond 4 (fallback for deep dependency chains)
-          TOTAL_LAYERS='${{ needs.calculate-dependency-layers.outputs.total-layers }}'
-          if [ "$TOTAL_LAYERS" -gt 4 ]; then
-            echo "⚠️  Warning: More than 4 dependency layers detected ($TOTAL_LAYERS). Consider optimizing dependency structure."
-            echo "Using fallback sequential publishing for remaining packages..."
-            
-            # Fallback to original Turborepo ordering for any missed packages
-            ORDERED_PACKAGES=$(pnpm turbo run build --dry=json | jq -r '.tasks[] | select(.package != "//") | .package' | sed 's|packages/||' | sort -u)
-            echo "$ORDERED_PACKAGES" | while read -r package; do
-              if echo "$CHANGED_PACKAGES" | jq -e --arg pkg "$package" 'index($pkg) != null' > /dev/null; then
-                # Check if package wasn't already published
-                if ! grep -q "^$package$" /tmp/published_packages.txt 2>/dev/null; then
-                  publish_single_package "$package" "Fallback"
-                fi
-              fi
-            done
-          fi
-
-          # Collect all published packages
-          if [ -f /tmp/published_packages.txt ]; then
-            PUBLISHED_JSON=$(cat /tmp/published_packages.txt | grep -v '^$' | jq -R -s -c 'split("\n")[:-1]')
-          else
-            PUBLISHED_JSON="[]"
-          fi
-
-          echo "published-packages=$PUBLISHED_JSON" >> $GITHUB_OUTPUT
-          echo "Published packages: $PUBLISHED_JSON"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  create-release-summary:
-    name: Create Release Summary
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [version-and-publish]
-    if: always() && needs.version-and-publish.result == 'success'
-    steps:
-      - name: Create release summary
-        run: |
-          PUBLISHED_PACKAGES='${{ needs.version-and-publish.outputs.published-packages }}'
-
-          echo "## 📦 Published Packages" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          if [ "$PUBLISHED_PACKAGES" != "[]" ] && [ "$PUBLISHED_PACKAGES" != '[""]' ]; then
-            echo "The following packages have been published to GitHub Packages:" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            
-            # List published packages
-            echo "$PUBLISHED_PACKAGES" | jq -r '.[]' | while read -r package; do
-              if [ -n "$package" ] && [ "$package" != "" ]; then
-                echo "- \`@saga-ed/$package\`" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
-            
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Installation" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-            echo "# Configure npm to use GitHub Packages for @saga-ed scope" >> $GITHUB_STEP_SUMMARY
-            echo "npm config set @saga-ed:registry https://npm.pkg.github.com" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "# Install packages" >> $GITHUB_STEP_SUMMARY
-            
-            echo "$PUBLISHED_PACKAGES" | jq -r '.[]' | while read -r package; do
-              if [ -n "$package" ] && [ "$package" != "" ]; then
-                echo "npm install @saga-ed/$package" >> $GITHUB_STEP_SUMMARY
-              fi
-            done
-            
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "No packages were published in this run." >> $GITHUB_STEP_SUMMARY
-          fi

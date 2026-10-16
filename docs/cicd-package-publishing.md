@@ -4,84 +4,46 @@ This document describes how to use the automated CI/CD pipeline for publishing `
 
 ## Overview
 
-The CI/CD pipeline automatically:
-- 🔍 Detects which packages have changed using Turborepo
-- 🧪 Runs lint, type checking, and tests only on affected packages
-- 📦 Builds packages in dependency order
-- 🚀 Publishes only changed packages to AWS CodeArtifact under the `@saga-ed` scope
-- 📊 Uses matrix jobs for parallel processing
+Two workflows split the job:
 
-## Triggering the Pipeline
+- **`package-ci.yml`** (pull requests): lint, type check and test every package in dependency-layer order. Never publishes.
+- **`publish-codeartifact.yml`** (manual dispatch): publishes ONE package at the version already committed in its `package.json`. Packages do not publish automatically on merge.
 
-### 1. Manual Triggers with Version Bumps
+## Publishing a Package
 
-Use the GitHub CLI to trigger manual deployments with version bumps:
+1. Bump the package's `version` in the PR and merge it.
+2. Dispatch the publish workflow from `main`:
 
-#### Patch Version Bump (1.0.0 → 1.0.1)
 ```bash
-gh workflow run "Publish to CodeArtifact" \
-  --field version=patch
+gh workflow run publish-codeartifact.yml -R saga-ed/soa --ref main \
+  -f single_package=packages/<runtime>/<pkg>
 ```
 
-#### Minor Version Bump (1.0.0 → 1.1.0)
-```bash
-gh workflow run "Publish to CodeArtifact" \
-  --field version=minor
-```
+3. If the package has `workspace:` runtime dependencies (`dependencies`, `peerDependencies`, `optionalDependencies`), publish those first. The workflow's `preflight` job checks that each dependency's exact local version exists in CodeArtifact and fails with the list of missing ones; publishing is gated on it.
 
-#### Major Version Bump (1.0.0 → 2.0.0)
-```bash
-gh workflow run "Publish to CodeArtifact" \
-  --field version=major
-```
-
-#### Force Publish All Packages (ignore change detection)
-```bash
-gh workflow run "Publish to CodeArtifact" \
-  --field version=patch \
-  --field force_publish_all=true
-```
-
-## How Change Detection Works
-
-The pipeline uses **Turborepo** to intelligently detect changes:
-
-### 1. For Push Events
-```bash
-# Compares current commit with previous commit
-pnpm turbo run build --dry=json --filter="...[${GITHUB_EVENT_BEFORE}]"
-```
-
-### 2. For Manual Triggers
-```bash
-# Compares with last git tag or main branch
-pnpm turbo run build --dry=json --filter="...[${LAST_TAG}]"
-```
-
-### 3. Dependency Aware
-If package A depends on package B, and B changes, then A will also be rebuilt and potentially republished.
+Options:
+- `-f dry_run=true`: build, test and preflight only, no publish.
+- `-f skip_tests=true`: skip the test job (preflight still runs).
+- `-f publish_target=codeartifact|github|both` (default `codeartifact`).
+- Branch prerelease: commit a `-dev.N` version on the branch and dispatch with `--ref <branch>`.
 
 ## Package Publishing Rules
 
 ### What Gets Published
-- ✅ **Non-private packages** only (`"private": false` or not set)
-- ✅ **Changed packages** (detected by Turborepo)
-- ✅ **Packages with updated dependencies** (dependency cascade)
+- ✅ The single `single_package` target, if non-private, at its committed version
+- ⏭️ A version that already exists in the registry is skipped, not failed
 
-### What Gets Skipped
+### What Gets Blocked
 - ❌ **Private packages** (`"private": true`)
-- ❌ **Unchanged packages** (no code changes)
-- ❌ **Failed tests** (entire workflow fails)
+- ❌ **Failed tests** (unless `skip_tests=true`)
+- ❌ **Failed preflight** (a `workspace:` runtime dependency's version is not in CodeArtifact)
 
 ### Publishing Order
-Packages are published in **dependency order** to ensure:
-1. Base packages (no internal deps) publish first
-2. Dependent packages publish after their dependencies
-3. No circular dependency issues
+The operator publishes dependencies before dependents; `preflight` enforces it.
 
-## Matrix Job Strategy
+## PR CI Matrix
 
-The pipeline uses GitHub Actions matrix strategy:
+`package-ci.yml` runs one matrix job per package within each dependency layer:
 
 ```yaml
 strategy:
@@ -89,11 +51,6 @@ strategy:
   matrix:
     package: ${{ fromJson(needs.detect-changes.outputs.changed-packages) }}
 ```
-
-This means:
-- 🚀 **Parallel execution** for lint/test of different packages
-- 🛡️ **Isolation** - one package failure doesn't stop others
-- ⚡ **Faster feedback** - get results for working packages immediately
 
 ## Package Scope Configuration
 
@@ -187,14 +144,8 @@ Auth token may have expired (12-hour TTL). Re-authenticate:
 pnpm co:login
 ```
 
-#### 3. "No changes detected"
-If you expect changes but none are detected:
-- Check if files are in the `packages/` directory
-- Verify Turborepo configuration in `turbo.json`
-- Use `force_publish_all=true` to override change detection
-
-#### 4. "Dependency order issues"
-The workflow automatically handles dependency order using Turborepo's task graph.
+#### 3. "depends on unpublished <dep>@<version>"
+The preflight job found a `workspace:` runtime dependency whose version is not in CodeArtifact. Publish it first with `single_package=<its path>` (the error names the path), then re-dispatch.
 
 ## Best Practices
 
@@ -220,14 +171,13 @@ The workflow automatically handles dependency order using Turborepo's task graph
 
 ## Workflow Configuration
 
-The workflow is defined in `.github/workflows/publish-codeartifact.yml` and includes:
+The publish workflow is `.github/workflows/publish-codeartifact.yml`:
 
-- **Change Detection**: Uses Turborepo to find affected packages
-- **Matrix Testing**: Parallel lint/test execution per package
-- **Dependency-Aware Building**: Builds packages in correct order
-- **Smart Publishing**: Only publishes changed, non-private packages
-- **CodeArtifact Integration**: OIDC authentication via SOADeployRole
-- **Release Summaries**: Detailed output of what was published
+- **Resolve Version**: validates `single_package` and reads its committed version
+- **Test Package**: lint, type check, test (skippable)
+- **Dependency Preflight**: verifies `workspace:` runtime deps exist in CodeArtifact (runs on dry runs too)
+- **Publish**: CodeArtifact and/or GitHub Packages, OIDC authentication via SOADeployRole
+- **Release Summary**: what was published
 
 For more details, see the workflow file itself.
 

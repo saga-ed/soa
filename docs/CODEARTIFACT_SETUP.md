@@ -68,14 +68,16 @@ Packages are published via GitHub Actions using OIDC authentication (no long-liv
 ### Workflow: `publish-codeartifact.yml`
 
 Manually triggered with options:
-- **version:** `patch`, `minor`, or `major`
+- **single_package:** (required) package path, e.g. `packages/node/health`; its version must already be committed
 - **publish_target:** `codeartifact`, `github`, or `both`
 - **skip_tests:** Skip test suite (use with caution)
+- **dry_run:** Build, test and preflight only
 
 The workflow:
-1. Runs tests and builds
-2. Bumps versions across all publishable packages
-3. Publishes in dependency order to selected targets
+1. Validates the package and reads its committed version
+2. Runs tests and builds
+3. Preflights `workspace:` runtime dependencies (each must already be in CodeArtifact)
+4. Publishes that one package to the selected targets
 
 ### IAM Role
 
@@ -86,7 +88,7 @@ GitHub Actions authenticates via the `SOADeployRole` IAM role (`/github-actions-
 
 ## Manual Publishing (Dev Versions)
 
-Most package publishes go through `publish-codeartifact.yml` on merge to main. Use the manual flow below when you need to push a pre-release version from an in-flight branch — typically because a consumer in another repo (program-hub, rostering, etc.) needs to pin the change for its own preview deploy or PR review **before** the soa change has merged.
+Package publishes go through a manual `publish-codeartifact.yml` dispatch with `single_package` after the version bump merges to main (nothing publishes automatically on merge). Use the manual flow below when you need to push a pre-release version from an in-flight branch — typically because a consumer in another repo (program-hub, rostering, etc.) needs to pin the change for its own preview deploy or PR review **before** the soa change has merged.
 
 ### Profile selection: prod, in-account
 
@@ -116,7 +118,7 @@ The trade-off is auth-token DX. Unlike ECR — where `aws ecr get-login-password
 | Stage | Version pattern | Example | Lifetime |
 |---|---|---|---|
 | In-flight feature branch | `MAJOR.MINOR.PATCH-dev.N` | `0.1.0-dev.2` | Bump `dev.N` per iteration. Pinned by consumer feature branches that depend on the change. |
-| Production approval | `MAJOR.MINOR.PATCH` | `0.1.0` | Cut once the feature is approved to merge — typically by `publish-codeartifact.yml` on the merge commit. This is the version production-deploying branches pin. |
+| Production approval | `MAJOR.MINOR.PATCH` | `0.1.0` | Cut once the feature is approved to merge — by dispatching `publish-codeartifact.yml` with `single_package` after the PR merges. This is the version production-deploying branches pin. |
 
 Dev versions are temporary by design. Once a non-dev release exists for the same minor (or the feature is abandoned), the `*-dev.*` versions become safe to delete.
 

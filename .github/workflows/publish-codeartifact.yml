@@ -1,32 +1,13 @@
 name: Publish to AWS CodeArtifact & GitHub Packages
 
-# Manual trigger for controlled publishing to CodeArtifact and/or GitHub Packages
+# Manual, single-package publish at the version already committed in package.json.
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version bump type"
+      single_package:
+        description: "Package path to publish (e.g. packages/node/health). Its version must already be committed; bump it in the PR. For a branch prerelease, commit a -dev.N version and dispatch with --ref <branch>."
         required: true
-        default: "patch"
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-          - prepatch
-          - preminor
-          - premajor
-          - prerelease
-      preid:
-        description: "Prerelease identifier (for pre* versions)"
-        required: false
-        default: "dev"
-        type: choice
-        options:
-          - dev
-          - alpha
-          - beta
-          - rc
+        type: string
       publish_target:
         description: "Publish target"
         required: true
@@ -42,15 +23,10 @@ on:
         default: false
         type: boolean
       dry_run:
-        description: "Dry run (build and test only, no publish)"
+        description: "Dry run (build, test and dependency preflight only, no publish)"
         required: false
         default: false
         type: boolean
-      single_package:
-        description: "Publish ONLY this package path (e.g. packages/web/rum-util) at its ALREADY-COMMITTED version — bump it via a PR first, since main's ruleset blocks direct pushes. Blank = standard coordinated multi-package release."
-        required: false
-        default: ""
-        type: string
 
 env:
   NODE_VERSION: "22"
@@ -59,21 +35,45 @@ env:
   CODEARTIFACT_DOMAIN: saga
   CODEARTIFACT_REPOSITORY: saga_js
   CODEARTIFACT_OWNER: "531314149529"
-  # When set (via the single_package dispatch input), every job scopes itself to
-  # this one package path instead of the standard coordinated multi-package release.
-  # Referenced as "$SINGLE_PACKAGE" in shell (never inline ${{ }}) to avoid injection.
+  # Reference as "$SINGLE_PACKAGE" in shell, never inline ${{ }} (injection).
   SINGLE_PACKAGE: ${{ github.event.inputs.single_package }}
 
 permissions:
   id-token: write
-  contents: write
+  contents: read
   packages: write
 
 jobs:
+  resolve-version:
+    name: Resolve Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      new-version: ${{ steps.resolve.outputs.new-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Validate package and read committed version
+        id: resolve
+        run: |
+          if ! [[ "$SINGLE_PACKAGE" =~ ^packages/[a-z0-9-]+/[a-z0-9._-]+$ ]]; then
+            echo "::error::single_package '$SINGLE_PACKAGE' must match packages/<group>/<name>"
+            exit 1
+          fi
+          if [ ! -f "$SINGLE_PACKAGE/package.json" ]; then
+            echo "::error::$SINGLE_PACKAGE/package.json not found"
+            exit 1
+          fi
+          NEW_VERSION=$(jq -r '.version' "$SINGLE_PACKAGE/package.json")
+          echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing committed version $NEW_VERSION of $SINGLE_PACKAGE"
+
   test:
-    name: Test All Packages
+    name: Test Package
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: resolve-version
     if: ${{ github.event.inputs.skip_tests != 'true' }}
     steps:
       - name: Checkout code
@@ -125,131 +125,34 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build publishable packages
+      - name: Build package and workspace deps
         run: |
-          # Build first - required for type checking packages with internal deps
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
-            echo "Single-package mode: building $PKG and its workspace deps"
-            pnpm turbo run build --filter="${PKG}..."
-            exit 0
-          fi
-          pnpm turbo run build --filter=@saga-ed/soa-config \
-            --filter=@saga-ed/soa-logger \
-            --filter=@saga-ed/soa-mailer \
-            --filter=@saga-ed/soa-pubsub-core \
-            --filter=@saga-ed/soa-api-util \
-            --filter=@saga-ed/soa-tgql-codegen \
-            --filter=@saga-ed/soa-trpc-base \
-            --filter=@saga-ed/soa-db \
-            --filter=@saga-ed/soa-api-core \
-            --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-aws-util \
-            --filter=@saga-ed/soa-rabbitmq \
-            --filter=@saga-ed/soa-redis-core \
-            --filter=@saga-ed/soa-test-util \
-            --filter=@saga-ed/soa-lake-writer
+          PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+          pnpm turbo run build --filter="${PKG}..."
 
-      - name: Lint publishable packages
+      - name: Lint package
         run: |
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
-            pnpm turbo run lint --filter="${PKG}"
-            exit 0
-          fi
-          pnpm turbo run lint --filter=@saga-ed/soa-config \
-            --filter=@saga-ed/soa-logger \
-            --filter=@saga-ed/soa-mailer \
-            --filter=@saga-ed/soa-pubsub-core \
-            --filter=@saga-ed/soa-api-util \
-            --filter=@saga-ed/soa-tgql-codegen \
-            --filter=@saga-ed/soa-trpc-base \
-            --filter=@saga-ed/soa-db \
-            --filter=@saga-ed/soa-api-core \
-            --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-aws-util \
-            --filter=@saga-ed/soa-rabbitmq \
-            --filter=@saga-ed/soa-redis-core \
-            --filter=@saga-ed/soa-test-util \
-            --filter=@saga-ed/soa-lake-writer
+          PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+          pnpm turbo run lint --filter="${PKG}"
 
-      - name: Type check publishable packages
+      - name: Type check package and workspace deps
         run: |
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
-            pnpm turbo run check-types --filter="${PKG}..."
-            exit 0
-          fi
-          pnpm turbo run check-types --filter=@saga-ed/soa-config \
-            --filter=@saga-ed/soa-logger \
-            --filter=@saga-ed/soa-mailer \
-            --filter=@saga-ed/soa-pubsub-core \
-            --filter=@saga-ed/soa-api-util \
-            --filter=@saga-ed/soa-tgql-codegen \
-            --filter=@saga-ed/soa-trpc-base \
-            --filter=@saga-ed/soa-db \
-            --filter=@saga-ed/soa-api-core \
-            --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-aws-util \
-            --filter=@saga-ed/soa-rabbitmq \
-            --filter=@saga-ed/soa-redis-core \
-            --filter=@saga-ed/soa-test-util \
-            --filter=@saga-ed/soa-lake-writer
+          PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+          pnpm turbo run check-types --filter="${PKG}..."
 
-      - name: Test publishable packages
+      - name: Test package
         run: |
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
-            pnpm turbo run test --filter="${PKG}"
-            exit 0
-          fi
-          # Note: soa-db excluded - its tests use mongodb-memory-server which
-          # requires downloading MongoDB and times out in CI
-          pnpm turbo run test --filter=@saga-ed/soa-config \
-            --filter=@saga-ed/soa-logger \
-            --filter=@saga-ed/soa-mailer \
-            --filter=@saga-ed/soa-pubsub-core \
-            --filter=@saga-ed/soa-api-util \
-            --filter=@saga-ed/soa-tgql-codegen \
-            --filter=@saga-ed/soa-trpc-base \
-            --filter=@saga-ed/soa-api-core \
-            --filter=@saga-ed/soa-pubsub-client \
-            --filter=@saga-ed/soa-aws-util \
-            --filter=@saga-ed/soa-rabbitmq \
-            --filter=@saga-ed/soa-redis-core \
-            --filter=@saga-ed/soa-test-util \
-            --filter=@saga-ed/soa-lake-writer
+          PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+          pnpm turbo run test --filter="${PKG}"
 
-      # The full-repo gates below validate cross-package integrity for a
-      # coordinated release. In single-package mode they're skipped — the
-      # per-package steps above (with `...`) already cover the target + its deps,
-      # and a full-repo lint could fail on an unrelated package and block the publish.
-      - name: Lint
-        if: ${{ github.event.inputs.single_package == '' }}
-        run: pnpm turbo run lint
-
-      - name: Type check
-        if: ${{ github.event.inputs.single_package == '' }}
-        run: pnpm turbo run check-types
-
-      - name: Build
-        if: ${{ github.event.inputs.single_package == '' }}
-        run: pnpm turbo run build
-
-  version-bump:
-    name: Version Bump
+  preflight:
+    name: Dependency Preflight
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: test
-    if: always() && (needs.test.result == 'success' || needs.test.result == 'skipped')
-    outputs:
-      new-version: ${{ steps.bump.outputs.new-version }}
+    needs: resolve-version
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -275,113 +178,100 @@ jobs:
             --domain-owner ${{ env.CODEARTIFACT_OWNER }} \
             --query authorizationToken \
             --output text)
-          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
           echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
 
-      - name: Configure CodeArtifact registry
+      - name: Configure npm for CodeArtifact
         run: |
-          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
+          REGISTRY_URL="https://${{ env.CODEARTIFACT_DOMAIN }}-${{ env.CODEARTIFACT_OWNER }}.d.codeartifact.${{ env.AWS_REGION }}.amazonaws.com/npm/${{ env.CODEARTIFACT_REPOSITORY }}/"
+          npm config set @saga-ed:registry=$REGISTRY_URL
+          npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
+          pnpm config set //${REGISTRY_URL#https://}:_authToken ${{ env.CODEARTIFACT_AUTH_TOKEN }}
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Configure git
+      - name: Check workspace runtime deps exist in CodeArtifact
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          PKG_JSON="$SINGLE_PACKAGE/package.json"
+          PKG=$(jq -r '.name' "$PKG_JSON")
+          ERR_FILE=$(mktemp)
+          MISSING=()
+          HARD_ERRORS=0
 
-      - name: Bump versions
-        id: bump
-        run: |
-          VERSION_TYPE="${{ github.event.inputs.version }}"
-          PREID="${{ github.event.inputs.preid }}"
-          DRY_RUN="${{ github.event.inputs.dry_run }}"
+          # Runtime-relevant sections only; devDependencies never ship to consumers.
+          DEPS=$(jq -r '[.dependencies, .peerDependencies, .optionalDependencies]
+            | map(. // {}) | add // {}
+            | to_entries[] | select(.value | startswith("workspace:")) | .key' "$PKG_JSON")
 
-          # Single-package mode publishes the version ALREADY COMMITTED on main.
-          # We can't bump-and-push here: main is guarded by a repository ruleset
-          # ("changes must be made through a pull request"), so the version is
-          # bumped via a normal PR before dispatch. Just read it and move on.
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            NEW_VERSION=$(jq -r '.version' "$SINGLE_PACKAGE/package.json")
-            echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "📦 single-package mode: publishing committed version $NEW_VERSION of $SINGLE_PACKAGE (no bump/push)"
+          if [ -z "$DEPS" ]; then
+            echo "No workspace runtime dependencies; nothing to check."
             exit 0
           fi
 
-          # Multi-package coordinated release: bump every publishable package.
-          PUBLISHABLE_PACKAGES=(
-            "packages/core/config"
-            "packages/node/logger"
-            "packages/node/mailer"
-            "packages/node/pubsub-core"
-            "packages/node/api-util"
-            "packages/core/tgql-codegen"
-            "packages/core/trpc-base"
-            "packages/node/db"
-            "packages/node/api-core"
-            "packages/node/pubsub-client"
-            "packages/node/aws-util"
-            "packages/node/lake-writer"
-            "packages/node/rabbitmq"
-            "packages/node/redis-core"
-            "packages/node/test-util"
-            "packages/core/fixture-deidentify"
-            "packages/node/mesh-fixture-cli"
-          )
+          for dep in $DEPS; do
+            LINK="$SINGLE_PACKAGE/node_modules/$dep/package.json"
+            if [ -f "$LINK" ]; then
+              dep_json="$LINK"
+            else
+              dep_json=""
+              while IFS= read -r f; do
+                if [ "$(jq -r '.name' "$f")" = "$dep" ]; then dep_json="$f"; break; fi
+              done < <(find packages -name package.json -not -path '*/node_modules/*')
+            fi
+            if [ -z "$dep_json" ]; then
+              echo "::error::Cannot locate workspace package for $dep (dependency of $PKG)"
+              HARD_ERRORS=$((HARD_ERRORS + 1))
+              continue
+            fi
+            dep_version=$(jq -r '.version' "$dep_json")
+            dep_dir=$(dirname "$(realpath --relative-to="$PWD" "$dep_json")")
 
-          # Build npm version command with preid for prerelease versions
-          VERSION_CMD="npm version $VERSION_TYPE --no-git-tag-version"
-          if [[ "$VERSION_TYPE" == pre* ]]; then
-            VERSION_CMD="npm version $VERSION_TYPE --preid=$PREID --no-git-tag-version"
-            echo "📦 Creating prerelease version with identifier: $PREID"
-          fi
+            set +e
+            out=$(npm view "$dep@$dep_version" version 2>"$ERR_FILE")
+            rc=$?
+            set -e
 
-          NEW_VERSION=""
-          for pkg_path in "${PUBLISHABLE_PACKAGES[@]}"; do
-            if [ -f "$pkg_path/package.json" ]; then
-              is_private=$(jq -r '.private // false' "$pkg_path/package.json")
-              if [ "$is_private" != "true" ]; then
-                echo "Bumping $pkg_path"
-                cd "$pkg_path"
-                eval $VERSION_CMD
-                NEW_VERSION=$(jq -r '.version' package.json)
-                cd - > /dev/null
-              fi
+            if [ $rc -eq 0 ] && [ -n "$out" ]; then
+              echo "OK: $dep@$dep_version is in CodeArtifact"
+            elif [ $rc -eq 0 ]; then
+              echo "::error::$PKG depends on unpublished $dep@$dep_version (package exists, version missing) — publish it first (single_package=$dep_dir)"
+              MISSING+=("$dep@$dep_version")
+            elif grep -q "E404" "$ERR_FILE"; then
+              echo "::error::$PKG depends on unpublished $dep@$dep_version (package not found) — publish it first (single_package=$dep_dir)"
+              MISSING+=("$dep@$dep_version")
+            else
+              echo "::error::Registry check for $dep@$dep_version failed (not a 404; auth/network?):"
+              cat "$ERR_FILE"
+              HARD_ERRORS=$((HARD_ERRORS + 1))
             fi
           done
 
-          echo "new-version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "📦 New version: $NEW_VERSION"
-
-          # Commit version changes (skip for dry run)
-          if [ "$DRY_RUN" != "true" ]; then
-            git add packages/*/*/package.json 2>/dev/null || true
-            if ! git diff --staged --quiet; then
-              git commit -m "chore: bump package versions ($VERSION_TYPE) to $NEW_VERSION"
-              git push
-            fi
-          else
-            echo "🔍 Dry run - skipping version commit"
+          if [ $HARD_ERRORS -gt 0 ]; then
+            echo "::error::Preflight could not verify $HARD_ERRORS dependency check(s)"
+            exit 1
           fi
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::Unpublished workspace dependencies: ${MISSING[*]}"
+            exit 1
+          fi
+          echo "Preflight passed for $PKG"
 
   publish-codeartifact:
     name: Publish to CodeArtifact
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: version-bump
+    needs: [resolve-version, test, preflight]
     if: |
       always() &&
-      needs.version-bump.result == 'success' &&
+      needs.resolve-version.result == 'success' &&
+      needs.preflight.result == 'success' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
       github.event.inputs.dry_run != 'true' &&
       (github.event.inputs.publish_target == 'codeartifact' || github.event.inputs.publish_target == 'both')
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          ref: ${{ github.ref_name }}
-
-      - name: Pull latest (with version bump)
-        run: git pull
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -393,18 +283,6 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build all packages
-        run: |
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
-            pnpm turbo run build --filter="${PKG}..."
-          else
-            pnpm turbo run build
-          fi
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -428,89 +306,56 @@ jobs:
           npm config set @saga-ed:registry=$REGISTRY_URL
           npm config set //${REGISTRY_URL#https://}:_authToken=${{ env.CODEARTIFACT_AUTH_TOKEN }}
 
-      - name: Publish packages in dependency order
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package and workspace deps
         run: |
-          # Layer 0: Base packages (no workspace deps)
-          LAYER_0="packages/core/config packages/node/logger packages/node/mailer packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base packages/node/lake-writer"
+          PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+          pnpm turbo run build --filter="${PKG}..."
 
-          # Layer 1: Depends on Layer 0
-          LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
-
-          # Layer 2: Depends on Layer 1
-          LAYER_2="packages/node/pubsub-client"
-
-          # Single-package mode: publish only the requested package (its deps are
-          # already published; an empty unquoted LAYER expands to zero iterations).
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            LAYER_0="$SINGLE_PACKAGE"; LAYER_1=""; LAYER_2=""
-          fi
-
-          PUBLISH_FAILURES=0
-
-          publish_package() {
-            local pkg_path="$1"
-            if [ -f "$pkg_path/package.json" ]; then
-              is_private=$(jq -r '.private // false' "$pkg_path/package.json")
-              if [ "$is_private" != "true" ]; then
-                pkg_name=$(jq -r '.name' "$pkg_path/package.json")
-                pkg_version=$(jq -r '.version' "$pkg_path/package.json")
-                echo "📦 Publishing $pkg_name@$pkg_version from $pkg_path..."
-                cd "$pkg_path"
-
-                # Capture output and exit code
-                set +e
-                output=$(pnpm publish --no-git-checks --access public 2>&1)
-                exit_code=$?
-                set -e
-
-                if [ $exit_code -eq 0 ]; then
-                  echo "✅ Published $pkg_name@$pkg_version"
-                elif echo "$output" | grep -qiE "(already exists|ConflictException|EPUBLISHCONFLICT|cannot publish over)"; then
-                  echo "⏭️ Skipped $pkg_name@$pkg_version (version already exists)"
-                else
-                  echo "❌ Failed to publish $pkg_name@$pkg_version"
-                  echo "$output"
-                  PUBLISH_FAILURES=$((PUBLISH_FAILURES + 1))
-                fi
-
-                cd - > /dev/null
-              fi
-            fi
-          }
-
-          echo "=== Publishing Layer 0 (Base packages) ==="
-          for pkg in $LAYER_0; do publish_package "$pkg"; done
-
-          echo "=== Publishing Layer 1 ==="
-          for pkg in $LAYER_1; do publish_package "$pkg"; done
-
-          echo "=== Publishing Layer 2 ==="
-          for pkg in $LAYER_2; do publish_package "$pkg"; done
-
-          if [ $PUBLISH_FAILURES -gt 0 ]; then
-            echo "❌ CodeArtifact publishing failed with $PUBLISH_FAILURES error(s)"
+      - name: Publish package
+        run: |
+          is_private=$(jq -r '.private // false' "$SINGLE_PACKAGE/package.json")
+          if [ "$is_private" = "true" ]; then
+            echo "::error::$SINGLE_PACKAGE is private and cannot be published"
             exit 1
           fi
-          echo "✅ CodeArtifact publishing complete"
+          pkg_name=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+          pkg_version=$(jq -r '.version' "$SINGLE_PACKAGE/package.json")
+          echo "📦 Publishing $pkg_name@$pkg_version from $SINGLE_PACKAGE..."
+          cd "$SINGLE_PACKAGE"
+
+          set +e
+          output=$(pnpm publish --no-git-checks --access public 2>&1)
+          exit_code=$?
+          set -e
+
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Published $pkg_name@$pkg_version"
+          elif echo "$output" | grep -qiE "(already exists|ConflictException|EPUBLISHCONFLICT|cannot publish over)"; then
+            echo "⏭️ Skipped $pkg_name@$pkg_version (version already exists)"
+          else
+            echo "❌ Failed to publish $pkg_name@$pkg_version"
+            echo "$output"
+            exit 1
+          fi
 
   publish-github:
     name: Publish to GitHub Packages
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: version-bump
+    needs: [resolve-version, test, preflight]
     if: |
       always() &&
-      needs.version-bump.result == 'success' &&
+      needs.resolve-version.result == 'success' &&
+      needs.preflight.result == 'success' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
       github.event.inputs.dry_run != 'true' &&
       (github.event.inputs.publish_target == 'github' || github.event.inputs.publish_target == 'both')
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          ref: ${{ github.ref_name }}
-
-      - name: Pull latest (with version bump)
-        run: git pull
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -528,73 +373,42 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build all packages
+      - name: Build package and workspace deps
         run: |
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
-            pnpm turbo run build --filter="${PKG}..."
-          else
-            pnpm turbo run build
-          fi
+          PKG=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+          pnpm turbo run build --filter="${PKG}..."
 
       - name: Setup .npmrc for GitHub Packages
         run: |
           echo "@saga-ed:registry=https://npm.pkg.github.com" >> .npmrc
           echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> .npmrc
 
-      - name: Publish packages in dependency order
+      - name: Publish package
         run: |
-          LAYER_0="packages/core/config packages/node/logger packages/node/mailer packages/node/pubsub-core packages/node/api-util packages/core/tgql-codegen packages/core/trpc-base packages/node/lake-writer"
-          LAYER_1="packages/node/db packages/node/api-core packages/node/aws-util packages/node/rabbitmq packages/node/redis-core packages/node/test-util"
-          LAYER_2="packages/node/pubsub-client"
-
-          # Single-package mode: publish only the requested package.
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            LAYER_0="$SINGLE_PACKAGE"; LAYER_1=""; LAYER_2=""
-          fi
-
-          PUBLISH_FAILURES=0
-
-          publish_package() {
-            local pkg_path="$1"
-            if [ -f "$pkg_path/package.json" ]; then
-              is_private=$(jq -r '.private // false' "$pkg_path/package.json")
-              if [ "$is_private" != "true" ]; then
-                pkg_name=$(jq -r '.name' "$pkg_path/package.json")
-                pkg_version=$(jq -r '.version' "$pkg_path/package.json")
-                echo "📦 Publishing $pkg_name@$pkg_version to GitHub Packages..."
-                cd "$pkg_path"
-
-                # Capture output and exit code
-                set +e
-                output=$(npm publish --access public 2>&1)
-                exit_code=$?
-                set -e
-
-                if [ $exit_code -eq 0 ]; then
-                  echo "✅ Published $pkg_name@$pkg_version"
-                elif echo "$output" | grep -qiE "(already exists|EPUBLISHCONFLICT|cannot publish over|You cannot publish over)"; then
-                  echo "⏭️ Skipped $pkg_name@$pkg_version (version already exists)"
-                else
-                  echo "❌ Failed to publish $pkg_name@$pkg_version"
-                  echo "$output"
-                  PUBLISH_FAILURES=$((PUBLISH_FAILURES + 1))
-                fi
-
-                cd - > /dev/null
-              fi
-            fi
-          }
-
-          for pkg in $LAYER_0; do publish_package "$pkg"; done
-          for pkg in $LAYER_1; do publish_package "$pkg"; done
-          for pkg in $LAYER_2; do publish_package "$pkg"; done
-
-          if [ $PUBLISH_FAILURES -gt 0 ]; then
-            echo "❌ GitHub Packages publishing failed with $PUBLISH_FAILURES error(s)"
+          is_private=$(jq -r '.private // false' "$SINGLE_PACKAGE/package.json")
+          if [ "$is_private" = "true" ]; then
+            echo "::error::$SINGLE_PACKAGE is private and cannot be published"
             exit 1
           fi
-          echo "✅ GitHub Packages publishing complete"
+          pkg_name=$(jq -r '.name' "$SINGLE_PACKAGE/package.json")
+          pkg_version=$(jq -r '.version' "$SINGLE_PACKAGE/package.json")
+          echo "📦 Publishing $pkg_name@$pkg_version to GitHub Packages..."
+          cd "$SINGLE_PACKAGE"
+
+          set +e
+          output=$(npm publish --access public 2>&1)
+          exit_code=$?
+          set -e
+
+          if [ $exit_code -eq 0 ]; then
+            echo "✅ Published $pkg_name@$pkg_version"
+          elif echo "$output" | grep -qiE "(already exists|EPUBLISHCONFLICT|cannot publish over|You cannot publish over)"; then
+            echo "⏭️ Skipped $pkg_name@$pkg_version (version already exists)"
+          else
+            echo "❌ Failed to publish $pkg_name@$pkg_version"
+            echo "$output"
+            exit 1
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -602,22 +416,16 @@ jobs:
     name: Create Release Summary
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [version-bump, publish-codeartifact, publish-github]
+    needs: [resolve-version, preflight, publish-codeartifact, publish-github]
     if: always()
     steps:
       - name: Create summary
         run: |
           echo "## 📦 Package Publishing Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ needs.version-bump.outputs.new-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Package:** \`$SINGLE_PACKAGE\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.resolve-version.outputs.new-version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ github.event.inputs.publish_target }}" >> $GITHUB_STEP_SUMMARY
-          if [ -n "$SINGLE_PACKAGE" ]; then
-            echo "**Scope:** single package \`$SINGLE_PACKAGE\`" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "**Version Bump:** ${{ github.event.inputs.version }}" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ github.event.inputs.version }}" == pre* ]]; then
-            echo "**Prerelease ID:** ${{ github.event.inputs.preid }}" >> $GITHUB_STEP_SUMMARY
-          fi
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
             echo "**Mode:** 🔍 Dry Run (no publish)" >> $GITHUB_STEP_SUMMARY
           fi
@@ -625,8 +433,14 @@ jobs:
 
           echo "### Results" >> $GITHUB_STEP_SUMMARY
 
+          if [ "${{ needs.preflight.result }}" == "success" ]; then
+            echo "- ✅ **Dependency preflight**: workspace runtime deps present in CodeArtifact" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ **Dependency preflight**: ${{ needs.preflight.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
           if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
-            echo "- 🔍 **Dry Run**: Build and test completed, no packages published" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔍 **Dry Run**: Build, test and preflight completed, no packages published" >> $GITHUB_STEP_SUMMARY
           else
             if [ "${{ needs.publish-codeartifact.result }}" == "success" ]; then
               echo "- ✅ **CodeArtifact**: Published successfully" >> $GITHUB_STEP_SUMMARY

@@ -8,7 +8,7 @@ Framework-free health/readiness route mounters for Saga Node services. Mount bef
 |---|---|---|
 | ALB target group | `/health/ready` | `createDbReadiness().probe` (reads state, never queries the DB) |
 | ECS container healthCheck | `/health/live` | always 200, including while draining |
-| Deploy smoke / humans | `/health/deep` | `deepProbes` that really hit dependencies; never an ALB path |
+| Deploy smoke / humans | `/health/deep` | `deepProbes` that really hit dependencies (result cached `deepCacheMs`, default 5s, concurrent calls coalesced); never an ALB path |
 
 ```ts
 const drain = createDrainSignal();

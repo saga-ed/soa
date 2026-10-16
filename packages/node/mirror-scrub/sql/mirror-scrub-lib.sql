@@ -28,8 +28,35 @@
 --   their base type); a text column named *_id is flagged like any other. Does not raise.
 -- pg_temp.mirror_expect_db(name)
 --   RAISES unless current_database() = name.
+-- pg_temp.mirror_adopt(owner)
+--   On RDS the master is NOSUPERUSER and not a member of service owner roles; as an
+--   rds_superuser member it may GRANT them to itself (the AWS-documented route). Grants
+--   owner -> current_user WITH INHERIT, SET when missing; only for a non-superuser,
+--   non-reserved owner, and only when current_user inherits rds_superuser. No-op elsewhere.
 
 CREATE TEMP TABLE IF NOT EXISTS mirror_allow (db text, tbl text, col text);
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_adopt(p_owner oid)
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_name text;
+BEGIN
+  IF pg_has_role(current_user, p_owner, 'USAGE') AND pg_has_role(current_user, p_owner, 'SET') THEN
+    RETURN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_superuser')
+     OR NOT pg_has_role(current_user, 'rds_superuser', 'USAGE') THEN
+    RETURN;
+  END IF;
+  SELECT rolname INTO v_name FROM pg_roles
+   WHERE oid = p_owner AND NOT rolsuper AND rolname NOT LIKE 'pg\_%' AND rolname NOT LIKE 'rds%';
+  IF v_name IS NULL THEN
+    RETURN;
+  END IF;
+  EXECUTE format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', v_name, current_user);
+  RAISE NOTICE 'mirror: granted % to % (rds_superuser adopt)', v_name, current_user;
+END;
+$fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_expect_db(p_db text)
 RETURNS void LANGUAGE plpgsql AS $fn$
@@ -89,6 +116,7 @@ BEGIN
   LOOP
     v_kw := CASE d.relkind WHEN 'm' THEN 'MATERIALIZED VIEW' ELSE 'VIEW' END;
     IF d.relowner <> (SELECT oid FROM pg_roles WHERE rolname = current_user) THEN
+      PERFORM pg_temp.mirror_adopt(d.relowner);
       IF NOT pg_has_role(current_user, d.relowner, 'MEMBER') THEN
         RAISE EXCEPTION 'mirror: % cannot re-own dependent %.% (owner %): GRANT % TO %',
           current_user, d.nspname, d.relname, d.relowner::regrole, d.relowner::regrole, current_user;
@@ -212,6 +240,7 @@ BEGIN
     RAISE EXCEPTION 'mirror_scrub: %.% is a view with no %_real table', p_schema, p_table, p_table;
   END IF;
 
+  PERFORM pg_temp.mirror_adopt((SELECT relowner FROM pg_class WHERE oid = v_oid));
   IF NOT pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = v_oid), 'USAGE')
      OR NOT pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = v_oid), 'MEMBER') THEN
     RAISE EXCEPTION 'mirror_scrub: % cannot rename/re-own %.% (owner %): % must be a member of the owner role (GRANT % TO %)',

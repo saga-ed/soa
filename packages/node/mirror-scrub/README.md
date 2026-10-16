@@ -16,6 +16,11 @@ Per scrubbed table `t` in a database, as the mirror master:
 2. `t` → `t_real` (re-owned by the master; every grantee loses all access), `t_public` → `t`.
    Table- and column-level SELECT grants move to the view.
 3. Views/matviews over `t_real` are re-owned by the master, ungranted and (matviews) emptied.
+
+On RDS the master is NOSUPERUSER and holds no membership in service owner roles. Before
+steps 2–3 the lib grants the owner role to the master (`WITH INHERIT TRUE, SET TRUE`), which an
+`rds_superuser` member may do; it skips superuser, `pg_*` and `rds*` owners. The grant persists
+on the mirror until the next restore.
 4. **Closed-world audit:** every column of every base table must be
    overridden or allow-listed by exact `(db, table, column)` unless its type is numeric, bool,
    date/time, interval, enum or uuid (fail-closed: inet, xml, composites, domains over text are
@@ -26,8 +31,8 @@ Per scrubbed table `t` in a database, as the mirror master:
 The SQL lib (`sql/mirror-scrub-lib.sql`) is design-reviewed: function bodies match
 rostering@`bf110ac5` (`iam-mirror-bootstrap/sql/mirror-scrub-lib.sql`) except the audit NOTICE
 text and its fail-closed type filter (flags every type but numeric, bool, date/time, interval,
-enum, uuid and uuid/int arrays; a strict superset of the reviewed filter). A body change needs a
-new design review.
+enum, uuid and uuid/int arrays; a strict superset of the reviewed filter), and `mirror_adopt`
+(0.1.1, separately reviewed). A body change needs a new design review.
 
 ## Per-database file contract (owning repo)
 

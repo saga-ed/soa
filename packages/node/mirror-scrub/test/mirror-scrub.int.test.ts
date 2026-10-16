@@ -245,3 +245,38 @@ describe('mirror-scrub lint', () => {
         expect(r.code, r.out).toBe(0);
     });
 });
+
+// Last: creating rds_superuser makes `check` refuse this cluster.
+describe('mirror-scrub run on an RDS-shaped master', () => {
+    it('adopts a service owner role it is not a member of, via rds_superuser', () => {
+        // RDS: the master is NOSUPERUSER, inherits rds_superuser, and holds no membership in
+        // service owner roles; vanilla PG needs ADMIN (no INHERIT/SET) to stand in for RDS's grant right.
+        expect(
+            psql(
+                'postgres',
+                `CREATE ROLE rds_superuser NOLOGIN;
+                 CREATE ROLE rds_master LOGIN NOSUPERUSER CREATEROLE;
+                 GRANT rds_superuser TO rds_master;
+                 CREATE ROLE svc_owner NOLOGIN;
+                 GRANT svc_owner TO rds_master WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;`,
+            ).code,
+        ).toBe(0);
+        const { db, allow } = freshDb();
+        expect(
+            psql(
+                db,
+                `GRANT USAGE, CREATE ON SCHEMA public TO rds_master;
+                 ALTER TABLE person OWNER TO svc_owner; ALTER TABLE outbox_event OWNER TO svc_owner;
+                 ALTER TABLE org OWNER TO svc_owner; ALTER VIEW person_emails OWNER TO svc_owner;
+                 ALTER MATERIALIZED VIEW person_counts OWNER TO svc_owner;`,
+            ).code,
+        ).toBe(0);
+        expect(psql(db, "SELECT pg_has_role('rds_master', 'svc_owner', 'USAGE')").out).toBe('f');
+
+        const r = cliRun(['run', '--db', db, '--scrub', scrubFile, '--allow', allow], { PGOPTIONS: '-c role=rds_master' });
+        expect(r.code, r.out).toBe(0);
+        expect(r.out).toContain('granted svc_owner to rds_master (rds_superuser adopt)');
+        expect(relkind(db, 'person')).toBe('v');
+        expect(psql(db, "SELECT relowner::regrole FROM pg_class WHERE relname = 'person_real'").out).toBe('rds_master');
+    });
+});

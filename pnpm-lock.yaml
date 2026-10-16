@@ -1059,6 +1059,9 @@ importers:
 
   packages/node/event-integration-tests:
     dependencies:
+      '@saga-ed/soa-event-consumer':
+        specifier: workspace:*
+        version: link:../event-consumer
       '@saga-ed/soa-event-outbox':
         specifier: workspace:*
         version: link:../event-outbox

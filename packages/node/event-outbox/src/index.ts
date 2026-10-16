@@ -13,6 +13,8 @@ export {
     OutboxRelay,
     type OutboxRelayOpts,
     type OutboxMetrics,
+    type ActivityGate,
+    type RelayStatus,
 } from './relay.js';
 export {
     createOutboxPool,

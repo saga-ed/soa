@@ -64,4 +64,6 @@ export {
     type ConsumerMetrics,
     type EventKey,
     type HandlerMap,
+    type ActivityGate,
+    type ConsumerStatus,
 } from './consumer.js';

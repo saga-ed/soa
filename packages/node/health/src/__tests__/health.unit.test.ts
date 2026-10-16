@@ -1,30 +1,43 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mountHealthRoutes, buildIdentity, type HealthRouter } from '../health.js';
+import {
+  mountHealthRoutes,
+  buildIdentity,
+  type HealthRouter,
+  type HealthResponse,
+} from '../health.js';
 
 /**
  * Captures the route handlers a service would register, so we can invoke them
  * with a fake res and assert the response bodies — without a real HTTP server.
  */
 function fakeApp() {
-  const routes = new Map<string, (req: unknown, res: { json(b: unknown): unknown }) => void>();
+  const routes = new Map<string, (req: unknown, res: HealthResponse) => void>();
   const app: HealthRouter = {
     get(path, handler) {
       routes.set(path, handler);
       return undefined;
     },
   };
-  async function call(path: string): Promise<unknown> {
+  async function callFull(path: string): Promise<{ code: number; body: unknown }> {
     const handler = routes.get(path);
     if (!handler) throw new Error(`no handler for ${path}`);
+    let code = 200;
     let body: unknown;
-    const res = { json: (b: unknown) => ((body = b), b) };
-    // The handler type is `=> void`, but the /health/details handler is async
-    // and returns a promise at runtime; await it so the readiness probe
-    // resolves before we read `body`.
+    const res: HealthResponse = {
+      status(c: number) {
+        code = c;
+        return { json: (b: unknown) => ((body = b), b) };
+      },
+      json: (b: unknown) => ((body = b), b),
+    };
+    // The /health/details handler is async at runtime though typed `=> void`.
     await (handler({}, res) as unknown as Promise<void> | void);
-    return body;
+    return { code, body };
   }
-  return { app, call, paths: () => Array.from(routes.keys()) };
+  async function call(path: string): Promise<unknown> {
+    return (await callFull(path)).body;
+  }
+  return { app, call, callFull, paths: () => Array.from(routes.keys()) };
 }
 
 describe('mountHealthRoutes', () => {

@@ -3,7 +3,8 @@
  *
  * Mounted BEFORE any auth perimeter so ALB / load-balancer probes are never
  * gated. `/health` is a liveness ping; `/health/details` adds a timed
- * dependency readiness probe (typically Postgres). Typed structurally (no
+ * dependency readiness probe (typically Postgres) and answers 503 when
+ * unhealthy. Typed structurally (no
  * express import) so the helper has no framework dependency — any object with
  * `get(path, handler)` works.
  *
@@ -16,6 +17,7 @@
  */
 
 export interface HealthResponse {
+  status(code: number): { json(body: unknown): unknown };
   json(body: unknown): unknown;
 }
 
@@ -31,6 +33,8 @@ export interface MountHealthOptions {
    * `() => container.get<PrismaClient>('PrismaClient').$queryRawUnsafe('SELECT 1')`.
    */
   pingDb: () => Promise<unknown>;
+  /** When true, `/health` answers 503 `draining` so the ALB deregisters the task. `/health/details` is unaffected. */
+  isDraining?: () => boolean;
 }
 
 /**
@@ -102,6 +106,10 @@ export function buildIdentity(env: EnvLike = ambientEnv()): BuildIdentity {
 
 export function mountHealthRoutes(app: HealthRouter, opts: MountHealthOptions): void {
   app.get('/health', (_req, res) => {
+    if (opts.isDraining?.()) {
+      res.status(503).json({ status: 'draining', ...buildIdentity() });
+      return;
+    }
     res.json({ status: 'ok', service: opts.serviceName, ...buildIdentity() });
   });
 
@@ -115,7 +123,7 @@ export function mountHealthRoutes(app: HealthRouter, opts: MountHealthOptions): 
       dependencies.postgres = { status: 'unhealthy' };
     }
     const allHealthy = Object.values(dependencies).every((d) => d.status === 'healthy');
-    res.json({
+    res.status(allHealthy ? 200 : 503).json({
       status: allHealthy ? 'healthy' : 'unhealthy',
       service: opts.serviceName,
       ...buildIdentity(),

@@ -70,13 +70,21 @@ export interface MountReadinessOptions {
    * so a hung dependency cannot block the probe past the load-balancer window.
    */
   timeoutMs?: number;
+  /**
+   * Same shape as `probes`, mounted at `/health/deep`. These may really hit
+   * dependencies on every call: for deploy smoke tests and humans, NEVER an
+   * ALB target-group path.
+   */
+  deepProbes?: Record<string, () => Promise<ProbeResult>>;
+  /** When true, `/health/ready` answers 503 `draining` without running probes. `/health/live` stays 200. */
+  isDraining?: () => boolean;
 }
 
 /** A sentinel the timeout rejects with, so we can tell timeout from a probe throw. */
-const TIMEOUT = Symbol('readiness-probe-timeout');
+export const TIMEOUT = Symbol('readiness-probe-timeout');
 
 /** Reject with TIMEOUT after `ms` so a hung probe cannot stall the response. */
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(TIMEOUT), ms);
@@ -84,6 +92,30 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   // Clear the pending timer once the probe settles so a fast probe doesn't
   // leave a dangling 2s timer (harmless but tidy under high request rates).
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function runProbes(
+  probes: Record<string, () => Promise<ProbeResult>>,
+  timeoutMs: number,
+  res: ReadinessResponse,
+): Promise<void> {
+  const entries = await Promise.all(
+    Object.entries(probes).map(async ([name, probe]) => {
+      // A probe that hangs is killed by the timeout (detail 'timeout'); a
+      // probe that throws is reported separately (detail 'error'). Either
+      // way it counts as not-ready.
+      const result: ProbeResult = await withTimeout(probe(), timeoutMs).catch((err) => ({
+        ready: false,
+        detail: err === TIMEOUT ? 'timeout' : 'error',
+      }));
+      return [name, result] as const;
+    }),
+  );
+  const checks: Record<string, ProbeResult> = Object.fromEntries(entries);
+  const ready = entries.every(([, r]) => r.ready);
+  res
+    .status(ready ? 200 : 503)
+    .json({ status: ready ? 'ready' : 'not ready', ...buildIdentity(), checks });
 }
 
 export function mountReadinessRoutes(app: ReadinessRouter, opts: MountReadinessOptions): void {
@@ -94,22 +126,17 @@ export function mountReadinessRoutes(app: ReadinessRouter, opts: MountReadinessO
   });
 
   app.get('/health/ready', async (_req, res) => {
-    const entries = await Promise.all(
-      Object.entries(opts.probes).map(async ([name, probe]) => {
-        // A probe that hangs is killed by the timeout (detail 'timeout'); a
-        // probe that throws is reported separately (detail 'error'). Either
-        // way it counts as not-ready.
-        const result: ProbeResult = await withTimeout(probe(), timeoutMs).catch((err) => ({
-          ready: false,
-          detail: err === TIMEOUT ? 'timeout' : 'error',
-        }));
-        return [name, result] as const;
-      }),
-    );
-    const checks: Record<string, ProbeResult> = Object.fromEntries(entries);
-    const ready = entries.every(([, r]) => r.ready);
-    res
-      .status(ready ? 200 : 503)
-      .json({ status: ready ? 'ready' : 'not ready', ...buildIdentity(), checks });
+    if (opts.isDraining?.()) {
+      res.status(503).json({ status: 'draining', ...buildIdentity() });
+      return;
+    }
+    await runProbes(opts.probes, timeoutMs, res);
   });
+
+  const deepProbes = opts.deepProbes;
+  if (deepProbes) {
+    app.get('/health/deep', async (_req, res) => {
+      await runProbes(deepProbes, timeoutMs, res);
+    });
+  }
 }

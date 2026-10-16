@@ -25,3 +25,9 @@ One-shot jobs use `resolveGate({ ownColor, parameterName, getParameter })`.
 
 Task role grant (prod only): `ssm:GetParameter` on exactly `arn:aws:ssm:<region>:<acct>:parameter/prod/bluegreen/<svc>/active-color`.
 Do not create dev parameters: nothing in dev would flip them back.
+
+## Adoption rule
+
+`await gate.start()` BEFORE starting any consumer, relay or scheduled job. Until the first read lands the gate is active
+(fail-open), so an idle-colour task that starts its consumers first consumes live traffic until the read completes.
+`start()` is bounded by `bootTimeoutMs` and never throws.

@@ -234,11 +234,9 @@ jobs:
 
             if [ $rc -eq 0 ] && [ -n "$out" ]; then
               echo "OK: $dep@$dep_version is in CodeArtifact"
-            elif [ $rc -eq 0 ]; then
-              echo "::error::$PKG depends on unpublished $dep@$dep_version (package exists, version missing) — publish it first (single_package=$dep_dir)"
-              MISSING+=("$dep@$dep_version")
-            elif grep -q "E404" "$ERR_FILE"; then
-              echo "::error::$PKG depends on unpublished $dep@$dep_version (package not found) — publish it first (single_package=$dep_dir)"
+            elif [ $rc -eq 0 ] || grep -q "E404" "$ERR_FILE"; then
+              # CodeArtifact answers E404 for a missing version, not just a missing package.
+              echo "::error::$PKG depends on $dep@$dep_version, which is not in CodeArtifact — publish it first (single_package=$dep_dir)"
               MISSING+=("$dep@$dep_version")
             else
               echo "::error::Registry check for $dep@$dep_version failed (not a 404; auth/network?):"

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { mountHealthRoutes, type HealthRouter } from '../health.js';
 import { mountReadinessRoutes, type ReadinessRouter } from '../readiness.js';
 import { createDrainSignal } from '../drain.js';
@@ -85,6 +85,87 @@ describe('/health/deep', () => {
     });
     await call('/health/ready');
     expect(deepRan).toBe(false);
+  });
+
+  describe('cache', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function counting() {
+      let runs = 0;
+      const probe = async () => {
+        runs++;
+        return { ready: true, detail: 'connected' };
+      };
+      return { probe, runs: () => runs };
+    }
+
+    it('reuses the last result within deepCacheMs and re-runs after it expires', async () => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      const { app, call } = fakeApp();
+      const c = counting();
+      mountReadinessRoutes(app, { probes: {}, deepProbes: { db: c.probe }, deepCacheMs: 5000 });
+
+      await call('/health/deep');
+      now.mockReturnValue(1_004_999);
+      expect(await call('/health/deep')).toMatchObject({ code: 200 });
+      expect(c.runs()).toBe(1);
+
+      now.mockReturnValue(1_005_000);
+      await call('/health/deep');
+      expect(c.runs()).toBe(2);
+    });
+
+    it('caches a 503 too', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+      const { app, call } = fakeApp();
+      let runs = 0;
+      mountReadinessRoutes(app, {
+        probes: {},
+        deepProbes: {
+          db: async () => {
+            runs++;
+            return { ready: false, detail: 'error' };
+          },
+        },
+      });
+      expect((await call('/health/deep')).code).toBe(503);
+      expect((await call('/health/deep')).code).toBe(503);
+      expect(runs).toBe(1);
+    });
+
+    it('coalesces concurrent callers onto one in-flight run', async () => {
+      const { app, call } = fakeApp();
+      let release!: () => void;
+      let runs = 0;
+      mountReadinessRoutes(app, {
+        probes: {},
+        deepProbes: {
+          db: () => {
+            runs++;
+            return new Promise((resolve) => {
+              release = () => resolve({ ready: true, detail: 'connected' });
+            });
+          },
+        },
+      });
+      const pending = [call('/health/deep'), call('/health/deep'), call('/health/deep')];
+      await Promise.resolve();
+      release();
+      const results = await Promise.all(pending);
+      expect(runs).toBe(1);
+      expect(results.every((r) => r.code === 200)).toBe(true);
+    });
+
+    it('runs every time when deepCacheMs is 0', async () => {
+      const { app, call } = fakeApp();
+      const c = counting();
+      mountReadinessRoutes(app, { probes: {}, deepProbes: { db: c.probe }, deepCacheMs: 0 });
+      await call('/health/deep');
+      await call('/health/deep');
+      expect(c.runs()).toBe(2);
+    });
   });
 });
 

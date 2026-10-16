@@ -76,6 +76,12 @@ export interface MountReadinessOptions {
    * ALB target-group path.
    */
   deepProbes?: Record<string, () => Promise<ProbeResult>>;
+  /**
+   * `/health/deep` reuses its last result for this long (default 5000) and
+   * concurrent callers share one in-flight run, so the unauthenticated route
+   * cannot amplify load onto its dependencies. 0 disables the cache.
+   */
+  deepCacheMs?: number;
   /** When true, `/health/ready` answers 503 `draining` without running probes. `/health/live` stays 200. */
   isDraining?: () => boolean;
 }
@@ -94,11 +100,15 @@ export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function runProbes(
+interface ProbeOutcome {
+  code: number;
+  body: Record<string, unknown>;
+}
+
+async function evaluateProbes(
   probes: Record<string, () => Promise<ProbeResult>>,
   timeoutMs: number,
-  res: ReadinessResponse,
-): Promise<void> {
+): Promise<ProbeOutcome> {
   const entries = await Promise.all(
     Object.entries(probes).map(async ([name, probe]) => {
       // A probe that hangs is killed by the timeout (detail 'timeout'); a
@@ -113,9 +123,40 @@ async function runProbes(
   );
   const checks: Record<string, ProbeResult> = Object.fromEntries(entries);
   const ready = entries.every(([, r]) => r.ready);
-  res
-    .status(ready ? 200 : 503)
-    .json({ status: ready ? 'ready' : 'not ready', ...buildIdentity(), checks });
+  return {
+    code: ready ? 200 : 503,
+    body: { status: ready ? 'ready' : 'not ready', ...buildIdentity(), checks },
+  };
+}
+
+async function runProbes(
+  probes: Record<string, () => Promise<ProbeResult>>,
+  timeoutMs: number,
+  res: ReadinessResponse,
+): Promise<void> {
+  const { code, body } = await evaluateProbes(probes, timeoutMs);
+  res.status(code).json(body);
+}
+
+function cachedEvaluator(
+  probes: Record<string, () => Promise<ProbeResult>>,
+  timeoutMs: number,
+  cacheMs: number,
+): () => Promise<ProbeOutcome> {
+  let last: { at: number; outcome: ProbeOutcome } | undefined;
+  let inFlight: Promise<ProbeOutcome> | undefined;
+  return () => {
+    if (last && Date.now() - last.at < cacheMs) return Promise.resolve(last.outcome);
+    inFlight ??= evaluateProbes(probes, timeoutMs)
+      .then((outcome) => {
+        last = { at: Date.now(), outcome };
+        return outcome;
+      })
+      .finally(() => {
+        inFlight = undefined;
+      });
+    return inFlight;
+  };
 }
 
 export function mountReadinessRoutes(app: ReadinessRouter, opts: MountReadinessOptions): void {
@@ -135,8 +176,10 @@ export function mountReadinessRoutes(app: ReadinessRouter, opts: MountReadinessO
 
   const deepProbes = opts.deepProbes;
   if (deepProbes) {
+    const evaluateDeep = cachedEvaluator(deepProbes, timeoutMs, opts.deepCacheMs ?? 5000);
     app.get('/health/deep', async (_req, res) => {
-      await runProbes(deepProbes, timeoutMs, res);
+      const { code, body } = await evaluateDeep();
+      res.status(code).json(body);
     });
   }
 }

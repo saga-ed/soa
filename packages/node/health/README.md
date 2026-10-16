@@ -12,7 +12,8 @@ Framework-free health/readiness route mounters for Saga Node services. Mount bef
 
 ```ts
 const drain = createDrainSignal();
-const dbReadiness = createDbReadiness({ ping: () => prisma.$queryRawUnsafe('SELECT 1') });
+const ping = () => prisma.$queryRawUnsafe('SELECT 1');
+const dbReadiness = createDbReadiness({ ping });
 
 mountReadinessRoutes(app, {
   probes: { db: dbReadiness.probe },

@@ -40,6 +40,7 @@ Server-side packages for Node.js applications.
 | `mailer/` | Shared transactional-email primitive: template-free `MailService` over a pluggable `MailAdapter` (`StubMailAdapter` for dev/test, `SesMailAdapter` for prod). | Tier |
 | `postgres/` | `PostgresProvider` — Inversify-injectable, ORM-agnostic `pg.Pool` wrapper with an AWS SSM/Secrets Manager config loader. | Tier |
 | `preview-headers/` | Canonical HTTP-plane `x-saga-preview-<service>` sandbox-routing-header primitives (capture/forward/match), the HTTP sibling of the event-plane preview tag. | Tier |
+| `mirror-scrub/` | View-swap PII scrub for the dev Postgres mirror: SQL lib, `mirror-scrub run` (exit-code contract for iac) and `check` (pre-merge CI gate on a throwaway PG). Never prod. | [mirror-scrub/](./mirror-scrub/README.md) |
 | `mesh-fixture-cli/` | **Deprecated** — superseded by `saga-stack-cli` (`ss stack snapshot`/`seed`). Left functional, not removed; cross-repo fixture authoring for the saga-mesh. | Tier |
 
 **Note:** Packages marked "Tier" are simple/single-purpose and adequately documented here. Complex packages have dedicated CLAUDE.md files. The event-driven family share [event-driven.md](../../.claude/rules/event-driven.md).

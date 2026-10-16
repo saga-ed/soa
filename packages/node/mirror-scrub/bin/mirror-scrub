@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# mirror-scrub — view-swap PII scrub of one dev-mirror database, and its pre-merge check.
+#   mirror-scrub run   --db <name> --scrub <file> --allow <file> [--allow-absent] [-- <psql args>]
+#   mirror-scrub check --db <name> --scrub <file> --allow <file> [--matrix <file>] [-- <psql args>]
+#   mirror-scrub lint  <file>...
+# Connection: PG* env vars and/or psql args after `--`; the first connection goes to
+# --maintenance-db (default postgres). Exit codes are the iac contract (README.md).
+set -uo pipefail
+
+EXIT_CLEAN=0 EXIT_USAGE=2 EXIT_UNREVIEWED=10 EXIT_AUDIT_INCOMPLETE=11 EXIT_NOT_COMMITTED=20 EXIT_ABSENT=30
+
+src="${BASH_SOURCE[0]}"
+while [[ -L "$src" ]]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"; src="$(readlink "$src")"; [[ "$src" != /* ]] && src="$dir/$src"
+done
+SQL_DIR="$(cd -P "$(dirname "$src")/../sql" && pwd)"
+
+die() { echo "mirror-scrub: $*" >&2; exit "$EXIT_USAGE"; }
+usage() { sed -n '2,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit "$EXIT_USAGE"; }
+
+lint() {
+  local f bad=0
+  for f in "$@"; do
+    [[ -r "$f" ]] || { echo "lint: $f: not readable" >&2; bad=1; continue; }
+    # Any backslash is rejected: psql runs a meta-command wherever one appears outside a literal.
+    if grep -nF '\' "$f" >&2 \
+      || grep -niE '(^|;)[[:space:]]*(BEGIN|COMMIT|ROLLBACK|ABORT|END|START[[:space:]]+TRANSACTION|SAVEPOINT|RELEASE|PREPARE[[:space:]]+TRANSACTION)([[:space:]]+(WORK|TRANSACTION))?[[:space:]]*;' "$f" >&2 \
+      || grep -niE '(^|;)[[:space:]]*(SET|RESET)[[:space:]]+(ROLE|SESSION)' "$f" >&2; then
+      echo "lint: $f: backslashes (psql meta-commands), transaction control and role switching are not allowed; run-db.sql owns them" >&2
+      bad=1
+    fi
+  done
+  return $bad
+}
+
+db="" scrub="" allow="" allow_absent=0 matrix="" maint="postgres"
+parse() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --db) db="${2:-}"; shift 2 ;;
+      --scrub) scrub="${2:-}"; shift 2 ;;
+      --allow) allow="${2:-}"; shift 2 ;;
+      --allow-absent) allow_absent=1; shift ;;
+      --matrix) matrix="${2:-}"; shift 2 ;;
+      --maintenance-db) maint="${2:-}"; shift 2 ;;
+      --) shift; PSQL_ARGS=("$@"); return ;;
+      *) die "unknown argument: $1" ;;
+    esac
+  done
+}
+PSQL_ARGS=()
+require_db_files() {
+  [[ -n "$db" && -n "$scrub" && -n "$allow" ]] || usage
+  [[ "$db" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid database name: $db"
+  scrub="$(realpath "$scrub")" allow="$(realpath "$allow")"
+  [[ "$scrub$allow" != *[[:space:]\'\"\`\$\\]* ]] || die "file paths must not contain whitespace, quotes, backticks, \$ or backslashes"
+  lint "$scrub" "$allow" || exit "$EXIT_USAGE"
+}
+psql_() { psql -X -v ON_ERROR_STOP=1 "${PSQL_ARGS[@]}" "$@"; }
+
+run_db() {
+  local out rc committed n
+  out="$(mktemp)"
+  psql_ -d "$maint" -v db="$db" -v lib="$SQL_DIR/mirror-scrub-lib.sql" -v allow="$allow" -v scrub="$scrub" \
+    -f "$SQL_DIR/run-db.sql" 2>&1 | tee "$out"
+  rc=${PIPESTATUS[0]}
+  if grep -qx "MIRROR_SCRUB_ABSENT $db" "$out"; then
+    rm -f "$out"
+    if [[ $allow_absent == 1 ]]; then echo "mirror-scrub: $db absent - skipped"; return $EXIT_ABSENT; fi
+    echo "mirror-scrub: $db does not exist (pass --allow-absent to skip)" >&2; return $EXIT_NOT_COMMITTED
+  fi
+  committed=0; grep -qx "MIRROR_SCRUB_COMMITTED $db" "$out" && committed=1
+  n="$(sed -n "s/^MIRROR_SCRUB_UNREVIEWED $db \([0-9][0-9]*\)$/\1/p" "$out")"
+  rm -f "$out"
+  if [[ $committed == 0 ]]; then echo "mirror-scrub: $db NOT scrubbed (psql exit $rc; transaction rolled back)" >&2; return $EXIT_NOT_COMMITTED; fi
+  if [[ -z "$n" || $rc != 0 ]]; then echo "mirror-scrub: $db scrubbed but the audit did not complete (psql exit $rc)" >&2; return $EXIT_AUDIT_INCOMPLETE; fi
+  if [[ "$n" != 0 ]]; then echo "mirror-scrub: $db scrubbed; $n unreviewed column(s)/view(s) - scrub or allow-list them" >&2; return $EXIT_UNREVIEWED; fi
+  echo "mirror-scrub: $db scrubbed, audit clean"
+  return $EXIT_CLEAN
+}
+
+check() {
+  [[ "${MIRROR_SCRUB_THROWAWAY:-}" == 1 ]] || die "check seeds fake rows, re-owns every relation and swaps tables: set MIRROR_SCRUB_THROWAWAY=1 against a throwaway Postgres only"
+  local guard
+  guard="$(psql_ -d "$maint" -tAc "SELECT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user)::int::text
+      || (EXISTS (SELECT 1 FROM pg_database WHERE datname = 'rdsadmin')
+          OR EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'rds_superuser'))::int::text
+      || (EXISTS (SELECT 1 FROM pg_database WHERE datname = '$db'))::int::text")" || die "cannot connect"
+  [[ "${guard:1:1}" == 0 ]] || die "refusing: this looks like RDS (rdsadmin / rds_superuser present)"
+  [[ "${guard:0:1}" == 1 ]] || die "check must connect as a superuser (seeding disables FK triggers)"
+  [[ "${guard:2:1}" == 1 ]] || { echo "mirror-scrub check: database $db does not exist" >&2; exit $EXIT_NOT_COMMITTED; }
+
+  # RDS-shaped roles: tables owned by a service owner role, read by a _ro role (plus a
+  # column-level grant per table), scrub run by a NOSUPERUSER master that is a member of the owner.
+  psql_ -q -d "$maint" <<'SQL' || exit $EXIT_USAGE
+DO $r$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mirror_check_owner') THEN CREATE ROLE mirror_check_owner NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mirror_check_ro') THEN CREATE ROLE mirror_check_ro NOLOGIN; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'mirror_check_master') THEN CREATE ROLE mirror_check_master NOLOGIN NOSUPERUSER CREATEROLE; END IF;
+END $r$;
+GRANT mirror_check_owner TO mirror_check_master;
+SQL
+  psql_ -q -d "$db" -f "$SQL_DIR/seed-generic.sql" 2>&1 | grep -iE 'seed skipped|ERROR' | sed "s/^/[$db seed] /"
+  psql_ -q -d "$db" <<'SQL' || exit $EXIT_USAGE
+GRANT USAGE, CREATE ON SCHEMA public TO mirror_check_master;
+GRANT USAGE ON SCHEMA public TO mirror_check_ro;
+DO $o$ DECLARE c record; first_col record; BEGIN
+  FOR c IN
+    SELECT n.nspname, cl.relname, cl.relkind FROM pg_class cl JOIN pg_namespace n ON n.oid = cl.relnamespace
+     WHERE n.nspname = 'public' AND cl.relkind IN ('r', 'p', 'v', 'm', 'S')
+       AND NOT (cl.relkind = 'S' AND EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = cl.oid
+                AND d.classid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')))
+  LOOP
+    EXECUTE format('ALTER %s %I.%I OWNER TO mirror_check_owner',
+      CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'S' THEN 'SEQUENCE' ELSE 'TABLE' END,
+      c.nspname, c.relname);
+  END LOOP;
+  GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirror_check_ro;
+  FOR first_col IN
+    SELECT cl.relname, a.attname
+      FROM pg_class cl JOIN pg_attribute a ON a.attrelid = cl.oid AND a.attnum = 1
+     WHERE cl.relnamespace = 'public'::regnamespace AND cl.relkind = 'r' AND cl.relname !~ '^_prisma'
+  LOOP
+    EXECUTE format('GRANT SELECT (%I) ON public.%I TO mirror_check_ro', first_col.attname, first_col.relname);
+  END LOOP;
+END $o$;
+SQL
+
+  local run rc
+  for run in 1 2; do
+    echo "== mirror-scrub check: run $run (as mirror_check_master)"
+    PGOPTIONS="${PGOPTIONS:-} -c role=mirror_check_master" run_db; rc=$?
+    [[ $rc == 0 ]] || { echo "mirror-scrub check: FAIL (run $run exited $rc)" >&2; exit $rc; }
+  done
+  local out
+  out="$(PGOPTIONS="${PGOPTIONS:-} -c role=mirror_check_master" psql_ -d "$db" -tA -f "$SQL_DIR/assert-scrub.sql" 2>&1)" \
+    || { echo "$out" >&2; echo "mirror-scrub check: FAIL (assert-scrub errored)" >&2; exit $EXIT_NOT_COMMITTED; }
+  [[ -n "$matrix" ]] && grep '^COL ' <<<"$out" | sed "s/^COL /$db./" > "$matrix"
+  if grep -q 'FAIL' <<<"$out"; then grep 'FAIL' <<<"$out" | sed "s/^/[$db] /" >&2; echo "mirror-scrub check: FAIL" >&2; exit $EXIT_NOT_COMMITTED; fi
+  echo "mirror-scrub check: PASS ($db)"
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  run) parse "$@"; require_db_files; run_db; exit $? ;;
+  check) parse "$@"; require_db_files; check ;;
+  lint) [[ $# -gt 0 ]] || usage; lint "$@" || exit $EXIT_USAGE; echo "lint: ok" ;;
+  *) usage ;;
+esac

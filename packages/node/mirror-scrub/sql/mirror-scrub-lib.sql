@@ -33,8 +33,12 @@
 --   rds_superuser member it may GRANT them to itself (the AWS-documented route). Grants
 --   owner -> current_user WITH INHERIT, SET when missing; only for a non-superuser,
 --   non-reserved owner, and only when current_user inherits rds_superuser. No-op elsewhere.
+-- pg_temp.mirror_release()
+--   Revokes every adopted grant; run-db.sql calls it before COMMIT so no grant outlives the
+--   transaction. On RDS an owner in rds_iam would otherwise force IAM auth on the master.
 
 CREATE TEMP TABLE IF NOT EXISTS mirror_allow (db text, tbl text, col text);
+CREATE TEMP TABLE IF NOT EXISTS mirror_adopted (role oid, n_before bigint);
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_adopt(p_owner oid)
 RETURNS void LANGUAGE plpgsql AS $fn$
@@ -53,8 +57,30 @@ BEGIN
   IF v_name IS NULL THEN
     RETURN;
   END IF;
+  INSERT INTO pg_temp.mirror_adopted
+    SELECT p_owner, count(*) FROM pg_auth_members
+     WHERE roleid = p_owner AND member = (SELECT oid FROM pg_roles WHERE rolname = current_user);
   EXECUTE format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', v_name, current_user);
   RAISE NOTICE 'mirror: granted % to % (rds_superuser adopt)', v_name, current_user;
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_release()
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN SELECT role, min(n_before) AS n_before FROM pg_temp.mirror_adopted GROUP BY role LOOP
+    EXECUTE format('REVOKE %s FROM %I', r.role::regrole, current_user);
+    IF (SELECT count(*) FROM pg_auth_members
+         WHERE roleid = r.role AND member = (SELECT oid FROM pg_roles WHERE rolname = current_user))
+       <> r.n_before
+       OR pg_has_role(current_user, r.role, 'USAGE') THEN
+      RAISE EXCEPTION 'mirror: could not release adopted role % from %; refusing to commit', r.role::regrole, current_user;
+    END IF;
+    RAISE NOTICE 'mirror: revoked % from % (adopt released)', r.role::regrole, current_user;
+  END LOOP;
+  DELETE FROM pg_temp.mirror_adopted;
 END;
 $fn$;
 

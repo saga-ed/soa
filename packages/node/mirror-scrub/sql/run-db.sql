@@ -12,6 +12,7 @@ SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db') AS has_db \gset
 SELECT pg_temp.mirror_expect_db(:'db');
 BEGIN;
 \i :scrub
+SELECT pg_temp.mirror_release();
 SELECT pg_temp.mirror_expect_db(:'db');
 COMMIT;
 \echo MIRROR_SCRUB_COMMITTED :db

@@ -19,8 +19,9 @@ Per scrubbed table `t` in a database, as the mirror master:
 
 On RDS the master is NOSUPERUSER and holds no membership in service owner roles. Before
 steps 2–3 the lib grants the owner role to the master (`WITH INHERIT TRUE, SET TRUE`), which an
-`rds_superuser` member may do; it skips superuser, `pg_*` and `rds*` owners. The grant persists
-on the mirror until the next restore.
+`rds_superuser` member may do; it skips superuser, `pg_*` and `rds*` owners. The grant is revoked
+before COMMIT and the scrub refuses to commit if it can't be: an owner in `rds_iam` would otherwise
+force IAM auth on the master, locking out its password logins.
 4. **Closed-world audit:** every column of every base table must be
    overridden or allow-listed by exact `(db, table, column)` unless its type is numeric, bool,
    date/time, interval, enum or uuid (fail-closed: inet, xml, composites, domains over text are

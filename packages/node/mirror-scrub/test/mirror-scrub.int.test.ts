@@ -258,6 +258,8 @@ describe('mirror-scrub run on an RDS-shaped master', () => {
                  CREATE ROLE rds_master LOGIN NOSUPERUSER CREATEROLE;
                  GRANT rds_superuser TO rds_master;
                  CREATE ROLE svc_owner NOLOGIN;
+                 CREATE ROLE rds_iam NOLOGIN;
+                 GRANT rds_iam TO svc_owner;
                  GRANT svc_owner TO rds_master WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;`,
             ).code,
         ).toBe(0);
@@ -276,7 +278,30 @@ describe('mirror-scrub run on an RDS-shaped master', () => {
         const r = cliRun(['run', '--db', db, '--scrub', scrubFile, '--allow', allow], { PGOPTIONS: '-c role=rds_master' });
         expect(r.code, r.out).toBe(0);
         expect(r.out).toContain('granted svc_owner to rds_master (rds_superuser adopt)');
+        expect(r.out).toContain('revoked svc_owner from rds_master (adopt released)');
         expect(relkind(db, 'person')).toBe('v');
         expect(psql(db, "SELECT relowner::regrole FROM pg_class WHERE relname = 'person_real'").out).toBe('rds_master');
+        // On RDS an inherited rds_iam forces IAM auth on the master: no adopted grant may persist.
+        // (The setup's ADMIN-only row stands in for RDS's grant right; only it may remain.)
+        expect(
+            psql(
+                db,
+                `SELECT count(*), bool_or(inherit_option), pg_has_role('rds_master', 'rds_iam', 'USAGE')
+                   FROM pg_auth_members WHERE roleid = 'svc_owner'::regrole AND member = 'rds_master'::regrole`,
+            ).out,
+        ).toBe('1|f|f');
+
+        const again = freshDb();
+        expect(
+            psql(
+                again.db,
+                `GRANT USAGE, CREATE ON SCHEMA public TO rds_master;
+                 ALTER TABLE person OWNER TO svc_owner; ALTER TABLE outbox_event OWNER TO svc_owner;
+                 ALTER TABLE org OWNER TO svc_owner; ALTER VIEW person_emails OWNER TO svc_owner;
+                 ALTER MATERIALIZED VIEW person_counts OWNER TO svc_owner;`,
+            ).code,
+        ).toBe(0);
+        const r2 = cliRun(['run', '--db', again.db, '--scrub', scrubFile, '--allow', again.allow], { PGOPTIONS: '-c role=rds_master' });
+        expect(r2.code, r2.out).toBe(0);
     });
 });

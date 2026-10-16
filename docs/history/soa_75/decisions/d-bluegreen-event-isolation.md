@@ -291,3 +291,9 @@ chat-api, insights-api, transcripts-api via `sds-outbox-helpers`. program-hub st
 
 Not inventoried: other background work (the per-task `consumed-events-retention` interval, qboard composite-worker and
 thumb-renderer, schedulers). The rostering lake-export job is the only gated job today and moves onto `soa-deploy-color`.
+
+### Adoption rule: start the gate before the work
+
+A service must `await gate.start()` before it starts any consumer, relay or scheduled job. Until the first read lands the gate
+is active (fail-open), so an idle-colour task that starts consumers first consumes live traffic until the read completes.
+`start()` is bounded (3 s boot timeout) and never throws.

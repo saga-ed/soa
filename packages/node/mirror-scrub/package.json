@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-mirror-scrub",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "private": false,
     "type": "module",
     "description": "View-swap PII scrub for the dev Postgres mirror: shared SQL lib, per-database runner with an exit-code contract, and a pre-merge check against a throwaway Postgres. Never run against prod.",

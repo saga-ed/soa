@@ -79,15 +79,15 @@ pnpm publish --no-git-checks --access public
 
 This works for any package whose `.npmrc` or `publishConfig` points at `saga_js` — including non-SOA packages like `@nimbee/ars-lib` in the nimbee repo.
 
-### All SOA packages (CI workflow)
+### One SOA package (CI workflow)
 
-The GitHub Actions workflow builds, tests, and publishes every SOA package in dependency order:
+Bump the package version in a PR first, then publish it at that committed version (publish `workspace:` dependencies before dependents; the workflow's preflight enforces this):
 
 ```bash
-gh workflow run publish-codeartifact.yml -f version=patch
+gh workflow run publish-codeartifact.yml -R saga-ed/soa --ref main -f single_package=packages/<runtime>/<pkg>
 ```
 
-Add `-f dry_run=true` to build and test without actually publishing.
+Add `-f dry_run=true` to build, test and run the dependency preflight without publishing.
 
 After publishing, consuming repos pick up new versions on their next `pnpm install` (with linking off).
 

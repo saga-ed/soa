@@ -53,6 +53,7 @@ doc-routing rules (repo-wide vs. nested vs. `.claude/rules/*.md` vs. skills).
 - Use pnpm only — `npm install` will fight the CodeArtifact `preinstall` hook and the lockfile.
 - Node version disagrees across sources: `package.json` `engines` says `>=24`, but CI pins
   `NODE_VERSION: 22`. Trust `engines` locally; don't "fix" CI to match without checking why.
+- Packages don't auto-publish on merge: bump the version in the PR, then dispatch `publish-codeartifact.yml` with `single_package`; preflight fails if a `workspace:` runtime dep's version isn't in CodeArtifact.
 
 ## Detailed Documentation
 

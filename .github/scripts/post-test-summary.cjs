@@ -1,6 +1,6 @@
 /**
  * Posts test summary as a PR comment
- * Used by the pr-test-summary job in publish-all-packages.yml
+ * Used by the pr-test-summary job in package-ci.yml
  *
  * Reads and merges multiple test result JSON files from the test-results directory
  * (uploaded as artifacts from each layer job)

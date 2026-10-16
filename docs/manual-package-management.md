@@ -264,6 +264,6 @@ Once your packages are working and you're ready for production:
 
 ## 🔗 Related Documentation
 
-- [GitHub Actions Workflow](../.github/workflows/publish-all-packages.yml)
+- [Publish Workflow](../.github/workflows/publish-codeartifact.yml)
 - [Migration Guide](./github-packages-migration.md)
 - [GitHub Personal Access Tokens (for publishing)](https://github.com/settings/tokens) 

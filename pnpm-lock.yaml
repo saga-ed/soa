@@ -1398,6 +1398,27 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/node/mirror-scrub:
+    devDependencies:
+      '@saga-ed/soa-typescript-config':
+        specifier: workspace:*
+        version: link:../../core/typescript-config
+      '@testcontainers/postgresql':
+        specifier: ^10.13.0
+        version: 10.28.0
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.0.12
+      testcontainers:
+        specifier: ^10.13.0
+        version: 10.28.0
+      typescript:
+        specifier: 5.8.2
+        version: 5.8.2
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
+
   packages/node/observability:
     dependencies:
       '@opentelemetry/api':

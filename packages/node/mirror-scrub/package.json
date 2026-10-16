@@ -1,0 +1,34 @@
+{
+    "name": "@saga-ed/soa-mirror-scrub",
+    "version": "0.1.0",
+    "private": false,
+    "type": "module",
+    "description": "View-swap PII scrub for the dev Postgres mirror: shared SQL lib, per-database runner with an exit-code contract, and a pre-merge check against a throwaway Postgres. Never run against prod.",
+    "bin": {
+        "mirror-scrub": "bin/mirror-scrub"
+    },
+    "files": ["bin", "sql", "README.md"],
+    "scripts": {
+        "build": "true",
+        "check-types": "tsc --noEmit",
+        "test": "vitest run",
+        "clean": "true"
+    },
+    "devDependencies": {
+        "@saga-ed/soa-typescript-config": "workspace:*",
+        "@testcontainers/postgresql": "^10.13.0",
+        "@types/node": "^24.0.3",
+        "testcontainers": "^10.13.0",
+        "typescript": "5.8.2",
+        "vitest": "^1.6.1"
+    },
+    "publishConfig": {
+        "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/saga-ed/soa.git",
+        "directory": "packages/node/mirror-scrub"
+    }
+}

@@ -38,7 +38,7 @@
 --   transaction. On RDS an owner in rds_iam would otherwise force IAM auth on the master.
 
 CREATE TEMP TABLE IF NOT EXISTS mirror_allow (db text, tbl text, col text);
-CREATE TEMP TABLE IF NOT EXISTS mirror_adopted (role text, n_before bigint);
+CREATE TEMP TABLE IF NOT EXISTS mirror_adopted (role oid, n_before bigint);
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_adopt(p_owner oid)
 RETURNS void LANGUAGE plpgsql AS $fn$
@@ -58,7 +58,7 @@ BEGIN
     RETURN;
   END IF;
   INSERT INTO pg_temp.mirror_adopted
-    SELECT v_name, count(*) FROM pg_auth_members
+    SELECT p_owner, count(*) FROM pg_auth_members
      WHERE roleid = p_owner AND member = (SELECT oid FROM pg_roles WHERE rolname = current_user);
   EXECUTE format('GRANT %I TO %I WITH INHERIT TRUE, SET TRUE', v_name, current_user);
   RAISE NOTICE 'mirror: granted % to % (rds_superuser adopt)', v_name, current_user;
@@ -71,13 +71,14 @@ DECLARE
   r record;
 BEGIN
   FOR r IN SELECT role, min(n_before) AS n_before FROM pg_temp.mirror_adopted GROUP BY role LOOP
-    EXECUTE format('REVOKE %I FROM %I', r.role, current_user);
+    EXECUTE format('REVOKE %s FROM %I', r.role::regrole, current_user);
     IF (SELECT count(*) FROM pg_auth_members
-         WHERE roleid = r.role::regrole AND member = (SELECT oid FROM pg_roles WHERE rolname = current_user))
-       <> r.n_before THEN
-      RAISE EXCEPTION 'mirror: could not release adopted role % from %; refusing to commit', r.role, current_user;
+         WHERE roleid = r.role AND member = (SELECT oid FROM pg_roles WHERE rolname = current_user))
+       <> r.n_before
+       OR pg_has_role(current_user, r.role, 'USAGE') THEN
+      RAISE EXCEPTION 'mirror: could not release adopted role % from %; refusing to commit', r.role::regrole, current_user;
     END IF;
-    RAISE NOTICE 'mirror: revoked % from % (adopt released)', r.role, current_user;
+    RAISE NOTICE 'mirror: revoked % from % (adopt released)', r.role::regrole, current_user;
   END LOOP;
   DELETE FROM pg_temp.mirror_adopted;
 END;

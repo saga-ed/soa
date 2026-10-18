@@ -43,95 +43,112 @@ Findings that drive the design:
 
 | Axis | Source | Used for |
 |---|---|---|
-| Behaviour profile | `EXEC_ENV` / `NODE_ENV` | Which code branches run. `prod` on prod and on the lane. |
+| Behaviour profile | `EXEC_ENV` / `NODE_ENV` | Which code branches run. `prod` on prod, the twin and (after flip) dev-main |
 | Lane | `LANE=twin\|mirror\|none` (infra-set in the task definition) | Side-effect fencing, guard, telemetry fencing |
 | Telemetry env | `DD_ENV` / `deployment.environment` | Datadog tag only. Never derived from profile |
-| Account | ECS task metadata / STS | Authoritative "is this prod" |
+| Account | ECS task metadata / STS, or the local declaration | Authoritative "is this prod" |
 
-`parseLane` is strict on `LANE` alone (trim, lowercase; unset/empty/whitespace = `none`; anything else = invalid). The deprecated `EXEC_ENV=mirror` alias is lane-guard's migration shim (lane-guard 0.2.0, soa#519, removed in 0.3.0) and stays out of soa-env. Lane-guard will import `parseLane`/identity from soa-env once it exists; until then lane-guard's `resolveLane()` is the reference and should stay a pure function that can be lifted.
+Ownership (review round 1): soa-env owns `parseLane`, `resolveAccount` and the single local declaration. The core has no dependencies; STS lookup is an injected `AccountResolver` or the `@saga-ed/soa-env/aws` subpath. lane-guard and soa-health import soa-env; lane-guard keeps its raw-env checks as an independent cross-check.
 
-## 4. Fail-closed parsing and the local escape
+`parseLane` is strict on `LANE` alone (trim, lowercase; unset/empty/whitespace = `none`; anything else = invalid). The `EXEC_ENV=mirror` alias exists only in lane-guard 0.2.x (soa#519, removed in 0.3.0); soa-env throws an explicit "set LANE=mirror" error when it sees `EXEC_ENV=mirror`.
 
-Rule: unknown or unparseable means deployed prod profile with all prod invariants enforced.
+## 4. Fail-closed parsing and the single local declaration
 
-- Profile: `prod` unless `EXEC_ENV` is exactly `dev`/`local` AND the account resolves to dev or local. Any other value (including `mirror`, `staging`, typos) is a prod profile. Conflicting signals (e.g. `NODE_ENV=development` with prod account) throw `EnvIdentityError`.
-- Account: resolved from ECS task metadata (`ECS_CONTAINER_METADATA_URI_V4`) then STS. Failure returns undefined or throws; never a default. On a lane an unresolved account stops boot (contract rule 3).
-- Local escape: `account.kind === 'local'` is legal only when no ECS metadata endpoint exists AND the process declares `SAGA_LOCAL=1`. /ss and test setup must start setting `SAGA_LOCAL=1` (a one-line change in saga-stack-cli manifests `services.ts`, and in vitest/jest setup via `testEnv`). Without it a laptop run is treated as deployed prod and fails closed. `SAGA_LOCAL` is refused if ECS metadata is present, so it cannot be set on a deployed task by accident.
-- Migration consequence: coach's "no EXEC_ENV = permissive" rung is replaced by `devAuthSurfaces`, true only with the local declaration or a dev account.
+Rule: unknown or unparseable means deployed prod behaviour with every invariant of the matching row enforced; if no row matches, boot fails.
+
+- Account: ECS task metadata (`ECS_CONTAINER_METADATA_URI_V4`) then the injected resolver. Failure returns undefined or throws; never a default. An unresolved account stops boot (contract rule 3).
+- The local declaration is `SAGA_LOCAL=1`. soa-env is its only owner; soa-health and everything else consume it (section 9, note on soa#521).
+- `SAGA_LOCAL=1` is REFUSED (boot error) when any of these is present: `ECS_CONTAINER_METADATA_URI`, `ECS_CONTAINER_METADATA_URI_V4`, `AWS_EXECUTION_ENV`, `AWS_LAMBDA_FUNCTION_NAME`. It is also refused when an injected resolver returns the prod account (a laptop holding prod credentials).
+- `SAGA_LOCAL=1` yields account kind `local`. The /ss manifests and vitest/jest setup set it (implementation PR; soa owns saga-stack-cli). Vitest setup sets it for `main.ts` boot tests.
+- Conflicting signals (prod account with `EXEC_ENV=dev`, `SAGA_LOCAL` with `LANE=twin`) throw `EnvIdentityError`.
 
 ## 5. Capabilities and the invariant table
 
-Interface: `stubs/types.ts`, `stubs/index.ts`. Capabilities: `credentialSource` (`iam-token|static`), `tls`, `failFast`, `mailSink`, `corsOrigins`, `cookieDomain`, `trustProxyHops`, `telemetryEnv`, `devAuthSurfaces`, `outbound.<integration>` (`live|sink|off`).
+Interface: `stubs/types.ts`, `stubs/index.ts`. Capabilities: `credentialSource` (`iam-token|static`), `tls`, `failFast`, `mailSink` (`ses|capture|stub`), `corsOrigins`, `cookieDomain`, `trustProxyHops`, `telemetryEnv`, `devPerimeter` (`on|off`), `permissiveAuthz` (boolean), `logFormat`, `logLevel`, `outbound.<integration>` (`live|sink|off`).
 
-Invariants are keyed on the right axis. "Real side effects required" depends on account + lane, NOT on behaviour profile, otherwise the twin cannot boot (iam-api already refuses the stub mailer under `NODE_ENV=production`; `mirror-lane.md`).
+`devPerimeter` and `permissiveAuthz` are separate switches. The dev perimeter is a protection (recon-blocking gate; ON in the dev overlay, forbidden in prod rows: `dev-perimeter-production.ts`). Permissive authz is a bypass (coach `COACH_AUTHZ_ALLOW_ALL`); it is legal only in the `local` row.
 
-| Profile | Lane | Account | Required | Forbidden |
+Invariants are keyed on ACCOUNT x LANE, not on behaviour profile. Profile is a derived input to the row, never a selector. "Real side effects required" depends on account + lane, so the twin can boot.
+
+| Row | Account | Lane | Required | Forbidden |
 |---|---|---|---|---|
-| prod | none | prod | `failFast`, `credentialSource=iam-token`, tls with CA, `mailSink=ses`, `outbound.* = live` per declaration, `telemetryEnv=prod`, `devAuthSurfaces=false` | stub mail, sinks, dev origins |
-| prod | twin or mirror | dev | `failFast`, `credentialSource=iam-token`, tls, `devAuthSurfaces=false`, `telemetryEnv != prod`, `mailSink in {sandbox-ses, capture}`, every `outbound.* in {sink, off}` | `ses` to real recipients, `live` outbound, prod-named SSM values that do not resolve to lane resources (guard) |
-| prod | twin or mirror | prod | none: boot fails (lane in prod account) | everything |
-| prod | none | dev | boot fails (prod-profile code, no lane, in dev account) unless a dev-deploy overlay declares it | n/a |
-| local | none | local | none required; `credentialSource=static`, `mailSink=stub|capture`, `outbound.* in {off, sink}` allowed | prod secret paths |
-| any | invalid | any | boot fails | n/a |
+| R1 prod | prod | none | `failFast`, `credentialSource=iam-token`, tls with CA, `mailSink=ses`, `outbound.* = live` per declaration, `telemetryEnv=prod`, `devPerimeter=off` | `permissiveAuthz`, `capture`/`stub` mail, sinks, dev origins |
+| R2 lane | dev | twin or mirror | `failFast`, `credentialSource=iam-token`, tls, `devPerimeter=off`, `telemetryEnv != prod`, `mailSink=capture`, every `outbound.* in {sink, off}` | `permissiveAuthz`, `mailSink=ses`, `live` outbound, prod-named SSM values that do not resolve to lane resources (guard) |
+| R3 dev overlay | dev | none | `devPerimeter=on`, `telemetryEnv=dev`, dev bindings (`credentialSource` per service SSM; `static` allowed), `mailSink in {stub, capture}`; `failFast` follows the legacy NODE_ENV branch until the service flips | `permissiveAuthz`, `mailSink=ses` to real recipients, prod secret paths |
+| R4 local | local | none | `credentialSource=static`, `mailSink in {stub, capture}`, `outbound.* in {off, sink}` | prod secret paths, `LANE != none` |
+| - | prod | twin or mirror | boot fails (lane in the prod account) | everything |
+| - | any | invalid | boot fails | everything |
+| - | prod | none, with `EXEC_ENV=dev` | boot fails (conflict) | everything |
 
-`createEnv` evaluates this table and throws one `EnvInvariantError` listing all violations (names, never values). Lane-guard stays as the independent boot-time cross-check on raw env (defense in depth).
+R3 transitional input: in 0.1.0, `EXEC_ENV=dev` is accepted as an input to R3 only. The end state is dev-main running `EXEC_ENV=prod` on R3 capabilities (prod code paths, dev bindings). Flip a service's dev-main to `EXEC_ENV=prod` only once that service's lint baseline is 0, because legacy `NODE_ENV` branches flip with it.
+
+Every current environment maps to exactly one row (values marked [assumed] are from docs and memory, to be verified per service in the implementation PR):
+
+| Environment | EXEC_ENV | NODE_ENV | LANE | Account | Row |
+|---|---|---|---|---|---|
+| prod | prod | production | none | prod | R1 |
+| twin lane | prod | production | twin | dev | R2 |
+| mirror lane | prod (`mirror` legacy, throws "set LANE=mirror") | production | mirror | dev | R2 |
+| dev-main | dev (-> prod after flip) | development (-> production) | none | dev | R3 |
+| container-per-PR preview | dev [assumed] | development [assumed] | none | dev | R3 |
+| training | dev [assumed] | development [assumed] | none | dev | R3 |
+| saga-sandbox | dev [assumed] | development [assumed] | none | dev | R3 |
+| /ss (saga-stack-cli) | unset | development | none | local (`SAGA_LOCAL=1`) | R4 |
+| CI unit/integration tests | unset | test | none | local (`SAGA_LOCAL=1` via test setup) | R4 |
+
+`createEnv` evaluates the table and throws one `EnvInvariantError` listing all violations (names, never values). Lane-guard remains the independent cross-check on raw env.
+
+Mail on the lane: `mailSink=capture` requires a `CaptureMailAdapter` in `@saga-ed/soa-mailer` (mailer enum becomes `stub|ses|capture`; capture writes the rendered message to a lane-owned sink such as a lane SQS queue or S3 prefix and never to a recipient). Follow-ups: (a) iam-api's stub-mailer refusal is rewritten to read the `mailSink` capability (refuse `stub` only in R1); (b) lane-guard's `ses` check must accept `MAIL_PROVIDER=capture` (lane-guard follow-up issue); (c) the mailer's `mailProvider: z.enum([...]).default('stub')` (`mailer/src/config.ts:18`) violates M1's no-silent-default rule and the key becomes required.
 
 ## 6. Binding to config (M1 composition)
 
-M1 ("prod config is the only config; other envs are overlays", ci-actions#138) fixes WHERE values live: the prod samconfig stanza is complete; non-prod stanzas are overlays. soa-env fixes WHAT is read: `CapabilityDeclaration.keys` maps each capability to ONE config key (one key per capability, no composite switches). Consequences:
+M1 (ci-actions#138) fixes WHERE values live: the prod samconfig stanza is complete; non-prod stanzas are overlays. soa-env fixes WHAT is read: `CapabilityDeclaration.keys` maps each capability to ONE config key (no composite switches).
 
-- The M1 render/policy gate asserts per-stanza values for those keys at PR time (prod stanza: `mail=ses`, `credential=iam-token`; lane overlay: `mail=sandbox-ses`, `outbound.*=sink`). The module asserts the invariants at boot. Neither duplicates the other.
-- `ConfigSource` is injected: SSM parameter reads (`/mirror/current/*`, service SSM) and template env vars in deployed envs; an in-memory map in tests. The module never reads `process.env` anywhere except `loadEnv`.
+- The M1 render/policy gate asserts per-stanza values for those keys at PR time (prod stanza: `mail=ses`, `credential=iam-token`; lane overlay: `mail=capture`, `outbound.*=sink`). The module asserts the invariants at boot. Neither duplicates the other.
+- `ConfigSource` is injected: SSM parameters and template env vars in deployed envs, an in-memory map in tests. `process.env` is read only in `loadEnv`.
 - Template `Default:` values for capability keys are forbidden by M1; a missing key throws (no silent dev default).
-- Code reads capabilities; it never compares them to env names. A capability value that implies an environment name (e.g. `telemetryEnv === 'prod'`) is not a branch condition.
+- Code reads capabilities; it never compares them to env names.
 
 ## 7. One client path and testability (C3)
 
-C3 closes only if each client has ONE construction and only the supplier differs. Example: one `PostgresProvider` build; `credentialSource` selects the password supplier (RDS IAM token callback vs static) and the pinned CA is applied whenever `tls.caBundlePath` is set. Shared packages (`postgres`, `api-util`, `rabbitmq`, `logger`, `mailer`) take capability inputs; their env-name fallbacks are deprecated.
+C3 closes only if each client has ONE construction and only the supplier differs: one `PostgresProvider` build, `credentialSource` selects the password supplier (RDS IAM token vs static), and the pinned CA applies whenever `tls.caBundlePath` is set.
 
-- `createEnv(decl, identity, config)` is pure; `loadEnv` is the single side-effecting entry, called once at boot. No module-top-level reads.
-- `@saga-ed/soa-env/testing` exports `testEnv(overrides)`: prod-profile identity with dev capability bindings (static credential, stub mail sink, `outbound` sinks). Unit tests run the same branch bodies with both `credentialSource` values; /ss supplies the same dev bindings through `SAGA_LOCAL=1` plus a local `ConfigSource`. This is the S-stage evidence for M2.
-- Capabilities are injected through DI (inversify binding for `Capabilities`), not imported as a global.
+- `createEnv(decl, identity, config)` is pure; `loadEnv` is the single side-effecting entry. No module-top-level reads (`USE_IAM_AUTH` pattern).
+- `@saga-ed/soa-env/testing` exports `testEnv(overrides)`: R4 identity with dev bindings. Unit tests run the same branch bodies with both `credentialSource` values; /ss supplies the same through `SAGA_LOCAL=1` plus a local `ConfigSource`.
+- Capabilities are injected through DI, not imported as a global.
 
-## 8. Lint rule (`@saga-ed/soa-env/eslint`)
+## 8. Lint (`@saga-ed/soa-env/eslint`)
 
-Lives in the new package (subpath export); the shared config `packages/core/eslint-config/base.js` is not edited here. Each consumer repo adds the preset. ESLint is 8.57 fleet-wide, so native bulk suppressions (ESLint 9.24+) are unavailable.
+Lives in the new package (subpath export); `packages/core/eslint-config/base.js` is not edited. ESLint stays at 8.57 (no upgrade now). Frontend `import.meta.env` is out of scope.
 
-Rule `no-env-identity`, error level. It reports:
-- Member reads of `EXEC_ENV`, `NODE_ENV`, `SAGA_ENV`, `LANE`, `DD_ENV` on ANY object (`process.env.X`, `env.X`, `opts.env.X`), not just `process.env`, because of the injected `env` parameter pattern.
-- Destructuring (`const { NODE_ENV } = process.env`), computed keys with those literals (`env['NODE_ENV']`), and string-literal aliases of the names.
-- Comparisons of any expression against `'prod'`, `'production'`, `'mirror'`, `'twin'`, `'staging'` (`===`, `!==`, `==`, `switch case`), unless the left side is not env-derived (heuristic: identifier/member name matches `/env|profile|lane|mode/i` or traces to a flagged read). The heuristic is intentionally narrow to limit false positives; misses fall to review.
-- Not reported: assignments that set child-process env (`env: { NODE_ENV: 'development' }` object literals), type-only positions.
+Rule `no-env-identity` is PURE (no file or baseline state, so ESLint caching stays correct). It reports:
+- Member reads of `EXEC_ENV`, `NODE_ENV`, `SAGA_ENV`, `LANE`, `DD_ENV` on any object, including destructuring and computed keys.
+- Comparisons of an env-derived expression against `'prod'`, `'production'`, `'mirror'`, `'twin'`, `'staging'`. The narrow heuristic treats a left side as env-derived when its name matches `/env|profile|lane/i` or it traces to a flagged read. `mode` is NOT in the regex.
+- Not reported: `env: { NODE_ENV: 'development' }` object literals (child-process writes), type positions.
 
-Allow-list:
-1. Default allow: files under the env module (`packages/node/env/src/**` and each consumer's `src/env/**` re-export shim).
-2. Per-glob `exempt` entries with a REQUIRED `reason` for CLI operator args (`**/bin/**`, `*/prod-migrate.ts`, `coach-concierge`, `provision-service-client.ts`) and build config (`tsup.config.*`, `svelte.config.*`, `vite.config.*`).
-3. Line-level `// eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- <reason>` requires a reason (enforced via `--report-unused-disable-directives` plus `eslint-comments/require-description`).
+Strict audit: a separate report-only run flags every `'prod'`/`'production'` literal comparison; it does not gate and feeds the baseline sizing.
 
-Ratchet (no 9.24 suppressions): a committed `.env-identity-baseline.json` maps `file -> count`. The rule (option `baseline`) fails when a file's count exceeds its baseline (new violation), and fails when the count is BELOW baseline ("baseline stale: lower it"), so the number only goes down. `pnpm lint:env-baseline --write` regenerates it and is refused in CI. New files have an implicit baseline of 0. The baseline is deleted when it reaches empty; the rule then stays at plain error. Alternative: upgrade to ESLint 9.24+ and use `eslint-suppressions.json`; the fleet upgrade cost makes the custom baseline the cheaper start.
+Allow-list: (1) the env module (`packages/node/env/src/**`, consumer `src/env/**`); (2) `exempt` globs with a required reason (CLI operator args `**/bin/**`, `*/prod-migrate.ts`, `coach-concierge`; build config `tsup.config.*`, `svelte.config.*`); (3) inline disables with a required description.
+
+Ratchet lives in a CI wrapper, `soa-env-lint-ratchet`, which runs `eslint --format json` and compares per-file counts of this rule with a committed baseline. The baseline file is shaped like ESLint 9's `eslint-suppressions.json` (`{ "<file>": { "@saga-ed/soa-env/no-env-identity": { "count": N } } }`), so a later ESLint 9.24+ upgrade is a rename. The wrapper fails when a file's count exceeds baseline (new violation) and when it is below baseline ("baseline stale: lower it"); `--write` regenerates it locally and is refused in CI. New files have an implicit baseline of 0.
 
 ## 9. Migration plan
 
-Order follows the contract (rule 4): authz-api, iam-api, sis-api, then fleet. (The issue lists iam-api first; authz-api first because its violation is smallest and isolated: `db-init.ts:43`.)
+Order follows the contract (rule 4): authz-api, iam-api, sis-api, then fleet (the issue lists iam-api first; authz-api's violation is smallest and isolated).
 
-0. This PR: design review. Open questions below resolved.
-1. soa: implementation PR (package scaffolding, `parseIdentity`/`createEnv`/`loadEnv`/`testEnv`, lint rule, tests). Publish `@saga-ed/soa-env` 0.1.0 (manual publish workflow, as for other soa packages).
-2. soa shared packages (prerequisite, one PR each, backward compatible): `api-util` cors/dev-perimeter take `corsOrigins`/`devAuthSurfaces`; `rabbitmq` takes `failFast`; `logger` takes a log-format/level capability; `postgres` loader takes `credentialSource`+`tls` instead of `env`. Env fallbacks marked deprecated.
-3. Pilot, rostering (M if rostering only):
-   - authz-api: replace module-level `USE_IAM_AUTH` and the `EXEC_ENV` branches (`db-init.ts:43-44`, `main.ts`, `prod-migrate.ts`) with capabilities. Tests exercise both `credentialSource` values on the same `initDb` path.
-   - iam-api: replace the NODE_ENV guards (`main.ts:141,155,220,230,285,343,358,377,398,463,863,1190`, `assert-production-config.ts`, `lake-export.ts:38`, `jwt-issuer.service.ts`) with `failFast`, `devAuthSurfaces`, `outbound.lake`, `mailSink`. `assertProductionConfig` becomes `createEnv` invariants plus its existing config rules.
-   - sis-api: `main.ts:61`, Clever/digest switches as `outbound.*`.
-   - Enable lint with a baseline for the rest of rostering; template changes (`LANE` parameter, telemetry decoupled from `ExecEnv`) are the iac#898 / ros lane-telemetry work, not repeated here.
-4. Fleet follow-ups (separate issues, in order): program-hub (sessions-api `client.ts:44`, scheduling/programs main, thumbnail host), student-data-system (transcripts/chat/ledger/insights/ads-adm; `SAGA_ENV` goes away), coach (authz ladder to `devAuthSurfaces`, `coach-db client.ts:30`), saga-dash BFFs (`staff-admin-console/backend`, `analytics-console/backend`).
-5. Ratchet to zero repo by repo; remove baseline files; make rule a required check.
+0. This PR: design review (round 1 resolved in the PR body).
+1. soa implementation PR: package scaffolding, `parseLane`/`resolveAccount`/`parseIdentity`/`createEnv`/`loadEnv`/`testEnv`, lint rule + ratchet wrapper, `SAGA_LOCAL=1` in /ss manifests and vitest setup, tests. Publish `@saga-ed/soa-env` 0.1.0.
+2. soa's own packages reach baseline 0 BEFORE any service flips NODE_ENV: `api-util` cors/dev-perimeter, `rabbitmq` (`failFast`), `logger` (plain `LOG_FORMAT`/`LOG_LEVEL` keys), `postgres` loader (`credentialSource`+`tls` instead of `env`), `mailer` (`capture` adapter, required `mailProvider`). In each shared package the capability wins over the env fallback, with a once-only deprecation warning when the fallback is used.
+3. lane-guard and soa-health import soa-env. Health reports `profile`, `lane`, `telemetryEnv`, `accountKind`; `environment` stays as a deprecated alias. Note on soa#521 (not edited here): it currently uses `EXEC_ENV=local|ci` as its local declaration; once soa-env 0.1.0 publishes, health switches to the soa-env local declaration (`SAGA_LOCAL=1`) so there is one declaration.
+4. Rostering pilot: authz-api (`db-init.ts:43` module-level `USE_IAM_AUTH`, `main.ts`, `prod-migrate.ts`), then iam-api (`main.ts` guards, `assert-production-config.ts`, `lake-export.ts:38`, `jwt-issuer.service.ts`, mailer refusal), then sis-api (`main.ts:61`, Clever/digest as `outbound.*`). Tests exercise both capability values on the same path. Lint enabled with a baseline for the rest of rostering. Template changes (`LANE` parameter, telemetry decoupled from `ExecEnv`) are the iac#898 work.
+5. Per-service dev-main flip to `EXEC_ENV=prod` only at that service's baseline 0.
+6. Fleet follow-ups in order: program-hub, student-data-system (`SAGA_ENV` removed), coach (authz ladder to `permissiveAuthz`, `coach-db client.ts:30`), saga-dash BFFs.
+7. Ratchet to zero repo by repo; rule becomes a required check.
 
-Rollback per step: each service PR is revertible; the module is additive; deprecated env fallbacks stay until the last consumer migrates.
+Rollback: each service PR is revertible; the module is additive; deprecated env fallbacks stay until the last consumer migrates.
 
 ## 10. Open questions
 
-1. Local declaration: is `SAGA_LOCAL=1` acceptable, and who owns the saga-stack-cli change?
-2. `health.ts:102` reports `EXEC_ENV` as `environment`; a twin would read "prod". Owned by the health work; should it report `lane` and `telemetryEnv` separately?
-3. Dev account deploys of prod-profile code with no lane (dev-main) are marked "boot fails" in the table; dev-main today runs `EXEC_ENV=dev`. Is the profile for dev-main `local`-style (`dev` account kind with dev bindings)? Table row likely needs a `dev` profile value.
-4. Does soa-env own account resolution, with lane-guard consuming it (proposed), or does lane-guard keep STS resolution?
-5. Heuristic scope of the comparison check vs. a stricter ban on all `'prod'` literals; stricter finds more but needs a bigger baseline.
-6. Upgrade to ESLint 9.24+ for native suppressions instead of the custom baseline?
+1. Preview, training and sandbox env values in the mapping table are [assumed]; verify per service before the pilot.
+2. Capture sink target for `CaptureMailAdapter` (lane SQS vs S3 prefix) and who provisions it (iac).
+3. Strict-literal audit scope and whether it eventually gates.

@@ -6,9 +6,12 @@ export interface NoEnvIdentityOptions {
     allow?: string[];
     /** Exempt file globs for CLI operator args and build config (reason required). */
     exempt?: { glob: string; reason: string }[];
-    /** Path to the ratchet baseline (per-file counts). */
-    baseline?: string;
 }
 
 export declare const rules: { 'no-env-identity': Rule.RuleModule };
 export declare const configs: { recommended: unknown };
+
+/** CI wrapper `soa-env-lint-ratchet`: `eslint --format json` vs an eslint-suppressions.json-shaped baseline. */
+export interface RatchetBaseline {
+    [file: string]: { '@saga-ed/soa-env/no-env-identity': { count: number } };
+}

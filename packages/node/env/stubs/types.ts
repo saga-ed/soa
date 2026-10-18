@@ -1,7 +1,7 @@
 // Interface stubs only (soa#515 design). No implementation, no package.json yet.
 
 /** Behaviour profile: which code branches run. Axis 1 of the twin lane contract. */
-export type Profile = 'prod' | 'local';
+export type Profile = 'prod' | 'dev';
 
 /** Lane identity: set by infra, never app config. Axis 2. */
 export type Lane = 'twin' | 'mirror' | 'none';
@@ -21,7 +21,11 @@ export interface ResolvedAccount {
 export type TelemetryEnv = string;
 
 export type CredentialSource = 'iam-token' | 'static';
-export type MailSink = 'ses' | 'stub' | 'sandbox-ses' | 'capture';
+/** `capture` needs CaptureMailAdapter in @saga-ed/soa-mailer; lane-guard must accept MAIL_PROVIDER=capture. */
+export type MailSink = 'ses' | 'stub' | 'capture';
+
+/** Invariant row, keyed on account x lane (profile is an input, never the selector). */
+export type InvariantRow = 'R1-prod' | 'R2-lane' | 'R3-dev-overlay' | 'R4-local';
 
 /** Every outward effect is a named binding; `off` is an explicit value, never absence. */
 export type OutboundBinding = 'live' | 'sink' | 'off';
@@ -42,8 +46,12 @@ export interface Capabilities {
     cookieDomain: string;
     trustProxyHops: number;
     telemetryEnv: TelemetryEnv;
-    /** Auth-bypass surfaces (dev perimeter, permissive authz). Must be false when profile=prod. */
-    devAuthSurfaces: boolean;
+    /** Protection (recon-blocking gate): ON in the dev overlay, off in prod rows. */
+    devPerimeter: 'on' | 'off';
+    /** Bypass: legal only in the local row. */
+    permissiveAuthz: boolean;
+    logFormat: string;
+    logLevel: string;
     /** Per integration: clever, partner-webhooks, lake-export, outbox-relay, datadog, ... */
     outbound: Readonly<Record<string, OutboundBinding>>;
 }
@@ -53,6 +61,7 @@ export interface EnvIdentity {
     lane: Lane;
     telemetryEnv: TelemetryEnv;
     account: ResolvedAccount;
+    row: InvariantRow;
 }
 
 /** Declared per service; resolved against identity + config source. */

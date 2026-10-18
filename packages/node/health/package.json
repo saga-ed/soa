@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-health",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -9,6 +9,18 @@
         ".": {
             "types": "./dist/index.d.ts",
             "default": "./dist/index.js"
+        },
+        "./schema": {
+            "types": "./dist/schema.d.ts",
+            "default": "./dist/schema.js"
+        },
+        "./aws": {
+            "types": "./dist/aws.d.ts",
+            "default": "./dist/aws.js"
+        },
+        "./openfga": {
+            "types": "./dist/openfga.d.ts",
+            "default": "./dist/openfga.js"
         }
     },
     "files": ["dist"],

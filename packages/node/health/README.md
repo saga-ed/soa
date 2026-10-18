@@ -32,3 +32,26 @@ process.on('SIGTERM', () => drain.startDraining()); // then stop accepting work 
 - `awaitDbAtBoot`: retries until the deadline, then throws so the ECS circuit breaker rolls the deploy back.
 - `isDraining`: `/health` and `/health/ready` return 503 `draining` without running probes.
 - `/health/details` returns 503 when unhealthy.
+
+## Deep readiness (0.2.0, soa#517)
+
+Declare dependencies once; the same probe set drives boot self-test, `/health/ready` (cache only) and `/health/deep`. Design and semantics: [docs/deep-readiness.md](docs/deep-readiness.md).
+
+```ts
+const dr = createDeepReadiness({
+  manifest: declareDependencies({
+    service: 'authz-api',
+    dependencies: [
+      dep({ name: 'authzDb', kind: 'prisma', criticality: 'critical', scope: 'shared', client: () => prisma }),
+      dep({ name: 'redis', kind: 'redis', criticality: 'optional', client: () => redis }),
+    ],
+  }),
+  isDraining: drain.isDraining,
+  authorizeInternal: createBearerAuthorizer(() => ssmBearerToken), // internal detail level; default deny
+});
+mountDeepReadiness(app, dr);
+await dr.boot(); // READINESS_BOOT=block|warn|open
+dr.start();
+```
+
+`@saga-ed/soa-health/schema` exports the `saga.readiness/v1` JSON Schema; `/aws` (`awsProbe`) and `/openfga` (`openfgaProbe`) export the probes for those kinds. The 0.1.x exports are unchanged.

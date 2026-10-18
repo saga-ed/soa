@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as api from '../index.js';
 
-// 0.1.x sources are frozen: iam/sis run them in prod. Any edit must be a deliberate, reviewed change.
+// 0.1.x sources are frozen so 0.1.x consumers can move to 0.2.x without a behaviour change. Any edit must be a deliberate, reviewed change.
 const FROZEN: Record<string, string> = {
   'db-boot.ts': 'd69fe53e7843dfe9db9cc35b5383d32e3393fa8c0a2fcf006f028959c5e3e80d',
   'db-readiness.ts': 'ba4f00823e148a0d0cb310b1b13bb003d4e92ce840ea36c67bc0cc488739d5e0',

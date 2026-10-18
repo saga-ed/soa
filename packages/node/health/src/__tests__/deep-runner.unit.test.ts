@@ -1,0 +1,440 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  assertManifestComplete,
+  clearClientRegistry,
+  createDeepReadiness,
+  declareDependencies,
+  dep,
+  registerClient,
+  type BootMode,
+  type ProbeOutcome,
+  type ReadinessEvent,
+} from '../index.js';
+
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
+type Ctl = { fail: boolean | ProbeOutcome | Error; calls: number; schemaFail: boolean };
+const ctl = (): Ctl => ({ fail: false, calls: 0, schemaFail: false });
+
+function mk(
+  opts: {
+    scope?: 'task' | 'shared';
+    optional?: boolean;
+    bootMode?: BootMode;
+    env?: string;
+    absent?: boolean;
+    whenAbsent?: 'skipped' | 'fail';
+    draining?: () => boolean;
+    onEvent?: (e: ReadinessEvent) => void;
+    schema?: boolean;
+  } = {},
+) {
+  const c = ctl();
+  const client = { id: 1 };
+  const d = dep({
+    name: 'db',
+    kind: 'custom',
+    ...(opts.optional ? { criticality: 'optional' as const } : { criticality: 'critical' as const, scope: opts.scope ?? 'shared' }),
+    client: () => (opts.absent ? null : client),
+    ...(opts.whenAbsent ? { whenAbsent: opts.whenAbsent } : {}),
+    probe: async () => {
+      c.calls++;
+      if (c.fail instanceof Error) throw c.fail;
+      if (c.fail === true) throw new Error('boom');
+      if (c.fail) return c.fail;
+    },
+    ...(opts.schema
+      ? {
+          schemaProbe: async () => {
+            if (c.schemaFail) throw Object.assign(new Error('no table'), { code: 'P2021' });
+          },
+        }
+      : {}),
+  });
+  const dr = createDeepReadiness({
+    manifest: declareDependencies({ service: 'svc', dependencies: [d] }),
+    intervalMs: 1000,
+    minProbeGapMs: 0,
+    staleAfterMs: 10_000,
+    bootRetryDelayMs: 500,
+    bootTimeoutMs: 3000,
+    bootMode: opts.bootMode ?? 'block',
+    env: opts.env ?? 'prod',
+    ...(opts.draining ? { isDraining: opts.draining } : {}),
+    ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
+  });
+  return { c, dr };
+}
+
+const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+
+describe('verdict transitions', () => {
+  it('starting -> ready -> degraded (shared failure after first success) -> ready', async () => {
+    const { c, dr } = mk();
+    expect(dr.report().verdict).toBe('starting');
+    expect(dr.report().httpStatus).toBe(503);
+    dr.start();
+    await tick(0);
+    expect(dr.report().verdict).toBe('ready');
+    expect(dr.report().httpStatus).toBe(200);
+
+    c.fail = true;
+    await tick(1300); // 1 failure < threshold 2
+    expect(dr.report().verdict).toBe('ready');
+    await tick(1300);
+    const r = dr.report('internal');
+    expect(r.verdict).toBe('degraded');
+    expect(r.httpStatus).toBe(200);
+    expect(r.dependencies?.[0]).toMatchObject({ state: 'failing', reason: 'error', criticality: 'critical', scope: 'shared' });
+
+    c.fail = false;
+    await tick(1300);
+    expect(dr.report().verdict).toBe('ready');
+    dr.stop();
+  });
+
+  it('never succeeded: stays starting (503) even when failing past threshold', async () => {
+    const { c, dr } = mk();
+    c.fail = true;
+    dr.start();
+    await tick(5000);
+    expect(dr.report('internal').dependencies?.[0]?.state).toBe('failing');
+    expect(dr.report().verdict).toBe('starting');
+    dr.stop();
+  });
+
+  it('scope:task failure after first success => not_ready (503)', async () => {
+    const { c, dr } = mk({ scope: 'task' });
+    dr.start();
+    await tick(0);
+    c.fail = true;
+    await tick(3000);
+    expect(dr.report().verdict).toBe('not_ready');
+    expect(dr.report().httpStatus).toBe(503);
+    dr.stop();
+  });
+
+  it('auth/tls/dns failures after first success still degrade (shared by default)', async () => {
+    for (const code of ['28P01', 'CERT_HAS_EXPIRED', 'ENOTFOUND']) {
+      const { c, dr } = mk();
+      dr.start();
+      await tick(0);
+      c.fail = Object.assign(new Error('x'), { code });
+      await tick(3000);
+      expect(dr.report().verdict).toBe('degraded');
+      dr.stop();
+    }
+  });
+
+  it('stale cache (blocked loop: probes stop refreshing) => not_ready even for shared', async () => {
+    const { dr } = mk();
+    dr.start();
+    await tick(0);
+    expect(dr.report().verdict).toBe('ready');
+    vi.setSystemTime(Date.now() + 10_500); // wall clock moves, no timer callback ran = blocked loop
+    expect(dr.report('internal').dependencies?.[0]?.state).toBe('stale');
+    expect(dr.report().verdict).toBe('not_ready');
+  });
+
+  it('optional failure only degrades, including before first success', async () => {
+    const { c, dr } = mk({ optional: true });
+    dr.start();
+    await tick(0);
+    expect(dr.report().verdict).toBe('ready');
+    c.fail = true;
+    await tick(3000);
+    expect(dr.report().verdict).toBe('degraded');
+    dr.stop();
+  });
+
+  it('pool_exhausted is neutral: degraded, no failure count, never 503 even for scope:task', async () => {
+    const { c, dr } = mk({ scope: 'task' });
+    dr.start();
+    await tick(0);
+    c.fail = Object.assign(new Error('Timed out fetching a new connection from the connection pool'), { code: 'P2024' });
+    await tick(5000);
+    const r = dr.report('internal');
+    expect(r.verdict).toBe('degraded');
+    expect(r.httpStatus).toBe(200);
+    expect(r.dependencies?.[0]).toMatchObject({ state: 'degraded', reason: 'pool_exhausted', consecutiveFailures: 0 });
+    c.fail = false;
+    await tick(1300);
+    expect(dr.report().verdict).toBe('ready');
+    dr.stop();
+  });
+
+  it('draining wins and answers 503', async () => {
+    let draining = false;
+    const { dr } = mk({ draining: () => draining });
+    dr.start();
+    await tick(0);
+    draining = true;
+    expect(dr.report().verdict).toBe('draining');
+    expect(dr.report().httpStatus).toBe(503);
+    dr.stop();
+  });
+
+  it('emits verdict-change and probe_failure events with enum reasons only', async () => {
+    const events: ReadinessEvent[] = [];
+    const { c, dr } = mk({ onEvent: (e) => events.push(e) });
+    dr.start();
+    await tick(0);
+    dr.report();
+    c.fail = true;
+    await tick(3000);
+    dr.report();
+    expect(events.filter((e) => e.type === 'verdict').map((e) => (e as { verdict: string }).verdict)).toEqual([
+      'ready',
+      'degraded',
+    ]);
+    expect(events.find((e) => e.type === 'probe_failure')).toEqual({ type: 'probe_failure', name: 'db', reason: 'error' });
+    dr.stop();
+  });
+});
+
+describe('observe()', () => {
+  it('failures are metric-only: no state or verdict change', async () => {
+    const events: ReadinessEvent[] = [];
+    const { dr } = mk({ onEvent: (e) => events.push(e) });
+    dr.start();
+    await tick(0);
+    for (let i = 0; i < 10; i++) dr.observe('db', 'failure', 'auth');
+    const r = dr.report('internal');
+    expect(r.verdict).toBe('ready');
+    expect(r.dependencies?.[0]).toMatchObject({ state: 'ok', consecutiveFailures: 0 });
+    expect(events.filter((e) => e.type === 'observed_failure')).toHaveLength(10);
+    dr.observe('nope', 'failure');
+    dr.stop();
+  });
+
+  it('traffic success suppresses the next active probe', async () => {
+    const { c, dr } = mk();
+    dr.start();
+    await tick(0);
+    const before = c.calls;
+    for (let i = 0; i < 5; i++) {
+      dr.observe('db', 'success');
+      await tick(500);
+    }
+    expect(c.calls).toBe(before);
+    dr.stop();
+  });
+
+  it('traffic success does not clear a failing state; only a probe does', async () => {
+    const { c, dr } = mk();
+    dr.start();
+    await tick(0);
+    c.fail = true;
+    await tick(3000);
+    dr.observe('db', 'success');
+    expect(dr.report().verdict).toBe('degraded');
+    dr.stop();
+  });
+});
+
+describe('boot() and READINESS_BOOT', () => {
+  it('block: resolves once the dependency succeeds (retrying)', async () => {
+    const { c, dr } = mk();
+    c.fail = true;
+    const p = dr.boot();
+    await tick(1200);
+    c.fail = false;
+    await tick(600);
+    const r = await p;
+    expect(r.verdict).toBe('ready');
+    expect(r.bootMode).toBe('block');
+  });
+
+  it('block: rejects at the deadline naming the dependency and enum reason only', async () => {
+    const { c, dr } = mk();
+    c.fail = Object.assign(new Error('password=hunter2 host=10.0.0.5'), { code: '28P01' });
+    const p = dr.boot().catch((e: Error) => e);
+    await tick(4000);
+    const err = (await p) as Error;
+    expect(err.message).toContain('db(auth)');
+    expect(err.message).not.toContain('hunter2');
+    expect(err.message).not.toContain('10.0.0.5');
+  });
+
+  it('warn: boot resolves with a down dependency, /ready stays 503 starting', async () => {
+    const { c, dr } = mk({ bootMode: 'warn' });
+    c.fail = true;
+    const r = await dr.boot();
+    expect(r.bootMode).toBe('warn');
+    expect(dr.report().verdict).toBe('starting');
+    expect(dr.report().httpStatus).toBe(503);
+  });
+
+  it('open: task enters the TG degraded with a down dependency', async () => {
+    const { c, dr } = mk({ bootMode: 'open' });
+    c.fail = true;
+    await dr.boot();
+    const r = dr.report();
+    expect(r.verdict).toBe('degraded');
+    expect(r.httpStatus).toBe(200);
+    expect(r.bootMode).toBe('open');
+  });
+
+  it('open never lifts the stale-cache 503', async () => {
+    const { dr } = mk({ bootMode: 'open' });
+    await dr.boot();
+    dr.start();
+    await tick(0);
+    vi.setSystemTime(Date.now() + 10_500);
+    expect(dr.report().verdict).toBe('not_ready');
+    dr.stop();
+  });
+
+  it('per-dependency boot:skip/warn do not block', async () => {
+    const c = ctl();
+    c.fail = true;
+    const dr = createDeepReadiness({
+      manifest: declareDependencies({
+        service: 's',
+        dependencies: [
+          dep({ name: 'a', kind: 'custom', criticality: 'critical', scope: 'shared', boot: 'warn', client: () => 1, probe: async () => { throw new Error('x'); } }),
+          dep({ name: 'b', kind: 'custom', criticality: 'optional', client: () => 1, probe: async () => { throw new Error('x'); } }),
+        ],
+      }),
+      env: 'prod',
+      bootMode: 'block',
+    });
+    await expect(dr.boot()).resolves.toBeDefined();
+  });
+});
+
+describe('environment and absent clients (fail closed)', () => {
+  it.each(['local', 'ci'])('EXEC_ENV=%s: absent client is skipped (ready)', async (env) => {
+    const { dr } = mk({ absent: true, env });
+    dr.start();
+    await tick(0);
+    const r = dr.report('internal');
+    expect(r.verdict).toBe('ready');
+    expect(r.dependencies?.[0]?.state).toBe('skipped');
+    dr.stop();
+  });
+
+  it.each(['prod', 'dev', 'banana', undefined])('EXEC_ENV=%s: absent client fails closed', async (env) => {
+    const KEY = 'EXEC_ENV';
+    const prev = process.env[KEY];
+    delete process.env[KEY];
+    try {
+      const { dr } = mk({ absent: true, env: env as string });
+      dr.start();
+      await tick(3000);
+      expect(dr.report().verdict).toBe('starting');
+      expect(dr.report('internal').dependencies?.[0]?.reason).toBe('not_ready');
+      dr.stop();
+    } finally {
+      if (prev !== undefined) process.env[KEY] = prev;
+    }
+  });
+
+  it('explicit whenAbsent overrides the environment default', async () => {
+    const { dr } = mk({ absent: true, env: 'prod', whenAbsent: 'skipped' });
+    dr.start();
+    await tick(0);
+    expect(dr.report().verdict).toBe('ready');
+    dr.stop();
+  });
+
+  it('READINESS_BOOT parsing: unknown => block', async () => {
+    const { parseBootMode } = await import('../index.js');
+    expect(parseBootMode('warn')).toBe('warn');
+    expect(parseBootMode('open')).toBe('open');
+    expect(parseBootMode('skip')).toBe('block');
+    expect(parseBootMode(undefined)).toBe('block');
+  });
+});
+
+describe('deepReport()', () => {
+  it('schemaProbe failure is deep-only: /ready stays ready, deep is not_ready for a critical dep', async () => {
+    const { c, dr } = mk({ schema: true });
+    dr.start();
+    await tick(0);
+    c.schemaFail = true;
+    expect(dr.report().verdict).toBe('ready');
+    const deep = await dr.deepReport('internal');
+    expect(deep.verdict).toBe('not_ready');
+    expect(deep.dependencies?.[0]).toMatchObject({ state: 'failing', reason: 'schema', level: 'deep' });
+    expect(dr.report().verdict).toBe('ready');
+    dr.stop();
+  });
+
+  it('caches and coalesces concurrent deep calls', async () => {
+    const { c, dr } = mk();
+    await dr.boot();
+    const base = c.calls;
+    await Promise.all([dr.deepReport(), dr.deepReport(), dr.deepReport()]);
+    expect(c.calls).toBe(base + 1);
+    await dr.deepReport();
+    expect(c.calls).toBe(base + 1);
+    await tick(6000);
+    await dr.deepReport();
+    expect(c.calls).toBe(base + 2);
+  });
+
+  it('minProbeGapMs: a deep flood cannot exceed one probe per gap', async () => {
+    const c = ctl();
+    const dr = createDeepReadiness({
+      manifest: declareDependencies({
+        service: 's',
+        dependencies: [dep({ name: 'a', kind: 'custom', criticality: 'optional', client: () => 1, probe: async () => void c.calls++ })],
+      }),
+      env: 'prod',
+      deepCacheMs: 0,
+      minProbeGapMs: 1000,
+    });
+    for (let i = 0; i < 10; i++) await dr.deepReport();
+    expect(c.calls).toBe(1);
+    await tick(1100);
+    await dr.deepReport();
+    expect(c.calls).toBe(2);
+  });
+});
+
+describe('public vs internal detail and security', () => {
+  it('public has counts only; internal adds dependencies and legacy checks; no secrets either way', async () => {
+    const { c, dr } = mk();
+    c.fail = Object.assign(new Error('postgres://u:pw@10.1.2.3/db'), { code: '28P01' });
+    dr.start();
+    await tick(3000);
+    const pub = dr.report('public');
+    expect(pub.dependencies).toBeUndefined();
+    expect(pub.checks).toBeUndefined();
+    expect(pub.summary.critical).toEqual({ ok: 0, failing: 1 });
+    const internal = dr.report('internal');
+    expect(internal.dependencies).toHaveLength(1);
+    expect(internal.checks?.db).toEqual({ ready: false, detail: 'failing:auth' });
+    const text = JSON.stringify([pub, internal]);
+    expect(text).not.toContain('pw@');
+    expect(text).not.toContain('10.1.2.3');
+    dr.stop();
+  });
+});
+
+describe('manifest guards', () => {
+  it('declareDependencies rejects duplicates, custom/openfga/aws without probe, critical without scope', () => {
+    const bad = (d: unknown) => d as ReturnType<typeof dep>;
+    expect(() =>
+      declareDependencies({ service: 's', dependencies: [dep({ name: 'x', kind: 'custom', criticality: 'optional', client: () => 1 }), dep({ name: 'x', kind: 'redis', criticality: 'optional', client: () => 1 })] }),
+    ).toThrow(/duplicate.*no probe|no probe.*duplicate/);
+    expect(() => declareDependencies({ service: 's', dependencies: [dep({ name: 'f', kind: 'openfga', criticality: 'optional', client: () => 1 })] })).toThrow(/no probe/);
+    expect(() => declareDependencies({ service: 's', dependencies: [dep({ name: 'k', kind: 'aws-kms', criticality: 'optional', client: () => 1 })] })).toThrow(/no probe/);
+    expect(() =>
+      declareDependencies({ service: 's', dependencies: [bad({ name: 'r', kind: 'redis', criticality: 'critical', client: () => 1 })] }),
+    ).toThrow(/no scope/);
+  });
+
+  it('assertManifestComplete: undeclared discovered client fails; registry diff works', () => {
+    const m = declareDependencies({ service: 's', dependencies: [dep({ name: 'db', kind: 'redis', criticality: 'optional', client: () => 1 })] });
+    expect(() => assertManifestComplete(m, { discover: ['db'] })).not.toThrow();
+    expect(() => assertManifestComplete(m, { discover: ['db', 'rabbit'] })).toThrow(/"rabbit".*not declared/);
+    clearClientRegistry();
+    registerClient('db');
+    registerClient('mongo');
+    expect(() => assertManifestComplete(m, { useRegistry: true })).toThrow(/"mongo"/);
+    clearClientRegistry();
+  });
+});

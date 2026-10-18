@@ -1,6 +1,6 @@
 # Deep readiness (soa#517, M3) - design
 
-Status: DRAFT, review round 1 applied (HOLD resolved; see PR body checklist). Types only: `src/deep-readiness.types.ts`. Part of hipponot/iac#897.
+Status: DRAFT, review round 1 applied (HOLD resolved; see PR body checklist). Implemented in 0.2.0 under `src/deep/` (+ `schema`, `aws`, `openfga` sub-path exports). Part of hipponot/iac#897.
 
 ## 1. Problem and current state
 
@@ -152,3 +152,12 @@ Decided: Q1 gating rule (section 3, pending Seth confirmation); Q2 structural ad
 Remaining:
 1. Seth to confirm the shared-dependency semantics (section 3) before promotion.
 2. Bind the LANE field/contract once hipponot/iac#898 lands.
+
+## 11. Implementation notes (0.2.0)
+
+- Adapters are structural (Prisma `$queryRawUnsafe` / pg `query`, MongoClient `db().command`, redis `ping`, amqplib `createChannel`/`checkExchange`, http `probeFetch`), so no `pg`/`@prisma/client`/`redis`/`amqplib` dependency. For the same reason `/aws` and `/openfga` declare NO peer dependencies: a declared optional peer would change the workspace lockfile importers for no typing benefit. `openfga` and `aws-*` kinds require an explicit `probe`; `openfgaProbe` and `awsProbe(op)` are provided.
+- The http kind expects the client to expose `probeFetch(url, {method, signal})`, the raw fetch without the app's breaker/retries.
+- "Stale cache" = no probe completion or traffic success within `staleAfterMs` (default 60s), independent of whether the dependency itself is up.
+- A deep-report `schemaProbe` failure on a critical dependency is `not_ready` in the DEEP report only (deploy smoke needs a hard answer); it never feeds `/health/ready`.
+- Unknown `READINESS_BOOT` values resolve to `block`.
+- 0.1.x sources are pinned by sha256 in `src/__tests__/compat-0.1.unit.test.ts`.

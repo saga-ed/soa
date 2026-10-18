@@ -26,3 +26,38 @@ export {
 export { awaitDbAtBoot, type AwaitDbAtBootOptions } from './db-boot.js';
 
 export { createDrainSignal, type DrainSignal } from './drain.js';
+
+export {
+  dep,
+  declareDependencies,
+  assertManifestComplete,
+  registerClient,
+  registeredClients,
+  clearClientRegistry,
+  type AssertManifestOptions,
+} from './deep/manifest.js';
+export { createDeepReadiness, parseBootMode } from './deep/runner.js';
+export { mountDeepReadiness } from './deep/mount.js';
+export { createBearerAuthorizer } from './deep/auth.js';
+export { classifyError } from './deep/classify.js';
+export type {
+  AnyDependency,
+  BootMode,
+  CreateDeepReadinessOptions,
+  Criticality,
+  DeepReadiness,
+  DependencyDeclaration,
+  DependencyKind,
+  DependencyManifest,
+  DependencyReport,
+  DependencyScope,
+  DependencyState,
+  DetailLevel,
+  ProbeOutcome,
+  ProbeReason,
+  ProbeScheduleOptions,
+  ReadinessEvent,
+  ReadinessReport,
+  ReadinessVerdict,
+} from './deep/types.js';
+export type { ProbeFetchLike } from './deep/adapters.js';

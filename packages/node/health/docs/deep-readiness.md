@@ -26,10 +26,11 @@ soa-health 0.1.x already has the right primitives (timeout, coalesced cached dee
 const manifest = declareDependencies({
   service: 'authz-api',
   dependencies: [
-    { name: 'authzDb', kind: 'postgres', criticality: 'critical', client: () => prisma,
-      schemaProbe: (p) => p.tuple.findFirst({ select: { id: true } }) },
-    { name: 'openfga', kind: 'openfga', criticality: 'critical', client: () => fga },
-    { name: 'redis',   kind: 'redis',   criticality: 'optional', client: () => redisClient, whenAbsent: 'skipped' },
+    dep({ name: 'authzDb', kind: 'postgres', criticality: 'critical', scope: 'shared',
+          client: () => prisma,
+          schemaProbe: (p) => p.tuple.findFirst({ select: { id: true } }) }),
+    dep({ name: 'openfga', kind: 'openfga', criticality: 'critical', scope: 'shared', client: () => fga }),
+    dep({ name: 'redis', kind: 'redis', criticality: 'optional', client: () => redisClient, whenAbsent: 'skipped' }),
   ],
 });
 ```
@@ -64,7 +65,7 @@ CI guard: `assertManifestComplete(manifest, { discover })` in a service unit tes
 ### Verdicts
 
 - `ready`: every dependency `ok`/`skipped`.
-- `degraded`: the task serves traffic (HTTP 200) but at least one dependency is not `ok`: an `optional` dependency failing, a `critical` dependency with `scope: 'shared'` failing AFTER its first success, or a neutral signal (pool-acquire timeout, `observe()` failure) is present. Always accompanied by a metric/log so it is alertable; it never pulls the task.
+- `degraded`: the task serves traffic (HTTP 200) but at least one dependency is not `ok`: an `optional` dependency failing, a `critical` dependency failing AFTER its first success (unless declared `scope: 'task'`), or a pool-acquire timeout is present. `observe()` failures never appear here: they are metric-only. Always accompanied by a metric/log so it is alertable; it never pulls the task.
 - `not_ready`: 503, the task is removed from the TG.
 - `starting`: 503, a `critical` dependency has not yet had its first success.
 - `draining`: 503, SIGTERM received.
@@ -72,10 +73,11 @@ CI guard: `assertManifestComplete(manifest, { discover })` in a service unit tes
 ### Gating rule (pending Seth confirmation)
 
 1. Until a critical dependency's FIRST success (boot, or `starting` verdict), it gates readiness: no success, no traffic.
-2. After first success each dependency carries `scope: 'task' | 'shared'`. A `shared` dependency (a database, broker or upstream every task depends on identically) that fails yields `degraded`/200 plus a metric, because pulling every task cannot help and, per section 5, causes replacement storms. Only task-local failures yield 503: a stale/blocked event loop (cache not refreshed within `staleAfterMs`), and failures classified `auth`, `tls` or `dns` on this task.
+2. After first success, EVERY failure is treated as `shared` by default, `auth`/`tls`/`dns` included: `degraded`/200 plus a metric, because pulling every task cannot help and, per section 5, causes replacement storms. Exactly two cases yield 503: (a) a stale cache, i.e. a blocked event loop that stopped refreshing within `staleAfterMs`; (b) a dependency explicitly declared `scope: 'task'` (opt-in, for dependencies that are genuinely per-task, e.g. a local sidecar). Peer-divergence detection (this task fails while its peers pass) is out of scope.
+   Asymmetry behind the default: a false 503 empties the whole fleet; a false 200 errors roughly 1/N of requests on the bad task. We choose the cheaper error.
 3. `optional` failures only degrade.
 
-Never counted toward 503 (neutral, degrade + metric only): pool-acquire timeouts (`pool_exhausted`: the probe could not even obtain a connection; that is load, and failing readiness on load sheds capacity at the worst moment and starts a spiral) and any failure reported through `observe()` (traffic-observed failures include user-caused errors). Only an active probe that reached the dependency can drive `failing`.
+Never counted toward 503 (neutral, degrade + metric only): pool-acquire timeouts (`pool_exhausted`: the probe could not even obtain a connection; that is load, and failing readiness on load sheds capacity at the worst moment and starts a spiral) Failures reported through `observe()` are METRIC-ONLY: they never change the verdict, not even to `degraded`, otherwise user-caused errors would flake the idle-colour flip gate. Only an active probe that reached the dependency can drive `failing`.
 
 `criticality` is REQUIRED on every declaration (no per-kind default; the earlier "default critical for postgres" is dropped as contradictory). `scope` is required for `critical` declarations.
 
@@ -83,7 +85,7 @@ Per-dependency state machine: `starting` -> `ok` -> `failing` (>= `failureThresh
 
 ### Boot override for shipping a fix during an outage
 
-`boot()` blocking on a down dependency means a replacement task never listens, and the circuit breaker rolls back the very deploy that carries the fix. `READINESS_BOOT=warn` (also `skip`), a dispatch-settable task env var wired through the deploy workflow input and service template, makes `boot()` log and continue for every dependency (state stays `starting`; the task still reports 503 on `/ready` until a first success, unless `READINESS_BOOT=warn` also sets gating to `degraded` for the task via `READINESS_GATE=off`, an explicit second knob so the operator knowingly takes the task into the TG with a down dependency). Default is `block`. The override is surfaced in the report (`bootMode`) so smoke and humans can see a task is running unguarded. Note that rostering#1684's `health-path` dispatch input only changes the smoke URL; it does not stop `boot()` from failing, so it is not this mitigation.
+`boot()` blocking on a down dependency means a replacement task never listens, and the circuit breaker rolls back the very deploy that carries the fix. `READINESS_BOOT=block|warn|open`, one dispatch-settable task env var wired through the deploy workflow input and service template: `block` (default) = boot gates; `warn` = `boot()` logs and continues, but the task still reports 503 on `/ready` (`starting`) until a first success; `open` = `warn` plus the first-success gate off, so the task enters the TG with a down dependency (state `degraded`). `open` NEVER lifts the stale-cache/blocked-event-loop 503. The mode is reported as `bootMode` so smoke and humans see a task is running unguarded. The workflow input defaults to `block`, so the next ordinary deploy resets any override. There is no separate gate knob. Note that rostering#1684's `health-path` dispatch input only changes the smoke URL; it does not stop `boot()` from failing, so it is not this mitigation.
 
 ## 4. Timeouts, caching, rate limiting (probe load on dependencies)
 
@@ -91,7 +93,7 @@ Invariants, all enforced by the runner so adopters cannot violate them:
 
 1. TG-facing `/health/ready` performs no dependency I/O. Load on a dependency from readiness = tasks x (1 / intervalMs), independent of ALB probe rate, number of ALB nodes, and any scraper. Example: 30 tasks x 1 probe/15s = 2 qps per dependency across the fleet.
 2. One in-flight probe per dependency; probes never overlap (as `createDbReadiness`).
-3. `observe(name, 'success'|'failure')` lets real traffic (a Prisma extension, an axios interceptor) refresh state and suppress the next active probe, so busy services add near-zero probe load. Failures observed from traffic count toward the threshold but cannot by themselves clear a `failing` state; only an active probe can.
+3. `observe(name, 'success'|'failure')` lets real traffic (a Prisma extension, an axios interceptor) refresh state and suppress the next active probe, so busy services add near-zero probe load. Traffic-observed failures are metric-only and never move state or verdict; only an active probe can drive `failing` or clear it.
 4. Per-probe hard timeout (default 2000ms). Where the client supports it (fetch, node-redis, AWS SDK v3) an `AbortSignal` releases the socket; where it does not (Prisma `$queryRaw`) the call is raced and abandoned, and the one-in-flight rule is what bounds the leak to one pooled connection per dependency per task. Timeout < ALB `HealthCheckTimeoutSeconds` (4s in the iam template); since `/ready` is cache-only it answers in microseconds regardless.
 5. `/health/deep`: result cached `deepCacheMs` (default 5s), concurrent callers coalesced, and a global `minProbeGapMs` per dependency shared with the background loop, so an unauthenticated flood cannot exceed ~1 probe/second/dependency/task.
 6. Probes use the app's pools, so a pool-acquire timeout is classified `pool_exhausted` and is neutral (section 3). Probes must not retry.
@@ -104,7 +106,7 @@ Fail-stale-safe: if the event loop is blocked, the cache stops refreshing and `s
 
 - TG `HealthCheckPath=/health/ready`; container healthCheck `/health/live` via a new `ContainerHealthCheckPath` (default `/health/live`) in the service template (today the iam/authz templates feed `HealthCheckPath` to both, `service-template.yaml:1200`). Prod samconfigs still on `/health` move to `/health/ready` per service.
 - IMPORTANT, ECS replacement: past `HealthCheckGracePeriodSeconds`, ECS replaces any task that fails the ELB (TG) health check, whatever the container check says. `/health/live` therefore does NOT protect against restart storms. If a shared critical outage 503'd `/ready` on every task, ECS would kill all of them; replacements would block in `boot()`; the TG would be empty; and ALB fail-open (which applies to an existing target set, not to targets that do not exist yet) would not help. This design does not rely on fail-open. The mitigation is the gating rule in section 3: after first success, shared-dependency failures degrade (200) and cannot trigger replacement; only task-local failures can, which is exactly when replacing helps.
-- Residual risk: `auth`/`tls`/`dns` failures are treated as task-local per the review, but a shared credential rotation or CA change can present the same way on every task. See disagreement note in the PR. Containment: ECS `minimumHealthyPercent`/circuit breaker bound a rolling replacement, and the metric on `not_ready` count per service is the alert.
+- Residual risk: because post-first-success failures (auth/tls/dns included) default to `shared` and degrade, a failure that is truly task-local (one task with a bad credential) keeps serving errors on about 1/N of requests until the degraded metric alerts; we accept this over the fleet-emptying cost of a false 503. There is no deploy-time containment for steady-state 503s (the circuit breaker acts only during deployments), so none is claimed.
 - During a shared outage, a NEW task (deploy, scale-out) cannot pass its first-success gate and stays out of the TG; existing tasks keep serving. To ship a fix then, dispatch with `READINESS_BOOT=warn` (section 3).
 - Circuit breaker: a new task that fails `boot()` or never becomes TG-healthy fails the deployment and rolls back. This is the intended C7/C11 catch for credential/CA/DNS/SG/version deltas.
 - Grace period derived from ONE value, not independently tuned: `HealthCheckGracePeriodSeconds >= bootTimeoutMs + firstProbe + HealthyThresholdCount x HealthCheckIntervalSeconds + margin`. With the iam routing template (Healthy 2 x 5s) and bootTimeout 60s that is about 60 + 2 + 10 + margin = 80s, versus 30s today, so the template change is required with adoption (or bootTimeout lowered). The container check keeps `StartPeriod + Retries x Interval` above `bootTimeoutMs`, so the container check cannot fail while `boot()` is still legitimately retrying. A lint in the service template derives both from the one `ReadinessBootTimeoutSeconds` parameter.
@@ -141,13 +143,12 @@ Consumers read the same shape: `ss` verify (stage S, local deps), the twin (stag
 
 - Background active probes + cache (chosen) vs probing per request: per-request is the "ALB overloads dependency" failure and makes readiness latency depend on the dependency. Cost of the chosen approach: up to ~15s staleness; mitigated by `observe()` and the deep path for smoke.
 - Failing readiness on a shared-dependency outage: harmful (ECS replaces every task, section 5). So shared failures degrade after first success; the cost is that a genuinely broken-for-everyone task keeps serving errors until alerts fire. Gating before first success still catches C3/C5/C6/C11 deltas on a new colour. Pending Seth confirmation.
-- Probing through the real client vs a parallel connection: the real client can be healthy while a fresh connection fails (and vice versa); we want the former because it is what serves traffic. Cost: a probe may queue behind a saturated pool; the timeout treats that as a failure, which matches user experience.
+- Probing through the real client vs a parallel connection: the real client can be healthy while a fresh connection fails (and vice versa); we want the former because it is what serves traffic. Cost: a probe may queue behind a saturated pool; a pool-acquire timeout is `pool_exhausted`, which is neutral (degrades, never 503), because failing readiness on load sheds capacity when it is needed.
 
 ## 10. Decisions from review round 1 and remaining questions
 
 Decided: Q1 gating rule (section 3, pending Seth confirmation); Q2 structural adapters for pg/prisma/redis/mongo/http/rabbit in the package, `/aws` and `/openfga` as sub-path exports with optional peer deps; Q3 hand-kept discover list for the pilot, registry diff fleet-wide; Q4 soa-health owns the schema, sub-path export, no Zod; Q5 grace period derived (section 5); Q6 SSM bearer, constant-time compare; Q7 flip requires `ready`, allow-list for `degraded`.
 
 Remaining:
-1. Confirm Q1 with Seth, including whether `auth`/`tls`/`dns` should be task-local (section 5 residual risk).
+1. Seth to confirm the shared-dependency semantics (section 3) before promotion.
 2. Bind the LANE field/contract once hipponot/iac#898 lands.
-3. `READINESS_GATE=off` second knob: keep, or fold into `READINESS_BOOT=warn`?

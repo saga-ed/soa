@@ -17,14 +17,15 @@ export type DependencyKind =
   | 'custom';
 
 /**
- * critical: gates readiness until first success; afterwards see DependencyScope.
+ * critical: gates readiness until first success; afterwards every failure is degraded/200 unless scope 'task'.
  * optional: failure => degraded (200). REQUIRED on every declaration, no per-kind default.
  */
 export type Criticality = 'critical' | 'optional';
 
 /**
- * After first success, a failing 'shared' critical dependency => degraded (200) + metric;
- * only 'task' failures (auth/tls/dns on this task, stale loop) => 503. Pending Seth confirmation.
+ * After first success a failing critical dependency => degraded (200) + metric, whether 'shared' (the
+ * default intent) or not. Only an explicit 'task' scope, or a stale cache/blocked event loop, => 503.
+ * Pending Seth confirmation.
  */
 export type DependencyScope = 'task' | 'shared';
 
@@ -53,13 +54,16 @@ export type ProbeReason =
  * uses (the Prisma client, the node-redis client, the OpenFGA SDK client, the
  * wrapper that carries the shared fetch agent). The runner never opens its own connection.
  */
-export interface DependencyDeclaration<C = unknown> {
+export type CriticalitySpec =
+  | { criticality: 'critical'; scope: DependencyScope }
+  | { criticality: 'optional' };
+
+export type DependencyDeclaration<C = unknown> = DependencyDeclarationBase<C> & CriticalitySpec;
+
+interface DependencyDeclarationBase<C> {
   /** Stable id, used in the report and metrics. Unique per service. */
   name: string;
   kind: DependencyKind;
-  criticality: Criticality;
-  /** Required when criticality is 'critical'. */
-  scope?: DependencyScope;
   /** Resolved lazily so DI containers and late-initialised clients work. null/undefined = not configured. */
   client: () => C | null | undefined;
   /**
@@ -88,9 +92,10 @@ export interface DependencyDeclaration<C = unknown> {
   boot?: 'block' | 'warn' | 'skip';
 }
 
-/** Type-erased declaration stored in a manifest; `dep<C>()` is the only constructor. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyDependency = DependencyDeclaration<any>;
+declare const anyDependencyBrand: unique symbol;
+
+/** Branded: a raw object literal does not type-check, callers must go through `dep()`. */
+export type AnyDependency = { readonly [anyDependencyBrand]: true; readonly name: string };
 
 /** Infers C from `client` so probe/schemaProbe are typed against the real client under strict mode. */
 export declare function dep<C>(d: DependencyDeclaration<C>): AnyDependency;
@@ -103,8 +108,11 @@ export interface DependencyManifest {
 /** Identity function that validates names/required fields and freezes the manifest. */
 export declare function declareDependencies(manifest: DependencyManifest): DependencyManifest;
 
-/** Boot mode from READINESS_BOOT (dispatch-settable). 'warn'/'skip' let a fix ship during a dependency outage. */
-export type BootMode = 'block' | 'warn' | 'skip';
+/**
+ * READINESS_BOOT (dispatch-settable, workflow default 'block'). warn: boot continues, /ready stays 503 until first success.
+ * open: warn + first-success gate off. open never lifts the stale-cache/event-loop 503.
+ */
+export type BootMode = 'block' | 'warn' | 'open';
 
 export interface ProbeScheduleOptions {
   /** Active probe cadence per dependency (default 15000). */
@@ -160,7 +168,7 @@ export interface ReadinessReport {
   dependencies?: DependencyReport[];
   /** Present on 'internal' detail only; legacy shape, migration aid. */
   checks?: Record<string, { ready: boolean; detail: string }>;
-  /** 'warn'/'skip' means this task is running unguarded. */
+  /** 'warn'/'open' means this task is running unguarded. */
   bootMode: BootMode;
   /** Present on 'public' detail: counts only. */
   summary: { critical: { ok: number; failing: number }; optional: { ok: number; failing: number } };
@@ -178,7 +186,7 @@ export interface DeepReadiness {
   report(level?: DetailLevel): ReadinessReport;
   /** Fresh active probes (rate-limited, coalesced, cached deepCacheMs). Never a TG path. */
   deepReport(level?: DetailLevel): Promise<ReadinessReport>;
-  /** Traffic success suppresses redundant active probes. Failures are neutral: degrade + metric, never 503. */
+  /** Traffic success suppresses redundant active probes. Failures are metric-only: never change state or verdict. */
   observe(name: string, outcome: 'success' | 'failure', reason?: ProbeReason): void;
 }
 

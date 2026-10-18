@@ -16,8 +16,17 @@ export type DependencyKind =
   | 'aws-kms'
   | 'custom';
 
-/** critical: failure => not ready (503). optional: failure => degraded, still ready (200). */
+/**
+ * critical: gates readiness until first success; afterwards see DependencyScope.
+ * optional: failure => degraded (200). REQUIRED on every declaration, no per-kind default.
+ */
 export type Criticality = 'critical' | 'optional';
+
+/**
+ * After first success, a failing 'shared' critical dependency => degraded (200) + metric;
+ * only 'task' failures (auth/tls/dns on this task, stale loop) => 503. Pending Seth confirmation.
+ */
+export type DependencyScope = 'task' | 'shared';
 
 /** Outcome of one active probe. Throwing is also a failure; the runner classifies it. */
 export interface ProbeOutcome {
@@ -35,6 +44,8 @@ export type ProbeReason =
   | 'schema'
   | 'unexpected_response'
   | 'not_ready'
+  /** Pool-acquire timeout. Neutral: degrades, never drives a 503. */
+  | 'pool_exhausted'
   | 'error';
 
 /**
@@ -47,14 +58,19 @@ export interface DependencyDeclaration<C = unknown> {
   name: string;
   kind: DependencyKind;
   criticality: Criticality;
+  /** Required when criticality is 'critical'. */
+  scope?: DependencyScope;
   /** Resolved lazily so DI containers and late-initialised clients work. null/undefined = not configured. */
   client: () => C | null | undefined;
   /**
-   * If the client is not configured: 'skipped' (ready) or 'fail'. Default 'fail'
-   * when criticality is critical and the environment is deployed (see EnvPolicy).
+   * If the client is not configured: 'skipped' (ready) or 'fail'. 'skipped' is the default
+   * only when EXEC_ENV is exactly 'local' or 'ci'; unset/unknown EXEC_ENV is deployed => 'fail'.
    */
   whenAbsent?: 'skipped' | 'fail';
-  /** Override the kind's default probe. Required for kind 'custom'. */
+  /**
+   * Override the kind's default probe. Required for 'custom' and every 'aws-*' kind (use an
+   * operation the task role already performs). Must not retry; must bypass app circuit breakers.
+   */
   probe?: (client: C, signal: AbortSignal) => Promise<ProbeOutcome | void>;
   /**
    * Optional deeper check (schema/grant/column mapping). Runs at boot and on
@@ -68,17 +84,27 @@ export interface DependencyDeclaration<C = unknown> {
   failureThreshold?: number;
   /** Freshness window: older than this without a success => stale => failing. */
   staleAfterMs?: number;
-  /** Boot phase behaviour. Default: critical => block, optional => skip. */
+  /** Boot phase behaviour. Default: critical => block, optional => skip. READINESS_BOOT env overrides at runtime. */
   boot?: 'block' | 'warn' | 'skip';
 }
 
+/** Type-erased declaration stored in a manifest; `dep<C>()` is the only constructor. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyDependency = DependencyDeclaration<any>;
+
+/** Infers C from `client` so probe/schemaProbe are typed against the real client under strict mode. */
+export declare function dep<C>(d: DependencyDeclaration<C>): AnyDependency;
+
 export interface DependencyManifest {
   service: string;
-  dependencies: readonly DependencyDeclaration[];
+  dependencies: readonly AnyDependency[];
 }
 
-/** Identity function that type-checks the declaration and freezes it. */
+/** Identity function that validates names/required fields and freezes the manifest. */
 export declare function declareDependencies(manifest: DependencyManifest): DependencyManifest;
+
+/** Boot mode from READINESS_BOOT (dispatch-settable). 'warn'/'skip' let a fix ship during a dependency outage. */
+export type BootMode = 'block' | 'warn' | 'skip';
 
 export interface ProbeScheduleOptions {
   /** Active probe cadence per dependency (default 15000). */
@@ -110,6 +136,10 @@ export interface DependencyReport {
   level: 'cached' | 'deep';
 }
 
+/**
+ * degraded: serves (HTTP 200) with a non-ok dependency: optional failing, shared critical failing
+ * after first success, or a neutral signal (pool_exhausted, observe() failure). Always emits a metric.
+ */
 export type ReadinessVerdict = 'ready' | 'degraded' | 'not_ready' | 'draining' | 'starting';
 
 /** Versioned, machine-readable. The same document feeds /ss, the twin and idle-colour smoke. */
@@ -128,6 +158,10 @@ export interface ReadinessReport {
   generatedAt: string;
   /** Present on 'internal' detail only. */
   dependencies?: DependencyReport[];
+  /** Present on 'internal' detail only; legacy shape, migration aid. */
+  checks?: Record<string, { ready: boolean; detail: string }>;
+  /** 'warn'/'skip' means this task is running unguarded. */
+  bootMode: BootMode;
   /** Present on 'public' detail: counts only. */
   summary: { critical: { ok: number; failing: number }; optional: { ok: number; failing: number } };
 }
@@ -144,17 +178,17 @@ export interface DeepReadiness {
   report(level?: DetailLevel): ReadinessReport;
   /** Fresh active probes (rate-limited, coalesced, cached deepCacheMs). Never a TG path. */
   deepReport(level?: DetailLevel): Promise<ReadinessReport>;
-  /** Real traffic reports success/failure for a dependency, suppressing redundant active probes. */
+  /** Traffic success suppresses redundant active probes. Failures are neutral: degrade + metric, never 503. */
   observe(name: string, outcome: 'success' | 'failure', reason?: ProbeReason): void;
 }
 
 export interface CreateDeepReadinessOptions extends ProbeScheduleOptions {
   manifest: DependencyManifest;
-  /** Defaults to NODE_ENV/EXEC_ENV based; controls whenAbsent defaults. */
-  env?: 'local' | 'ci' | 'dev' | 'prod';
+  /** Test seam. Production reads EXEC_ENV only; unset/unknown => deployed (fail closed). Lane (twin/mirror) comes from the iac#898 LANE identity, not here. */
+  env?: string;
   isDraining?: () => boolean;
-  /** Authorises the internal detail level. Default: deny, so unauthenticated callers get 'public'. */
-  authorizeInternal?: (req: unknown) => boolean;
+  /** Internal-detail bearer (loaded from SSM by the service). Compared in constant time. Unset => internal unreachable. */
+  internalBearerToken?: string;
 }
 
 export declare function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadiness;

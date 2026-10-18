@@ -8,8 +8,14 @@ import type { DeepReadiness, DetailLevel } from './types.js';
  * (Express, and the other shapes mountReadinessRoutes accepts). Mount BEFORE any auth perimeter.
  */
 export function mountDeepReadiness(app: ReadinessRouter, dr: DeepReadiness): void {
-  const levelOf = async (req: unknown): Promise<DetailLevel> =>
-    (await Promise.resolve(dr.authorizeInternal(req)).catch(() => false)) ? 'internal' : 'public';
+  // A throwing authorizer (sync or async) must downgrade to public, never fail /health/ready.
+  const levelOf = async (req: unknown): Promise<DetailLevel> => {
+    try {
+      return (await dr.authorizeInternal(req)) ? 'internal' : 'public';
+    } catch {
+      return 'public';
+    }
+  };
 
   app.get('/health/live', (_req, res) => {
     res.json({ status: 'ok', ...buildIdentity() });

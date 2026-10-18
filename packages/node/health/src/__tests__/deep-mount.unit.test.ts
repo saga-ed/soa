@@ -73,6 +73,34 @@ describe('mountDeepReadiness', () => {
     expect((await unset.call('/health/ready', { authorization: 'Bearer ' })).body.dependencies).toBeUndefined();
   });
 
+  it('a throwing authorizer (sync or async) serves public, not 503', async () => {
+    for (const authorizeInternal of [
+      () => {
+        throw new Error('secret not loaded');
+      },
+      async () => {
+        throw new Error('secret not loaded');
+      },
+    ]) {
+      const { app, call } = fakeApp();
+      const dr = createDeepReadiness({
+        manifest: declareDependencies({
+          service: 'svc',
+          dependencies: [dep({ name: 'db', kind: 'custom', criticality: 'critical', scope: 'shared', client: () => 1, probe: async () => undefined })],
+        }),
+        env: 'prod',
+        minProbeGapMs: 0,
+        authorizeInternal,
+      });
+      mountDeepReadiness(app, dr);
+      await dr.boot();
+      const ready = await call('/health/ready', { authorization: 'Bearer x' });
+      expect(ready.code).toBe(200);
+      expect(ready.body.dependencies).toBeUndefined();
+      expect((await call('/health/deep')).code).toBe(200);
+    }
+  });
+
   it('reports conform to the exported JSON Schema (required keys, enums)', async () => {
     const { app, call } = fakeApp();
     const dr = make('t');

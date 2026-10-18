@@ -58,7 +58,7 @@ Rule: unknown or unparseable means deployed prod behaviour with every invariant 
 
 - Account: ECS task metadata (`ECS_CONTAINER_METADATA_URI_V4`) then the injected resolver. Failure returns undefined or throws; never a default. An unresolved account stops boot (contract rule 3).
 - The local declaration is `SAGA_LOCAL=1`. soa-env is its only owner; soa-health and everything else consume it (section 9, note on soa#521).
-- `SAGA_LOCAL=1` is REFUSED (boot error) when any of these is present: `ECS_CONTAINER_METADATA_URI`, `ECS_CONTAINER_METADATA_URI_V4`, `AWS_EXECUTION_ENV`, `AWS_LAMBDA_FUNCTION_NAME`. It is also refused when an injected resolver returns the prod account (a laptop holding prod credentials).
+- `SAGA_LOCAL=1` is REFUSED (boot error) when any of these is present: `ECS_CONTAINER_METADATA_URI`, `ECS_CONTAINER_METADATA_URI_V4`, `AWS_EXECUTION_ENV`, `AWS_LAMBDA_FUNCTION_NAME`. Under `SAGA_LOCAL=1` a resolver failure resolves to `local`; only a positive prod-account result refuses (a laptop holding prod credentials). Consequence for /ss: an exported `AWS_PROFILE=saga` would be refused, so saga-stack-cli must scrub `AWS_PROFILE` and other `AWS_*` variables for child service processes (saga-stack-cli implementation item).
 - `SAGA_LOCAL=1` yields account kind `local`. The /ss manifests and vitest/jest setup set it (implementation PR; soa owns saga-stack-cli). Vitest setup sets it for `main.ts` boot tests.
 - Conflicting signals (prod account with `EXEC_ENV=dev`, `SAGA_LOCAL` with `LANE=twin`) throw `EnvIdentityError`.
 
@@ -66,15 +66,15 @@ Rule: unknown or unparseable means deployed prod behaviour with every invariant 
 
 Interface: `stubs/types.ts`, `stubs/index.ts`. Capabilities: `credentialSource` (`iam-token|static`), `tls`, `failFast`, `mailSink` (`ses|capture|stub`), `corsOrigins`, `cookieDomain`, `trustProxyHops`, `telemetryEnv`, `devPerimeter` (`on|off`), `permissiveAuthz` (boolean), `logFormat`, `logLevel`, `outbound.<integration>` (`live|sink|off`).
 
-`devPerimeter` and `permissiveAuthz` are separate switches. The dev perimeter is a protection (recon-blocking gate; ON in the dev overlay, forbidden in prod rows: `dev-perimeter-production.ts`). Permissive authz is a bypass (coach `COACH_AUTHZ_ALLOW_ALL`); it is legal only in the `local` row.
+`devPerimeter` and `permissiveAuthz` are separate switches. The dev perimeter is a protection (recon-blocking gate; default ON in the dev overlay (may be off: rostering `.github/workflows/sandbox-deploy.yml` ~L327 passes `DevPerimeterEnabled=false` for the e2e composition), forced off in R1/R2: `dev-perimeter-production.ts`). Permissive authz is a bypass (coach `COACH_AUTHZ_ALLOW_ALL`); it is legal only in the `local` row.
 
 Invariants are keyed on ACCOUNT x LANE, not on behaviour profile. Profile is a derived input to the row, never a selector. "Real side effects required" depends on account + lane, so the twin can boot.
 
 | Row | Account | Lane | Required | Forbidden |
 |---|---|---|---|---|
-| R1 prod | prod | none | `failFast`, `credentialSource=iam-token`, tls with CA, `mailSink=ses`, `outbound.* = live` per declaration, `telemetryEnv=prod`, `devPerimeter=off` | `permissiveAuthz`, `capture`/`stub` mail, sinks, dev origins |
+| R1 prod | prod | none | `failFast`, `credentialSource=iam-token`, tls with CA, `mailSink=ses` (only when the service's declaration lists mail), `outbound.* = live` per declaration, `telemetryEnv=prod`, `devPerimeter=off` | `permissiveAuthz`, `capture`/`stub` mail, sinks, dev origins |
 | R2 lane | dev | twin or mirror | `failFast`, `credentialSource=iam-token`, tls, `devPerimeter=off`, `telemetryEnv != prod`, `mailSink=capture`, every `outbound.* in {sink, off}` | `permissiveAuthz`, `mailSink=ses`, `live` outbound, prod-named SSM values that do not resolve to lane resources (guard) |
-| R3 dev overlay | dev | none | `devPerimeter=on`, `telemetryEnv=dev`, dev bindings (`credentialSource` per service SSM; `static` allowed), `mailSink in {stub, capture}`; `failFast` follows the legacy NODE_ENV branch until the service flips | `permissiveAuthz`, `mailSink=ses` to real recipients, prod secret paths |
+| R3 dev overlay | dev | none | `devPerimeter in {on, off}` (default on; only R1 and R2 force off), `telemetryEnv=dev`, dev bindings (`credentialSource` per service SSM; `static` allowed), `mailSink in {stub, capture}`; `failFast` follows the legacy NODE_ENV branch until the service flips | `permissiveAuthz`, `mailSink=ses` to real recipients, prod secret paths |
 | R4 local | local | none | `credentialSource=static`, `mailSink in {stub, capture}`, `outbound.* in {off, sink}` | prod secret paths, `LANE != none` |
 | - | prod | twin or mirror | boot fails (lane in the prod account) | everything |
 | - | any | invalid | boot fails | everything |
@@ -90,9 +90,9 @@ Every current environment maps to exactly one row (values marked [assumed] are f
 | twin lane | prod | production | twin | dev | R2 |
 | mirror lane | prod (`mirror` legacy, throws "set LANE=mirror") | production | mirror | dev | R2 |
 | dev-main | dev (-> prod after flip) | development (-> production) | none | dev | R3 |
-| container-per-PR preview | dev [assumed] | development [assumed] | none | dev | R3 |
-| training | dev [assumed] | development [assumed] | none | dev | R3 |
-| saga-sandbox | dev [assumed] | development [assumed] | none | dev | R3 |
+| container-per-PR preview | dev (verified for rostering; [assumed] for program-hub, sds, coach) | development (same) | none | dev | R3 |
+| training | dev (verified for rostering; [assumed] elsewhere) | development (same) | none | dev | R3 |
+| saga-sandbox | dev (verified for rostering; [assumed] elsewhere) | development (same) | none | dev | R3 |
 | /ss (saga-stack-cli) | unset | development | none | local (`SAGA_LOCAL=1`) | R4 |
 | CI unit/integration tests | unset | test | none | local (`SAGA_LOCAL=1` via test setup) | R4 |
 
@@ -140,7 +140,7 @@ Order follows the contract (rule 4): authz-api, iam-api, sis-api, then fleet (th
 1. soa implementation PR: package scaffolding, `parseLane`/`resolveAccount`/`parseIdentity`/`createEnv`/`loadEnv`/`testEnv`, lint rule + ratchet wrapper, `SAGA_LOCAL=1` in /ss manifests and vitest setup, tests. Publish `@saga-ed/soa-env` 0.1.0.
 2. soa's own packages reach baseline 0 BEFORE any service flips NODE_ENV: `api-util` cors/dev-perimeter, `rabbitmq` (`failFast`), `logger` (plain `LOG_FORMAT`/`LOG_LEVEL` keys), `postgres` loader (`credentialSource`+`tls` instead of `env`), `mailer` (`capture` adapter, required `mailProvider`). In each shared package the capability wins over the env fallback, with a once-only deprecation warning when the fallback is used.
 3. lane-guard and soa-health import soa-env. Health reports `profile`, `lane`, `telemetryEnv`, `accountKind`; `environment` stays as a deprecated alias. Note on soa#521 (not edited here): it currently uses `EXEC_ENV=local|ci` as its local declaration; once soa-env 0.1.0 publishes, health switches to the soa-env local declaration (`SAGA_LOCAL=1`) so there is one declaration.
-4. Rostering pilot: authz-api (`db-init.ts:43` module-level `USE_IAM_AUTH`, `main.ts`, `prod-migrate.ts`), then iam-api (`main.ts` guards, `assert-production-config.ts`, `lake-export.ts:38`, `jwt-issuer.service.ts`, mailer refusal), then sis-api (`main.ts:61`, Clever/digest as `outbound.*`). Tests exercise both capability values on the same path. Lint enabled with a baseline for the rest of rostering. Template changes (`LANE` parameter, telemetry decoupled from `ExecEnv`) are the iac#898 work.
+4. Rostering pilot: authz-api (`db-init.ts:43` module-level `USE_IAM_AUTH`, `main.ts`, `prod-migrate.ts`), then iam-api (`main.ts` guards, `assert-production-config.ts`, `lake-export.ts:38`, `jwt-issuer.service.ts`, mailer refusal), then sis-api (`main.ts:61`, Clever/digest as `outbound.*`). Pilot checklist: verify what sis-api prod actually runs for mail (`MailProvider` comes from `vars.ROSTERING_SIS_MAIL_PROVIDER || 'stub'`, `deploy-sis-api.yml:306`) before declaring R1 `mailSink=ses` for it. Tests exercise both capability values on the same path. Lint enabled with a baseline for the rest of rostering. Template changes (`LANE` parameter, telemetry decoupled from `ExecEnv`) are the iac#898 work.
 5. Per-service dev-main flip to `EXEC_ENV=prod` only at that service's baseline 0.
 6. Fleet follow-ups in order: program-hub, student-data-system (`SAGA_ENV` removed), coach (authz ladder to `permissiveAuthz`, `coach-db client.ts:30`), saga-dash BFFs.
 7. Ratchet to zero repo by repo; rule becomes a required check.
@@ -149,6 +149,6 @@ Rollback: each service PR is revertible; the module is additive; deprecated env 
 
 ## 10. Open questions
 
-1. Preview, training and sandbox env values in the mapping table are [assumed]; verify per service before the pilot.
-2. Capture sink target for `CaptureMailAdapter` (lane SQS vs S3 prefix) and who provisions it (iac).
+1. Preview, training and sandbox values are verified for rostering (EXEC_ENV=dev, NODE_ENV=development, dev stanza); verify per service for program-hub, sds and coach before their rollout.
+2. Capture sink target: recommend an S3 prefix (no consumer needed, durable, test-inspectable, no 256KB limit); iac provisions it. Decide before the iam-api lane pilot, not before 0.1.0, which needs only the `capture` enum value and the invariant.
 3. Strict-literal audit scope and whether it eventually gates.

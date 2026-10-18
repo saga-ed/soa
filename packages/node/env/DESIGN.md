@@ -1,6 +1,6 @@
 # @saga-ed/soa-env: design (soa#515, M2)
 
-Status: DRAFT for design review. Design and interface stubs only. No `package.json` yet: `pnpm-workspace.yaml` globs `packages/node/*`, so adding one would change `pnpm-lock.yaml`. Scaffolding lands with the implementation PR.
+Status: ACCEPTED 2026-10-18 (design review SHIP after 2 rounds); implementation pending (section 9 step 1). Design and interface stubs only. No `package.json` yet: `pnpm-workspace.yaml` globs `packages/node/*`, so adding one would change `pnpm-lock.yaml`. Scaffolding lands with the implementation PR.
 
 Tracking: saga-ed/soa#515, part of hipponot/iac#897. Classes: C1 (env-gated branches), C3 (one client path), C10 (side-effect switches visible). Contract: iac `docs/regression-suite/twin-lane-contract.md` (iac#898). Related: lane-guard (soa#516/#519), M1 prod-config-only (ci-actions#138).
 
@@ -150,5 +150,5 @@ Rollback: each service PR is revertible; the module is additive; deprecated env 
 ## 10. Open questions
 
 1. Preview, training and sandbox values are verified for rostering (EXEC_ENV=dev, NODE_ENV=development, dev stanza); verify per service for program-hub, sds and coach before their rollout.
-2. Capture sink target: recommend an S3 prefix (no consumer needed, durable, test-inspectable, no 256KB limit); iac provisions it. Decide before the iam-api lane pilot, not before 0.1.0, which needs only the `capture` enum value and the invariant.
+2. Capture sink target: DECIDED 2026-10-18, an S3 prefix (no consumer needed, durable, test-inspectable, no 256KB limit); iac provisions it before the iam-api lane pilot. 0.1.0 needs only the `capture` enum value and the invariant.
 3. Strict-literal audit scope and whether it eventually gates.

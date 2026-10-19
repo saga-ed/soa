@@ -117,7 +117,9 @@ function hasDevOrigin(origins: readonly (string | RegExp)[]): boolean {
  * Value encodings: booleans `true|false`; `tls` `off|required|required:<caBundlePath>`;
  * `corsOrigins` comma-separated (`/re/` entries are RegExp); `outbound` `name=live|sink|off,...`.
  * `mailSink` is optional in the declaration (a service with no mail omits its key and receives
- * `stub`, which no row check applies to).
+ * `stub`, which no row check applies to). `corsOrigins`, `cookieDomain`, `trustProxyHops`,
+ * `devPerimeter`, `logFormat` and `logLevel` are optional too: an undeclared one is not read,
+ * is `undefined`, and its row checks are skipped.
  */
 export function createEnv(
   decl: CapabilityDeclaration,
@@ -160,14 +162,14 @@ export function createEnv(
     r => oneOf(r, ['ses', 'stub', 'capture'] as const),
     true
   );
-  const corsOrigins = read('corsOrigins', parseOrigins);
-  const cookieDomain = read('cookieDomain', nonEmpty);
-  const trustProxyHops = read('trustProxyHops', parseHops);
+  const corsOrigins = read('corsOrigins', parseOrigins, true);
+  const cookieDomain = read('cookieDomain', nonEmpty, true);
+  const trustProxyHops = read('trustProxyHops', parseHops, true);
   const telemetryEnv = read('telemetryEnv', nonEmpty);
-  const devPerimeter = read('devPerimeter', r => oneOf(r, ['on', 'off'] as const));
+  const devPerimeter = read('devPerimeter', r => oneOf(r, ['on', 'off'] as const), true);
   const permissiveAuthz = read('permissiveAuthz', parseBool);
-  const logFormat = read('logFormat', nonEmpty);
-  const logLevel = read('logLevel', nonEmpty);
+  const logFormat = read('logFormat', nonEmpty, true);
+  const logLevel = read('logLevel', nonEmpty, true);
 
   let outbound: Record<string, OutboundBinding> | undefined;
   const outboundKey = decl.keys.outbound;
@@ -293,14 +295,14 @@ export function createEnv(
     tls: tls as TlsCapability,
     failFast: failFast as boolean,
     mailSink: mailSink as MailSink,
-    corsOrigins: corsOrigins as readonly (string | RegExp)[],
-    cookieDomain: cookieDomain as string,
-    trustProxyHops: trustProxyHops as number,
+    corsOrigins,
+    cookieDomain,
+    trustProxyHops,
     telemetryEnv: telemetryEnv as string,
-    devPerimeter: devPerimeter as 'on' | 'off',
+    devPerimeter,
     permissiveAuthz: permissiveAuthz as boolean,
-    logFormat: logFormat as string,
-    logLevel: logLevel as string,
+    logFormat,
+    logLevel,
     outbound: Object.freeze(outbound),
   });
 }

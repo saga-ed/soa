@@ -199,12 +199,20 @@ describe('createEnv: strict reads', () => {
     expect(v).toEqual(['logLevel: config key LOG_LEVEL is missing']);
   });
 
-  it('a capability absent from the declaration throws', () => {
-    const partial: CapabilityDeclaration = { ...decl, keys: { ...decl.keys } };
-    delete partial.keys.cookieDomain;
-    expect(violationsOf('R3-dev-overlay', {}, partial)).toEqual([
-      'cookieDomain: no config key in the declaration',
-    ]);
+  it('a core capability absent from the declaration throws', () => {
+    for (const cap of [
+      'credentialSource',
+      'tls',
+      'failFast',
+      'telemetryEnv',
+      'permissiveAuthz',
+    ] as const) {
+      const partial: CapabilityDeclaration = { ...decl, keys: { ...decl.keys } };
+      delete partial.keys[cap];
+      expect(violationsOf('R3-dev-overlay', {}, partial)).toContain(
+        `${cap}: no config key in the declaration`
+      );
+    }
   });
 
   it('an unknown outbound key is an error', () => {
@@ -278,6 +286,64 @@ describe('createEnv: strict reads', () => {
     }
     const dev = violationsOf('R1-prod', { CORS: 'https://dash.wootdev.com' }).join();
     expect(dev).not.toContain('wootdev');
+  });
+});
+
+describe('createEnv: optional service-shaped capabilities', () => {
+  const optional = [
+    'cookieDomain',
+    'corsOrigins',
+    'trustProxyHops',
+    'devPerimeter',
+    'logFormat',
+    'logLevel',
+  ] as const;
+  const withoutOptional = (): CapabilityDeclaration => {
+    const d: CapabilityDeclaration = { ...decl, keys: { ...decl.keys } };
+    for (const cap of optional) delete d.keys[cap];
+    return d;
+  };
+
+  it.each(['R1-prod', 'R2-lane'] as const)(
+    '%s: undeclared optionals are undefined with no violation',
+    row => {
+      const caps = createEnv(withoutOptional(), identityFor(row), source(validConfig[row]));
+      for (const cap of optional) expect(caps[cap]).toBeUndefined();
+      expect(caps.credentialSource).toBe('iam-token');
+    }
+  );
+
+  it.each(rows)('%s: undeclared optionals are not read even when the config holds them', row => {
+    expect(
+      violationsOf(row, { PERIMETER: 'on', CORS: 'http://localhost' }, withoutOptional())
+    ).toEqual([]);
+  });
+
+  it('declared but missing still violates', () => {
+    for (const [cap, key] of [
+      ['cookieDomain', 'COOKIE'],
+      ['logFormat', 'LOG_FORMAT'],
+      ['devPerimeter', 'PERIMETER'],
+    ] as const) {
+      expect(violationsOf('R1-prod', { [key]: undefined })).toEqual([
+        `${cap}: config key ${key} is missing`,
+      ]);
+    }
+  });
+
+  it('declared R1 devPerimeter=on and dev cors origin still violate', () => {
+    expect(violationsOf('R1-prod', { PERIMETER: 'on' })).toEqual([
+      'R1-prod: devPerimeter must be off',
+    ]);
+    expect(violationsOf('R1-prod', { CORS: 'http://localhost:3000' })).toEqual([
+      'R1-prod: corsOrigins must not include dev origins',
+    ]);
+  });
+
+  it('declared R2 devPerimeter=on still violates', () => {
+    expect(violationsOf('R2-lane', { PERIMETER: 'on' })).toEqual([
+      'R2-lane: devPerimeter must be off',
+    ]);
   });
 });
 

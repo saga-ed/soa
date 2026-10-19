@@ -40,16 +40,17 @@ export interface Capabilities {
   /** true: dependency-resolution failure at boot aborts the process. */
   failFast: boolean;
   mailSink: MailSink;
-  corsOrigins: readonly (string | RegExp)[];
-  cookieDomain: string;
-  trustProxyHops: number;
+  /** Optional capabilities below: undefined when the service does not declare it. */
+  corsOrigins?: readonly (string | RegExp)[];
+  cookieDomain?: string;
+  trustProxyHops?: number;
   telemetryEnv: TelemetryEnv;
   /** Protection (recon-blocking gate): ON in the dev overlay, off in prod rows. */
-  devPerimeter: 'on' | 'off';
+  devPerimeter?: 'on' | 'off';
   /** Bypass: legal only in the local row. */
   permissiveAuthz: boolean;
-  logFormat: string;
-  logLevel: string;
+  logFormat?: string;
+  logLevel?: string;
   /** Per integration: clever, partner-webhooks, lake-export, outbox-relay, datadog, ... */
   outbound: Readonly<Record<string, OutboundBinding>>;
 }

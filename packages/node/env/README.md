@@ -36,7 +36,10 @@ const env = await loadEnv(decl, configSource, { resolver: createStsAccountResolv
 
 Config value encodings: booleans `true|false`; `tls` `off|required|required:<caBundlePath>`;
 `corsOrigins` comma-separated (`/re/` entries are RegExp); `outbound` `name=live|sink|off,...`.
-`mailSink` is optional in a declaration; omit its key for a service with no mail.
+Required keys: `credentialSource`, `tls`, `failFast`, `telemetryEnv`, `permissiveAuthz`.
+Optional (omit the key; the capability is `undefined` and its row checks are skipped): `cookieDomain`,
+`corsOrigins`, `trustProxyHops`, `devPerimeter`, `logFormat`, `logLevel`. `mailSink` is optional too;
+omit its key for a service with no mail (reads `stub`).
 
 ## `@saga-ed/soa-env/testing`
 

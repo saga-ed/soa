@@ -192,7 +192,10 @@ describe('createEnv: strict reads', () => {
     const v = violationsOf('R3-dev-overlay', {
       OUTBOUND: 'clever=live,lake-export=live,stripe=live',
     });
-    expect(v.join()).toMatch(/outbound\.stripe is not declared/);
+    expect(v.join()).toMatch(
+      /lists integrations not declared by the service \(declared: clever, lake-export\)/
+    );
+    expect(v.join()).not.toContain('stripe');
   });
 
   it('a declared outbound integration must be configured', () => {
@@ -238,7 +241,7 @@ describe('createEnv: strict reads', () => {
       PERMISSIVE: secret,
       LOG_FORMAT: ' ',
       LOG_LEVEL: ' ',
-      OUTBOUND: `${secret},clever=${secret},${secret}=live`,
+      OUTBOUND: `${secret},clever=${secret},${secret}=live,sk_live_51HxAbC=live,AKIAIOSFODNN7EXAMPLE=live`,
     };
     for (const row of rows) {
       let message = '';
@@ -251,6 +254,8 @@ describe('createEnv: strict reads', () => {
       expect(message).not.toContain('AKIA');
       expect(message).not.toContain('wJalr');
       expect(message).not.toContain('secret');
+      expect(message).not.toContain('sk_live');
+      expect(message).not.toContain('EXAMPLE');
     }
     const dev = violationsOf('R1-prod', { CORS: 'https://dash.wootdev.com' }).join();
     expect(dev).not.toContain('wootdev');

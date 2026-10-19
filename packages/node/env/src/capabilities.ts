@@ -13,7 +13,6 @@ import type {
 type Parsed<T> = { ok: true; value: T } | { ok: false };
 
 const DEV_ORIGIN = /(^|[/.@])(localhost|127\.0\.0\.1|\[::1\]|wootdev\.com)([:/]|$)/i;
-const SAFE_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
 function oneOf<T extends string>(raw: string, allowed: readonly T[]): Parsed<T> {
   return (allowed as readonly string[]).includes(raw)
@@ -71,6 +70,7 @@ function parseOutbound(
 ): { bindings: Record<string, OutboundBinding>; problems: string[] } {
   const bindings: Record<string, OutboundBinding> = {};
   const problems: string[] = [];
+  let undeclared = false;
   for (const entry of raw
     .split(',')
     .map(e => e.trim())
@@ -82,15 +82,20 @@ function parseOutbound(
       'sink',
       'off',
     ] as const);
-    if (!SAFE_NAME.test(name)) {
+    if (eq === -1) {
       problems.push('outbound has a malformed entry');
     } else if (!declared.includes(name)) {
-      problems.push(`outbound.${name} is not declared by the service`);
+      undeclared = true;
     } else if (!binding.ok) {
       problems.push(`outbound.${name} has an invalid binding`);
     } else {
       bindings[name] = binding.value;
     }
+  }
+  if (undeclared) {
+    problems.push(
+      `outbound lists integrations not declared by the service (declared: ${declared.join(', ')})`
+    );
   }
   for (const name of declared) {
     if (!(name in bindings) && !problems.some(p => p.startsWith(`outbound.${name} `))) {

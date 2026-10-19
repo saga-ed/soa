@@ -239,6 +239,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         NODE_ENV: 'development',
         PORT: '${AUTHZ_PORT}',
         AUTHZ_DATABASE_URL: '${AUTHZ_DB_URL}',
+        // soa-env R4 (local) capability keys; authz-api refuses to boot without them (rostering#1729).
+        DB_CREDENTIAL_SOURCE: 'static',
+        DB_TLS: 'off',
+        FAIL_FAST: 'false',
+        TELEMETRY_ENV: 'local',
+        PERMISSIVE_AUTHZ: 'false',
         RABBITMQ_URL: '${MESH_MQ}',
         IAM_AUTH_JWKSURL: '${IAM_URL}/.well-known/services/jwks.json',
         IAM_AUTH_USERJWKSURL: '${IAM_URL}/.well-known/jwks.json',

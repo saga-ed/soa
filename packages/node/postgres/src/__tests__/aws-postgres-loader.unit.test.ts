@@ -287,6 +287,7 @@ describe('loadPostgresConfigFromAws — capability form', () => {
     await expect(
       loadPostgresConfigFromAws({
         credentialSource: 'iam-token',
+        tls: { required: true },
         service: 'chat-api',
         instanceName: 'i',
       }),
@@ -304,6 +305,7 @@ describe('loadPostgresConfigFromAws — capability form', () => {
     const config = await loadPostgresConfigFromAws({
       credentialSource: 'iam-token',
       coords,
+      tls: { required: true },
       service: 'chat-api',
       instanceName: 'i',
     });
@@ -315,10 +317,18 @@ describe('loadPostgresConfigFromAws — capability form', () => {
     expect(names.sort()).toEqual([coords.hostSsmPath, coords.portSsmPath].sort());
   });
 
-  it('static reads the dev parity secret; ssl defaults to false', async () => {
+  it('capability form without tls throws', async () => {
+    await expect(
+      // @ts-expect-error tls is required in the capability form
+      loadPostgresConfigFromAws({ credentialSource: 'static', service: 'chat-api', instanceName: 'i' }),
+    ).rejects.toThrow(/requires explicit 'tls'/);
+  });
+
+  it('static reads the dev parity secret; tls not required → ssl false', async () => {
     smMock.on(GetSecretValueCommand).resolves(devSecret);
     const config = await loadPostgresConfigFromAws({
       credentialSource: 'static',
+      tls: { required: false },
       service: 'chat-api',
       instanceName: 'i',
     });

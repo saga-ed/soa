@@ -96,7 +96,8 @@ export interface LoadPostgresConfigBase {
   region?: string;
 
   /**
-   * Transport security. Omitted: iam-token → `true`, static → `false`.
+   * Transport security (required in the capability form). Omitted under legacy
+   * `env`: iam-token → `true`, static → `false`.
    * Not required → `false`; required → `true`; required with `caBundlePath`
    * → pinned CA with `rejectUnauthorized: true`.
    */
@@ -117,6 +118,8 @@ export interface PostgresIamCoords {
 /** Capability form: pass `credentialSource` (and `coords` for `iam-token`). */
 export interface LoadPostgresConfigByCapability extends LoadPostgresConfigBase {
   credentialSource: 'iam-token' | 'static';
+  /** Required: no silent per-branch TLS default in the capability form. */
+  tls: PostgresTlsCapability;
   /** Required when `credentialSource` is `'iam-token'`. */
   coords?: PostgresIamCoords;
   /** @deprecated Mutually exclusive with `credentialSource`. */
@@ -260,6 +263,11 @@ export async function loadPostgresConfigFromAws(
   } else {
     credentialSource = params.credentialSource as 'iam-token' | 'static';
     coords = params.coords;
+    if (!params.tls) {
+      throw new Error(
+        "loadPostgresConfigFromAws: the capability form requires explicit 'tls' (no default TLS posture)",
+      );
+    }
     if (credentialSource === 'iam-token' && !coords) {
       throw new Error(
         "loadPostgresConfigFromAws: credentialSource 'iam-token' requires explicit 'coords' (no default SSM paths)",

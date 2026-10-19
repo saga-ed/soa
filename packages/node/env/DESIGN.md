@@ -1,6 +1,6 @@
 # @saga-ed/soa-env: design (soa#515, M2)
 
-Status: ACCEPTED 2026-10-18 (design review SHIP after 2 rounds); implementation pending (section 9 step 1). Design and interface stubs only. No `package.json` yet: `pnpm-workspace.yaml` globs `packages/node/*`, so adding one would change `pnpm-lock.yaml`. Scaffolding lands with the implementation PR.
+Status: ACCEPTED 2026-10-18 (design review SHIP after 2 rounds); implementation landed in this PR (section 9 step 1, minus the /ss wiring, which is deferred).
 
 Tracking: saga-ed/soa#515, part of hipponot/iac#897. Classes: C1 (env-gated branches), C3 (one client path), C10 (side-effect switches visible). Contract: iac `docs/regression-suite/twin-lane-contract.md` (iac#898). Related: lane-guard (soa#516/#519), M1 prod-config-only (ci-actions#138).
 
@@ -64,7 +64,7 @@ Rule: unknown or unparseable means deployed prod behaviour with every invariant 
 
 ## 5. Capabilities and the invariant table
 
-Interface: `stubs/types.ts`, `stubs/index.ts`. Capabilities: `credentialSource` (`iam-token|static`), `tls`, `failFast`, `mailSink` (`ses|capture|stub`), `corsOrigins`, `cookieDomain`, `trustProxyHops`, `telemetryEnv`, `devPerimeter` (`on|off`), `permissiveAuthz` (boolean), `logFormat`, `logLevel`, `outbound.<integration>` (`live|sink|off`).
+Interface: `src/types.ts`, `src/index.ts`. Capabilities: `credentialSource` (`iam-token|static`), `tls`, `failFast`, `mailSink` (`ses|capture|stub`), `corsOrigins`, `cookieDomain`, `trustProxyHops`, `telemetryEnv`, `devPerimeter` (`on|off`), `permissiveAuthz` (boolean), `logFormat`, `logLevel`, `outbound.<integration>` (`live|sink|off`).
 
 `devPerimeter` and `permissiveAuthz` are separate switches. The dev perimeter is a protection (recon-blocking gate; default ON in the dev overlay (may be off: rostering `.github/workflows/sandbox-deploy.yml` ~L327 passes `DevPerimeterEnabled=false` for the e2e composition), forced off in R1/R2: `dev-perimeter-production.ts`). Permissive authz is a bypass (coach `COACH_AUTHZ_ALLOW_ALL`); it is legal only in the `local` row.
 
@@ -108,6 +108,7 @@ M1 (ci-actions#138) fixes WHERE values live: the prod samconfig stanza is comple
 - `ConfigSource` is injected: SSM parameters and template env vars in deployed envs, an in-memory map in tests. `process.env` is read only in `loadEnv`.
 - Template `Default:` values for capability keys are forbidden by M1; a missing key throws (no silent dev default).
 - Code reads capabilities; it never compares them to env names.
+- Config value encodings (0.1.0; the M1 render gate in ci-actions#138 must match): booleans `true|false`; `tls` = `off|required|required:<caBundlePath>`; `corsOrigins` = comma list, entries wrapped in slashes are RegExp; `outbound` = `name=live|sink|off,...` (every declared integration must appear; unknown names are an error). `mailSink` is optional in a declaration: no key means no mail, the capability reads `stub`, and the R1/R2 mail checks are skipped.
 
 ## 7. One client path and testability (C3)
 

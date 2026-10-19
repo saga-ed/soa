@@ -7,15 +7,23 @@ import {
   SSMClient,
 } from '@aws-sdk/client-ssm';
 import { Signer } from '@aws-sdk/rds-signer';
+import { readFileSync } from 'node:fs';
 
 /**
  * Build a ready-to-use ``pg.Pool``-compatible config for a Saga service's
- * Postgres connection. Handles all three envs via the same call:
+ * Postgres connection.
  *
- *   loadPostgresConfigFromAws({ env: 'prod', service: 'chat-api', role: 'app',
- *                               instanceName: 'ChatDB' })
+ *   loadPostgresConfigFromAws({
+ *     credentialSource: 'iam-token',
+ *     coords: { hostSsmPath, portSsmPath },
+ *     tls: { required: true, caBundlePath },
+ *     service: 'chat-api', role: 'app', instanceName: 'ChatDB',
+ *   })
  *
- * **Env behavior:**
+ * `credentialSource: 'static'` reads the dev parity secret instead. The legacy
+ * `env` form is deprecated and maps onto the same path:
+ *
+ * **Legacy env behavior:**
  *
  * - `'prod'`   — IAM-auth against shared RDS in prod account. Coords
  *                (host/port) come from SSM `/shared/infra/prod/postgres-{host,port}`.
@@ -49,9 +57,7 @@ import { Signer } from '@aws-sdk/rds-signer';
  * pass ``dbId`` to select; the database becomes ``{service_snake}_{dbId}_db``
  * or whatever the spec declares.
  */
-export interface LoadPostgresConfigParams {
-  env: 'dev' | 'mirror' | 'prod';
-
+export interface LoadPostgresConfigBase {
   /** Service name as it appears in `db-access.yaml` (e.g. 'chat-api'). */
   service: string;
 
@@ -88,7 +94,45 @@ export interface LoadPostgresConfigParams {
 
   /** AWS region. Defaults to us-west-2 (Saga's only region today). */
   region?: string;
+
+  /**
+   * Transport security. Omitted: iam-token → `true`, static → `false`.
+   * Not required → `false`; required → `true`; required with `caBundlePath`
+   * → pinned CA with `rejectUnauthorized: true`.
+   */
+  tls?: PostgresTlsCapability;
 }
+
+export interface PostgresTlsCapability {
+  required: boolean;
+  caBundlePath?: string;
+}
+
+/** IAM-token coordinates; no default so a dev-lane caller can never fall through to /prod paths. */
+export interface PostgresIamCoords {
+  hostSsmPath: string;
+  portSsmPath: string;
+}
+
+/** Capability form: pass `credentialSource` (and `coords` for `iam-token`). */
+export interface LoadPostgresConfigByCapability extends LoadPostgresConfigBase {
+  credentialSource: 'iam-token' | 'static';
+  /** Required when `credentialSource` is `'iam-token'`. */
+  coords?: PostgresIamCoords;
+  /** @deprecated Mutually exclusive with `credentialSource`. */
+  env?: never;
+}
+
+/** @deprecated Pass `credentialSource` (+ `coords`) instead (soa#515). */
+export interface LoadPostgresConfigByEnv extends LoadPostgresConfigBase {
+  env: 'dev' | 'mirror' | 'prod';
+  credentialSource?: never;
+  coords?: never;
+}
+
+export type LoadPostgresConfigParams =
+  | LoadPostgresConfigByCapability
+  | LoadPostgresConfigByEnv;
 
 /**
  * TLS options for a Postgres connection — a structural subset of Node's
@@ -154,6 +198,32 @@ export interface PostgresPoolConfig {
 
 const DEFAULT_REGION = 'us-west-2';
 
+const LEGACY_ENV_CREDENTIAL_SOURCE: Record<
+  'dev' | 'mirror' | 'prod',
+  'iam-token' | 'static'
+> = { dev: 'static', mirror: 'iam-token', prod: 'iam-token' };
+
+let legacyEnvWarned = false;
+
+function warnLegacyEnvOnce(): void {
+  if (legacyEnvWarned) return;
+  legacyEnvWarned = true;
+  process.emitWarning(
+    "loadPostgresConfigFromAws: the 'env' parameter is deprecated; pass 'credentialSource' (+ 'coords' for iam-token) and 'tls' instead.",
+    { type: 'DeprecationWarning', code: 'SOA_ENV_FALLBACK_POSTGRES_ENV' },
+  );
+}
+
+function resolveSsl(
+  tls: PostgresTlsCapability | undefined,
+  fallback: boolean,
+): boolean | PostgresSslConfig {
+  if (!tls) return fallback;
+  if (!tls.required) return false;
+  if (!tls.caBundlePath) return true;
+  return { ca: readFileSync(tls.caBundlePath, 'utf8'), rejectUnauthorized: true };
+}
+
 export async function loadPostgresConfigFromAws(
   params: LoadPostgresConfigParams,
 ): Promise<PostgresPoolConfig> {
@@ -166,8 +236,39 @@ export async function loadPostgresConfigFromAws(
   const database =
     params.database ?? (params.dbId ? `${serviceSnake}_${params.dbId}_db` : serviceSnake);
 
-  if (params.env === 'dev') {
-    return loadDevConfig({
+  const hasEnv = params.env !== undefined;
+  const hasSource = params.credentialSource !== undefined;
+  if (hasEnv === hasSource) {
+    throw new Error(
+      "loadPostgresConfigFromAws: pass exactly one of 'env' (deprecated) or 'credentialSource'",
+    );
+  }
+
+  let credentialSource: 'iam-token' | 'static';
+  let coords: PostgresIamCoords | undefined;
+  if (params.env !== undefined) {
+    warnLegacyEnvOnce();
+    credentialSource = LEGACY_ENV_CREDENTIAL_SOURCE[params.env];
+    if (credentialSource === 'iam-token') {
+      // Narrowed: env is 'mirror' | 'prod' here.
+      const iamEnv = params.env as 'mirror' | 'prod';
+      coords = {
+        hostSsmPath: iamHostSsmPath(iamEnv),
+        portSsmPath: iamPortSsmPath(iamEnv),
+      };
+    }
+  } else {
+    credentialSource = params.credentialSource as 'iam-token' | 'static';
+    coords = params.coords;
+    if (credentialSource === 'iam-token' && !coords) {
+      throw new Error(
+        "loadPostgresConfigFromAws: credentialSource 'iam-token' requires explicit 'coords' (no default SSM paths)",
+      );
+    }
+  }
+
+  if (credentialSource === 'static') {
+    return loadStaticConfig({
       service: params.service,
       role,
       instanceName: params.instanceName,
@@ -175,25 +276,27 @@ export async function loadPostgresConfigFromAws(
       username,
       database,
       region,
+      ssl: resolveSsl(params.tls, false),
     });
   }
 
   return loadIamConfig({
-    env: params.env,
+    coords: coords as PostgresIamCoords,
     instanceName: params.instanceName,
     username,
     database,
     region,
+    ssl: resolveSsl(params.tls, true),
   });
 }
 
 /**
- * Dev path: read the parity SM secret + return config with the static
+ * Static path: read the parity SM secret + return config with the static
  * password. The parity entry is written by
  * ``saga-provision-credentials create --env dev --insecure-dev`` and
  * contains the role's hardcoded local-docker password.
  */
-async function loadDevConfig(args: {
+async function loadStaticConfig(args: {
   service: string;
   role: 'owner' | 'app' | 'ro';
   instanceName: string;
@@ -201,6 +304,7 @@ async function loadDevConfig(args: {
   username: string;
   database: string;
   region: string;
+  ssl: boolean | PostgresSslConfig;
 }): Promise<PostgresPoolConfig> {
   const sm = new SecretsManagerClient({ region: args.region });
   const secretId = devSecretName(args.service, args.role, args.dbId);
@@ -212,13 +316,13 @@ async function loadDevConfig(args: {
     database: raw.database ?? raw.dbname ?? args.database,
     user: raw.username ?? args.username,
     password: raw.password,
-    ssl: false,
+    ssl: args.ssl,
   };
 }
 
 /**
- * Mirror/prod path: IAM auth. Coords from SSM; password is an async
- * callback that mints a fresh 15-min token per new pool connection.
+ * IAM path: coords from SSM; password is an async callback that mints a
+ * fresh 15-min token per new pool connection.
  *
  * `pg.Pool` calls the password callback once per connection establishment
  * (not once per query). Long-lived pooled connections survive past the
@@ -226,16 +330,17 @@ async function loadDevConfig(args: {
  * time. New connections (pool refill, scale-out) get fresh tokens.
  */
 async function loadIamConfig(args: {
-  env: 'mirror' | 'prod';
+  coords: PostgresIamCoords;
   instanceName: string;
   username: string;
   database: string;
   region: string;
+  ssl: boolean | PostgresSslConfig;
 }): Promise<PostgresPoolConfig> {
   const ssm = new SSMClient({ region: args.region });
   const [host, portRaw] = await Promise.all([
-    readSsm(ssm, iamHostSsmPath(args.env)),
-    readSsm(ssm, iamPortSsmPath(args.env)),
+    readSsm(ssm, args.coords.hostSsmPath),
+    readSsm(ssm, args.coords.portSsmPath),
   ]);
   const port = parseInt(portRaw, 10);
 
@@ -257,7 +362,7 @@ async function loadIamConfig(args: {
     port,
     database: args.database,
     user: args.username,
-    ssl: true,
+    ssl: args.ssl,
     password: async () => signer.getAuthToken(),
   };
 }
@@ -274,16 +379,23 @@ async function loadIamConfig(args: {
  * refresh workflow rolls instances under that namespace.
  */
 export function iamHostSsmPath(env: 'mirror' | 'prod'): string {
-  return env === 'mirror'
-    ? '/mirror/current/postgres-rds/endpoint'
-    : '/prod/postgres-rds/endpoint';
+  return IAM_SSM_PATHS[env].host;
 }
 
 export function iamPortSsmPath(env: 'mirror' | 'prod'): string {
-  return env === 'mirror'
-    ? '/mirror/current/postgres-rds/port'
-    : '/prod/postgres-rds/port';
+  return IAM_SSM_PATHS[env].port;
 }
+
+const IAM_SSM_PATHS: Record<'mirror' | 'prod', { host: string; port: string }> = {
+  mirror: {
+    host: '/mirror/current/postgres-rds/endpoint',
+    port: '/mirror/current/postgres-rds/port',
+  },
+  prod: {
+    host: '/prod/postgres-rds/endpoint',
+    port: '/prod/postgres-rds/port',
+  },
+};
 
 /**
  * Dev parity SM secret name (one per service per role, optionally per dbId

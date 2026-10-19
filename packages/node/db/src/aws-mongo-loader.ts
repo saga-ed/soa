@@ -35,10 +35,15 @@ import type { MongoProviderConfig } from './mongo-provider-config.js';
  * env vars or static wiring.
  */
 export interface LoadMongoConfigParams {
-  /** Mirror-current is the dev-account mirror (admin); shared is mirror/prod. */
+  /**
+   * Explicit coordinates; replaces `scope` + `env` (passing either alongside
+   * throws). Preferred form: no env name is inferred from the caller.
+   */
+  coords?: MongoCoords;
+  /** @deprecated Use `coords`. Mirror-current is the dev-account mirror (admin); shared is mirror/prod. */
   scope?: 'shared' | 'mirror-current';
   /**
-   * Required when scope is 'shared'. Ignored for 'mirror-current'.
+   * @deprecated Use `coords`. Required when scope is 'shared'. Ignored for 'mirror-current'.
    *
    * - `'mirror'` — canonical name for the prod-shape RDS-managed mirror.
    * - `'prod'`   — production.
@@ -58,13 +63,77 @@ export interface LoadMongoConfigParams {
   region?: string;
 }
 
+/**
+ * - `shared`         - per-service SCRAM user from `{ssmPrefix}/mongodb-*` and
+ *                      secret `{secretPrefix}/{project}-password`
+ *                      (e.g. `/shared/infra/prod` + `prod/mongodb-shared`).
+ * - `mirror-project` - per-service user on the dev-account mirror
+ *                      (`/mirror/current/mongodb-shared/*`).
+ * - `mirror-current` - master admin on the dev-account mirror.
+ */
+export type MongoCoords =
+  | { kind: 'shared'; ssmPrefix: string; secretPrefix: string }
+  | { kind: 'mirror-project' }
+  | { kind: 'mirror-current' };
+
 const DEFAULT_REGION = 'us-west-2';
+
+const LEGACY_SHARED_ENV_COORDS: Record<'mirror' | 'prod' | 'staging', MongoCoords> = {
+  mirror: { kind: 'mirror-project' },
+  prod: { kind: 'shared', ssmPrefix: '/shared/infra/prod', secretPrefix: 'prod/mongodb-shared' },
+  staging: {
+    kind: 'shared',
+    ssmPrefix: '/shared/infra/staging',
+    secretPrefix: 'staging/mongodb-shared',
+  },
+};
+
+let legacyEnvWarned = false;
+
+function warnLegacyEnvOnce(): void {
+  if (legacyEnvWarned) return;
+  legacyEnvWarned = true;
+  process.emitWarning(
+    "loadMongoConfigFromAws: 'scope'/'env' are deprecated; pass 'coords' instead.",
+    { type: 'DeprecationWarning', code: 'SOA_ENV_FALLBACK_MONGO_ENV' },
+  );
+}
+
+function resolveCoords(params: LoadMongoConfigParams): MongoCoords {
+  if (params.coords) {
+    if (params.scope !== undefined || params.env !== undefined) {
+      throw new Error("loadMongoConfigFromAws: 'coords' cannot be combined with 'scope'/'env'");
+    }
+    return params.coords;
+  }
+
+  warnLegacyEnvOnce();
+  const scope = params.scope ?? 'shared';
+  // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass coords (soa#515)
+  if (scope === 'mirror-current') return { kind: 'mirror-current' };
+
+  const env = params.env;
+  if (env === undefined || !Object.hasOwn(LEGACY_SHARED_ENV_COORDS, env)) {
+    throw new Error(
+      `scope='shared' requires env='mirror'|'prod' (or deprecated 'staging'), got: ${String(env)}`,
+    );
+  }
+  // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass coords (soa#515)
+  if (env === 'staging') {
+    // eslint-disable-next-line no-console
+    console.warn(
+      "[@saga-ed/soa-db] env='staging' is deprecated; use env='mirror'. " +
+        "Will be removed in next major.",
+    );
+  }
+  return LEGACY_SHARED_ENV_COORDS[env];
+}
 
 export async function loadMongoConfigFromAws(
   params: LoadMongoConfigParams,
 ): Promise<MongoProviderConfig> {
   const { project, instanceName } = params;
-  const scope = params.scope ?? 'shared';
+  const coords = resolveCoords(params);
   const region = params.region ?? DEFAULT_REGION;
 
   const ssm = new SSMClient({ region });
@@ -72,70 +141,50 @@ export async function loadMongoConfigFromAws(
 
   const dbName = `${project.replace(/-/g, '_')}_db`;
 
-  if (scope === 'shared') {
-    const env = params.env;
-    if (env !== 'mirror' && env !== 'prod' && env !== 'staging') {
-      throw new Error(
-        `scope='shared' requires env='mirror'|'prod' (or deprecated 'staging'), got: ${String(env)}`,
-      );
-    }
-
-    if (env === 'staging') {
-      // eslint-disable-next-line no-console
-      console.warn(
-        "[@saga-ed/soa-db] env='staging' is deprecated; use env='mirror'. " +
-          "Will be removed in next major.",
-      );
-    }
-
-    // env='mirror' reads from the daily-refresh workflow's paths:
-    //   SSM:    /mirror/current/mongodb-shared/{endpoint,port,replica-set-name,ca-secret-arn}
-    //   Secret: /mirror/current/{project}-mongo-password
-    // env='prod' uses the canonical prod paths.
-    // env='staging' (deprecated) keeps the legacy paths under /shared/infra/staging/*.
-    if (env === 'mirror') {
-      const [endpoint, port, replicaSetName, caSecretArn] = await Promise.all([
-        readSsm(ssm, '/mirror/current/mongodb-shared/endpoint'),
-        readSsm(ssm, '/mirror/current/mongodb-shared/port'),
-        readSsm(ssm, '/mirror/current/mongodb-shared/replica-set-name'),
-        readSsm(ssm, '/mirror/current/mongodb-shared/ca-secret-arn'),
-      ]);
-
-      const [caBundle, projectCreds] = await Promise.all([
-        readSecretJson<{ ca_cert: string }>(sm, caSecretArn),
-        readSecretJson<{ username: string; password: string }>(
-          sm,
-          `/mirror/current/${project}-mongo-password`,
-        ),
-      ]);
-
-      return {
-        configType: 'MONGO',
-        instanceName,
-        hosts: [`${endpoint}:${port}`],
-        database: dbName,
-        username: projectCreds.username,
-        password: projectCreds.password,
-        replicaSet: replicaSetName,
-        authSource: dbName,
-        tls: true,
-        tlsCAContent: caBundle.ca_cert,
-      };
-    }
-
-    const pathSegment = env === 'prod' ? 'prod' : 'staging';
-
-    const [hostsCsv, replicaSetName, caSecretArn] = await Promise.all([
-      readSsm(ssm, `/shared/infra/${pathSegment}/mongodb-hosts`),
-      readSsm(ssm, `/shared/infra/${pathSegment}/mongodb-replica-set-name`),
-      readSsm(ssm, `/shared/infra/${pathSegment}/mongodb-ca-secret-arn`),
+  if (coords.kind === 'mirror-project') {
+    // SSM:    /mirror/current/mongodb-shared/{endpoint,port,replica-set-name,ca-secret-arn}
+    // Secret: /mirror/current/{project}-mongo-password
+    const [endpoint, port, replicaSetName, caSecretArn] = await Promise.all([
+      readSsm(ssm, '/mirror/current/mongodb-shared/endpoint'),
+      readSsm(ssm, '/mirror/current/mongodb-shared/port'),
+      readSsm(ssm, '/mirror/current/mongodb-shared/replica-set-name'),
+      readSsm(ssm, '/mirror/current/mongodb-shared/ca-secret-arn'),
     ]);
 
     const [caBundle, projectCreds] = await Promise.all([
       readSecretJson<{ ca_cert: string }>(sm, caSecretArn),
       readSecretJson<{ username: string; password: string }>(
         sm,
-        `${pathSegment}/mongodb-shared/${project}-password`,
+        `/mirror/current/${project}-mongo-password`,
+      ),
+    ]);
+
+    return {
+      configType: 'MONGO',
+      instanceName,
+      hosts: [`${endpoint}:${port}`],
+      database: dbName,
+      username: projectCreds.username,
+      password: projectCreds.password,
+      replicaSet: replicaSetName,
+      authSource: dbName,
+      tls: true,
+      tlsCAContent: caBundle.ca_cert,
+    };
+  }
+
+  if (coords.kind === 'shared') {
+    const [hostsCsv, replicaSetName, caSecretArn] = await Promise.all([
+      readSsm(ssm, `${coords.ssmPrefix}/mongodb-hosts`),
+      readSsm(ssm, `${coords.ssmPrefix}/mongodb-replica-set-name`),
+      readSsm(ssm, `${coords.ssmPrefix}/mongodb-ca-secret-arn`),
+    ]);
+
+    const [caBundle, projectCreds] = await Promise.all([
+      readSecretJson<{ ca_cert: string }>(sm, caSecretArn),
+      readSecretJson<{ username: string; password: string }>(
+        sm,
+        `${coords.secretPrefix}/${project}-password`,
       ),
     ]);
 
@@ -153,7 +202,7 @@ export async function loadMongoConfigFromAws(
     };
   }
 
-  // scope === 'mirror-current'
+  // coords.kind === 'mirror-current'
   const [endpoint, port, replicaSetName, caSecretArn, masterSecretArn] =
     await Promise.all([
       readSsm(ssm, '/mirror/current/mongodb-shared/endpoint'),

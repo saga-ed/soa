@@ -9,6 +9,11 @@ export {
 } from './aws-postgres-loader.js';
 export type {
   LoadPostgresConfigParams,
+  LoadPostgresConfigBase,
+  LoadPostgresConfigByCapability,
+  LoadPostgresConfigByEnv,
+  PostgresIamCoords,
+  PostgresTlsCapability,
   PostgresPoolConfig,
   PostgresSslConfig,
 } from './aws-postgres-loader.js';

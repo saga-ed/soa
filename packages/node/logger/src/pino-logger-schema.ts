@@ -6,6 +6,7 @@ export const PinoLoggerSchema = z.object({
   isExpressContext: z.boolean(),
   prettyPrint: z.boolean().optional(),
   logFile: z.string().optional(),
+  logFormat: z.enum(['json', 'pretty']).optional(),
 });
 
 export type PinoLoggerConfig = z.infer<typeof PinoLoggerSchema>;

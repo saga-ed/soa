@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-rabbitmq",
-  "version": "1.4.0-dev.3",
+  "version": "1.4.0-dev.4",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

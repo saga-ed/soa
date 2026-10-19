@@ -40,10 +40,16 @@ const SAGA_PROD_ORIGIN_REGEX = /^https:\/\/([a-z0-9-]+\.)+saga\.org(:\d+)?$/;
 
 export interface SagaOriginAllowlistOptions {
   /**
-   * Env source. `NODE_ENV` selects the prod-vs-dev wildcard; `CORS_ORIGIN`
-   * (comma-separated) adds explicit origins. Defaults to `process.env`.
+   * Legacy env source (used only when `corsOrigins` is absent). `NODE_ENV`
+   * selects the prod-vs-dev wildcard; `CORS_ORIGIN` (comma-separated) adds
+   * explicit origins. Defaults to `process.env`.
    */
   env?: Record<string, string | undefined>;
+  /**
+   * Complete allowlist from the env capability. When provided it is returned
+   * as-is (copied): no `CORS_ORIGIN`, `devOrigins` or wildcard is appended.
+   */
+  corsOrigins?: readonly (string | RegExp)[];
   /**
    * Extra explicit origins allowed in NON-production only — e.g. local dev
    * servers (`http://localhost:5173`). Omitted in prod so localhost can never
@@ -52,8 +58,18 @@ export interface SagaOriginAllowlistOptions {
   devOrigins?: readonly string[];
 }
 
+let warnedCorsFallback = false;
+
+/** Test-only: re-arm the once-per-process fallback warning. */
+export function resetCorsFallbackWarning(): void {
+  warnedCorsFallback = false;
+}
+
 /**
  * Build an environment-isolated CORS / CSRF origin allowlist.
+ *
+ * - **`corsOrigins` provided**: it is the complete allowlist; nothing is added.
+ * - Otherwise (deprecated, warns once; pass `corsOrigins`):
  *
  * - **prod** (`NODE_ENV==='production'`): explicit `CORS_ORIGIN` entries + the
  *   `https://*.saga.org` wildcard. No dev origins, no `*.wootdev.com`.
@@ -66,7 +82,16 @@ export interface SagaOriginAllowlistOptions {
 export function buildSagaOriginAllowlist(
   opts: SagaOriginAllowlistOptions = {},
 ): (string | RegExp)[] {
+  if (opts.corsOrigins) return [...opts.corsOrigins];
+  if (!warnedCorsFallback) {
+    warnedCorsFallback = true;
+    process.emitWarning(
+      'buildSagaOriginAllowlist: pass `corsOrigins` from the env capability; NODE_ENV/CORS_ORIGIN fallback is deprecated (soa#515)',
+      { type: 'DeprecationWarning', code: 'SOA_ENV_FALLBACK_CORS' },
+    );
+  }
   const env = opts.env ?? process.env;
+  // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass corsOrigins (soa#515)
   const isProd = env.NODE_ENV === 'production';
   const list: (string | RegExp)[] = (env.CORS_ORIGIN ?? '')
     .split(',')

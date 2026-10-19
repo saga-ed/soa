@@ -54,8 +54,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadiness {
   const env = ambientEnv();
-  const execEnv = opts.env ?? env.EXEC_ENV;
-  const localLike = execEnv === 'local' || execEnv === 'ci';
+  const localLike = opts.identity?.account.kind === 'local';
   const bootMode: BootMode = opts.bootMode ?? parseBootMode(env.READINESS_BOOT);
   const now = opts.now ?? Date.now;
   const intervalMs = opts.intervalMs ?? 15000;
@@ -233,7 +232,7 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
       service,
       verdict: snap.verdict,
       httpStatus: snap.verdict === 'ready' || snap.verdict === 'degraded' ? 200 : 503,
-      build: buildIdentity(),
+      build: buildIdentity(undefined, opts.identity),
       generatedAt: new Date(snap.at).toISOString(),
       bootMode,
       summary: { critical: count('critical'), optional: count('optional') },
@@ -276,6 +275,7 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
 
   return {
     bootMode,
+    ...(opts.identity ? { identity: opts.identity } : {}),
     isDraining: () => opts.isDraining?.() ?? false,
     authorizeInternal: (req) => (opts.authorizeInternal ? opts.authorizeInternal(req) : false),
 

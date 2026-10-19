@@ -16,6 +16,8 @@
  * returns an equally healthy 200.
  */
 
+import type { EnvIdentity } from '@saga-ed/soa-env';
+
 export interface HealthResponse {
   status(code: number): { json(body: unknown): unknown };
   json(body: unknown): unknown;
@@ -35,6 +37,8 @@ export interface MountHealthOptions {
   pingDb: () => Promise<unknown>;
   /** When true, `/health` answers 503 `draining` so the ALB deregisters the task. `/health/details` is unaffected. */
   isDraining?: () => boolean;
+  /** soa-env's resolved identity; adds profile, lane, telemetryEnv and accountKind to the build identity. */
+  identity?: EnvIdentity;
 }
 
 /**
@@ -50,8 +54,13 @@ export interface BuildIdentity {
   colour?: string;
   /** Git SHA of the running image. */
   version?: string;
-  /** Deployment environment, e.g. `dev` | `prod`. */
+  /** @deprecated Raw EXEC_ENV; use `profile`. */
   environment?: string;
+  /** Behaviour profile from soa-env. Present only when an identity is passed. */
+  profile?: EnvIdentity['profile'];
+  lane?: EnvIdentity['lane'];
+  telemetryEnv?: EnvIdentity['telemetryEnv'];
+  accountKind?: EnvIdentity['account']['kind'];
   /** ISO timestamp stamped at deploy time. */
   deployedAt?: string;
 }
@@ -93,24 +102,31 @@ function ambientEnv(): EnvLike {
  * rather than emitted as `undefined`/`"unknown"`, so a caller can distinguish
  * "not reported" from a real value.
  */
-export function buildIdentity(env: EnvLike = ambientEnv()): BuildIdentity {
-  const identity: BuildIdentity = {};
+export function buildIdentity(env: EnvLike = ambientEnv(), identity?: EnvIdentity): BuildIdentity {
+  const out: BuildIdentity = {};
   const colour = readColour(env);
-  if (colour) identity.colour = colour;
+  if (colour) out.colour = colour;
   // DD_VERSION is the image tag, which CI sets to the git SHA.
-  if (env.DD_VERSION) identity.version = env.DD_VERSION;
-  if (env.EXEC_ENV) identity.environment = env.EXEC_ENV;
-  if (env.DEPLOYMENT_DATETIME) identity.deployedAt = env.DEPLOYMENT_DATETIME;
-  return identity;
+  if (env.DD_VERSION) out.version = env.DD_VERSION;
+  // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated alias of profile; remove once consumers pass identity (soa#515)
+  if (env.EXEC_ENV) out.environment = env.EXEC_ENV;
+  if (env.DEPLOYMENT_DATETIME) out.deployedAt = env.DEPLOYMENT_DATETIME;
+  if (identity) {
+    out.profile = identity.profile;
+    out.lane = identity.lane;
+    out.telemetryEnv = identity.telemetryEnv;
+    out.accountKind = identity.account.kind;
+  }
+  return out;
 }
 
 export function mountHealthRoutes(app: HealthRouter, opts: MountHealthOptions): void {
   app.get('/health', (_req, res) => {
     if (opts.isDraining?.()) {
-      res.status(503).json({ status: 'draining', ...buildIdentity() });
+      res.status(503).json({ status: 'draining', ...buildIdentity(undefined, opts.identity) });
       return;
     }
-    res.json({ status: 'ok', service: opts.serviceName, ...buildIdentity() });
+    res.json({ status: 'ok', service: opts.serviceName, ...buildIdentity(undefined, opts.identity) });
   });
 
   app.get('/health/details', async (_req, res) => {
@@ -126,7 +142,7 @@ export function mountHealthRoutes(app: HealthRouter, opts: MountHealthOptions): 
     res.status(allHealthy ? 200 : 503).json({
       status: allHealthy ? 'healthy' : 'unhealthy',
       service: opts.serviceName,
-      ...buildIdentity(),
+      ...buildIdentity(undefined, opts.identity),
       timestamp: new Date().toISOString(),
       dependencies,
     });

@@ -54,4 +54,9 @@ await dr.boot(); // READINESS_BOOT=block|warn|open
 dr.start();
 ```
 
+### 0.3.0 (soa#515) — breaking: deep seam
+
+- Breaking: `CreateDeepReadinessOptions.env` is removed. Pass `identity` (soa-env's resolved `EnvIdentity`); an absent client defaults to `skipped` only when `identity.account.kind` is `local` (`SAGA_LOCAL=1`), otherwise it fails closed. `DeepReadiness.identity` exposes it.
+- New `identity` option on `mountHealthRoutes` and `mountReadinessRoutes`; `buildIdentity(env, identity)` adds `profile`, `lane`, `telemetryEnv`, `accountKind` to the build identity (never `account.id` or `row`). `environment` (raw `EXEC_ENV`) stays as a deprecated alias of `profile`.
+
 `@saga-ed/soa-health/schema` exports the `saga.readiness/v1` JSON Schema; `/aws` (`awsProbe`) and `/openfga` (`openfgaProbe`) export the probes for those kinds. The 0.1.x exports are unchanged.

@@ -18,7 +18,7 @@ export function mountDeepReadiness(app: ReadinessRouter, dr: DeepReadiness): voi
   };
 
   app.get('/health/live', (_req, res) => {
-    res.json({ status: 'ok', ...buildIdentity() });
+    res.json({ status: 'ok', ...buildIdentity(undefined, dr.identity) });
   });
 
   app.get('/health/ready', async (req, res) => {

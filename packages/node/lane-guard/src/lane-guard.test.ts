@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { EnvIdentity } from '@saga-ed/soa-env';
 import { assertLaneSafe, checkLaneSafety, LaneGuardError, resolveLane } from './index.js';
 
 const DEV = '396913734878';
@@ -247,5 +248,62 @@ describe('AWS account', () => {
     it('does not print the account id', () => {
         const [v] = checkLaneSafety(clean, { accountId: PROD });
         expect(v?.message).not.toContain(PROD);
+    });
+});
+
+describe('MAIL_PROVIDER=capture', () => {
+    it('passes on LANE=twin with capture bucket/prefix set', () => {
+        const env = { ...clean, MAIL_PROVIDER: 'capture', MAIL_CAPTURE_BUCKET: 'dev-mail-capture', MAIL_CAPTURE_PREFIX: 'twin/' };
+        expect(checkLaneSafety(env, { accountId: DEV })).toEqual([]);
+        expect(() => assertLaneSafe(env, { accountId: DEV })).not.toThrow();
+    });
+
+    it('SES messages name the capture or stub mailer', () => {
+        const [v] = checkLaneSafety({ ...clean, MAIL_PROVIDER: 'ses' }, { accountId: DEV });
+        expect(v?.message).toContain('capture or stub mailer');
+    });
+});
+
+describe('soa-env identity cross-check', () => {
+    const identity = (lane: 'twin' | 'mirror' | 'none', id?: string): EnvIdentity => ({
+        profile: 'dev',
+        lane,
+        telemetryEnv: lane,
+        account: id ? { kind: 'dev', id } : { kind: 'local' },
+        row: lane === 'none' ? 'R3-dev-overlay' : 'R2-lane',
+    });
+
+    it('agreeing identity adds no violation and supplies accountId', () => {
+        expect(checkLaneSafety(clean, { identity: identity('twin', DEV) })).toEqual([]);
+    });
+
+    it('explicit accountId wins over identity.account.id', () => {
+        expect(checks({}, { accountId: PROD, identity: identity('twin', DEV) })).toEqual(['aws-account']);
+    });
+
+    it('identity without an account id still fails closed', () => {
+        expect(checks({}, { identity: identity('twin') })).toEqual(['aws-account']);
+    });
+
+    it('identity twin vs raw none yields lane-identity (no early return)', () => {
+        const env = { ...clean, LANE: 'none' };
+        expect(checkLaneSafety(env, { identity: identity('twin', DEV) }).map((x) => x.check)).toEqual(['lane-identity']);
+        expect(() => assertLaneSafe(env, { identity: identity('twin', DEV) })).toThrow(LaneGuardError);
+    });
+
+    it('identity none vs raw twin yields lane-identity', () => {
+        expect(checks({}, { accountId: DEV, identity: identity('none', DEV) })).toEqual(['lane-identity']);
+    });
+
+    it('identity mirror vs raw twin yields lane-identity naming both lanes only', () => {
+        const [v] = checkLaneSafety(clean, { identity: identity('mirror', DEV) });
+        expect(v?.check).toBe('lane-identity');
+        expect(v?.message).toContain('mirror');
+        expect(v?.message).toContain('twin');
+        expect(v?.message).not.toContain(DEV);
+    });
+
+    it('both none is a no-op', () => {
+        expect(() => assertLaneSafe({ LANE: 'none' }, { identity: identity('none') })).not.toThrow();
     });
 });

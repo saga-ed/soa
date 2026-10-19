@@ -41,4 +41,9 @@ assertLaneSafe(process.env, { accountId });
 | `ses` | `MAIL_PROVIDER=ses` or any non-empty `MAIL_SES_*` (no sandbox signal is defined yet) |
 | `partner-egress` | non-empty `CLEVER_*`, `*PARTNER*WEBHOOK*`, or `*WEBHOOK*URL*` |
 
+### 0.2.1
+
+- `opts.identity` (soa-env's `EnvIdentity`) is cross-checked against the raw env: a lane mismatch in either direction is a `lane-identity` violation, including identity `twin`/`mirror` with raw `none`. `identity.account.id` supplies `accountId` when none is passed. Raw-env checks are unchanged and independent.
+- `MAIL_PROVIDER=capture` is accepted on a lane; only `ses` and `MAIL_SES_*` are violations.
+
 `checkLaneSafety(env, opts)` returns the violations without throwing; `resolveLane(env)` returns the resolved lane.

@@ -1,3 +1,5 @@
+import type { EnvIdentity } from '@saga-ed/soa-env';
+
 export type Env = Record<string, string | undefined>;
 
 export interface LaneViolation {
@@ -12,6 +14,8 @@ export interface LaneGuardOptions {
     accountId?: string;
     /** Accounts a lane may run in. Default: dev only. */
     allowedAccountIds?: string[];
+    /** soa-env's resolved identity; cross-checked against the raw env, never trusted over it. */
+    identity?: EnvIdentity;
 }
 
 export const DEV_ACCOUNT_ID = '396913734878';
@@ -46,11 +50,14 @@ export interface LaneResolution {
 
 /** LANE (infra-set) is authoritative. EXEC_ENV=mirror is honoured only when LANE is unset (removed in 0.3.0). */
 export function resolveLane(env: Env): LaneResolution {
+    // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- independent raw-env cross-check of soa-env (DESIGN §3)
     const raw = env.LANE?.trim().toLowerCase();
+    // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- independent raw-env cross-check of soa-env (DESIGN §3)
     const execMirror = env.EXEC_ENV?.trim().toLowerCase() === 'mirror';
     if (!raw) {
         return execMirror ? { lane: 'mirror', viaDeprecatedAlias: true } : { lane: 'none', viaDeprecatedAlias: false };
     }
+    // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- independent raw-env cross-check of soa-env (DESIGN §3)
     if (raw !== 'twin' && raw !== 'mirror' && raw !== 'none') {
         return { lane: 'invalid', viaDeprecatedAlias: false, reason: 'LANE is not one of twin|mirror|none' };
     }
@@ -63,6 +70,7 @@ export function resolveLane(env: Env): LaneResolution {
 function telemetryEnvViolations(env: Env, lane: Lane): LaneViolation[] {
     const v: LaneViolation[] = [];
     const isProd = (x: string) => x === 'prod' || x === 'production';
+    // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- independent raw-env cross-check of soa-env (DESIGN §3)
     const dd = env.DD_ENV?.trim().toLowerCase();
     if (!dd) {
         v.push({ check: 'dd-env', message: `DD_ENV is unset/empty; LANE=${lane} requires a non-prod value (e.g. "${lane}")` });
@@ -81,15 +89,22 @@ function telemetryEnvViolations(env: Env, lane: Lane): LaneViolation[] {
     return v;
 }
 
-/** Returns [] when LANE is none/unset. Otherwise runs every lane check. */
+function identityMismatch(raw: Lane, identity: EnvIdentity | undefined): LaneViolation | undefined {
+    if (!identity || identity.lane === raw) return undefined;
+    return { check: 'lane-identity', message: `soa-env lane "${identity.lane}" disagrees with raw env lane "${raw}"` };
+}
+
+/** Returns [] when LANE is none/unset and any identity agrees. Otherwise runs every lane check. */
 export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViolation[] {
     const { lane, reason } = resolveLane(env);
-    if (lane === 'none') return [];
     if (lane === 'invalid') return [{ check: 'lane-identity', message: reason ?? 'invalid lane identity' }];
+    const mismatch = identityMismatch(lane, opts.identity);
+    if (lane === 'none') return mismatch ? [mismatch] : [];
 
-    const v: LaneViolation[] = [];
+    const v: LaneViolation[] = mismatch ? [mismatch] : [];
+    const accountId = opts.accountId ?? opts.identity?.account.id;
     const allowed = opts.allowedAccountIds ?? [DEV_ACCOUNT_ID];
-    const accountOk = opts.accountId !== undefined && allowed.includes(opts.accountId);
+    const accountOk = accountId !== undefined && allowed.includes(accountId);
     const patterns = opts.prodHostPatterns ?? DEFAULT_PROD_HOST_PATTERNS;
     const isProdHost = (host: string): boolean =>
         patterns.some((p) => {
@@ -119,7 +134,7 @@ export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViol
         }
 
         if (name.toUpperCase().startsWith('MAIL_SES_')) {
-            v.push({ check: 'ses', message: `${name} is set; LANE=${lane} uses the stub mailer, not SES` });
+            v.push({ check: 'ses', message: `${name} is set; LANE=${lane} uses the capture or stub mailer, not SES` });
         }
 
         if (PARTNER_VAR_RES.some((re) => re.test(name))) {
@@ -128,10 +143,10 @@ export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViol
     }
 
     if (env.MAIL_PROVIDER?.trim().toLowerCase() === 'ses') {
-        v.push({ check: 'ses', message: `MAIL_PROVIDER=ses; LANE=${lane} uses the stub mailer, not SES` });
+        v.push({ check: 'ses', message: `MAIL_PROVIDER=ses; LANE=${lane} uses the capture or stub mailer, not SES` });
     }
 
-    if (opts.accountId === undefined) {
+    if (accountId === undefined) {
         v.push({ check: 'aws-account', message: `AWS account id was not resolved; LANE=${lane} fails closed` });
     } else if (!accountOk) {
         v.push({ check: 'aws-account', message: `AWS account id is not in the allowed set for LANE=${lane}` });
@@ -158,7 +173,7 @@ let aliasWarned = false;
 /** No-op unless LANE is twin|mirror (or the deprecated EXEC_ENV=mirror alias). Throws on unknown LANE. Call before creating any client. */
 export function assertLaneSafe(env: Env = process.env, opts: LaneGuardOptions = {}): void {
     const res = resolveLane(env);
-    if (res.lane === 'none') return;
+    if (res.lane === 'none' && (!opts.identity || opts.identity.lane === 'none')) return;
     if (res.viaDeprecatedAlias && !aliasWarned) {
         aliasWarned = true;
         process.emitWarning('soa-lane-guard: EXEC_ENV=mirror as a lane trigger is deprecated; set LANE=mirror (removed in 0.3.0)', 'DeprecationWarning');

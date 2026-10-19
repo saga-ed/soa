@@ -35,6 +35,7 @@
  * answered.
  */
 
+import type { EnvIdentity } from '@saga-ed/soa-env';
 import { buildIdentity } from './health.js';
 
 /** A single dependency probe's outcome. Only `ready` drives the 200/503. */
@@ -84,6 +85,8 @@ export interface MountReadinessOptions {
   deepCacheMs?: number;
   /** When true, `/health/ready` answers 503 `draining` without running probes. `/health/live` stays 200. */
   isDraining?: () => boolean;
+  /** soa-env's resolved identity; adds profile, lane, telemetryEnv and accountKind to the build identity. */
+  identity?: EnvIdentity;
 }
 
 /** A sentinel the timeout rejects with, so we can tell timeout from a probe throw. */
@@ -108,6 +111,7 @@ interface ProbeOutcome {
 async function evaluateProbes(
   probes: Record<string, () => Promise<ProbeResult>>,
   timeoutMs: number,
+  identity?: EnvIdentity,
 ): Promise<ProbeOutcome> {
   const entries = await Promise.all(
     Object.entries(probes).map(async ([name, probe]) => {
@@ -125,7 +129,7 @@ async function evaluateProbes(
   const ready = entries.every(([, r]) => r.ready);
   return {
     code: ready ? 200 : 503,
-    body: { status: ready ? 'ready' : 'not ready', ...buildIdentity(), checks },
+    body: { status: ready ? 'ready' : 'not ready', ...buildIdentity(undefined, identity), checks },
   };
 }
 
@@ -133,8 +137,9 @@ async function runProbes(
   probes: Record<string, () => Promise<ProbeResult>>,
   timeoutMs: number,
   res: ReadinessResponse,
+  identity?: EnvIdentity,
 ): Promise<void> {
-  const { code, body } = await evaluateProbes(probes, timeoutMs);
+  const { code, body } = await evaluateProbes(probes, timeoutMs, identity);
   res.status(code).json(body);
 }
 
@@ -142,12 +147,13 @@ function cachedEvaluator(
   probes: Record<string, () => Promise<ProbeResult>>,
   timeoutMs: number,
   cacheMs: number,
+  identity?: EnvIdentity,
 ): () => Promise<ProbeOutcome> {
   let last: { at: number; outcome: ProbeOutcome } | undefined;
   let inFlight: Promise<ProbeOutcome> | undefined;
   return () => {
     if (last && Date.now() - last.at < cacheMs) return Promise.resolve(last.outcome);
-    inFlight ??= evaluateProbes(probes, timeoutMs)
+    inFlight ??= evaluateProbes(probes, timeoutMs, identity)
       .then((outcome) => {
         last = { at: Date.now(), outcome };
         return outcome;
@@ -163,20 +169,20 @@ export function mountReadinessRoutes(app: ReadinessRouter, opts: MountReadinessO
   const timeoutMs = opts.timeoutMs ?? 2000;
 
   app.get('/health/live', (_req, res) => {
-    res.json({ status: 'ok', ...buildIdentity() });
+    res.json({ status: 'ok', ...buildIdentity(undefined, opts.identity) });
   });
 
   app.get('/health/ready', async (_req, res) => {
     if (opts.isDraining?.()) {
-      res.status(503).json({ status: 'draining', ...buildIdentity() });
+      res.status(503).json({ status: 'draining', ...buildIdentity(undefined, opts.identity) });
       return;
     }
-    await runProbes(opts.probes, timeoutMs, res);
+    await runProbes(opts.probes, timeoutMs, res, opts.identity);
   });
 
   const deepProbes = opts.deepProbes;
   if (deepProbes) {
-    const evaluateDeep = cachedEvaluator(deepProbes, timeoutMs, opts.deepCacheMs ?? 5000);
+    const evaluateDeep = cachedEvaluator(deepProbes, timeoutMs, opts.deepCacheMs ?? 5000, opts.identity);
     app.get('/health/deep', async (_req, res) => {
       const { code, body } = await evaluateDeep();
       res.status(code).json(body);

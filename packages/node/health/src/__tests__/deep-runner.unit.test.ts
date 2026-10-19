@@ -1,3 +1,4 @@
+import type { EnvIdentity } from '@saga-ed/soa-env';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assertManifestComplete,
@@ -11,6 +12,14 @@ import {
   type ReadinessEvent,
 } from '../index.js';
 
+const ident = (kind: 'prod' | 'dev' | 'local'): EnvIdentity => ({
+  profile: kind === 'prod' ? 'prod' : 'dev',
+  lane: 'none',
+  telemetryEnv: kind,
+  account: kind === 'local' ? { kind } : { kind, id: '123456789012' },
+  row: kind === 'local' ? 'R4-local' : kind === 'prod' ? 'R1-prod' : 'R3-dev-overlay',
+});
+
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
@@ -22,7 +31,7 @@ function mk(
     scope?: 'task' | 'shared';
     optional?: boolean;
     bootMode?: BootMode;
-    env?: string;
+    identity?: EnvIdentity;
     absent?: boolean;
     whenAbsent?: 'skipped' | 'fail';
     draining?: () => boolean;
@@ -60,7 +69,7 @@ function mk(
     bootRetryDelayMs: 500,
     bootTimeoutMs: 3000,
     bootMode: opts.bootMode ?? 'block',
-    env: opts.env ?? 'prod',
+    ...(opts.identity ? { identity: opts.identity } : {}),
     ...(opts.draining ? { isDraining: opts.draining } : {}),
     ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
   });
@@ -297,7 +306,6 @@ describe('boot() and READINESS_BOOT', () => {
           dep({ name: 'b', kind: 'custom', criticality: 'optional', client: () => 1, probe: async () => { throw new Error('x'); } }),
         ],
       }),
-      env: 'prod',
       bootMode: 'block',
     });
     await expect(dr.boot()).resolves.toBeDefined();
@@ -305,8 +313,8 @@ describe('boot() and READINESS_BOOT', () => {
 });
 
 describe('environment and absent clients (fail closed)', () => {
-  it.each(['local', 'ci'])('EXEC_ENV=%s: absent client is skipped (ready)', async (env) => {
-    const { dr } = mk({ absent: true, env });
+  it('local identity: absent client is skipped (ready)', async () => {
+    const { dr } = mk({ absent: true, identity: ident('local') });
     dr.start();
     await tick(0);
     const r = dr.report('internal');
@@ -315,12 +323,12 @@ describe('environment and absent clients (fail closed)', () => {
     dr.stop();
   });
 
-  it.each(['prod', 'dev', 'banana', undefined])('EXEC_ENV=%s: absent client fails closed', async (env) => {
+  it.each([ident('prod'), ident('dev'), undefined])('identity %# : absent client fails closed', async (identity) => {
     const KEY = 'EXEC_ENV';
     const prev = process.env[KEY];
-    delete process.env[KEY];
+    process.env[KEY] = 'local';
     try {
-      const { dr } = mk({ absent: true, env: env as string });
+      const { dr } = mk({ absent: true, ...(identity ? { identity } : {}) });
       dr.start();
       await tick(3000);
       expect(dr.report().verdict).toBe('starting');
@@ -328,11 +336,12 @@ describe('environment and absent clients (fail closed)', () => {
       dr.stop();
     } finally {
       if (prev !== undefined) process.env[KEY] = prev;
+      else delete process.env[KEY];
     }
   });
 
   it('explicit whenAbsent overrides the environment default', async () => {
-    const { dr } = mk({ absent: true, env: 'prod', whenAbsent: 'skipped' });
+    const { dr } = mk({ absent: true, identity: ident('prod'), whenAbsent: 'skipped' });
     dr.start();
     await tick(0);
     expect(dr.report().verdict).toBe('ready');
@@ -345,6 +354,24 @@ describe('environment and absent clients (fail closed)', () => {
     expect(parseBootMode('open')).toBe('open');
     expect(parseBootMode('skip')).toBe('block');
     expect(parseBootMode(undefined)).toBe('block');
+  });
+});
+
+describe('identity on the report', () => {
+  it('build carries the four identity fields and never account.id or row', async () => {
+    const { dr } = mk({ identity: ident('dev') });
+    const r = dr.report('internal');
+    expect(r.build).toMatchObject({ profile: 'dev', lane: 'none', telemetryEnv: 'dev', accountKind: 'dev' });
+    const text = JSON.stringify(r);
+    expect(text).not.toContain('123456789012');
+    expect(text).not.toContain('R3-dev-overlay');
+    expect(dr.identity?.profile).toBe('dev');
+  });
+
+  it('no identity: build has no identity fields', () => {
+    const { dr } = mk();
+    expect(Object.keys(dr.report().build)).not.toContain('profile');
+    expect(dr.identity).toBeUndefined();
   });
 });
 
@@ -382,7 +409,6 @@ describe('deepReport()', () => {
         service: 's',
         dependencies: [dep({ name: 'a', kind: 'custom', criticality: 'optional', client: () => 1, probe: async () => void c.calls++ })],
       }),
-      env: 'prod',
       deepCacheMs: 0,
       minProbeGapMs: 1000,
     });

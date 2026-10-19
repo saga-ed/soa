@@ -36,7 +36,6 @@ const make = (token?: string) =>
       service: 'svc',
       dependencies: [dep({ name: 'db', kind: 'custom', criticality: 'critical', scope: 'shared', client: () => 1, probe: async () => undefined })],
     }),
-    env: 'prod',
     minProbeGapMs: 0,
     authorizeInternal: createBearerAuthorizer(() => token),
   });
@@ -88,8 +87,7 @@ describe('mountDeepReadiness', () => {
           service: 'svc',
           dependencies: [dep({ name: 'db', kind: 'custom', criticality: 'critical', scope: 'shared', client: () => 1, probe: async () => undefined })],
         }),
-        env: 'prod',
-        minProbeGapMs: 0,
+            minProbeGapMs: 0,
         authorizeInternal,
       });
       mountDeepReadiness(app, dr);
@@ -116,5 +114,18 @@ describe('mountDeepReadiness', () => {
     for (const k of s.properties.dependencies.items.required) expect(d).toHaveProperty(k);
     expect(s.properties.dependencies.items.properties.state.enum).toContain(d.state);
     for (const k of Object.keys(rep)) expect(Object.keys(s.properties)).toContain(k);
+  });
+
+  it('schema build declares the identity fields; a report carrying them stays in-schema', async () => {
+    const p = readinessReportJsonSchema.properties.build.properties;
+    expect(p.profile.enum).toEqual(['prod', 'dev']);
+    expect(p.lane.enum).toEqual(['twin', 'mirror', 'none']);
+    expect(p.accountKind.enum).toEqual(['prod', 'dev', 'local']);
+    expect(p.telemetryEnv.type).toBe('string');
+    const dr = createDeepReadiness({
+      manifest: declareDependencies({ service: 'svc', dependencies: [] }),
+      identity: { profile: 'dev', lane: 'none', telemetryEnv: 'dev', account: { kind: 'dev', id: '123456789012' }, row: 'R3-dev-overlay' },
+    });
+    for (const k of Object.keys(dr.report().build)) expect(Object.keys(p)).toContain(k);
   });
 });

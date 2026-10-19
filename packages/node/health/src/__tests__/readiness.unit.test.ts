@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { EnvIdentity } from '@saga-ed/soa-env';
 import {
   mountReadinessRoutes,
   type ReadinessRouter,
@@ -190,6 +191,52 @@ describe('build identity on the readiness pair', () => {
       const { code, body } = await call('/health/ready');
       expect(code).toBe(503);
       expect(body).toMatchObject({ status: 'not ready', colour: 'blue' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('identity option', () => {
+  const identity: EnvIdentity = {
+    profile: 'dev',
+    lane: 'mirror',
+    telemetryEnv: 'mirror',
+    account: { kind: 'dev', id: '396913734878' },
+    row: 'R2-lane',
+  };
+
+  it('threads identity into live, ready, not-ready, draining and deep bodies without account.id or row', async () => {
+    vi.stubGlobal('process', { env: {} });
+    try {
+      let draining = false;
+      const { app, call } = fakeApp();
+      mountReadinessRoutes(app, {
+        probes: { db: async () => ({ ready: false, detail: 'error' }) },
+        deepProbes: { db: async () => ({ ready: true, detail: 'ok' }) },
+        isDraining: () => draining,
+        identity,
+      });
+      const want = { profile: 'dev', lane: 'mirror', telemetryEnv: 'mirror', accountKind: 'dev' };
+      for (const path of ['/health/live', '/health/ready', '/health/deep']) {
+        const { body } = await call(path);
+        expect(body).toMatchObject(want);
+        expect(JSON.stringify(body)).not.toContain('396913734878');
+        expect(JSON.stringify(body)).not.toContain('R2-lane');
+      }
+      draining = true;
+      expect((await call('/health/ready')).body).toMatchObject({ status: 'draining', ...want });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('without identity the body has no identity fields', async () => {
+    vi.stubGlobal('process', { env: {} });
+    try {
+      const { app, call } = fakeApp();
+      mountReadinessRoutes(app, { probes: {} });
+      expect((await call('/health/live')).body).toEqual({ status: 'ok' });
     } finally {
       vi.unstubAllGlobals();
     }

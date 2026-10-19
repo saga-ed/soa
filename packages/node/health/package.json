@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-health",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -30,6 +30,9 @@
         "test": "vitest run --passWithNoTests",
         "lint": "eslint src/",
         "clean": "rm -rf dist"
+    },
+    "dependencies": {
+        "@saga-ed/soa-env": "workspace:*"
     },
     "devDependencies": {
         "@saga-ed/soa-typescript-config": "workspace:*",

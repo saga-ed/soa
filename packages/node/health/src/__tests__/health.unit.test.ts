@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { EnvIdentity } from '@saga-ed/soa-env';
 import {
   mountHealthRoutes,
   buildIdentity,
@@ -193,6 +194,49 @@ describe('buildIdentity', () => {
       const details = (await call('/health/details')) as Record<string, unknown>;
       expect(details.colour).toBe('green');
       expect(details.version).toBe('abc123');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('buildIdentity with soa-env identity', () => {
+  const identity: EnvIdentity = {
+    profile: 'prod',
+    lane: 'twin',
+    telemetryEnv: 'twin',
+    account: { kind: 'dev', id: '396913734878' },
+    row: 'R2-lane',
+  };
+
+  it('adds exactly profile, lane, telemetryEnv, accountKind; never account.id or row', () => {
+    const out = buildIdentity({ DD_VERSION: 'abc', EXEC_ENV: 'prod' }, identity);
+    expect(out).toEqual({
+      version: 'abc',
+      environment: 'prod',
+      profile: 'prod',
+      lane: 'twin',
+      telemetryEnv: 'twin',
+      accountKind: 'dev',
+    });
+    const text = JSON.stringify(out);
+    expect(text).not.toContain('396913734878');
+    expect(text).not.toContain('R2-lane');
+  });
+
+  it('without identity the output is unchanged', () => {
+    expect(buildIdentity({ DD_VERSION: 'abc', EXEC_ENV: 'prod' })).toEqual({ version: 'abc', environment: 'prod' });
+  });
+
+  it('mountHealthRoutes passes identity to both routes', async () => {
+    const { app, call } = fakeApp();
+    vi.stubGlobal('process', { env: {} });
+    try {
+      mountHealthRoutes(app, { serviceName: 'S', pingDb: async () => undefined, identity });
+      expect(await call('/health')).toMatchObject({ profile: 'prod', lane: 'twin', telemetryEnv: 'twin', accountKind: 'dev' });
+      const details = (await call('/health/details')) as Record<string, unknown>;
+      expect(details).toMatchObject({ profile: 'prod', accountKind: 'dev' });
+      expect(JSON.stringify(details)).not.toContain('396913734878');
     } finally {
       vi.unstubAllGlobals();
     }

@@ -1,5 +1,8 @@
 /** Deep readiness types (soa#517). Semantics: docs/deep-readiness.md. */
 
+import type { EnvIdentity } from '@saga-ed/soa-env';
+import type { BuildIdentity } from '../health.js';
+
 export type DependencyKind =
   | 'postgres'
   | 'prisma'
@@ -58,7 +61,7 @@ interface DependencyDeclarationBase<C> {
   client: () => C | null | undefined;
   /** Kind-specific target: exchange name (rabbitmq), URL (http). */
   target?: string;
-  /** 'skipped' is the default only when EXEC_ENV is exactly 'local' or 'ci'; otherwise 'fail'. */
+  /** 'skipped' is the default only when identity.account.kind is local (SAGA_LOCAL=1); otherwise 'fail'. */
   whenAbsent?: 'skipped' | 'fail';
   /**
    * Overrides the kind's default probe. Required for 'custom', 'openfga' and 'aws-*'.
@@ -136,7 +139,7 @@ export interface ReadinessReport {
   service: string;
   verdict: ReadinessVerdict;
   httpStatus: 200 | 503;
-  build: { colour?: string; version?: string; environment?: string; deployedAt?: string };
+  build: BuildIdentity;
   generatedAt: string;
   bootMode: BootMode;
   summary: { critical: { ok: number; failing: number }; optional: { ok: number; failing: number } };
@@ -168,12 +171,14 @@ export interface DeepReadiness {
   /** For mountDeepReadiness. */
   authorizeInternal(req: unknown): boolean | Promise<boolean>;
   isDraining(): boolean;
+  /** The identity this instance was created with; mountDeepReadiness reports it on /health/live. */
+  readonly identity?: EnvIdentity;
 }
 
 export interface CreateDeepReadinessOptions extends ProbeScheduleOptions {
   manifest: DependencyManifest;
-  /** Test seam; production reads EXEC_ENV only. Unset/unknown => deployed (fail closed). */
-  env?: string;
+  /** soa-env's resolved identity. Absent clients are skipped only when account.kind is local; unset => fail closed. */
+  identity?: EnvIdentity;
   /** Test seam; production reads READINESS_BOOT. Unknown value => 'block'. */
   bootMode?: BootMode;
   isDraining?: () => boolean;

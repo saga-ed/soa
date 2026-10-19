@@ -1489,6 +1489,8 @@ services_up(){
   # seed-mode (logger config inline) so they're unaffected.
   export PINO_LOGGER_LEVEL="${PINO_LOGGER_LEVEL:-info}"
   export PINO_LOGGER_ISEXPRESSCONTEXT="${PINO_LOGGER_ISEXPRESSCONTEXT:-true}"
+  # soa-env local declaration (packages/node/env/DESIGN.md §4).
+  export SAGA_LOCAL=1
   # AUTH_DEVUSERID must be the seeded dev-user UUID (iam-api refuses to boot with
   # the 'dev-user-001' default when AUTH_ENABLED=false). apply_fixes only set this
   # via sed on iam-api/.env, which doesn't exist on a fresh clone — pass it on the

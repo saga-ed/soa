@@ -547,9 +547,12 @@ export function resolveLaunchEnv(
   // Global env up.sh `export`s once in services_up (~1384-1385) so every child
   // inherits it — required for any soa node service to pass startup validation.
   // Laid down FIRST so a per-service launch.env key could override it (none do).
+  // SAGA_LOCAL=1 is the soa-env local declaration (packages/node/env DESIGN §4);
+  // every lane here is a locally-run process, so it applies to all of them.
   const env: Record<string, string> = {
     PINO_LOGGER_LEVEL: ctx.tokens.PINO_LOGGER_LEVEL,
     PINO_LOGGER_ISEXPRESSCONTEXT: ctx.tokens.PINO_LOGGER_ISEXPRESSCONTEXT,
+    SAGA_LOCAL: '1',
   };
   for (const [key, template] of Object.entries(def.launch.env)) {
     env[key] = expand(template, tokens, `${service}.launch.env.${key}`);

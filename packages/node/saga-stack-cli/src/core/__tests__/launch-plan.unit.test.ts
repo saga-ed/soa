@@ -40,7 +40,7 @@ const ctx: LaunchContext = defaultLaunchContext({
 // child inherits them. They are not on any `launch_if` line, so the per-service
 // fidelity tests below assert the launch_if-line vars only — we strip the two
 // globals here and cover them separately in the "global PINO logger env" block.
-const GLOBAL_KEYS = ['PINO_LOGGER_LEVEL', 'PINO_LOGGER_ISEXPRESSCONTEXT'] as const;
+const GLOBAL_KEYS = ['PINO_LOGGER_LEVEL', 'PINO_LOGGER_ISEXPRESSCONTEXT', 'SAGA_LOCAL'] as const;
 const rawEnv = (id: ServiceId) => resolveLaunchEnv(id, 'stack', ctx);
 const env = (id: ServiceId) => {
   const e = { ...rawEnv(id) };
@@ -82,6 +82,20 @@ describe('global PINO logger env (up.sh services_up export ~1384-1385)', () => {
     const e = resolveLaunchEnv('iam-api', 'stack', overridden);
     expect(e.PINO_LOGGER_LEVEL).toBe('debug');
     expect(e.PINO_LOGGER_ISEXPRESSCONTEXT).toBe('false');
+  });
+});
+
+describe('SAGA_LOCAL=1 local declaration (soa-env DESIGN §4)', () => {
+  it.each(['stack', 'sandbox', 'tunnel'] as const)('is set on every service in the %s lane', (lane) => {
+    const laneCtx = defaultLaunchContext({
+      repoRoots: REPO_ROOTS,
+      vendorDir: '/w/vendor',
+      sandbox: { name: 'sb' },
+      tunnel: { domain: 't.example' },
+    });
+    for (const id of Object.keys(manifest.services) as ServiceId[]) {
+      expect(resolveLaunchEnv(id, lane, laneCtx).SAGA_LOCAL).toBe('1');
+    }
   });
 });
 

@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   GetSecretValueCommand,
@@ -256,5 +259,157 @@ describe('loadPostgresConfigFromAws — dev (static password from parity secret)
         instanceName: 'i',
       }),
     ).rejects.toThrow(/no SecretString/);
+  });
+});
+
+describe('loadPostgresConfigFromAws — capability form', () => {
+  const coords = {
+    hostSsmPath: '/twin/pg/endpoint',
+    portSsmPath: '/twin/pg/port',
+  };
+  const devSecret = {
+    SecretString: JSON.stringify({
+      password: 'pw',
+      host: 'db-host.dbs',
+      port: 5432,
+      database: 'chat_api',
+    }),
+  };
+
+  function caFile(): { path: string; pem: string } {
+    const pem = '-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n';
+    const path = join(mkdtempSync(join(tmpdir(), 'pg-ca-')), 'ca.pem');
+    writeFileSync(path, pem);
+    return { path, pem };
+  }
+
+  it('iam-token without coords throws', async () => {
+    await expect(
+      loadPostgresConfigFromAws({
+        credentialSource: 'iam-token',
+        tls: { required: true },
+        service: 'chat-api',
+        instanceName: 'i',
+      }),
+    ).rejects.toThrow(/requires explicit 'coords'/);
+    expect(ssmMock.calls()).toHaveLength(0);
+  });
+
+  it('iam-token reads exactly the given SSM paths', async () => {
+    ssmMock
+      .on(GetParameterCommand, { Name: coords.hostSsmPath })
+      .resolves({ Parameter: { Value: 'twin-pg.dev.internal' } })
+      .on(GetParameterCommand, { Name: coords.portSsmPath })
+      .resolves({ Parameter: { Value: '5432' } });
+
+    const config = await loadPostgresConfigFromAws({
+      credentialSource: 'iam-token',
+      coords,
+      tls: { required: true },
+      service: 'chat-api',
+      instanceName: 'i',
+    });
+
+    expect(config.host).toBe('twin-pg.dev.internal');
+    expect(config.ssl).toBe(true);
+    expect(typeof config.password).toBe('function');
+    const names = ssmMock.commandCalls(GetParameterCommand).map((c) => c.args[0].input.Name);
+    expect(names.sort()).toEqual([coords.hostSsmPath, coords.portSsmPath].sort());
+  });
+
+  it('capability form without tls throws', async () => {
+    await expect(
+      // @ts-expect-error tls is required in the capability form
+      loadPostgresConfigFromAws({ credentialSource: 'static', service: 'chat-api', instanceName: 'i' }),
+    ).rejects.toThrow(/requires explicit 'tls'/);
+  });
+
+  it('static reads the dev parity secret; tls not required → ssl false', async () => {
+    smMock.on(GetSecretValueCommand).resolves(devSecret);
+    const config = await loadPostgresConfigFromAws({
+      credentialSource: 'static',
+      tls: { required: false },
+      service: 'chat-api',
+      instanceName: 'i',
+    });
+    expect(smMock.commandCalls(GetSecretValueCommand)[0]?.args[0].input.SecretId).toBe(
+      'dev/postgres-shared/chat-api/app',
+    );
+    expect(config.password).toBe('pw');
+    expect(config.ssl).toBe(false);
+  });
+
+  it('tls with caBundlePath yields a pinned ca object (iam-token)', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: '5432' } });
+    const ca = caFile();
+    const config = await loadPostgresConfigFromAws({
+      credentialSource: 'iam-token',
+      coords,
+      tls: { required: true, caBundlePath: ca.path },
+      service: 'chat-api',
+      instanceName: 'i',
+    });
+    expect(config.ssl).toEqual({ ca: ca.pem, rejectUnauthorized: true });
+  });
+
+  it('tls with caBundlePath yields a pinned ca object (static)', async () => {
+    smMock.on(GetSecretValueCommand).resolves(devSecret);
+    const ca = caFile();
+    const config = await loadPostgresConfigFromAws({
+      credentialSource: 'static',
+      tls: { required: true, caBundlePath: ca.path },
+      service: 'chat-api',
+      instanceName: 'i',
+    });
+    expect(config.ssl).toEqual({ ca: ca.pem, rejectUnauthorized: true });
+  });
+
+  it('tls required without CA -> true; not required -> false (both branches)', async () => {
+    ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: '5432' } });
+    smMock.on(GetSecretValueCommand).resolves(devSecret);
+    const base = { service: 'chat-api', instanceName: 'i' };
+    expect(
+      (await loadPostgresConfigFromAws({ ...base, credentialSource: 'static', tls: { required: true } })).ssl,
+    ).toBe(true);
+    expect(
+      (await loadPostgresConfigFromAws({ ...base, credentialSource: 'iam-token', coords, tls: { required: false } })).ssl,
+    ).toBe(false);
+  });
+
+  it('passing both env and credentialSource throws', async () => {
+    await expect(
+      loadPostgresConfigFromAws({
+        env: 'prod',
+        credentialSource: 'static',
+        service: 'chat-api',
+        instanceName: 'i',
+      } as never),
+    ).rejects.toThrow(/exactly one of/);
+  });
+
+  it('passing neither env nor credentialSource throws', async () => {
+    await expect(
+      loadPostgresConfigFromAws({ service: 'chat-api', instanceName: 'i' } as never),
+    ).rejects.toThrow(/exactly one of/);
+  });
+});
+
+describe('loadPostgresConfigFromAws — legacy env deprecation', () => {
+  it('still works and emits the deprecation warning once per process', async () => {
+    vi.resetModules();
+    const mod = await import('../aws-postgres-loader.js');
+    const warn = vi.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
+    smMock.on(GetSecretValueCommand).resolves({
+      SecretString: JSON.stringify({ password: 'pw', host: 'h', port: 5432 }),
+    });
+    const params = { env: 'dev', service: 'chat-api', instanceName: 'i' } as const;
+    await mod.loadPostgresConfigFromAws(params);
+    await mod.loadPostgresConfigFromAws(params);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[1]).toMatchObject({
+      type: 'DeprecationWarning',
+      code: 'SOA_ENV_FALLBACK_POSTGRES_ENV',
+    });
+    warn.mockRestore();
   });
 });

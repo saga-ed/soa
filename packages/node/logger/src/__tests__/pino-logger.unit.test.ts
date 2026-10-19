@@ -8,6 +8,7 @@ import {
   traceCorrelationMixin,
   resolveDeploymentBindings,
   resolveVersionBinding,
+  resetLegacyFallbackWarning,
 } from '../pino-logger.js';
 import { PinoLoggerConfig } from '../pino-logger-schema.js';
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -365,5 +366,61 @@ describe('PinoLogger', () => {
         else process.env.OTEL_RESOURCE_ATTRIBUTES = prev;
       }
     });
+  });
+});
+
+describe('PinoLogger logFormat capability (soa#515)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pinoFn: any = (pino as any).default ?? pino;
+  const cfg = (extra: Partial<PinoLoggerConfig>): PinoLoggerConfig => ({
+    configType: 'PINO_LOGGER',
+    level: 'info',
+    isExpressContext: true,
+    ...extra,
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.NODE_ENV;
+    resetLegacyFallbackWarning();
+  });
+
+  it("logFormat 'json' + Express uses the main-thread destination even when NODE_ENV=development", () => {
+    process.env.NODE_ENV = 'development';
+    const dest = vi.spyOn(pinoFn, 'destination');
+    const warn = vi.spyOn(process, 'emitWarning');
+    new PinoLogger(cfg({ logFormat: 'json' }));
+    expect(dest).toHaveBeenCalledWith({ dest: 1, sync: false });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("logFormat 'pretty' + Express skips the destination path even when NODE_ENV=production", () => {
+    process.env.NODE_ENV = 'production';
+    const dest = vi.spyOn(pinoFn, 'destination');
+    const warn = vi.spyOn(process, 'emitWarning');
+    expect(() => new PinoLogger(cfg({ logFormat: 'pretty' }))).not.toThrow();
+    expect(dest).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("logFormat 'json' without Express context constructs without the destination path", () => {
+    process.env.NODE_ENV = 'local';
+    const dest = vi.spyOn(pinoFn, 'destination');
+    expect(() => new PinoLogger(cfg({ logFormat: 'json', isExpressContext: false }))).not.toThrow();
+    expect(dest).not.toHaveBeenCalled();
+  });
+
+  it('without logFormat keeps NODE_ENV behaviour and warns exactly once', () => {
+    process.env.NODE_ENV = 'production';
+    const dest = vi.spyOn(pinoFn, 'destination');
+    const warn = vi.spyOn(process, 'emitWarning');
+    new PinoLogger(cfg({}));
+    new PinoLogger(cfg({}));
+    expect(dest).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('soa#515'),
+      { type: 'DeprecationWarning', code: 'SOA_ENV_FALLBACK_LOGGER' },
+    );
   });
 });

@@ -38,18 +38,52 @@ import type { DevPerimeterConfig } from './dev-perimeter-config.js';
  *     the predicate is non-null, for services with no aggregate asserter.
  */
 function isProdEnv(nodeEnv: string | undefined): boolean {
+  // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass the devPerimeter capability (soa#515)
   return nodeEnv === 'production';
+}
+
+/** Structural subset of the env capabilities; `'off'` means the perimeter must not run. */
+export interface DevPerimeterCapability {
+  devPerimeter: 'on' | 'off';
+}
+
+let warnedDevPerimeterFallback = false;
+
+/** Test-only: re-arm the once-per-process fallback warning. */
+export function resetDevPerimeterFallbackWarning(): void {
+  warnedDevPerimeterFallback = false;
 }
 
 /**
  * Returns the violation message if the dev recon perimeter is enabled in an
- * environment where it must not be (production), or `null` if acceptable.
+ * environment where it must not be, or `null` if acceptable.
+ *
+ * Second arg: a `{ devPerimeter }` capability (violation iff enabled and the
+ * capability is `'off'`), or a legacy NODE_ENV string (deprecated, warns once).
  */
 export function devPerimeterProductionViolation(
   config: Pick<DevPerimeterConfig, 'enabled'>,
-  nodeEnv: string | undefined,
+  nodeEnvOrCap: string | undefined | DevPerimeterCapability,
 ): string | null {
-  if (config.enabled && isProdEnv(nodeEnv)) {
+  if (typeof nodeEnvOrCap === 'object' && nodeEnvOrCap !== null) {
+    if (config.enabled && nodeEnvOrCap.devPerimeter === 'off') {
+      return (
+        'DEV_PERIMETER_ENABLED must be false when the devPerimeter capability is off: ' +
+        'the perimeter is enabled but this environment declares devPerimeter=off. ' +
+        'End-user facing environments authenticate via iam-api only; the JumpCloud ' +
+        'recon perimeter is a dev-only gate.'
+      );
+    }
+    return null;
+  }
+  if (!warnedDevPerimeterFallback) {
+    warnedDevPerimeterFallback = true;
+    process.emitWarning(
+      'devPerimeterProductionViolation: pass the env capability `{ devPerimeter }` instead of a NODE_ENV string; the string form is deprecated (soa#515)',
+      { type: 'DeprecationWarning', code: 'SOA_ENV_FALLBACK_DEV_PERIMETER' },
+    );
+  }
+  if (config.enabled && isProdEnv(nodeEnvOrCap)) {
     return (
       `DEV_PERIMETER_ENABLED must be false in production (NODE_ENV=production). ` +
       'Production *.saga.org services are end-user facing and authenticate via iam-api ' +
@@ -68,9 +102,9 @@ export function devPerimeterProductionViolation(
  */
 export function assertDevPerimeterProductionConfig(
   config: Pick<DevPerimeterConfig, 'enabled'>,
-  nodeEnv: string | undefined,
+  nodeEnvOrCap: string | undefined | DevPerimeterCapability,
 ): void {
-  const violation = devPerimeterProductionViolation(config, nodeEnv);
+  const violation = devPerimeterProductionViolation(config, nodeEnvOrCap);
   if (violation) throw new Error(violation);
 }
 

@@ -63,14 +63,26 @@ export interface RabbitMQConfig {
    *   when the broker returns. Correct in dev/test where the broker is more
    *   flaky than the service itself.
    *
-   * Default: `'fatal'` when `process.env.NODE_ENV === 'production'`,
-   * `'log-and-continue'` otherwise. Set explicitly to override that default
-   * — e.g. a CI/staging environment where you want fail-loud behavior.
+   * Precedence: `failureMode`, then `failFast`, then the deprecated NODE_ENV
+   * default (`'fatal'` in production, else `'log-and-continue'`; warns once).
    *
    * Design rationale for pattern 3 ("non-fatal broker startup") not
    * written up; see `docs/history/soa_75/README.md#missing-decisions`.
    */
   failureMode?: 'fatal' | 'log-and-continue';
+
+  /**
+   * Env-capability form of `failureMode`: `true` → `'fatal'`, `false` →
+   * `'log-and-continue'`. Ignored when `failureMode` is set.
+   */
+  failFast?: boolean;
+}
+
+let warnedFailFastFallback = false;
+
+/** Test-only: re-arm the once-per-process fallback warning. */
+export function resetFailFastFallbackWarning(): void {
+  warnedFailFastFallback = false;
 }
 
 export interface ReconnectConfig {
@@ -119,7 +131,7 @@ export type ConnectionState =
    */
   | "CLOSED";
 
-const DEFAULT_CONNECTION_CONFIG: Required<Omit<RabbitMQConfig, 'url' | 'failureMode'> & { reconnect: Required<ReconnectConfig> }> = {
+const DEFAULT_CONNECTION_CONFIG: Required<Omit<RabbitMQConfig, 'url' | 'failureMode' | 'failFast'> & { reconnect: Required<ReconnectConfig> }> = {
   reconnect: {
     enabled: true,
     maxRetries: 10,
@@ -131,7 +143,7 @@ const DEFAULT_CONNECTION_CONFIG: Required<Omit<RabbitMQConfig, 'url' | 'failureM
 
 @injectable()
 export class ConnectionManager {
-  private config: Required<Omit<RabbitMQConfig, 'failureMode'> & { reconnect: Required<ReconnectConfig> }> & { failureMode?: 'fatal' | 'log-and-continue' };
+  private config: Required<Omit<RabbitMQConfig, 'failureMode' | 'failFast'> & { reconnect: Required<ReconnectConfig> }> & { failureMode?: 'fatal' | 'log-and-continue'; failFast?: boolean };
   private channelModel: ChannelModel | null = null;
 
   private currentState: ConnectionState = "DISCONNECTED";
@@ -528,6 +540,17 @@ export class ConnectionManager {
 
   private resolveFailureMode(): 'fatal' | 'log-and-continue' {
     if (this.config.failureMode) return this.config.failureMode;
+    if (this.config.failFast !== undefined) {
+      return this.config.failFast ? 'fatal' : 'log-and-continue';
+    }
+    if (!warnedFailFastFallback) {
+      warnedFailFastFallback = true;
+      process.emitWarning(
+        'ConnectionManager: pass `failFast` from the env capability (or `failureMode`); the NODE_ENV default is deprecated (soa#515)',
+        { type: 'DeprecationWarning', code: 'SOA_ENV_FALLBACK_RABBITMQ_FAILFAST' },
+      );
+    }
+    // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass failFast (soa#515)
     return process.env.NODE_ENV === 'production' ? 'fatal' : 'log-and-continue';
   }
 }

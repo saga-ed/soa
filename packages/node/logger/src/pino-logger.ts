@@ -149,12 +149,34 @@ export function resolveVersionBinding(
   return raw ? { version: raw } : {};
 }
 
+let legacyFallbackWarned = false;
+
+function warnLegacyFallbackOnce(): void {
+  if (legacyFallbackWarned) return;
+  legacyFallbackWarned = true;
+  process.emitWarning(
+    'PinoLogger: config.logFormat is unset; falling back to NODE_ENV. Pass logFormat from @saga-ed/soa-env (soa#515).',
+    { type: 'DeprecationWarning', code: 'SOA_ENV_FALLBACK_LOGGER' },
+  );
+}
+
+/** Test-only: re-arm the once-per-process deprecation warning. */
+export function resetLegacyFallbackWarning(): void {
+  legacyFallbackWarned = false;
+}
+
+function legacyNodeEnv(): string {
+  // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass logFormat (soa#515)
+  return process.env.NODE_ENV || 'development';
+}
+
 @injectable()
 export class PinoLogger implements ILogger {
   private readonly logger: Logger;
 
   constructor(@inject('PinoLoggerConfig') private config: PinoLoggerConfig) {
-    const env = process.env.NODE_ENV || 'development';
+    const logFormat = config.logFormat;
+    if (!logFormat) warnLegacyFallbackOnce();
     const isForeground = Boolean(process.stdout.isTTY);
     const isExpressContext = config.isExpressContext;
     const logFile = config.logFile;
@@ -187,7 +209,11 @@ export class PinoLogger implements ILogger {
     // logged to a /tmp file that never reached CloudWatch. A main-thread
     // SonicBoom stream on stdout is reliable and is captured by the awslogs
     // driver → CloudWatch.
-    if (env === 'production' && isExpressContext) {
+    const useDirectStdout = logFormat
+      ? logFormat === 'json' && isExpressContext
+      // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass logFormat (soa#515)
+      : legacyNodeEnv() === 'production' && isExpressContext;
+    if (useDirectStdout) {
       const dest = pinoFn.destination({ dest: logFile ?? 1, sync: false });
       this.logger = pinoFn(
         { level: config.level, redact, base, mixin: traceCorrelationMixin },
@@ -199,8 +225,24 @@ export class PinoLogger implements ILogger {
 
     const targets: TransportTargetOptions[] = [];
 
-    // NODE_ENV=local
-    if (env === 'local') {
+    const consoleTarget = (): TransportTargetOptions => ({
+      target: pretty ? 'pino-pretty' : 'pino/file',
+      options: pretty
+        ? { colorize: true, levelFirst: true, translateTime: 'SYS:standard' }
+        : { destination: 1 },
+    });
+
+    if (logFormat === 'json') {
+      targets.push({ target: 'pino/file', options: { destination: 1 } });
+    } else if (logFormat === 'pretty') {
+      targets.push(consoleTarget());
+      if (logFile) {
+        targets.push({ target: 'pino/file', options: { destination: logFile } });
+      }
+    }
+    // Legacy NODE_ENV=local
+    // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass logFormat (soa#515)
+    else if (legacyNodeEnv() === 'local') {
       // Always console logger
       targets.push({
         target: pretty ? 'pino-pretty' : 'pino/file',
@@ -220,8 +262,9 @@ export class PinoLogger implements ILogger {
         });
       }
     }
-    // NODE_ENV=development
-    else if (env === 'development') {
+    // Legacy NODE_ENV=development
+    // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- deprecated fallback; remove once all consumers pass logFormat (soa#515)
+    else if (legacyNodeEnv() === 'development') {
       if (isExpressContext && isForeground) {
         targets.push({
           target: pretty ? 'pino-pretty' : 'pino/file',

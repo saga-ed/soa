@@ -106,6 +106,22 @@ const config = await loadMongoConfigFromAws({
 
 This connects as `saga_admin` against `admin` (authSource), with `database: 'ledger_api_db'` set as the default DB. Useful for one-off prod-shape investigations against the most recent mirror.
 
+### Explicit coordinates (preferred)
+
+`coords` replaces the deprecated `scope`/`env` pair (combining them throws); no env name is inferred.
+
+```typescript
+await loadMongoConfigFromAws({
+  coords: { kind: 'shared', ssmPrefix: '/shared/infra/prod', secretPrefix: 'prod/mongodb-shared' },
+  project: 'ledger-api',
+  instanceName: 'main',
+});
+// coords: { kind: 'mirror-project' }  - per-service user on the dev mirror
+// coords: { kind: 'mirror-current' }  - mirror master admin
+```
+
+Legacy `scope`/`env` still work and emit `DeprecationWarning` `SOA_ENV_FALLBACK_MONGO_ENV` once per process.
+
 ## Saga conventions (referenced by the loader)
 
 | Concept | Convention |

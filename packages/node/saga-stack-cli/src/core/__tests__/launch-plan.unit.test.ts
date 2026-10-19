@@ -127,6 +127,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   it('iam-api', () => {
     expect(env('iam-api')).toEqual({
       PORT: '3010',
+      DB_CREDENTIAL_SOURCE: 'static',
+      DB_TLS: 'off',
+      FAIL_FAST: 'false',
+      TELEMETRY_ENV: 'local',
+      PERMISSIVE_AUTHZ: 'false',
       AUTH_DEVUSERID: 'f0000004-0000-4000-8000-00000000beef',
       // coach-web (:8800) is in the allowlist because its browser calls
       // auth.whoami direct; omit it and every coach page 503s on CORS.

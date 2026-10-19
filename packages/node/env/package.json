@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-env",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "private": false,
     "type": "module",
     "description": "Environment identity and declared capabilities: one module reads account, lane and profile, and returns fail-closed capabilities that call sites consume instead of branching on env names.",

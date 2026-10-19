@@ -60,6 +60,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         PORT: '${IAM_PORT}',
+        // soa-env R4 (local) capability keys; the service refuses to boot without them.
+        DB_CREDENTIAL_SOURCE: 'static',
+        DB_TLS: 'off',
+        FAIL_FAST: 'false',
+        TELEMETRY_ENV: 'local',
+        PERMISSIVE_AUTHZ: 'false',
         AUTH_DEVUSERID: '${DEV_USER_UUID}',
         // Stamp the SAME issuer coach-api validates (its AUTH_ISSUER). Injected
         // rather than left to iam-api/.env so the two ends can never drift.
@@ -239,7 +245,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         NODE_ENV: 'development',
         PORT: '${AUTHZ_PORT}',
         AUTHZ_DATABASE_URL: '${AUTHZ_DB_URL}',
-        // soa-env R4 (local) capability keys; authz-api refuses to boot without them (rostering#1729).
+        // soa-env R4 (local) capability keys; the service refuses to boot without them.
         DB_CREDENTIAL_SOURCE: 'static',
         DB_TLS: 'off',
         FAIL_FAST: 'false',

@@ -1,6 +1,6 @@
 # @saga-ed/soa-env: design (soa#515, M2)
 
-Status: ACCEPTED 2026-10-18 (design review SHIP after 2 rounds); implementation pending (section 9 step 1). Design and interface stubs only. No `package.json` yet: `pnpm-workspace.yaml` globs `packages/node/*`, so adding one would change `pnpm-lock.yaml`. Scaffolding lands with the implementation PR.
+Status: ACCEPTED 2026-10-18 (design review SHIP after 2 rounds); implementation landed in this PR (section 9 step 1, minus the /ss wiring, which is deferred).
 
 Tracking: saga-ed/soa#515, part of hipponot/iac#897. Classes: C1 (env-gated branches), C3 (one client path), C10 (side-effect switches visible). Contract: iac `docs/regression-suite/twin-lane-contract.md` (iac#898). Related: lane-guard (soa#516/#519), M1 prod-config-only (ci-actions#138).
 

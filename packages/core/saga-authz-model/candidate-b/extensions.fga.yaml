@@ -327,9 +327,9 @@ tests:
       - user: user:dana               # district can_edit holder
         object: district:balt
         assertions: {can_create_program: true, can_manage_admins: false, can_upload_roster: true, can_download_roster: true, can_view_pii: true}
-      - user: user:oscar              # org_admin staff -> staff_admin via can_admin_personas
+      - user: user:oscar              # org_admin staff -> staff_admin via can_admin_personas; view_pii via live can_view_user_pii (org_admin)
         object: district:balt
-        assertions: {can_create_program: false, can_manage_admins: true, can_upload_roster: true, can_download_roster: true, can_view_pii: false}
+        assertions: {can_create_program: false, can_manage_admins: true, can_upload_roster: true, can_download_roster: true, can_view_pii: true}
       - user: user:pat                # support, with a direct per-district staff_view_pii grant only
         object: district:balt
         assertions: {can_create_program: false, can_manage_admins: false, can_upload_roster: false, can_download_roster: false, can_view_pii: true}

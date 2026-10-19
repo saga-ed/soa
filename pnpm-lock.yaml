@@ -1005,10 +1005,6 @@ importers:
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
 
   packages/node/env:
-    dependencies:
-      eslint:
-        specifier: ^8.57
-        version: 8.57.1
     devDependencies:
       '@aws-sdk/client-sts':
         specifier: ^3.968.0
@@ -1022,6 +1018,9 @@ importers:
       '@typescript-eslint/parser':
         specifier: ^8.50.0
         version: 8.50.0(eslint@8.57.1)(typescript@5.8.2)
+      eslint:
+        specifier: 8.57.1
+        version: 8.57.1
       tsup:
         specifier: ^8.5.0
         version: 8.5.1(@swc/core@1.15.7(@swc/helpers@0.5.17))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.8.2)(yaml@2.8.2)

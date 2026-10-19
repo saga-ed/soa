@@ -174,6 +174,25 @@ describe('createEnv: invariant table', () => {
   });
 });
 
+describe('createEnv: identity telemetry cross-check', () => {
+  const run = (row: InvariantRow, telemetryEnv: string) =>
+    createEnv(
+      decl,
+      { ...identityFor(row), telemetryEnv },
+      source(validConfig[row] as Record<string, string>)
+    );
+
+  it('R2 rejects DD_ENV=prod even when config telemetryEnv is not prod', () => {
+    expect(() => run('R2-lane', 'prod')).toThrow(
+      /identity telemetryEnv \(DD_ENV\) must not be prod/
+    );
+  });
+
+  it('R1 rejects a non-prod DD_ENV even when config telemetryEnv is prod', () => {
+    expect(() => run('R1-prod', 'dev')).toThrow(/identity telemetryEnv \(DD_ENV\) must be prod/);
+  });
+});
+
 describe('createEnv: strict reads', () => {
   it('a missing key throws, naming the key', () => {
     const v = violationsOf('R3-dev-overlay', { LOG_LEVEL: undefined });

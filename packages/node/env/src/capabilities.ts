@@ -225,6 +225,7 @@ export function createEnv(
         defined(telemetryEnv, v => v === 'prod'),
         'telemetryEnv must be prod'
       );
+      need(identity.telemetryEnv === 'prod', 'identity telemetryEnv (DD_ENV) must be prod');
       need(
         defined(devPerimeter, v => v === 'off'),
         'devPerimeter must be off'
@@ -252,6 +253,7 @@ export function createEnv(
         defined(telemetryEnv, v => v !== 'prod'),
         'telemetryEnv must not be prod'
       );
+      need(identity.telemetryEnv !== 'prod', 'identity telemetryEnv (DD_ENV) must not be prod');
       if (mailDeclared)
         need(
           defined(mailSink, v => v === 'capture'),

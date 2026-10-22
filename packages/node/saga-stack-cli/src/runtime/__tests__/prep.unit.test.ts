@@ -64,7 +64,7 @@ describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => 
     expect(calls.map((call) => call.args)).toEqual([
       ['--filter', '@saga-ed/vishnu...', '--filter', '@saga-ed/saga-stack-cli...',
         'install', '--frozen-lockfile'],
-      ['--filter', '@saga-ed/saga-stack-cli', 'build'],
+      ['--filter', '@saga-ed/soa-event-stats...', '--filter', '@saga-ed/saga-stack-cli...', '-r', 'build'],
     ]);
   });
 

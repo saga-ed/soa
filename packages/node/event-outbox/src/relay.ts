@@ -69,7 +69,7 @@ export interface OutboxRelayOpts {
     /** Dedicated pg pool for the relay (separate from the service's Prisma client). */
     pool: Pool;
     /** Connection manager from @saga-ed/soa-rabbitmq for resilient AMQP. */
-    connectionManager: ConnectionManager;
+    connectionManager: Pick<ConnectionManager, 'ensureConnected' | 'newChannel'>;
     /** Topic exchange to publish into (e.g., "identity.events"). */
     exchange: string;
     /** Polling cadence. Defaults to 500ms (matches ledger-api). */

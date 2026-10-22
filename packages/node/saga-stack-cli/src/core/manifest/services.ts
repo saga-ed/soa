@@ -97,6 +97,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // and expands to the exact legacy literals at slot 0 (byte-identity).
         DATABASE_URL: '${IAM_DB_URL}',
         PII_DATABASE_URL: '${IAM_PII_DB_URL}',
+        // Same deterministic synthetic-only keys used by the IAM seed profile.
+        PII_CRYPTO_PIIDEKHEX: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        PII_CRYPTO_PIIHMACKEYHEX: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+        PII_CRYPTO_PIIDEKVERSION: '1',
         // Same class, third instance: iam-api's OutboxRelay reads RABBITMQ_URL
         // with a $ROSTERING/.env.local fallback baking LITERAL :5672 — so at
         // slot > 0 iam.* events published to slot 0's broker while the slot's

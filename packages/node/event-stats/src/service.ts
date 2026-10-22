@@ -87,9 +87,23 @@ export function createServiceEventStats(options: ServiceStatsOptions) {
       for (const handler of config.handlers) {
         const pattern = binding.routingKey.split('.');
         const words = handler.eventType.split('.');
-        const matches =
-          pattern.every((word, i) => word === '#' || word === '*' || word === words[i]) &&
-          (pattern.includes('#') || pattern.length === words.length);
+        // RabbitMQ topic '#' consumes zero or more words, including in the middle.
+        const memo = new Map<string, boolean>();
+        const match = (p: number, w: number): boolean => {
+          const key = `${p}:${w}`;
+          if (memo.has(key)) return memo.get(key)!;
+          const result =
+            p === pattern.length
+              ? w === words.length
+              : pattern[p] === '#'
+                ? match(p + 1, w) || (w < words.length && match(p, w + 1))
+                : w < words.length &&
+                  (pattern[p] === '*' || pattern[p] === words[w]) &&
+                  match(p + 1, w + 1);
+          memo.set(key, result);
+          return result;
+        };
+        const matches = match(0, 0);
         if (matches)
           stats.register({
             role: 'consumer',

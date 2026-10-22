@@ -64,16 +64,18 @@ describe('synthetic-dev HTTP bridge', () => {
   it('rejects remote access, cross-origin reads, arbitrary targets, and mutations', async () => {
     const loader = vi.fn();
     const middleware = localMeshMiddleware({ VISHNU_MODE: 'synthetic' }, loader);
+    for (const route of ['/api/mesh', '/api/event-stats']) {
     for (const req of [
-      request('/api/mesh', { socket: { remoteAddress: '192.0.2.1' } }),
-      request('/api/mesh', { headers: { host: 'evil.example' } }),
-      request('/api/mesh', { headers: { host: 'localhost:8930', origin: 'https://evil.example' } }),
-      request('/api/mesh?target=https://example.com'),
-      request('/api/mesh', { method: 'POST' }),
+      request(route, { socket: { remoteAddress: '192.0.2.1' } }),
+      request(route, { headers: { host: 'evil.example' } }),
+      request(route, { headers: { host: 'localhost:8930', origin: 'https://evil.example' } }),
+      request(`${route}?target=https://example.com`),
+      request(route, { method: 'POST' }),
     ]) {
       const res = response();
       await middleware(req, res.res, () => {});
       expect(res.result().status).toBeGreaterThanOrEqual(400);
+    }
     }
     expect(loader).not.toHaveBeenCalled();
   });

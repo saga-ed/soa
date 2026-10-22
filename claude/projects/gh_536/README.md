@@ -24,3 +24,8 @@ Set `gh536` binds slot 3 to the child checkout. Use `SS_ACTOR=gh536` on mutating
 ## Existing Vishnu implementation
 
 The original application and ss integration remain in `/home/skelly/dev/soa` on `work/vishnu-discovery-handoff`. They include uncommitted work and are not automatically part of this epic. Preserve and deliberately port the Vishnu changes for I#538; do not copy the old lockfile or unrelated CLI edits over current main.
+
+## Infrastructure test entry point
+
+[Prepared synthetic slot, repeatable scenario and release gates](docs/synthetic-event-stats.md).
+The statistics UX is explicitly deferred until the user has tested this infrastructure.

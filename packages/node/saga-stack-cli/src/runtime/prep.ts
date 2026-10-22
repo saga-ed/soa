@@ -336,7 +336,7 @@ async function prepOneRepo(
     if (installed.code !== 0) return installStep;
     const build: PrepStep = {
       repo, kind: 'build', cwd: root,
-      argv: ['--filter', '@saga-ed/saga-stack-cli', 'build'],
+      argv: ['--filter', '@saga-ed/soa-event-stats...', '--filter', '@saga-ed/saga-stack-cli...', '-r', 'build'],
     };
     return await run(build) ? null : build;
   }

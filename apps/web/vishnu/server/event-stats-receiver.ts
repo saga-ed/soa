@@ -27,6 +27,13 @@ export class EventStatsReceiver {
       onError: (kind: string) => void;
     }
   ) {}
+  private reportError(kind: string) {
+    try {
+      this.options.onError(kind);
+    } catch {
+      /* diagnostics cannot break delivery */
+    }
+  }
   start(): void {
     if (!this.running) {
       this.running = true;
@@ -105,7 +112,7 @@ export class EventStatsReceiver {
       this.failures = 0;
       this.diagnostics.reconnects++;
     } catch {
-      this.options.onError('connection');
+      this.reportError('connection');
       this.failures = Math.min(5, this.failures + 1);
       if (this.connection === connection) {
         this.channel = undefined;
@@ -147,7 +154,7 @@ export class EventStatsReceiver {
       settle(result === 'accepted' || result === 'ignored');
     } catch {
       this.diagnostics.storageFailures++;
-      this.options.onError('storage');
+      this.reportError('storage');
       // Keep the report unacked; closing this connection redelivers after a bounded reconnect delay.
       if (this.connection) {
         const connection = this.connection;

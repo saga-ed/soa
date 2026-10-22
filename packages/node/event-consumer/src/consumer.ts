@@ -1,6 +1,5 @@
 import type { Channel, ConsumeMessage } from 'amqplib';
 import type { Pool, PoolClient } from 'pg';
-import type { ZodType } from 'zod';
 import type { ILogger } from '@saga-ed/soa-logger';
 import type { ConnectionManager } from '@saga-ed/soa-rabbitmq';
 import {
@@ -48,7 +47,7 @@ export class DuplicateHandlerError extends Error {
 export interface EventHandler<T> {
     eventType: string;
     eventVersion: number;
-    payloadSchema: Pick<ZodType<T>, 'parse'>;
+    payloadSchema: { parse(data: unknown): T };
     /**
      * Run the projection / side effect within the supplied tx-scoped client.
      * The consumer guarantees: (a) the consumed_events row was just inserted,
@@ -138,7 +137,7 @@ export interface EventConsumerOpts {
     /** Stable identifier used for the consumed_events idempotency key. */
     consumerName: string;
     pool: Pool;
-    connectionManager: ConnectionManager;
+    connectionManager: Pick<ConnectionManager, 'ensureConnected' | 'newChannel'>;
     /** Durable queue name (e.g., "admissions-svc.upstream-events"). */
     queue: string;
     /**

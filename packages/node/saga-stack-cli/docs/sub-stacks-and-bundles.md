@@ -146,10 +146,11 @@ ss stack verify --with dash --with vishnu
 ```
 
 Open <http://localhost:8930>. To attach only the viewer to an already running
-stack, use `ss stack up --with vishnu --no-seed`. The viewer adds no application
-or database dependencies and does not seed data. It reads the declared `ss`
-service topology and current local health probes; it does not imply Datadog
-traffic or RabbitMQ event projection coverage.
+stack, use `ss stack up --with vishnu --no-seed`. The viewer adds PostgreSQL, RabbitMQ and its dedicated `vishnu` database, without
+seeding data. It reads the declared `ss` topology and local health probes. Its
+server ingests event statistics from IAM/programs/scheduling at `/api/event-stats`;
+the graph statistics UX and Datadog integration remain separate. See the
+[Vishnu README](../../../../apps/web/vishnu/README.md) for receiver scope and bounds.
 
 The normal `--slot N` option offsets the viewer port by `N × 1000` and pins its
 observations to that slot. `--state-dir` is passed to its server adapter too.

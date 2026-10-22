@@ -131,3 +131,15 @@ Review covered hook boundaries, exception isolation, scope filtering, SQL
 parameterization, bounded storage, server-only credentials, lifecycle shutdown,
 and unrelated-worktree isolation. Claude-only review commands were not available;
 these checks and the concrete tests provide the review evidence for this draft.
+
+## Review branches
+
+- Shared package: [SOA PR#540](https://github.com/saga-ed/soa/pull/540).
+- Shared adoption wiring: [SOA PR#541](https://github.com/saga-ed/soa/pull/541).
+- Receiver/app preservation: [SOA PR#542](https://github.com/saga-ed/soa/pull/542).
+- IAM adopter: [rostering PR#1783](https://github.com/saga-ed/rostering/pull/1783), commit `43c91f8f`.
+- Programs/scheduling adopters: [program-hub PR#1023](https://github.com/saga-ed/program-hub/pull/1023), commit `eb851ac7`.
+
+A real receiver-only restart preserved all six stored instance/epoch snapshots,
+then resumed ingestion with sequences at least as new as before. The three live
+services continued running throughout. The final slot verification passed 4/4.

@@ -79,3 +79,26 @@ Receivers must retain/reject retired epochs so a delayed old-epoch report cannot
 Run `pnpm --filter @saga-ed/soa-event-stats test`, `check-types`, `build`, and `test:int`. The integration suite starts isolated Postgres/RabbitMQ containers, verifies real outbox fanout into two consumers, duplicate suppression, rollback/DLQ, and report transport. It does not use a shared synthetic stack.
 
 Release the observer-bearing event-consumer 0.2.0 and event-outbox 0.3.0 packages before event-stats 0.1.0 through the repository's manual single-package CodeArtifact workflow. Complete dependency preflight before dispatch; no package is published by this change. Then adopt in I#537, and implement receiver persistence/UI in I#538.
+
+## Service lifecycle helper
+
+`createServiceEventStats({ service, capabilities, publisherExchange, onError })`
+returns `consumer(options)`, `outbox(options)`, `start()` and async `stop()`.
+Wrap existing constructor options, start after business resources are initialized,
+and stop after consumers/relays stop. Existing observers and metrics remain active.
+When disabled, options pass through and no reporting resources are allocated.
+
+Enable with `EVENT_STATS_ENABLED=true`. Enabled services require
+`EVENT_STATS_ENVIRONMENT`, `EVENT_STATS_DEPLOYMENT`, `EVENT_STATS_REVISION`,
+`EVENT_STATS_BROKER`, `EVENT_STATS_VHOST`, and `RABBITMQ_URL`.
+`EVENT_STATS_INSTANCE` defaults to hostname plus PID;
+`EVENT_STATS_INTERVAL_MS` defaults to 30000 (positive integer, at most one hour).
+The helper uses a separate short-lived AMQP connection per flush, with two-second
+connection/report deadlines and a best-effort final flush. The publisher exchange
+must already exist. Consumer idle streams are registered from the configured
+bindings and exact handler types; wildcard labels are not emitted as event types.
+
+Service schema parsers expose `parse(data: unknown)` structurally so existing
+Zod 3 handlers can coexist with Zod 4 packages without changing the wire envelope.
+Connection managers expose only the `ensureConnected` and `newChannel` methods
+required by these adapters; unrelated class-private fields do not constrain adopters.

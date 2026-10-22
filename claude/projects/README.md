@@ -5,3 +5,4 @@ User-owned projects retain `claude/projects/gh_<issue>/` by explicit ruling on 2
 | Project | Entry point |
 |---|---|
 | I#536 — RabbitMQ event telemetry | [gh_536](gh_536/README.md) |
+| I#535 — Shared event statistics | [gh_535](gh_535/README.md) |

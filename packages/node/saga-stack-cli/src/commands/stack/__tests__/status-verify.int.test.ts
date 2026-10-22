@@ -199,6 +199,18 @@ afterEach(() => {
 });
 
 describe('stack status — native, manifest-derived, read-only', () => {
+  it('probes an explicitly selected Vishnu without a bundle flag', async () => {
+    await StackStatus.run(['--only', 'vishnu', ...WS], config);
+    expect(probed).toEqual(['http://localhost:8930/api/health']);
+  });
+
+  it('fails verify when explicitly selected Vishnu is unavailable', async () => {
+    installProber(['http://localhost:8930/api/health']);
+    await expect(StackVerify.run(['--only', 'vishnu', ...WS], config))
+      .rejects.toMatchObject({ oclif: { exit: 1 } });
+    expect(probed).toEqual(['http://localhost:8930/api/health']);
+  });
+
   it('probes every non-optional service INCLUDING content-api :3009 (the closed gap)', async () => {
     await StackStatus.run([...WS], config);
     expect(probed).toContain(CONTENT_URL);

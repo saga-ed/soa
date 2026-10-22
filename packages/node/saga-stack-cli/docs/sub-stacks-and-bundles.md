@@ -135,6 +135,27 @@ All native partial-stack launches now pass their mesh closure to Compose,
 including `postgres_init` when PostgreSQL is selected. Host-port checks cover
 only selected units. A service with no mesh dependencies starts no containers.
 The shared Makefile retains full-project behavior when `SERVICES` is omitted.
+## Vishnu mesh viewer
+
+Boot the dashboard's application mesh alongside the local Vishnu viewer:
+
+```bash
+ss stack up --with dash --with vishnu --dry-run
+ss stack up --with dash --with vishnu
+ss stack verify --with dash --with vishnu
+```
+
+Open <http://localhost:8930>. To attach only the viewer to an already running
+stack, use `ss stack up --with vishnu --no-seed`. The viewer adds no application
+or database dependencies and does not seed data. It reads the declared `ss`
+service topology and current local health probes; it does not imply Datadog
+traffic or RabbitMQ event projection coverage.
+
+The normal `--slot N` option offsets the viewer port by `N × 1000` and pins its
+observations to that slot. `--state-dir` is passed to its server adapter too.
+For example, slot 2's viewer is <http://localhost:10930>. A telemetry refresh
+updates health without rearranging the graph. Keep the viewer on loopback;
+this local diagnostic adapter is not a production deployment.
 
 ## Seeding
 

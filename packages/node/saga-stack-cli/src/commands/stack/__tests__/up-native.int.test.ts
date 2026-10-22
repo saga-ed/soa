@@ -181,6 +181,15 @@ afterEach(() => {
 });
 
 describe('stack up --only — native partial-stack', () => {
+  it('launches an explicitly requested Vishnu without enabling other optional services', async () => {
+    await StackUp.run([
+      '--only', 'vishnu,transcripts-api', '--no-seed', '--no-auto-pull', '--skip-prep', ...WS,
+    ], config);
+    expect(launches.map((service) => service.id)).toEqual(['vishnu']);
+    expect(launches[0]!.healthUrl).toBe('http://localhost:8930/api/health');
+    expect(launches[0]!.env.VISHNU_MODE).toBe('synthetic');
+  });
+
   it('boots the closure natively: mesh make-up, topo-wave launch, native seed (no up.sh)', async () => {
     await StackUp.run(['--only', 'scheduling-api,sessions-api', ...WS], config);
 

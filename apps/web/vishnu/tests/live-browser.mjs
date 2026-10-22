@@ -12,6 +12,7 @@ let inFlight = 0;
 let maxInFlight = 0;
 let delayMs = 0;
 let health = 'healthy';
+let runtimeState;
 let requests = 0;
 const snapshot = () => ({
   topologyVersion: extraNode ? 'synthetic-test-v2' : 'synthetic-test-v1',
@@ -42,6 +43,7 @@ const snapshot = () => ({
       band: 'mesh',
       kind: 'service',
       health,
+      runtimeState,
       freshness: 'fresh',
       errors: null,
       summary: 'HTTP health probe',
@@ -124,6 +126,15 @@ try {
   assert.equal(await viewport(), beforeViewport);
   assert.match(await page.locator('.inspector').innerText(), /Unknown/);
   assert.doesNotMatch(await page.locator('.inspector').innerText(), /Invented fixture/);
+  health = 'unknown';
+  for (const state of ['not-started', 'stopped']) {
+    runtimeState = state;
+    await page.waitForFunction(label => [...document.querySelectorAll('.system-node')].some(node =>
+      node.textContent.includes('Local API') && node.textContent.includes(label) && !node.classList.contains('critical')
+    ), state.replace('-', ' '));
+    assert.deepEqual(await geometry(), beforeGeometry);
+    assert.equal(await viewport(), beforeViewport);
+  }
   disconnected = true;
   await page.waitForFunction(
     () => document.querySelector('.status-pill')?.textContent.includes('stale'),

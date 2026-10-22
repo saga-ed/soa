@@ -10,7 +10,7 @@ describe('Vishnu local mesh collector', () => {
     const ports: number[] = [];
     const collect = createLocalMeshCollector({
       slot: 2,
-      hasPidFile: async id => id === 'saga-dash',
+      processState: async id => (id === 'saga-dash' ? 'running' : 'absent'),
       prober: {
         probe: async url => {
           urls.push(url);
@@ -53,7 +53,7 @@ describe('Vishnu local mesh collector', () => {
   it('retains a discovered service and stable topology when it goes down', async () => {
     let reachable = true;
     const collect = createLocalMeshCollector({
-      hasPidFile: async () => false,
+      processState: async () => 'absent',
       prober: { probe: async url => ({ ok: reachable && url.includes(':3010/') }) },
       tcpProbe: async () => false,
     });
@@ -68,7 +68,7 @@ describe('Vishnu local mesh collector', () => {
 
   it('includes declared dependencies of a tracked process even when none respond', async () => {
     const collect = createLocalMeshCollector({
-      hasPidFile: async id => id === 'saga-dash',
+      processState: async id => (id === 'saga-dash' ? 'running' : 'absent'),
       prober: { probe: async () => ({ ok: false }) },
       tcpProbe: async () => false,
     });
@@ -77,12 +77,16 @@ describe('Vishnu local mesh collector', () => {
     expect(snapshot.systems.some(s => s.id === 'scheduling-api')).toBe(true);
     expect(snapshot.systems.some(s => s.id === 'iam-api')).toBe(true);
     expect(snapshot.systems.some(s => s.id === 'coach-web')).toBe(false);
-    expect(snapshot.systems.every(s => s.health === 'critical')).toBe(true);
+    expect(snapshot.systems.find(s => s.id === 'saga-dash')?.health).toBe('critical');
+    expect(snapshot.systems.find(s => s.id === 'iam-api')).toMatchObject({
+      health: 'unknown',
+      runtimeState: 'not-started',
+    });
   });
 
   it('returns an empty live mesh when nothing is tracked or reachable', async () => {
     const snapshot = await createLocalMeshCollector({
-      hasPidFile: async () => false,
+      processState: async () => 'absent',
       prober: { probe: async () => ({ ok: false }) },
       tcpProbe: async () => false,
     })();
@@ -115,5 +119,59 @@ describe('Vishnu local mesh collector', () => {
         server.close(error => (error ? reject(error) : resolve()))
       );
     }
+  });
+});
+
+describe('partial-stack lifecycle regression', () => {
+  it('ignores old exited or unverified PID records in a reused slot', async () => {
+    const snapshot = await createLocalMeshCollector({
+      slot: 3,
+      processState: async id => (id === 'saga-dash' ? 'exited' : 'unverified'),
+      prober: { probe: async url => ({ ok: url.includes(':6010/') }) },
+      tcpProbe: async () => true,
+    })();
+    expect(snapshot.systems.filter(s => !s.id.startsWith('infra:')).map(s => s.id)).toEqual([
+      'iam-api',
+    ]);
+    expect(snapshot.systems.every(s => s.health === 'healthy')).toBe(true);
+  });
+
+  it('keeps an observed crash critical, but an explicit stop neutral without removing topology', async () => {
+    let state: 'running' | 'exited' | 'absent' = 'running';
+    let healthy = true;
+    const collect = createLocalMeshCollector({
+      processState: async id => (id === 'iam-api' ? state : 'absent'),
+      prober: { probe: async url => ({ ok: healthy && url.includes(':3010/') }) },
+      tcpProbe: async () => true,
+    });
+    const first = await collect();
+    healthy = false;
+    state = 'exited';
+    expect((await collect()).systems.find(s => s.id === 'iam-api')).toMatchObject({
+      health: 'critical',
+      runtimeState: 'unhealthy',
+    });
+    state = 'absent';
+    const stopped = await collect();
+    expect(stopped.systems.find(s => s.id === 'iam-api')).toMatchObject({
+      health: 'unknown',
+      runtimeState: 'stopped',
+    });
+    expect(stopped.topologyVersion).toEqual(first.topologyVersion);
+    expect(stopped.relationships).toEqual(first.relationships);
+  });
+
+  it('discovers an unhealthy HTTP responder even without a managed PID', async () => {
+    const snapshot = await createLocalMeshCollector({
+      processState: async () => 'absent',
+      prober: {
+        probe: async url => (url.includes(':3010/') ? { ok: false, status: 503 } : { ok: false }),
+      },
+      tcpProbe: async () => true,
+    })();
+    expect(snapshot.systems.find(s => s.id === 'iam-api')).toMatchObject({
+      health: 'critical',
+      runtimeState: 'unhealthy',
+    });
   });
 });

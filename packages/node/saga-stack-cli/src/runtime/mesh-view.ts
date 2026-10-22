@@ -5,13 +5,16 @@
  */
 import { busRoles } from './mesh-bus-roles.js';
 import { httpProtocol } from './mesh-protocols.js';
-import { access } from 'node:fs/promises';
+import { readFile, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createConnection } from 'node:net';
 import { deriveInstance, slotExcludedServices } from '../core/derive-instance.js';
 import { manifest } from '../core/manifest/index.js';
 import type { ServiceId, MeshId } from '../core/manifest/index.js';
 import { makeRealProber, type HealthProber } from './health.js';
+
+export type ProcessState = 'running' | 'exited' | 'absent' | 'unverified';
+export type RuntimeState = 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unknown';
 
 type Health = 'healthy' | 'critical' | 'unknown';
 interface Evidence {
@@ -20,6 +23,7 @@ interface Evidence {
   url?: string;
 }
 interface System {
+  runtimeState?: RuntimeState;
   eventBus?: { publishes: boolean; consumes: boolean };
   id: string;
   label: string;
@@ -62,8 +66,54 @@ export interface MeshViewOptions {
   stateDir?: string;
   prober?: HealthProber;
   tcpProbe?: (port: number) => Promise<boolean>;
-  hasPidFile?: (id: ServiceId) => Promise<boolean>;
+  processState?: (id: ServiceId) => Promise<ProcessState>;
   now?: () => Date;
+}
+
+/** PID files are historical records, not proof of a currently running service.
+ * Verify both service directory and slot-specific port before trusting a live PID.
+ * Unreadable/non-Linux process metadata is unknown, never an asserted outage.
+ */
+export async function readServiceProcessState(
+  stateDir: string,
+  id: ServiceId,
+  port: number
+): Promise<ProcessState> {
+  let raw: string;
+  try {
+    raw = (await readFile(join(stateDir, `${id}.pid`), 'utf8')).trim();
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unverified';
+  }
+  if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) return 'unverified';
+  try {
+    process.kill(Number(raw), 0);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'exited' : 'unverified';
+  }
+  try {
+    const service = manifest.services[id];
+    const [cwd, launch] = await Promise.all([
+      readlink(`/proc/${raw}/cwd`),
+      readFile(`/proc/${raw}/${service.portEnvVar ? 'environ' : 'cmdline'}`, 'utf8'),
+    ]);
+    if (!cwd.endsWith(`/${service.subpath}`)) return 'unverified';
+    if (service.portEnvVar) {
+      if (!launch.split('\0').includes(`${service.portEnvVar}=${port}`)) return 'unverified';
+    } else {
+      // Frontends receive --port on the command line rather than in PORT.
+      const args = launch.split(/[\0\s]+/);
+      if (
+        !args.some(
+          (arg, i) => arg === `--port=${port}` || (arg === '--port' && args[i + 1] === String(port))
+        )
+      )
+        return 'unverified';
+    }
+    return 'running';
+  } catch {
+    return 'unverified';
+  }
 }
 
 async function tcpProbe(port: number): Promise<boolean> {
@@ -90,19 +140,19 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
   const prober = options.prober ?? makeRealProber({ timeoutMs: 1500, followRedirects: false });
   const probeTcp = options.tcpProbe ?? tcpProbe;
   const now = options.now ?? (() => new Date());
-  const hasPidFile =
-    options.hasPidFile ??
-    (async (id: ServiceId) => {
-      try {
-        await access(join(stateDir, `${id}.pid`));
-        return true;
-      } catch {
-        return false;
-      }
-    });
+  const processState =
+    options.processState ??
+    (id =>
+      readServiceProcessState(
+        stateDir,
+        id,
+        instance.portOverrides[id] ?? manifest.services[id].port
+      ));
   const excluded = new Set(slotExcludedServices(instance.slot));
   const services = Object.values(manifest.services).filter(s => !excluded.has(s.id));
   const retained = new Set<ServiceId>();
+  const observed = new Set<ServiceId>();
+  const managed = new Set<ServiceId>();
 
   return async (): Promise<LocalMeshSnapshot> => {
     const observedAt = now().toISOString();
@@ -110,9 +160,13 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
       services.map(async service => {
         const port = instance.portOverrides[service.id] ?? service.port;
         const url = `http://127.0.0.1:${port}${service.healthPath}`;
-        const [probe, tracked] = await Promise.all([prober.probe(url), hasPidFile(service.id)]);
-        if (probe.ok || tracked) retained.add(service.id);
-        return { service, url, probe };
+        const [probe, process] = await Promise.all([prober.probe(url), processState(service.id)]);
+        if (process === 'running') managed.add(service.id);
+        if (probe.ok || probe.status || process === 'running') {
+          retained.add(service.id);
+          observed.add(service.id);
+        }
+        return { service, url, probe, process };
       })
     );
     // Include declared dependencies even when they never started successfully.
@@ -125,31 +179,72 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
     };
     for (const id of [...retained]) include(id);
     const visible = rows.filter(row => retained.has(row.service.id));
-    const systems: System[] = visible.map(({ service, url, probe }) => ({
-      id: service.id,
-      label: service.id,
-      band: service.isFrontend ? 'application' : 'mesh',
-      ...(busRoles[service.id] ? { eventBus: { publishes: busRoles[service.id]!.publishes, consumes: busRoles[service.id]!.consumes } } : {}),
-      kind: service.isFrontend ? 'Web application' : 'API service',
-      health: probe.ok ? 'healthy' : 'critical',
-      freshness: 'fresh',
-      errors: null,
-      summary: probe.ok
-        ? 'Local HTTP probe succeeded. This establishes endpoint reachability, not request success rates or end-to-end business health. Process and checkout identity are not verified by this probe; use ss stack verify for that check.'
-        : 'Local HTTP probe failed. The declared service remains visible; inspect its ss log and startup state.',
-      evidence: [
-        ...(busRoles[service.id] ? [{ label: 'Event bus capability (source-verified)', description: busRoles[service.id]!.evidence + ' Declared capability, not observed traffic or consumer health.' }] : []),
-        {
-          label: 'HTTP health probe',
-          description: `GET ${url} — ${probe.status ? `HTTP ${probe.status}` : 'no HTTP response'}. Observed ${observedAt}.`,
-          url,
-        },
-        {
-          label: 'Declared service',
-          description: `ss manifest: ${service.id}, repo ${service.repo}. Slot ${instance.slot}. No production service queried.`,
-        },
-      ],
-    }));
+    const systems: System[] = visible.map(({ service, url, probe, process }) => {
+      const runtimeState: RuntimeState = probe.ok
+        ? 'reachable'
+        : probe.status || process === 'running'
+          ? 'unhealthy'
+          : !observed.has(service.id)
+            ? 'not-started'
+            : process === 'absent' && managed.has(service.id)
+              ? 'stopped'
+              : process === 'unverified'
+                ? 'unknown'
+                : 'unhealthy';
+      return {
+        runtimeState,
+        id: service.id,
+        label: service.id,
+        band: service.isFrontend ? 'application' : 'mesh',
+        ...(busRoles[service.id]
+          ? {
+              eventBus: {
+                publishes: busRoles[service.id]!.publishes,
+                consumes: busRoles[service.id]!.consumes,
+              },
+            }
+          : {}),
+        kind: service.isFrontend ? 'Web application' : 'API service',
+        health:
+          runtimeState === 'reachable'
+            ? 'healthy'
+            : runtimeState === 'unhealthy'
+              ? 'critical'
+              : 'unknown',
+        freshness: 'fresh',
+        errors: null,
+        summary: probe.ok
+          ? 'Local HTTP probe succeeded. This establishes endpoint reachability, not request success rates or end-to-end business health. Process and checkout identity are not verified by this probe; use ss stack verify for that check.'
+          : runtimeState === 'not-started'
+            ? 'Declared dependency has not been observed running in this viewer session. No active managed process was verified; this is not a confirmed outage.'
+            : runtimeState === 'stopped'
+              ? 'The previously managed service has no launch PID record and is not responding. It remains visible as stopped.'
+              : runtimeState === 'unknown'
+                ? 'The process record could not be verified. The endpoint is not responding; lifecycle state is unknown.'
+                : 'An observed service is not responding successfully. Inspect its ss log and startup state.',
+        evidence: [
+          ...(busRoles[service.id]
+            ? [
+                {
+                  label: 'Event bus capability (source-verified)',
+                  description:
+                    busRoles[service.id]!.evidence +
+                    ' Declared capability, not observed traffic or consumer health.',
+                },
+              ]
+            : []),
+          {
+            label: 'HTTP health probe',
+            description: `GET ${url} — ${probe.status ? `HTTP ${probe.status}` : 'no HTTP response'}. Observed ${observedAt}.`,
+            url,
+          },
+          {
+            label: 'Declared service',
+            description: `ss manifest: ${service.id}, repo ${service.repo}. Slot ${instance.slot}. No production service queried.`,
+          },
+        ],
+      };
+    });
     const relationships: Relationship[] = [];
     const add = (
       id: string,
@@ -173,7 +268,17 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
         health: 'unknown',
         freshness: 'missing',
         summary: `${description} This is declared wiring, not an observed request or event. Traffic, endpoint/event count, and projection completion are not measured.`,
-        evidence: [{ label: 'ss service manifest', description }, ...(kind === 'http' ? [{ label: 'Client transport evidence', description: httpProtocol(source, target).evidence }] : [])],
+        evidence: [
+          { label: 'ss service manifest', description },
+          ...(kind === 'http'
+            ? [
+                {
+                  label: 'Client transport evidence',
+                  description: httpProtocol(source, target).evidence,
+                },
+              ]
+            : []),
+        ],
       });
     };
     const meshIds = new Set<MeshId>();

@@ -145,3 +145,18 @@ check, follow [the I#536 test runbook](../../../claude/projects/gh_536/docs/synt
 The check leaves two identifiable synthetic outbox rows, a successful projection,
 deduplication records and the expected failed event in the business DLQ. Its temporary
 failure trigger is removed in `finally`. It never resets/seeds the slot.
+
+## Partial-stack lifecycle states
+
+Discovery requires a responding local endpoint or a live managed process whose
+service directory and slot port match its PID record. Historical, malformed and
+reused PID records alone do not add services to the active mesh. On Linux, process
+verification uses `/proc`; inaccessible metadata is unverified, not proof of failure.
+
+Declared dependencies that have never been observed running in this viewer session
+are neutral **not started** nodes. A previously managed service whose PID record
+was removed is **stopped**, also neutral. An observed service that exits with its
+record still present, or whose endpoint responds unsuccessfully, remains
+**unhealthy**. Existing nodes and edges remain stable across those transitions.
+Without current launch intent, a dead historical PID alone cannot establish an
+unexpected outage across viewer restarts; it is excluded from discovery.

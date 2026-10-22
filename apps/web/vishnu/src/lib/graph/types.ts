@@ -7,6 +7,7 @@ export interface Evidence {
   url?: string;
 }
 export interface System {
+  runtimeState?: 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unknown';
   eventBus?: { publishes: boolean; consumes: boolean };
   id: string;
   label: string;

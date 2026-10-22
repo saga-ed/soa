@@ -147,3 +147,24 @@ services continued running throughout. The final slot verification passed 4/4.
 Final transport review added a bounded close handshake and forced socket cleanup;
 a hung-close unit test and the real pipeline using the isolated service transport
 both passed. Integration review: [SOA PR#543](https://github.com/saga-ed/soa/pull/543).
+
+
+## Reused-slot discovery correction (2026-10-22)
+
+The user observed six critical nodes from PID files left by an October 7 run.
+Those processes did not exist and were outside the selected telemetry slice.
+The collector now verifies PID liveness, service working directory and slot port
+before treating a process record as discovery evidence. It exposes neutral
+not-started/stopped states separately from observed service failures. Regression
+coverage includes stale/reused PIDs, wrong slots, missing dependencies, explicit
+stop and crash transitions, HTTP 503 responders, and frontend command-line ports.
+Vishnu alone was restarted; the six historical records were deliberately retained
+to demonstrate that the fix does not depend on manual cleanup. The live result
+contains four healthy services and three healthy infrastructure nodes.
+
+Validation for the discovery correction: 15 focused collector/process tests,
+19 Vishnu tests, CLI build and Svelte type checks passed. Live browser checks
+verified neutral lifecycle labels and stable layout; the real slot rendered seven
+nodes with zero critical borders. The broad CLI run passed 1,893 tests and hit two
+unrelated port/timing failures; both affected suites passed on isolated rerun.
+Slot verification remained 4/4 healthy after the Vishnu-only restart.

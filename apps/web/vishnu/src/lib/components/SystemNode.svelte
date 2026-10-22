@@ -24,7 +24,7 @@
  <Handle type="target" position={Position.Left} />
  <div class="node-kind">{data.system.kind}</div>
  <strong>{data.system.label}</strong>
- <div class="node-status"><span>{symbols[data.system.health]} {data.live && data.system.health === 'healthy' ? 'reachable' : data.system.health}</span><span>{data.system.freshness === 'fresh' ? data.live ? 'probe' : `${data.system.errors ?? '—'} errors` : data.system.freshness}</span></div>
+ <div class="node-status"><span>{symbols[data.system.health]} {data.live && data.system.runtimeState ? data.system.runtimeState.replace('-', ' ') : data.live && data.system.health === 'healthy' ? 'reachable' : data.system.health}</span><span>{data.system.freshness === 'fresh' ? data.live ? 'probe' : `${data.system.errors ?? '—'} errors` : data.system.freshness}</span></div>
  {#if participation}
   <button class="bus-badge nodrag nopan" aria-label={`Inspect event bus participation for ${data.system.label}`} onclick={(event) => { event.stopPropagation(); data.onselect(data.system.id); }} title={busRole(participation)}>{busBadge(participation)}</button>
  {/if}

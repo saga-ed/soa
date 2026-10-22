@@ -48,7 +48,7 @@ export class DuplicateHandlerError extends Error {
 export interface EventHandler<T> {
     eventType: string;
     eventVersion: number;
-    payloadSchema: ZodType<T>;
+    payloadSchema: Pick<ZodType<T>, 'parse'>;
     /**
      * Run the projection / side effect within the supplied tx-scoped client.
      * The consumer guarantees: (a) the consumed_events row was just inserted,

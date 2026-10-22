@@ -22,7 +22,7 @@ export class IsolatedRabbitMqReportTransport implements ReportTransport {
     };
     signal.addEventListener('abort', close, { once: true });
     try {
-      connection = await connect(this.url, { timeout: this.timeoutMs });
+      connection = await connect(this.url, { timeout: this.timeoutMs, signal });
       connection.on('error', () => {});
       signal.throwIfAborted();
       await new RabbitMqReportTransport({

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { context, propagation } from '@opentelemetry/api';
 import { z } from 'zod';
+import type { ZodType as ZodV3Type } from 'zod/v3';
 
 export { applyPreviewTag } from './preview-tag.js';
 
@@ -43,7 +44,7 @@ export type EventEnvelope = z.infer<typeof EventEnvelopeSchema>;
 export interface PayloadDescriptor<T> {
     eventType: string;
     eventVersion: number;
-    payloadSchema: z.ZodType<T>;
+    payloadSchema: z.ZodType<T> | ZodV3Type<T>;
 }
 
 /**

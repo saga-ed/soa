@@ -46,6 +46,8 @@ import type { Lane, Manifest, RepoKey, ServiceId } from './manifest/index.js';
  * runtime context builder is the one place these become host-specific.
  */
 export interface LaunchTokens {
+  EVENT_STATS_DEPLOYMENT: string;
+  EVENT_STATS_BROKER: string;
   AP_API_PORT: string;
   AP_DASH_PORT: string;
   AP_STUDENT_PORT: string;
@@ -739,6 +741,8 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
   const recordingsApiPort = inputs.recordingsApiPort ?? 8444;
 
   const tokens: LaunchTokens = {
+    EVENT_STATS_DEPLOYMENT: `slot-${(inputs.meshOffset ?? 0) / 1000}`,
+    EVENT_STATS_BROKER: `soa-s${(inputs.meshOffset ?? 0) / 1000}`,
     AP_API_PORT: String(ports['ap-api']),
     AP_DASH_PORT: String(ports['ap-dash']),
     AP_STUDENT_PORT: String(ports['ap-student']),

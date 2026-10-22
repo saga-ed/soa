@@ -55,10 +55,17 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // iam-api genuinely needs redis (lockout / rate-limit / JWT+refresh stores).
     // In mesh[] so a partial `--only iam-api` closure brings redis up; the
     // launch.env below points it at the slot's redis (base 6379 at slot 0).
-    mesh: ['postgres', 'redis'],
+    mesh: ['postgres', 'redis', 'rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
       env: {
+        EVENT_STATS_ENABLED: 'true',
+        EVENT_STATS_ENVIRONMENT: 'synthetic',
+        EVENT_STATS_DEPLOYMENT: '${EVENT_STATS_DEPLOYMENT}',
+        EVENT_STATS_BROKER: '${EVENT_STATS_BROKER}',
+        EVENT_STATS_VHOST: '/',
+        EVENT_STATS_REVISION: 'working-tree',
+        EVENT_STATS_INTERVAL_MS: '5000',
         PORT: '${IAM_PORT}',
         // soa-env R4 (local) capability keys; the service refuses to boot without them.
         DB_CREDENTIAL_SOURCE: 'static',
@@ -300,6 +307,13 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     launch: {
       cmd: 'pnpm dev',
       env: {
+        EVENT_STATS_ENABLED: 'true',
+        EVENT_STATS_ENVIRONMENT: 'synthetic',
+        EVENT_STATS_DEPLOYMENT: '${EVENT_STATS_DEPLOYMENT}',
+        EVENT_STATS_BROKER: '${EVENT_STATS_BROKER}',
+        EVENT_STATS_VHOST: '/',
+        EVENT_STATS_REVISION: 'working-tree',
+        EVENT_STATS_INTERVAL_MS: '5000',
         NODE_ENV: 'development',
         DATABASE_URL: '${PROGRAMS_DB_URL}',
         IAM_API_URL: '${IAM_URL}',
@@ -359,6 +373,13 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     launch: {
       cmd: 'pnpm dev',
       env: {
+        EVENT_STATS_ENABLED: 'true',
+        EVENT_STATS_ENVIRONMENT: 'synthetic',
+        EVENT_STATS_DEPLOYMENT: '${EVENT_STATS_DEPLOYMENT}',
+        EVENT_STATS_BROKER: '${EVENT_STATS_BROKER}',
+        EVENT_STATS_VHOST: '/',
+        EVENT_STATS_REVISION: 'working-tree',
+        EVENT_STATS_INTERVAL_MS: '5000',
         NODE_ENV: 'development',
         DATABASE_URL: '${SCHEDULING_DB_URL}',
         IAM_API_URL: '${IAM_URL}',

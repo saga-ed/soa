@@ -59,6 +59,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     launch: {
       cmd: 'pnpm dev',
       env: {
+        NODE_ENV: 'development',
         EVENT_STATS_ENABLED: 'true',
         EVENT_STATS_ENVIRONMENT: 'synthetic',
         EVENT_STATS_DEPLOYMENT: '${EVENT_STATS_DEPLOYMENT}',

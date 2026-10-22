@@ -18,6 +18,7 @@
 import type { DatabaseDef, DbId } from './types.js';
 
 export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
+  vishnu: { name: 'vishnu', engine: 'postgres', migrate: null, ownerRole: 'vishnu', ownerPw: 'vishnu', resettable: true, resetMode: 'truncate', meshProvisioned: true },
   iam_local: {
     name: 'iam_local',
     engine: 'postgres',

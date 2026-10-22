@@ -58,6 +58,10 @@ export interface LaunchTokens {
   // ── ports, string form (used as `${…}` inside launch env) ──
   /** iam-api port — up.sh `IAM_PORT` (3010). */
   IAM_PORT: string;
+  VISHNU_DB_URL: string;
+  VISHNU_SLOT: string;
+  VISHNU_STATE_DIR: string;
+  VISHNU_SOA_ROOT: string;
   /** sis-api port — up.sh `SIS_PORT` (3100). */
   SIS_PORT: string;
   /** authz-api port (3200) — sessions-api's `AUTHZ_API_URL` (soa#402). authz-api's
@@ -647,6 +651,8 @@ export interface LaunchContextInputs {
    *  passes `dirname(resolveVendorScript('rtsm-fleet-local.json'))`. Replaces up.sh's
    *  `$SCRIPT_DIR`/synthetic-dev tool dir for rtsm's non-tunnel FLEET_CONFIG_PATH. */
   vendorDir: string;
+  /** Runtime state directory used by local diagnostic viewers. */
+  stateDir?: string;
   /** Absolute path to a GENERATED per-slot rtsm fleet file (endpoint swapped to the
    *  slot's rtsm port). Absent ⇒ `RTSM_FLEET_PATH` defaults to the vendored file
    *  (slot 0, byte-identical). Set by `up` at slot > 0 (soa#271). */
@@ -751,6 +757,11 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
     AP_STUDENT_URL: `http://127.0.0.1:${ports['ap-student']}`,
     AP_DB_URL: pgUrl('ap', pgPort, m),
     // ports (string form)
+    VISHNU_STATE_DIR: inputs.stateDir ?? ((inputs.meshOffset ?? 0) === 0
+      ? '/tmp/sds-synthetic' : `/tmp/sds-synthetic-s${(inputs.meshOffset ?? 0) / 1000}`),
+    VISHNU_DB_URL: pgUrl('vishnu', pgPort, m),
+    VISHNU_SLOT: String((inputs.meshOffset ?? 0) / 1000),
+    VISHNU_SOA_ROOT: inputs.repoRoots.SOA,
     IAM_PORT: String(ports['iam-api']),
     SIS_PORT: String(ports['sis-api']),
     AUTHZ_PORT: String(ports['authz-api']),

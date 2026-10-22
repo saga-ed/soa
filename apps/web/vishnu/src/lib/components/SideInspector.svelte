@@ -1,0 +1,40 @@
+<script lang="ts">
+ import { connectionLabel } from '$lib/graph/presentation';
+ import type { MeshSnapshot } from '$lib/graph/types';
+ let { snapshot, selected, onselect }: { snapshot: MeshSnapshot; selected: string | null; onselect: (id: string | null) => void } = $props();
+ let item = $derived(snapshot.systems.find(s => s.id === selected) ?? snapshot.relationships.find(r => r.id === selected));
+ let relationships = $derived(snapshot.relationships.filter(r => r.source === selected || r.target === selected || (selected != null && r.via?.includes(selected))));
+ let expanded = $state(false);
+ $effect(() => { selected; expanded = false; });
+</script>
+<aside id="selection-inspector" class="inspector" aria-label="Selection inspector">
+ <div class="inspector-heading"><span class="eyebrow">INSPECTOR</span>{#if item}<button aria-label="Clear selection" onclick={() => onselect(null)}>×</button>{/if}</div>
+ {#if item}
+  <h2>{item.label}</h2><div class="status-pill {item.health}">{snapshot.mode === 'live' && item.health === 'healthy' ? 'reachable' : item.health} · {item.freshness}</div>
+  <p>{item.summary}</p>
+  <dl class="metrics">
+   <div><dt>Type</dt><dd>{'source' in item ? connectionLabel(item) : item.kind}</dd></div>
+   {#if 'rate' in item}<div><dt>Traffic</dt><dd>{item.rate == null ? 'Unknown' : `${item.rate}/s`}</dd></div>{#if item.kind === 'http'}<div><dt>p95 latency</dt><dd>{item.latencyMs == null ? 'Unknown' : `${item.latencyMs} ms`}</dd></div>{/if}<div><dt>{item.kind === 'event' ? 'Distinct event types' : item.kind === 'http' ? 'Endpoints' : 'Database operations'}</dt><dd>{item.count ?? 'Unknown'}</dd></div>{:else}<div><dt>Observed errors</dt><dd>{item.errors == null ? 'Unknown' : `${item.errors}`}</dd></div>{/if}
+  </dl>
+  {#if item && !('source' in item) && (item.eventBus || relationships.some(r => r.kind === 'event'))}
+   <h3>Event bus participation</h3>
+   {#if item.eventBus}<p>{item.eventBus.publishes ? 'MQ-P · Publishes events' : ''}{item.eventBus.publishes && item.eventBus.consumes ? ' · ' : ''}{item.eventBus.consumes ? 'MQ-C · Consumes events' : ''}</p>{/if}
+   <p>Published / consumed event totals and rates: Unknown. Participant telemetry is not connected; logical paths cannot be summed into message totals.</p>
+   <div class="relationship-list">{#each relationships.filter(r => r.kind === 'event') as r}<button onclick={() => onselect(r.id)}><strong>{r.source === selected ? '↑ Publishes' : r.target === selected ? '↓ Consumes' : '↔ Routes'}: {r.label}</strong><small>{snapshot.systems.find(s => s.id === r.source)?.label} → {snapshot.systems.find(s => s.id === r.target)?.label}</small></button>{/each}</div>
+   <p>Message consumption does not establish successful projection completion.</p>
+  {/if}
+  <h3>Evidence</h3>{#each item.evidence as evidence}<section class="evidence"><strong>{evidence.label}</strong><p>{evidence.description}</p>{#if evidence.url && /^https?:\/\//.test(evidence.url)}<a href={evidence.url} target="_blank" rel="noreferrer">Open evidence ↗</a>{/if}</section>{/each}
+  {#if !item.evidence.length}<p>No evidence supplied. Unknown does not mean healthy.</p>{/if}
+  <button class="details-button" aria-expanded={expanded} onclick={() => expanded = !expanded}>{expanded ? 'Hide' : 'Show'} relationship details</button>
+  {#if expanded}
+   {#if 'source' in item}<div class="relationship-list"><button onclick={() => onselect(item && 'source' in item ? item.source : null)}>Source: {snapshot.systems.find(s => 'source' in item! && s.id === item!.source)?.label}</button><button onclick={() => onselect(item && 'target' in item ? item.target : null)}>Target: {snapshot.systems.find(s => 'target' in item! && s.id === item!.target)?.label}</button></div>
+   {:else}<div class="relationship-list">{#each relationships as r}<button onclick={() => onselect(r.id)}><strong>{r.label}</strong><small>{r.kind} · {r.health} · {r.freshness}</small></button>{/each}</div>{/if}
+  {/if}
+ {:else}
+  <h2>Follow the signal</h2><p>Select a system or connection to inspect its health and evidence without losing your place.</p>
+  <h3>Systems needing attention</h3><div class="relationship-list">{#each snapshot.systems.filter(s => s.health !== 'healthy') as s}<button onclick={() => onselect(s.id)}><strong>{s.label}</strong><small>{s.health} · {s.freshness}</small></button>{:else}<p>{snapshot.mode === 'live' ? 'All probed systems are reachable.' : 'All fixture systems are healthy.'}</p>{/each}</div>
+  <h3>Reading the mesh</h3><p>Border + status: system health.<br/>Line width: endpoint / event type / operation count.<br/>Blue intensity: traffic volume.<br/>Dashed lines: stale or missing telemetry.<br/>Labels: HTTP/tRPC, HTTP/REST, HTTP/tRPC + REST, HTTP/? (unverified), DB; ▲ or ! marks trouble.</p><p>White gaps at crossings mean paths cross without connecting. MQ badges and the RabbitMQ participant panel expose logical publisher-to-consumer relationships; event edges are hidden.</p>
+ {/if}
+ <p class="fixture-note">Observation: <time datetime={snapshot.observedAt}>{new Date(snapshot.observedAt).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}</time><br/>{#if snapshot.mode === 'fixture'}Metrics and observed error counts cover the preceding {snapshot.observationWindowSeconds / 60} minutes.{:else}Health reflects local probes at this observation time. A successful probe does not establish end-to-end service health.{/if}</p>
+ <p class="fixture-note">{#if snapshot.mode === 'fixture'}Invented fixture evidence. No live telemetry is connected.{:else}Declared relationships come from the local stack configuration. Traffic, latency, endpoint counts, and application errors remain unknown until instrumented.{/if}</p>
+</aside>

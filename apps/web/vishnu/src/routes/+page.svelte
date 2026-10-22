@@ -1,0 +1,91 @@
+<script lang="ts">
+ import { onMount } from 'svelte';
+ import { createFixture } from '$lib/fixtures/mesh';
+ import { createLayoutWorker } from '$lib/graph/worker-layout';
+ import type { MeshLayout, MeshSnapshot } from '$lib/graph/types';
+ import MeshGraph from '$lib/components/MeshGraph.svelte';
+ import SideInspector from '$lib/components/SideInspector.svelte';
+ let scenario = $state<'overview' | 'incident' | 'missing'>('incident');
+ let liveSnapshot = $state<MeshSnapshot | null>(null);
+ let mode = $state<'loading' | 'fixture' | 'live'>('loading');
+ let disconnected = $state('');
+ let snapshot = $derived(mode === 'fixture' ? createFixture(scenario) : liveSnapshot);
+ let sourceLabel = $derived(mode === 'fixture' ? 'Fixture preview' : mode === 'loading' ? 'Connecting…' : `${snapshot?.environment ?? 'Synthetic dev'}${snapshot?.slot != null ? ` · slot ${snapshot.slot}` : ''}`);
+ let layout = $state<MeshLayout | null>(null);
+ let failure = $state('');
+ let selected = $state<string | null>(null);
+ let search = $state('');
+ let focused = $state(false);
+ let showInspector = $state(true);
+ let showList = $state(false);
+ let selectedLabel = $derived(snapshot?.systems.find(s => s.id === selected)?.label ?? snapshot?.relationships.find(r => r.id === selected)?.label ?? 'None');
+ let matches = $derived(snapshot?.systems.filter(s => s.label.toLowerCase().includes(search.toLowerCase())) ?? []);
+ onMount(() => {
+  const worker = createLayoutWorker();
+  let active = true;
+  let timer: ReturnType<typeof setTimeout>;
+  let request: AbortController | undefined;
+  let apiUrl = '/api/mesh';
+  let pollMs = 15000;
+  const fetchJson = async (url: string) => {
+   request = new AbortController();
+   const timeout = setTimeout(() => request?.abort(), 10000);
+   try {
+    const response = await fetch(url, { cache: 'no-store', signal: request.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+   } finally { clearTimeout(timeout); }
+  };
+  const poll = async () => {
+   try {
+    const next: MeshSnapshot = await fetchJson(apiUrl);
+    if (next.mode !== 'live' || !Array.isArray(next.systems) || !Array.isArray(next.relationships) || !next.topologyVersion || !Number.isFinite(Date.parse(next.observedAt))) throw new Error('Invalid live mesh response');
+    const nextLayout = !layout || next.topologyVersion !== liveSnapshot?.topologyVersion ? await worker.layout(next) : layout;
+    if (!active) return;
+    layout = nextLayout;
+    liveSnapshot = next;
+    disconnected = '';
+    failure = '';
+    if (selected && !next.systems.some(s => s.id === selected) && !next.relationships.some(r => r.id === selected)) selected = null;
+   } catch (error) {
+    if (!active) return;
+    disconnected = `Live collector unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    if (liveSnapshot) liveSnapshot = { ...liveSnapshot, systems: liveSnapshot.systems.map(s => ({ ...s, freshness: 'stale' })), relationships: liveSnapshot.relationships.map(r => ({ ...r, freshness: 'stale' })) };
+   } finally { if (active) timer = setTimeout(poll, pollMs); }
+  };
+  const start = async () => {
+   const requested = new URLSearchParams(location.search).get('mode');
+   let config: { mode?: string; apiUrl?: string; pollIntervalMs?: number } = {};
+   if (requested !== 'fixture') {
+    try { config = await fetchJson('/config.json'); } catch { /* Static fixture builds have no runtime config. */ }
+   }
+   if (!active) return;
+   mode = requested === 'fixture' ? 'fixture' : requested === 'live' || config.mode === 'live' || import.meta.env.VITE_VISHNU_MODE === 'live' ? 'live' : 'fixture';
+   if (mode === 'live') {
+    apiUrl = config.apiUrl || '/api/mesh';
+    pollMs = Math.max(3000, Number(config.pollIntervalMs) || 15000);
+    await poll();
+   } else {
+    try { const result = await worker.layout(createFixture('overview')); if (active) layout = result; }
+    catch (error) { if (active) failure = String(error); }
+   }
+  };
+  void start();
+  return () => { active = false; clearTimeout(timer); request?.abort(); worker.terminate(); };
+ });
+</script>
+<svelte:head><title>Vishnu · Saga mesh</title><meta name="description" content="Saga mesh topology, system health, and evidence." /></svelte:head>
+<svelte:window onkeydown={(event) => { if (event.key === 'Escape') { selected = null; search = ''; } }} />
+<div class="app-shell" class:focused>
+ <nav class="app-nav" aria-label="Main"><div class="nav-context"><a class="vishnu-brand" href="/" aria-label="Vishnu home"><img src="/vishnu-logo-on-dark.png" alt="Vishnu — Saga Mesh Observability" width="2172" height="724" /></a></div><a class="active-nav" aria-current="page" href="/">◈ &nbsp; Mesh overview</a><div class="nav-bottom">{sourceLabel}<br/><small>{mode === 'fixture' ? 'Design & interaction study' : 'Local stack health probes'}</small></div></nav>
+ <div class="app-main"><header class="topbar"><h1>Mesh overview</h1><span class="preview-badge">{sourceLabel}</span></header>
+ <main id="mesh-main"><section class="intro"><div><span class="eyebrow">SAGA SYSTEMS</span><h2>See the connections.<br/>Find the trouble.</h2></div><p>Explore declared topology alongside observed signals.<br/>Select any system or path to follow the evidence.</p></section>
+ {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for the local stack collector.'} Retrying automatically.{:else}Local health probes · declared stack connections · traffic and error measurements unavailable{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
+ {#if snapshot}
+ <div class="toolbar">{#if mode === 'fixture'}<label>Fixture scenario <select bind:value={scenario}><option value="overview">Healthy overview</option><option value="incident">Consumer incident</option><option value="missing">Missing telemetry</option></select></label>{/if}<div class="search"><label for="system-search">Find a system</label><input id="system-search" type="search" placeholder="Search systems…" bind:value={search} />{#if search}<div class="search-results">{#each matches as s}<button onclick={() => { selected = s.id; search = ''; }}>{s.label}</button>{:else}<p>No matching systems</p>{/each}</div>{/if}</div><div class="view-actions"><button aria-pressed={focused} onclick={() => focused = !focused}>{focused ? 'Exit focus' : 'Focus canvas'}</button><button aria-expanded={showInspector} aria-controls="selection-inspector" onclick={() => showInspector = !showInspector}>{showInspector ? 'Hide inspector' : 'Show inspector'}</button><button aria-expanded={showList} aria-controls="mesh-list" onclick={() => showList = !showList}>{showList ? 'Hide list' : 'Browse as list'}</button></div><span class="summary-count">{snapshot.systems.length} systems · {snapshot.relationships.length} paths</span></div>
+ <p class="sr-only" role="status" aria-live="polite">Selected: {selectedLabel}. {showInspector ? 'Details are in the selection inspector.' : 'Use Show inspector for details.'}</p>
+ {#if showList}<section class="mesh-list" id="mesh-list" aria-label="Mesh systems and relationships"><div><h3>Systems</h3><ul>{#each snapshot.systems as system}<li><button aria-pressed={selected === system.id} onclick={() => selected = system.id}>{system.label}<small>{system.kind} · {mode === 'live' && system.health === 'healthy' ? 'reachable' : system.health} · {system.freshness}</small></button></li>{/each}</ul></div><div><h3>Relationships</h3><ul>{#each snapshot.relationships as relationship}<li><button aria-pressed={selected === relationship.id} onclick={() => selected = relationship.id}>{relationship.label}<small>{snapshot?.systems.find(s => s.id === relationship.source)?.label} → {snapshot?.systems.find(s => s.id === relationship.target)?.label}<br/>{relationship.kind} · {relationship.health} · {relationship.freshness}</small></button></li>{/each}</ul></div></section>{/if}
+ <div class="workspace" class:inspector-hidden={!showInspector}><section class="graph-panel" aria-label="Interactive service mesh"><div class="band-labels"><span>DATA SYSTEMS</span><span>MESH SERVICES</span><span>APPLICATIONS</span></div><div class="graph-canvas">{#if layout}<MeshGraph {snapshot} {layout} {selected} onselect={id => selected = id}/>{:else if failure}<p role="alert">Could not lay out mesh: {failure}</p>{:else}<p role="status">Laying out the mesh…</p>{/if}</div><div class="graph-footer">Drag to pan · Scroll to zoom · Tab then Enter to select<span>Geometry stays stable as signals change</span></div></section>{#if showInspector}<SideInspector {snapshot} {selected} onselect={id => selected = id}/>{/if}</div>
+ {:else}<p role="status">{disconnected || 'Connecting to the mesh…'}</p>{/if}
+ </main></div>
+</div>

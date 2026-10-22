@@ -46,6 +46,7 @@ const SERVICE_IDS = [
   'ap-api',
   'ap-dash',
   'ap-student',
+  'vishnu',
 ] as const;
 
 // Compile guard: every literal above must be a real ServiceId (catches typos /

@@ -1,3 +1,4 @@
+import { IsolatedRabbitMqReportTransport } from '../service.js';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import amqp, { type ChannelModel } from 'amqplib';
 import { Pool } from 'pg';
@@ -161,10 +162,7 @@ it('reconciles real fanout, duplicate and rollback evidence with independently t
   for (const s of [producer, ...stats]) {
     const reporter = new EventStatsReporter({
       stats: s,
-      transport: new RabbitMqReportTransport({
-        exchange,
-        createChannel: () => reporting.createChannel(),
-      }),
+      transport: new IsolatedRabbitMqReportTransport(infra.rabbitmqUrl, exchange),
     });
     await reporter.flush();
     await reporter.stop();

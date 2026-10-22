@@ -106,7 +106,7 @@ only. See [its README](../../../../apps/web/vishnu/README.md) for bounds and tru
 
 ## Validation record (2026-10-22)
 
-- Shared event packages: 246 unit tests; type checks and stats lint passed.
+- Shared event packages: 247 unit tests; type checks and stats lint passed.
 - Real PostgreSQL/RabbitMQ tests: shared fan-out/duplicate/failure/outage pipeline
   and five Vishnu persistence/ingestion cases passed.
 - CLI: 1,885 tests passed across the full run and the corrected launch-env suite
@@ -143,3 +143,7 @@ these checks and the concrete tests provide the review evidence for this draft.
 A real receiver-only restart preserved all six stored instance/epoch snapshots,
 then resumed ingestion with sequences at least as new as before. The three live
 services continued running throughout. The final slot verification passed 4/4.
+
+Final transport review added a bounded close handshake and forced socket cleanup;
+a hung-close unit test and the real pipeline using the isolated service transport
+both passed. Integration review: [SOA PR#543](https://github.com/saga-ed/soa/pull/543).

@@ -17,12 +17,11 @@ export class IsolatedRabbitMqReportTransport implements ReportTransport {
   async send(envelope: EventEnvelope, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
     let connection: ChannelModel | undefined;
-    const close = () => {
-      void connection?.close().catch(() => {});
-    };
-    signal.addEventListener('abort', close, { once: true });
+    const socket = new AbortController();
+    const abort = () => socket.abort();
+    signal.addEventListener('abort', abort, { once: true });
     try {
-      connection = await connect(this.url, { timeout: this.timeoutMs, signal });
+      connection = await connect(this.url, { timeout: this.timeoutMs, signal: socket.signal });
       connection.on('error', () => {});
       signal.throwIfAborted();
       await new RabbitMqReportTransport({
@@ -30,8 +29,22 @@ export class IsolatedRabbitMqReportTransport implements ReportTransport {
         createChannel: () => connection!.createChannel(),
       }).send(envelope, signal);
     } finally {
-      signal.removeEventListener('abort', close);
-      close();
+      // Bound even a successful send's close handshake; a half-open peer must
+      // not leave one reporting socket behind on every heartbeat.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        if (connection)
+          await Promise.race([
+            connection.close().catch(() => {}),
+            new Promise<void>(resolve => {
+              timer = setTimeout(resolve, 200);
+            }),
+          ]);
+      } finally {
+        clearTimeout(timer);
+        abort();
+        signal.removeEventListener('abort', abort);
+      }
     }
   }
 }

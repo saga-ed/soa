@@ -15,3 +15,6 @@ Follow the epic's [routing ruling](../gh_536/decisions/d1-event-stats-routing.md
 Use root `CLAUDE.md`, `.claude/rules/event-driven.md`, `.claude/rules/testing-node.md`, and `docs/testing/`. The original Vishnu application remains in the primary discovery checkout and is not present on this branch.
 
 `sources/` holds verbatim request/issue snapshots. `research/` is reserved for measured implementation findings. GitHub owns delivery status.
+
+Implementation evidence: [boundary decisions and validation](research/01-implementation-validation.md).
+Package contract and adoption guide: [event-stats](../../../packages/node/event-stats/README.md).

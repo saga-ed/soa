@@ -1185,6 +1185,61 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
 
+  packages/node/event-stats:
+    dependencies:
+      '@saga-ed/soa-event-consumer':
+        specifier: workspace:*
+        version: link:../event-consumer
+      '@saga-ed/soa-event-envelope':
+        specifier: workspace:*
+        version: link:../event-envelope
+      '@saga-ed/soa-event-outbox':
+        specifier: workspace:*
+        version: link:../event-outbox
+      '@saga-ed/soa-rabbitmq':
+        specifier: workspace:*
+        version: link:../rabbitmq
+      amqplib:
+        specifier: ^0.10.4
+        version: 0.10.9
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@saga-ed/soa-eslint-config':
+        specifier: workspace:*
+        version: link:../../core/eslint-config
+      '@saga-ed/soa-event-test-harness':
+        specifier: workspace:*
+        version: link:../event-test-harness
+      '@saga-ed/soa-typescript-config':
+        specifier: workspace:*
+        version: link:../../core/typescript-config
+      '@types/amqplib':
+        specifier: ^0.10.4
+        version: 0.10.8
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.0.12
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+      eslint:
+        specifier: ^8.57.0
+        version: 8.57.1
+      pg:
+        specifier: ^8.13.0
+        version: 8.20.0
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(@swc/core@1.15.7(@swc/helpers@0.5.17))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.8.2)(yaml@2.8.2)
+      typescript:
+        specifier: 5.8.2
+        version: 5.8.2
+      vitest:
+        specifier: ^1.6.1
+        version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
+
   packages/node/event-test-harness:
     dependencies:
       '@testcontainers/postgresql':

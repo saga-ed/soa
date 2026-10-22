@@ -57,6 +57,14 @@ export interface RelayStatus {
     state: 'stopped' | 'standby' | 'follower' | 'leader';
 }
 
+export interface OutboxObservation {
+    readonly kind: 'attempted' | 'accepted' | 'failed';
+    readonly reason?: 'transport' | 'backpressure';
+    readonly exchange: string;
+    readonly eventType: string;
+    readonly eventVersion: number;
+}
+
 export interface OutboxRelayOpts {
     /** Dedicated pg pool for the relay (separate from the service's Prisma client). */
     pool: Pool;
@@ -102,6 +110,8 @@ export interface OutboxRelayOpts {
     onFatalError?: (err: Error) => void;
     /** Optional Prometheus hooks. No-op when undefined. */
     metrics?: OutboxMetrics;
+    /** Client transport outcomes, never broker confirmation or outbox transaction completion. */
+    observe?: (observation: OutboxObservation) => void | Promise<void>;
     logger: ILogger;
     /**
      * Startup check that outbox_event has a valid partial index on
@@ -877,7 +887,34 @@ export class OutboxRelay {
         this.retentionTimer.unref?.();
     }
 
+    private telemetryWarningLogged = false;
+
+    private telemetryFailed = (): void => {
+        if (this.telemetryWarningLogged) return;
+        this.telemetryWarningLogged = true;
+        try { this.opts.logger.warn('[OutboxRelay] telemetry callback failed (further warnings suppressed)'); }
+        catch { /* telemetry must not affect business work */ }
+    };
+
+    private metric(callback: () => unknown): void {
+        try {
+            const result = callback();
+            if (result) void Promise.resolve(result).catch(this.telemetryFailed);
+        } catch { this.telemetryFailed(); }
+    }
+
+    private observe(kind: OutboxObservation['kind'], row: OutboxRow, reason?: OutboxObservation['reason']): void {
+        if (row.event_type.startsWith('observability.event_stats.')) return;
+        const failed = this.telemetryFailed;
+        try {
+            const result = this.opts.observe?.({ kind, reason, exchange: this.opts.exchange, eventType: row.event_type, eventVersion: row.event_version });
+            if (result) void Promise.resolve(result).catch(failed);
+        } catch { failed(); }
+    }
+
     private async publishRow(channel: Channel, row: OutboxRow): Promise<void> {
+        let failureReason: OutboxObservation['reason'] = 'transport';
+        this.observe('attempted', row);
         // Restore the trace context the publisher captured at outbox-write
         // time so this PRODUCER span chains under the original request span,
         // and the consumer's CONSUMER span chains under this one. End-to-end
@@ -940,6 +977,7 @@ export class OutboxRelay {
                 );
 
                 if (!ok) {
+                    failureReason = 'backpressure';
                     // Channel buffer full. Wait for drain, but also listen
                     // for 'error'/'close' AND a hard timeout — without all
                     // three, a silently-dropped TCP socket can wedge the
@@ -981,15 +1019,17 @@ export class OutboxRelay {
                     });
                 }
 
-                this.opts.metrics?.onPublished(row.event_type, row.event_version);
+                this.observe('accepted', row);
+                this.metric(() => this.opts.metrics?.onPublished(row.event_type, row.event_version));
                 span.setStatus({ code: SpanStatusCode.OK });
             } catch (err) {
                 const reason = err instanceof Error ? err.message : String(err);
-                this.opts.metrics?.onPublishFailed(
+                this.observe('failed', row, failureReason);
+                this.metric(() => this.opts.metrics?.onPublishFailed(
                     row.event_type,
                     row.event_version,
                     reason,
-                );
+                ));
                 span.recordException(err instanceof Error ? err : new Error(reason));
                 span.setStatus({ code: SpanStatusCode.ERROR, message: reason });
                 throw err;

@@ -180,3 +180,11 @@ saw the event (e.g. one added after the original publish, or one whose
 processed the event to re-run their handler, that's a distinct operation
 (delete the matching `consumed_events` rows for that consumer first) and
 carries its own idempotency risk — not something this recipe does for you.
+
+### Event statistics observer (0.3.0)
+
+The optional `observe` callback reports transport attempts, client acceptance and
+transport failure independently of existing metrics. Acceptance is not broker
+confirmation or outbox transaction completion. Observer and publish-metrics callback
+failures are isolated from business publishing. See
+[event-stats](../event-stats/README.md) for integration and counting semantics.

@@ -12,6 +12,7 @@ try {
   await page.locator('.svelte-flow__node').first().waitFor();
   assert.equal(await page.locator('.svelte-flow__node').count(), 9);
   assert.equal(await page.locator('.svelte-flow__edge').count(), 8);
+  await page.waitForFunction(() => document.querySelector('.svelte-flow__edge-wrapper')?.getBoundingClientRect().height > 0);
   assert.ok(
     await page
       .locator('.svelte-flow__edge-wrapper')
@@ -28,9 +29,9 @@ try {
   assert.equal(await page.locator('.bus-panel').count(), 1);
   assert.equal(await page.locator('.bus-participant').count(), 3);
   await page.locator('.bus-participant button').first().click();
-  await page.getByRole('heading', { name: 'Event bus participation', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'MQ activity', exact: true }).waitFor();
   await page.locator('.bus-badge').first().click();
-  await page.getByRole('heading', { name: 'Event bus participation', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'MQ activity', exact: true }).waitFor();
   await page.getByLabel('Clear selection').click();
 
   const geometry = () =>

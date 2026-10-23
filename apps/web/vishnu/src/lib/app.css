@@ -581,7 +581,7 @@ dd {
   height: auto;
 }
 
-.live-status {
+.live-status, .datadog-status {
   padding: var(--space-sm) var(--space-md);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
@@ -614,3 +614,28 @@ dd {
 .system-node { position: relative; }
 .bus-role { display: block; color: var(--color-primary); font-size: 10px; }
 .bus-participant button { margin-bottom: 2px; }
+
+.mq-preview { position: fixed; z-index: 1000; width: min(340px, calc(100vw - 24px)); max-height: min(420px, calc(100vh - 24px)); overflow: auto; padding: 16px; background: var(--color-bg, #171e2c); color: var(--color-text, #edf1fa); border: 1px solid var(--color-primary); border-radius: 12px; box-shadow: 0 12px 36px #0008; }
+.mq-preview header, .mq-freshness { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.mq-preview header { margin-bottom: 12px; }
+.mq-freshness { font-size: 12px; color: var(--color-text-secondary); }
+.mq-stats table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 12px 0; }
+.mq-stats th { text-align: left; font-weight: 500; }
+.mq-stats td, .mq-stats thead th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.mq-stats td, .mq-stats th { padding: 6px 4px; border-bottom: 1px solid #ffffff18; }
+.mq-caption { font-size: 11px; line-height: 1.5; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+.mq-source, .mq-stream { padding: 8px 0; border-top: 1px solid #ffffff20; font-size: 12px; overflow-wrap: anywhere; }
+.mq-source summary, .mq-stream summary { cursor: pointer; }
+.mq-stream dl > div { display: flex; justify-content: space-between; padding: 4px 0; }
+.mq-preview button { cursor: pointer; }
+.mq-preview { display: flex; flex-direction: column; overflow: hidden; }
+.mq-preview > header, .mq-preview > button { flex-shrink: 0; }
+.mq-preview > .mq-stats { min-height: 0; overflow: auto; }
+.mq-preview > button { margin-top: 8px; }
+.mq-stats td, .mq-stats th, .mq-source, .mq-stream { border-color: var(--color-border); }
+
+.apm-badge { position: absolute; top: 100%; left: 0; margin-top: 2px; white-space: nowrap; font-size: 9px; background: var(--color-bg); color: var(--color-primary); padding: 2px 5px; border-radius: 4px; }
+.apm-badge.warning { color: #df9e22; }
+.apm-badge.critical { color: #ef6464; }
+.datadog-stats { border-block: 1px solid var(--color-border); padding-block: 8px; margin-block: 12px; }
+.datadog-stats a { overflow-wrap: anywhere; }

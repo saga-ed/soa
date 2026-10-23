@@ -1,8 +1,9 @@
+import { createDatadogReader } from './datadog';
 import { createEventStatsRuntime } from './event-stats-runtime';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { Plugin } from 'vite';
+import { loadEnv, type Plugin } from 'vite';
 import type { MeshSnapshot } from '../src/lib/graph/types';
 
 type Collector = () => Promise<MeshSnapshot>;
@@ -20,7 +21,8 @@ const loadCollector: Loader = async root => {
 export function localMeshMiddleware(
   env: Record<string, string | undefined> = process.env,
   loader: Loader = loadCollector,
-  readStats?: () => Promise<unknown>
+  readStats?: () => Promise<unknown>,
+  readDatadog = createDatadogReader(env)
 ) {
   const enabled = env.VISHNU_MODE === 'synthetic';
   let collector: Promise<Collector> | undefined;
@@ -43,7 +45,7 @@ export function localMeshMiddleware(
   };
   return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const path = req.url?.split('?')[0];
-    if (!['/config.json', '/api/mesh', '/api/health', '/api/event-stats'].includes(path ?? '')) return next();
+    if (!['/config.json', '/api/mesh', '/api/health', '/api/event-stats', '/api/datadog'].includes(path ?? '')) return next();
     if (req.method !== 'GET') return reply(res, 405, { error: 'Read-only endpoint' });
     const remote = req.socket.remoteAddress;
     if (!remote || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) {
@@ -71,6 +73,7 @@ export function localMeshMiddleware(
         error: 'Start Vishnu with ss --with vishnu to enable synthetic-dev observations',
       });
     try {
+      if (path === '/api/datadog') return reply(res, 200, await readDatadog());
       if (path === '/api/event-stats') {
         if (!readStats) return reply(res, 503, { error: 'Event statistics unavailable' });
         return reply(res, 200, await readStats());
@@ -102,9 +105,10 @@ export function vishnuLocalPlugin(): Plugin {
     name: 'vishnu-synthetic-dev',
     apply: 'serve',
     configureServer(server) {
-      const runtime = process.env.VISHNU_MODE === 'synthetic' ? createEventStatsRuntime() : undefined;
+      const env = { ...loadEnv(server.config.mode, server.config.envDir, ''), ...process.env };
+      const runtime = env.VISHNU_MODE === 'synthetic' ? createEventStatsRuntime(env) : undefined;
       if (runtime) void runtime.read().catch(() => console.warn('[vishnu-event-stats] startup unavailable; API access retries initialization'));
-      server.middlewares.use(localMeshMiddleware(process.env, loadCollector, runtime?.read));
+      server.middlewares.use(localMeshMiddleware(env, loadCollector, runtime?.read));
       server.httpServer?.once('close', () => { void runtime?.close(); });
     },
   };

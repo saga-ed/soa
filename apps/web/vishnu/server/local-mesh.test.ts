@@ -64,7 +64,7 @@ describe('synthetic-dev HTTP bridge', () => {
   it('rejects remote access, cross-origin reads, arbitrary targets, and mutations', async () => {
     const loader = vi.fn();
     const middleware = localMeshMiddleware({ VISHNU_MODE: 'synthetic' }, loader);
-    for (const route of ['/api/mesh', '/api/event-stats']) {
+    for (const route of ['/api/mesh', '/api/event-stats', '/api/datadog']) {
     for (const req of [
       request(route, { socket: { remoteAddress: '192.0.2.1' } }),
       request(route, { headers: { host: 'evil.example' } }),

@@ -67,6 +67,8 @@ export interface MeshViewOptions {
   prober?: HealthProber;
   tcpProbe?: (port: number) => Promise<boolean>;
   processState?: (id: ServiceId) => Promise<ProcessState>;
+  /** Declared product surfaces remain visible even in a partial stack. */
+  declaredRoots?: readonly ServiceId[];
   now?: () => Date;
 }
 
@@ -177,6 +179,7 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
         if (!retained.has(dep)) include(dep);
       }
     };
+    for (const id of options.declaredRoots ?? ['saga-dash', 'connect-web', 'coach-web']) include(id);
     for (const id of [...retained]) include(id);
     const visible = rows.filter(row => retained.has(row.service.id));
     const systems: System[] = visible.map(({ service, url, probe, process }) => {
@@ -194,7 +197,7 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
       return {
         runtimeState,
         id: service.id,
-        label: service.id,
+        label: service.id === 'connect-web' ? 'Connectv3' : service.id === 'coach-web' ? 'Coach' : service.id,
         band: service.isFrontend ? 'application' : 'mesh',
         ...(busRoles[service.id]
           ? {
@@ -282,8 +285,12 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
       });
     };
     const meshIds = new Set<MeshId>();
+    const activeMeshIds = new Set<MeshId>();
     for (const { service } of visible) {
-      for (const unit of service.mesh) meshIds.add(unit);
+      for (const unit of service.mesh) {
+        meshIds.add(unit);
+        if (observed.has(service.id)) activeMeshIds.add(unit);
+      }
       for (const dep of service.dependsOn) {
         if (!retained.has(dep)) continue;
         const kind = service.depKinds[dep];
@@ -311,6 +318,7 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
         const unit: MeshId =
           manifest.databases[db].engine === 'mongo' ? 'connect-mongo' : 'postgres';
         meshIds.add(unit);
+        if (observed.has(service.id)) activeMeshIds.add(unit);
         add(
           `db:${service.id}:${db}`,
           service.id,
@@ -353,12 +361,13 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
         label: unit.id,
         band: unit.id === 'rabbitmq' ? 'mesh' : 'data',
         kind: 'Infrastructure listener',
-        health: unit.ok ? 'healthy' : 'critical',
+        health: unit.ok ? 'healthy' : activeMeshIds.has(unit.id) ? 'critical' : 'unknown',
+        runtimeState: unit.ok ? 'reachable' : activeMeshIds.has(unit.id) ? 'unhealthy' : 'not-started',
         freshness: 'fresh',
         errors: null,
         summary: unit.ok
           ? `TCP listener on port ${unit.port} is reachable. Protocol readiness, database contents, queue depths, and traffic have not been measured.`
-          : `TCP listener on port ${unit.port} is not reachable.`,
+          : activeMeshIds.has(unit.id) ? `TCP listener on port ${unit.port} is not reachable.` : 'Infrastructure is declared by inactive services; no local listener has been observed.',
         evidence: [
           {
             label: 'TCP reachability',

@@ -3,8 +3,9 @@
 View the synthetic-dev mesh managed by `ss`, or explore an explicitly labeled
 fixture preview. Live mode derives topology from the `ss` manifest and probes the
 selected slot's local services. The server also ingests cumulative event statistics
-from IAM, programs and scheduling. Statistics are available at `/api/event-stats`;
-the graph statistics UX is a separate follow-up. Datadog is not connected.
+from IAM, programs and scheduling. Statistics are available at `/api/event-stats`, in the API inspector, and in
+keyboard-accessible MQ badge previews. An optional server-side Datadog adapter
+provides scoped APM observations and links to Datadog for flow analysis.
 
 ## Run with synthetic-dev
 
@@ -42,7 +43,9 @@ Live signals are deliberately limited:
   provenance separately. HTTP redirects are rejected.
 - Relationships are the dependencies declared in the `ss` manifest, which is not
   a complete inventory of every API endpoint or event binding.
-- Traffic, latency, error counts, and endpoint/event counts stay unknown.
+- HTTP edge traffic, edge latency and endpoint counts stay unknown without
+  caller-specific evidence. MQ counts/rates come from reporting instances; optional
+  Datadog metrics describe services and are labeled separately from local probes.
 - Broker selection exposes the logical event dependencies routed through it.
 
 The adapter accepts no arbitrary target URLs or mutations and never returns
@@ -148,8 +151,10 @@ failure trigger is removed in `finally`. It never resets/seeds the slot.
 
 ## Partial-stack lifecycle states
 
-Discovery requires a responding local endpoint or a live managed process whose
-service directory and slot port match its PID record. Historical, malformed and
+The default topology retains saga-dash, Connectv3 and Coach plus their declared
+dependencies. Additional active-service discovery requires a responding local
+endpoint or a live managed process whose service directory and slot port match
+its PID record. Historical, malformed and
 reused PID records alone do not add services to the active mesh. On Linux, process
 verification uses `/proc`; inaccessible metadata is unverified, not proof of failure.
 
@@ -159,4 +164,72 @@ was removed is **stopped**, also neutral. An observed service that exits with it
 record still present, or whose endpoint responds unsuccessfully, remains
 **unhealthy**. Existing nodes and edges remain stable across those transitions.
 Without current launch intent, a dead historical PID alone cannot establish an
-unexpected outage across viewer restarts; it is excluded from discovery.
+unexpected outage across viewer restarts; it is excluded from active discovery; declared product dependencies can still
+appear as neutral, not-started nodes.
+
+
+## Datadog observations and flow analysis
+
+Codex's Datadog MCP OAuth login is for agent investigation. Vishnu independently
+uses a read-only API/application key pair on its server. It never reads personal
+MCP OAuth tokens. Configure the server environment or the git-ignored file
+`apps/web/vishnu/.env.local` (restart Vishnu after editing):
+
+```dotenv
+DD_SITE=datadoghq.com
+DD_API_KEY=<read-only-integration-api-key>
+DD_APP_KEY=<scoped-application-key>
+VISHNU_DATADOG_ENV=synthetic
+VISHNU_DATADOG_DEPLOYMENT=slot-3
+VISHNU_DATADOG_DEPLOYMENT_TAG=deployment.identifier
+```
+
+Required permissions: `timeseries_query`, `monitors_read`, and APM read access
+for service dependencies. Never prefix these secrets with `VITE_` or commit them.
+The deployment tag must be available on trace metrics and configured as a Datadog
+primary tag for the Service Dependencies API; otherwise that query may be
+unavailable. No fallback silently broadens the query to all deployments.
+
+`/api/datadog` is read-only and has the same loopback/origin restrictions as the
+other local APIs. Fixed requests are coalesced and cached for 60 seconds, with
+8-second timeouts and rate-limit backoff. No browser-supplied queries/URLs are
+accepted. Missing credentials, denied requests, partial responses, stale data and
+zero measurements remain distinct. APM data does not overwrite local probe health.
+
+The default metric prefix is `trace.http.server.request`; the duration distribution
+is interpreted in seconds and displayed in milliseconds. Override with
+`VISHNU_DATADOG_METRIC_PREFIX` only for an equivalent seconds-based distribution.
+Requests and errors use `.as_rate()`. The inspector shows the latest bucket, and
+an earlier p95 bucket at least five minutes before it, never an average of percentiles.
+The query window is 15 minutes; points expire after 3 minutes. Retention and SDK
+sampling must be verified in the live organization before claiming full coverage.
+
+The graph always preserves topology and geometry. All paths, Hot services, Slow
+services, and Warnings & alerts change emphasis. Node badges show service metrics;
+lines marked `observed` have an exact scoped dependency observation. Existing line
+width still represents declared endpoint/operation counts, not measured HTTP volume.
+Only synthetic data for the displayed slot is eligible for graph overlays. If a
+cloud environment/deployment is configured, its observations remain explicitly
+labeled in the inspector and the slot graph is not colored from them.
+
+Display thresholds (configurable; not monitor definitions):
+
+- `VISHNU_DATADOG_HOT_RATE`: 10 requests/second.
+- `VISHNU_DATADOG_WARNING_P95_MS`: 2500 ms.
+- `VISHNU_DATADOG_CRITICAL_P95_MS`: 5000 ms.
+
+The p95 defaults match the existing IaC monitor defaults, but these badges evaluate
+the latest bucket rather than the monitor's sustained window. Hot traffic alone is
+not a fault. Only monitor groups explicitly including the exact environment,
+deployment and service are attached; environment-wide monitors are not attributed
+to a synthetic slot. The adapter reads at most the first 100 service-mesh monitors.
+
+Inspector links open scoped Datadog span search; use Trace Queries / Flow Map in
+Datadog for fan-out, repeated calls and waterfalls. Edge links filter destination
+service and `@span.parent.service`. Missing propagation/parent tags can yield no
+results, so a destination-only link is provided too. Vishnu does not ingest or
+reconstruct trace trees, and retained span counts are not used as traffic totals.
+
+Checks: `pnpm --filter @saga-ed/vishnu test:datadog-browser` covers controlled
+browser responses, scope isolation, expiry, errors, links, and stable graph geometry.
+No live Datadog coverage is established by that test.

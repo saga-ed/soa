@@ -28,4 +28,7 @@ The original application and ss integration remain in `/home/skelly/dev/soa` on 
 ## Infrastructure test entry point
 
 [Prepared synthetic slot, repeatable scenario and release gates](docs/synthetic-event-stats.md).
-The statistics UX is explicitly deferred until the user has tested this infrastructure.
+Following infrastructure validation, the user authorized the statistics UX on
+2026-10-23: API inspectors, MQ badge previews, expanded declared topology, and
+Datadog-backed service observations with external flow-analysis links. See
+[the I#538 scope](../gh_538/README.md).

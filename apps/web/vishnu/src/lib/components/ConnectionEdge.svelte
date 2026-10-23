@@ -3,7 +3,7 @@
  import type { Point, Relationship } from '$lib/graph/types';
  import { connectionLabel } from '$lib/graph/presentation';
  import { roundedPath } from '$lib/graph/geometry';
- let { id, data, selected }: EdgeProps<Edge<{ relationship: Relationship; points: Point[]; dimmed: boolean }>> = $props();
+ let { id, data, selected }: EdgeProps<Edge<{ relationship: Relationship; points: Point[]; observed?: boolean; dimmed: boolean }>> = $props();
  const store = useStore();
  let midpoint = $derived.by(() => { const p = data?.points ?? []; const lengths = p.slice(1).map((b, i) => Math.hypot(b.x-p[i].x,b.y-p[i].y)); let half=lengths.reduce((a,b)=>a+b,0)/2; for(let i=0;i<lengths.length;i++){if(half<=lengths[i]){const t=lengths[i] ? half/lengths[i] : 0;return {x:p[i].x+(p[i+1].x-p[i].x)*t,y:p[i].y+(p[i+1].y-p[i].y)*t};}half-=lengths[i];}return p[0] ?? {x:0,y:0}; });
  let trouble = $derived(data?.relationship.health === 'warning' || data?.relationship.health === 'critical');
@@ -19,5 +19,5 @@
 </g>
 
 {#if data && showLabel}
-<EdgeLabel x={midpoint.x} y={midpoint.y} selectEdgeOnClick class={`connection-label ${data.relationship.health} ${data.dimmed ? 'dimmed' : ''}`}><span>{data.relationship.health === 'critical' ? '! ' : data.relationship.health === 'warning' ? '▲ ' : ''}{connectionLabel(data.relationship)}{selected ? ` · ${data.relationship.label}` : ''}</span></EdgeLabel>
+<EdgeLabel x={midpoint.x} y={midpoint.y} selectEdgeOnClick class={`connection-label ${data.relationship.health} ${data.dimmed ? 'dimmed' : ''}`}><span>{data.relationship.health === 'critical' ? '! ' : data.relationship.health === 'warning' ? '▲ ' : ''}{connectionLabel(data.relationship)}{data.observed ? ' · observed' : ''}{selected ? ` · ${data.relationship.label}` : ''}</span></EdgeLabel>
 {/if}

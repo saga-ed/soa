@@ -1,5 +1,6 @@
 /** Source-verified capabilities; these do not assert that a relay/consumer is healthy. */
 export const busRoles: Record<string, { publishes: boolean; consumes: boolean; evidence: string }> = {
+  'coach-api': { publishes: false, consumes: true, evidence: 'coach/apps/node/coach-api/src/inversify.config.ts wires IamEventConsumer; src/main.ts starts it. No publisher role has been verified.' },
   'programs-api': { publishes: true, consumes: true, evidence: 'program-hub/apps/node/programs-api/src/main.ts starts OutboxRelay, IamProjectionConsumer, SlotProjectionConsumer, AdhocPodAssignmentConsumer and reconciliation consumers.' },
   'scheduling-api': { publishes: true, consumes: true, evidence: 'program-hub/apps/node/scheduling-api/src/inversify.config.ts wires OutboxRelay and ProgramsProjectionConsumer; src/main.ts starts them.' },
   'sessions-api': { publishes: true, consumes: true, evidence: 'program-hub/apps/node/sessions-api/src/main.ts starts OutboxRelay, ProgramsProjectionConsumer, SchedulingProjectionConsumer and IamUserProjectionConsumer.' },

@@ -9,6 +9,7 @@ describe('Vishnu local mesh collector', () => {
     const urls: string[] = [];
     const ports: number[] = [];
     const collect = createLocalMeshCollector({
+      declaredRoots: [],
       slot: 2,
       processState: async id => (id === 'saga-dash' ? 'running' : 'absent'),
       prober: {
@@ -53,6 +54,7 @@ describe('Vishnu local mesh collector', () => {
   it('retains a discovered service and stable topology when it goes down', async () => {
     let reachable = true;
     const collect = createLocalMeshCollector({
+      declaredRoots: [],
       processState: async () => 'absent',
       prober: { probe: async url => ({ ok: reachable && url.includes(':3010/') }) },
       tcpProbe: async () => false,
@@ -68,6 +70,7 @@ describe('Vishnu local mesh collector', () => {
 
   it('includes declared dependencies of a tracked process even when none respond', async () => {
     const collect = createLocalMeshCollector({
+      declaredRoots: [],
       processState: async id => (id === 'saga-dash' ? 'running' : 'absent'),
       prober: { probe: async () => ({ ok: false }) },
       tcpProbe: async () => false,
@@ -86,6 +89,7 @@ describe('Vishnu local mesh collector', () => {
 
   it('returns an empty live mesh when nothing is tracked or reachable', async () => {
     const snapshot = await createLocalMeshCollector({
+      declaredRoots: [],
       processState: async () => 'absent',
       prober: { probe: async () => ({ ok: false }) },
       tcpProbe: async () => false,
@@ -125,6 +129,7 @@ describe('Vishnu local mesh collector', () => {
 describe('partial-stack lifecycle regression', () => {
   it('ignores old exited or unverified PID records in a reused slot', async () => {
     const snapshot = await createLocalMeshCollector({
+      declaredRoots: [],
       slot: 3,
       processState: async id => (id === 'saga-dash' ? 'exited' : 'unverified'),
       prober: { probe: async url => ({ ok: url.includes(':6010/') }) },
@@ -140,6 +145,7 @@ describe('partial-stack lifecycle regression', () => {
     let state: 'running' | 'exited' | 'absent' = 'running';
     let healthy = true;
     const collect = createLocalMeshCollector({
+      declaredRoots: [],
       processState: async id => (id === 'iam-api' ? state : 'absent'),
       prober: { probe: async url => ({ ok: healthy && url.includes(':3010/') }) },
       tcpProbe: async () => true,
@@ -163,6 +169,7 @@ describe('partial-stack lifecycle regression', () => {
 
   it('discovers an unhealthy HTTP responder even without a managed PID', async () => {
     const snapshot = await createLocalMeshCollector({
+      declaredRoots: [],
       processState: async () => 'absent',
       prober: {
         probe: async url => (url.includes(':3010/') ? { ok: false, status: 503 } : { ok: false }),
@@ -174,4 +181,17 @@ describe('partial-stack lifecycle regression', () => {
       runtimeState: 'unhealthy',
     });
   });
+});
+
+
+it('shows the declared product mesh without marking unstarted systems critical', async () => {
+  const snapshot = await createLocalMeshCollector({
+    slot: 3, processState: async () => 'exited',
+    prober: {probe: async () => ({ok: false})}, tcpProbe: async () => false,
+  })();
+  for (const id of ['sessions-api','connect-api','coach-api','saga-dash','connect-web','coach-web']) {
+    expect(snapshot.systems.find(s => s.id === id)).toMatchObject({health:'unknown',runtimeState:'not-started'});
+  }
+  expect(snapshot.systems.filter(s => s.band === 'application').map(s => s.label)).toEqual(expect.arrayContaining(['Connectv3','Coach','saga-dash']));
+  expect(snapshot.systems.some(s => s.health === 'critical')).toBe(false);
 });

@@ -1,9 +1,11 @@
 <script lang="ts">
+ import type { serviceSignal } from '$lib/graph/datadog';
+ import {numberLabel, type MqViews} from '$lib/graph/event-stats';
  import { Handle, Position, type NodeProps, type Node } from '@xyflow/svelte';
  import { systemShape } from '$lib/graph/presentation';
  import { busBadge, busRole, type busParticipants } from '$lib/graph/bus';
  import type { System } from '$lib/graph/types';
- let { data, selected }: NodeProps<Node<{ system: System; dimmed: boolean; live: boolean; participants: ReturnType<typeof busParticipants>; onselect: (id: string) => void }>> = $props();
+ let { data, selected }: NodeProps<Node<{ signal: ReturnType<typeof serviceSignal>; mqViews: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; system: System; dimmed: boolean; live: boolean; participants: ReturnType<typeof busParticipants>; onselect: (id: string) => void }>> = $props();
  let participation = $derived(data.participants.find(p => p.system.id === data.system.id));
  let shape = $derived(systemShape(data.system));
  const symbols = { healthy: '●', warning: '▲', critical: '!', unknown: '?' };
@@ -26,7 +28,10 @@
  <strong>{data.system.label}</strong>
  <div class="node-status"><span>{symbols[data.system.health]} {data.live && data.system.runtimeState ? data.system.runtimeState.replace('-', ' ') : data.live && data.system.health === 'healthy' ? 'reachable' : data.system.health}</span><span>{data.system.freshness === 'fresh' ? data.live ? 'probe' : `${data.system.errors ?? '—'} errors` : data.system.freshness}</span></div>
  {#if participation}
-  <button class="bus-badge nodrag nopan" aria-label={`Inspect event bus participation for ${data.system.label}`} onclick={(event) => { event.stopPropagation(); data.onselect(data.system.id); }} title={busRole(participation)}>{busBadge(participation)}</button>
+  <button class="bus-badge nodrag nopan" aria-label={`Inspect event bus participation for ${data.system.label}`} onclick={(event) => { event.stopPropagation(); data.onselect(data.system.id); }} onmouseenter={(event) => data.onpreview(data.system.id, event.currentTarget.getBoundingClientRect())} onmouseleave={() => data.onpreview(null)} onfocus={(event) => data.onpreview(data.system.id, event.currentTarget.getBoundingClientRect())} onblur={() => data.onpreview(null)} aria-haspopup="dialog">{busBadge(participation)}</button>
+ {/if}
+ {#if data.signal.p95Ms != null || data.signal.rate != null || data.signal.flagged}
+  <div class="apm-badge {data.signal.risk}">APM {data.signal.flagged ? '▲ ' : ''}{data.signal.p95Ms != null ? `p95 ${Math.round(data.signal.p95Ms)} ms` : 'latency —'} · {data.signal.rate != null ? `${numberLabel(data.signal.rate,true)}/s` : 'rate —'}</div>
  {/if}
  <Handle type="source" position={Position.Right} />
 </div>
@@ -37,10 +42,10 @@
   {#each data.participants as participant}
    <div class="bus-participant">
     <button onclick={(event) => { event.stopPropagation(); data.onselect(participant.system.id); }}>{participant.system.label}</button><small class="bus-role">{busBadge(participant)} · {busRole(participant)}</small>
-    <div><span>↑ Published</span><span>{participant.publishes ? '— / —' : 'Not declared'}</span></div>
-    <div><span>↓ Consumed</span><span>{participant.consumes ? '— / —' : 'Not declared'}</span></div>
+    <div><span>↑ Accepted</span><span>{participant.publishes ? `${numberLabel(data.mqViews[participant.system.id]?.rows[0]?.count ?? null)} / ${numberLabel(data.mqViews[participant.system.id]?.rows[0]?.rate ?? null,true)}` : 'Not declared'}</span></div>
+    <div><span>↓ Deliveries</span><span>{participant.consumes ? `${numberLabel(data.mqViews[participant.system.id]?.rows[1]?.count ?? null)} / ${numberLabel(data.mqViews[participant.system.id]?.rows[1]?.rate ?? null,true)}` : 'Not declared'}</span></div>
    </div>
   {:else}<p>No declared participants</p>{/each}
-  <footer>— Unknown · telemetry not connected</footer>
+  <footer>— Unknown / unavailable · reporting instances only</footer>
  </section>
 {/if}

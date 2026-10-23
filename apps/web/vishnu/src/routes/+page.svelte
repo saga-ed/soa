@@ -134,7 +134,7 @@
 <div class="app-shell" class:focused>
  <nav class="app-nav" aria-label="Main"><div class="nav-context"><a class="vishnu-brand" href="/" aria-label="Vishnu home"><img src="/vishnu-logo-on-dark.png" alt="Vishnu — Saga Mesh Observability" width="2172" height="724" /></a></div><a class="active-nav" aria-current="page" href="/">◈ &nbsp; Mesh overview</a><div class="nav-bottom">{sourceLabel}<br/><small>{mode === 'fixture' ? 'Design & interaction study' : 'Local stack health probes'}</small></div></nav>
  <div class="app-main"><header class="topbar"><h1>Preserve, Protect, Anticipate</h1><span class="preview-badge">{sourceLabel}</span></header>
- <main id="mesh-main"><section class="intro"><div><span class="eyebrow">SAGA SYSTEMS</span><h2>See the connections.<br/>Find the trouble.</h2></div><p>Explore declared topology alongside observed signals.<br/>Select any system or path to follow the evidence.</p></section>
+ <main id="mesh-main">
  {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for the local stack collector.'} Retrying automatically.{:else}Local health probes · declared product topology · MQ telemetry {statsError ? 'unavailable' : stats?.receiver.connected ? 'connected' : 'connecting'}{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
  {#if snapshot}
  {#if mode === 'live'}<p class="datadog-status" role="status">Datadog: {datadogError ? 'unavailable; retrying' : datadog?.status ?? 'connecting'}{#if datadog} · {datadog.scope.environment} / {datadog.scope.deployment}{#if !scopedDatadog} · separate scope; graph overlay disabled{/if}{/if}. Metrics describe services; flow analysis opens in Datadog.</p>{/if}

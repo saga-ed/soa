@@ -649,3 +649,36 @@ dd {
 .signal-edge-label { font-weight:600; }
 .demo-detail { border-left:4px solid; padding:12px; margin-top:16px; background:var(--color-bg); }
 .relationship-list .demo-warning { border-left:4px solid; }
+
+.graph-label-layer { position:absolute; inset:0; z-index:8; pointer-events:none; overflow:hidden; }
+.path-label { position:absolute; pointer-events:auto; padding:3px 10px; margin:0; font:600 12px "Montserrat Variable",sans-serif; line-height:20px; white-space:nowrap; border:1px solid var(--color-border); background:var(--color-bg); border-radius:6px; box-shadow:var(--shadow-sm); overflow:hidden; }
+.path-label.compact { border-radius:50%; padding:0; font-size:15px; border:1px solid currentColor; }
+.path-label.context-label { color:var(--color-text-secondary) !important; }
+.path-label.selected-label { outline:2px solid var(--color-primary); outline-offset:2px; }
+.path-tooltip { position:fixed; z-index:2000; width:320px; max-height:180px; overflow:auto; padding:12px; white-space:pre-line; font-size:13px; line-height:1.6; background:var(--color-surface-inverse); color:var(--color-text-inverse); border-radius:8px; box-shadow:var(--shadow-sm); }
+.crowded-paths { position:absolute; bottom:10px; left:62px; pointer-events:auto; font-size:12px; }
+.crowded-path-list { position:absolute; bottom:34px; left:0; width:320px; max-height:240px; overflow:auto; padding:8px; background:var(--color-bg); border:1px solid var(--color-border); border-radius:8px; }
+.crowded-path-list button { white-space:pre-line; text-align:left; display:block; width:100%; margin-bottom:6px; font-size:12px; }
+.focus-context-caption { position:absolute; right:10px; top:10px; max-width:42%; z-index:10; padding:6px 10px; background:var(--color-bg-secondary); color:var(--color-text-secondary); border-radius:6px; font-size:11px; pointer-events:none; }
+.system-node .node-silhouette { width:100%; height:100%; }
+.system-node.context-node { padding:8px; border:1px solid var(--color-border-strong); background:var(--color-bg-secondary); opacity:.65; box-shadow:none; overflow:hidden; }
+.system-node.context-node strong { font-size:12px; }
+.system-node.context-node .node-kind { font-size:9px; margin-bottom:4px; }
+.system-node.context-node .node-status { display:none; }
+.focus-layout-toggle { font-size:12px; flex-direction:row !important; align-items:center; }
+.focus-layout-toggle input { width:auto; }
+
+/* Quiet structure leaves saturated strokes to the observations. */
+.system-node.healthy { --health:var(--color-border-hover); }
+.system-node.healthy .node-status { color:var(--color-success-strong); }
+.system-node.healthy .node-silhouette { stroke:var(--color-border-strong); }
+.path-label:not(.compact) { border-left:3px solid currentColor; }
+
+.path-label.compact.quiet-marker { border:1px solid var(--color-secondary); background:var(--color-bg); box-shadow:none; color:var(--color-secondary); font-size:12px; font-weight:600; opacity:.45; }
+.path-label.compact.quiet-marker:hover, .path-label.compact.quiet-marker:focus-visible { opacity:1; outline:1px solid var(--color-border-hover); }
+.mesh-edge.dimmed { opacity:.45; }
+
+.path-label:not(.compact) { display:flex; align-items:center; justify-content:center; gap:6px; }
+.path-label.compact { font-size:11px; line-height:16px; }
+.inline-path-info { display:inline-flex; flex:none; align-items:center; justify-content:center; width:18px; height:18px; border:1px solid var(--color-secondary); border-radius:50%; color:var(--color-secondary); font-size:11px; font-weight:600; opacity:.45; }
+.path-label:hover .inline-path-info, .path-label:focus-visible .inline-path-info { opacity:1; }

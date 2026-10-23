@@ -204,10 +204,11 @@ an earlier p95 bucket at least five minutes before it, never an average of perce
 The query window is 15 minutes; points expire after 3 minutes. Retention and SDK
 sampling must be verified in the live organization before claiming full coverage.
 
-The graph always preserves topology and geometry. All paths, Hot services, Slow
-services, and Warnings & alerts change emphasis. Node badges show service metrics;
-lines marked `observed` have an exact scoped dependency observation. Existing line
-width still represents declared endpoint/operation counts, not measured HTTP volume.
+Telemetry refresh preserves geometry. User-selected signal views can smoothly
+reflow matching systems into an expanded focus area, retaining every node and
+connection in a smaller context frame. Disable Reflow signal focus to keep the
+full layout. All paths restores the original geometry. Node badges show service metrics;
+lines marked `observed` have an exact scoped dependency observation. Thin gray lines represent structure; stronger colored lines represent signals.
 Only synthetic data for the displayed slot is eligible for graph overlays. If a
 cloud environment/deployment is configured, its observations remain explicitly
 labeled in the inspector and the slot graph is not colored from them.
@@ -239,13 +240,23 @@ No live Datadog coverage is established by that test.
 
 Open `/?mode=demo` for an isolated, clearly labeled simulation. It makes no live
 mesh, MQ or Datadog requests. All paths includes invented early warnings at 70%
-of a budget, with Hot, Slow, Fan-out and Warnings views for emphasis. Geometry
-and path count remain unchanged while switching views.
+of a budget, with Hot, Slow, Fan-out and Warnings views for emphasis. Path count remains unchanged while switching views; geometry can tween into a
+focused layout. Reduced-motion users get immediate transitions.
 
-Palette uses Saga semantic tokens: teal (`--color-teal`) for traffic, amber
-(`--color-attention`) for latency, magenta (`--chart-2`) for fan-out, clay
+Palette uses Saga semantic tokens: orange (`--color-attention-strong`) for traffic,
+blue (`--color-primary`) for latency, magenta (`--chart-2`) for fan-out, clay
 (`--color-danger`) for a threshold breach. Opacity is `0.35 + 0.65 × min(1,
 value / budget)`; labels remain fully opaque and show the value and percentage.
 The demo budgets are illustrative, not operational thresholds. Its causal example
 is two Programs calls per IAM request, each making 25 Scheduling calls: 50 calls
 per root request. The Return to live view link exits the simulation.
+
+
+Path labels are placed in screen coordinates and avoid nodes, controls and other
+labels. They degrade from signal text to protocol identifier plus an 18px
+partially transparent grayscale info icon, then to an icon alone when necessary.
+Hover or keyboard focus reveals the complete description. Unplaceable labels
+remain available in Crowded paths and the inspector. Coach → IAM simulates 12
+HTTP 500 responses in 500 requests (2.4% errors); saga-dash → Programs remains
+the orange hot path. The demo's full-mesh/selection reflow retains connectivity,
+handles interrupted transitions, and restores the exact original geometry.

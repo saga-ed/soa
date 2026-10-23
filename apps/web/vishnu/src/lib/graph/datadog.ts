@@ -1,6 +1,6 @@
 import type { MeshSnapshot } from './types';
 
-export type SignalView = 'overview' | 'hot' | 'slow' | 'attention' | 'fanout';
+export type SignalView = 'overview' | 'hot' | 'slow' | 'attention' | 'fanout' | 'error';
 export interface MetricPoint {
   at: number;
   value: number;
@@ -84,7 +84,7 @@ export function serviceSignal(
 export function emphasizes(view: SignalView, signal: ReturnType<typeof serviceSignal>): boolean {
   return (
     view === 'overview' ||
-    (view === 'hot' ? signal.hot : view === 'slow' ? signal.slow : signal.flagged)
+    (view === 'error' ? signal.errorRate != null && signal.errorRate > 0 : view === 'hot' ? signal.hot : view === 'slow' ? signal.slow : signal.flagged)
   );
 }
 /** Values are quoted for Datadog search, then URL encoded; no raw query interpolation. */

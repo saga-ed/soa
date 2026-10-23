@@ -46,6 +46,7 @@ try {
   await page.goto(base);
   await page.getByLabel('Signal view').waitFor();
   await page.locator('.apm-badge').first().waitFor();
+  await page.getByLabel('Reflow signal focus').uncheck();
   const node = page.locator('.svelte-flow__node[data-id="programs-api"]');
   const geometry = await page
     .locator('.svelte-flow__node')

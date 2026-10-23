@@ -50,6 +50,7 @@ export interface Point {
   y: number;
 }
 export interface LayoutNode {
+  context?: boolean;
   id: string;
   x: number;
   y: number;

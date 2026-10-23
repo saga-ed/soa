@@ -12,6 +12,7 @@
     "test:live-browser": "node tests/live-browser.mjs",
     "test:synthetic": "node tests/synthetic-smoke.mjs",
     "test:int": "vitest run --config vitest.int.config.ts",
+    "test:reflow-browser": "node tests/reflow-browser.mjs",
     "test:datadog-browser": "node tests/datadog-browser.mjs",
     "test:mq-browser": "node tests/mq-browser.mjs"
   },

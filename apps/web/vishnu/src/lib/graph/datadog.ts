@@ -1,6 +1,6 @@
 import type { MeshSnapshot } from './types';
 
-export type SignalView = 'overview' | 'hot' | 'slow' | 'attention';
+export type SignalView = 'overview' | 'hot' | 'slow' | 'attention' | 'fanout';
 export interface MetricPoint {
   at: number;
   value: number;

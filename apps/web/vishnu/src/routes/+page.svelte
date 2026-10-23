@@ -1,5 +1,6 @@
 <script lang="ts">
  import { matchesMesh, type DatadogSnapshot, type SignalView } from '$lib/graph/datadog';
+ import { createSignalDemo, demoSignals } from '$lib/fixtures/signals';
  import { onMount } from 'svelte';
  import { createFixture } from '$lib/fixtures/mesh';
  import { createLayoutWorker } from '$lib/graph/worker-layout';
@@ -24,14 +25,15 @@
   clearTimeout(hoverTimer);
   hover = {id, x: Math.max(12, Math.min(rect.left, window.innerWidth - 352)), y: rect.bottom + 428 <= window.innerHeight ? rect.bottom + 8 : Math.max(12, rect.top - 428)};
  };
+ let demo = $state(false);
  let scenario = $state<'overview' | 'incident' | 'missing'>('incident');
  let liveSnapshot = $state<MeshSnapshot | null>(null);
  let mode = $state<'loading' | 'fixture' | 'live'>('loading');
  let disconnected = $state('');
- let snapshot = $derived(mode === 'fixture' ? createFixture(scenario) : liveSnapshot);
+ let snapshot = $derived(mode === 'fixture' ? (demo ? createSignalDemo() : createFixture(scenario)) : liveSnapshot);
  let datadogNow = $derived(datadog ? datadog.serverNow + Math.max(0, clock - datadogLoadedAt) : 0);
  let scopedDatadog = $derived(matchesMesh(datadog, snapshot) ? datadog : null);
- let sourceLabel = $derived(mode === 'fixture' ? 'Fixture preview' : mode === 'loading' ? 'Connecting…' : `${snapshot?.environment ?? 'Synthetic dev'}${snapshot?.slot != null ? ` · slot ${snapshot.slot}` : ''}`);
+ let sourceLabel = $derived(mode === 'fixture' ? (demo ? 'SIMULATED SIGNALS' : 'Fixture preview') : mode === 'loading' ? 'Connecting…' : `${snapshot?.environment ?? 'Synthetic dev'}${snapshot?.slot != null ? ` · slot ${snapshot.slot}` : ''}`);
  let mqViews: MqViews = $derived.by(() => {
   const scoped = snapshot?.mode === 'live' && stats?.scope.environment === 'synthetic' && stats?.scope.deployment === `slot-${snapshot.slot}` && stats?.scope.broker === `soa-s${snapshot.slot}` && stats?.scope.vhost === '/' ? stats : null;
   return Object.fromEntries((snapshot?.systems ?? []).map(s => [s.id, serviceStats(scoped, s.id, Math.max(0,clock-statsLoadedAt), !!statsError)]));
@@ -103,12 +105,13 @@
   };
   const start = async () => {
    const requested = new URLSearchParams(location.search).get('mode');
+   demo = requested === 'demo';
    let config: { mode?: string; apiUrl?: string; pollIntervalMs?: number } = {};
-   if (requested !== 'fixture') {
+   if (requested !== 'fixture' && !demo) {
     try { config = await fetchJson('/config.json'); } catch { /* Static fixture builds have no runtime config. */ }
    }
    if (!active) return;
-   mode = requested === 'fixture' ? 'fixture' : requested === 'live' || config.mode === 'live' || import.meta.env.VITE_VISHNU_MODE === 'live' ? 'live' : 'fixture';
+   mode = requested === 'fixture' || demo ? 'fixture' : requested === 'live' || config.mode === 'live' || import.meta.env.VITE_VISHNU_MODE === 'live' ? 'live' : 'fixture';
    if (mode === 'live') {
     apiUrl = config.apiUrl || '/api/mesh';
     pollMs = Math.max(3000, Number(config.pollIntervalMs) || 15000);
@@ -116,7 +119,7 @@
     void pollDatadog();
     await poll();
    } else {
-    try { const result = await worker.layout(createFixture('overview')); if (active) layout = result; }
+    try { const result = await worker.layout(demo ? createSignalDemo() : createFixture('overview')); if (active) layout = result; }
     catch (error) { if (active) failure = String(error); }
    }
   };
@@ -133,10 +136,12 @@
  {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for the local stack collector.'} Retrying automatically.{:else}Local health probes · declared product topology · MQ telemetry {statsError ? 'unavailable' : stats?.receiver.connected ? 'connected' : 'connecting'}{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
  {#if snapshot}
  {#if mode === 'live'}<p class="datadog-status" role="status">Datadog: {datadogError ? 'unavailable; retrying' : datadog?.status ?? 'connecting'}{#if datadog} · {datadog.scope.environment} / {datadog.scope.deployment}{#if !scopedDatadog} · separate scope; graph overlay disabled{/if}{/if}. Metrics describe services; flow analysis opens in Datadog.</p>{/if}
- <div class="toolbar">{#if mode === 'live'}<label>Signal view <select bind:value={signalView}><option value="overview">All paths · early warnings</option><option value="hot">Hot services</option><option value="slow">Slow services</option><option value="attention">Warnings & alerts</option></select></label>{/if}{#if mode === 'fixture'}<label>Fixture scenario <select bind:value={scenario}><option value="overview">Healthy overview</option><option value="incident">Consumer incident</option><option value="missing">Missing telemetry</option></select></label>{/if}<div class="search"><label for="system-search">Find a system</label><input id="system-search" type="search" placeholder="Search systems…" bind:value={search} />{#if search}<div class="search-results">{#each matches as s}<button onclick={() => { selected = s.id; search = ''; }}>{s.label}</button>{:else}<p>No matching systems</p>{/each}</div>{/if}</div><div class="view-actions"><button aria-pressed={focused} onclick={() => focused = !focused}>{focused ? 'Exit focus' : 'Focus canvas'}</button><button aria-expanded={showInspector} aria-controls="selection-inspector" onclick={() => showInspector = !showInspector}>{showInspector ? 'Hide inspector' : 'Show inspector'}</button><button aria-expanded={showList} aria-controls="mesh-list" onclick={() => showList = !showList}>{showList ? 'Hide list' : 'Browse as list'}</button></div><span class="summary-count">{snapshot.systems.length} systems · {snapshot.relationships.length} paths</span></div>
+ {#if demo}<div class="demo-banner"><strong>SIMULATED SIGNALS · stand-up demo</strong><span>Invented measurements and call chains. No live APIs or Datadog queries.</span><a href="/">Return to live view ↗</a></div>{:else}<p class="demo-entry"><a href="?mode=demo">Preview simulated signals ↗</a></p>{/if}
+ <div class="toolbar">{#if mode === 'live' || demo}<label>Signal view <select bind:value={signalView}><option value="overview">All paths · early warnings</option><option value="hot">Hot services</option><option value="slow">Slow services</option><option value="attention">Warnings & alerts</option>{#if demo}<option value="fanout">Fan-out</option>{/if}</select></label>{/if}{#if mode === 'fixture' && !demo}<label>Fixture scenario <select bind:value={scenario}><option value="overview">Healthy overview</option><option value="incident">Consumer incident</option><option value="missing">Missing telemetry</option></select></label>{/if}<div class="search"><label for="system-search">Find a system</label><input id="system-search" type="search" placeholder="Search systems…" bind:value={search} />{#if search}<div class="search-results">{#each matches as s}<button onclick={() => { selected = s.id; search = ''; }}>{s.label}</button>{:else}<p>No matching systems</p>{/each}</div>{/if}</div><div class="view-actions"><button aria-pressed={focused} onclick={() => focused = !focused}>{focused ? 'Exit focus' : 'Focus canvas'}</button><button aria-expanded={showInspector} aria-controls="selection-inspector" onclick={() => showInspector = !showInspector}>{showInspector ? 'Hide inspector' : 'Show inspector'}</button><button aria-expanded={showList} aria-controls="mesh-list" onclick={() => showList = !showList}>{showList ? 'Hide list' : 'Browse as list'}</button></div><span class="summary-count">{snapshot.systems.length} systems · {snapshot.relationships.length} paths</span></div>
+ {#if demo}<div class="signal-legend" aria-label="Signal legend"><span style="--signal-color:var(--color-teal)">↗ Hot traffic</span><span style="--signal-color:var(--color-attention)">◷ Slow paths</span><span style="--signal-color:var(--chart-2)">⑂ Fan-out</span><span style="--signal-color:var(--color-danger)">! Threshold breached</span><small>Intensity = budget used · 35–100% opacity · ▲ early warning from 70% · all paths remain visible</small></div>{/if}
  <p class="sr-only" role="status" aria-live="polite">Selected: {selectedLabel}. {showInspector ? 'Details are in the selection inspector.' : 'Use Show inspector for details.'}</p>
  {#if showList}<section class="mesh-list" id="mesh-list" aria-label="Mesh systems and relationships"><div><h3>Systems</h3><ul>{#each snapshot.systems as system}<li><button aria-pressed={selected === system.id} onclick={() => selected = system.id}>{system.label}<small>{system.kind} · {mode === 'live' && system.health === 'healthy' ? 'reachable' : system.health} · {system.freshness}</small></button></li>{/each}</ul></div><div><h3>Relationships</h3><ul>{#each snapshot.relationships as relationship}<li><button aria-pressed={selected === relationship.id} onclick={() => selected = relationship.id}>{relationship.label}<small>{snapshot?.systems.find(s => s.id === relationship.source)?.label} → {snapshot?.systems.find(s => s.id === relationship.target)?.label}<br/>{relationship.kind} · {relationship.health} · {relationship.freshness}</small></button></li>{/each}</ul></div></section>{/if}
- <div class="workspace" class:inspector-hidden={!showInspector}><section class="graph-panel" aria-label="Interactive service mesh"><div class="band-labels"><span>DATA SYSTEMS</span><span>MESH SERVICES</span><span>APPLICATIONS</span></div><div class="graph-canvas">{#if layout}<MeshGraph datadog={scopedDatadog} {datadogError} now={datadogNow} {signalView} {snapshot} {layout} {selected} {mqViews} onpreview={preview} onselect={id => { selected = id; hover = null; if (id) showInspector = true; }}/>{:else if failure}<p role="alert">Could not lay out mesh: {failure}</p>{:else}<p role="status">Laying out the mesh…</p>{/if}</div><div class="graph-footer">Drag to pan · Scroll to zoom · Tab then Enter to select<span>Geometry stays stable as signals change</span></div></section>{#if showInspector}<SideInspector {datadog} {datadogError} now={datadogNow} {snapshot} {selected} {mqViews} onselect={id => selected = id}/>{/if}</div>
+ <div class="workspace" class:inspector-hidden={!showInspector}><section class="graph-panel" aria-label="Interactive service mesh"><div class="band-labels"><span>DATA SYSTEMS</span><span>MESH SERVICES</span><span>APPLICATIONS</span></div><div class="graph-canvas">{#if layout}<MeshGraph demoSignals={demo ? demoSignals : {}} datadog={scopedDatadog} {datadogError} now={datadogNow} {signalView} {snapshot} {layout} {selected} {mqViews} onpreview={preview} onselect={id => { selected = id; hover = null; if (id) showInspector = true; }}/>{:else if failure}<p role="alert">Could not lay out mesh: {failure}</p>{:else}<p role="status">Laying out the mesh…</p>{/if}</div><div class="graph-footer">Drag to pan · Scroll to zoom · Tab then Enter to select<span>Geometry stays stable as signals change</span></div></section>{#if showInspector}<SideInspector demoSignals={demo ? demoSignals : {}} {datadog} {datadogError} now={datadogNow} {snapshot} {selected} {mqViews} onselect={id => selected = id}/>{/if}</div>
  {:else}<p role="status">{disconnected || 'Connecting to the mesh…'}</p>{/if}
  </main></div>
 </div>

@@ -639,3 +639,13 @@ dd {
 .apm-badge.critical { color: #ef6464; }
 .datadog-stats { border-block: 1px solid var(--color-border); padding-block: 8px; margin-block: 12px; }
 .datadog-stats a { overflow-wrap: anywhere; }
+
+.demo-banner { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:12px 16px; margin-block:12px; background:var(--color-notice-bg); border-left:4px solid var(--color-notice); color:var(--color-text); font-size:13px; }
+.demo-banner a { margin-left:auto; }
+.demo-entry { font-size:12px; margin-block:8px; }
+.signal-legend { display:flex; flex-wrap:wrap; gap:12px 20px; padding:12px 0; font-size:12px; color:var(--color-text); }
+.signal-legend span { border-bottom:3px solid var(--signal-color); padding-bottom:4px; }
+.signal-legend small { flex-basis:100%; color:var(--color-text-secondary); }
+.signal-edge-label { font-weight:600; }
+.demo-detail { border-left:4px solid; padding:12px; margin-top:16px; background:var(--color-bg); }
+.relationship-list .demo-warning { border-left:4px solid; }

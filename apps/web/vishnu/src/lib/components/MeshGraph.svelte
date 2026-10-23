@@ -2,13 +2,15 @@
  import { SvelteFlow, Background, Controls, MiniMap, type Node, type Edge } from '@xyflow/svelte';
  import type { MeshSnapshot, MeshLayout } from '$lib/graph/types';
  import { serviceSignal, emphasizes, type DatadogSnapshot, type SignalView } from '$lib/graph/datadog';
+ import { signalDegree, type DemoSignal } from '$lib/fixtures/signals';
  import type { MqViews } from '$lib/graph/event-stats';
  import { busParticipants } from '$lib/graph/bus';
  import SystemNode from './SystemNode.svelte';
  import ConnectionEdge from './ConnectionEdge.svelte';
  import GraphControls from './GraphControls.svelte';
- let { datadog = null, datadogError = false, now = 0, signalView = 'overview', snapshot, layout, selected, onselect, mqViews = {}, onpreview }: { datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; signalView?: SignalView; mqViews?: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; snapshot: MeshSnapshot; layout: MeshLayout; selected: string | null; onselect: (id: string | null) => void } = $props();
+ let { demoSignals = {}, datadog = null, datadogError = false, now = 0, signalView = 'overview', snapshot, layout, selected, onselect, mqViews = {}, onpreview }: { demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; signalView?: SignalView; mqViews?: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; snapshot: MeshSnapshot; layout: MeshLayout; selected: string | null; onselect: (id: string | null) => void } = $props();
  let participants = $derived(busParticipants(snapshot));
+ const demoMatch = (s: DemoSignal) => signalView === 'overview' || (signalView === 'attention' ? signalDegree(s) >= .7 : signalView === s.kind);
  const nodeTypes = { system: SystemNode };
  const edgeTypes = { routed: ConnectionEdge };
  let relevant = $derived.by(() => {
@@ -24,15 +26,16 @@
  let nodes: Node[] = $derived(layout.nodes.map(n => {
   const system = snapshot.systems.find(s => s.id === n.id)!;
   const signal = serviceSignal(datadog, system.id, now, datadogError);
-  return { id: n.id, type: 'system', position: { x: n.x, y: n.y }, width: n.width, height: n.height, selected: selected === n.id, ariaLabel: `${system.label}, ${snapshot.mode === 'live' && system.health === 'healthy' ? 'reachable' : system.health}. Press Enter to inspect.`, data: { system, signal, participants, onselect, mqViews, onpreview, live: snapshot.mode === 'live', dimmed: selected ? !relevant.has(n.id) : !emphasizes(signalView, signal) } };
+  return { id: n.id, type: 'system', position: { x: n.x, y: n.y }, width: n.width, height: n.height, selected: selected === n.id, ariaLabel: `${system.label}, ${snapshot.mode === 'live' && system.health === 'healthy' ? 'reachable' : system.health}. Press Enter to inspect.`, data: { system, signal, participants, onselect, mqViews, onpreview, live: snapshot.mode === 'live', dimmed: selected ? !relevant.has(n.id) : !(Object.keys(demoSignals).length ? snapshot.relationships.some(r => (r.source === n.id || r.target === n.id) && demoSignals[r.id] && demoMatch(demoSignals[r.id])) || signalView === 'overview' : emphasizes(signalView, signal)) } };
  }));
  let edges: Edge[] = $derived(layout.edges.filter(e => snapshot.relationships.find(r => r.id === e.id)?.kind !== 'event').map(e => {
   const r = snapshot.relationships.find(r => r.id === e.id)!;
   const sourceSignal = serviceSignal(datadog, r.source, now, datadogError);
   const targetSignal = serviceSignal(datadog, r.target, now, datadogError);
-  const emphasized = emphasizes(signalView, sourceSignal) || emphasizes(signalView, targetSignal);
+  const demoSignal = demoSignals[r.id];
+  const emphasized = Object.keys(demoSignals).length ? signalView === 'overview' || (demoSignal && demoMatch(demoSignal)) : emphasizes(signalView, sourceSignal) || emphasizes(signalView, targetSignal);
   const observed = !datadogError && datadog && ['connected','partial'].includes(datadog.status) && now - Date.parse(datadog.observedAt) <= datadog.freshForMs && datadog.dependencies.some(d => d.source === r.source && d.target === r.target);
-  return { id: e.id, source: r.source, target: r.target, type: 'routed', selected: selected === e.id, ariaLabel: `${r.label}, ${r.kind}, ${r.health}. Press Enter to inspect.`, data: { relationship: r, points: e.points, observed: !!observed, dimmed: selected ? !relevant.has(e.id) : !emphasized } };
+  return { id: e.id, source: r.source, target: r.target, type: 'routed', selected: selected === e.id, ariaLabel: `${r.label}, ${r.kind}, ${r.health}. Press Enter to inspect.`, data: { relationship: r, demoSignal, demo: Object.keys(demoSignals).length > 0, points: e.points, observed: !!observed, dimmed: selected ? !relevant.has(e.id) : !emphasized } };
  }));
  let selectedIds = $derived(snapshot.systems.some(s => s.id === selected) ? [selected!] : snapshot.relationships.filter(r => r.id === selected).flatMap(r => [r.source, r.target]));
 </script>

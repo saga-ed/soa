@@ -1,11 +1,12 @@
 <script lang="ts">
+ import { signalNames, signalColor, signalDegree, type DemoSignal } from '$lib/fixtures/signals';
  import DatadogStats from './DatadogStats.svelte';
  import type { DatadogSnapshot } from '$lib/graph/datadog';
  import MqStats from './MqStats.svelte';
  import type { MqViews } from '$lib/graph/event-stats';
  import { connectionLabel } from '$lib/graph/presentation';
  import type { MeshSnapshot } from '$lib/graph/types';
- let { datadog = null, datadogError = false, now = 0, snapshot, selected, onselect, mqViews = {} }: { datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; mqViews?: MqViews; snapshot: MeshSnapshot; selected: string | null; onselect: (id: string | null) => void } = $props();
+ let { demoSignals = {}, datadog = null, datadogError = false, now = 0, snapshot, selected, onselect, mqViews = {} }: { demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; mqViews?: MqViews; snapshot: MeshSnapshot; selected: string | null; onselect: (id: string | null) => void } = $props();
  let item = $derived(snapshot.systems.find(s => s.id === selected) ?? snapshot.relationships.find(r => r.id === selected));
  let relationships = $derived(snapshot.relationships.filter(r => r.source === selected || r.target === selected || (selected != null && r.via?.includes(selected))));
  let expanded = $state(false);
@@ -25,6 +26,7 @@
   {#if snapshot.mode === 'live' && ('source' in item ? item.kind === 'http' : item.band !== 'data')}
    <DatadogStats data={datadog} failed={datadogError} {now} source={'source' in item ? item.source : item.id} target={'target' in item ? item.target : undefined} />
   {/if}
+  {#if demoSignals[item.id]}{@const signal = demoSignals[item.id]}<section class="demo-detail" style:border-color={signalColor(signal)}><strong>SIMULATED · {signalNames[signal.kind]}</strong><h3>{signal.value} {signal.unit}</h3><p>{Math.round(signalDegree(signal)*100)}% of a {signal.budget} {signal.unit} budget.</p><p>{signal.detail}</p><p>Warning at 70%; breach at 100%. Color intensity increases as headroom shrinks.</p></section>{/if}
   <p>{item.summary}</p>
   <dl class="metrics">
    <div><dt>Type</dt><dd>{'source' in item ? connectionLabel(item) : item.kind}</dd></div>
@@ -38,6 +40,7 @@
    {:else}<div class="relationship-list">{#each relationships as r}<button onclick={() => onselect(r.id)}><strong>{r.label}</strong><small>{r.kind} · {r.health} · {r.freshness}</small></button>{/each}</div>{/if}
   {/if}
  {:else}
+  {#if Object.keys(demoSignals).length}<h2>Early warnings</h2><p>All paths stay visible. These simulated signals approach their budgets before errors appear.</p><div class="relationship-list">{#each Object.entries(demoSignals).filter(([,s]) => signalDegree(s) >= .7) as [id,signal]}<button class="demo-warning" style:border-left-color={signalColor(signal)} onclick={() => onselect(id)}><strong>{signalNames[signal.kind]} · {Math.round(signalDegree(signal)*100)}% of budget</strong><small>{snapshot.relationships.find(r => r.id === id)?.label}<br/>{signal.value} {signal.unit}</small></button>{/each}</div><p>Example: IAM → Programs ×2 → Scheduling ×25 = 50 Scheduling calls per IAM request.</p>{/if}
   <h2>Follow the signal</h2><p>Select a system or connection to inspect its health and evidence without losing your place.</p>
   <h3>Systems needing attention</h3><div class="relationship-list">{#each snapshot.systems.filter(s => s.health !== 'healthy') as s}<button onclick={() => onselect(s.id)}><strong>{s.label}</strong><small>{s.health} · {s.freshness}</small></button>{:else}<p>{snapshot.mode === 'live' ? 'All probed systems are reachable.' : 'All fixture systems are healthy.'}</p>{/each}</div>
   <h3>Reading the mesh</h3><p>Border + status: system health.<br/>Line width: endpoint / event type / operation count.<br/>Blue intensity: traffic volume.<br/>Dashed lines: stale or missing telemetry.<br/>Labels: HTTP/tRPC, HTTP/REST, HTTP/tRPC + REST, HTTP/? (unverified), DB; ▲ or ! marks trouble.</p><p>Signal views dim unrelated services and paths without hiding topology. APM badges show service-level metrics; hot traffic alone does not imply a fault. White gaps at crossings mean paths cross without connecting. MQ badges and the RabbitMQ participant panel expose logical publisher-to-consumer relationships; event edges are hidden.</p>

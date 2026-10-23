@@ -233,3 +233,19 @@ reconstruct trace trees, and retained span counts are not used as traffic totals
 Checks: `pnpm --filter @saga-ed/vishnu test:datadog-browser` covers controlled
 browser responses, scope isolation, expiry, errors, links, and stable graph geometry.
 No live Datadog coverage is established by that test.
+
+
+## Stand-up signal demo
+
+Open `/?mode=demo` for an isolated, clearly labeled simulation. It makes no live
+mesh, MQ or Datadog requests. All paths includes invented early warnings at 70%
+of a budget, with Hot, Slow, Fan-out and Warnings views for emphasis. Geometry
+and path count remain unchanged while switching views.
+
+Palette uses Saga semantic tokens: teal (`--color-teal`) for traffic, amber
+(`--color-attention`) for latency, magenta (`--chart-2`) for fan-out, clay
+(`--color-danger`) for a threshold breach. Opacity is `0.35 + 0.65 × min(1,
+value / budget)`; labels remain fully opaque and show the value and percentage.
+The demo budgets are illustrative, not operational thresholds. Its causal example
+is two Programs calls per IAM request, each making 25 Scheduling calls: 50 calls
+per root request. The Return to live view link exits the simulation.

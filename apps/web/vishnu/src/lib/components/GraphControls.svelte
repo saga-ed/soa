@@ -6,7 +6,7 @@
  let { selectedIds, revision=0, targetLayout, onFocusSelection, onFullMesh }: { selectedIds: string[]; revision?:number; targetLayout:MeshLayout; onFocusSelection:()=>void; onFullMesh:()=>void } = $props();
  const { fitView, fitBounds } = useSvelteFlow();
  let controls: HTMLDivElement;
- $effect(()=>{const current=revision; const target=targetLayout;if(current)untrack(()=>{void fitBounds({x:0,y:0,width:target.width,height:target.height},{padding:.1,duration:window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:520});});});
+ $effect(()=>{const current=revision;if(current)untrack(()=>{const target=targetLayout;void fitBounds({x:0,y:0,width:target.width,height:target.height},{padding:.1,duration:window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:520});});});
  onMount(() => {
   const canvas = controls.closest('.svelte-flow');
   if (!canvas) return;

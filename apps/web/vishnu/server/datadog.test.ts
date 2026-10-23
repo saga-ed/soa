@@ -139,3 +139,30 @@ describe('Datadog read adapter', () => {
     );
   });
 });
+
+describe('cloud environment scope', () => {
+  it('queries the whole explicit environment without a deployment filter and scopes monitor metadata', async () => {
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/v1/query') return ok({ status: 'ok', series: [] });
+      if (url.pathname === '/api/v1/service_dependencies') return ok({});
+      return ok([
+        { id: 10, type: 'metric alert', tags: ['env:dev'], name: 'volume guard', state: { groups: { 'service:iam-api': { status: 'Alert' } } } },
+        { id: 11, type: 'composite', query: '10 && 12', tags: ['env:dev'], name: 'actual incident', state: { groups: { 'service:iam-api': { status: 'OK' } } } },
+        { id: 13, tags: ['env:prod'], name: 'prod alarm', state: { groups: { 'service:iam-api': { status: 'Alert' } } } },
+      ]);
+    });
+    const data = await createDatadogReader({ ...env, VISHNU_DATADOG_SCOPE: 'environment', VISHNU_DATADOG_ENV: 'dev' }, fetcher as typeof fetch, () => time)();
+    expect(data.scope).toMatchObject({ level: 'environment', deployment: 'all', environment: 'dev' });
+    expect(data.services[0].monitors.map(m => m.id)).toEqual([10, 11]);
+    expect(serviceSignal(data, 'iam-api', time).flagged).toBe(false);
+    expect(new URL(traceLink(data, 'iam-api')).searchParams.get('query')).toBe('env:"dev" service:"iam-api"');
+    for (const [input] of fetcher.mock.calls.slice(0, 3)) expect(new URL(String(input)).searchParams.get('query')).toContain('{env:dev}');
+    expect(new URL(String(fetcher.mock.calls[3][0])).searchParams.has('primary_tag')).toBe(false);
+  });
+  it('never allows environment-wide synthetic observations', async () => {
+    const fetcher = backend();
+    expect((await createDatadogReader({ ...env, VISHNU_DATADOG_SCOPE: 'environment' }, fetcher as typeof fetch)()).status).toBe('unavailable');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});

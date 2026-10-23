@@ -406,6 +406,70 @@ importers:
         specifier: ^1.5.0
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
 
+  apps/node/vishnu-api:
+    dependencies:
+      '@saga-ed/janus-client':
+        specifier: 0.2.0
+        version: 0.2.0(express@4.22.1)
+      '@saga-ed/soa-api-core':
+        specifier: workspace:*
+        version: link:../../../packages/node/api-core
+      '@saga-ed/soa-event-envelope':
+        specifier: workspace:*
+        version: link:../../../packages/node/event-envelope
+      '@saga-ed/soa-event-stats':
+        specifier: workspace:*
+        version: link:../../../packages/node/event-stats
+      '@saga-ed/soa-health':
+        specifier: workspace:*
+        version: link:../../../packages/node/health
+      '@saga-ed/soa-logger':
+        specifier: workspace:*
+        version: link:../../../packages/node/logger
+      '@trpc/server':
+        specifier: ^11.0.0
+        version: 11.8.0(typescript@5.9.3)
+      amqplib:
+        specifier: ^0.10.4
+        version: 0.10.9
+      express:
+        specifier: ^4.18.2
+        version: 4.22.1
+      inversify:
+        specifier: ^6.2.2
+        version: 6.2.2(reflect-metadata@0.2.2)
+      pg:
+        specifier: ^8.13.0
+        version: 8.20.0
+      reflect-metadata:
+        specifier: ^0.2.2
+        version: 0.2.2
+    devDependencies:
+      '@types/amqplib':
+        specifier: ^0.10.4
+        version: 0.10.8
+      '@types/express':
+        specifier: ^5.0.3
+        version: 5.0.6
+      '@types/node':
+        specifier: ^24.0.3
+        version: 24.0.12
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+      jose:
+        specifier: ^5.9.0
+        version: 5.10.0
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(@swc/core@1.15.7(@swc/helpers@0.5.17))(jiti@2.6.1)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.0.12)(jiti@2.6.1)(jsdom@25.0.1)(tsx@4.21.0)(yaml@2.8.2)
+
   apps/web/docs:
     dependencies:
       '@saga-ed/soa-ui':
@@ -4892,6 +4956,14 @@ packages:
 
   '@rushstack/eslint-patch@1.15.0':
     resolution: {integrity: sha512-ojSshQPKwVvSMR8yT2L/QtUkV5SXi/IfDiJ4/8d6UbTPjiHVmxZzUAzGD8Tzks1b9+qQkZa0isUOvYObedITaw==}
+
+  '@saga-ed/janus-client@0.2.0':
+    resolution: {integrity: sha512-ZYO4UPHDbTC2xYc83alB8xGBfV2xhHWgpZiqkmmnI8lpPSoupGrFvYUlDUf8PbQdKOwSGuWmGSmb2hclD8IVuw==}
+    peerDependencies:
+      express: ^4.18.0 || ^5.0.0
+    peerDependenciesMeta:
+      express:
+        optional: true
 
   '@saga-ed/product-style@https://codeload.github.com/saga-ed/product-style/tar.gz/9b134187093f550a4d33cfda4d37c8ab02cdbfed':
     resolution: {tarball: https://codeload.github.com/saga-ed/product-style/tar.gz/9b134187093f550a4d33cfda4d37c8ab02cdbfed}
@@ -13721,7 +13793,7 @@ snapshots:
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
-      '@jridgewell/sourcemap-codec': 1.5.5
+      '@jridgewell/sourcemap-codec': 1.6.0
       '@jridgewell/trace-mapping': 0.3.31
 
   '@jridgewell/remapping@2.3.5':
@@ -13743,7 +13815,7 @@ snapshots:
   '@jridgewell/trace-mapping@0.3.9':
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
-      '@jridgewell/sourcemap-codec': 1.5.5
+      '@jridgewell/sourcemap-codec': 1.6.0
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
@@ -14963,6 +15035,14 @@ snapshots:
   '@rtsao/scc@1.1.0': {}
 
   '@rushstack/eslint-patch@1.15.0': {}
+
+  '@saga-ed/janus-client@0.2.0(express@4.22.1)':
+    dependencies:
+      cookie: 1.1.1
+      jose: 5.10.0
+      zod: 3.25.67
+    optionalDependencies:
+      express: 4.22.1
 
   '@saga-ed/product-style@https://codeload.github.com/saga-ed/product-style/tar.gz/9b134187093f550a4d33cfda4d37c8ab02cdbfed': {}
 
@@ -18307,7 +18387,7 @@ snapshots:
 
   estree-walker@3.0.3:
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
 
   esutils@2.0.3: {}
 
@@ -19249,7 +19329,7 @@ snapshots:
 
   is-reference@1.2.1:
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
 
   is-reference@3.0.3:
     dependencies:
@@ -19650,7 +19730,7 @@ snapshots:
 
   magic-string@0.30.21:
     dependencies:
-      '@jridgewell/sourcemap-codec': 1.5.5
+      '@jridgewell/sourcemap-codec': 1.6.0
 
   magicast@0.3.5:
     dependencies:
@@ -19760,7 +19840,7 @@ snapshots:
 
   mlly@1.8.0:
     dependencies:
-      acorn: 8.16.0
+      acorn: 8.19.0
       pathe: 2.0.3
       pkg-types: 1.3.1
       ufo: 1.6.1

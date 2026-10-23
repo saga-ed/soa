@@ -16,8 +16,8 @@
    <div><dt>p95 five minutes earlier</dt><dd>{numberLabel(signal.previousP95Ms)} ms</dd></div>
   </dl>
   <p class="fixture-note">Display thresholds: hot ≥ {data.thresholds.hotRate}/s; p95 warning ≥ {data.thresholds.warningP95Ms} ms, critical ≥ {data.thresholds.criticalP95Ms} ms. These highlight the latest bucket, not a sustained Datadog monitor evaluation.</p>
-  {#each signal.monitors as monitor}<p><a href={monitor.url} target="_blank" rel="noreferrer">{monitor.status}: {monitor.name} ↗</a></p>{/each}
-  {#if !signal.monitors.length}<p class="fixture-note">No current monitor groups matched this exact environment and deployment.</p>{/if}
+  {#each signal.monitors as monitor}<p><a href={monitor.url} target="_blank" rel="noreferrer">{monitor.status}: {monitor.name}{monitor.actionable === false ? ' (composite input; not a standalone alert)' : ''} ↗</a></p>{/each}
+  {#if !signal.monitors.length}<p class="fixture-note">No current monitor groups matched this observation scope.</p>{/if}
   <a class="details-button" href={traceLink(data,source,target)} target="_blank" rel="noreferrer">{target ? 'Investigate this call in Datadog' : 'Open service traces in Datadog'} ↗</a>
   {#if target}<p><a href={traceLink(data,target)} target="_blank" rel="noreferrer">Open destination traces ↗</a></p>{/if}
   <p class="fixture-note">Use Datadog’s Trace Queries / Flow Map for repeated calls, fan-out and waterfalls. The call link filters by parent service; missing propagation or parent tags can yield no results. Retained spans are sampled evidence, not total request counts.</p>

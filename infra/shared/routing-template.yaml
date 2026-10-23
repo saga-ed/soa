@@ -1,0 +1,198 @@
+# Source: saga-ed/program-hub infra/shared/routing-template.yaml @ 067bb09 (2026-09).
+# Re-sync with /saga-iac:harvest.
+# Sanitized: program-hub -> soa. Environment/VpcIdSSMParameter/
+# ALBListenerArnSSMParameter (and, on a legacy per-service routing template
+# that still carries it, VpnCidrBlocksSSMParameter) are allowlisted to keep
+# DEV defaults in the check-prod-defaults guard (see CLAUDE.md "Template
+# Defaults") because saga-deploy-routing / this stack's callers pass only
+# HostHeader/TargetGroupName-shaped values, never a full service-parameter-
+# overrides-json — there is no channel to supply a dev value otherwise. This
+# upstream copy's Environment/VpcIdSSMParameter/ALBListenerArnSSMParameter
+# defaults already happen to be PROD-shaped (satisfying the prod-valued-Defaults invariant outright);
+# keep them that way on re-sync, but do not fail a generated repo's guard if
+# a future harvest reverts to dev defaults here — that would still be
+# expected and allowlisted, not a regression. This template carries no
+# VpnCidrBlocksSSMParameter param at all (OIDC/VPN bypass rules are
+# deprecated fleet-wide, per the SUPERSEDED note removed from this example).
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Shared per-colour routing stack (target group + header-gated preview rule)
+  for a soa ECS service. Deployed twice per service per environment,
+  once with Identifier=blue and once with Identifier=green. The live weighted
+  listener rule that actually receives production traffic is created once via
+  CLI (`saga-bluegreen create-rule`), never by this template — flips
+  thereafter are ModifyRule calls outside CFN (`saga-bluegreen flip`). Scope,
+  by design, not a gap: no OIDC gating (Janus + WAF supersede it). Deletion
+  policy / Retain for durable identifiers is deliberately NOT here — CI/CD
+  workflow logic must own that (an ALB has a 100-target-group quota; leaking
+  one per PR eventually starves it).
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+    Default: prod
+  ProjectName:
+    Type: String
+    Default: 'soa'
+  ServiceName:
+    Type: String
+    Description: Service name for tags/SSM paths (e.g. my-api). Does not drive the target-group name — see TargetGroupName.
+  Identifier:
+    Type: String
+    AllowedValues: [blue, green]
+    Description: Colour slot this stack instance owns.
+  ContainerPort:
+    Type: Number
+  HealthCheckPath:
+    Type: String
+    Default: /health
+  HostHeader:
+    Type: String
+  PathPattern:
+    Type: String
+    Default: ''
+    Description: "Optional path-pattern condition (e.g. /*). Empty = host-header-only routing."
+  PreviewHeader:
+    Type: String
+    Default: ''
+    Description: x-saga-preview-<service> header value. Empty falls back to Identifier (see ListenerRuleEphemeral).
+  TargetGroupName:
+    Type: String
+    Default: ''
+    Description: >
+      Explicit TG name override, pinned by every caller to the current live TG
+      name (e.g. "myapi-blue-tg") — Name is immutable, so an unset
+      override deriving service-colour-tg instead would replace
+      the target group.
+  ListenerRulePriorityBase:
+    Type: Number
+  VpcIdSSMParameter:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /prod/app/vpc-id
+  ALBListenerArnSSMParameter:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /prod/app/app-alb-443-listener-arn
+
+Conditions:
+  HasPreviewHeader:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: PreviewHeader
+      - ''
+  HasCustomTgName:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: TargetGroupName
+      - ''
+  HasPathPattern:
+    Fn::Not:
+    - Fn::Equals:
+      - Ref: PathPattern
+      - ''
+
+Resources:
+  # Standing infra for the service's life — not create/destroy-on-flip.
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name:
+        Fn::If:
+        - HasCustomTgName
+        - Ref: TargetGroupName
+        - Fn::Sub: ${ServiceName}-${Identifier}-tg
+      Protocol: HTTP
+      Port:
+        Ref: ContainerPort
+      VpcId:
+        Ref: VpcIdSSMParameter
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath:
+        Ref: HealthCheckPath
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200-299
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '30'
+      Tags:
+      - Key: Project
+        Value:
+          Ref: ProjectName
+      - Key: Environment
+        Value:
+          Ref: Environment
+      - Key: Service
+        Value:
+          Ref: ServiceName
+      - Key: Identifier
+        Value:
+          Ref: Identifier
+
+  # "Ephemeral" name kept to avoid replacing the resource on live stacks.
+  # http-header condition falls back to Identifier when PreviewHeader is
+  # empty — an unguarded empty value would outrank the live weighted rule
+  # (this is the exact shape of a real prod outage on this pattern; see
+  # OPS.md "Gotchas").
+  ListenerRuleEphemeral:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Ref: ALBListenerArnSSMParameter
+      Priority:
+        Ref: ListenerRulePriorityBase
+      Conditions:
+      - Field: host-header
+        Values:
+        - Ref: HostHeader
+      - Fn::If:
+        - HasPathPattern
+        - Field: path-pattern
+          Values:
+          - Ref: PathPattern
+          - /health
+        - Ref: AWS::NoValue
+      - Field: http-header
+        HttpHeaderConfig:
+          HttpHeaderName:
+            Fn::Sub: x-saga-preview-${ServiceName}
+          Values:
+          - Fn::If:
+            - HasPreviewHeader
+            - Ref: PreviewHeader
+            - Ref: Identifier
+      Actions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: TargetGroup
+
+  TargetGroupArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        Fn::Sub: /${ProjectName}/${ServiceName}/infra/${Environment}/${Identifier}/target-group-arn
+      Type: String
+      Value:
+        Ref: TargetGroup
+      Description:
+        Fn::Sub: ALB target group ARN for ${ServiceName} (${Identifier})
+      Tags:
+        Project:
+          Ref: ProjectName
+
+Outputs:
+  TargetGroupArn:
+    Value:
+      Ref: TargetGroup
+  HostHeader:
+    Value:
+      Ref: HostHeader
+  Url:
+    Value:
+      Fn::Sub: https://${HostHeader}

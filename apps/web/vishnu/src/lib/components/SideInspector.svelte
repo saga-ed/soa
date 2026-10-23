@@ -23,14 +23,14 @@
    <div class="relationship-list">{#each relationships.filter(r => r.kind === 'event') as r}<button onclick={() => onselect(r.id)}><strong>{r.source === selected ? '↑ Publishes' : r.target === selected ? '↓ Consumes' : '↔ Routes'}: {r.label}</strong><small>{snapshot.systems.find(s => s.id === r.source)?.label} → {snapshot.systems.find(s => s.id === r.target)?.label}</small></button>{/each}</div>
    <p>Message consumption does not establish successful projection completion.</p>
   {/if}
-  {#if snapshot.mode === 'live' && ('source' in item ? item.kind === 'http' : item.band !== 'data')}
+  {#if snapshot.mode === 'live' && ('source' in item ? ['http', 'dependency'].includes(item.kind) : item.band !== 'data')}
    <DatadogStats data={datadog} failed={datadogError} {now} source={'source' in item ? item.source : item.id} target={'target' in item ? item.target : undefined} />
   {/if}
   {#if demoSignals[item.id]}{@const signal = demoSignals[item.id]}<section class="demo-detail" style:border-color={signalColor(signal)}><strong>SIMULATED · {signalNames[signal.kind]}</strong><h3>{signal.value} {signal.unit}</h3><p>{Math.round(signalDegree(signal)*100)}% of a {signal.budget} {signal.unit} budget.</p><p>{signal.detail}</p><p>Warning at 70%; breach at 100%. Color intensity increases as headroom shrinks.</p></section>{/if}
   <p>{item.summary}</p>
   <dl class="metrics">
    <div><dt>Type</dt><dd>{'source' in item ? connectionLabel(item) : item.kind}</dd></div>
-   {#if 'rate' in item}<div><dt>Traffic</dt><dd>{item.rate == null ? 'Unknown' : `${item.rate}/s`}</dd></div>{#if item.kind === 'http'}<div><dt>p95 latency</dt><dd>{item.latencyMs == null ? 'Unknown' : `${item.latencyMs} ms`}</dd></div>{/if}<div><dt>{item.kind === 'event' ? 'Distinct event types' : item.kind === 'http' ? 'Endpoints' : 'Database operations'}</dt><dd>{item.count ?? 'Unknown'}</dd></div>{:else}<div><dt>Observed errors</dt><dd>{item.errors == null ? 'Unknown' : `${item.errors}`}</dd></div>{/if}
+   {#if 'rate' in item}<div><dt>Traffic</dt><dd>{item.rate == null ? 'Unknown' : `${item.rate}/s`}</dd></div>{#if ['http', 'dependency'].includes(item.kind)}<div><dt>p95 latency</dt><dd>{item.latencyMs == null ? 'Unknown' : `${item.latencyMs} ms`}</dd></div>{/if}<div><dt>{item.kind === 'event' ? 'Distinct event types' : item.kind === 'http' ? 'Endpoints' : item.kind === 'dependency' ? 'Calls' : 'Database operations'}</dt><dd>{item.count ?? 'Unknown'}</dd></div>{:else}<div><dt>Observed errors</dt><dd>{item.errors == null ? 'Unknown' : `${item.errors}`}</dd></div>{/if}
   </dl>
   <h3>Evidence</h3>{#each item.evidence as evidence}<section class="evidence"><strong>{evidence.label}</strong><p>{evidence.description}</p>{#if evidence.url && /^https?:\/\//.test(evidence.url)}<a href={evidence.url} target="_blank" rel="noreferrer">Open evidence ↗</a>{/if}</section>{/each}
   {#if !item.evidence.length}<p>No evidence supplied. Unknown does not mean healthy.</p>{/if}

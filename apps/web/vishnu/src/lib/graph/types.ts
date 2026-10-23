@@ -25,7 +25,7 @@ export interface Relationship {
   source: string;
   target: string;
   label: string;
-  kind: 'http' | 'event' | 'database';
+  kind: 'http' | 'event' | 'database' | 'dependency';
   protocol?: 'trpc' | 'rest' | 'mixed' | 'unknown';
   count: number | null;
   rate: number | null;
@@ -36,6 +36,7 @@ export interface Relationship {
   evidence: Evidence[];
 }
 export interface MeshSnapshot {
+  scope?: { level?: 'environment' | 'deployment'; environment: string; deployment: string; deploymentTag: string };
   topologyVersion: string;
   environment: string;
   mode: 'fixture' | 'live';

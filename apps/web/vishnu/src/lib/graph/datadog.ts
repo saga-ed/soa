@@ -11,7 +11,7 @@ export interface DatadogService {
   p95Ms: MetricPoint | null;
   errorRate: MetricPoint | null;
   previousP95Ms: number | null;
-  monitors: { id: number; name: string; status: string; url: string }[];
+  monitors: { actionable?: boolean; id: number; name: string; status: string; url: string }[];
 }
 export interface DatadogSnapshot {
   version: 1;
@@ -20,7 +20,7 @@ export interface DatadogSnapshot {
   observedAt: string;
   serverNow: number;
   freshForMs: number;
-  scope: { environment: string; deployment: string; deploymentTag: string };
+  scope: { level?: 'environment' | 'deployment'; environment: string; deployment: string; deploymentTag: string };
   appUrl: string;
   window: { from: number; to: number };
   thresholds: { hotRate: number; warningP95Ms: number; criticalP95Ms: number };
@@ -31,8 +31,9 @@ export function matchesMesh(data: DatadogSnapshot | null, mesh: MeshSnapshot | n
   return (
     !!data &&
     mesh?.mode === 'live' &&
-    data.scope.environment === 'synthetic' &&
-    data.scope.deployment === `slot-${mesh.slot}`
+    (mesh.scope
+      ? (data.scope.level ?? 'deployment') === (mesh.scope.level ?? 'deployment') && data.scope.environment === mesh.scope.environment && data.scope.deployment === mesh.scope.deployment && data.scope.deploymentTag === mesh.scope.deploymentTag
+      : data.scope.environment === 'synthetic' && data.scope.deployment === `slot-${mesh.slot}`)
   );
 }
 export function currentPoint(
@@ -64,10 +65,10 @@ export function serviceSignal(
   const errorRate = fresh ? currentPoint(source?.errorRate, now, data!.freshForMs) : null;
   const monitors = fresh ? (source?.monitors ?? []) : [];
   const critical =
-    monitors.some(m => m.status === 'Alert') ||
+    monitors.some(m => m.actionable !== false && m.status === 'Alert') ||
     (p95Ms != null && p95Ms >= data!.thresholds.criticalP95Ms);
   const warning =
-    monitors.some(m => m.status === 'Warn') ||
+    monitors.some(m => m.actionable !== false && m.status === 'Warn') ||
     (p95Ms != null && p95Ms >= data!.thresholds.warningP95Ms);
   return {
     rate,
@@ -90,7 +91,7 @@ export function emphasizes(view: SignalView, signal: ReturnType<typeof serviceSi
 /** Values are quoted for Datadog search, then URL encoded; no raw query interpolation. */
 export function traceLink(data: DatadogSnapshot, source?: string, target?: string): string {
   const quote = (v: string) => JSON.stringify(v);
-  const scope = `env:${quote(data.scope.environment)} @${data.scope.deploymentTag}:${quote(data.scope.deployment)}`;
+  const scope = `env:${quote(data.scope.environment)}${data.scope.level === 'environment' ? '' : ` @${data.scope.deploymentTag}:${quote(data.scope.deployment)}`}`;
   // Search is a supported span-query landing page. The user can switch to Trace Queries / Flow Map there.
   const query = `${scope}${target ? ` service:${quote(target)} @span.parent.service:${quote(source ?? '')}` : source ? ` service:${quote(source)}` : ''}`;
   const url = new URL('/apm/traces', data.appUrl);

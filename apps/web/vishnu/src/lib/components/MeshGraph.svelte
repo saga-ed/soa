@@ -21,11 +21,12 @@
  let focusCount = $state(0);
  let manualFocus = $state<{view:SignalView;ids:string[]}|null>(null);
  let frame = 0;
+ let lastFocusRequest = '';
  let drawn = $derived(displayLayout ?? layout);
  const matched = () => {
   const ids=new Set<string>();
   if(signalView === 'overview') return ids;
-  for(const r of snapshot.relationships.filter(r=>r.kind==='http')) {
+  for(const r of snapshot.relationships.filter(r=>r.kind==='http'||r.kind==='dependency')) {
    const demo=demoSignals[r.id];
    const match=Object.keys(demoSignals).length ? demo && demoMatch(demo) : emphasizes(signalView,serviceSignal(datadog,r.source,now,datadogError)) || emphasizes(signalView,serviceSignal(datadog,r.target,now,datadogError));
    if(match){ids.add(r.source);ids.add(r.target);}
@@ -35,6 +36,9 @@
  $effect(()=>{
   const base=layout, view=signalView, enabled=focusSignals, request=manualFocus;
   untrack(()=>{
+   const focusRequest = JSON.stringify([view, enabled, request]);
+   const refit = lastFocusRequest !== focusRequest;
+   lastFocusRequest = focusRequest;
    cancelAnimationFrame(frame);
    const ids=enabled && request?.view===view ? new Set(request.ids) : enabled ? matched() : new Set<string>();
    const next=focusLayout(base,snapshot,ids);
@@ -42,7 +46,8 @@
    targetLayout=next;
    const previous=displayLayout;
    if(!previous){displayLayout=next;return;}
-   revision++;
+   // Background topology polls must not override the user's viewport.
+   if (refit) revision++;
    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){displayLayout=next;moving=false;return;}
    const interpolate=layoutTween(previous,next);const start=performance.now();moving=true;
    const animate=(time:number)=>{const t=Math.min(1,(time-start)/520);displayLayout=interpolate(1-Math.pow(1-t,3));if(t<1)frame=requestAnimationFrame(animate);else moving=false;};

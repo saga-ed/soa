@@ -17,6 +17,7 @@
  let datadogLoadedAt = $state(0);
  let stats = $state<StatsSnapshot | null>(null);
  let statsError = $state('');
+ let mqEnabled = $state(true);
  let statsLoadedAt = $state(0);
  let clock = $state(0);
  let hover = $state<{id: string; x: number; y: number} | null>(null);
@@ -65,6 +66,7 @@
    const timeout = setTimeout(() => request.abort(), 10000);
    try {
     const response = await fetch(url, { cache: 'no-store', signal: request.signal });
+    if (response.status === 401) { location.assign('/auth/login'); throw new Error('Staff sign-in required'); }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return await response.json();
    } finally { clearTimeout(timeout); requests.delete(request); }
@@ -108,7 +110,7 @@
   const start = async () => {
    const requested = new URLSearchParams(location.search).get('mode');
    demo = requested === 'demo';
-   let config: { mode?: string; apiUrl?: string; pollIntervalMs?: number } = {};
+   let config: { mode?: string; apiUrl?: string; pollIntervalMs?: number; mqEnabled?: boolean } = {};
    if (requested !== 'fixture' && !demo) {
     try { config = await fetchJson('/config.json'); } catch { /* Static fixture builds have no runtime config. */ }
    }
@@ -117,7 +119,8 @@
    if (mode === 'live') {
     apiUrl = config.apiUrl || '/api/mesh';
     pollMs = Math.max(3000, Number(config.pollIntervalMs) || 15000);
-    void pollStats();
+    mqEnabled = config.mqEnabled !== false;
+    if (mqEnabled) void pollStats();
     void pollDatadog();
     await poll();
    } else {
@@ -132,10 +135,10 @@
 <svelte:head><title>Vishnu · Saga mesh</title><meta name="description" content="Saga mesh topology, system health, and evidence." /></svelte:head>
 <svelte:window onkeydown={(event) => { if (event.key === 'Escape') { clearTimeout(hoverTimer); if (hover) hover = null; else { selected = null; search = ''; } } }} />
 <div class="app-shell" class:focused>
- <nav class="app-nav" aria-label="Main"><div class="nav-context"><a class="vishnu-brand" href="/" aria-label="Vishnu home"><img src="/vishnu-logo-on-dark.png" alt="Vishnu — Saga Mesh Observability" width="2172" height="724" /></a></div><a class="active-nav" aria-current="page" href="/">◈ &nbsp; Mesh overview</a><div class="nav-bottom">{sourceLabel}<br/><small>{mode === 'fixture' ? 'Design & interaction study' : 'Local stack health probes'}</small></div></nav>
+ <nav class="app-nav" aria-label="Main"><div class="nav-context"><a class="vishnu-brand" href="/" aria-label="Vishnu home"><img src="/vishnu-logo-on-dark.png" alt="Vishnu — Saga Mesh Observability" width="2172" height="724" /></a></div><a class="active-nav" aria-current="page" href="/">◈ &nbsp; Mesh overview</a><div class="nav-bottom">{sourceLabel}<br/><small>{mode === 'fixture' ? 'Design & interaction study' : snapshot?.scope ? 'Cloud mesh observations' : 'Local stack health probes'}</small></div></nav>
  <div class="app-main"><header class="topbar"><h1>Preserve, Protect, Anticipate</h1><span class="preview-badge">{sourceLabel}</span></header>
  <main id="mesh-main">
- {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for the local stack collector.'} Retrying automatically.{:else}Local health probes · declared product topology · MQ telemetry {statsError ? 'unavailable' : stats?.receiver.connected ? 'connected' : 'connecting'}{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
+ {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for mesh observations.'} Retrying automatically.{:else}{snapshot?.scope ? 'Datadog observations' : 'Local health probes · declared product topology'} · MQ telemetry {!mqEnabled ? 'not enabled' : statsError ? 'unavailable' : stats?.receiver.connected ? 'connected' : 'connecting'}{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
  {#if snapshot}
  {#if mode === 'live'}<p class="datadog-status" role="status">Datadog: {datadogError ? 'unavailable; retrying' : datadog?.status ?? 'connecting'}{#if datadog} · {datadog.scope.environment} / {datadog.scope.deployment}{#if !scopedDatadog} · separate scope; graph overlay disabled{/if}{/if}. Metrics describe services; flow analysis opens in Datadog.</p>{/if}
  {#if demo}<div class="demo-banner"><strong>SIMULATED SIGNALS · stand-up demo</strong><span>Invented measurements and call chains. No live APIs or Datadog queries.</span><a href="/">Return to live view ↗</a></div>{:else}<p class="demo-entry"><a href="?mode=demo">Preview simulated signals ↗</a></p>{/if}

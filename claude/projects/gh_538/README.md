@@ -21,3 +21,6 @@ agent's authenticated Datadog MCP connection.
 
 See [the live test runbook](../gh_536/docs/synthetic-event-stats.md) and
 [the app configuration and limitations](../../../apps/web/vishnu/README.md).
+
+Hosted runtime design and live prerequisite evidence are recorded in
+[the deployment decision](decisions/d1-hosted-runtime.md).

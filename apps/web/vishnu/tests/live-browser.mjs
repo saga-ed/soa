@@ -99,7 +99,7 @@ try {
   await page.waitForFunction(() =>
     document
       .querySelector('.live-status')
-      ?.textContent.includes('Waiting for the local stack collector')
+      ?.textContent.includes('Waiting for mesh observations')
   );
   assert.equal(await page.getByLabel('Fixture scenario').count(), 0);
   assert.equal(await page.locator('.svelte-flow__node').count(), 0);
@@ -115,6 +115,13 @@ try {
   const geometry = () =>
     page.locator('.svelte-flow__node').evaluateAll(nodes => nodes.map(n => n.style.transform));
   const viewport = () => page.locator('.svelte-flow__viewport').evaluate(n => n.style.transform);
+  // SvelteFlow's fit animation may round its final transform by a fraction of a pixel.
+  const assertViewportStable = async () => {
+    const values = text => text.match(/-?\d+(?:\.\d+)?/g).map(Number);
+    const current = values(await viewport()), previous = values(beforeViewport);
+    assert.equal(current.length, previous.length);
+    current.forEach((value, i) => assert.ok(Math.abs(value - previous[i]) < (i === 2 ? .001 : .1), 'Polling must preserve viewport position and zoom'));
+  };
   const beforeGeometry = await geometry();
   const beforeViewport = await viewport();
   health = 'critical';
@@ -123,7 +130,7 @@ try {
     { timeout: 10000 }
   );
   assert.deepEqual(await geometry(), beforeGeometry);
-  assert.equal(await viewport(), beforeViewport);
+  await assertViewportStable();
   assert.match(await page.locator('.inspector').innerText(), /Unknown/);
   assert.doesNotMatch(await page.locator('.inspector').innerText(), /Invented fixture/);
   health = 'unknown';
@@ -133,7 +140,7 @@ try {
       node.textContent.includes('Local API') && node.textContent.includes(label) && !node.classList.contains('critical')
     ), state.replace('-', ' '));
     assert.deepEqual(await geometry(), beforeGeometry);
-    assert.equal(await viewport(), beforeViewport);
+    await assertViewportStable();
   }
   disconnected = true;
   await page.waitForFunction(
@@ -153,7 +160,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.svelte-flow__node').length === 3);
   assert.equal(maxInFlight, 1, 'Slow responses must not cause overlapping polls');
   assert.notDeepEqual(await geometry(), beforeGeometry);
-  assert.equal(await viewport(), beforeViewport, 'Topology updates preserve the viewport');
+  await assertViewportStable();
   await page.getByRole('heading', { name: 'Local API', exact: true }).waitFor();
   delayMs = 0;
   await page.goto(`${url}?mode=fixture`);

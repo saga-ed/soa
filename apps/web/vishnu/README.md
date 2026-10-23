@@ -260,3 +260,10 @@ remain available in Crowded paths and the inspector. Coach → IAM simulates 12
 HTTP 500 responses in 500 requests (2.4% errors); saga-dash → Programs remains
 the orange hot path. The demo's full-mesh/selection reflow retains connectivity,
 handles interrupted transitions, and restores the exact original geometry.
+
+## Hosted dev/prod runtime
+
+The hosted [SOA/tRPC backend](../../node/vishnu-api/README.md) serves the built
+frontend behind JANUS staff authentication. See [deployment preparation](../../../infra/vishnu-api/OPS.md)
+for the dev container and infrastructure bring-up. This is separate from the
+synthetic Vite adapter above; cloud MQ adoption is not enabled by these templates.

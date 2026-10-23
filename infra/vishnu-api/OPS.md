@@ -1,8 +1,9 @@
-# Vishnu dev deployment preparation
+# Vishnu dev deployment operations
 
-These templates are prepared and locally validated; they have not been deployed.
-No DNS record, target group, ECS service, image push or live ALB rule was created.
-The dedicated dev Datadog application-key secret exists. Production is out of scope.
+Dev was deployed on 2026-10-23 at https://vishnu.wootops.org. Blue serves one
+healthy task; green is standing infrastructure at zero tasks. All five stacks
+completed successfully. Production is out of scope. See
+[deployment evidence](../../claude/projects/gh_538/docs/dev-deployment-2026-10-23.md).
 
 ## Design and verified prerequisites
 
@@ -14,14 +15,15 @@ JANUS guards both UI and API; allowed permissions match staff-admin-console:
 On 2026-10-23, read-only checks verified the dev cluster/capacity provider, VPC,
 private subnets, ALB security group/listener, and `*.wootops.org` TLS certificate.
 JANUS accepted `https://vishnu.wootops.org/` as the post-login return URL and
-redirected to JumpCloud. JWKS was reachable. An actual staff login through the
-new deployed hostname still needs testing after DNS and routing exist.
+redirected to JumpCloud. JWKS was reachable. A real staff login through the deployed hostname was subsequently verified,
+including connected dev Datadog statistics in the inspector.
 
 Staff-admin-console currently uses Amplify + Lambda and retains ALB OIDC rules.
 Vishnu uses a long-running container to accommodate its eventual MQ receiver;
 new routing follows the canonical JANUS perimeter rather than copying that
-existing edge-OIDC exception. Confirm the shared ALB WAF policy at launch: both Observer and AppInfra lack
-`wafv2:GetWebACLForResource`, so its attachment could not be verified here.
+existing edge-OIDC exception. The `saga-waf-dev` CloudFormation stack reports a completed WebACL association
+with this dev ALB. Direct WAF inspection is denied under Observer, AppInfra and
+PlatformInfra; attachment evidence comes from CloudFormation resource metadata.
 
 Datadog API metrics, service dependencies and monitors returned HTTP 200 with the
 new `vishnu-readonly` application key. Its scopes are `apm_read`,
@@ -57,8 +59,11 @@ command.
    `python3 infra/vishnu-api/render-deploy-command.py routing-dev-blue ListenerRulePriorityBase=<verified-priority>`.
    Review and run it. This creates the blue target group and header-gated rule,
    **not** the live weighted rule. Repeat this check immediately before deploying
-   because other services can claim priorities. Prepare green standing routing
-   before introducing blue/green cutovers; only initial blue is configured here.
+   because other services can claim priorities. Green uses `routing-dev-green` with its own verified priority. Both routing
+   stacks now exist; registry priorities are blue=2, green=18, live=4015.
+   The live-rule CLI warns about these CFN-owned preview rules as possible
+   takeovers. They are header-gated and intentionally precede the live rule:
+   retain both routing stacks; do not follow the generic warning to retire them.
 
 3. Build and push a commit-tagged ARM64 image to
    `396913734878.dkr.ecr.us-west-2.amazonaws.com/soa/vishnu-api:<git-sha>` after ECR
@@ -76,7 +81,8 @@ command.
 4. Render the full service command with
    `python3 infra/vishnu-api/render-deploy-command.py dev ImageArn=<dev-image-uri> BuildRevision=<git-sha>`.
    Review and run it; wait for healthy targets and verify build identity.
-   The image and task definition both use ARM64. Desired count is one.
+   The image and task definition both use ARM64. Blue desired count is one;
+   `dev-green` creates the idle green service with desired count zero.
    Test the blue header rule before exposing the live hostname.
 
 5. Create the dev live weighted rule through the current Saga blue/green tooling
@@ -84,7 +90,7 @@ command.
    The live rule must stay outside CloudFormation. Add a Route53 alias for
    `vishnu.wootops.org` in zone `Z07700453LJ7LUSAA9XZ6` pointing to the shared dev
    ALB; inspect its current DNS name and canonical hosted-zone ID rather than
-   copying stale values. There was no Vishnu record at preparation time.
+   copying stale values. The dev alias now exists; inspect it before making any future DNS change.
 
 6. Verify public health/build identity; unauthenticated UI redirects to JANUS;
    JSON/tRPC returns 401; nonstaff sessions return 403; a real staff session loads
@@ -107,6 +113,6 @@ configuration requires an exact deployment. Synthetic slot 3 remains independent
 
 For an initial failed launch, keep DNS/live routing absent and inspect the failed
 task/logs. Once serving, redeploy the previous immutable image tag for rollback;
-introduce the green lane before using colour flips. Retained ECR/log resources
+deploy and verify the idle green lane before using colour flips. Retained ECR/log resources
 can survive bootstrap rollback: inspect ownership before retrying. Do not delete
 shared infrastructure to recover this service.

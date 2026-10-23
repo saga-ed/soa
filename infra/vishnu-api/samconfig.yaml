@@ -57,3 +57,46 @@ dev:
       - DatadogApiKeyArn=arn:aws:secretsmanager:us-west-2:396913734878:secret:datadog/api-key/default-mj4116
       - DatadogAppKeyArn=arn:aws:secretsmanager:us-west-2:396913734878:secret:soa/vishnu/dev/datadog-app-key-ilOgHK
       - DesiredCount=1
+routing-dev-green:
+  deploy:
+    parameters:
+      stack_name: soa-vishnu-api-green-routing
+      template_file: infra/shared/routing-template.yaml
+      region: us-west-2
+      capabilities:
+      - CAPABILITY_NAMED_IAM
+      confirm_changeset: true
+      parameter_overrides:
+      - Environment=dev
+      - ProjectName=soa
+      - ServiceName=vishnu-api
+      - Identifier=green
+      - ContainerPort=8931
+      - HealthCheckPath=/health/ready
+      - HostHeader=vishnu.wootops.org
+      - TargetGroupName=vishnu-api-green-tg
+      - VpcIdSSMParameter=/shared/infra/dev/vpc-id
+      - ALBListenerArnSSMParameter=/shared/infra/dev/app-alb-443-listener-arn
+dev-green:
+  deploy:
+    parameters:
+      stack_name: soa-vishnu-api-green
+      template_file: infra/shared/service-template.yaml
+      region: us-west-2
+      capabilities:
+      - CAPABILITY_NAMED_IAM
+      confirm_changeset: true
+      parameter_overrides:
+      - Identifier=green
+      - ExecEnv=dev
+      - ClusterArnSSMParameter=/dev/shared-arm/ecs-cluster-arn
+      - SubnetIdsSSMParameter=/shared/infra/dev/private-subnet-ids
+      - SecurityGroupIdSSMParameter=/soa/vishnu-api/infra/dev/sg-id
+      - TargetGroupArnSSMParameter=/soa/vishnu-api/infra/dev/green/target-group-arn
+      - ExecutionRoleArnSSMParameter=/soa/vishnu-api/infra/dev/execution-role-arn
+      - TaskRoleArnSSMParameter=/soa/vishnu-api/infra/dev/task-role-arn
+      - LogGroupSSMParameter=/soa/vishnu-api/infra/dev/log-group
+      - CapacityProviderName=dev-shared-ec2-cluster-arm-capacity-provider
+      - DatadogApiKeyArn=arn:aws:secretsmanager:us-west-2:396913734878:secret:datadog/api-key/default-mj4116
+      - DatadogAppKeyArn=arn:aws:secretsmanager:us-west-2:396913734878:secret:soa/vishnu/dev/datadog-app-key-ilOgHK
+      - DesiredCount=0

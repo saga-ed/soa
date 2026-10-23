@@ -24,3 +24,5 @@ See [the live test runbook](../gh_536/docs/synthetic-event-stats.md) and
 
 Hosted runtime design and live prerequisite evidence are recorded in
 [the deployment decision](decisions/d1-hosted-runtime.md).
+
+Dev launch evidence: [2026-10-23 deployment](docs/dev-deployment-2026-10-23.md).

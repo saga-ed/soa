@@ -8,7 +8,7 @@
  let path = $derived(roundedPath(data?.points ?? []));
  let width = $derived(data?.demoSignal ? 4 : data?.relationship.health === 'critical' ? 3 : 1.2);
  let intensity = $derived(data?.demoSignal ? signalOpacity(data.demoSignal) : data?.relationship.health === 'critical' ? 1 : .65);
- let color = $derived(data?.demoSignal ? signalColor(data.demoSignal) : data?.relationship.health === 'critical' ? 'var(--color-danger)' : 'var(--color-secondary)');
+ let color = $derived(data?.demoSignal ? signalColor(data.demoSignal) : data?.relationship.health === 'critical' ? 'var(--color-signal-error)' : 'var(--color-secondary)');
 </script>
 <defs><marker id={`arrow-${id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 10 5 L 0 10 z" fill={color} /></marker></defs>
 <g class:dimmed={data?.dimmed} class="mesh-edge" class:edge-selected={selected && !data?.demo}>

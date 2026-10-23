@@ -2,7 +2,7 @@ import { createFixture } from './mesh';
 import type { Relationship } from '../graph/types';
 export type DemoKind = 'hot' | 'slow' | 'fanout' | 'error';
 export interface DemoSignal { kind: DemoKind; value: number; budget: number; unit: string; detail: string }
-export const signalColors = { hot: 'var(--color-attention-strong)', slow: 'var(--color-primary)', fanout: 'var(--chart-2)', error: 'var(--color-danger)' };
+export const signalColors = { hot: 'var(--color-attention-strong)', slow: 'var(--color-primary)', fanout: 'var(--chart-2)', error: 'var(--color-signal-error)' };
 export const signalNames = { hot: 'Hot traffic', slow: 'Slow path', fanout: 'Fan-out', error: 'Errors' };
 export const demoSignals: Record<string, DemoSignal> = {
   'dash-programs': { kind: 'hot', value: 180, budget: 200, unit: 'requests/s', detail: 'Traffic is up from 95 requests/s. Approaching the illustrative 200 requests/s capacity budget; no errors yet.' },
@@ -13,7 +13,7 @@ export const demoSignals: Record<string, DemoSignal> = {
 };
 export const signalDegree = (s: DemoSignal) => Math.max(0, s.value / s.budget);
 export const signalOpacity = (s: DemoSignal) => 0.35 + 0.65 * Math.min(1, signalDegree(s));
-export const signalColor = (s: DemoSignal) => s.kind === 'error' || signalDegree(s) >= 1 ? 'var(--color-danger)' : signalColors[s.kind];
+export const signalColor = (s: DemoSignal) => s.kind === 'error' || signalDegree(s) >= 1 ? 'var(--color-signal-error)' : signalColors[s.kind];
 export function createSignalDemo() {
   const mesh = createFixture('overview');
   mesh.topologyVersion = 'standup-signals-v1';

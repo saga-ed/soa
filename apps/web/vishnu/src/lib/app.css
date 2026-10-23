@@ -278,7 +278,7 @@ select {
   --health: var(--color-warning-strong);
 }
 .critical {
-  --health: var(--color-danger);
+  --health: var(--color-signal-error);
 }
 .healthy {
   --health: var(--color-success-strong);
@@ -682,3 +682,11 @@ dd {
 .path-label.compact { font-size:11px; line-height:16px; }
 .inline-path-info { display:inline-flex; flex:none; align-items:center; justify-content:center; width:18px; height:18px; border:1px solid var(--color-secondary); border-radius:50%; color:var(--color-secondary); font-size:11px; font-weight:600; opacity:.45; }
 .path-label:hover .inline-path-info, .path-label:focus-visible .inline-path-info { opacity:1; }
+
+
+:root { --color-signal-error:#e32636; }
+@media (prefers-contrast:more) { :root { --color-signal-error:var(--color-danger); } }
+.path-label.protocol-only { border:0; background:transparent; box-shadow:none; border-radius:0; }
+.path-label.protocol-only:hover { background:transparent; }
+.fanout-icon { display:inline-block; flex:none; vertical-align:middle; overflow:visible; }
+.path-label.compact .fanout-icon { width:14px; height:14px; }

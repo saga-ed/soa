@@ -1,0 +1,1 @@
+<svg class="fanout-icon" width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 18V5M4 5V10H16V5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.5 2.5H5.5V5.5H2.5ZM8.5 2.5H11.5V5.5H8.5ZM14.5 2.5H17.5V5.5H14.5Z" fill="currentColor"/></svg>

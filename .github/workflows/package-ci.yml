@@ -10,6 +10,7 @@ on:
     paths:
       - "packages/**"
       - "apps/web/vishnu/**"
+      - "apps/node/vishnu-api/**"
       - "build-tools/**"
       - "turbo.json"
       - "pnpm-workspace.yaml"
@@ -551,7 +552,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: "24"
           package-manager-cache: false
 
       - name: Install pnpm
@@ -593,7 +594,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --filter @saga-ed/soa-event-stats... --filter @saga-ed/vishnu... --filter @saga-ed/saga-stack-cli...
+        run: pnpm install --frozen-lockfile --filter @saga-ed/soa-event-stats... --filter @saga-ed/vishnu... --filter @saga-ed/vishnu-api... --filter @saga-ed/saga-stack-cli...
 
       - name: Build event statistics and dependencies
         run: pnpm --filter @saga-ed/soa-event-stats... run build
@@ -618,6 +619,15 @@ jobs:
           pnpm --filter @saga-ed/vishnu test
           pnpm --filter @saga-ed/vishnu test:int
           pnpm --filter @saga-ed/vishnu build
+
+      - name: Build and verify hosted Vishnu staff boundary
+        run: |
+          pnpm exec turbo run build --filter=@saga-ed/vishnu-api^...
+          pnpm --filter @saga-ed/vishnu-api check-types
+          pnpm --filter @saga-ed/vishnu-api test
+          pnpm --filter @saga-ed/vishnu-api build
+          pnpm exec playwright install --with-deps chromium
+          pnpm --filter @saga-ed/vishnu-api test:browser
 
 
   # PR Test Summary - Posts test results as a PR comment

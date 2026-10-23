@@ -96,8 +96,8 @@ command.
 
 This is a manual dev bring-up package. No GitHub deploy role/workflow has been
 created; do not attach the reduced service template to the generic ECS workflow
-without adding its required parameter contract and caller configuration. Existing
-repo CI remains unchanged. No production samconfig or credentials are provided.
+without adding its required parameter contract and caller configuration. The existing event-statistics CI job also builds and tests the hosted backend
+and signed-session browser flow on Node 24; it performs no deployment. No production samconfig or credentials are provided.
 
 The first cloud view is explicitly environment-wide because measured trace
 series lack deployment tags. Cloud MQ is off: deploy durable receiver storage,

@@ -210,7 +210,7 @@ export default class StackUp extends BaseCommand {
     // Hard-coding withAuthz to false previously dropped a workspace-named
     // `authz-sync` silently.
     const closureOpts: ResolvedClosureOpts =
-      ws ? closureOptsForIds(ws.runSet) : closureOptsFor(flags.with);
+      ws ? closureOptsForIds(ws.runSet) : closureOptsFor(flags.with, flags.only);
     const { withAuthz, withJanusMock } = closureOpts;
 
     // ── --dry-run (M0/M4): planner only. Compute the SAME sandbox/workspace prune the

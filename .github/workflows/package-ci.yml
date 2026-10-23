@@ -9,6 +9,8 @@ on:
   pull_request:
     paths:
       - "packages/**"
+      - "apps/web/vishnu/**"
+      - "apps/node/vishnu-api/**"
       - "build-tools/**"
       - "turbo.json"
       - "pnpm-workspace.yaml"
@@ -537,6 +539,96 @@ jobs:
           path: ${{ github.workspace }}/test-results-${{ steps.safe-name.outputs.name }}.json
           retention-days: 1
           if-no-files-found: ignore
+
+  # event-stats is currently layer 4, beyond the legacy layer matrix above.
+  event-stats-contract:
+    name: Event statistics contract and pipeline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get CodeArtifact auth token
+        run: |
+          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token \
+            --domain ${{ env.CODEARTIFACT_DOMAIN }} \
+            --domain-owner ${{ env.CODEARTIFACT_OWNER }} \
+            --query authorizationToken \
+            --output text)
+          echo "::add-mask::$CODEARTIFACT_AUTH_TOKEN"
+          echo "CODEARTIFACT_AUTH_TOKEN=$CODEARTIFACT_AUTH_TOKEN" >> $GITHUB_ENV
+
+      - name: Configure CodeArtifact registry
+        run: |
+          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken $CODEARTIFACT_AUTH_TOKEN
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @saga-ed/soa-event-stats... --filter @saga-ed/vishnu... --filter @saga-ed/vishnu-api... --filter @saga-ed/saga-stack-cli...
+
+      - name: Build event statistics and dependencies
+        run: pnpm --filter @saga-ed/soa-event-stats... run build
+
+      - name: Check event package types
+        run: pnpm --filter @saga-ed/soa-event-consumer --filter @saga-ed/soa-event-outbox --filter @saga-ed/soa-event-stats check-types
+
+      - name: Lint event statistics
+        run: pnpm --filter @saga-ed/soa-event-stats lint
+
+      - name: Test event boundaries and contract
+        run: pnpm --filter @saga-ed/soa-event-consumer --filter @saga-ed/soa-event-outbox --filter @saga-ed/soa-event-stats test
+
+      - name: Test Postgres and RabbitMQ pipeline
+        run: pnpm --filter @saga-ed/soa-event-stats test:int
+
+      - name: Build CLI and check Vishnu ingestion
+        run: |
+          pnpm --filter @saga-ed/saga-stack-cli build
+          pnpm --filter @saga-ed/saga-stack-cli test
+          pnpm --filter @saga-ed/vishnu check-types
+          pnpm --filter @saga-ed/vishnu test
+          pnpm --filter @saga-ed/vishnu test:int
+          pnpm --filter @saga-ed/vishnu build
+
+      - name: Build and verify hosted Vishnu staff boundary
+        run: |
+          pnpm exec turbo run build --filter=@saga-ed/vishnu-api^...
+          pnpm --filter @saga-ed/vishnu-api check-types
+          pnpm --filter @saga-ed/vishnu-api test
+          pnpm --filter @saga-ed/vishnu-api build
+          pnpm exec playwright install --with-deps chromium
+          pnpm --filter @saga-ed/vishnu-api test:browser
+
 
   # PR Test Summary - Posts test results as a PR comment
   pr-test-summary:

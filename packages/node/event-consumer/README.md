@@ -396,3 +396,11 @@ Point `RABBITMQ_TEST_URL` elsewhere to use an existing broker.
   + `id()` UUID-shaped seed for fixture IDs.
 - `@saga-ed/soa-rabbitmq` — `ConnectionManager` with `failureMode` for
   broker-startup behavior.
+
+### Event statistics observer (0.2.0)
+
+The optional `observe` callback reports delivery, committed work, duplicate skips,
+processing failures and client ack/nack outcomes independently of existing metrics.
+Callbacks cannot change business outcomes when they throw or reject. Metrics event
+callbacks now have the same isolation; their historical counting behavior remains.
+See [event-stats](../event-stats/README.md) for integration and counting semantics.

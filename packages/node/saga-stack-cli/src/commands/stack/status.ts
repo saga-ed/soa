@@ -283,7 +283,7 @@ export function resolveServiceSet(
     fail(`unknown service id(s): ${unknown.join(', ')}\nknown: ${[...known].join(', ')}`);
   }
 
-  return computeClosure(manifest, requested, closureOptsFor(withBundles)).services;
+  return computeClosure(manifest, requested, closureOptsFor(withBundles, only)).services;
 }
 
 /** A service excluded from the health pass because its sibling repo isn't cloned. */

@@ -55,10 +55,18 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     // iam-api genuinely needs redis (lockout / rate-limit / JWT+refresh stores).
     // In mesh[] so a partial `--only iam-api` closure brings redis up; the
     // launch.env below points it at the slot's redis (base 6379 at slot 0).
-    mesh: ['postgres', 'redis'],
+    mesh: ['postgres', 'redis', 'rabbitmq'],
     launch: {
       cmd: 'pnpm dev',
       env: {
+        NODE_ENV: 'development',
+        EVENT_STATS_ENABLED: 'true',
+        EVENT_STATS_ENVIRONMENT: 'synthetic',
+        EVENT_STATS_DEPLOYMENT: '${EVENT_STATS_DEPLOYMENT}',
+        EVENT_STATS_BROKER: '${EVENT_STATS_BROKER}',
+        EVENT_STATS_VHOST: '/',
+        EVENT_STATS_REVISION: 'working-tree',
+        EVENT_STATS_INTERVAL_MS: '5000',
         PORT: '${IAM_PORT}',
         // soa-env R4 (local) capability keys; the service refuses to boot without them.
         DB_CREDENTIAL_SOURCE: 'static',
@@ -89,6 +97,10 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
         // and expands to the exact legacy literals at slot 0 (byte-identity).
         DATABASE_URL: '${IAM_DB_URL}',
         PII_DATABASE_URL: '${IAM_PII_DB_URL}',
+        // Same deterministic synthetic-only keys used by the IAM seed profile.
+        PII_CRYPTO_PIIDEKHEX: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        PII_CRYPTO_PIIHMACKEYHEX: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+        PII_CRYPTO_PIIDEKVERSION: '1',
         // Same class, third instance: iam-api's OutboxRelay reads RABBITMQ_URL
         // with a $ROSTERING/.env.local fallback baking LITERAL :5672 — so at
         // slot > 0 iam.* events published to slot 0's broker while the slot's
@@ -300,6 +312,13 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     launch: {
       cmd: 'pnpm dev',
       env: {
+        EVENT_STATS_ENABLED: 'true',
+        EVENT_STATS_ENVIRONMENT: 'synthetic',
+        EVENT_STATS_DEPLOYMENT: '${EVENT_STATS_DEPLOYMENT}',
+        EVENT_STATS_BROKER: '${EVENT_STATS_BROKER}',
+        EVENT_STATS_VHOST: '/',
+        EVENT_STATS_REVISION: 'working-tree',
+        EVENT_STATS_INTERVAL_MS: '5000',
         NODE_ENV: 'development',
         DATABASE_URL: '${PROGRAMS_DB_URL}',
         IAM_API_URL: '${IAM_URL}',
@@ -359,6 +378,13 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
     launch: {
       cmd: 'pnpm dev',
       env: {
+        EVENT_STATS_ENABLED: 'true',
+        EVENT_STATS_ENVIRONMENT: 'synthetic',
+        EVENT_STATS_DEPLOYMENT: '${EVENT_STATS_DEPLOYMENT}',
+        EVENT_STATS_BROKER: '${EVENT_STATS_BROKER}',
+        EVENT_STATS_VHOST: '/',
+        EVENT_STATS_REVISION: 'working-tree',
+        EVENT_STATS_INTERVAL_MS: '5000',
         NODE_ENV: 'development',
         DATABASE_URL: '${SCHEDULING_DB_URL}',
         IAM_API_URL: '${IAM_URL}',
@@ -547,6 +573,39 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       'ADS_ADM_SESSION_DATA_PROVIDER',
       'ADS_ADM_MOCK_SESSION_DATA_ENABLED',
     ],
+  },
+  vishnu: {
+    id: 'vishnu',
+    repo: 'SOA',
+    subpath: 'apps/web/vishnu',
+    port: 8930,
+    portEnvVar: null,
+    healthPath: '/api/health',
+    databases: ['vishnu'],
+    dependsOn: [],
+    depKinds: {},
+    mesh: ['postgres', 'rabbitmq'],
+    launch: {
+      cmd: 'pnpm dev --strictPort',
+      env: {
+        VISHNU_MODE: 'synthetic',
+        VISHNU_DATABASE_URL: '${VISHNU_DB_URL}',
+        RABBITMQ_URL: '${MESH_MQ}',
+        EVENT_STATS_ENVIRONMENT: 'synthetic',
+        EVENT_STATS_DEPLOYMENT: 'slot-${VISHNU_SLOT}',
+        EVENT_STATS_BROKER: 'soa-s${VISHNU_SLOT}',
+        EVENT_STATS_VHOST: '/',
+        VISHNU_SLOT: '${VISHNU_SLOT}',
+        VISHNU_STATE_DIR: '${VISHNU_STATE_DIR}',
+        VISHNU_SOA_ROOT: '${VISHNU_SOA_ROOT}',
+      },
+    },
+    seed: [],
+    lane: lanes(8930, 'vishnu'),
+    tunnelSlug: 'vishnu',
+    isFrontend: true,
+    optional: true,
+    adoptEnv: ['VISHNU_MODE', 'VISHNU_SLOT', 'VISHNU_SOA_ROOT', 'VISHNU_STATE_DIR'],
   },
   'saga-dash': {
     id: 'saga-dash',

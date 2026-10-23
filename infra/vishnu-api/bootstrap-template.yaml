@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Vishnu bootstrap; adapted from saga-iac ECS bootstrap, Datadog-only first deployment.
+Parameters:
+  Environment: {Type: String, Default: prod, AllowedValues: [dev, prod]}
+  VpcIdSSMParameter: {Type: 'AWS::SSM::Parameter::Value<AWS::EC2::VPC::Id>'}
+  ALBSecurityGroupIdSSMParameter: {Type: 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>'}
+  DatadogApiKeyArn: {Type: String, AllowedPattern: 'arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+'}
+  DatadogAppKeyArn: {Type: String, AllowedPattern: 'arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+'}
+Conditions:
+  IsProd: !Equals [!Ref Environment, prod]
+Resources:
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Vishnu staff UI and API; ingress from shared ALB only
+      VpcId: !Ref VpcIdSSMParameter
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8931, ToPort: 8931, SourceSecurityGroupId: !Ref ALBSecurityGroupIdSSMParameter}
+      SecurityGroupEgress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: 'Datadog, JANUS JWKS and AWS endpoints'}
+      Tags: [{Key: Project, Value: soa}, {Key: Service, Value: vishnu-api}, {Key: Environment, Value: !Ref Environment}]
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Environment}-soa-vishnu-api-task-execution-role'
+      PermissionsBoundary: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/SagaProdMax'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: ecs-tasks.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy']
+      Policies:
+        - PolicyName: VishnuDatadogSecrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'secretsmanager:GetSecretValue'
+                Resource: [!Ref DatadogApiKeyArn, !Ref DatadogAppKeyArn]
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Environment}-soa-vishnu-api-task-role'
+      PermissionsBoundary: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/SagaProdMax'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: ecs-tasks.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      # No AWS application permissions: ECS injects the two scoped secrets.
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub '/soa/${Environment}/vishnu-api'
+      RetentionInDays: !If [IsProd, 90, 14]
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: soa/vishnu-api
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration: {ScanOnPush: true}
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Expire untagged images","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":7},"action":{"type":"expire"}}]}'
+  SecurityGroupParameter:
+    Type: AWS::SSM::Parameter
+    Properties: {Name: !Sub '/soa/vishnu-api/infra/${Environment}/sg-id', Type: String, Value: !Ref TaskSecurityGroup}
+  ExecutionRoleParameter:
+    Type: AWS::SSM::Parameter
+    Properties: {Name: !Sub '/soa/vishnu-api/infra/${Environment}/execution-role-arn', Type: String, Value: !GetAtt ExecutionRole.Arn}
+  TaskRoleParameter:
+    Type: AWS::SSM::Parameter
+    Properties: {Name: !Sub '/soa/vishnu-api/infra/${Environment}/task-role-arn', Type: String, Value: !GetAtt TaskRole.Arn}
+  LogGroupParameter:
+    Type: AWS::SSM::Parameter
+    Properties: {Name: !Sub '/soa/vishnu-api/infra/${Environment}/log-group', Type: String, Value: !Ref LogGroup}
+Outputs:
+  ImageRepository: {Value: !GetAtt Repository.RepositoryUri}

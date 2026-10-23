@@ -1,0 +1,404 @@
+/**
+ * Read-only synthetic-dev observations for Vishnu. The manifest supplies declared
+ * wiring; probes supply reachability only, never invented traffic or latency.
+ * This intentionally does not serialize launch env or database credentials.
+ */
+import { busRoles } from './mesh-bus-roles.js';
+import { httpProtocol } from './mesh-protocols.js';
+import { readFile, readlink } from 'node:fs/promises';
+import { join } from 'node:path';
+import { createConnection } from 'node:net';
+import { deriveInstance, slotExcludedServices } from '../core/derive-instance.js';
+import { manifest } from '../core/manifest/index.js';
+import type { ServiceId, MeshId } from '../core/manifest/index.js';
+import { makeRealProber, type HealthProber } from './health.js';
+
+export type ProcessState = 'running' | 'exited' | 'absent' | 'unverified';
+export type RuntimeState = 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unknown';
+
+type Health = 'healthy' | 'critical' | 'unknown';
+interface Evidence {
+  label: string;
+  description: string;
+  url?: string;
+}
+interface System {
+  runtimeState?: RuntimeState;
+  eventBus?: { publishes: boolean; consumes: boolean };
+  id: string;
+  label: string;
+  band: 'data' | 'mesh' | 'application';
+  kind: string;
+  health: Health;
+  freshness: 'fresh' | 'missing';
+  summary: string;
+  errors: null;
+  evidence: Evidence[];
+}
+interface Relationship {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  via?: string[];
+  kind: 'http' | 'event' | 'database';
+  protocol?: 'trpc' | 'rest' | 'mixed' | 'unknown';
+  count: null;
+  rate: null;
+  latencyMs: null;
+  health: 'unknown';
+  freshness: 'missing';
+  summary: string;
+  evidence: Evidence[];
+}
+export interface LocalMeshSnapshot {
+  topologyVersion: string;
+  environment: string;
+  mode: 'live';
+  slot: number;
+  observedAt: string;
+  observationWindowSeconds: number;
+  systems: System[];
+  relationships: Relationship[];
+}
+export interface MeshViewOptions {
+  slot?: number;
+  stateDir?: string;
+  prober?: HealthProber;
+  tcpProbe?: (port: number) => Promise<boolean>;
+  processState?: (id: ServiceId) => Promise<ProcessState>;
+  /** Declared product surfaces remain visible even in a partial stack. */
+  declaredRoots?: readonly ServiceId[];
+  now?: () => Date;
+}
+
+/** PID files are historical records, not proof of a currently running service.
+ * Verify both service directory and slot-specific port before trusting a live PID.
+ * Unreadable/non-Linux process metadata is unknown, never an asserted outage.
+ */
+export async function readServiceProcessState(
+  stateDir: string,
+  id: ServiceId,
+  port: number
+): Promise<ProcessState> {
+  let raw: string;
+  try {
+    raw = (await readFile(join(stateDir, `${id}.pid`), 'utf8')).trim();
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unverified';
+  }
+  if (!/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(Number(raw))) return 'unverified';
+  try {
+    process.kill(Number(raw), 0);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'exited' : 'unverified';
+  }
+  try {
+    const service = manifest.services[id];
+    const [cwd, launch] = await Promise.all([
+      readlink(`/proc/${raw}/cwd`),
+      readFile(`/proc/${raw}/${service.portEnvVar ? 'environ' : 'cmdline'}`, 'utf8'),
+    ]);
+    if (!cwd.endsWith(`/${service.subpath}`)) return 'unverified';
+    if (service.portEnvVar) {
+      if (!launch.split('\0').includes(`${service.portEnvVar}=${port}`)) return 'unverified';
+    } else {
+      // Frontends receive --port on the command line rather than in PORT.
+      const args = launch.split(/[\0\s]+/);
+      if (
+        !args.some(
+          (arg, i) => arg === `--port=${port}` || (arg === '--port' && args[i + 1] === String(port))
+        )
+      )
+        return 'unverified';
+    }
+    return 'running';
+  } catch {
+    return 'unverified';
+  }
+}
+
+async function tcpProbe(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    const done = (ok: boolean) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.setTimeout(1200);
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+    socket.once('timeout', () => done(false));
+  });
+}
+
+/**
+ * One collector per viewer process. Retaining discovered services makes a
+ * stopped process visible as unavailable rather than silently removing its node.
+ */
+export function createLocalMeshCollector(options: MeshViewOptions = {}) {
+  const instance = deriveInstance({ slot: options.slot ?? 0 });
+  const stateDir = options.stateDir ?? instance.stateDir;
+  const prober = options.prober ?? makeRealProber({ timeoutMs: 1500, followRedirects: false });
+  const probeTcp = options.tcpProbe ?? tcpProbe;
+  const now = options.now ?? (() => new Date());
+  const processState =
+    options.processState ??
+    (id =>
+      readServiceProcessState(
+        stateDir,
+        id,
+        instance.portOverrides[id] ?? manifest.services[id].port
+      ));
+  const excluded = new Set(slotExcludedServices(instance.slot));
+  const services = Object.values(manifest.services).filter(s => !excluded.has(s.id));
+  const retained = new Set<ServiceId>();
+  const observed = new Set<ServiceId>();
+  const managed = new Set<ServiceId>();
+
+  return async (): Promise<LocalMeshSnapshot> => {
+    const observedAt = now().toISOString();
+    const rows = await Promise.all(
+      services.map(async service => {
+        const port = instance.portOverrides[service.id] ?? service.port;
+        const url = `http://127.0.0.1:${port}${service.healthPath}`;
+        const [probe, process] = await Promise.all([prober.probe(url), processState(service.id)]);
+        if (process === 'running') managed.add(service.id);
+        if (probe.ok || probe.status || process === 'running') {
+          retained.add(service.id);
+          observed.add(service.id);
+        }
+        return { service, url, probe, process };
+      })
+    );
+    // Include declared dependencies even when they never started successfully.
+    const include = (id: ServiceId) => {
+      if (excluded.has(id)) return;
+      retained.add(id);
+      for (const dep of manifest.services[id].dependsOn) {
+        if (!retained.has(dep)) include(dep);
+      }
+    };
+    for (const id of options.declaredRoots ?? ['saga-dash', 'connect-web', 'coach-web']) include(id);
+    for (const id of [...retained]) include(id);
+    const visible = rows.filter(row => retained.has(row.service.id));
+    const systems: System[] = visible.map(({ service, url, probe, process }) => {
+      const runtimeState: RuntimeState = probe.ok
+        ? 'reachable'
+        : probe.status || process === 'running'
+          ? 'unhealthy'
+          : !observed.has(service.id)
+            ? 'not-started'
+            : process === 'absent' && managed.has(service.id)
+              ? 'stopped'
+              : process === 'unverified'
+                ? 'unknown'
+                : 'unhealthy';
+      return {
+        runtimeState,
+        id: service.id,
+        label: service.id === 'connect-web' ? 'Connectv3' : service.id === 'coach-web' ? 'Coach' : service.id,
+        band: service.isFrontend ? 'application' : 'mesh',
+        ...(busRoles[service.id]
+          ? {
+              eventBus: {
+                publishes: busRoles[service.id]!.publishes,
+                consumes: busRoles[service.id]!.consumes,
+              },
+            }
+          : {}),
+        kind: service.isFrontend ? 'Web application' : 'API service',
+        health:
+          runtimeState === 'reachable'
+            ? 'healthy'
+            : runtimeState === 'unhealthy'
+              ? 'critical'
+              : 'unknown',
+        freshness: 'fresh',
+        errors: null,
+        summary: probe.ok
+          ? 'Local HTTP probe succeeded. This establishes endpoint reachability, not request success rates or end-to-end business health. Process and checkout identity are not verified by this probe; use ss stack verify for that check.'
+          : runtimeState === 'not-started'
+            ? 'Declared dependency has not been observed running in this viewer session. No active managed process was verified; this is not a confirmed outage.'
+            : runtimeState === 'stopped'
+              ? 'The previously managed service has no launch PID record and is not responding. It remains visible as stopped.'
+              : runtimeState === 'unknown'
+                ? 'The process record could not be verified. The endpoint is not responding; lifecycle state is unknown.'
+                : 'An observed service is not responding successfully. Inspect its ss log and startup state.',
+        evidence: [
+          ...(busRoles[service.id]
+            ? [
+                {
+                  label: 'Event bus capability (source-verified)',
+                  description:
+                    busRoles[service.id]!.evidence +
+                    ' Declared capability, not observed traffic or consumer health.',
+                },
+              ]
+            : []),
+          {
+            label: 'HTTP health probe',
+            description: `GET ${url} — ${probe.status ? `HTTP ${probe.status}` : 'no HTTP response'}. Observed ${observedAt}.`,
+            url,
+          },
+          {
+            label: 'Declared service',
+            description: `ss manifest: ${service.id}, repo ${service.repo}. Slot ${instance.slot}. No production service queried.`,
+          },
+        ],
+      };
+    });
+    const relationships: Relationship[] = [];
+    const add = (
+      id: string,
+      source: string,
+      target: string,
+      kind: Relationship['kind'],
+      label: string,
+      description: string
+    ) => {
+      relationships.push({
+        id,
+        source,
+        target,
+        kind,
+        ...(kind === 'http' ? { protocol: httpProtocol(source, target).protocol } : {}),
+        label,
+        ...(kind === 'event' ? { via: ['infra:rabbitmq'] } : {}),
+        count: null,
+        rate: null,
+        latencyMs: null,
+        health: 'unknown',
+        freshness: 'missing',
+        summary: `${description} This is declared wiring, not an observed request or event. Traffic, endpoint/event count, and projection completion are not measured.`,
+        evidence: [
+          { label: 'ss service manifest', description },
+          ...(kind === 'http'
+            ? [
+                {
+                  label: 'Client transport evidence',
+                  description: httpProtocol(source, target).evidence,
+                },
+              ]
+            : []),
+        ],
+      });
+    };
+    const meshIds = new Set<MeshId>();
+    const activeMeshIds = new Set<MeshId>();
+    for (const { service } of visible) {
+      for (const unit of service.mesh) {
+        meshIds.add(unit);
+        if (observed.has(service.id)) activeMeshIds.add(unit);
+      }
+      for (const dep of service.dependsOn) {
+        if (!retained.has(dep)) continue;
+        const kind = service.depKinds[dep];
+        if (kind === 'event') {
+          add(
+            `dep:${dep}:${service.id}`,
+            dep,
+            service.id,
+            'event',
+            `${dep} events`,
+            `${service.id} declares an event dependency on ${dep}, via RabbitMQ. Exact bindings are not represented in the ss manifest.`
+          );
+        } else {
+          add(
+            `dep:${service.id}:${dep}`,
+            service.id,
+            dep,
+            'http',
+            `${service.id} → ${dep}`,
+            `${service.id} declares a ${kind ?? 'runtime'} dependency on ${dep}.`
+          );
+        }
+      }
+      for (const db of service.databases) {
+        const unit: MeshId =
+          manifest.databases[db].engine === 'mongo' ? 'connect-mongo' : 'postgres';
+        meshIds.add(unit);
+        if (observed.has(service.id)) activeMeshIds.add(unit);
+        add(
+          `db:${service.id}:${db}`,
+          service.id,
+          `infra:${unit}`,
+          'database',
+          db,
+          `${service.id} uses the ${db} database. The store node measures TCP reachability only; database authentication and schema are not probed.`
+        );
+      }
+      if (service.mesh.includes('redis')) {
+        add(
+          `cache:${service.id}`,
+          service.id,
+          'infra:redis',
+          'database',
+          'Redis connection',
+          `${service.id} declares a Redis dependency.`
+        );
+      }
+      if (service.mesh.includes('openfga')) {
+        add(
+          `authz:${service.id}`,
+          service.id,
+          'infra:openfga',
+          'http',
+          'OpenFGA connection',
+          `${service.id} declares an OpenFGA infrastructure dependency.`
+        );
+      }
+    }
+    for (const unit of await Promise.all(
+      [...meshIds].sort().map(async id => {
+        const def = manifest.mesh[id];
+        const port = def.port + instance.offset;
+        return { id, port, ok: await probeTcp(port) };
+      })
+    )) {
+      systems.push({
+        id: `infra:${unit.id}`,
+        label: unit.id,
+        band: unit.id === 'rabbitmq' ? 'mesh' : 'data',
+        kind: 'Infrastructure listener',
+        health: unit.ok ? 'healthy' : activeMeshIds.has(unit.id) ? 'critical' : 'unknown',
+        runtimeState: unit.ok ? 'reachable' : activeMeshIds.has(unit.id) ? 'unhealthy' : 'not-started',
+        freshness: 'fresh',
+        errors: null,
+        summary: unit.ok
+          ? `TCP listener on port ${unit.port} is reachable. Protocol readiness, database contents, queue depths, and traffic have not been measured.`
+          : activeMeshIds.has(unit.id) ? `TCP listener on port ${unit.port} is not reachable.` : 'Infrastructure is declared by inactive services; no local listener has been observed.',
+        evidence: [
+          {
+            label: 'TCP reachability',
+            description: `127.0.0.1:${unit.port}, slot ${instance.slot}, observed ${observedAt}. No credentials or database records are returned.`,
+          },
+          ...(unit.id === 'rabbitmq'
+            ? [
+                {
+                  label: 'Logical event paths',
+                  description:
+                    'Event edges represent publisher-to-consumer dependencies through this broker. Select relationship details to inspect those paths; queue bindings and delivery are not independently verified.',
+                },
+              ]
+            : []),
+        ],
+      });
+    }
+    systems.sort((a, b) => a.id.localeCompare(b.id));
+    relationships.sort((a, b) => a.id.localeCompare(b.id));
+    return {
+      mode: 'live',
+      slot: instance.slot,
+      environment: 'synthetic-dev',
+      topologyVersion: JSON.stringify({
+        nodes: systems.map(s => s.id),
+        edges: relationships.map(r => [r.id, r.source, r.target]),
+      }),
+      observedAt,
+      observationWindowSeconds: 0,
+      systems,
+      relationships,
+    };
+  };
+}

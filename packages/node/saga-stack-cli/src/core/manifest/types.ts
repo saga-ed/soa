@@ -21,6 +21,7 @@ export type ServiceId =
   | 'sessions-api'
   | 'content-api'
   | 'ads-adm-api'
+  | 'vishnu' // optional synthetic mesh viewer
   | 'saga-dash'
   | 'connect-api'
   | 'connect-web'
@@ -69,6 +70,7 @@ export type Engine = 'postgres' | 'mongo';
  * the postgres/mongo database name). `connectv3` is mongo; the rest are postgres.
  */
 export type DbId =
+  | 'vishnu'
   | 'iam_local'
   | 'iam_pii_local'
   | 'programs'

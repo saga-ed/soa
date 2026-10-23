@@ -1,0 +1,13 @@
+{
+  "vishnu-api": {
+    "devHost": "vishnu.wootops.org",
+    "prodHost": "vishnu.sagaops.org",
+    "livePriority": 4015,
+    "tgPrefix": "vishnu-api",
+    "bluePriority": 2,
+    "greenPriority": 18,
+    "previewHeader": "x-saga-preview-vishnu-api",
+    "ecsServiceStem": "soa-vishnu-api",
+    "repo": "saga-ed/soa"
+  }
+}

@@ -37,9 +37,24 @@ try {
  await page.getByRole('button').filter({hasText:'iam-api'}).first().click();
  await page.getByRole('heading',{name:'Datadog APM'}).waitFor();
  assert.match(await page.locator('.datadog-stats').innerText(),/3,?000/);
+ // Quiet APM windows keep real source declarations and do not become fake traffic.
+ snapshot.dependencies=[]; snapshot.services=[];
+ await page.reload();
+ await page.locator('.svelte-flow__edge').first().waitFor();
+ assert.ok(await page.locator('.svelte-flow__edge').count() >= 20);
+ const ids=await page.locator('.svelte-flow__edge').evaluateAll(es=>es.map(e=>e.getAttribute('data-id')));
+ assert.ok(ids.includes('declared:coach:coach-api'));
+ await page.screenshot({path:'/tmp/vishnu-declared-quiet.png',fullPage:true});
+ await page.locator('.svelte-flow__edge[data-id="declared:coach:coach-api"]').click({force:true});
+ await page.getByText('Declared connection',{exact:true}).waitFor();
+ await page.getByText('Not observed in APM window',{exact:false}).first().waitFor();
+ assert.match(await page.locator('.inspector').innerText(),/HTTP\/GraphQL/);
+ assert.match(await page.locator('.inspector').innerText(),/does not prove zero traffic/);
+ await page.mouse.move(0,0);
+ await page.keyboard.press('Escape');
  await page.screenshot({path:'/tmp/vishnu-hosted-browser.png',fullPage:true});
  assert.deepEqual(errors,[]);
- console.log('Hosted UI: authenticated load, exact cloud scope, disabled MQ, inspector and worker layout passed');
+ console.log('Hosted UI: staff auth, scope, MQ off, service metrics and persistent quiet-window declared edges passed');
 } finally {
  await browser.close();
  await new Promise(r=>server.close(r));await new Promise(r=>keys.close(r));

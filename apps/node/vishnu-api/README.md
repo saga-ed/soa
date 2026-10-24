@@ -34,8 +34,17 @@ unavailable data. Readiness checks the MQ connection when that receiver is enabl
 
 ## Observation semantics
 
-Cloud topology combines the three declared applications with services and
-relationships observed in APM. APM adjacency is labeled `APM`; it supplies no
+Cloud topology combines reviewed source-declared clients with services and
+relationships observed in APM. `src/declared-topology.ts` holds the dated source
+catalog with repository/file evidence and configuration conditions. It is not an
+automatic fleet discovery or proof of deployed client configuration. Declared
+edges persist through quiet windows/outages and retain stable IDs when APM sees
+them; observed-only dependencies remain additional evidence. Update the catalog
+when client wiring changes. Conditional clients remain labeled conditional.
+Declared-only paths are dashed with readable neutral strokes; the inspector
+distinguishes not observed, observed, stale and unavailable. Unknown is never zero.
+This first catalog covers application/API request wiring, not cloud databases or
+broker bindings; those cannot be inferred from the synthetic launcher. APM adjacency is labeled `APM`; it supplies no
 protocol, edge count, or edge latency. Service rates/p95 remain service-level
 measurements. Lack of data stays unknown. Composite monitor inputs are shown as
 evidence, but do not independently raise a critical signal.

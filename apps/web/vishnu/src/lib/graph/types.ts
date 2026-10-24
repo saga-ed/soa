@@ -7,6 +7,7 @@ export interface Evidence {
   url?: string;
 }
 export interface System {
+  observationSource?: 'apm' | 'declared';
   runtimeState?: 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unknown';
   eventBus?: { publishes: boolean; consumes: boolean };
   id: string;
@@ -20,13 +21,15 @@ export interface System {
   evidence: Evidence[];
 }
 export interface Relationship {
+  declared?: boolean;
+  observation?: 'observed' | 'not-observed' | 'unavailable' | 'stale';
   id: string;
   via?: string[];
   source: string;
   target: string;
   label: string;
   kind: 'http' | 'event' | 'database' | 'dependency';
-  protocol?: 'trpc' | 'rest' | 'mixed' | 'unknown';
+  protocol?: 'trpc' | 'rest' | 'mixed' | 'graphql' | 'unknown';
   count: number | null;
   rate: number | null;
   latencyMs: number | null;

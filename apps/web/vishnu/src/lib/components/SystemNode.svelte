@@ -26,7 +26,7 @@
  <Handle type="target" position={Position.Left} />
  <div class="node-kind">{data.system.kind}</div>
  <strong>{data.system.label}</strong>
- <div class="node-status"><span>{symbols[data.system.health]} {data.live && data.system.runtimeState ? data.system.runtimeState.replace('-', ' ') : data.live && data.system.health === 'healthy' ? 'reachable' : data.system.health}</span><span>{data.system.freshness === 'fresh' ? data.live ? 'probe' : `${data.system.errors ?? '—'} errors` : data.system.freshness}</span></div>
+ <div class="node-status"><span>{symbols[data.system.health]} {data.live && data.system.runtimeState ? data.system.runtimeState.replace('-', ' ') : data.live && data.system.health === 'healthy' ? 'reachable' : data.system.health}</span><span>{data.system.freshness === 'fresh' ? data.system.observationSource ? 'APM' : data.live ? 'probe' : `${data.system.errors ?? '—'} errors` : data.system.observationSource === 'declared' ? 'declared' : data.system.freshness}</span></div>
  {#if participation && !data.context}
   <button class="bus-badge nodrag nopan" aria-label={`Inspect event bus participation for ${data.system.label}`} onclick={(event) => { event.stopPropagation(); data.onselect(data.system.id); }} onmouseenter={(event) => data.onpreview(data.system.id, event.currentTarget.getBoundingClientRect())} onmouseleave={() => data.onpreview(null)} onfocus={(event) => data.onpreview(data.system.id, event.currentTarget.getBoundingClientRect())} onblur={() => data.onpreview(null)} aria-haspopup="dialog">{busBadge(participation)}</button>
  {/if}

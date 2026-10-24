@@ -78,7 +78,7 @@
   const targetSignal = serviceSignal(datadog, r.target, now, datadogError);
   const demoSignal = demoSignals[r.id];
   const emphasized = Object.keys(demoSignals).length ? signalView === 'overview' || (demoSignal && demoMatch(demoSignal)) : emphasizes(signalView, sourceSignal) || emphasizes(signalView, targetSignal);
-  const observed = !datadogError && datadog && ['connected','partial'].includes(datadog.status) && now - Date.parse(datadog.observedAt) <= datadog.freshForMs && datadog.dependencies.some(d => d.source === r.source && d.target === r.target);
+  const observed = !datadogError && datadog && ['connected','partial'].includes(datadog.status) && now - Date.parse(datadog.observedAt) <= datadog.freshForMs && (r.observation ? r.observation === 'observed' : datadog.dependencies.some(d => d.source === r.source && d.target === r.target));
   return { id: e.id, source: r.source, target: r.target, type: 'routed', selected: selected === e.id, ariaLabel: `${r.label}, ${r.kind}, ${r.health}. Press Enter to inspect.`, data: { relationship: r, demoSignal, demo: Object.keys(demoSignals).length > 0, points: e.points, observed: !!observed, dimmed: selected ? !relevant.has(e.id) : !emphasized } };
  }));
  let selectedIds = $derived(snapshot.systems.some(s => s.id === selected) ? [selected!] : snapshot.relationships.filter(r => r.id === selected).flatMap(r => [r.source, r.target]));

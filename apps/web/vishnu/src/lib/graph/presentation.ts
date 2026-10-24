@@ -15,8 +15,8 @@ export function layoutRank(system: System): number {
 }
 
 export function connectionLabel(relationship: Relationship): string {
-  if (relationship.kind === 'dependency') return 'APM';
+  if (relationship.kind === 'dependency') return relationship.declared ? 'Dependency' : 'APM';
   if (relationship.kind === 'event') return 'MQ';
   if (relationship.kind === 'database') return 'DB';
-  return { trpc: 'HTTP/tRPC', rest: 'HTTP/REST', mixed: 'HTTP/tRPC + REST', unknown: 'HTTP/?' }[relationship.protocol ?? 'unknown'];
+  return { graphql: 'HTTP/GraphQL', trpc: 'HTTP/tRPC', rest: 'HTTP/REST', mixed: 'HTTP/tRPC + REST', unknown: 'HTTP/?' }[relationship.protocol ?? 'unknown'];
 }

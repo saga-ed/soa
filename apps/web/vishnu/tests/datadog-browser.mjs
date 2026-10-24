@@ -37,6 +37,14 @@ const value = () => ({
         ],
   dependencies: [{ source: 'programs-api', target: 'scheduling-api' }],
 });
+// Keep this overlay test independent of a running synthetic stack.
+await page.route('**/config.json', r => r.fulfill({ json: { mode:'live', mqEnabled:false } }));
+await page.route('**/api/mesh', r => r.fulfill({ json: {
+  topologyVersion:'datadog-browser-test', environment:'synthetic-dev', slot:3, mode:'live',
+  observedAt:new Date(now).toISOString(), observationWindowSeconds:900,
+  systems:['programs-api','scheduling-api'].map(id=>({id,label:id,band:'mesh',kind:'API service',health:'unknown',freshness:'missing',errors:null,summary:'Browser test declaration',evidence:[]})),
+  relationships:[{id:'test-programs-scheduling',source:'programs-api',target:'scheduling-api',label:'Browser test path',kind:'http',protocol:'trpc',count:null,rate:null,latencyMs:null,health:'unknown',freshness:'missing',summary:'Browser test declaration',evidence:[]}]
+} }));
 await page.route('**/api/datadog', r =>
   variant === 'failure'
     ? r.fulfill({ status: 503, body: 'unavailable' })

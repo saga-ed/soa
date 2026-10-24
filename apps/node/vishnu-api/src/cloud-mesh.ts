@@ -1,27 +1,108 @@
 import { createHash } from 'node:crypto';
 import type { DatadogSnapshot } from '../../../web/vishnu/src/lib/graph/datadog';
-import type { MeshSnapshot, System } from '../../../web/vishnu/src/lib/graph/types';
+import type { MeshSnapshot, System, Relationship } from '../../../web/vishnu/src/lib/graph/types';
+import { applicationLabels, declaredConnections } from './declared-topology.js';
 
-/** Only observed APM edges; a service measurement never becomes an edge measurement. */
+/** Source-declared topology survives quiet windows. APM overlays never invent edge metrics. */
 export function cloudMesh(data: DatadogSnapshot): MeshSnapshot {
-  const applications = new Map([['coach', 'Coach'], ['connectv3', 'Connectv3'], ['saga_dash', 'Saga Dash']]);
-  const names = new Set([...applications.keys(), ...data.services.map(s => s.service),
-    ...data.dependencies.flatMap(d => [d.source, d.target])]);
   const available = ['connected', 'partial'].includes(data.status);
   const fresh = available && data.serverNow - Date.parse(data.observedAt) <= data.freshForMs;
-  const systems: System[] = [...names].sort().map(id => ({ id, label: applications.get(id) ?? id,
-    band: applications.has(id) ? 'application' : 'mesh', kind: applications.has(id) ? 'Application' : 'Observed APM service',
-    health: 'unknown', freshness: fresh && data.services.some(s => s.service === id) ? 'fresh' : 'missing',
-    summary: applications.has(id) ? 'Declared application; connections appear when observed in APM.' : 'Observed in Datadog; reachability is not probed.',
-    errors: null, evidence: [] }));
-  const dependencies = [...new Map(data.dependencies.map(d => [JSON.stringify([d.source, d.target]), d])).values()];
-  const relationships = dependencies.map(({ source, target }) => ({
-    id: `apm:${source}:${target}`, source, target, label: 'APM dependency', kind: 'dependency' as const,
-    protocol: 'unknown' as const, count: null, rate: null, latencyMs: null, health: 'unknown' as const,
-    freshness: fresh ? 'fresh' as const : 'stale' as const,
-    summary: 'Datadog APM adjacency. Protocol, call count and path latency are not supplied by this endpoint.', evidence: []
-  })).sort((a, b) => a.id.localeCompare(b.id));
-  return { topologyVersion: createHash('sha256').update(JSON.stringify([data.scope, [...names].sort(), relationships.map(r => r.id)])).digest('hex').slice(0, 16),
-    environment: data.scope.environment, scope: data.scope, mode: 'live', observedAt: data.observedAt,
-    observationWindowSeconds: (data.window.to - data.window.from) / 1000, systems, relationships };
+  const key = (source: string, target: string) => JSON.stringify([source, target]);
+  const dependencies = new Map(data.dependencies.map(d => [key(d.source, d.target), d]));
+  const relationships: Relationship[] = declaredConnections.map(d => {
+    const observed = dependencies.has(key(d.source, d.target));
+    dependencies.delete(key(d.source, d.target));
+    const observation = !available
+      ? 'unavailable'
+      : !fresh
+        ? 'stale'
+        : observed
+          ? 'observed'
+          : data.status === 'partial'
+            ? 'unavailable'
+            : 'not-observed';
+    return {
+      id: `declared:${d.source}:${d.target}`,
+      source: d.source,
+      target: d.target,
+      label: `${applicationLabels.get(d.source) ?? d.source} → ${applicationLabels.get(d.target) ?? d.target}`,
+      kind: d.protocol ? 'http' : 'dependency',
+      protocol: d.protocol,
+      declared: true,
+      observation,
+      count: null,
+      rate: null,
+      latencyMs: null,
+      health: 'unknown',
+      freshness:
+        observation === 'observed' ? 'fresh' : observation === 'stale' ? 'stale' : 'missing',
+      summary: `Source-declared connection. ${d.condition ?? 'Declared by an application client.'} ${observation === 'observed' ? 'Also observed in the current APM window.' : observation === 'not-observed' ? 'Not observed in the current APM window; this does not prove zero traffic or an outage.' : 'Current APM observation is unavailable or stale.'} Deployed configuration is not independently verified. Edge traffic and latency remain unknown.`,
+      evidence: [
+        {
+          label: 'Source declaration',
+          description: `${d.repo}/${d.path} (reviewed 2026-10-24). ${d.condition ?? ''}`,
+          url: `https://github.com/saga-ed/${d.repo}/blob/main/${d.path}`,
+        },
+      ],
+    };
+  });
+  for (const { source, target } of dependencies.values())
+    relationships.push({
+      id: `apm:${source}:${target}`,
+      source,
+      target,
+      label: 'APM dependency',
+      kind: 'dependency',
+      protocol: 'unknown',
+      declared: false,
+      observation: fresh ? 'observed' : available ? 'stale' : 'unavailable',
+      count: null,
+      rate: null,
+      latencyMs: null,
+      health: 'unknown',
+      freshness: fresh ? 'fresh' : 'stale',
+      summary:
+        'Observed APM adjacency without a source declaration. Protocol, call count and path latency are not supplied by this endpoint.',
+      evidence: [],
+    });
+  relationships.sort((a, b) => a.id.localeCompare(b.id));
+  const names = new Set([
+    ...applicationLabels.keys(),
+    ...data.services.map(s => s.service),
+    ...relationships.flatMap(r => [r.source, r.target]),
+  ]);
+  const declaredNames = new Set(declaredConnections.flatMap(d => [d.source, d.target]));
+  const systems: System[] = [...names]
+    .sort()
+    .map(id => ({
+      id,
+      label: applicationLabels.get(id) ?? id,
+      band: applicationLabels.has(id) ? 'application' : 'mesh',
+      kind: applicationLabels.has(id) ? 'Application' : 'API / service',
+      health: 'unknown',
+      freshness: fresh && data.services.some(s => s.service === id) ? 'fresh' : 'missing',
+      observationSource:
+        fresh && data.services.some(s => s.service === id)
+          ? 'apm'
+          : declaredNames.has(id)
+            ? 'declared'
+            : 'apm',
+      summary:
+        'Source declarations describe supported wiring; APM supplies observations. Reachability and deployed client configuration are not probed.',
+      errors: null,
+      evidence: [],
+    }));
+  return {
+    topologyVersion: createHash('sha256')
+      .update(JSON.stringify([data.scope, [...names].sort(), relationships.map(r => r.id)]))
+      .digest('hex')
+      .slice(0, 16),
+    environment: data.scope.environment,
+    scope: data.scope,
+    mode: 'live',
+    observedAt: data.observedAt,
+    observationWindowSeconds: (data.window.to - data.window.from) / 1000,
+    systems,
+    relationships,
+  };
 }

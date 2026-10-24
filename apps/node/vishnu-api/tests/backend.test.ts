@@ -71,11 +71,12 @@ describe('scope isolation',()=>{
  });
  it('does not manufacture health, edges, or metrics and only matches exact cloud scope',async()=>{
   const data=await createDatadogReader(env)();const mesh=cloudMesh(data);
-  expect(mesh.systems.map(s=>s.id)).toEqual(['coach','connectv3','saga_dash']);expect(mesh.relationships).toEqual([]);expect(mesh.systems.every(s=>s.health==='unknown')).toBe(true);
+  expect(mesh.systems.map(s=>s.id)).toEqual(expect.arrayContaining(['coach','connectv3','saga_dash']));expect(mesh.relationships.every(r=>r.declared)).toBe(true);expect(mesh.systems.every(s=>s.health==='unknown')).toBe(true);
   const observed = cloudMesh({...data, dependencies: [{source:'saga_dash',target:'iam-api'}, {source:'saga_dash',target:'iam-api'}]});
-  expect(observed.relationships).toHaveLength(1);
-  expect(connectionLabel(observed.relationships[0])).toBe('APM');
-  expect(observed.relationships[0].latencyMs).toBeNull();
+  const edge = observed.relationships.filter(r=>r.source==='saga_dash'&&r.target==='iam-api');
+  expect(edge).toHaveLength(1);
+  expect(connectionLabel(edge[0])).toBe('HTTP/tRPC');
+  expect(edge[0].latencyMs).toBeNull();
   expect(matchesMesh(data,mesh)).toBe(true);expect(matchesMesh({...data,scope:{...data.scope,environment:'prod'}},mesh)).toBe(false);
  });
 });

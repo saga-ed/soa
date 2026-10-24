@@ -129,7 +129,7 @@ jobs:
   # ── Integration tests (requires Docker) ─────────────────────
   integration:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
       run:
@@ -141,14 +141,10 @@ jobs:
 
       - name: Install database clients
         run: |
-          # mongosh
-          wget -qO- https://www.mongodb.org/static/pgp/server-6.0.asc | \
-            sudo gpg --dearmor -o /usr/share/keyrings/mongodb-archive-keyring.gpg
-          echo "deb [signed-by=/usr/share/keyrings/mongodb-archive-keyring.gpg] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/6.0 multiverse" | \
-            sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+          MONGOSH_VERSION=2.14.0
+          wget -q "https://downloads.mongodb.com/compass/mongodb-mongosh_${MONGOSH_VERSION}_amd64.deb"
           sudo apt-get update -qq
-          sudo apt-get install -y -qq mongodb-mongosh mysql-client > /dev/null
-          # psql is pre-installed on ubuntu-latest
+          sudo apt-get install -y -qq "./mongodb-mongosh_${MONGOSH_VERSION}_amd64.deb" mysql-client postgresql-client > /dev/null
 
       - name: Verify prerequisites
         run: |

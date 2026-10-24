@@ -141,8 +141,11 @@ jobs:
 
       - name: Install database clients
         run: |
+          # bump both together; sha256 = GitHub release asset digest (mongodb-js/mongosh)
           MONGOSH_VERSION=2.14.0
+          MONGOSH_SHA256=adb6b416a7c3798e3de80b42090de18b6717f209d976b097cbb9f26cd644609a
           wget -q "https://downloads.mongodb.com/compass/mongodb-mongosh_${MONGOSH_VERSION}_amd64.deb"
+          echo "${MONGOSH_SHA256}  mongodb-mongosh_${MONGOSH_VERSION}_amd64.deb" | sha256sum -c -
           sudo apt-get update -qq
           sudo apt-get install -y -qq "./mongodb-mongosh_${MONGOSH_VERSION}_amd64.deb" mysql-client postgresql-client > /dev/null
 

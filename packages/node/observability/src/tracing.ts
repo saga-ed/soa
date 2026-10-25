@@ -100,9 +100,7 @@ export function initTracing(
         // pg requireParentSpan drops parentless background churn; in-request
         // connect spans are dropped by SpanDroppingExporter instead.
         //
-        // /health* gets no server span: probe 503s otherwise dominate the
-        // trace-metric 5xx rate on quiet services (iac#938). Skipping at the
-        // hook leaves no parent, so requireParentSpan drops its pg spans too.
+        // /health* gets no server span; see hipponot/iac#938.
         instrumentations: [
             getNodeAutoInstrumentations({
                 '@opentelemetry/instrumentation-http': {

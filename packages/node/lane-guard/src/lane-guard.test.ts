@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { EnvIdentity } from '@saga-ed/soa-env';
-import { assertLaneSafe, checkLaneSafety, LaneGuardError, resolveLane } from './index.js';
+import {
+    assertLaneSafe,
+    checkLaneSafety,
+    DEFAULT_ALLOWED_HOST_SUFFIXES,
+    DEFAULT_NON_EGRESS_VAR_PATTERNS,
+    DEFAULT_PROD_PUBLIC_APEXES,
+    LaneGuardError,
+    resolveLane,
+} from './index.js';
 
 const DEV = '396913734878';
 const PROD = '531314149529';
@@ -305,5 +313,213 @@ describe('soa-env identity cross-check', () => {
 
     it('both none is a no-op', () => {
         expect(() => assertLaneSafe({ LANE: 'none' }, { identity: identity('none') })).not.toThrow();
+    });
+});
+
+describe('prod public hosts', () => {
+    const opts = { accountId: DEV };
+    const hostViolations = (env: Record<string, string>, o: object = opts) =>
+        checkLaneSafety({ ...clean, ...env }, o)
+            .filter((x) => x.check === 'prod-public-host')
+            .map((x) => x.message);
+
+    it('exposes the defaults', () => {
+        expect(DEFAULT_PROD_PUBLIC_APEXES).toEqual(['saga.org', 'sagaops.org']);
+        expect(DEFAULT_ALLOWED_HOST_SUFFIXES).toEqual(['internal.saga.org', 'dbs.internal']);
+        expect(DEFAULT_NON_EGRESS_VAR_PATTERNS.length).toBeGreaterThan(0);
+    });
+
+    it.each([
+        ['IAM_API_URL', 'https://iam.saga.org'],
+        ['PUBLIC_API_URL', 'https://connectv3-api.saga.org'],
+        ['AUTH_JWKSURL', 'https://iam.saga.org/.well-known/jwks.json'],
+        ['STAFFGATE_JWKSURL', 'https://gate.sagaops.org/.well-known/jwks.json'],
+        ['RTSM_API_URL', 'https://core-a.rtsm.saga.org'],
+        ['RECORDER_URL_TEMPLATE', 'https://recorder-{node}.fleek.saga.org'],
+        ['SOME_WS', 'wss://chi-1.fleek.saga.org'],
+        ['SOME_APEX', 'https://saga.org'],
+        ['PORTED', 'http://iam.saga.org:8443/x'],
+        ['UPPER', 'HTTPS://IAM.SAGA.ORG'],
+        ['TRAILING_DOT', 'https://iam.saga.org./x'],
+        ['AMQP_PROD', 'amqps://u:pw@mq.saga.org:5671'],
+    ])('rejects %s=%s', (name, value) => {
+        const msgs = hostViolations({ [name]: value });
+        expect(msgs).toHaveLength(1);
+        expect(msgs[0]).toContain(`${name} references prod public host`);
+    });
+
+    it('rejects a bare host in a HOST/HOSTNAME/DOMAIN/ENDPOINT var', () => {
+        for (const name of ['JANUS_LOGIN_HOST', 'API_HOSTNAME', 'FLEEK_DOMAIN', 'S3_ENDPOINT']) {
+            expect(hostViolations({ [name]: 'login.saga.org' })).toHaveLength(1);
+        }
+        expect(hostViolations({ S3_ENDPOINT: 'iam.saga.org:443/path' })).toHaveLength(1);
+        expect(hostViolations({ UPSTREAM_HOST: 'ok.wootdev.com, iam.saga.org' })).toHaveLength(1);
+        expect(hostViolations({ UPSTREAM_HOST: 'ok.wootdev.com iam.saga.org' })).toHaveLength(1);
+        expect(hostViolations({ UPSTREAM_HOST: 'ok.wootdev.com' })).toEqual([]);
+    });
+
+    it('ignores a bare prod host in a var whose name is not host-like', () => {
+        expect(hostViolations({ SOME_LABEL: 'login.saga.org' })).toEqual([]);
+    });
+
+    it('finds a prod host in the second entry of a comma-separated URL list', () => {
+        const msgs = hostViolations({ UPSTREAMS: 'https://a.wootdev.com,https://iam.saga.org' });
+        expect(msgs).toEqual(['UPSTREAMS references prod public host "iam.saga.org"']);
+    });
+
+    it('finds a prod host in a comma-separated authority and in a space-separated list', () => {
+        expect(hostViolations({ U: 'https://a.wootdev.com,iam.saga.org/x' })).toHaveLength(1);
+        expect(hostViolations({ U: 'https://a.wootdev.com https://iam.saga.org' })).toHaveLength(1);
+    });
+
+    it('finds hosts inside a JSON value', () => {
+        const topology = '{"domain":"fleek.wootdev.com","cityMap":{"_default":"wss://chi-1.fleek.saga.org"}}';
+        expect(hostViolations({ FLEEK_TOPOLOGY_JSON: topology })).toEqual([
+            'FLEEK_TOPOLOGY_JSON references prod public host "chi-1.fleek.saga.org"',
+        ]);
+    });
+
+    it('reports every offending var, and each host once per var', () => {
+        const msgs = hostViolations({
+            IAM_API_URL: 'https://iam.saga.org',
+            SESSIONS_API_URL: 'https://sessions-api.saga.org',
+            TWICE: 'https://iam.saga.org/a https://iam.saga.org/b',
+        });
+        expect(msgs).toHaveLength(3);
+        expect(msgs.join('\n')).toMatch(/IAM_API_URL[\s\S]*SESSIONS_API_URL[\s\S]*TWICE/);
+    });
+
+    it.each([
+        'https://authz-api.internal.saga.org',
+        'https://authz-api.internal.saga.org/health/ready',
+        'https://internal.saga.org',
+        'http://openfga.dbs.internal:8080',
+        'https://iam.wootdev.com',
+        'https://fleek.wootdev.com',
+        'https://core-a.rtsm.wootdev.com',
+        'https://iam.saga-training.org',
+        'https://evilsaga.org',
+        'https://saga.org.example.com',
+        'https://xinternal.saga.org.example.com',
+        'http://localhost:3000',
+    ])('allows %s', (url) => {
+        expect(hostViolations({ SOME_URL: url })).toEqual([]);
+    });
+
+    it('does not let a lookalike of an allowed suffix through', () => {
+        expect(hostViolations({ SOME_URL: 'https://xinternal.saga.org' })).toHaveLength(1);
+        expect(hostViolations({ SOME_URL: 'https://internal.saga.org.evil.saga.org' })).toHaveLength(1);
+    });
+
+    it('does not treat an email address as a host', () => {
+        expect(hostViolations({ MAIL_FROM_ADDRESS: 'noreply@saga.org' })).toEqual([]);
+        expect(hostViolations({ MAIL_DOMAIN: 'noreply@saga.org' })).toEqual([]);
+    });
+
+    it('exempts CORS / allowed-origin vars, cookie domains, issuers and the SAML entity id', () => {
+        const env = {
+            DISTRICT_ADMIN_ALLOWEDORIGINS: 'https://dash.saga.org,https://blue.dash.saga.org',
+            ALLOWED_ORIGINS: 'https://connectv3.saga.org',
+            CORS_ORIGINS: 'https://dash.saga.org',
+            STAR_UPLOAD_CORS_ORIGIN: 'https://staff-admin.sagaops.org',
+            AUTH_SESSIONCOOKIEDOMAIN: '.saga.org',
+            AUTH_IMPERSONATIONDASHCOOKIEDOMAIN: '.saga.org',
+            JWT_ISSUER: 'https://iam.saga.org',
+            IAM_AUTH_USERTOKENISSUER: 'https://iam.saga.org',
+            SAML_SP_ENTITY_ID: 'https://iam.saga.org/saga_api/v1.0/saml/metadata',
+        };
+        expect(hostViolations(env)).toEqual([]);
+        expect(() => assertLaneSafe({ ...clean, ...env }, opts)).not.toThrow();
+    });
+
+    it('does not exempt near-miss names', () => {
+        const env = {
+            ISSUER_JWKS_URL: 'https://iam.saga.org/.well-known/jwks.json',
+            ISSUER_URL: 'https://iam.saga.org',
+            ORIGINS_PROXY_URL: 'https://iam.saga.org',
+            COOKIE_DOMAIN_SYNC_URL: 'https://iam.saga.org',
+            SAML_IDP_URL: 'https://iam.saga.org',
+        };
+        expect(hostViolations(env)).toHaveLength(5);
+    });
+
+    it('an exempt name does not exempt the other vars', () => {
+        const msgs = hostViolations({ JWT_ISSUER: 'https://iam.saga.org', IAM_API_URL: 'https://iam.saga.org' });
+        expect(msgs).toEqual(['IAM_API_URL references prod public host "iam.saga.org"']);
+    });
+
+    it('prodPublicApexes replaces the default', () => {
+        const env = { A: 'https://x.example.test', B: 'https://iam.saga.org' };
+        expect(hostViolations(env, { ...opts, prodPublicApexes: ['example.test'] })).toEqual([
+            'A references prod public host "x.example.test"',
+        ]);
+        expect(hostViolations(env, { ...opts, prodPublicApexes: ['.EXAMPLE.test.'] })).toHaveLength(1);
+        expect(hostViolations(env, { ...opts, prodPublicApexes: [...DEFAULT_PROD_PUBLIC_APEXES, 'example.test'] })).toHaveLength(2);
+    });
+
+    it('allowedHostSuffixes replaces the default', () => {
+        const env = { A: 'https://authz-api.internal.saga.org', B: 'https://x.lane.saga.org' };
+        expect(hostViolations(env, { ...opts, allowedHostSuffixes: ['lane.saga.org'] })).toEqual([
+            'A references prod public host "authz-api.internal.saga.org"',
+        ]);
+        expect(hostViolations(env, { ...opts, allowedHostSuffixes: [...DEFAULT_ALLOWED_HOST_SUFFIXES, 'lane.saga.org'] })).toEqual([]);
+    });
+
+    it('nonEgressVarPatterns replaces the default', () => {
+        const env = { JWT_ISSUER: 'https://iam.saga.org', MY_ORIGIN: 'https://iam.saga.org' };
+        expect(hostViolations(env, { ...opts, nonEgressVarPatterns: [/^MY_ORIGIN$/] })).toEqual([
+            'JWT_ISSUER references prod public host "iam.saga.org"',
+        ]);
+        expect(hostViolations(env, { ...opts, nonEgressVarPatterns: [...DEFAULT_NON_EGRESS_VAR_PATTERNS, /^MY_ORIGIN$/] })).toEqual([]);
+        expect(hostViolations(env, { ...opts, nonEgressVarPatterns: [/ISSUER$/g, /ISSUER$/g] })).toEqual([
+            'MY_ORIGIN references prod public host "iam.saga.org"',
+        ]);
+    });
+
+    it('applies to both lanes', () => {
+        for (const LANE of ['twin', 'mirror']) {
+            expect(hostViolations({ LANE, IAM_API_URL: 'https://iam.saga.org' })).toHaveLength(1);
+        }
+    });
+
+    it('throws one LaneGuardError listing var names and hosts only, never values', () => {
+        const env = {
+            ...clean,
+            IAM_API_URL: 'https://svc:SECRETPW@iam.saga.org:8443/path?token=SECRETTOKEN',
+            SESSIONS_API_URL: 'https://sessions-api.saga.org/x#SECRETFRAG',
+            UPSTREAM_HOST: 'login.saga.org',
+        };
+        let err: unknown;
+        try {
+            assertLaneSafe(env, { accountId: DEV });
+        } catch (e) {
+            err = e;
+        }
+        expect(err).toBeInstanceOf(LaneGuardError);
+        const msg = (err as LaneGuardError).message;
+        expect(msg).toContain('[prod-public-host] IAM_API_URL references prod public host "iam.saga.org"');
+        expect(msg).toContain('[prod-public-host] SESSIONS_API_URL references prod public host "sessions-api.saga.org"');
+        expect(msg).toContain('[prod-public-host] UPSTREAM_HOST references prod public host "login.saga.org"');
+        expect(msg).toContain('(3 violations)');
+        for (const secret of ['SECRETPW', 'SECRETTOKEN', 'SECRETFRAG', '8443', '/path', 'svc:']) {
+            expect(msg).not.toContain(secret);
+        }
+    });
+
+    it.each([undefined, '', '  ', 'none', 'NONE'])('is a strict no-op when LANE=%j, with prod hosts present', (LANE) => {
+        const env = {
+            LANE,
+            EXEC_ENV: 'prod',
+            IAM_API_URL: 'https://iam.saga.org',
+            JANUS_LOGIN_HOST: 'login.saga.org',
+            STAFFGATE_JWKSURL: 'https://gate.sagaops.org/.well-known/jwks.json',
+        };
+        expect(checkLaneSafety(env)).toEqual([]);
+        expect(() => assertLaneSafe(env)).not.toThrow();
+    });
+
+    it('reports only prod-public-host for a prod https URL, nothing for clean values', () => {
+        expect(checks({ IAM_API_URL: 'https://iam.wootdev.com', REDIS_URL: 'redis://cache.dev.internal:6379' })).toEqual([]);
+        expect(checks({ IAM_API_URL: 'https://iam.saga.org' })).toEqual(['prod-public-host']);
     });
 });

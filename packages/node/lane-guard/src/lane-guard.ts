@@ -3,7 +3,15 @@ import type { EnvIdentity } from '@saga-ed/soa-env';
 export type Env = Record<string, string | undefined>;
 
 export interface LaneViolation {
-    check: 'lane-identity' | 'dd-env' | 'prod-secret-path' | 'prod-host' | 'ses' | 'partner-egress' | 'aws-account';
+    check:
+        | 'lane-identity'
+        | 'dd-env'
+        | 'prod-secret-path'
+        | 'prod-host'
+        | 'prod-public-host'
+        | 'ses'
+        | 'partner-egress'
+        | 'aws-account';
     message: string;
 }
 
@@ -16,11 +24,32 @@ export interface LaneGuardOptions {
     allowedAccountIds?: string[];
     /** soa-env's resolved identity; cross-checked against the raw env, never trusted over it. */
     identity?: EnvIdentity;
+    /** Prod public apex domains; a host equal to or under one is rejected. Replaces the default. */
+    prodPublicApexes?: string[];
+    /** Domain suffixes exempt from `prodPublicApexes` (dev-VPC private zones). Replaces the default. */
+    allowedHostSuffixes?: string[];
+    /** Env var names whose values are inbound or identity strings, not egress. Replaces the default. */
+    nonEgressVarPatterns?: RegExp[];
 }
 
 export const DEV_ACCOUNT_ID = '396913734878';
 
 export const DEFAULT_PROD_HOST_PATTERNS: RegExp[] = [/(^|[.\-_])(prod|production)([.\-_]|$)/i];
+
+/** Prod-only public apexes. Dev uses wootdev.com / wootops.org. */
+export const DEFAULT_PROD_PUBLIC_APEXES: string[] = ['saga.org', 'sagaops.org'];
+
+/** Dev-VPC private zones a lane uses to reach twins (twin-lane-contract rules 5-6). */
+export const DEFAULT_ALLOWED_HOST_SUFFIXES: string[] = ['internal.saga.org', 'dbs.internal'];
+
+/** Names of vars that hold CORS origins, cookie scopes, token issuers or a SAML entity id: compared or emitted, never dialled. */
+export const DEFAULT_NON_EGRESS_VAR_PATTERNS: RegExp[] = [
+    /CORS_?ORIGINS?$/i,
+    /ALLOWED_?ORIGINS?$/i,
+    /COOKIE_?DOMAIN$/i,
+    /ISSUER$/i,
+    /^SAML_SP_ENTITY_?ID$/i,
+];
 
 export type Lane = 'twin' | 'mirror' | 'none';
 
@@ -28,6 +57,9 @@ const PROD_SSM_PATH_RE = /(?:^|parameter|[\s,;=:])\/(?:shared\/infra\/)?prod\//;
 const OTEL_ENV_RE = /(?:^|,)\s*deployment\.environment(?:\.name)?\s*=\s*([^,]*)/gi;
 const URL_RE = /\b(amqps?|rediss?|mongodb(?:\+srv)?|postgres(?:ql)?):\/\/([^\s/?#]*)/gi;
 const HOST_VAR_RE = /^(PGHOST|(POSTGRES|PG|REDIS|MONGO|MONGODB|RABBITMQ|AMQP)_?[A-Z0-9_]*HOST)$/i;
+// Any scheme. The authority ends at the next URL, so comma-separated URL lists split cleanly; `{}` stays so templated hosts match.
+const ANY_URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/((?:(?![a-z][a-z0-9+.-]*:\/\/)[^\s/?#"'`<>\\])*)/gi;
+const BARE_HOST_VAR_RE = /(HOST|HOSTNAME|DOMAIN|ENDPOINT)$/i;
 const PARTNER_VAR_RES = [/^CLEVER_/i, /PARTNER.*WEBHOOK|WEBHOOK.*URL/i];
 
 const isSet = (v: string | undefined): v is string => v !== undefined && v.trim() !== '';
@@ -40,6 +72,35 @@ function hostsOfAuthority(authority: string): string[] {
         .filter(Boolean);
 }
 
+function normalizeHost(piece: string): string {
+    return piece
+        .slice(piece.lastIndexOf('@') + 1)
+        .trim()
+        .replace(/^\[|\]$/g, '')
+        .replace(/:\d*$/, '')
+        .replace(/^(\*?\.)+/, '')
+        .replace(/\.+$/, '')
+        .toLowerCase();
+}
+
+/** Hosts of every URL in the value (any scheme), plus the value itself when the var name marks it as a bare host. */
+function egressHosts(name: string, value: string): string[] {
+    const hosts: string[] = [];
+    for (const m of value.matchAll(ANY_URL_RE)) {
+        for (const piece of (m[1] ?? '').split(',')) hosts.push(normalizeHost(piece));
+    }
+    if (!value.includes('://') && BARE_HOST_VAR_RE.test(name)) {
+        for (const token of value.split(/[\s,;]+/)) {
+            if (token.includes('@')) continue;
+            hosts.push(normalizeHost(token.split('/')[0] ?? ''));
+        }
+    }
+    return hosts.filter(Boolean);
+}
+
+const normalizeDomains = (list: string[]): string[] => list.map((d) => d.trim().replace(/^\.+|\.+$/g, '').toLowerCase()).filter(Boolean);
+const underDomain = (host: string, domain: string): boolean => host === domain || host.endsWith(`.${domain}`);
+
 export interface LaneResolution {
     /** `invalid` = LANE set to an unknown value, or contradicting EXEC_ENV. */
     lane: Lane | 'invalid';
@@ -48,7 +109,7 @@ export interface LaneResolution {
     reason?: string;
 }
 
-/** LANE (infra-set) is authoritative. EXEC_ENV=mirror is honoured only when LANE is unset (removed in 0.3.0). */
+/** LANE (infra-set) is authoritative. EXEC_ENV=mirror is honoured only when LANE is unset (removal pending). */
 export function resolveLane(env: Env): LaneResolution {
     // eslint-disable-next-line @saga-ed/soa-env/no-env-identity -- independent raw-env cross-check of soa-env (DESIGN §3)
     const raw = env.LANE?.trim().toLowerCase();
@@ -112,6 +173,17 @@ export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViol
             return p.test(host);
         });
 
+    const apexes = normalizeDomains(opts.prodPublicApexes ?? DEFAULT_PROD_PUBLIC_APEXES);
+    const allowedSuffixes = normalizeDomains(opts.allowedHostSuffixes ?? DEFAULT_ALLOWED_HOST_SUFFIXES);
+    const nonEgress = opts.nonEgressVarPatterns ?? DEFAULT_NON_EGRESS_VAR_PATTERNS;
+    const isNonEgressVar = (name: string): boolean =>
+        nonEgress.some((p) => {
+            p.lastIndex = 0;
+            return p.test(name);
+        });
+    const isProdPublicHost = (host: string): boolean =>
+        apexes.some((a) => underDomain(host, a)) && !allowedSuffixes.some((a) => underDomain(host, a));
+
     v.push(...telemetryEnvViolations(env, lane));
 
     for (const [name, value] of Object.entries(env)) {
@@ -131,6 +203,14 @@ export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViol
 
         if (HOST_VAR_RE.test(name) && !value.includes('://') && isProdHost(value.trim())) {
             v.push({ check: 'prod-host', message: `${name} has prod-matching host "${value.trim()}"` });
+        }
+
+        if (!isNonEgressVar(name)) {
+            for (const host of new Set(egressHosts(name, value))) {
+                if (isProdPublicHost(host)) {
+                    v.push({ check: 'prod-public-host', message: `${name} references prod public host "${host}"` });
+                }
+            }
         }
 
         if (name.toUpperCase().startsWith('MAIL_SES_')) {
@@ -176,7 +256,7 @@ export function assertLaneSafe(env: Env = process.env, opts: LaneGuardOptions = 
     if (res.lane === 'none' && (!opts.identity || opts.identity.lane === 'none')) return;
     if (res.viaDeprecatedAlias && !aliasWarned) {
         aliasWarned = true;
-        process.emitWarning('soa-lane-guard: EXEC_ENV=mirror as a lane trigger is deprecated; set LANE=mirror (removed in 0.3.0)', 'DeprecationWarning');
+        process.emitWarning('soa-lane-guard: EXEC_ENV=mirror as a lane trigger is deprecated; set LANE=mirror (removal pending)', 'DeprecationWarning');
     }
     const violations = checkLaneSafety(env, opts);
     if (violations.length > 0) throw new LaneGuardError(violations, res.lane);

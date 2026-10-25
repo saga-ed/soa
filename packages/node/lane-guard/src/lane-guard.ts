@@ -42,11 +42,10 @@ export const DEFAULT_PROD_PUBLIC_APEXES: string[] = ['saga.org', 'sagaops.org'];
 /** Dev-VPC private zones a lane uses to reach twins (twin-lane-contract rules 5-6). */
 export const DEFAULT_ALLOWED_HOST_SUFFIXES: string[] = ['internal.saga.org', 'dbs.internal'];
 
-/** Names of vars that hold CORS origins, cookie scopes, token issuers or a SAML entity id: compared or emitted, never dialled. */
+/** Names of vars that hold CORS origins, token issuers or a SAML entity id: compared or emitted, never dialled. */
 export const DEFAULT_NON_EGRESS_VAR_PATTERNS: RegExp[] = [
     /CORS_?ORIGINS?$/i,
     /ALLOWED_?ORIGINS?$/i,
-    /COOKIE_?DOMAIN$/i,
     /ISSUER$/i,
     /^SAML_SP_ENTITY_?ID$/i,
 ];

@@ -58,7 +58,7 @@ A twin is a prod-config copy running in the dev account; a prod service URL it f
 |---|---|
 | `prodPublicApexes` | `DEFAULT_PROD_PUBLIC_APEXES`: `saga.org`, `sagaops.org` (dev uses `wootdev.com`/`wootops.org`) |
 | `allowedHostSuffixes` | `DEFAULT_ALLOWED_HOST_SUFFIXES`: `internal.saga.org`, `dbs.internal` (dev-VPC private zones, twin-lane-contract rules 5-6) |
-| `nonEgressVarPatterns` | `DEFAULT_NON_EGRESS_VAR_PATTERNS`: `*CORS_ORIGIN(S)`, `*ALLOWED_ORIGIN(S)`, `*COOKIE_DOMAIN`, `*ISSUER`, `SAML_SP_ENTITY_ID`. Issuers are compared with the token `iss` claim and cookie domains and CORS origins are inbound; JWKS and API URLs are separate vars and stay checked. |
+| `nonEgressVarPatterns` | `DEFAULT_NON_EGRESS_VAR_PATTERNS`: `*CORS_ORIGIN(S)`, `*ALLOWED_ORIGIN(S)`, `*ISSUER`, `SAML_SP_ENTITY_ID`. Issuers are compared with the token `iss` claim and CORS origins are inbound; cookie domains are not exempt (a twin cookie on a prod apex shares browser scope with prod sessions); JWKS and API URLs are separate vars and stay checked. |
 
 Not covered: values the guard cannot see (schema defaults in app code when the var is absent, SSM/Secrets Manager-resolved values), and a bare host inside a JSON value with no URL scheme.
 

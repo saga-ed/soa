@@ -416,14 +416,12 @@ describe('prod public hosts', () => {
         expect(hostViolations({ MAIL_DOMAIN: 'noreply@saga.org' })).toEqual([]);
     });
 
-    it('exempts CORS / allowed-origin vars, cookie domains, issuers and the SAML entity id', () => {
+    it('exempts CORS / allowed-origin vars, issuers and the SAML entity id', () => {
         const env = {
             DISTRICT_ADMIN_ALLOWEDORIGINS: 'https://dash.saga.org,https://blue.dash.saga.org',
             ALLOWED_ORIGINS: 'https://connectv3.saga.org',
             CORS_ORIGINS: 'https://dash.saga.org',
             STAR_UPLOAD_CORS_ORIGIN: 'https://staff-admin.sagaops.org',
-            AUTH_SESSIONCOOKIEDOMAIN: '.saga.org',
-            AUTH_IMPERSONATIONDASHCOOKIEDOMAIN: '.saga.org',
             JWT_ISSUER: 'https://iam.saga.org',
             IAM_AUTH_USERTOKENISSUER: 'https://iam.saga.org',
             SAML_SP_ENTITY_ID: 'https://iam.saga.org/saga_api/v1.0/saml/metadata',
@@ -432,15 +430,21 @@ describe('prod public hosts', () => {
         expect(() => assertLaneSafe({ ...clean, ...env }, opts)).not.toThrow();
     });
 
+    it('rejects a laned cookie domain on a prod apex', () => {
+        for (const name of ['COOKIE_DOMAIN', 'AUTH_SESSIONCOOKIEDOMAIN', 'AUTH_IMPERSONATIONDASHCOOKIEDOMAIN']) {
+            expect(hostViolations({ [name]: '.saga.org' })).toEqual([`${name} references prod public host "saga.org"`]);
+        }
+        expect(hostViolations({ AUTH_SESSIONCOOKIEDOMAIN: '.wootdev.com' })).toEqual([]);
+    });
+
     it('does not exempt near-miss names', () => {
         const env = {
             ISSUER_JWKS_URL: 'https://iam.saga.org/.well-known/jwks.json',
             ISSUER_URL: 'https://iam.saga.org',
             ORIGINS_PROXY_URL: 'https://iam.saga.org',
-            COOKIE_DOMAIN_SYNC_URL: 'https://iam.saga.org',
             SAML_IDP_URL: 'https://iam.saga.org',
         };
-        expect(hostViolations(env)).toHaveLength(5);
+        expect(hostViolations(env)).toHaveLength(4);
     });
 
     it('an exempt name does not exempt the other vars', () => {

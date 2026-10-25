@@ -124,6 +124,24 @@ describe('withJanusMock: true — local mock signer overlay (soa#446)', () => {
 });
 
 describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () => {
+  it.each([
+    'iam-api',
+    'authz-api',
+    'programs-api',
+    'scheduling-api',
+    'sessions-api',
+    'content-api',
+    'coach-api',
+  ])('%s carries the soa-env R4 capability keys', (service) => {
+    expect(env(service)).toMatchObject({
+      DB_CREDENTIAL_SOURCE: 'static',
+      DB_TLS: 'off',
+      FAIL_FAST: 'false',
+      TELEMETRY_ENV: 'local',
+      PERMISSIVE_AUTHZ: 'false',
+    });
+  });
+
   it('iam-api', () => {
     expect(env('iam-api')).toEqual({
       PORT: '3010',
@@ -183,6 +201,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   it('programs-api', () => {
     expect(env('programs-api')).toEqual({
       NODE_ENV: 'development',
+      DB_CREDENTIAL_SOURCE: 'static',
+      DB_TLS: 'off',
+      FAIL_FAST: 'false',
+      TELEMETRY_ENV: 'local',
+      PERMISSIVE_AUTHZ: 'false',
       DATABASE_URL: 'postgresql://saga_user:password123@localhost:5432/programs',
       IAM_API_URL: 'http://localhost:3010',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
@@ -201,6 +224,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   it('scheduling-api', () => {
     expect(env('scheduling-api')).toEqual({
       NODE_ENV: 'development',
+      DB_CREDENTIAL_SOURCE: 'static',
+      DB_TLS: 'off',
+      FAIL_FAST: 'false',
+      TELEMETRY_ENV: 'local',
+      PERMISSIVE_AUTHZ: 'false',
       DATABASE_URL: 'postgresql://saga_user:password123@localhost:5432/scheduling',
       IAM_API_URL: 'http://localhost:3010',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
@@ -216,6 +244,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   it('sessions-api', () => {
     expect(env('sessions-api')).toEqual({
       NODE_ENV: 'development',
+      DB_CREDENTIAL_SOURCE: 'static',
+      DB_TLS: 'off',
+      FAIL_FAST: 'false',
+      TELEMETRY_ENV: 'local',
+      PERMISSIVE_AUTHZ: 'false',
       DATABASE_URL: 'postgresql://saga_user:password123@localhost:5432/sessions',
       IAM_API_URL: 'http://localhost:3010',
       RABBITMQ_URL: 'amqp://rabbitmq_admin:password123@localhost:5672',
@@ -229,6 +262,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   it('content-api (:3009)', () => {
     expect(env('content-api')).toEqual({
       NODE_ENV: 'development',
+      DB_CREDENTIAL_SOURCE: 'static',
+      DB_TLS: 'off',
+      FAIL_FAST: 'false',
+      TELEMETRY_ENV: 'local',
+      PERMISSIVE_AUTHZ: 'false',
       PORT: '3009',
       DATABASE_URL: 'postgresql://saga_user:password123@localhost:5432/content',
       IAM_API_URL: 'http://localhost:3010',
@@ -397,6 +435,11 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
   it('coach-api (single-store: coach_api pg; iss=iam.wootdev.com — what local iam mints)', () => {
     expect(env('coach-api')).toEqual({
       NODE_ENV: 'development',
+      DB_CREDENTIAL_SOURCE: 'static',
+      DB_TLS: 'off',
+      FAIL_FAST: 'false',
+      TELEMETRY_ENV: 'local',
+      PERMISSIVE_AUTHZ: 'false',
       EXPRESS_SERVER_PORT: '6105',
       DATABASE_URL: 'postgresql://coach_api_app:dev-password-coach-api-app@localhost:5432/coach_api',
       AUTH_AUTHENABLED: 'true',

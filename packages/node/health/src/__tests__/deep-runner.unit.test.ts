@@ -466,6 +466,10 @@ describe('manifest guards', () => {
 });
 
 describe('freshProbe', () => {
+  // Jitter factor 1.0: cadence assertions are exact.
+  beforeEach(() => void vi.spyOn(Math, 'random').mockReturnValue(0.5));
+  afterEach(() => vi.restoreAllMocks());
+
   const authErr = () => Object.assign(new Error('PAM authentication failed for user "app"'), { code: '28000' });
 
   function mkFresh(
@@ -508,9 +512,9 @@ describe('freshProbe', () => {
     dr.start();
     expect(dr.report().verdict).toBe('ready');
     c.freshFail = authErr();
-    await tick(12_000); // first failing fresh probe
+    await tick(10_500); // first failing fresh probe at 10s; retry at 11s
     expect(dr.report().verdict).toBe('ready'); // 1 < failureThreshold
-    await tick(1300); // retries at the pooled cadence while failing
+    await tick(1000); // retries at the pooled cadence while failing
     const r = dr.report('internal');
     expect(r.verdict).toBe('degraded');
     expect(r.httpStatus).toBe(200);
@@ -594,7 +598,7 @@ describe('freshProbe', () => {
     await tick(7000);
     expect(c.freshCalls).toBe(1);
     expect(c.pooledCalls).toBeGreaterThan(3);
-    await tick(5500); // <= 12.5s since start: first scheduled run has fired, second cannot have
+    await tick(5500); // 12.5s since start: first scheduled run (10s) has fired, second (20s) has not
     expect(c.freshCalls).toBe(2);
     dr.stop();
   });

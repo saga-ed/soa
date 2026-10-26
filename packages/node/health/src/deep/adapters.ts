@@ -10,6 +10,12 @@ interface PrismaLike {
 interface PgLike {
   query(sql: string): Promise<unknown>;
 }
+/** Structural `pg.Client`. */
+export interface PgClientLike {
+  connect(): Promise<unknown>;
+  query(sql: string): Promise<unknown>;
+  end(): Promise<unknown>;
+}
 interface MongoClientLike {
   db(name?: string): { command(cmd: Record<string, unknown>): Promise<unknown> };
 }
@@ -41,6 +47,32 @@ export async function sqlProbe(client: unknown): Promise<void> {
   } else {
     throw new TypeError('postgres client is neither Prisma-like nor pg-like');
   }
+}
+
+/**
+ * `freshProbe` helper: new client per call, `SELECT 1`, always `end()`. Abort ends the client, which
+ * rejects the in-flight connect/query. The factory must build the client from current credentials.
+ */
+export function pgFreshProbe(factory: () => PgClientLike): (signal: AbortSignal) => Promise<void> {
+  return async (signal) => {
+    const client = factory();
+    let ending: Promise<unknown> | undefined;
+    const end = (): Promise<unknown> => (ending ??= Promise.resolve().then(() => client.end()));
+    const onAbort = (): void => void end().catch(() => undefined);
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      if (signal.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      await client.connect();
+      await client.query('SELECT 1');
+    } finally {
+      signal.removeEventListener('abort', onAbort);
+      try {
+        await end();
+      } catch {
+        /* close failure must not mask the probe outcome */
+      }
+    }
+  };
 }
 
 export async function mongoProbe(client: unknown): Promise<void> {

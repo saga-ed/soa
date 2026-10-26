@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TIMEOUT } from '../readiness.js';
 import { awsProbe } from '../aws.js';
 import { openfgaProbe } from '../openfga.js';
-import { httpProbe, mongoProbe, rabbitProbe, redisProbe, sqlProbe } from '../deep/adapters.js';
+import { httpProbe, mongoProbe, pgFreshProbe, rabbitProbe, redisProbe, sqlProbe } from '../deep/adapters.js';
 import { classifyError } from '../deep/classify.js';
 
 describe('adapters (fake clients)', () => {
@@ -115,6 +115,8 @@ describe('classifyError', () => {
     [e({ code: 'ENOTFOUND' }), 'dns'],
     [e({ code: 'CERT_HAS_EXPIRED' }), 'tls'],
     [e({ code: '28P01' }), 'auth'],
+    [e({ code: '28000' }), 'auth'],
+    [e({}, 'PAM authentication failed for user "app"'), 'auth'],
     [e({ name: 'AccessDeniedException' }), 'auth'],
     [e({}, 'password authentication failed for user x'), 'auth'],
     [e({ code: 'P2021' }), 'schema'],
@@ -124,5 +126,66 @@ describe('classifyError', () => {
     [new Error('who knows'), 'error'],
   ])('%#', (err, reason) => {
     expect(classifyError(err)).toBe(reason);
+  });
+});
+
+describe('pgFreshProbe', () => {
+  const fake = (over: { connect?: () => Promise<unknown>; query?: () => Promise<unknown>; end?: () => Promise<unknown> } = {}) => ({
+    connect: vi.fn(over.connect ?? (async () => undefined)),
+    query: vi.fn(over.query ?? (async () => ({}))),
+    end: vi.fn(over.end ?? (async () => undefined)),
+  });
+
+  it('connects, runs SELECT 1, ends', async () => {
+    const c = fake();
+    const factory = vi.fn(() => c);
+    await pgFreshProbe(factory)(new AbortController().signal);
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(c.connect).toHaveBeenCalledTimes(1);
+    expect(c.query).toHaveBeenCalledWith('SELECT 1');
+    expect(c.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('builds a new client per call', async () => {
+    const factory = vi.fn(() => fake());
+    const probe = pgFreshProbe(factory);
+    await probe(new AbortController().signal);
+    await probe(new AbortController().signal);
+    expect(factory).toHaveBeenCalledTimes(2);
+  });
+
+  it('ends the client when query fails, and rethrows the query error', async () => {
+    const err = Object.assign(new Error('boom'), { code: '28000' });
+    const c = fake({ query: async () => Promise.reject(err) });
+    await expect(pgFreshProbe(() => c)(new AbortController().signal)).rejects.toBe(err);
+    expect(c.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends the client when connect fails (PAM auth) and the error classifies as auth', async () => {
+    const err = Object.assign(new Error('PAM authentication failed for user "app"'), { code: '28000' });
+    const c = fake({ connect: async () => Promise.reject(err) });
+    const got = await pgFreshProbe(() => c)(new AbortController().signal).catch((x: unknown) => x);
+    expect(got).toBe(err);
+    expect(c.query).not.toHaveBeenCalled();
+    expect(c.end).toHaveBeenCalledTimes(1);
+    expect(classifyError(got)).toBe('auth');
+  });
+
+  it('a failing end() does not mask success or the query error', async () => {
+    const ok = fake({ end: async () => Promise.reject(new Error('end failed')) });
+    await expect(pgFreshProbe(() => ok)(new AbortController().signal)).resolves.toBeUndefined();
+    const qErr = new Error('query failed');
+    const bad = fake({ query: async () => Promise.reject(qErr), end: async () => Promise.reject(new Error('end failed')) });
+    await expect(pgFreshProbe(() => bad)(new AbortController().signal)).rejects.toBe(qErr);
+  });
+
+  it('abort ends the client while connect is pending', async () => {
+    const c = fake({ connect: () => new Promise(() => undefined) });
+    const ac = new AbortController();
+    void pgFreshProbe(() => c)(ac.signal).catch(() => undefined);
+    ac.abort();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(c.end).toHaveBeenCalledTimes(1);
   });
 });

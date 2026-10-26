@@ -3,7 +3,7 @@ import type { EnvIdentity } from '@saga-ed/soa-env';
 export type Env = Record<string, string | undefined>;
 
 export interface LaneViolation {
-    check: 'lane-identity' | 'dd-env' | 'prod-secret-path' | 'prod-host' | 'ses' | 'partner-egress' | 'aws-account';
+    check: 'lane-identity' | 'dd-env' | 'prod-secret-path' | 'prod-host' | 'ses' | 'partner-egress' | 'aws-account' | 'amqp-vhost';
     message: string;
 }
 
@@ -16,6 +16,8 @@ export interface LaneGuardOptions {
     allowedAccountIds?: string[];
     /** soa-env's resolved identity; cross-checked against the raw env, never trusted over it. */
     identity?: EnvIdentity;
+    /** LANE=twin only: replaces the default vhost rule (decoded vhost contains the lane name as a delimited token). Never read from env. */
+    amqpVhostPattern?: RegExp;
 }
 
 export const DEV_ACCOUNT_ID = '396913734878';
@@ -30,6 +32,8 @@ const URL_RE = /\b(amqps?|rediss?|mongodb(?:\+srv)?|postgres(?:ql)?):\/\/([^\s/?
 const HOST_VAR_RE = /^(PGHOST|(POSTGRES|PG|REDIS|MONGO|MONGODB|RABBITMQ|AMQP)_?[A-Z0-9_]*HOST)$/i;
 const PARTNER_VAR_RES = [/^CLEVER_/i, /PARTNER.*WEBHOOK|WEBHOOK.*URL/i];
 
+const AMQP_URL_RE = /\bamqps?:\/\/[^\s]*/gi;
+
 const isSet = (v: string | undefined): v is string => v !== undefined && v.trim() !== '';
 
 function hostsOfAuthority(authority: string): string[] {
@@ -38,6 +42,28 @@ function hostsOfAuthority(authority: string): string[] {
         .split(',')
         .map((h) => h.trim().replace(/^\[|\]$/g, '').replace(/:\d*$/, ''))
         .filter(Boolean);
+}
+
+/** AMQP vhost per the amqp-uri spec: no path = default "/", otherwise the percent-decoded path after the first "/". undefined = undecodable. */
+function amqpVhost(url: string): string | undefined {
+    const rest = url.slice(url.indexOf('://') + 3);
+    const slash = rest.search(/[/?#]/);
+    if (slash === -1 || rest[slash] !== '/') return '/';
+    const path = rest.slice(slash + 1).split(/[?#]/, 1)[0] ?? '';
+    try {
+        return decodeURIComponent(path);
+    } catch {
+        return undefined;
+    }
+}
+
+function vhostAllowed(vhost: string, lane: Lane, pattern: RegExp | undefined): boolean {
+    if (vhost === '' || vhost === '/') return false;
+    if (pattern) {
+        pattern.lastIndex = 0;
+        return pattern.test(vhost);
+    }
+    return new RegExp(`(^|[^a-z0-9])${lane}([^a-z0-9]|$)`, 'i').test(vhost);
 }
 
 export interface LaneResolution {
@@ -125,6 +151,15 @@ export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViol
             for (const host of hostsOfAuthority(m[2] ?? '')) {
                 if (isProdHost(host)) {
                     v.push({ check: 'prod-host', message: `${name} has a ${m[1]!.toLowerCase()}:// URL with prod-matching host "${host}"` });
+                }
+            }
+        }
+
+        if (lane === 'twin') {
+            for (const m of value.matchAll(AMQP_URL_RE)) {
+                const vhost = amqpVhost(m[0]);
+                if (vhost === undefined || !vhostAllowed(vhost, lane, opts.amqpVhostPattern)) {
+                    v.push({ check: 'amqp-vhost', message: `${name} has an amqp(s):// URL whose vhost is not lane-scoped; LANE=${lane} requires a dedicated vhost (default rule: contains "${lane}" as a delimited token)` });
                 }
             }
         }

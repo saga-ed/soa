@@ -38,8 +38,13 @@ assertLaneSafe(process.env, { accountId });
 | `aws-account` | `accountId` omitted, or not in `allowedAccountIds` (default dev `396913734878`) |
 | `prod-secret-path` | env value referencing a `/prod/` or `/shared/infra/prod/` SSM path while the account is not a verified allowed account. Allowed in the dev account; the guard cannot verify the value points at lane resources. |
 | `prod-host` | `amqp(s)://`, `redis(s)://`, `mongodb(+srv)://`, `postgres(ql)://` URL (any host in the list), or `PGHOST`/`*_HOST` var for postgres/redis/mongo/rabbit, matching `prodHostPatterns` (default: a `prod`/`production` label segment) |
+| `amqp-vhost` | `LANE=twin` only: any `amqp(s)://` URL in env whose percent-decoded vhost is empty, `/`, undecodable, or lacks the lane name (`twin`) as a delimited token (case-insensitive; `/twin`, `/authz-twin` pass; `/dev`, `/twinkle` fail). No path = default vhost `/` = fail. Override only via `opts.amqpVhostPattern` (never env); `/` and empty always fail. No AMQP URL = pass. |
 | `ses` | `MAIL_PROVIDER=ses` or any non-empty `MAIL_SES_*` (no sandbox signal is defined yet) |
 | `partner-egress` | non-empty `CLEVER_*`, `*PARTNER*WEBHOOK*`, or `*WEBHOOK*URL*` |
+
+### 0.2.2
+
+- `amqp-vhost` check (twin only): the twin must not bind a shared vhost. Twins whose RabbitMQ vhost lacks `twin` now fail boot.
 
 ### 0.2.1
 

@@ -17,7 +17,7 @@ import {
 function fakePool(locked: boolean) {
   const calls: string[] = [];
   const client = {
-    query: vi.fn(async (text: string) => {
+    query: vi.fn(async (text: string, _values?: unknown[]) => {
       calls.push(text.includes('unlock') ? 'unlock' : 'lock');
       return { rows: [{ locked }] };
     }),
@@ -30,7 +30,7 @@ function fakePool(locked: boolean) {
 }
 
 function fakeSql(rows: unknown[] = []) {
-  const query = vi.fn(async () => ({ rows }));
+  const query = vi.fn(async (_text: string, _values?: unknown[]) => ({ rows }));
   return { sql: { query } as unknown as SqlLike, query };
 }
 

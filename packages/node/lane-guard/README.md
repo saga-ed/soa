@@ -39,8 +39,13 @@ assertLaneSafe(process.env, { accountId });
 | `prod-secret-path` | env value referencing a `/prod/` or `/shared/infra/prod/` SSM path while the account is not a verified allowed account. Allowed in the dev account; the guard cannot verify the value points at lane resources. |
 | `prod-host` | `amqp(s)://`, `redis(s)://`, `mongodb(+srv)://`, `postgres(ql)://` URL (any host in the list), or `PGHOST`/`*_HOST` var for postgres/redis/mongo/rabbit, matching `prodHostPatterns` (default: a `prod`/`production` label segment) |
 | `amqp-vhost` | `LANE=twin` only: any `amqp(s)://` URL in env whose percent-decoded vhost is empty, `/`, undecodable, or lacks the lane name (`twin`) as a delimited token (case-insensitive; `/twin`, `/authz-twin` pass; `/dev`, `/twinkle` fail). No path = default vhost `/` = fail. Override only via `opts.amqpVhostPattern` (never env); `/` and empty always fail. No AMQP URL = pass. |
+| `arn-account` | any env value containing an ARN with a 12-digit account id (`arn:aws*:<svc>:<region>:<acct>:`) not in `allowedAccountIds`, e.g. a prod KMS signing-key ARN. Account-less ARNs (`arn:aws:s3:::bucket`) are not checked. |
 | `ses` | `MAIL_PROVIDER=ses` or any non-empty `MAIL_SES_*` (no sandbox signal is defined yet) |
 | `partner-egress` | non-empty `CLEVER_*`, `*PARTNER*WEBHOOK*`, or `*WEBHOOK*URL*` |
+
+### 0.3.0
+
+- `arn-account` check: an env ARN whose account is outside `allowedAccountIds` fails boot. Lanes passing cross-account ARNs (e.g. a prod KMS key) now fail.
 
 ### 0.2.2
 

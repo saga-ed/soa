@@ -143,6 +143,8 @@ Consumers read the same shape: `ss` verify (stage S, local deps), the twin (stag
 
 ## 8. Migration path
 
+Per-service steps: [adoption-runbook.md](adoption-runbook.md).
+
 1. Ship `createDeepReadiness`/`mountDeepReadiness` additively in soa-health 0.2.0. Every 0.1.x export (`mountReadinessRoutes`, `mountHealthRoutes`, `createDbReadiness`, `awaitDbAtBoot`, `createDrainSignal`, `buildIdentity`) keeps its source and behaviour byte-identical (iam/sis run them in prod); the new code lives in new files and is not reimplemented on top of them or vice versa. A unit test pins the 0.1.x response bodies. Deprecation, if any, is a later major.
 2. Pilot: authz-api (client-non-null today; evidence `authz-api/src/main.ts:205`). Manifest: authz-db (postgres, critical, schema probe), openfga (critical), Redis if used (optional). Boot self-test fails closed. Prod TG moves `/health` -> `/health/ready` and container check -> `/health/live`, dev first, then a prod blue/green deploy with idle-colour smoke (per the deploy-wave rules).
 3. iam/sis (1684) migrate by replacing `mountIamHealth` with a manifest: iamDb/piiDb (postgres), redis (PING, not `isReady`), kms (aws-kms/custom, `getJwks`). Legacy `checks` is emitted at the internal level only for one release. Public/internal split lands here, with smoke scripts updated to send the bearer token.

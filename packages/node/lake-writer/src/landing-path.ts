@@ -29,7 +29,9 @@ export type SourceSystem =
   | 'ads_adm'
   | 'surveys'
   | 'programhub'
-  | 'rostering';
+  | 'rostering'
+  | 'transcripts_api'
+  | 'chat_api';
 
 const DATASET_NAME_RE = /^[a-z][a-z0-9_]*$/;
 

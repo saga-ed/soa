@@ -8,7 +8,7 @@ import {
 } from '@aws-sdk/client-ssm';
 import { Signer } from '@aws-sdk/rds-signer';
 import { readFileSync } from 'node:fs';
-import { rootCertificates } from 'node:tls';
+import { amazonTrustRoots } from './amazon-trust-roots.js';
 
 /**
  * Build a ready-to-use ``pg.Pool``-compatible config for a Saga service's
@@ -100,7 +100,7 @@ export interface LoadPostgresConfigBase {
    * Transport security (required in the capability form). Omitted under legacy
    * `env`: iam-token → `true`, static → `false`.
    * Not required → `false`; required → `true`; required with `caBundlePath`
-   * → RDS CA bundle plus Node's default roots, `rejectUnauthorized: true`.
+   * → RDS CA bundle plus Amazon Trust Services roots, `rejectUnauthorized: true`.
    */
   tls?: PostgresTlsCapability;
 }
@@ -225,9 +225,9 @@ function resolveSsl(
   if (!tls) return fallback;
   if (!tls.required) return false;
   if (!tls.caBundlePath) return true;
-  // RDS bundle (direct endpoint) + Node roots (RDS Proxy certs chain to Amazon Trust Services).
+  // RDS bundle (direct endpoint) + Amazon Trust Services roots (RDS Proxy); never all Node roots (iac#919).
   return {
-    ca: [readFileSync(tls.caBundlePath, 'utf8'), ...rootCertificates],
+    ca: [readFileSync(tls.caBundlePath, 'utf8'), ...amazonTrustRoots],
     rejectUnauthorized: true,
   };
 }

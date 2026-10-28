@@ -69,6 +69,25 @@ permission isolation to the fleet migration. Confidence: high.
 If you choose A1, the audit needs your explicit OK to read the dev broker
 credential, since it is beyond the Observer role.
 
+## Live audit result (2026-10-28)
+
+Run read-only through an SSM port-forward via `dev-db-jump-host` to the
+`shared-dev-mq` management API (the broker SG allows the jump host on 443), using
+the shared dev AMQP credential (`/shared/infra/dev/rabbitmq-url`, read in-process,
+never printed). The broker admin secret was denied to AppRuntime and was not
+escalated for. Script: topic-matcher plus `/api/exchanges/{vhost}/{name}/bindings/source`.
+
+- 245 exchanges named `iam|programs|scheduling.events[.*]` across vhosts `/` and
+  `twin`, all **topic**. 583 bindings checked.
+- 117 bindings match `observability.event_stats.reported`, and **every one is the
+  `#` binding from a `*.events.dlq[.<tag>]` exchange to its DLQ queue**. That is
+  soa-event-consumer's own dead-letter plumbing (`consumer.ts:463–470`). DLQ
+  exchanges receive only already-dead-lettered messages, never publisher traffic.
+- **Zero matches on any publisher exchange** (`iam.events`, `programs.events`,
+  `scheduling.events`, or their preview/sandbox copies). No hand-made business
+  binding catches the report key. A1 is satisfied. Re-run the same script just before
+  Gate G to catch any binding added since.
+
 ## Related artifacts
 
 - `/home/skelly/dev/rostering/packages/core/iam-events/src/index.ts` (line 41, `IAM_EXCHANGE`)

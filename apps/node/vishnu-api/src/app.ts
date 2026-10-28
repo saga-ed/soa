@@ -67,7 +67,7 @@ export async function createApp(config: Config, telemetry: TelemetryService, opt
   await server.init(container, []);
   const createContext = (staff: boolean) => ({ staff, telemetry: container.get<TelemetryService>('TelemetryService') });
   app.use('/trpc', createExpressMiddleware({ router: appRouter, createContext: ({ res }) => createContext(res.locals.staff === true) }));
-  app.get('/config.json', (_req, res) => res.json({ mode: 'live', apiUrl: '/api/mesh', pollIntervalMs: 15000, environment: config.environment, mqEnabled: config.mqEnabled, transport: 'trpc' }));
+  app.get('/config.json', (_req, res) => res.json({ mode: 'live', apiUrl: '/api/mesh', pollIntervalMs: 15000, environment: config.environment, mqEnabled: config.mqEnabled, mqDeployment: config.mqDeployment, datadogScope: config.datadogScope, transport: 'trpc' }));
   // Compatibility endpoints share the same protected procedures as typed clients.
   const reads = { '/api/mesh': 'mesh', '/api/datadog': 'datadog', '/api/event-stats': 'eventStats' } as const;
   for (const [path, procedure] of Object.entries(reads)) app.get(path, async (req, res) => {

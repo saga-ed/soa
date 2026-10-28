@@ -99,3 +99,30 @@ export type ServiceStats = ReturnType<typeof serviceStats>;
 export type MqViews = Record<string, ServiceStats>;
 export const numberLabel = (value: number | null, rate = false) =>
   value == null ? '—' : value.toLocaleString(undefined, { maximumFractionDigits: rate ? 2 : 0 });
+/** Hosted MQ scope from /config.json: the exact deployment the receiver accepts (d3). */
+export interface HostedMqScope {
+  environment: string;
+  deployment: string;
+}
+/**
+ * Stats are shown only when their scope is exactly the one this view describes:
+ * the slot's synthetic broker locally, or the configured hosted MQ deployment.
+ */
+export function scopedStats(
+  stats: StatsSnapshot | null,
+  mesh: { mode?: string; slot?: number } | null,
+  hosted: HostedMqScope | null
+): StatsSnapshot | null {
+  if (!stats || mesh?.mode !== 'live') return null;
+  const s = stats.scope;
+  if (mesh.slot != null)
+    return s.environment === 'synthetic' &&
+      s.deployment === `slot-${mesh.slot}` &&
+      s.broker === `soa-s${mesh.slot}` &&
+      s.vhost === '/'
+      ? stats
+      : null;
+  return hosted && s.environment === hosted.environment && s.deployment === hosted.deployment
+    ? stats
+    : null;
+}

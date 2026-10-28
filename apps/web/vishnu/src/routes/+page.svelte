@@ -8,7 +8,7 @@
  import type { MeshLayout, MeshSnapshot } from '$lib/graph/types';
  import MeshGraph from '$lib/components/MeshGraph.svelte';
  import MqStats from '$lib/components/MqStats.svelte';
- import { serviceStats, type StatsSnapshot, type MqViews } from '$lib/graph/event-stats';
+ import { scopedStats, serviceStats, type HostedMqScope, type StatsSnapshot, type MqViews } from '$lib/graph/event-stats';
  import SideInspector from '$lib/components/SideInspector.svelte';
  let datadog = $state<DatadogSnapshot | null>(null);
  let datadogError = $state(false);
@@ -18,6 +18,7 @@
  let stats = $state<StatsSnapshot | null>(null);
  let statsError = $state('');
  let mqEnabled = $state(true);
+ let hostedMq = $state<HostedMqScope | null>(null);
  let statsLoadedAt = $state(0);
  let clock = $state(0);
  let hover = $state<{id: string; x: number; y: number} | null>(null);
@@ -38,7 +39,7 @@
  let scopedDatadog = $derived(matchesMesh(datadog, snapshot) ? datadog : null);
  let sourceLabel = $derived(mode === 'fixture' ? (demo ? 'SIMULATED SIGNALS' : 'Fixture preview') : mode === 'loading' ? 'Connecting…' : `${snapshot?.environment ?? 'Synthetic dev'}${snapshot?.slot != null ? ` · slot ${snapshot.slot}` : ''}`);
  let mqViews: MqViews = $derived.by(() => {
-  const scoped = snapshot?.mode === 'live' && stats?.scope.environment === 'synthetic' && stats?.scope.deployment === `slot-${snapshot.slot}` && stats?.scope.broker === `soa-s${snapshot.slot}` && stats?.scope.vhost === '/' ? stats : null;
+  const scoped = scopedStats(stats, snapshot, hostedMq);
   return Object.fromEntries((snapshot?.systems ?? []).map(s => [s.id, serviceStats(scoped, s.id, Math.max(0,clock-statsLoadedAt), !!statsError)]));
  });
  let layout = $state<MeshLayout | null>(null);
@@ -110,7 +111,7 @@
   const start = async () => {
    const requested = new URLSearchParams(location.search).get('mode');
    demo = requested === 'demo';
-   let config: { mode?: string; apiUrl?: string; pollIntervalMs?: number; mqEnabled?: boolean } = {};
+   let config: { mode?: string; apiUrl?: string; pollIntervalMs?: number; mqEnabled?: boolean; environment?: string; mqDeployment?: string | null } = {};
    if (requested !== 'fixture' && !demo) {
     try { config = await fetchJson('/config.json'); } catch { /* Static fixture builds have no runtime config. */ }
    }
@@ -120,6 +121,7 @@
     apiUrl = config.apiUrl || '/api/mesh';
     pollMs = Math.max(3000, Number(config.pollIntervalMs) || 15000);
     mqEnabled = config.mqEnabled !== false;
+    hostedMq = config.environment && config.mqDeployment ? { environment: config.environment, deployment: config.mqDeployment } : null;
     if (mqEnabled) void pollStats();
     void pollDatadog();
     await poll();
@@ -138,7 +140,7 @@
  <nav class="app-nav" aria-label="Main"><div class="nav-context"><a class="vishnu-brand" href="/" aria-label="Vishnu home"><img src="/vishnu-logo-on-dark.png" alt="Vishnu — Saga Mesh Observability" width="2172" height="724" /></a></div><a class="active-nav" aria-current="page" href="/">◈ &nbsp; Mesh overview</a><div class="nav-bottom">{sourceLabel}<br/><small>{mode === 'fixture' ? 'Design & interaction study' : snapshot?.scope ? 'Cloud mesh observations' : 'Local stack health probes'}</small></div></nav>
  <div class="app-main"><header class="topbar"><h1>Preserve, Protect, Anticipate</h1><span class="preview-badge">{sourceLabel}</span></header>
  <main id="mesh-main">
- {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for mesh observations.'} Retrying automatically.{:else}{snapshot?.scope ? 'Source-declared topology · Datadog observations' : 'Local health probes · declared product topology'} · MQ telemetry {!mqEnabled ? 'not enabled' : statsError ? 'unavailable' : stats?.receiver.connected ? 'connected' : 'connecting'}{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
+ {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for mesh observations.'} Retrying automatically.{:else}{snapshot?.scope ? 'Source-declared topology · Datadog observations' : 'Local health probes · declared product topology'} · MQ telemetry{#if hostedMq} ({hostedMq.environment} / {hostedMq.deployment}){/if} {!mqEnabled ? 'not enabled' : statsError ? 'unavailable' : stats?.receiver.connected ? 'connected' : 'connecting'}{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
  {#if snapshot}
  {#if mode === 'live'}<p class="datadog-status" role="status">Datadog: {datadogError ? 'unavailable; retrying' : datadog?.status ?? 'connecting'}{#if datadog} · {datadog.scope.environment} / {datadog.scope.deployment}{#if !scopedDatadog} · separate scope; graph overlay disabled{/if}{/if}. Metrics describe services; flow analysis opens in Datadog.</p>{/if}
  {#if demo}<div class="demo-banner"><strong>SIMULATED SIGNALS · stand-up demo</strong><span>Invented measurements and call chains. No live APIs or Datadog queries.</span><a href="/">Return to live view ↗</a></div>{:else}<p class="demo-entry"><a href="?mode=demo">Preview simulated signals ↗</a></p>{/if}

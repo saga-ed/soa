@@ -32,6 +32,15 @@ interface Rt {
   deepProbed: boolean;
   inFlight?: Promise<void>;
   timer?: ReturnType<typeof setTimeout>;
+  /** freshProbe state; independent of the pooled probe so neither clears the other. */
+  freshSucceeded: boolean;
+  freshFailed: boolean;
+  freshNeutral: boolean;
+  freshFails: number;
+  freshReason?: ProbeReason;
+  freshAttemptAt?: number;
+  freshInFlight?: Promise<void>;
+  freshTimer?: ReturnType<typeof setTimeout>;
 }
 
 interface Snapshot {
@@ -73,6 +82,10 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
     consecutiveFailures: 0,
     neutral: false,
     deepProbed: false,
+    freshSucceeded: false,
+    freshFailed: false,
+    freshNeutral: false,
+    freshFails: 0,
   }));
   const byName = new Map(rts.map((r) => [r.d.name, r]));
   let startedAt: number | undefined;
@@ -82,6 +95,12 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
   let deepInFlight: Promise<Snapshot> | undefined;
 
   const threshold = (rt: Rt): number => rt.d.failureThreshold ?? 2;
+  const hasFresh = (rt: Rt): boolean => rt.d.freshProbe !== undefined;
+  /** First success on every declared probe (pooled, and fresh when declared). */
+  const succeeded = (rt: Rt): boolean => rt.hasSucceeded && (!hasFresh(rt) || rt.freshSucceeded);
+  const failures = (rt: Rt): number => rt.consecutiveFailures + rt.freshFails;
+  const isNeutral = (rt: Rt): boolean => rt.neutral || rt.freshNeutral;
+  const reasonOf = (rt: Rt): ProbeReason | undefined => rt.lastReason ?? rt.freshReason;
 
   async function runProbeFn(
     rt: Rt,
@@ -158,18 +177,58 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
     return rt.inFlight;
   }
 
+  async function runFresh(rt: Rt): Promise<void> {
+    const freshProbe = rt.d.freshProbe;
+    if (!freshProbe) return;
+    const client = rt.d.client();
+    if (client === null || client === undefined || rt.skipped) return;
+    const outcome = await runProbeFn(rt, (_c, s) => freshProbe(s), client);
+    const t = now();
+    rt.lastRefreshAt = t;
+    if (outcome.ok) {
+      rt.freshSucceeded = true;
+      rt.freshFailed = false;
+      rt.freshNeutral = false;
+      rt.freshFails = 0;
+      rt.freshReason = undefined;
+      rt.lastSuccessAt = t;
+      return;
+    }
+    const reason = outcome.reason ?? 'error';
+    rt.freshFailed = true;
+    rt.freshReason = reason;
+    opts.onEvent?.({ type: 'probe_failure', name: rt.d.name, reason });
+    if (reason === 'pool_exhausted') rt.freshNeutral = true;
+    else {
+      rt.freshNeutral = false;
+      rt.freshFails++;
+    }
+  }
+
+  function freshOnce(rt: Rt, force: boolean): Promise<void> {
+    if (!hasFresh(rt)) return Promise.resolve();
+    if (rt.freshInFlight) return rt.freshInFlight;
+    const t = now();
+    if (!force && rt.freshAttemptAt !== undefined && t - rt.freshAttemptAt < minProbeGapMs) return Promise.resolve();
+    rt.freshAttemptAt = t;
+    rt.freshInFlight = runFresh(rt).finally(() => {
+      rt.freshInFlight = undefined;
+    });
+    return rt.freshInFlight;
+  }
+
   function stateOf(rt: Rt, t: number, deepMode: boolean): { state: DependencyState; reason?: ProbeReason } {
     if (rt.skipped) return { state: 'skipped' };
     const ref = rt.lastRefreshAt ?? startedAt;
     if (ref !== undefined && started && t - ref > staleAfterMs) return { state: 'stale' };
-    if (deepMode && rt.hasSucceeded && rt.schemaFailed) return { state: 'failing', reason: rt.schemaFailed };
-    if (!rt.hasSucceeded) {
-      return rt.consecutiveFailures >= threshold(rt)
-        ? { state: 'failing', reason: rt.lastReason }
-        : { state: 'starting', reason: rt.lastReason };
+    if (deepMode && succeeded(rt) && rt.schemaFailed) return { state: 'failing', reason: rt.schemaFailed };
+    if (!succeeded(rt)) {
+      return failures(rt) >= threshold(rt)
+        ? { state: 'failing', reason: reasonOf(rt) }
+        : { state: 'starting', reason: reasonOf(rt) };
     }
-    if (rt.neutral) return { state: 'degraded', reason: rt.lastReason };
-    if (rt.consecutiveFailures >= threshold(rt)) return { state: 'failing', reason: rt.lastReason };
+    if (isNeutral(rt)) return { state: 'degraded', reason: reasonOf(rt) };
+    if (failures(rt) >= threshold(rt)) return { state: 'failing', reason: reasonOf(rt) };
     return { state: 'ok' };
   }
 
@@ -187,7 +246,7 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
       if (state === 'stale') notReady = true;
       else if (state === 'skipped') {
         /* neutral */
-      } else if (critical && !rt.hasSucceeded) {
+      } else if (critical && !succeeded(rt)) {
         if (bootMode === 'open') degraded = true;
         else starting = true;
       } else if (state === 'failing') {
@@ -195,7 +254,7 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
         if (taskScoped || schemaHard) notReady = true;
         else degraded = true;
       } else if (state === 'degraded') degraded = true;
-      else if (!critical && state === 'starting' && rt.lastReason) degraded = true;
+      else if (!critical && state === 'starting' && reason) degraded = true;
       deps.push({
         name: rt.d.name,
         kind: rt.d.kind,
@@ -205,7 +264,7 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
         ...(reason ? { reason } : {}),
         ...(rt.latencyMs !== undefined ? { latencyMs: rt.latencyMs } : {}),
         ...(rt.lastSuccessAt !== undefined ? { lastSuccessAgeMs: Math.max(0, t - rt.lastSuccessAt) } : {}),
-        consecutiveFailures: rt.consecutiveFailures,
+        consecutiveFailures: failures(rt),
         level: deepMode && rt.deepProbed ? 'deep' : 'cached',
       });
     }
@@ -265,13 +324,29 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
     (rt.timer as { unref?: () => void }).unref?.();
   }
 
+  function scheduleFresh(rt: Rt): void {
+    const base = rt.d.freshIntervalMs ?? 300000;
+    // While failing, re-probe at the pooled cadence so failureThreshold confirms and recovery lands promptly.
+    const step = rt.freshFailed ? Math.min(base, rt.d.intervalMs ?? intervalMs) : base;
+    const delay = Math.round(step * (0.8 + Math.random() * 0.4));
+    rt.freshTimer = setTimeout(() => {
+      rt.freshTimer = undefined;
+      if (!started) return;
+      // Reschedule after completion so the cadence reflects the outcome just recorded.
+      void freshOnce(rt, false).finally(() => {
+        if (started && !rt.freshTimer) scheduleFresh(rt);
+      });
+    }, delay);
+    (rt.freshTimer as { unref?: () => void }).unref?.();
+  }
+
   const bootTargets = (): Array<{ rt: Rt; mode: 'block' | 'warn' }> =>
     rts.flatMap((rt) => {
       const m = rt.d.boot ?? (rt.d.criticality === 'critical' ? 'block' : 'skip');
       return m === 'skip' ? [] : [{ rt, mode: m }];
     });
 
-  const done = (rt: Rt): boolean => rt.hasSucceeded || rt.skipped;
+  const done = (rt: Rt): boolean => succeeded(rt) || rt.skipped;
 
   return {
     bootMode,
@@ -285,11 +360,14 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
       const targets = bootTargets();
       await Promise.all(
         targets.map(async ({ rt, mode }) => {
-          await probeOnce(rt, false, true);
+          await Promise.all([probeOnce(rt, false, true), freshOnce(rt, true)]);
           if (bootMode !== 'block' || mode === 'warn') return;
           while (!done(rt) && now() + bootRetryDelayMs < deadline) {
             await sleep(bootRetryDelayMs);
-            await probeOnce(rt, false, true);
+            await Promise.all([
+              rt.hasSucceeded ? undefined : probeOnce(rt, false, true),
+              rt.freshSucceeded ? undefined : freshOnce(rt, true),
+            ]);
           }
         }),
       );
@@ -298,7 +376,7 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
         if (failed.length) {
           throw new Error(
             `readiness boot failed for ${service} after ${now() - startedAt}ms: ${failed
-              .map(({ rt }) => `${rt.d.name}(${rt.lastReason ?? 'error'})`)
+              .map(({ rt }) => `${rt.d.name}(${reasonOf(rt) ?? 'error'})`)
               .join(', ')}`,
           );
         }
@@ -313,6 +391,13 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
       for (const rt of rts) {
         if (rt.lastAttemptAt === undefined) void probeOnce(rt, false, true);
         schedule(rt);
+        if (hasFresh(rt)) {
+          if (rt.freshAttemptAt === undefined) {
+            void freshOnce(rt, true).finally(() => {
+              if (started && !rt.freshTimer) scheduleFresh(rt);
+            });
+          } else scheduleFresh(rt);
+        }
       }
     },
 
@@ -321,6 +406,8 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
       for (const rt of rts) {
         if (rt.timer) clearTimeout(rt.timer);
         rt.timer = undefined;
+        if (rt.freshTimer) clearTimeout(rt.freshTimer);
+        rt.freshTimer = undefined;
       }
     },
 
@@ -330,7 +417,7 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
 
     async deepReport(level = 'public') {
       if (!deepCache || now() - deepCache.at >= deepCacheMs) {
-        deepInFlight ??= Promise.all(rts.map((rt) => probeOnce(rt, true, false)))
+        deepInFlight ??= Promise.all(rts.map((rt) => Promise.all([probeOnce(rt, true, false), freshOnce(rt, false)])))
           .then(() => {
             deepCache = snapshot(true);
             return deepCache;
@@ -350,7 +437,7 @@ export function createDeepReadiness(opts: CreateDeepReadinessOptions): DeepReadi
         opts.onEvent?.({ type: 'observed_failure', name, ...(reason ? { reason } : {}) });
         return;
       }
-      if (rt.hasSucceeded && !rt.neutral && rt.consecutiveFailures < threshold(rt)) {
+      if (succeeded(rt) && !isNeutral(rt) && !rt.freshFailed && failures(rt) < threshold(rt)) {
         const t = now();
         rt.trafficOkAt = t;
         rt.lastSuccessAt = t;

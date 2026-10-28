@@ -301,6 +301,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         NODE_ENV: 'development',
+        // soa-env R4 (local) capability keys; the service refuses to boot without them.
+        DB_CREDENTIAL_SOURCE: 'static',
+        DB_TLS: 'off',
+        FAIL_FAST: 'false',
+        TELEMETRY_ENV: 'local',
+        PERMISSIVE_AUTHZ: 'false',
         DATABASE_URL: '${PROGRAMS_DB_URL}',
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
@@ -360,6 +366,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         NODE_ENV: 'development',
+        // soa-env R4 (local) capability keys; the service refuses to boot without them.
+        DB_CREDENTIAL_SOURCE: 'static',
+        DB_TLS: 'off',
+        FAIL_FAST: 'false',
+        TELEMETRY_ENV: 'local',
+        PERMISSIVE_AUTHZ: 'false',
         DATABASE_URL: '${SCHEDULING_DB_URL}',
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
@@ -403,6 +415,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         NODE_ENV: 'development',
+        // soa-env R4 (local) capability keys; the service refuses to boot without them.
+        DB_CREDENTIAL_SOURCE: 'static',
+        DB_TLS: 'off',
+        FAIL_FAST: 'false',
+        TELEMETRY_ENV: 'local',
+        PERMISSIVE_AUTHZ: 'false',
         DATABASE_URL: '${SESSIONS_DB_URL}',
         IAM_API_URL: '${IAM_URL}',
         RABBITMQ_URL: '${MESH_MQ}',
@@ -437,6 +455,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         NODE_ENV: 'development',
+        // soa-env R4 (local) capability keys; the service refuses to boot without them.
+        DB_CREDENTIAL_SOURCE: 'static',
+        DB_TLS: 'off',
+        FAIL_FAST: 'false',
+        TELEMETRY_ENV: 'local',
+        PERMISSIVE_AUTHZ: 'false',
         PORT: '${CONTENT_PORT}',
         DATABASE_URL: '${CONTENT_DB_URL}',
         IAM_API_URL: '${IAM_URL}',
@@ -813,6 +837,12 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
       cmd: 'pnpm dev',
       env: {
         NODE_ENV: 'development',
+        // soa-env R4 (local) capability keys; the service refuses to boot without them.
+        DB_CREDENTIAL_SOURCE: 'static',
+        DB_TLS: 'off',
+        FAIL_FAST: 'false',
+        TELEMETRY_ENV: 'local',
+        PERMISSIVE_AUTHZ: 'false',
         EXPRESS_SERVER_PORT: '${COACH_API_PORT}',
         DATABASE_URL: '${COACH_DB_URL}',
         AUTH_AUTHENABLED: 'true',

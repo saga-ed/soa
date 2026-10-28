@@ -6,8 +6,27 @@ Parameters:
   ALBSecurityGroupIdSSMParameter: {Type: 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>'}
   DatadogApiKeyArn: {Type: String, AllowedPattern: 'arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+'}
   DatadogAppKeyArn: {Type: String, AllowedPattern: 'arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+'}
+  # MQ telemetry receiver network and secret access (gh_536 d4/d5). Off by default.
+  MqNetworkEnabled: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  RabbitMqSecurityGroupIdSSMParameter:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>'
+    Default: /shared/infra/dev/rabbitmq-sg-id
+  DbHostSecurityGroupIdSSMParameter:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>'
+    Default: /dev/db-host-v2/sg-id
+  # db-host-v2 assigns one host port per container; set from the provision result.
+  DbHostPostgresPort: {Type: Number, Default: 5432, MinValue: 1, MaxValue: 65535}
+  VishnuDatabaseUrlSecretArn: {Type: String, Default: '', AllowedPattern: '^(|arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+)$'}
+  RabbitmqUrlSSMParameterName: {Type: String, Default: /shared/infra/dev/rabbitmq-url, AllowedPattern: '^/[a-zA-Z0-9_./-]+$'}
+Rules:
+  MqNetworkRequiresDatabaseSecret:
+    RuleCondition: !Equals [!Ref MqNetworkEnabled, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref VishnuDatabaseUrlSecretArn, '']]
+        AssertDescription: MqNetworkEnabled=true needs VishnuDatabaseUrlSecretArn
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]
+  MqNetwork: !Equals [!Ref MqNetworkEnabled, 'true']
 Resources:
   TaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -62,6 +81,42 @@ Resources:
       ImageScanningConfiguration: {ScanOnPush: true}
       LifecyclePolicy:
         LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Expire untagged images","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":7},"action":{"type":"expire"}}]}'
+  # AMQPS to the shared broker and PostgreSQL to Vishnu's db-host-v2 container.
+  RabbitMqIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: MqNetwork
+    Properties: {GroupId: !Ref RabbitMqSecurityGroupIdSSMParameter, SourceSecurityGroupId: !Ref TaskSecurityGroup, IpProtocol: tcp, FromPort: 5671, ToPort: 5671, Description: soa vishnu-api to shared RabbitMQ}
+  RabbitMqEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: MqNetwork
+    Properties: {GroupId: !Ref TaskSecurityGroup, DestinationSecurityGroupId: !Ref RabbitMqSecurityGroupIdSSMParameter, IpProtocol: tcp, FromPort: 5671, ToPort: 5671, Description: AMQPS to shared RabbitMQ}
+  PostgresIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: MqNetwork
+    Properties: {GroupId: !Ref DbHostSecurityGroupIdSSMParameter, SourceSecurityGroupId: !Ref TaskSecurityGroup, IpProtocol: tcp, FromPort: !Ref DbHostPostgresPort, ToPort: !Ref DbHostPostgresPort, Description: soa vishnu-api to db-host postgres}
+  PostgresEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: MqNetwork
+    Properties: {GroupId: !Ref TaskSecurityGroup, DestinationSecurityGroupId: !Ref DbHostSecurityGroupIdSSMParameter, IpProtocol: tcp, FromPort: !Ref DbHostPostgresPort, ToPort: !Ref DbHostPostgresPort, Description: Vishnu telemetry store on db-host}
+  MqSecretsPolicy:
+    Type: AWS::IAM::Policy
+    Condition: MqNetwork
+    Properties:
+      PolicyName: VishnuMqSecrets
+      Roles: [!Ref ExecutionRole]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: 'secretsmanager:GetSecretValue'
+            Resource: !Ref VishnuDatabaseUrlSecretArn
+          - Effect: Allow
+            Action: 'ssm:GetParameters'
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RabbitmqUrlSSMParameterName}'
+          - Effect: Allow
+            Action: 'kms:Decrypt'
+            Resource: '*'
+            Condition: {StringEquals: {'kms:ViaService': !Sub 'ssm.${AWS::Region}.amazonaws.com'}}
   SecurityGroupParameter:
     Type: AWS::SSM::Parameter
     Properties: {Name: !Sub '/soa/vishnu-api/infra/${Environment}/sg-id', Type: String, Value: !Ref TaskSecurityGroup}

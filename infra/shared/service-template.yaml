@@ -16,8 +16,25 @@ Parameters:
   DatadogApiKeyArn: {Type: String, AllowedPattern: 'arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+'}
   DatadogAppKeyArn: {Type: String, AllowedPattern: 'arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+'}
   DesiredCount: {Type: Number, Default: 1, MinValue: 0, MaxValue: 2}
+  # MQ telemetry receiver (gh_536 d3/d4). Off by default: the task definition is
+  # unchanged until VishnuMqEnabled=true and the values below are supplied.
+  VishnuMqEnabled: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  EventStatsDeployment: {Type: String, Default: main, AllowedPattern: '^[a-zA-Z0-9_.-]+$'}
+  EventStatsBroker: {Type: String, Default: '', AllowedPattern: '^[a-zA-Z0-9_.-]*$'}
+  EventStatsVhost: {Type: String, Default: '/', AllowedPattern: '^[a-zA-Z0-9_./-]+$'}
+  VishnuDatabaseUrlSecretArn: {Type: String, Default: '', AllowedPattern: '^(|arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+)$'}
+  RabbitmqUrlSSMParameterName: {Type: String, Default: /shared/infra/dev/rabbitmq-url, AllowedPattern: '^/[a-zA-Z0-9_./-]+$'}
+Rules:
+  MqRequiresReceiverWiring:
+    RuleCondition: !Equals [!Ref VishnuMqEnabled, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref VishnuDatabaseUrlSecretArn, '']]
+        AssertDescription: VishnuMqEnabled=true needs VishnuDatabaseUrlSecretArn
+      - Assert: !Not [!Equals [!Ref EventStatsBroker, '']]
+        AssertDescription: VishnuMqEnabled=true needs EventStatsBroker
 Conditions:
   IsProd: !Equals [!Ref ExecEnv, prod]
+  MqEnabled: !Equals [!Ref VishnuMqEnabled, 'true']
 Resources:
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -46,11 +63,17 @@ Resources:
             - {Name: VISHNU_ENVIRONMENT, Value: !Ref ExecEnv}
             - {Name: VISHNU_DATADOG_ENV, Value: !Ref ExecEnv}
             - {Name: VISHNU_DATADOG_SCOPE, Value: environment}
-            - {Name: VISHNU_MQ_ENABLED, Value: 'false'}
+            - {Name: VISHNU_MQ_ENABLED, Value: !Ref VishnuMqEnabled}
             - {Name: DD_SITE, Value: datadoghq.com}
+            - !If [MqEnabled, {Name: EVENT_STATS_ENVIRONMENT, Value: !Ref ExecEnv}, !Ref 'AWS::NoValue']
+            - !If [MqEnabled, {Name: EVENT_STATS_DEPLOYMENT, Value: !Ref EventStatsDeployment}, !Ref 'AWS::NoValue']
+            - !If [MqEnabled, {Name: EVENT_STATS_BROKER, Value: !Ref EventStatsBroker}, !Ref 'AWS::NoValue']
+            - !If [MqEnabled, {Name: EVENT_STATS_VHOST, Value: !Ref EventStatsVhost}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: DD_API_KEY, ValueFrom: !Ref DatadogApiKeyArn}
             - {Name: DD_APP_KEY, ValueFrom: !Ref DatadogAppKeyArn}
+            - !If [MqEnabled, {Name: VISHNU_DATABASE_URL, ValueFrom: !Ref VishnuDatabaseUrlSecretArn}, !Ref 'AWS::NoValue']
+            - !If [MqEnabled, {Name: RABBITMQ_URL, ValueFrom: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RabbitmqUrlSSMParameterName}'}, !Ref 'AWS::NoValue']
           LogConfiguration:
             LogDriver: awslogs
             Options: {awslogs-group: !Ref LogGroupSSMParameter, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: !Ref Identifier}

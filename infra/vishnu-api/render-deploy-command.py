@@ -13,12 +13,20 @@ config_file = Path(__file__).resolve().with_name('samconfig.yaml')
 params = yaml.safe_load(config_file.read_text())[args.stage]['deploy']['parameters']
 values = dict(pair.split('=', 1) for pair in params['parameter_overrides'])
 required = set() if args.stage == 'bootstrap-dev' else {'ListenerRulePriorityBase'} if args.stage.startswith('routing-') else {'ImageArn', 'BuildRevision'}
+# MQ receiver wiring (gh_536 d3/d4); optional, and the templates default it off.
+optional = (
+    {'MqNetworkEnabled', 'DbHostPostgresPort', 'VishnuDatabaseUrlSecretArn'} if args.stage == 'bootstrap-dev'
+    else {'VishnuMqEnabled', 'VishnuDatabaseUrlSecretArn', 'EventStatsDeployment', 'EventStatsBroker', 'EventStatsVhost'}
+    if args.stage in ['dev', 'dev-green'] else set()
+)
+if args.stage == 'dev-green':
+    optional.add('DesiredCount')  # only for an explicit cutover; green otherwise stays at 0
 for pair in args.overrides:
     if '=' not in pair:
         parser.error('Overrides must be Key=Value')
     key, value = pair.split('=', 1)
-    if key not in required or not value:
-        parser.error(f'Only these nonempty overrides are accepted: {sorted(required)}')
+    if key not in required | optional or not value:
+        parser.error(f'Only these nonempty overrides are accepted: {sorted(required | optional)}')
     values[key] = value
 missing = required - values.keys()
 if missing:

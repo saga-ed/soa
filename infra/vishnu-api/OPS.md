@@ -106,10 +106,37 @@ without adding its required parameter contract and caller configuration. The exi
 and signed-session browser flow on Node 24; it performs no deployment. No production samconfig or credentials are provided.
 
 The first cloud view is explicitly environment-wide because measured trace
-series lack deployment tags. Cloud MQ is off: deploy durable receiver storage,
-broker credentials/connectivity and producer/consumer adoption before enabling
-it. Environment-wide MQ aggregation needs its own scope design; current receiver
-configuration requires an exact deployment. Synthetic slot 3 remains independent.
+series lack deployment tags. Cloud MQ is off until the receiver steps below run.
+Per gh_536 d3, Datadog stays environment-wide while MQ uses its own exact scope
+(`dev / main / shared-dev-mq / /`). Synthetic slot 3 remains independent.
+
+## MQ receiver enablement (Gate D; approval required)
+
+Decisions: `claude/projects/gh_536/decisions/d3`–`d5`. Reporters stay off
+throughout (d7 enables them later, one service at a time).
+
+1. Provision Vishnu's container Postgres through the db-host-v2 orchestrator
+   (`db-orch-v2.wootdev.com`, see the saga-iac `db-host-v2.md` reference). Record
+   the assigned host and **port** (one host port per container, usually not 5432).
+2. Store the connection URL in Secrets Manager as `soa/vishnu/dev/database-url`.
+   Never put the value in git, arguments or output.
+3. Update the bootstrap with a reviewed change set:
+   `render-deploy-command.py bootstrap-dev MqNetworkEnabled=true DbHostPostgresPort=<port> VishnuDatabaseUrlSecretArn=<arn>`.
+   This adds broker (5671) and db-host ingress/egress plus execution-role read
+   access to the database secret and `/shared/infra/dev/rabbitmq-url`.
+4. Deploy the reviewed image to **green** with MQ on:
+   `render-deploy-command.py dev-green ImageArn=<image> BuildRevision=<sha> DesiredCount=1 VishnuMqEnabled=true EventStatsBroker=shared-dev-mq VishnuDatabaseUrlSecretArn=<arn>`
+   (`EventStatsDeployment` defaults to `main`, `EventStatsVhost` to `/`).
+5. Validate through the `x-saga-preview-vishnu-api: green` header: JANUS login,
+   table creation, queue `vishnu.main.event-stats.v1` bound only to
+   `observability.event_stats.reported`, restart and redelivery, scope rejection,
+   and that stopping green has no effect on business services.
+6. Gate E: shift live rule 4015 to blue 0 / green 100. Blue stays available for
+   rollback until the d7 soak ends. Both colours may consume the one queue (d4).
+
+Rollback: shift 4015 back to blue, then redeploy green with `VishnuMqEnabled=false`
+or `DesiredCount=0`. The queue is bounded (10,000 messages, 1h TTL), so reports
+expire rather than build up.
 
 For an initial failed launch, keep DNS/live routing absent and inspect the failed
 task/logs. Once serving, redeploy the previous immutable image tag for rollback;

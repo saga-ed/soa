@@ -70,6 +70,10 @@ interface DependencyDeclarationBase<C> {
   probe?: (client: C, signal: AbortSignal) => Promise<ProbeOutcome | void>;
   /** Deeper check (schema/grant/column). Deep path only; never feeds /health/ready. */
   schemaProbe?: (client: C, signal: AbortSignal) => Promise<ProbeOutcome | void>;
+  /** New connection with current credentials, trivial query, closed. Pooled probes keep a warm connection and miss credential/token expiry (soa#504). */
+  freshProbe?: (signal: AbortSignal) => Promise<ProbeOutcome | void>;
+  /** freshProbe cadence (default 300000, +-20% jitter). */
+  freshIntervalMs?: number;
   timeoutMs?: number;
   intervalMs?: number;
   /** Consecutive failures before 'failing' (default 2). */

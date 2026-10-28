@@ -464,3 +464,210 @@ describe('manifest guards', () => {
     clearClientRegistry();
   });
 });
+
+describe('freshProbe', () => {
+  // Jitter factor 1.0: cadence assertions are exact.
+  beforeEach(() => void vi.spyOn(Math, 'random').mockReturnValue(0.5));
+  afterEach(() => vi.restoreAllMocks());
+
+  const authErr = () => Object.assign(new Error('PAM authentication failed for user "app"'), { code: '28000' });
+
+  function mkFresh(
+    o: { scope?: 'task' | 'shared'; freshIntervalMs?: number; minProbeGapMs?: number; deepCacheMs?: number; bootMode?: BootMode } = {},
+  ) {
+    const c = { pooledFail: false, freshFail: false as boolean | Error, pooledCalls: 0, freshCalls: 0 };
+    const d = dep({
+      name: 'db',
+      kind: 'custom',
+      criticality: 'critical' as const,
+      scope: o.scope ?? 'shared',
+      client: () => ({}),
+      probe: async () => {
+        c.pooledCalls++;
+        if (c.pooledFail) throw new Error('boom');
+      },
+      freshProbe: async () => {
+        c.freshCalls++;
+        if (c.freshFail instanceof Error) throw c.freshFail;
+        if (c.freshFail) throw new Error('boom');
+      },
+      freshIntervalMs: o.freshIntervalMs ?? 10_000,
+    });
+    const dr = createDeepReadiness({
+      manifest: declareDependencies({ service: 'svc', dependencies: [d] }),
+      intervalMs: 1000,
+      minProbeGapMs: o.minProbeGapMs ?? 0,
+      ...(o.deepCacheMs !== undefined ? { deepCacheMs: o.deepCacheMs } : {}),
+      staleAfterMs: 60_000,
+      bootRetryDelayMs: 500,
+      bootTimeoutMs: 3000,
+      bootMode: o.bootMode ?? 'block',
+    });
+    return { c, dr };
+  }
+
+  it('fresh failure after first success degrades (shared) with reason auth; pooled stays healthy', async () => {
+    const { c, dr } = mkFresh();
+    await dr.boot();
+    dr.start();
+    expect(dr.report().verdict).toBe('ready');
+    c.freshFail = authErr();
+    await tick(10_500); // first failing fresh probe at 10s; retry at 11s
+    expect(dr.report().verdict).toBe('ready'); // 1 < failureThreshold
+    await tick(1000); // retries at the pooled cadence while failing
+    const r = dr.report('internal');
+    expect(r.verdict).toBe('degraded');
+    expect(r.httpStatus).toBe(200);
+    expect(r.dependencies?.[0]).toMatchObject({ state: 'failing', reason: 'auth', consecutiveFailures: 2 });
+    dr.stop();
+  });
+
+  it('fresh failure after first success with scope:task => not_ready', async () => {
+    const { c, dr } = mkFresh({ scope: 'task' });
+    await dr.boot();
+    dr.start();
+    c.freshFail = authErr();
+    await tick(15_000);
+    expect(dr.report().verdict).toBe('not_ready');
+    expect(dr.report().httpStatus).toBe(503);
+    dr.stop();
+  });
+
+  it('pooled success and observe() success do not clear a fresh failure; next fresh success recovers', async () => {
+    const { c, dr } = mkFresh();
+    await dr.boot();
+    dr.start();
+    c.freshFail = authErr();
+    await tick(15_000);
+    expect(dr.report().verdict).toBe('degraded');
+    const pooledBefore = c.pooledCalls;
+    await tick(5000); // pooled probes keep succeeding
+    expect(c.pooledCalls).toBeGreaterThan(pooledBefore);
+    dr.observe('db', 'success');
+    expect(dr.report().verdict).toBe('degraded');
+    expect(dr.report('internal').dependencies?.[0]?.state).toBe('failing');
+
+    c.freshFail = false;
+    await tick(1500);
+    expect(dr.report().verdict).toBe('ready');
+    expect(dr.report('internal').dependencies?.[0]).toMatchObject({ state: 'ok', consecutiveFailures: 0 });
+    dr.stop();
+  });
+
+  it('before first fresh success the dependency gates readiness even if pooled probe succeeds', async () => {
+    const { c, dr } = mkFresh();
+    c.freshFail = authErr();
+    dr.start();
+    await tick(5000);
+    expect(dr.report('internal').dependencies?.[0]?.state).toBe('failing');
+    expect(dr.report().verdict).toBe('starting');
+    expect(dr.report().httpStatus).toBe(503);
+    c.freshFail = false;
+    await tick(1500);
+    expect(dr.report().verdict).toBe('ready');
+    dr.stop();
+  });
+
+  it('boot blocks until a fresh success, and rejects at the deadline without one', async () => {
+    const a = mkFresh();
+    a.c.freshFail = true;
+    const p = a.dr.boot();
+    await tick(1200);
+    expect(a.c.freshCalls).toBeGreaterThan(1);
+    let settled = false;
+    void p.then(() => (settled = true));
+    await tick(0);
+    expect(settled).toBe(false);
+    a.c.freshFail = false;
+    await tick(600);
+    expect((await p).verdict).toBe('ready');
+
+    const b = mkFresh();
+    b.c.freshFail = authErr();
+    const q = b.dr.boot();
+    const assertion = expect(q).rejects.toThrow(/db\(auth\)/);
+    await tick(4000);
+    await assertion;
+  });
+
+  it('cadence: runs on freshIntervalMs (+-20%), independent of the pooled interval', async () => {
+    const { c, dr } = mkFresh({ freshIntervalMs: 10_000 });
+    await dr.boot();
+    dr.start();
+    expect(c.freshCalls).toBe(1);
+    await tick(7000);
+    expect(c.freshCalls).toBe(1);
+    expect(c.pooledCalls).toBeGreaterThan(3);
+    await tick(5500); // 12.5s since start: first scheduled run (10s) has fired, second (20s) has not
+    expect(c.freshCalls).toBe(2);
+    dr.stop();
+  });
+
+  it('one fresh probe in flight at a time', async () => {
+    let release: () => void = () => undefined;
+    let calls = 0;
+    const dr = createDeepReadiness({
+      manifest: declareDependencies({
+        service: 's',
+        dependencies: [
+          dep({
+            name: 'a',
+            kind: 'custom',
+            criticality: 'optional',
+            client: () => 1,
+            probe: async () => undefined,
+            freshProbe: () => {
+              calls++;
+              return new Promise<void>((r) => (release = r));
+            },
+            timeoutMs: 60_000,
+          }),
+        ],
+      }),
+      deepCacheMs: 0,
+      minProbeGapMs: 0,
+    });
+    const first = dr.deepReport();
+    void dr.deepReport();
+    void dr.deepReport();
+    await tick(0);
+    expect(calls).toBe(1);
+    release();
+    await first;
+  });
+
+  it('deep flood opens at most one fresh probe per minProbeGapMs', async () => {
+    const { c, dr } = mkFresh({ minProbeGapMs: 1000, deepCacheMs: 0 });
+    for (let i = 0; i < 10; i++) await dr.deepReport();
+    expect(c.freshCalls).toBe(1);
+    await tick(1100);
+    await dr.deepReport();
+    expect(c.freshCalls).toBe(2);
+  });
+
+  it('fresh timeout is a timeout failure through the same classifier', async () => {
+    const events: ReadinessEvent[] = [];
+    const dr = createDeepReadiness({
+      manifest: declareDependencies({
+        service: 's',
+        dependencies: [
+          dep({
+            name: 'a',
+            kind: 'custom',
+            criticality: 'optional',
+            client: () => 1,
+            probe: async () => undefined,
+            freshProbe: () => new Promise<void>(() => undefined),
+            timeoutMs: 500,
+          }),
+        ],
+      }),
+      onEvent: (e) => events.push(e),
+    });
+    const p = dr.deepReport('internal');
+    await tick(600);
+    const r = await p;
+    expect(events).toContainEqual({ type: 'probe_failure', name: 'a', reason: 'timeout' });
+    expect(r.dependencies?.[0]?.reason).toBe('timeout');
+  });
+});

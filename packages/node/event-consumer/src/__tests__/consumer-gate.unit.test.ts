@@ -76,7 +76,7 @@ function envelopeMessage(_label: string): ConsumeMessage {
         occurredAt: new Date().toISOString(),
         payload: {},
     };
-    return { content: Buffer.from(JSON.stringify(body)) } as ConsumeMessage;
+    return { content: Buffer.from(JSON.stringify(body)), fields: { exchange: 'test.events', routingKey: 'test.thing', redelivered: false, deliveryTag: 1, consumerTag: 'test' }, properties: {} } as ConsumeMessage;
 }
 
 function makeConsumer(

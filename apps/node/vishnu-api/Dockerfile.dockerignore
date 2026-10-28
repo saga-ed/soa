@@ -1,0 +1,16 @@
+.git
+**/node_modules
+**/.turbo
+**/.svelte-kit
+**/dist
+**/build
+**/.env
+**/.env.*
+**/.npmrc
+**/*.pem
+**/*.key
+**/coverage
+**/test-results
+**/playwright-report
+claude
+.Codex

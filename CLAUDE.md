@@ -12,6 +12,10 @@ doc vs. code wins (`git log -1`).
 
 <!-- docs-check: history-dir: docs/history -->
 
+User-owned issue projects retain `claude/projects/gh_<issue>/` per skelly’s
+2026-10-22 ruling; see [personal project index](claude/projects/README.md).
+This scoped exception does not relocate existing `docs/history/` records.
+
 ## Path-scoped rules (`.claude/rules/`)
 
 - `testing-node.md` — loads on `apps/node/**` or `packages/node/**`: DI/Inversify,

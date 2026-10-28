@@ -144,6 +144,14 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
 
   it('iam-api', () => {
     expect(env('iam-api')).toEqual({
+      NODE_ENV: 'development',
+      PII_CRYPTO_PIIDEKHEX: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      PII_CRYPTO_PIIHMACKEYHEX: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+      PII_CRYPTO_PIIDEKVERSION: '1',
+      EVENT_STATS_ENABLED: 'true', EVENT_STATS_ENVIRONMENT: 'synthetic',
+      EVENT_STATS_DEPLOYMENT: 'slot-0', EVENT_STATS_BROKER: 'soa-s0',
+      EVENT_STATS_VHOST: '/', EVENT_STATS_REVISION: 'working-tree', EVENT_STATS_INTERVAL_MS: '5000',
+
       PORT: '3010',
       DB_CREDENTIAL_SOURCE: 'static',
       DB_TLS: 'off',
@@ -200,6 +208,10 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
 
   it('programs-api', () => {
     expect(env('programs-api')).toEqual({
+      EVENT_STATS_ENABLED: 'true', EVENT_STATS_ENVIRONMENT: 'synthetic',
+      EVENT_STATS_DEPLOYMENT: 'slot-0', EVENT_STATS_BROKER: 'soa-s0',
+      EVENT_STATS_VHOST: '/', EVENT_STATS_REVISION: 'working-tree', EVENT_STATS_INTERVAL_MS: '5000',
+
       NODE_ENV: 'development',
       DB_CREDENTIAL_SOURCE: 'static',
       DB_TLS: 'off',
@@ -223,6 +235,10 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
 
   it('scheduling-api', () => {
     expect(env('scheduling-api')).toEqual({
+      EVENT_STATS_ENABLED: 'true', EVENT_STATS_ENVIRONMENT: 'synthetic',
+      EVENT_STATS_DEPLOYMENT: 'slot-0', EVENT_STATS_BROKER: 'soa-s0',
+      EVENT_STATS_VHOST: '/', EVENT_STATS_REVISION: 'working-tree', EVENT_STATS_INTERVAL_MS: '5000',
+
       NODE_ENV: 'development',
       DB_CREDENTIAL_SOURCE: 'static',
       DB_TLS: 'off',

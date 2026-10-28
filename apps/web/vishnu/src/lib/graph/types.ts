@@ -1,0 +1,73 @@
+export type Health = 'healthy' | 'warning' | 'critical' | 'unknown';
+export type Band = 'data' | 'mesh' | 'application';
+export type Freshness = 'fresh' | 'stale' | 'missing';
+export interface Evidence {
+  label: string;
+  description: string;
+  url?: string;
+}
+export interface System {
+  observationSource?: 'apm' | 'declared';
+  runtimeState?: 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unknown';
+  eventBus?: { publishes: boolean; consumes: boolean };
+  id: string;
+  label: string;
+  band: Band;
+  kind: string;
+  health: Health;
+  freshness: Freshness;
+  summary: string;
+  errors: number | null;
+  evidence: Evidence[];
+}
+export interface Relationship {
+  declared?: boolean;
+  observation?: 'observed' | 'not-observed' | 'unavailable' | 'stale';
+  id: string;
+  via?: string[];
+  source: string;
+  target: string;
+  label: string;
+  kind: 'http' | 'event' | 'database' | 'dependency';
+  protocol?: 'trpc' | 'rest' | 'mixed' | 'graphql' | 'unknown';
+  count: number | null;
+  rate: number | null;
+  latencyMs: number | null;
+  health: Health;
+  freshness: Freshness;
+  summary: string;
+  evidence: Evidence[];
+}
+export interface MeshSnapshot {
+  scope?: { level?: 'environment' | 'deployment'; environment: string; deployment: string; deploymentTag: string };
+  topologyVersion: string;
+  environment: string;
+  mode: 'fixture' | 'live';
+  slot?: number;
+  observedAt: string;
+  observationWindowSeconds: number;
+  systems: System[];
+  relationships: Relationship[];
+}
+export interface Point {
+  x: number;
+  y: number;
+}
+export interface LayoutNode {
+  context?: boolean;
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export interface LayoutEdge {
+  id: string;
+  points: Point[];
+}
+export interface MeshLayout {
+  nodes: LayoutNode[];
+  edges: LayoutEdge[];
+  width: number;
+  height: number;
+}

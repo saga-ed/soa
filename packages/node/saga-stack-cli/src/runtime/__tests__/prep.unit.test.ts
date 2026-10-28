@@ -51,6 +51,32 @@ function runnerFailingWhen(fail: (spec: ScriptInvocation) => boolean): { runner:
 const NEVER_FRESH = (): boolean => false;
 
 describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => {
+  it('prepares Vishnu and its CLI collector without building unrelated SOA workspaces', async () => {
+    const { runner, calls } = fakeRunner();
+    const res = await prepClosure({
+      services: ['vishnu'], dbs: [], repoRoots: REPO_ROOTS, runner,
+      // A whole-repo freshness marker does not establish the new app is installed.
+      isFresh: () => true,
+      dbGenerateScan: () => { throw new Error('Vishnu has no Prisma dependencies'); },
+      writeStamp: () => { throw new Error('Targeted prep must not stamp the whole repo'); },
+    });
+    expect(res.ok).toBe(true);
+    expect(calls.map((call) => call.args)).toEqual([
+      ['--filter', '@saga-ed/vishnu...', '--filter', '@saga-ed/saga-stack-cli...',
+        'install', '--frozen-lockfile'],
+      ['--filter', '@saga-ed/soa-event-stats...', '--filter', '@saga-ed/saga-stack-cli...', '-r', 'build'],
+    ]);
+  });
+
+  it('fails the viewer prep when its runtime collector fails to build', async () => {
+    const { runner } = runnerFailingWhen((call) => call.args?.includes('build') ?? false);
+    const res = await prepClosure({
+      services: ['vishnu'], dbs: [], repoRoots: REPO_ROOTS, runner,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.failed?.kind).toBe('build');
+  });
+
   it('per repo: install → db:generate (its *-db pkgs) → build, in canonical repo order', async () => {
     const { runner } = fakeRunner();
     const res = await prepClosure({

@@ -1,6 +1,5 @@
 import type { Channel, ConsumeMessage } from 'amqplib';
 import type { Pool, PoolClient } from 'pg';
-import type { ZodType } from 'zod';
 import type { ILogger } from '@saga-ed/soa-logger';
 import type { ConnectionManager } from '@saga-ed/soa-rabbitmq';
 import {
@@ -48,7 +47,7 @@ export class DuplicateHandlerError extends Error {
 export interface EventHandler<T> {
     eventType: string;
     eventVersion: number;
-    payloadSchema: ZodType<T>;
+    payloadSchema: { parse(data: unknown): T };
     /**
      * Run the projection / side effect within the supplied tx-scoped client.
      * The consumer guarantees: (a) the consumed_events row was just inserted,
@@ -122,11 +121,23 @@ export interface ConsumerStatus {
     inFlight: number;
 }
 
+export interface ConsumerObservation {
+    readonly kind: 'delivered' | 'committed' | 'duplicate' | 'failed' | 'ackIssued' | 'ackFailed' | 'nackIssued' | 'nackFailed';
+    readonly queue: string;
+    readonly consumerName: string;
+    readonly exchange?: string;
+    readonly eventType?: string;
+    readonly eventVersion?: number;
+    readonly redelivered?: boolean;
+    readonly requeue?: boolean;
+    readonly reason?: 'envelope' | 'unsupported' | 'schema' | 'database' | 'handler' | 'commit';
+}
+
 export interface EventConsumerOpts {
     /** Stable identifier used for the consumed_events idempotency key. */
     consumerName: string;
     pool: Pool;
-    connectionManager: ConnectionManager;
+    connectionManager: Pick<ConnectionManager, 'ensureConnected' | 'newChannel'>;
     /** Durable queue name (e.g., "admissions-svc.upstream-events"). */
     queue: string;
     /**
@@ -158,6 +169,8 @@ export interface EventConsumerOpts {
     dlq?: DlqConfig;
     /** Optional Prometheus hooks. No-op when undefined. */
     metrics?: ConsumerMetrics;
+    /** Nonblocking telemetry observer. Exceptions/rejections are isolated from business work. */
+    observe?: (observation: ConsumerObservation) => void | Promise<void>;
     logger: ILogger;
     /**
      * Optional activity gate. Topology (queue, DLQ, bindings) is always
@@ -571,9 +584,16 @@ export class EventConsumer {
     }
 
     private async dispatch(channel: Channel, msg: ConsumeMessage): Promise<void> {
+        let envelope: EventEnvelope | undefined;
+        const exchange = msg.fields.exchange;
+        const identity = () => ({ exchange, eventType: envelope?.eventType ?? msg.fields.routingKey, eventVersion: envelope?.eventVersion });
         try {
-            await this.handleMessage(msg.content);
-            this.settle(() => channel.ack(msg));
+            await this.handleMessage(msg.content, exchange, parsed => {
+                envelope = parsed;
+                this.observe({ ...identity(), kind: 'delivered', redelivered: msg.fields.redelivered });
+            });
+            const issued = this.settle(() => channel.ack(msg));
+            this.observe({ ...identity(), kind: issued ? 'ackIssued' : 'ackFailed' });
         } catch (err) {
             // Poison errors never requeue — re-delivering an unparseable or
             // unrouteable message just spins the same failure forever and
@@ -589,7 +609,11 @@ export class EventConsumer {
                 `[EventConsumer:${this.opts.consumerName}] handler error → ${fate}`,
                 err instanceof Error ? err : undefined,
             );
-            this.settle(() => channel.nack(msg, false, requeue));
+            if (err instanceof MalformedEnvelopeError) {
+                this.observe({ ...identity(), kind: 'failed', reason: 'envelope' });
+            }
+            const issued = this.settle(() => channel.nack(msg, false, requeue));
+            this.observe({ ...identity(), kind: issued ? 'nackIssued' : 'nackFailed', requeue });
         }
     }
 
@@ -600,9 +624,10 @@ export class EventConsumer {
      * and the consumed_events idempotency check absorbs the duplicate, so
      * the right move is to log and move on rather than crash the dispatch.
      */
-    private settle(op: () => void): void {
+    private settle(op: () => void): boolean {
         try {
             op();
+            return true;
         } catch (err) {
             const detail = `[EventConsumer:${this.opts.consumerName}] ack/nack failed on dead channel (broker will redeliver): ${err instanceof Error ? err.message : String(err)}`;
             // Routine during graceful shutdown (stop() closes the channel
@@ -612,15 +637,42 @@ export class EventConsumer {
             } else {
                 this.opts.logger.warn(detail);
             }
+            return false;
         }
     }
 
-    private async handleMessage(buffer: Buffer): Promise<void> {
+    private telemetryWarningLogged = false;
+
+    private telemetryFailed = (): void => {
+        if (this.telemetryWarningLogged) return;
+        this.telemetryWarningLogged = true;
+        try { this.opts.logger.warn('[EventConsumer] telemetry callback failed (further warnings suppressed)'); }
+        catch { /* telemetry must not affect business work */ }
+    };
+
+    private metric(callback: () => unknown): void {
+        try {
+            const result = callback();
+            if (result) void Promise.resolve(result).catch(this.telemetryFailed);
+        } catch { this.telemetryFailed(); }
+    }
+
+    private observe(event: Omit<ConsumerObservation, 'queue' | 'consumerName'>): void {
+        if (event.eventType?.startsWith('observability.event_stats.')) return;
+        const failed = this.telemetryFailed;
+        try {
+            const result = this.opts.observe?.({ ...event, queue: this.opts.queue, consumerName: this.opts.consumerName });
+            if (result) void Promise.resolve(result).catch(failed);
+        } catch { failed(); }
+    }
+
+    private async handleMessage(buffer: Buffer, exchange?: string, parsed?: (envelope?: EventEnvelope) => void): Promise<void> {
         let envelope: EventEnvelope;
         try {
             const raw = JSON.parse(buffer.toString('utf8')) as unknown;
             envelope = EventEnvelopeSchema.parse(raw);
         } catch (err) {
+            parsed?.();
             // Use a typed error so `dispatch` can route this branch to a
             // bounded `reason_class` and to the never-requeue path.
             throw new MalformedEnvelopeError(
@@ -628,6 +680,7 @@ export class EventConsumer {
             );
         }
 
+        parsed?.(envelope);
         const parentCtx = envelope.meta
             ? propagation.extract(
                   context.active(),
@@ -657,22 +710,22 @@ export class EventConsumer {
             try {
                 await context.with(
                     trace.setSpan(context.active(), span),
-                    () => this.processEnvelope(envelope),
+                    () => this.processEnvelope(envelope, exchange),
                 );
                 span.setStatus({ code: SpanStatusCode.OK });
-                this.opts.metrics?.onProcessed(
+                this.metric(() => this.opts.metrics?.onProcessed(
                     envelope.eventType,
                     envelope.eventVersion,
-                );
+                ));
             } catch (err) {
                 const reason = err instanceof Error ? err.message : String(err);
                 span.recordException(err instanceof Error ? err : new Error(reason));
                 span.setStatus({ code: SpanStatusCode.ERROR, message: reason });
-                this.opts.metrics?.onFailed(
+                this.metric(() => this.opts.metrics?.onFailed(
                     envelope.eventType,
                     envelope.eventVersion,
                     reason,
-                );
+                ));
                 throw err;
             } finally {
                 span.end();
@@ -680,67 +733,80 @@ export class EventConsumer {
         });
     }
 
-    private async processEnvelope(envelope: EventEnvelope): Promise<void> {
-        const key = eventKey(envelope.eventType, envelope.eventVersion);
-        const handler = this.handlerMap.get(key);
-        if (!handler) {
-            throw new ConsumerVersionMismatchError(key);
-        }
-
-        const payload = handler.payloadSchema.parse(envelope.payload);
-
-        const client = await this.opts.pool.connect();
-        let clientPoisoned = false;
+    private async processEnvelope(envelope: EventEnvelope, exchange?: string): Promise<void> {
+        const identity = { exchange, eventType: envelope.eventType, eventVersion: envelope.eventVersion };
+        let reason: ConsumerObservation['reason'] = 'unsupported';
         try {
-            await client.query('BEGIN');
-
-            const insertResult = await client.query<{ event_id: string }>(
-                `INSERT INTO consumed_events (consumer_name, event_id)
-                 VALUES ($1, $2)
-                 ON CONFLICT (consumer_name, event_id) DO NOTHING
-                 RETURNING event_id`,
-                [this.opts.consumerName, envelope.eventId],
-            );
-
-            if (insertResult.rowCount === 0) {
-                // Duplicate delivery — already processed. Logged at debug
-                // because high-throughput streams can produce these by the
-                // thousand and they aren't operationally interesting beyond
-                // the events_duplicate_total counter.
-                await client.query('COMMIT');
-                this.opts.logger.debug(
-                    `[EventConsumer:${this.opts.consumerName}] skip duplicate ${envelope.eventId}`,
-                );
-                this.opts.metrics?.onDuplicate(
-                    envelope.eventType,
-                    envelope.eventVersion,
-                );
-                return;
+            const key = eventKey(envelope.eventType, envelope.eventVersion);
+            const handler = this.handlerMap.get(key);
+            if (!handler) {
+                throw new ConsumerVersionMismatchError(key);
             }
 
-            await handler.handle(envelope, payload as never, client);
-            await client.query('COMMIT');
-        } catch (err) {
+            reason = 'schema';
+            const payload = handler.payloadSchema.parse(envelope.payload);
+            reason = 'database';
+            const client = await this.opts.pool.connect();
+            let clientPoisoned = false;
             try {
-                await client.query('ROLLBACK');
-            } catch (rollbackErr) {
-                // Mid-transaction connection loss can cause both the original
-                // op and the ROLLBACK to fail. The pool client is now in an
-                // unknown state and must NOT be recycled — release(err)
-                // tells node-postgres to destroy it.
-                clientPoisoned = true;
-                this.opts.logger.error(
-                    `[EventConsumer:${this.opts.consumerName}] ROLLBACK failed; destroying client`,
-                    rollbackErr instanceof Error ? rollbackErr : undefined,
+                await client.query('BEGIN');
+
+                const insertResult = await client.query<{ event_id: string }>(
+                    `INSERT INTO consumed_events (consumer_name, event_id)
+                     VALUES ($1, $2)
+                     ON CONFLICT (consumer_name, event_id) DO NOTHING
+                     RETURNING event_id`,
+                    [this.opts.consumerName, envelope.eventId],
                 );
+
+                if (insertResult.rowCount === 0) {
+                    // Duplicate delivery — already processed. Logged at debug
+                    // because high-throughput streams can produce these by the
+                    // thousand and they aren't operationally interesting beyond
+                    // the events_duplicate_total counter.
+                    reason = 'commit';
+                    await client.query('COMMIT');
+                    this.observe({ ...identity, kind: 'duplicate' });
+                    this.opts.logger.debug(
+                        `[EventConsumer:${this.opts.consumerName}] skip duplicate ${envelope.eventId}`,
+                    );
+                    this.metric(() => this.opts.metrics?.onDuplicate(
+                        envelope.eventType,
+                        envelope.eventVersion,
+                    ));
+                    return;
+                }
+
+                reason = 'handler';
+                await handler.handle(envelope, payload as never, client);
+                reason = 'commit';
+                await client.query('COMMIT');
+                this.observe({ ...identity, kind: 'committed' });
+            } catch (err) {
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackErr) {
+                    // Mid-transaction connection loss can cause both the original
+                    // op and the ROLLBACK to fail. The pool client is now in an
+                    // unknown state and must NOT be recycled — release(err)
+                    // tells node-postgres to destroy it.
+                    clientPoisoned = true;
+                    this.opts.logger.error(
+                        `[EventConsumer:${this.opts.consumerName}] ROLLBACK failed; destroying client`,
+                        rollbackErr instanceof Error ? rollbackErr : undefined,
+                    );
+                }
+                throw err;
+            } finally {
+                if (clientPoisoned) {
+                    client.release(new Error('rollback failed; client destroyed'));
+                } else {
+                    client.release();
+                }
             }
+        } catch (err) {
+            this.observe({ ...identity, kind: 'failed', reason });
             throw err;
-        } finally {
-            if (clientPoisoned) {
-                client.release(new Error('rollback failed; client destroyed'));
-            } else {
-                client.release();
-            }
         }
     }
 }

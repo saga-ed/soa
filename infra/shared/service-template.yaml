@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: SOA hosted observation service; ECS colour lifecycle from saga-iac, no mutable upstream APIs.
+Parameters:
+  Identifier: {Type: String, AllowedValues: [blue, green]}
+  ExecEnv: {Type: String, Default: prod, AllowedValues: [dev, prod]}
+  ImageArn: {Type: String}
+  BuildRevision: {Type: String}
+  ClusterArnSSMParameter: {Type: 'AWS::SSM::Parameter::Value<String>'}
+  SubnetIdsSSMParameter: {Type: 'AWS::SSM::Parameter::Value<CommaDelimitedList>'}
+  SecurityGroupIdSSMParameter: {Type: 'AWS::SSM::Parameter::Value<String>'}
+  TargetGroupArnSSMParameter: {Type: 'AWS::SSM::Parameter::Value<String>'}
+  ExecutionRoleArnSSMParameter: {Type: 'AWS::SSM::Parameter::Value<String>'}
+  TaskRoleArnSSMParameter: {Type: 'AWS::SSM::Parameter::Value<String>'}
+  LogGroupSSMParameter: {Type: 'AWS::SSM::Parameter::Value<String>'}
+  CapacityProviderName: {Type: String, Default: prod-shared-ec2-cluster-capacity-provider}
+  DatadogApiKeyArn: {Type: String, AllowedPattern: 'arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+'}
+  DatadogAppKeyArn: {Type: String, AllowedPattern: 'arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+'}
+  DesiredCount: {Type: Number, Default: 1, MinValue: 0, MaxValue: 2}
+Conditions:
+  IsProd: !Equals [!Ref ExecEnv, prod]
+Resources:
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub 'soa-vishnu-api-${Identifier}'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [EC2]
+      Cpu: '256'
+      Memory: '512'
+      RuntimePlatform: {CpuArchitecture: ARM64, OperatingSystemFamily: LINUX}
+      ExecutionRoleArn: !Ref ExecutionRoleArnSSMParameter
+      TaskRoleArn: !Ref TaskRoleArnSSMParameter
+      ContainerDefinitions:
+        - Name: vishnu-api
+          Image: !Ref ImageArn
+          Essential: true
+          Memory: 512
+          PortMappings: [{ContainerPort: 8931, Protocol: tcp}]
+          Environment:
+            - {Name: PORT, Value: '8931'}
+            - {Name: NODE_ENV, Value: !If [IsProd, production, development]}
+            - {Name: NODE_OPTIONS, Value: '--max-old-space-size=384'}
+            - {Name: EXEC_ENV, Value: !Ref ExecEnv}
+            - {Name: DD_VERSION, Value: !Ref BuildRevision}
+            - {Name: OTEL_RESOURCE_ATTRIBUTES, Value: !Sub 'deployment.identifier=${Identifier}'}
+            - {Name: VISHNU_ENVIRONMENT, Value: !Ref ExecEnv}
+            - {Name: VISHNU_DATADOG_ENV, Value: !Ref ExecEnv}
+            - {Name: VISHNU_DATADOG_SCOPE, Value: environment}
+            - {Name: VISHNU_MQ_ENABLED, Value: 'false'}
+            - {Name: DD_SITE, Value: datadoghq.com}
+          Secrets:
+            - {Name: DD_API_KEY, ValueFrom: !Ref DatadogApiKeyArn}
+            - {Name: DD_APP_KEY, ValueFrom: !Ref DatadogAppKeyArn}
+          LogConfiguration:
+            LogDriver: awslogs
+            Options: {awslogs-group: !Ref LogGroupSSMParameter, awslogs-region: !Ref 'AWS::Region', awslogs-stream-prefix: !Ref Identifier}
+          HealthCheck:
+            Command: [CMD-SHELL, 'node -e "fetch(''http://127.0.0.1:8931/health'').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"']
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 120
+          StopTimeout: 30
+  Service:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub 'soa-vishnu-api-${Identifier}'
+      Cluster: !Ref ClusterArnSSMParameter
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      CapacityProviderStrategy: [{CapacityProvider: !Ref CapacityProviderName, Weight: 1}]
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: {Enable: true, Rollback: true}
+      HealthCheckGracePeriodSeconds: 120
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref SubnetIdsSSMParameter
+          SecurityGroups: [!Ref SecurityGroupIdSSMParameter]
+          AssignPublicIp: DISABLED
+      LoadBalancers: [{TargetGroupArn: !Ref TargetGroupArnSSMParameter, ContainerName: vishnu-api, ContainerPort: 8931}]
+      Tags: [{Key: Project, Value: soa}, {Key: Service, Value: vishnu-api}, {Key: Environment, Value: !Ref ExecEnv}, {Key: Identifier, Value: !Ref Identifier}]
+Outputs:
+  ServiceName: {Value: !GetAtt Service.Name}

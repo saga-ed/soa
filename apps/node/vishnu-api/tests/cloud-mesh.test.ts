@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cloudMesh } from '../src/cloud-mesh.js';
+import { canonicalApmServices, cloudMesh } from '../src/cloud-mesh.js';
 import { createDatadogReader } from '../src/telemetry/datadog.js';
 
 const empty = () =>
@@ -73,5 +73,38 @@ describe('declared cloud connections', () => {
         r => r.observation === 'unavailable'
       )
     ).toBe(true);
+  });
+  it('maps the aliased APM service onto its declared node for both the mesh and per-node signals', async () => {
+    const base = await empty();
+    const data = canonicalApmServices({
+      ...base,
+      status: 'connected' as const,
+      services: [
+        {
+          service: 'qboard_connectv3',
+          rate: null,
+          p95Ms: null,
+          errorRate: null,
+          previousP95Ms: null,
+          monitors: [],
+        },
+      ],
+      dependencies: [
+        { source: 'qboard_connectv3', target: 'connectv3-api' },
+        { source: 'connectv3', target: 'connectv3-api' },
+      ],
+    });
+    expect(data.services.map(s => s.service)).toEqual(['connectv3']);
+    expect(data.dependencies).toEqual([{ source: 'connectv3', target: 'connectv3-api' }]);
+    const mesh = cloudMesh(data);
+    expect(mesh.systems.some(s => s.id === 'qboard_connectv3')).toBe(false);
+    const edge = mesh.relationships.find(
+      r => r.source === 'connectv3' && r.target === 'connectv3-api'
+    )!;
+    expect(edge.declared).toBe(true);
+    expect(edge.observation).toBe('observed');
+    expect(
+      mesh.relationships.filter(r => r.source === 'connectv3' && r.target === 'connectv3-api')
+    ).toHaveLength(1);
   });
 });

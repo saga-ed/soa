@@ -1,6 +1,6 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import type { DatadogSnapshot } from '../../../web/vishnu/src/lib/graph/datadog';
-import { cloudMesh } from './cloud-mesh.js';
+import { canonicalApmServices, cloudMesh } from './cloud-mesh.js';
 export interface TelemetryService {
   datadog(): Promise<DatadogSnapshot>;
   eventStats(): Promise<unknown>;
@@ -15,8 +15,12 @@ const staffProcedure = t.procedure.use(({ ctx, next }) => {
 });
 export const appRouter = t.router({
   telemetry: t.router({
-    mesh: staffProcedure.query(async ({ ctx }) => cloudMesh(await ctx.telemetry.datadog())),
-    datadog: staffProcedure.query(({ ctx }) => ctx.telemetry.datadog()),
+    mesh: staffProcedure.query(async ({ ctx }) =>
+      cloudMesh(canonicalApmServices(await ctx.telemetry.datadog()))
+    ),
+    datadog: staffProcedure.query(async ({ ctx }) =>
+      canonicalApmServices(await ctx.telemetry.datadog())
+    ),
     eventStats: staffProcedure.query(({ ctx }) => ctx.telemetry.eventStats()),
   }),
 });

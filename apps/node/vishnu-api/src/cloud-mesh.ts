@@ -1,7 +1,23 @@
 import { createHash } from 'node:crypto';
 import type { DatadogSnapshot } from '../../../web/vishnu/src/lib/graph/datadog';
 import type { MeshSnapshot, System, Relationship } from '../../../web/vishnu/src/lib/graph/types';
-import { applicationLabels, declaredConnections } from './declared-topology.js';
+import { apmServiceAliases, applicationLabels, declaredConnections } from './declared-topology.js';
+
+/** Rename aliased APM services to their declared node id, so mesh edges and per-node signals agree. */
+export function canonicalApmServices(data: DatadogSnapshot): DatadogSnapshot {
+  const id = (service: string) => apmServiceAliases.get(service) ?? service;
+  const seen = new Set<string>();
+  return {
+    ...data,
+    services: data.services.map(s => ({ ...s, service: id(s.service) })),
+    dependencies: data.dependencies
+      .map(d => ({ ...d, source: id(d.source), target: id(d.target) }))
+      .filter(d => {
+        const k = JSON.stringify([d.source, d.target]);
+        return !seen.has(k) && !!seen.add(k);
+      }),
+  };
+}
 
 /** Source-declared topology survives quiet windows. APM overlays never invent edge metrics. */
 export function cloudMesh(data: DatadogSnapshot): MeshSnapshot {

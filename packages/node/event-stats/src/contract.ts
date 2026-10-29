@@ -47,12 +47,12 @@ export const CountersSchema = z.strictObject({
 });
 export const ReportSchema = z.strictObject({
   version: z.literal(1),
-  reportId: z.uuid(),
+  reportId: z.string().uuid(),
   identity: IdentitySchema,
-  epoch: z.uuid(),
+  epoch: z.string().uuid(),
   sequence: count.positive(),
-  startedAt: z.iso.datetime(),
-  observedAt: z.iso.datetime(),
+  startedAt: z.string().datetime(),
+  observedAt: z.string().datetime(),
   elapsedMs: z.number().finite().nonnegative(),
   capabilities: z
     .array(z.enum(['producer', 'consumer']))
@@ -63,7 +63,7 @@ export const ReportSchema = z.strictObject({
       z.strictObject({
         stream: StreamSchema,
         counters: CountersSchema,
-        latestSuccessAt: z.iso.datetime().nullable(),
+        latestSuccessAt: z.string().datetime().nullable(),
         failureReasons: z.strictObject({
           transport: count,
           backpressure: count,

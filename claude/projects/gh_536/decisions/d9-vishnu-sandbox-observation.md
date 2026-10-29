@@ -1,6 +1,12 @@
 # d9 — How hosted Vishnu observes a patch-party sandbox (dev)
 
-PENDING — 2026-10-29
+RESOLVED — 2026-10-29
+
+User ruling: "Option a as recommended". Idle blue observes one named sandbox
+(`EventStatsPreviewTag` = `EventStatsDeployment` = `sandbox-<name>`, dev only, default
+off), with exact scope kept (d3) and exchanges only ever checked (d1). The phase
+succeeds when blue shows live reports from iam-api, programs-api and scheduling-api
+deployed with reporting enabled in the sandbox.
 
 ## Context
 

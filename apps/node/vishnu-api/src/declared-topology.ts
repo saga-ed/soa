@@ -126,6 +126,8 @@ export const declaredConnections: readonly Declaration[] = [
     'apps/node/ads-adm-api/src/clients/programs-api.client.ts'
   ),
 ];
+/** Datadog service names that report under a different id than the declared node (d6, B2). */
+export const apmServiceAliases = new Map([['qboard_connectv3', 'connectv3']]);
 export const applicationLabels = new Map([
   ['coach', 'Coach'],
   ['connectv3', 'Connectv3'],

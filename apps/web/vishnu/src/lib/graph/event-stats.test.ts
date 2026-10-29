@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { EventStats, compareReports } from '@saga-ed/soa-event-stats';
-import { serviceStats, type StatsSnapshot, type StatsSource } from './event-stats';
+import { scopedStats, serviceStats, type StatsSnapshot, type StatsSource } from './event-stats';
 const now = new Date().toISOString();
 const scope = { environment: 'synthetic', deployment: 'slot-3', broker: 'soa-s3', vhost: '/' };
 function source(instance = 'one', accepted = 3, interval = 1000): StatsSource {
@@ -97,4 +97,33 @@ it('keeps consumer deliveries, commits and duplicate skips distinct across subsc
   expect(metric(view, 'deliveries').count).toBe(4);
   expect(metric(view, 'commits').count).toBe(2);
   expect(metric(view, 'duplicates').count).toBe(2);
+});
+it('accepts stats only for the exact synthetic slot or hosted MQ deployment', () => {
+  const stats = (scope: StatsSnapshot['scope']): StatsSnapshot => ({
+    version: 1,
+    scope,
+    observedAt: now,
+    staleAfterMs: 90000,
+    sources: [],
+    receiver: { connected: true },
+  });
+  const hostedScope = {
+    environment: 'dev',
+    deployment: 'main',
+    broker: 'shared-dev-mq',
+    vhost: '/',
+  };
+  const hosted = { environment: 'dev', deployment: 'main' };
+  expect(scopedStats(stats(scope), { mode: 'live', slot: 3 }, null)).not.toBeNull();
+  expect(scopedStats(stats(scope), { mode: 'live', slot: 4 }, null)).toBeNull();
+  expect(scopedStats(stats(hostedScope), { mode: 'live' }, hosted)).not.toBeNull();
+  expect(scopedStats(stats(hostedScope), { mode: 'live' }, null)).toBeNull();
+  expect(
+    scopedStats(stats({ ...hostedScope, deployment: 'blue' }), { mode: 'live' }, hosted)
+  ).toBeNull();
+  expect(
+    scopedStats(stats({ ...hostedScope, environment: 'prod' }), { mode: 'live' }, hosted)
+  ).toBeNull();
+  expect(scopedStats(stats(hostedScope), { mode: 'live', slot: 3 }, hosted)).toBeNull();
+  expect(scopedStats(stats(hostedScope), { mode: 'fixture' }, hosted)).toBeNull();
 });

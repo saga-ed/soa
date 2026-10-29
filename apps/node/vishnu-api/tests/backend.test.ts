@@ -69,6 +69,13 @@ describe('scope isolation',()=>{
  it('fails closed on missing scope, cross-environment settings and auth bypass',()=>{
   for(const e of [{},{...env,VISHNU_DATADOG_DEPLOYMENT:''},{...env,JANUS_REQUIRED:'false'},{...env,VISHNU_ENVIRONMENT:'prod'},{...env,VISHNU_PUBLIC_ORIGIN:'https://evil.invalid'}]) expect(()=>loadConfig(e)).toThrow();
  });
+ it('pairs environment-wide Datadog with an exact MQ scope, and keeps deployment-scoped Datadog on the same deployment (d3)',()=>{
+  const hosted={VISHNU_ENVIRONMENT:'dev',VISHNU_DATADOG_ENV:'dev',VISHNU_DATADOG_SCOPE:'environment',VISHNU_MQ_ENABLED:'true',EVENT_STATS_ENVIRONMENT:'dev',EVENT_STATS_DEPLOYMENT:'main'};
+  expect(loadConfig(hosted)).toMatchObject({mqEnabled:true,mqDeployment:'main',datadogScope:'environment',deployment:'all'});
+  expect(loadConfig({...hosted,VISHNU_MQ_ENABLED:'false'})).toMatchObject({mqEnabled:false,mqDeployment:null});
+  for(const e of [{...hosted,EVENT_STATS_DEPLOYMENT:undefined},{...hosted,EVENT_STATS_DEPLOYMENT:'all/../x'},{...hosted,EVENT_STATS_ENVIRONMENT:'prod'},{...env,VISHNU_MQ_ENABLED:'true',EVENT_STATS_ENVIRONMENT:'dev',EVENT_STATS_DEPLOYMENT:'main'}]) expect(()=>loadConfig(e)).toThrow();
+  expect(loadConfig({...env,VISHNU_MQ_ENABLED:'true',EVENT_STATS_ENVIRONMENT:'dev',EVENT_STATS_DEPLOYMENT:'blue'})).toMatchObject({mqDeployment:'blue',datadogScope:'deployment'});
+ });
  it('does not manufacture health, edges, or metrics and only matches exact cloud scope',async()=>{
   const data=await createDatadogReader(env)();const mesh=cloudMesh(data);
   expect(mesh.systems.map(s=>s.id)).toEqual(expect.arrayContaining(['coach','connectv3','saga_dash']));expect(mesh.relationships.every(r=>r.declared)).toBe(true);expect(mesh.systems.every(s=>s.health==='unknown')).toBe(true);

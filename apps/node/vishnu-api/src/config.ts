@@ -7,6 +7,9 @@ export interface Config {
   port: number;
   permissions: string[];
   mqEnabled: boolean;
+  /** Exact MQ telemetry deployment; null while MQ is off (d3). */
+  mqDeployment: string | null;
+  datadogScope: 'environment' | 'deployment';
   deployment: string;
   deploymentTag: string;
 }
@@ -34,9 +37,19 @@ export function loadConfig(env: Env): Config {
   if (env.VISHNU_MQ_ENABLED && !['true', 'false'].includes(env.VISHNU_MQ_ENABLED))
     throw new Error('Invalid VISHNU_MQ_ENABLED');
   const mqEnabled = env.VISHNU_MQ_ENABLED === 'true';
-  if (mqEnabled && (env.VISHNU_DATADOG_SCOPE === 'environment' || env.EVENT_STATS_ENVIRONMENT !== environment || env.EVENT_STATS_DEPLOYMENT !== deployment))
-    throw new Error('MQ and Datadog must use the same environment and deployment');
+  const datadogScope = env.VISHNU_DATADOG_SCOPE === 'environment' ? 'environment' : 'deployment';
+  // d3: environment-wide Datadog may pair with its own exact MQ scope; a
+  // deployment-scoped Datadog view must still describe the same population.
+  let mqDeployment: string | null = null;
+  if (mqEnabled) {
+    if (env.EVENT_STATS_ENVIRONMENT !== environment)
+      throw new Error('MQ and Datadog must use the same environment');
+    mqDeployment = env.EVENT_STATS_DEPLOYMENT ?? '';
+    if (!/^[a-zA-Z0-9_.-]+$/.test(mqDeployment)) throw new Error('Explicit MQ deployment scope required');
+    if (datadogScope === 'deployment' && mqDeployment !== deployment)
+      throw new Error('MQ and deployment-scoped Datadog must use the same deployment');
+  }
   return { environment, origin, gateUrl, jwksUrl: `${gateUrl}/.well-known/jwks.json`, port,
     permissions: ['iam-admin', 'staff:super_admin', 'staff:support', 'staff:org_admin'],
-    mqEnabled, deployment, deploymentTag };
+    mqEnabled, mqDeployment, datadogScope, deployment, deploymentTag };
 }

@@ -1,0 +1,22 @@
+{
+  "name": "gh537",
+  "ttlHours": 72,
+  "build": [
+    { "repo": "rostering", "service": "iam-api", "ref": "gh_537-event-stats-adoption", "dbProfile": "canonical", "inputs": { "event-stats": "true" } },
+    { "repo": "program-hub", "service": "programs-api", "ref": "gh_537-event-stats-adoption", "dbProfile": "canonical", "inputs": { "event-stats": "true" } },
+    { "repo": "program-hub", "service": "scheduling-api", "ref": "gh_537-event-stats-adoption", "dbProfile": "canonical", "inputs": { "event-stats": "true" } }
+  ],
+  "observer": {
+    "repo": "soa",
+    "service": "vishnu-api",
+    "colour": "blue",
+    "ref": "gh_538-vishnu-sandbox",
+    "parameters": { "VishnuMqEnabled": "true", "EventStatsBroker": "shared-dev-mq", "EventStatsDeployment": "sandbox-gh537", "EventStatsPreviewTag": "sandbox-gh537" }
+  },
+  "success": "Vishnu blue (x-saga-preview-vishnu-api: blue) shows fresh reports from iam-api, programs-api and scheduling-api in scope dev / sandbox-gh537 / shared-dev-mq / /.",
+  "notes": [
+    "Approved by skelly 2026-10-29 ('Approve the sandbox soak'). Decisions d8, d9.",
+    "Direct dispatch, not a composition: no automatic TTL sweep (microservices#713). Tear down explicitly and verify (patch-party section 6).",
+    "Preflight 4.2 finding: program-hub sets no PREVIEW_ORIGINATE_MAP and points IamApiUrl at shared dev iam-api, so sandbox programs-api background IAM calls reach shared dev IAM. Writes need program or pod changes; the soak drives no traffic. Check shared iam-api for sandbox-originated writes afterwards."
+  ]
+}

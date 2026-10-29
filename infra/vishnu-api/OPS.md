@@ -143,3 +143,55 @@ task/logs. Once serving, redeploy the previous immutable image tag for rollback;
 deploy and verify the idle green lane before using colour flips. Retained ECR/log resources
 can survive bootstrap rollback: inspect ownership before retrying. Do not delete
 shared infrastructure to recover this service.
+
+## Observing a patch-party sandbox (gh_536 d9; approval required)
+
+Decision: `claude/projects/gh_536/decisions/d9-vishnu-sandbox-observation.md`
+(PENDING until ruled). One idle colour, normally **blue**, observes exactly one
+sandbox. The live colour keeps `dev / main` and is not touched. With
+`EventStatsPreviewTag` unset (the default), nothing in the task definition changes.
+
+What the setting does, for sandbox `<name>` (identifier `sandbox-<name>`):
+
+- `VISHNU_MQ_PREVIEW_TAG=sandbox-<name>`, which must equal `EventStatsDeployment`.
+  The template Rule `SandboxObservationIsExact`, the renderer and the config loader
+  each refuse a mismatch, a missing `VishnuMqEnabled=true`, or a non-dev environment.
+- Queue `vishnu.sandbox-<name>.event-stats.v1` (+ `.invalid`). It has the usual
+  bounds plus `x-expires` 24h, so it deletes itself a day after the colour stops
+  consuming.
+- It checks (never declares) and binds `observability.event_stats.reported` on
+  `iam.events.sandbox-<name>`, `programs.events.sandbox-<name>` and
+  `scheduling.events.sandbox-<name>`. Until the sandbox services have declared
+  them, the receiver logs `connection unavailable; retrying` and backs off (max 30s).
+- `/config.json` adds `mqPreviewTag`. The status line reads
+  `MQ telemetry (dev / sandbox-<name> · patch-party sandbox; APM stays dev-wide)`.
+
+Prerequisites:
+
+1. The sandbox is up, with iam-api, programs-api and scheduling-api deployed with
+   `EventStatsEnabled=true`, `EventStatsBroker=shared-dev-mq` and
+   `EventStatsDeployment=sandbox-<name>` (adopter `sandbox-deploy.yml` overrides;
+   see d9).
+2. The d5 binding audit has been re-run against the tagged exchanges
+   (`claude/projects/gh_536/scripts/broker-binding-audit.py`).
+3. The Vishnu image built from a commit containing d9 has been pushed to the dev
+   Vishnu ECR repository.
+
+Steps (sandbox `gh537`):
+
+```bash
+python3 infra/vishnu-api/render-deploy-command.py dev \
+  ImageArn=396913734878.dkr.ecr.us-west-2.amazonaws.com/soa/vishnu-api:<tag> BuildRevision=<sha> \
+  VishnuMqEnabled=true EventStatsBroker=shared-dev-mq VishnuDatabaseUrlSecretArn=<arn> \
+  EventStatsDeployment=sandbox-gh537 EventStatsPreviewTag=sandbox-gh537
+```
+
+Review the change set. It should change only the blue task definition and service.
+Then run the printed `sam deploy`. Verify through `x-saga-preview-vishnu-api: blue`:
+the receiver is connected, the queue and three bindings above exist, and all three
+services show **Live** counters. Green's view and `vishnu.main.event-stats.v1` stay
+unchanged.
+
+Return blue to idle with the same command, without the two sandbox overrides and
+with `VishnuMqEnabled=false` (or the previous image and parameters). Its sandbox
+queues expire 24h later. Sandbox rows age out of the shared store after 24h.

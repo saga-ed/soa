@@ -56,6 +56,11 @@ describe('hosted staff boundary',()=>{
   const rest=await http('/api/mesh',jwt);expect(rest.status).toBe(200);expect(JSON.parse(rest.body).scope.environment).toBe('dev');
   const rpc=await http('/trpc/telemetry.mesh',jwt);expect(rpc.status).toBe(200);expect(JSON.parse(rpc.body).result.data.scope.environment).toBe('dev');
  });
+ it('serves the unchanged runtime config shape when no sandbox is observed (d9)',async()=>{
+  const res=await http('/config.json',await token());
+  expect(res.status).toBe(200);
+  expect(Object.keys(JSON.parse(res.body))).toEqual(['mode','apiUrl','pollIntervalMs','environment','mqEnabled','mqDeployment','datadogScope','transport']);
+ });
  it('rejects arbitrary targets, foreign origins, forged hosts and writes',async()=>{
   const jwt=await token();
   expect((await http('/api/mesh?target=http://metadata',jwt)).status).toBe(400);

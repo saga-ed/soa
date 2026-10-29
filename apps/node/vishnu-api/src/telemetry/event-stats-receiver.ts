@@ -24,6 +24,10 @@ export class EventStatsReceiver {
       url: string;
       queue: string;
       store: EventStatsStore;
+      /** Exchanges to check and bind; defaults to the untagged REPORTERS (d1: never declared). */
+      exchanges?: readonly string[];
+      /** Extra arguments for both Vishnu queues; only a sandbox observer sets x-expires (d9). */
+      queueArguments?: Record<string, unknown>;
       onError: (kind: string) => void;
     }
   ) {}
@@ -77,11 +81,16 @@ export class EventStatsReceiver {
           void connection?.close().catch(() => {});
         }
       });
-      for (const exchange of Object.values(REPORTERS)) await channel.checkExchange(exchange);
+      const exchanges = this.options.exchanges ?? Object.values(REPORTERS);
+      for (const exchange of exchanges) await channel.checkExchange(exchange);
       const dlq = `${this.options.queue}.invalid`;
       await channel.assertQueue(dlq, {
         durable: true,
-        arguments: { 'x-max-length': 100, 'x-message-ttl': 3600000 },
+        arguments: {
+          'x-max-length': 100,
+          'x-message-ttl': 3600000,
+          ...this.options.queueArguments,
+        },
       });
       await channel.assertQueue(this.options.queue, {
         durable: true,
@@ -90,9 +99,10 @@ export class EventStatsReceiver {
           'x-message-ttl': 3600000,
           'x-dead-letter-exchange': '',
           'x-dead-letter-routing-key': dlq,
+          ...this.options.queueArguments,
         },
       });
-      for (const exchange of Object.values(REPORTERS))
+      for (const exchange of exchanges)
         await channel.bindQueue(this.options.queue, exchange, REPORT_EVENT_TYPE);
       await channel.prefetch(10);
       if (!this.running) {

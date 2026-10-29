@@ -1,6 +1,6 @@
 {
   "name": "@saga-ed/soa-event-stats",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "main": "dist/index.js",
@@ -21,7 +21,8 @@
     "test": "vitest run --passWithNoTests",
     "test:int": "vitest run --config vitest.int.config.ts",
     "lint": "eslint src/",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test:zod3": "vitest run --config vitest.zod3.config.ts"
   },
   "dependencies": {
     "@saga-ed/soa-event-envelope": "workspace:*",
@@ -42,7 +43,8 @@
     "@saga-ed/soa-event-test-harness": "workspace:*",
     "pg": "^8.13.0",
     "@saga-ed/soa-eslint-config": "workspace:*",
-    "eslint": "^8.57.0"
+    "eslint": "^8.57.0",
+    "zod3": "npm:zod@3.25.67"
   },
   "publishConfig": {
     "registry": "https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/",

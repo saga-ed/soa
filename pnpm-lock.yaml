@@ -1367,6 +1367,9 @@ importers:
       vitest:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@24.0.12)(jsdom@25.0.1)
+      zod3:
+        specifier: npm:zod@3.25.67
+        version: zod@3.25.67
 
   packages/node/event-test-harness:
     dependencies:
@@ -18060,7 +18063,7 @@ snapshots:
       tinyglobby: 0.2.15
       unrs-resolver: 1.11.1
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.50.0(eslint@8.57.1)(typescript@5.8.2))(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
     transitivePeerDependencies:
       - supports-color
 

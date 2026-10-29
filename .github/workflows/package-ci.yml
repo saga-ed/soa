@@ -608,6 +608,10 @@ jobs:
       - name: Test event boundaries and contract
         run: pnpm --filter @saga-ed/soa-event-consumer --filter @saga-ed/soa-event-outbox --filter @saga-ed/soa-event-stats test
 
+      # Adopters may force Zod 3 (program-hub pnpm.overrides); the contract must load there too (gh_536 d8).
+      - name: Test event statistics contract under Zod 3
+        run: pnpm --filter @saga-ed/soa-event-stats test:zod3
+
       - name: Test Postgres and RabbitMQ pipeline
         run: pnpm --filter @saga-ed/soa-event-stats test:int
 

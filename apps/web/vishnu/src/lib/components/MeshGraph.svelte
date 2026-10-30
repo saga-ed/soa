@@ -11,7 +11,7 @@
  import SystemNode from './SystemNode.svelte';
  import ConnectionEdge from './ConnectionEdge.svelte';
  import GraphControls from './GraphControls.svelte';
- let { focusSignals = true, demoSignals = {}, datadog = null, datadogError = false, now = 0, signalView = 'overview', snapshot, layout, selected, onselect, mqViews = {}, onpreview }: { focusSignals?: boolean; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; signalView?: SignalView; mqViews?: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; snapshot: MeshSnapshot; layout: MeshLayout; selected: string | null; onselect: (id: string | null) => void } = $props();
+ let { fitRequest = 0, focusSignals = true, demoSignals = {}, datadog = null, datadogError = false, now = 0, signalView = 'overview', snapshot, layout, selected, onselect, mqViews = {}, onpreview }: { fitRequest?: number; focusSignals?: boolean; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; signalView?: SignalView; mqViews?: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; snapshot: MeshSnapshot; layout: MeshLayout; selected: string | null; onselect: (id: string | null) => void } = $props();
  let participants = $derived(busParticipants(snapshot));
  const demoMatch = (s: DemoSignal) => signalView === 'overview' || (signalView === 'attention' ? signalDegree(s) >= .7 : signalView === s.kind);
  let displayLayout = $state<MeshLayout|null>(null);
@@ -34,9 +34,9 @@
   return ids;
  };
  $effect(()=>{
-  const base=layout, view=signalView, enabled=focusSignals, request=manualFocus;
+  const base=layout, view=signalView, enabled=focusSignals, request=manualFocus, fit=fitRequest;
   untrack(()=>{
-   const focusRequest = JSON.stringify([view, enabled, request]);
+   const focusRequest = JSON.stringify([view, enabled, request, fit]);
    const refit = lastFocusRequest !== focusRequest;
    lastFocusRequest = focusRequest;
    cancelAnimationFrame(frame);
@@ -46,7 +46,8 @@
    targetLayout=next;
    const previous=displayLayout;
    if(!previous){displayLayout=next;return;}
-   // Background topology polls must not override the user's viewport.
+   // Background topology polls must not override the user's viewport; a
+   // relayout for a new canvas shape (fitRequest) does refit.
    if (refit) revision++;
    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){displayLayout=next;moving=false;return;}
    const interpolate=layoutTween(previous,next);const start=performance.now();moving=true;

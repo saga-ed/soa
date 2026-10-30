@@ -23,9 +23,27 @@ export function topologyKey(snapshot: MeshSnapshot): string {
   });
 }
 
+/** Approximate footprint of one layered column (node, layer gap, edge lanes)
+ * and one stacked row. */
+const columnPitch = nodeWidth + 96 + 64;
+const rowPitch = nodeHeight + 48;
+
+/**
+ * Most systems per layer for a canvas of the given width/height ratio. Without
+ * a bound, a band with many loosely connected services becomes one tall column;
+ * bounding the layer lets the band wrap into more columns on wide screens.
+ */
+export function layerBound(snapshot: MeshSnapshot, aspectRatio: number): number {
+  // Shared infrastructure sits in its own fixed row, outside the layered columns.
+  const count = snapshot.systems.filter(system => systemShape(system) === 'service').length;
+  const ratio = Math.min(6, Math.max(0.5, aspectRatio));
+  return Math.max(3, Math.ceil(Math.sqrt((count * columnPitch) / (ratio * rowPitch))));
+}
+
 export async function layoutMesh(
   snapshot: MeshSnapshot,
-  engine?: Pick<InstanceType<typeof ELK>, 'layout'>
+  engine?: Pick<InstanceType<typeof ELK>, 'layout'>,
+  aspectRatio = 16 / 9
 ): Promise<MeshLayout> {
   const systems = [...snapshot.systems].sort(
     (a, b) => layoutRank(a) - layoutRank(b) || compare(a.id, b.id)
@@ -102,10 +120,18 @@ export async function layoutMesh(
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.randomSeed': '1',
       'elk.partitioning.activate': 'true',
+      // Partitions still order the bands; within them, Coffman-Graham wraps
+      // wide bands into several columns instead of one unbounded layer.
+      'elk.layered.layering.strategy': 'COFFMAN_GRAHAM',
+      'elk.layered.layering.coffmanGraham.layerBound': String(layerBound(snapshot, aspectRatio)),
       'elk.separateConnectedComponents': 'false',
       'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
       'elk.layered.crossingMinimization.greedySwitch.type': 'TWO_SIDED',
       'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      // Brandes-Koepf straightens fan-outs by spreading a layer's nodes over the
+      // whole graph height, which re-creates the tall column. Packing each layer
+      // keeps the height near the bound and the drawing wide.
+      'elk.layered.nodePlacement.strategy': 'SIMPLE',
       'elk.layered.mergeEdges': 'false',
       'elk.layered.mergeHierarchyEdges': 'false',
       'elk.spacing.nodeNode': '48',

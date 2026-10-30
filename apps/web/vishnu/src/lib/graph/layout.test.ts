@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutMesh, topologyKey } from './layout';
+import { layerBound, layoutMesh, topologyKey } from './layout';
 import type { Band, MeshLayout, MeshSnapshot, Relationship, System } from './types';
 import { createFixture } from '../fixtures/mesh';
 
@@ -77,6 +77,22 @@ const denseFixture = (): MeshSnapshot => {
     for (let j = 0; j < 4; j++) {
       snapshot.relationships.push(edge(`api-${i}-${j}`, `app-${i}`, `service-${j}`));
     }
+  return snapshot;
+};
+
+/** Hosted shape: apps fan out to a wide mesh band, many services report APM only. */
+const hostedFixture = (): MeshSnapshot => {
+  const snapshot = fixture();
+  snapshot.systems = [
+    ...Array.from({ length: 26 }, (_, i) => system(`api-${i}`, 'mesh')),
+    ...Array.from({ length: 3 }, (_, i) => system(`web-${i}`, 'application')),
+  ];
+  snapshot.relationships = [
+    ...Array.from({ length: 11 }, (_, i) => edge(`dash-${i}`, 'web-0', `api-${i}`)),
+    ...[1, 2, 11].map(i => edge(`coach-${i}`, 'web-1', `api-${i}`)),
+    ...[1, 12, 13].map(i => edge(`connect-${i}`, 'web-2', `api-${i}`)),
+    ...[2, 3, 4].map(i => edge(`mesh-${i}`, `api-${i}`, 'api-1')),
+  ];
   return snapshot;
 };
 
@@ -177,6 +193,33 @@ describe('mesh layout', () => {
     // A measured fixed-order baseline (NONE/OFF + forceNodeModelOrder) has
     // 438 proper segment crossings with elkjs 0.11.1 on this same fixture.
     expect(crossingCount(layout)).toBeLessThan(438);
+  });
+
+  it('wraps a wide mesh band to fill wide canvases and stack on narrow ones', async () => {
+    const snapshot = hostedFixture();
+    const ultrawide = await layoutMesh(snapshot, undefined, 21 / 9);
+    const phone = await layoutMesh(snapshot, undefined, 0.8);
+    expectClearGeometry(ultrawide);
+    expectClearGeometry(phone);
+    // An unbounded layer stacked these 26 services into one column (about 1:2).
+    expect(ultrawide.width / ultrawide.height).toBeGreaterThan(1.6);
+    expect(phone.width / phone.height).toBeLessThan(ultrawide.width / ultrawide.height);
+    // Wrapping stays inside the band: every application remains right of the mesh.
+    const node = (id: string) => ultrawide.nodes.find(node => node.id === id)!;
+    const meshEdge = Math.max(
+      ...ultrawide.nodes.filter(n => n.id.startsWith('api')).map(n => n.x + n.width)
+    );
+    for (const app of ['web-0', 'web-1', 'web-2']) expect(node(app).x).toBeGreaterThan(meshEdge);
+  });
+
+  it('bounds layers by canvas shape only, so equal bounds give equal layouts', async () => {
+    const snapshot = hostedFixture();
+    expect(layerBound(snapshot, 21 / 9)).toBeLessThan(layerBound(snapshot, 16 / 9));
+    expect(layerBound(snapshot, 16 / 9)).toBeLessThan(layerBound(snapshot, 0.8));
+    expect(layerBound(fixture(), 21 / 9)).toBe(3);
+    expect(await layoutMesh(snapshot, undefined, 2.3)).toEqual(
+      await layoutMesh(snapshot, undefined, 2.31)
+    );
   });
 
   it('routes a self-loop back to its actual system without crossing nodes', async () => {

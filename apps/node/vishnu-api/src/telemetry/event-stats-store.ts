@@ -6,6 +6,7 @@ import {
   type Report,
   type ReportComparison,
 } from '@saga-ed/soa-event-stats';
+import { applyPreviewTag } from '@saga-ed/soa-event-envelope';
 
 export type TelemetryScope = Pick<
   Report['identity'],
@@ -15,7 +16,43 @@ export const REPORTERS = {
   'iam-api': 'iam.events',
   'programs-api': 'programs.events',
   'scheduling-api': 'scheduling.events',
+  // d10 wave 1 (program-hub); Datadog service names confirmed for d6.
+  'sessions-api': 'sess.events',
+  'content-api': 'content.events',
+  // d10 wave 1 (student-data-system, isolated per d11); Datadog names confirmed for d6.
+  'chat-api': 'chat.events',
+  'insights-api': 'insights.events',
+  'transcripts-api': 'transcripts.events',
 } as const;
+export type ReporterExchanges = Readonly<Record<keyof typeof REPORTERS, string>>;
+/** A patch-party sandbox identifier, the value its services put in EVENT_PREVIEW_TAG. */
+export const SANDBOX_PREVIEW_TAG = /^sandbox-[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$/;
+/**
+ * d9: validates an optional sandbox observation tag. Absent or empty means the
+ * untagged dev mesh. A tag must be `sandbox-<name>` and must equal the exact MQ
+ * deployment, so one receiver never mixes a sandbox with another population.
+ */
+export function mqPreviewTag(tag: string | undefined, deployment: string | undefined) {
+  if (!tag) return undefined;
+  if (!SANDBOX_PREVIEW_TAG.test(tag)) throw new Error('MQ preview tag must be sandbox-<name>');
+  if (deployment !== tag)
+    throw new Error('A sandbox observer must use its preview tag as MQ deployment');
+  return tag;
+}
+/**
+ * The reporter exchange each service must publish on. With a sandbox tag, every
+ * exchange gets the same applyPreviewTag suffix the sandboxed publishers use.
+ * Without one this is REPORTERS itself; the process environment is never read.
+ */
+export function reporterExchanges(previewTag?: string): ReporterExchanges {
+  if (!previewTag) return REPORTERS;
+  return Object.fromEntries(
+    Object.entries(REPORTERS).map(([service, exchange]) => [
+      service,
+      applyPreviewTag(exchange, previewTag),
+    ])
+  ) as ReporterExchanges;
+}
 export type ApplyResult = 'accepted' | 'ignored' | 'scope' | 'capacity';
 const keyFor = (r: Report) =>
   createHash('sha256')
@@ -37,7 +74,13 @@ export class EventStatsStore {
   constructor(
     private readonly pool: Pool,
     readonly scope: TelemetryScope,
-    private readonly limits = { sources: 256, epochs: 64, retentionMs: 86_400_000, staleMs: 90_000 }
+    private readonly limits = {
+      sources: 256,
+      epochs: 64,
+      retentionMs: 86_400_000,
+      staleMs: 90_000,
+    },
+    private readonly reporters: ReporterExchanges = REPORTERS
   ) {}
   async init(): Promise<void> {
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_stats_source (
@@ -52,7 +95,9 @@ export class EventStatsStore {
       Object.entries(this.scope).some(([k, v]) => report.identity[k as keyof TelemetryScope] !== v)
     )
       return 'scope';
-    if (REPORTERS[report.identity.service as keyof typeof REPORTERS] !== exchange) return 'scope';
+    const service = report.identity.service;
+    if (!Object.hasOwn(this.reporters, service)) return 'scope';
+    if (this.reporters[service as keyof ReporterExchanges] !== exchange) return 'scope';
     const key = keyFor(report);
     const client = await this.pool.connect();
     try {

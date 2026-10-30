@@ -2,13 +2,14 @@
  import FanoutIcon from '$lib/components/FanoutIcon.svelte';
  import { matchesMesh, type DatadogSnapshot, type SignalView } from '$lib/graph/datadog';
  import { createSignalDemo, demoSignals } from '$lib/fixtures/signals';
- import { onMount } from 'svelte';
+ import { onMount, tick } from 'svelte';
  import { createFixture } from '$lib/fixtures/mesh';
  import { createLayoutWorker } from '$lib/graph/worker-layout';
+ import { layerBound } from '$lib/graph/layout';
  import type { MeshLayout, MeshSnapshot } from '$lib/graph/types';
  import MeshGraph from '$lib/components/MeshGraph.svelte';
  import MqStats from '$lib/components/MqStats.svelte';
- import { scopedStats, serviceStats, type HostedMqScope, type StatsSnapshot, type MqViews } from '$lib/graph/event-stats';
+ import { hostedMqLabel, hostedMqScope, scopedStats, serviceStats, type HostedMqScope, type StatsSnapshot, type MqViews } from '$lib/graph/event-stats';
  import SideInspector from '$lib/components/SideInspector.svelte';
  let datadog = $state<DatadogSnapshot | null>(null);
  let datadogError = $state(false);
@@ -43,6 +44,15 @@
   return Object.fromEntries((snapshot?.systems ?? []).map(s => [s.id, serviceStats(scoped, s.id, Math.max(0,clock-statsLoadedAt), !!statsError)]));
  });
  let layout = $state<MeshLayout | null>(null);
+ // Layout wraps bands to the canvas shape; only a change of layer bound relayouts.
+ let canvasWidth = $state(0);
+ let canvasHeight = $state(0);
+ let layoutAspect = 16 / 9;
+ let layoutSeq = 0;
+ let fitRequest = $state(0);
+ let scheduleRelayout: (() => void) | undefined;
+ const canvasAspect = () => canvasWidth > 0 && canvasHeight > 0 ? canvasWidth / canvasHeight : window.innerWidth / window.innerHeight;
+ $effect(() => { if (snapshot && layout && canvasWidth && canvasHeight && layerBound(snapshot, canvasAspect()) !== layerBound(snapshot, layoutAspect)) scheduleRelayout?.(); });
  let failure = $state('');
  let selected = $state<string | null>(null);
  let search = $state('');
@@ -61,6 +71,16 @@
   const clockTimer = setInterval(() => clock = performance.now(), 1000);
   let apiUrl = '/api/mesh';
   let pollMs = 15000;
+  let relayoutTimer: ReturnType<typeof setTimeout>;
+  const layoutFor = (next: MeshSnapshot) => { layoutAspect = canvasAspect(); layoutSeq++; return worker.layout(next, layoutAspect); };
+  scheduleRelayout = () => {
+   clearTimeout(relayoutTimer);
+   relayoutTimer = setTimeout(async () => {
+    if (!snapshot) return;
+    const next = layoutFor($state.snapshot(snapshot) as MeshSnapshot), seq = layoutSeq;
+    try { const result = await next; if (active && seq === layoutSeq) { layout = result; fitRequest++; } } catch { /* Keep the current layout. */ }
+   }, 250);
+  };
   const fetchJson = async (url: string) => {
    const request = new AbortController();
    requests.add(request);
@@ -95,7 +115,7 @@
    try {
     const next: MeshSnapshot = await fetchJson(apiUrl);
     if (next.mode !== 'live' || !Array.isArray(next.systems) || !Array.isArray(next.relationships) || !next.topologyVersion || !Number.isFinite(Date.parse(next.observedAt))) throw new Error('Invalid live mesh response');
-    const nextLayout = !layout || next.topologyVersion !== liveSnapshot?.topologyVersion ? await worker.layout(next) : layout;
+    const nextLayout = !layout || next.topologyVersion !== liveSnapshot?.topologyVersion ? await layoutFor(next) : layout;
     if (!active) return;
     layout = nextLayout;
     liveSnapshot = next;
@@ -111,7 +131,7 @@
   const start = async () => {
    const requested = new URLSearchParams(location.search).get('mode');
    demo = requested === 'demo';
-   let config: { mode?: string; apiUrl?: string; pollIntervalMs?: number; mqEnabled?: boolean; environment?: string; mqDeployment?: string | null } = {};
+   let config: { mode?: string; apiUrl?: string; pollIntervalMs?: number; mqEnabled?: boolean; environment?: string; mqDeployment?: string | null; mqPreviewTag?: string } = {};
    if (requested !== 'fixture' && !demo) {
     try { config = await fetchJson('/config.json'); } catch { /* Static fixture builds have no runtime config. */ }
    }
@@ -121,17 +141,17 @@
     apiUrl = config.apiUrl || '/api/mesh';
     pollMs = Math.max(3000, Number(config.pollIntervalMs) || 15000);
     mqEnabled = config.mqEnabled !== false;
-    hostedMq = config.environment && config.mqDeployment ? { environment: config.environment, deployment: config.mqDeployment } : null;
+    hostedMq = hostedMqScope(config);
     if (mqEnabled) void pollStats();
     void pollDatadog();
     await poll();
    } else {
-    try { const result = await worker.layout(demo ? createSignalDemo() : createFixture('overview')); if (active) layout = result; }
+    try { await tick(); const result = await layoutFor(demo ? createSignalDemo() : createFixture('overview')); if (active) layout = result; }
     catch (error) { if (active) failure = String(error); }
    }
   };
   void start();
-  return () => { active = false; clearTimeout(timer); clearTimeout(statsTimer); clearTimeout(datadogTimer); clearTimeout(hoverTimer); clearInterval(clockTimer); for (const request of requests) request.abort(); worker.terminate(); };
+  return () => { active = false; clearTimeout(timer); clearTimeout(statsTimer); clearTimeout(datadogTimer); clearTimeout(hoverTimer); clearTimeout(relayoutTimer); clearInterval(clockTimer); for (const request of requests) request.abort(); worker.terminate(); };
  });
 </script>
 <svelte:head><title>Vishnu · Saga mesh</title><meta name="description" content="Saga mesh topology, system health, and evidence." /></svelte:head>
@@ -140,7 +160,7 @@
  <nav class="app-nav" aria-label="Main"><div class="nav-context"><a class="vishnu-brand" href="/" aria-label="Vishnu home"><img src="/vishnu-logo-on-dark.png" alt="Vishnu — Saga Mesh Observability" width="2172" height="724" /></a></div><a class="active-nav" aria-current="page" href="/">◈ &nbsp; Mesh overview</a><div class="nav-bottom">{sourceLabel}<br/><small>{mode === 'fixture' ? 'Design & interaction study' : snapshot?.scope ? 'Cloud mesh observations' : 'Local stack health probes'}</small></div></nav>
  <div class="app-main"><header class="topbar"><h1>Preserve, Protect, Anticipate</h1><span class="preview-badge">{sourceLabel}</span></header>
  <main id="mesh-main">
- {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for mesh observations.'} Retrying automatically.{:else}{snapshot?.scope ? 'Source-declared topology · Datadog observations' : 'Local health probes · declared product topology'} · MQ telemetry{#if hostedMq} ({hostedMq.environment} / {hostedMq.deployment}){/if} {!mqEnabled ? 'not enabled' : statsError ? 'unavailable' : stats?.receiver.connected ? 'connected' : 'connecting'}{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
+ {#if mode === 'live'}<p class="live-status" role="status">{#if disconnected}{disconnected}. {snapshot ? 'Showing the last observation, marked stale.' : 'Waiting for mesh observations.'} Retrying automatically.{:else}{snapshot?.scope ? 'Source-declared topology · Datadog observations' : 'Local health probes · declared product topology'} · MQ telemetry{#if hostedMq} ({hostedMqLabel(hostedMq)}){/if} {!mqEnabled ? 'not enabled' : statsError ? 'unavailable' : stats?.receiver.connected ? 'connected' : 'connecting'}{/if} <a href="?mode=fixture">Open fixture preview</a></p>{/if}
  {#if snapshot}
  {#if mode === 'live'}<p class="datadog-status" role="status">Datadog: {datadogError ? 'unavailable; retrying' : datadog?.status ?? 'connecting'}{#if datadog} · {datadog.scope.environment} / {datadog.scope.deployment}{#if !scopedDatadog} · separate scope; graph overlay disabled{/if}{/if}. Metrics describe services; flow analysis opens in Datadog.</p>{/if}
  {#if demo}<div class="demo-banner"><strong>SIMULATED SIGNALS · stand-up demo</strong><span>Invented measurements and call chains. No live APIs or Datadog queries.</span><a href="/">Return to live view ↗</a></div>{:else}<p class="demo-entry"><a href="?mode=demo">Preview simulated signals ↗</a></p>{/if}
@@ -148,7 +168,7 @@
  {#if demo}<div class="signal-legend" aria-label="Signal legend"><span style="--signal-color:var(--color-attention-strong)">↗ Hot traffic</span><span style="--signal-color:var(--color-primary)">◷ Slow paths</span><span style="--signal-color:var(--chart-2)"><FanoutIcon /> Fan-out</span><span style="--signal-color:var(--color-signal-error)">! Errors / breached threshold</span><small>Intensity = budget used · 35–100% opacity · ▲ early warning from 70% · full connectivity stays visible</small></div>{/if}
  <p class="sr-only" role="status" aria-live="polite">Selected: {selectedLabel}. {showInspector ? 'Details are in the selection inspector.' : 'Use Show inspector for details.'}</p>
  {#if showList}<section class="mesh-list" id="mesh-list" aria-label="Mesh systems and relationships"><div><h3>Systems</h3><ul>{#each snapshot.systems as system}<li><button aria-pressed={selected === system.id} onclick={() => selected = system.id}>{system.label}<small>{system.kind} · {mode === 'live' && system.health === 'healthy' ? 'reachable' : system.health} · {system.freshness}</small></button></li>{/each}</ul></div><div><h3>Relationships</h3><ul>{#each snapshot.relationships as relationship}<li><button aria-pressed={selected === relationship.id} onclick={() => selected = relationship.id}>{relationship.label}<small>{snapshot?.systems.find(s => s.id === relationship.source)?.label} → {snapshot?.systems.find(s => s.id === relationship.target)?.label}<br/>{relationship.kind} · {relationship.health} · {relationship.freshness}</small></button></li>{/each}</ul></div></section>{/if}
- <div class="workspace" class:inspector-hidden={!showInspector}><section class="graph-panel" aria-label="Interactive service mesh"><div class="band-labels"><span>DATA SYSTEMS</span><span>MESH SERVICES</span><span>APPLICATIONS</span></div><div class="graph-canvas">{#if layout}<MeshGraph {focusSignals} demoSignals={demo ? demoSignals : {}} datadog={scopedDatadog} {datadogError} now={datadogNow} {signalView} {snapshot} {layout} {selected} {mqViews} onpreview={preview} onselect={id => { selected = id; hover = null; if (id) showInspector = true; }}/>{:else if failure}<p role="alert">Could not lay out mesh: {failure}</p>{:else}<p role="status">Laying out the mesh…</p>{/if}</div><div class="graph-footer">Drag to pan · Scroll to zoom · Tab then Enter to select<span>Hover path markers for details · signal views reflow with context</span></div></section>{#if showInspector}<SideInspector demoSignals={demo ? demoSignals : {}} {datadog} {datadogError} now={datadogNow} {snapshot} {selected} {mqViews} onselect={id => selected = id}/>{/if}</div>
+ <div class="workspace" class:inspector-hidden={!showInspector}><section class="graph-panel" aria-label="Interactive service mesh"><div class="band-labels"><span>DATA SYSTEMS</span><span>MESH SERVICES</span><span>APPLICATIONS</span></div><div class="graph-canvas" bind:clientWidth={canvasWidth} bind:clientHeight={canvasHeight}>{#if layout}<MeshGraph {focusSignals} demoSignals={demo ? demoSignals : {}} datadog={scopedDatadog} {datadogError} now={datadogNow} {signalView} {snapshot} {layout} {selected} {mqViews} {fitRequest} onpreview={preview} onselect={id => { selected = id; hover = null; if (id) showInspector = true; }}/>{:else if failure}<p role="alert">Could not lay out mesh: {failure}</p>{:else}<p role="status">Laying out the mesh…</p>{/if}</div><div class="graph-footer">Drag to pan · Scroll to zoom · Tab then Enter to select<span>Hover path markers for details · signal views reflow with context</span></div></section>{#if showInspector}<SideInspector demoSignals={demo ? demoSignals : {}} {datadog} {datadogError} now={datadogNow} {snapshot} {selected} {mqViews} onselect={id => selected = id}/>{/if}</div>
  {:else}<p role="status">{disconnected || 'Connecting to the mesh…'}</p>{/if}
  </main></div>
 </div>

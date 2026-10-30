@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Print a complete dev SAM command; never execute it or read secret values."""
 import argparse
+import re
 from pathlib import Path
 import shlex
 import yaml
@@ -16,7 +17,8 @@ required = set() if args.stage == 'bootstrap-dev' else {'ListenerRulePriorityBas
 # MQ receiver wiring (gh_536 d3/d4); optional, and the templates default it off.
 optional = (
     {'MqNetworkEnabled', 'DbHostPostgresPort', 'VishnuDatabaseUrlSecretArn'} if args.stage == 'bootstrap-dev'
-    else {'VishnuMqEnabled', 'VishnuDatabaseUrlSecretArn', 'EventStatsDeployment', 'EventStatsBroker', 'EventStatsVhost'}
+    else {'VishnuMqEnabled', 'VishnuDatabaseUrlSecretArn', 'EventStatsDeployment', 'EventStatsBroker', 'EventStatsVhost',
+          'EventStatsPreviewTag'}
     if args.stage in ['dev', 'dev-green'] else set()
 )
 if args.stage == 'dev-green':
@@ -38,6 +40,13 @@ if args.stage.startswith('routing-'):
         parser.error('Priority must be numeric')
     if not 1 <= priority <= 3999:
         parser.error('Priority must be in the preview range 1–3999; check the live listener before choosing')
+tag = values.get('EventStatsPreviewTag')
+if tag:
+    # gh_536 d9: one named sandbox, exact scope; the template Rule enforces the same.
+    if not re.fullmatch(r'sandbox-[a-zA-Z0-9][a-zA-Z0-9-]{0,39}', tag):
+        parser.error('EventStatsPreviewTag must be sandbox-<name>')
+    if values.get('VishnuMqEnabled') != 'true' or values.get('EventStatsDeployment') != tag:
+        parser.error('EventStatsPreviewTag needs VishnuMqEnabled=true and EventStatsDeployment equal to the tag')
 if args.stage in ['dev', 'dev-green'] and not values['ImageArn'].startswith('396913734878.dkr.ecr.us-west-2.amazonaws.com/soa/vishnu-api:'):
     parser.error('Image must be an immutable tag in the dev Vishnu ECR repository')
 command = ['sam', 'deploy', '--profile', 'saga-infra-dev', '--region', params['region'],

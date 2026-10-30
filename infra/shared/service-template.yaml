@@ -24,6 +24,10 @@ Parameters:
   EventStatsVhost: {Type: String, Default: '/', AllowedPattern: '^[a-zA-Z0-9_./-]+$'}
   VishnuDatabaseUrlSecretArn: {Type: String, Default: '', AllowedPattern: '^(|arn:aws:secretsmanager:us-west-2:[0-9]{12}:secret:.+)$'}
   RabbitmqUrlSSMParameterName: {Type: String, Default: /shared/infra/dev/rabbitmq-url, AllowedPattern: '^/[a-zA-Z0-9_./-]+$'}
+  # gh_536 d9: observe ONE patch-party sandbox instead of the untagged dev mesh.
+  # Empty (default) adds nothing to the task definition. When set, it must equal
+  # EventStatsDeployment, and the receiver binds the sandbox-tagged exchanges.
+  EventStatsPreviewTag: {Type: String, Default: '', AllowedPattern: '^(|sandbox-[a-zA-Z0-9][a-zA-Z0-9-]{0,39})$'}
 Rules:
   MqRequiresReceiverWiring:
     RuleCondition: !Equals [!Ref VishnuMqEnabled, 'true']
@@ -32,9 +36,19 @@ Rules:
         AssertDescription: VishnuMqEnabled=true needs VishnuDatabaseUrlSecretArn
       - Assert: !Not [!Equals [!Ref EventStatsBroker, '']]
         AssertDescription: VishnuMqEnabled=true needs EventStatsBroker
+  SandboxObservationIsExact:
+    RuleCondition: !Not [!Equals [!Ref EventStatsPreviewTag, '']]
+    Assertions:
+      - Assert: !Equals [!Ref VishnuMqEnabled, 'true']
+        AssertDescription: EventStatsPreviewTag needs VishnuMqEnabled=true
+      - Assert: !Equals [!Ref EventStatsPreviewTag, !Ref EventStatsDeployment]
+        AssertDescription: EventStatsPreviewTag must equal EventStatsDeployment (exact MQ scope, d3/d9)
+      - Assert: !Equals [!Ref ExecEnv, dev]
+        AssertDescription: Sandbox observation is dev-only
 Conditions:
   IsProd: !Equals [!Ref ExecEnv, prod]
   MqEnabled: !Equals [!Ref VishnuMqEnabled, 'true']
+  MqSandbox: !And [!Condition MqEnabled, !Not [!Equals [!Ref EventStatsPreviewTag, '']]]
 Resources:
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -69,6 +83,7 @@ Resources:
             - !If [MqEnabled, {Name: EVENT_STATS_DEPLOYMENT, Value: !Ref EventStatsDeployment}, !Ref 'AWS::NoValue']
             - !If [MqEnabled, {Name: EVENT_STATS_BROKER, Value: !Ref EventStatsBroker}, !Ref 'AWS::NoValue']
             - !If [MqEnabled, {Name: EVENT_STATS_VHOST, Value: !Ref EventStatsVhost}, !Ref 'AWS::NoValue']
+            - !If [MqSandbox, {Name: VISHNU_MQ_PREVIEW_TAG, Value: !Ref EventStatsPreviewTag}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: DD_API_KEY, ValueFrom: !Ref DatadogApiKeyArn}
             - {Name: DD_APP_KEY, ValueFrom: !Ref DatadogAppKeyArn}

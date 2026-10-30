@@ -1,6 +1,13 @@
 import { expect, it } from 'vitest';
 import { EventStats, compareReports } from '@saga-ed/soa-event-stats';
-import { scopedStats, serviceStats, type StatsSnapshot, type StatsSource } from './event-stats';
+import {
+  hostedMqLabel,
+  hostedMqScope,
+  scopedStats,
+  serviceStats,
+  type StatsSnapshot,
+  type StatsSource,
+} from './event-stats';
 const now = new Date().toISOString();
 const scope = { environment: 'synthetic', deployment: 'slot-3', broker: 'soa-s3', vhost: '/' };
 function source(instance = 'one', accepted = 3, interval = 1000): StatsSource {
@@ -126,4 +133,40 @@ it('accepts stats only for the exact synthetic slot or hosted MQ deployment', ()
   ).toBeNull();
   expect(scopedStats(stats(hostedScope), { mode: 'live', slot: 3 }, hosted)).toBeNull();
   expect(scopedStats(stats(hostedScope), { mode: 'fixture' }, hosted)).toBeNull();
+});
+it('keeps the untagged hosted scope and label unchanged when no sandbox tag is configured (d9)', () => {
+  const config = { environment: 'dev', mqDeployment: 'main' };
+  expect(hostedMqScope(config)).toEqual({ environment: 'dev', deployment: 'main' });
+  expect(hostedMqLabel(hostedMqScope(config)!)).toBe('dev / main');
+  expect(hostedMqScope({ environment: 'dev', mqDeployment: null })).toBeNull();
+  expect(hostedMqScope({ mqDeployment: 'main' })).toBeNull();
+});
+it('observes exactly one named sandbox and labels it apart from the environment-wide APM view (d9)', () => {
+  const config = {
+    environment: 'dev',
+    mqDeployment: 'sandbox-gh537',
+    mqPreviewTag: 'sandbox-gh537',
+  };
+  const hosted = hostedMqScope(config)!;
+  expect(hosted).toEqual({
+    environment: 'dev',
+    deployment: 'sandbox-gh537',
+    previewTag: 'sandbox-gh537',
+  });
+  expect(hostedMqLabel(hosted)).toBe(
+    'dev / sandbox-gh537 · patch-party sandbox; APM stays dev-wide'
+  );
+  // A tag that disagrees with the exact deployment is refused rather than guessed.
+  expect(hostedMqScope({ ...config, mqPreviewTag: 'sandbox-other' })).toBeNull();
+  const stats = (deployment: string): StatsSnapshot => ({
+    version: 1,
+    scope: { environment: 'dev', deployment, broker: 'shared-dev-mq', vhost: '/' },
+    observedAt: now,
+    staleAfterMs: 90000,
+    sources: [],
+    receiver: { connected: true },
+  });
+  expect(scopedStats(stats('sandbox-gh537'), { mode: 'live' }, hosted)).not.toBeNull();
+  expect(scopedStats(stats('main'), { mode: 'live' }, hosted)).toBeNull();
+  expect(scopedStats(stats('sandbox-other'), { mode: 'live' }, hosted)).toBeNull();
 });

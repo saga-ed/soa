@@ -17,6 +17,21 @@ links the entry.
 
 ---
 
+### 2026-10-30 — Hosted MQ badges, combined Vishnu PR, blue redeployed
+
+- **What changed:** hosted meshes never marked event-bus participants (only the synthetic
+  `ss` manifest did), so no hosted node showed MQ badges. Added a source-declared
+  `declaredEventBus` table (iam, programs, scheduling, sessions, content) next to the
+  declared HTTP connections. The ultrawide layout (closed PR#558) and the wave-1 `REPORTERS`
+  (sessions, content) were folded into **PR#556**, now the single Vishnu PR. Blue redeployed
+  (`4549326b`): badges show, counters read 0/0 (sandbox has no traffic).
+- **Where:** soa PR#556 (`gh_538-vishnu-sandbox` @ `4549326b`); blue task definition rev 4.
+- **Impact on functionality work:** participation is now declared in
+  `apps/node/vishnu-api/src/declared-topology.ts`. When a service starts reporting, add it to
+  both `REPORTERS` and `declaredEventBus`. Consider deriving roles from report capabilities.
+- **Action for Astra:** review the declared-vs-derived approach for event-bus participation.
+  sds (chat, insights, transcripts) is pending d11 and isn't in either table yet.
+
 ### 2026-10-30 — Wave 1 instrumentation (d10) and the doc tree
 
 - **What changed:** d10 ruled, two waves. sessions-api and content-api are instrumented

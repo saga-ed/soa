@@ -136,6 +136,11 @@ export const declaredEventBus = new Map<string, { publishes: boolean; consumes: 
   ['scheduling-api', { publishes: true, consumes: true }],
   ['sessions-api', { publishes: true, consumes: true }],
   ['content-api', { publishes: true, consumes: false }],
+  ['chat-api', { publishes: true, consumes: false }],
+  ['insights-api', { publishes: true, consumes: false }],
+  // Its transcription.events consumer uses its own connection and doesn't report, so only the
+  // instrumented outbox side is declared; a consumer badge would show counts that never move.
+  ['transcripts-api', { publishes: true, consumes: false }],
 ]);
 export const applicationLabels = new Map([
   ['coach', 'Coach'],

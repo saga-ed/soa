@@ -129,6 +129,9 @@ describe('reporter exchanges (d9)', () => {
       'scheduling-api': 'scheduling.events.sandbox-gh537',
       'sessions-api': 'sess.events.sandbox-gh537',
       'content-api': 'content.events.sandbox-gh537',
+      'chat-api': 'chat.events.sandbox-gh537',
+      'insights-api': 'insights.events.sandbox-gh537',
+      'transcripts-api': 'transcripts.events.sandbox-gh537',
     });
   });
 });
@@ -202,6 +205,9 @@ describe('receiver topology (d1/d9)', () => {
       'scheduling.events',
       'sess.events',
       'content.events',
+      'chat.events',
+      'insights.events',
+      'transcripts.events',
     ]);
     expect(calls.bindQueue.map(([, exchange]) => exchange)).toEqual(calls.checkExchange);
     expect(calls.assertQueue).toEqual([
@@ -234,6 +240,9 @@ describe('receiver topology (d1/d9)', () => {
       'scheduling.events.sandbox-gh537',
       'sess.events.sandbox-gh537',
       'content.events.sandbox-gh537',
+      'chat.events.sandbox-gh537',
+      'insights.events.sandbox-gh537',
+      'transcripts.events.sandbox-gh537',
     ];
     expect(calls.checkExchange).toEqual(tagged);
     expect(calls.bindQueue).toEqual(

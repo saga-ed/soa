@@ -19,6 +19,10 @@ export const REPORTERS = {
   // d10 wave 1 (program-hub); Datadog service names confirmed for d6.
   'sessions-api': 'sess.events',
   'content-api': 'content.events',
+  // d10 wave 1 (student-data-system, isolated per d11); Datadog names confirmed for d6.
+  'chat-api': 'chat.events',
+  'insights-api': 'insights.events',
+  'transcripts-api': 'transcripts.events',
 } as const;
 export type ReporterExchanges = Readonly<Record<keyof typeof REPORTERS, string>>;
 /** A patch-party sandbox identifier, the value its services put in EVENT_PREVIEW_TAG. */

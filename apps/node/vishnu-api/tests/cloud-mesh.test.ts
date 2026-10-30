@@ -113,11 +113,14 @@ describe('declared cloud connections', () => {
       mesh.systems.filter(s => s.eventBus).map(s => [s.id, s.eventBus])
     );
     expect(bus).toEqual({
+      'chat-api': { publishes: true, consumes: false },
       'content-api': { publishes: true, consumes: false },
       'iam-api': { publishes: true, consumes: false },
+      'insights-api': { publishes: true, consumes: false },
       'programs-api': { publishes: true, consumes: true },
       'scheduling-api': { publishes: true, consumes: true },
       'sessions-api': { publishes: true, consumes: true },
+      'transcripts-api': { publishes: true, consumes: false },
     });
     expect(mesh.relationships.some(r => r.kind === 'event')).toBe(false);
   });

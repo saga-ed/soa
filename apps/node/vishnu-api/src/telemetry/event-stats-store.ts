@@ -16,6 +16,9 @@ export const REPORTERS = {
   'iam-api': 'iam.events',
   'programs-api': 'programs.events',
   'scheduling-api': 'scheduling.events',
+  // d10 wave 1 (program-hub); Datadog service names confirmed for d6.
+  'sessions-api': 'sess.events',
+  'content-api': 'content.events',
 } as const;
 export type ReporterExchanges = Readonly<Record<keyof typeof REPORTERS, string>>;
 /** A patch-party sandbox identifier, the value its services put in EVENT_PREVIEW_TAG. */
@@ -39,11 +42,12 @@ export function mqPreviewTag(tag: string | undefined, deployment: string | undef
  */
 export function reporterExchanges(previewTag?: string): ReporterExchanges {
   if (!previewTag) return REPORTERS;
-  return {
-    'iam-api': applyPreviewTag(REPORTERS['iam-api'], previewTag),
-    'programs-api': applyPreviewTag(REPORTERS['programs-api'], previewTag),
-    'scheduling-api': applyPreviewTag(REPORTERS['scheduling-api'], previewTag),
-  };
+  return Object.fromEntries(
+    Object.entries(REPORTERS).map(([service, exchange]) => [
+      service,
+      applyPreviewTag(exchange, previewTag),
+    ])
+  ) as ReporterExchanges;
 }
 export type ApplyResult = 'accepted' | 'ignored' | 'scope' | 'capacity';
 const keyFor = (r: Report) =>

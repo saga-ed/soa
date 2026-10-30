@@ -127,6 +127,8 @@ describe('reporter exchanges (d9)', () => {
       'iam-api': 'iam.events.sandbox-gh537',
       'programs-api': 'programs.events.sandbox-gh537',
       'scheduling-api': 'scheduling.events.sandbox-gh537',
+      'sessions-api': 'sess.events.sandbox-gh537',
+      'content-api': 'content.events.sandbox-gh537',
     });
   });
 });
@@ -194,7 +196,13 @@ describe('receiver topology (d1/d9)', () => {
   };
   it('defaults to checking and binding the untagged exchanges with unchanged queue arguments', async () => {
     await run({});
-    expect(calls.checkExchange).toEqual(['iam.events', 'programs.events', 'scheduling.events']);
+    expect(calls.checkExchange).toEqual([
+      'iam.events',
+      'programs.events',
+      'scheduling.events',
+      'sess.events',
+      'content.events',
+    ]);
     expect(calls.bindQueue.map(([, exchange]) => exchange)).toEqual(calls.checkExchange);
     expect(calls.assertQueue).toEqual([
       [
@@ -224,6 +232,8 @@ describe('receiver topology (d1/d9)', () => {
       'iam.events.sandbox-gh537',
       'programs.events.sandbox-gh537',
       'scheduling.events.sandbox-gh537',
+      'sess.events.sandbox-gh537',
+      'content.events.sandbox-gh537',
     ];
     expect(calls.checkExchange).toEqual(tagged);
     expect(calls.bindQueue).toEqual(

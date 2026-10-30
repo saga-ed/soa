@@ -152,6 +152,29 @@ Currently seeded flow viewers:
 District, which `dev@saga.org` already carries; `--hold` opens that browser
 for you.)
 
+## Can I feed a local video file to the login browser's camera/mic?
+
+Yes — `--fake-video <file>` (and `--fake-audio <file>`) on `ss stack login
+--browser` play a **local** clip into the headful Chromium's fake camera/mic, for
+AV flows (Connect) on a box with no real device:
+
+```bash
+ss stack login empty@saga.org --browser --state-dir /tmp/ss-eadmin-browser \
+   --fake-video ~/clips/student.mp4
+```
+
+- **Auto-transcode.** Chromium's file-backed capture reads only raw **Y4M** video +
+  **PCM WAV** audio, so any other format (`.mp4`, …) is transcoded via `ffmpeg`
+  (needs `ffmpeg` on PATH). A `.y4m`/`.wav` file is used as-is. `--fake-video foo.mp4`
+  alone also **derives the mic** from the same file; `--fake-audio` overrides it.
+- **Size caveat.** Y4M is uncompressed — a minute of 720p is hundreds of MB. The
+  transcode is cached by mtime (under `<state-dir>/fake-av/`), so a repeat run with
+  the same clip is instant; for big/long clips, pre-make a small `.y4m` and pass that.
+- **Requires `--browser`** (there's nothing to feed otherwise) and applies per
+  `--state-dir`, so each browser instance gets its own clip.
+- Distinct from `ss develop connect --fake-media`, which plays Chromium's built-in
+  **synthetic** test pattern (a moving pattern + beep), not your file.
+
 ## How do I pull the latest main into slot 0 and the worktree slots?
 
 ```bash

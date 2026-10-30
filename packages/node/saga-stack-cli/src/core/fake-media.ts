@@ -46,14 +46,20 @@ export interface FakeMediaPlan {
   audio?: FfmpegStep;
 }
 
+// `-nostdin` (soa#363): ffmpeg reads stdin for interactive control ('q' to quit). With
+// inherited terminal stdin a BACKGROUNDED `ss stack login` would take SIGTTIN on that read
+// and STOP (the transcode "freezes", so the browser never launches). `-nostdin` makes
+// ffmpeg never touch stdin — the runtime ALSO routes stdin from /dev/null (belt-and-suspenders).
+const FFMPEG_NOSTDIN = '-nostdin';
+
 /** yuv420p Y4M — the widely-supported raw form Chromium's fake VIDEO capture reads. */
 function videoArgv(input: string, output: string): string[] {
-  return ['-y', '-i', input, '-pix_fmt', 'yuv420p', output];
+  return [FFMPEG_NOSTDIN, '-y', '-i', input, '-pix_fmt', 'yuv420p', output];
 }
 
 /** 16-bit PCM WAV (mono, 48 kHz) — the form Chromium's fake AUDIO capture reads. `-vn` drops video. */
 function audioArgv(input: string, output: string): string[] {
-  return ['-y', '-i', input, '-vn', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', '1', output];
+  return [FFMPEG_NOSTDIN, '-y', '-i', input, '-vn', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', '1', output];
 }
 
 function makeStep(

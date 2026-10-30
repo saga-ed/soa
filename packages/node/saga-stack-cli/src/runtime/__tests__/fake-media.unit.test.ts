@@ -48,10 +48,12 @@ describe('prepareFakeMedia', () => {
       video: '/state/fake-av/s.fake-video.y4m',
       audio: '/state/fake-av/s.fake-audio.wav',
     });
-    // ffmpeg -version presence check, then the two transcodes.
-    expect(calls.map((c) => c.args[0])).toEqual(['-version', '-y', '-y']);
+    // ffmpeg -version presence check, then the two transcodes (each `-nostdin …`).
+    expect(calls.map((c) => c.args[0])).toEqual(['-version', '-nostdin', '-nostdin']);
     expect(calls[1].command).toBe('ffmpeg');
     expect(calls[1].args).toContain('/state/fake-av/s.fake-video.y4m');
+    // BACKGROUND-SAFE: every ffmpeg run routes stdin from /dev/null (no SIGTTIN freeze).
+    expect(calls.every((c) => c.stdinFile === '/dev/null')).toBe(true);
   });
 
   it('passthrough inputs run NO ffmpeg (not even the -version presence check)', async () => {

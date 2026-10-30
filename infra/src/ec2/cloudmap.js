@@ -13,8 +13,21 @@ function sleep_sync(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+// list-services returns every service in the namespace (the CLI auto-paginates),
+// so the response scales with accumulated leaked entries, not with what we asked
+// for: dev measured 1.7k services / ~1.1MB, just past spawnSync's 1MB default.
+const MAX_BUFFER = 64 * 1024 * 1024;
+
 function run(args) {
-    const result = spawnSync('aws', args, { encoding: 'utf8', stdio: 'pipe' });
+    const result = spawnSync('aws', args, { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAX_BUFFER });
+    // A spawn-level failure (ENOBUFS, ENOENT) leaves status null and stderr
+    // empty; without this branch it falls through as an AWS error whose code
+    // can't be parsed, and the caller's triage misreads it.
+    if (result.error) {
+        const err = new Error(`aws ${args.slice(0, 3).join(' ')} failed: ${result.error.message}`);
+        err.spawn_code = result.error.code ?? null;
+        throw err;
+    }
     if (result.status !== 0) {
         const err = new Error(`aws ${args.slice(0, 3).join(' ')} failed: ${result.stderr || result.error}`);
         // The CLI reports the failure kind as "An error occurred (Code) when

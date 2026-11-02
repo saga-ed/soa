@@ -25,10 +25,10 @@
    previousHeight = height;
    clearTimeout(timer);
    // Wait for fullscreen transitions and the flow's own size observer to settle.
-   timer = setTimeout(() => { void fitView({ padding: 0.18 }); }, 150);
+   timer = setTimeout(() => { void fitView({ padding: 0.06 }); }, 150);
   });
   observer.observe(canvas);
   return () => { observer.disconnect(); clearTimeout(timer); };
  });
 </script>
-<Panel position="top-left"><div class="graph-actions" bind:this={controls}><button onclick={() => {onFullMesh();void fitView({ padding: 0.18 });}}>Fit mesh</button><button disabled={!selectedIds.length} onclick={() => fitView({ nodes: selectedIds.map(id => ({ id })), padding: 0.4, maxZoom: 1.2 })}>Fit selection</button><button disabled={!selectedIds.length} onclick={onFocusSelection}>Focus selection</button></div></Panel>
+<Panel position="top-left"><div class="graph-actions" bind:this={controls}><button onclick={() => {onFullMesh();void fitView({ padding: 0.06 });}}>Fit mesh</button><button disabled={!selectedIds.length} onclick={() => fitView({ nodes: selectedIds.map(id => ({ id })), padding: 0.4, maxZoom: 1.2 })}>Fit selection</button><button disabled={!selectedIds.length} onclick={onFocusSelection}>Focus selection</button></div></Panel>

@@ -1,6 +1,6 @@
 import type ELK from 'elkjs/lib/elk-api.js';
 import type { ElkNode, ElkPort } from 'elkjs/lib/elk-api';
-import { busParticipants, busPanelHeight } from './bus';
+import { busParticipants } from './bus';
 import { layoutRank, systemShape } from './presentation';
 import type { MeshLayout, MeshSnapshot } from './types';
 
@@ -186,7 +186,7 @@ export async function layoutMesh(
             x: coordinate((node.x ?? 0) + index * (nodeWidth + rowGap)),
             y: coordinate(node.y ?? 0),
             width: nodeWidth,
-            height: systemShape(system) === 'bus' ? nodeHeight + 16 + busPanelHeight(busParticipants(snapshot).length) : nodeHeight,
+            height: nodeHeight,
           }))
         : [
             {
@@ -208,6 +208,6 @@ export async function layoutMesh(
       return { id: edge.id, points: reversed.has(edge.id) ? points.reverse() : points };
     }),
     width: result.width ?? 0,
-    height: Math.max(result.height ?? 0, ...((result.children ?? []).filter(n => n.id === rowId).map(n => (n.y ?? 0) + nodeHeight + 16 + busPanelHeight(busParticipants(snapshot).length) + 40))),
+    height: result.height ?? 0,
   };
 }

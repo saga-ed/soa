@@ -1,4 +1,5 @@
 <script lang="ts">
+ import { nodeObservation } from '$lib/graph/node-observation';
  import { untrack, onDestroy } from 'svelte';
  import { focusLayout, layoutTween } from '$lib/graph/focus-layout';
  import GraphLabels from './GraphLabels.svelte';
@@ -71,7 +72,7 @@
  let nodes: Node[] = $derived(drawn.nodes.filter(n=>snapshot.systems.some(s=>s.id===n.id)).map(n => {
   const system = snapshot.systems.find(s => s.id === n.id)!;
   const signal = serviceSignal(datadog, system.id, now, datadogError);
-  return { id: n.id, type: 'system', position: { x: n.x, y: n.y }, width: n.width, height: n.height, selected: selected === n.id, ariaLabel: `${system.label}, ${snapshot.mode === 'live' && system.health === 'healthy' ? 'reachable' : system.health}. Press Enter to inspect.`, data: { system, context: n.context, width:n.width, height:n.context ? n.height : system.kind === 'Shared broker' || system.id === 'infra:rabbitmq' ? 112 : n.height, signal, participants, onselect, mqViews, onpreview, live: snapshot.mode === 'live', dimmed: selected ? !relevant.has(n.id) : !(Object.keys(demoSignals).length ? snapshot.relationships.some(r => (r.source === n.id || r.target === n.id) && demoSignals[r.id] && demoMatch(demoSignals[r.id])) || signalView === 'overview' : emphasizes(signalView, signal)) } };
+  return { id: n.id, type: 'system', position: { x: n.x, y: n.y }, width: n.width, height: n.height, selected: selected === n.id, ariaLabel: `${system.label}, ${nodeObservation(system, signal, mqViews[system.id], snapshot.mode === 'live').label}. Press Enter to inspect.`, data: { system, context: n.context, width:n.width, height:n.context ? n.height : system.kind === 'Shared broker' || system.id === 'infra:rabbitmq' ? 112 : n.height, signal, participants, onselect, mqViews, onpreview, live: snapshot.mode === 'live', dimmed: selected ? !relevant.has(n.id) : !(Object.keys(demoSignals).length ? snapshot.relationships.some(r => (r.source === n.id || r.target === n.id) && demoSignals[r.id] && demoMatch(demoSignals[r.id])) || signalView === 'overview' : emphasizes(signalView, signal)) } };
  }));
  let edges: Edge[] = $derived(drawn.edges.filter(e => snapshot.relationships.some(r => r.id === e.id && r.kind !== 'event')).map(e => {
   const r = snapshot.relationships.find(r => r.id === e.id)!;

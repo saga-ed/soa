@@ -1,6 +1,6 @@
 # d5 — soa is public and ci-actions is private: how does Vishnu get a CI path?
 
-**PENDING**
+**RESOLVED 2026-11-02: Option A** (skelly). A standalone workflow in soa using only public actions. soa and ci-actions keep their visibility.
 
 ## Context
 

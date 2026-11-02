@@ -24,7 +24,7 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - `plans/01-plan-of-record.md` — the phased plan
 - `decisions/d1-vishnu-sandbox-deploys.md` — RESOLVED: defer I#561
 - `decisions/d4-sequencing-with-pr556.md` — RESOLVED: I#560 lands on main first
-- `decisions/d5-public-soa-private-ci-actions.md` — PENDING, blocks merge
+- `decisions/d5-public-soa-private-ci-actions.md` — RESOLVED: standalone workflow using public actions
 - `decisions/d2-spa-in-deploy-gate.md` — RESOLVED: name-glob filter covers both packages
 - `decisions/d3-buildplatform-dockerfile-split.md` — RESOLVED: dropped
 
@@ -38,10 +38,10 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - **No `$BUILDPLATFORM` split** in the Dockerfile (d3, skelly, 2026-11-02).
 - **I#561 is deferred** (d1, skelly, 2026-11-02).
 - **I#560 lands on main before PR#556** (d4, skelly, 2026-11-02).
+- **Standalone workflow, not the fleet pipeline** (d5, skelly, 2026-11-02): public soa can't call private ci-actions.
 
 ## Open (track, don't block)
 
-- d5: a public soa can't call the private ci-actions. Blocks merge.
 - Live colour read 2026-11-02: green live at main scope, blue idle at `sandbox-gh537`. The workflow reads this on each dispatch rather than assuming it.
 
 ## Key reference paths

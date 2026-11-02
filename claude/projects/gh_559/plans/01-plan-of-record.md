@@ -14,7 +14,11 @@ Status lives on the issues. This is the shape and the reasoning.
 
 Why one PR: these are useless separately, and skelly wants fewer Vishnu PRs. The role stack has to be deployed before the workflow can run.
 
-**Sequencing with PR#556:** it edits `service-template.yaml`, `OPS.md` and `render-deploy-command.py`, and adds parameters the caller must pass (`EventStatsPreviewTag` and the MQ set). Rebase once it lands. If it stays open, base on its branch rather than duplicating its parameters.
+**Branch:** commit directly on `gh_559-Vishnu-CI-deploy`, with one PR to main, rather than a sub-branch PR'd into the issue branch. With I#561 deferred, a sub-branch would only add a second PR.
+
+**Sequencing with PR#556 (d4):** this lands on main first. The workflow sends `EventStatsPreviewTag` only when the input is set, because main's template doesn't declare it until PR#556 lands. PR#556 then merges main and deploys its own branch by dispatch. Confirm that dispatch-on-a-branch works once the workflow is on main.
+
+**Live colour:** `OPS.md` on main says blue is live, d9 says green. Check the live rule before the first dispatch, and make the colour input required, with no default.
 
 ## Later: per-sandbox and PR previews (I#561), deferred by d1
 

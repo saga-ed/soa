@@ -1,6 +1,6 @@
 # d4 — How does I#560 land relative to PR#556?
 
-**PENDING**
+**RESOLVED 2026-11-02: Option A** (skelly). I#560 lands on main first, independently of PR#556. The workflow sends the preview tag only when the input is set.
 
 ## Context
 

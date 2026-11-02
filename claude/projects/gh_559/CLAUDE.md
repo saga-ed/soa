@@ -23,7 +23,7 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - `research/02-why-arm64-and-emulation.md` — why ARM, and how emulation came about
 - `plans/01-plan-of-record.md` — the phased plan
 - `decisions/d1-vishnu-sandbox-deploys.md` — RESOLVED: defer I#561
-- `decisions/d4-sequencing-with-pr556.md` — PENDING
+- `decisions/d4-sequencing-with-pr556.md` — RESOLVED: I#560 lands on main first
 - `decisions/d2-spa-in-deploy-gate.md` — RESOLVED: name-glob filter covers both packages
 - `decisions/d3-buildplatform-dockerfile-split.md` — RESOLVED: dropped
 
@@ -35,10 +35,11 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - **An idle colour observes one sandbox** (gh_536 d9, skelly, 2026-10-29). I#560's preview-tag input serves this.
 - **The deploy gate covers both packages** with `@saga-ed/vishnu*...` (d2, skelly, 2026-11-02).
 - **No `$BUILDPLATFORM` split** in the Dockerfile (d3, skelly, 2026-11-02).
+- **I#561 is deferred** (d1, skelly, 2026-11-02).
+- **I#560 lands on main before PR#556** (d4, skelly, 2026-11-02).
 
 ## Open (track, don't block)
 
-- d4: sequencing with PR#556.
 - Which colour is live: `OPS.md` on main says blue, d9 says green. The workflow must never deploy over the live colour by default.
 
 ## Key reference paths

@@ -72,7 +72,8 @@ export function serviceSignal(
     (p95Ms != null && p95Ms >= data!.thresholds.warningP95Ms);
   return {
     observed: fresh && !!source,
-    stale: !!source && !fresh,
+    unavailable: failed || !!data && !['connected', 'partial'].includes(data.status),
+    stale: !!source && !failed && !!data && ['connected', 'partial'].includes(data.status) && !fresh,
     rate,
     p95Ms,
     errorRate,

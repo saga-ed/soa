@@ -8,7 +8,8 @@ export function nodeObservation(system: System, signal: ReturnType<typeof servic
   const evidence: string[] = [];
   if (signal.flagged) evidence.push(signal.risk === 'critical' ? '! APM alert' : '▲ APM warning');
   else if (signal.observed) evidence.push('APM observed');
-  if (signal.stale) evidence.push('APM stale');
+  if (signal.unavailable) evidence.push('APM unavailable');
+  else if (signal.stale) evidence.push('APM stale');
   if (mq?.status === 'Live') evidence.push('MQ reporting');
   else if (mq?.status === 'Stale') evidence.push('MQ stale');
   else if (mq?.status === 'Unavailable' && system.eventBus) evidence.push('MQ unavailable');

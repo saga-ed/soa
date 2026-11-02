@@ -18,6 +18,11 @@ describe('node evidence labels', () => {
   expect(nodeObservation(system,signal,undefined,true).label).toBe('Declared only');
   expect(nodeObservation(system,{...signal,stale:true},{...serviceStats(null,system.id),status:'Stale'},true).label).toBe('APM stale · MQ stale');
  });
+ it('distinguishes a failed refresh from aged observations', () => {
+  const failed = serviceSignal(null, system.id, 0, true);
+  expect(failed.stale).toBe(false);
+  expect(nodeObservation(system, failed, undefined, true).label).toBe('APM unavailable');
+ });
  it('preserves fixture health labels', () => {
   expect(nodeObservation({...system,health:'critical'},signal,undefined,false).label).toBe('critical');
  });

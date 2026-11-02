@@ -21,9 +21,13 @@ Standalone, per d5: soa is public and can't call the private ci-actions.
 
 **Sequencing with PR#556 (d4):** this lands on main first. The workflow sends `EventStatsPreviewTag` only when the input is set, and refuses if the ref's template doesn't declare it, because SAM would silently drop it. PR#556 then merges main and deploys its own branch by dispatch. Tests against PR#556's renderer and template passed; confirm dispatch-on-a-branch once the workflow is on main.
 
-**Live colour:** read on every dispatch, in preflight and again immediately before `sam deploy`. Read 2026-11-02: green live, blue idle at `sandbox-gh537`, so a plain blue dispatch is refused until blue is returned to main scope per `OPS.md`.
+**Live colour:** read on every dispatch, in preflight and again immediately before `sam deploy`. Read 2026-11-02: green live, blue idle at `sandbox-gh537`.
 
-## First dispatch proves
+## First dispatch
+
+**Don't reset blue from main.** The Vishnu deploy session reported on 2026-11-02 that blue is in active use at `sandbox-gh537` with no end date, and that its code exists only on PR#556, so a main build would remove features as well as change scope. Green carries live traffic, and the guard refuses it.
+
+So the first dispatch should be blue from PR#556's branch after it merges main, with `preview-tag: sandbox-gh537`. That replaces the manual QEMU build and keeps the observation running. It still redeploys a colour in use, so agree the timing with that session and skelly first. PR#556 must also move to `id=codeartifact`, which merging main does for the Dockerfile.
 
 Nothing has run on GitHub. Still unproven: the two-role flow, the Node 24 gate on existing tests, a real arm64 build, a real `sam deploy`, health from a runner, and `SOADeployRole` accepting the subjects used.
 

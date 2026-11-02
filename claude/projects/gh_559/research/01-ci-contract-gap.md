@@ -2,7 +2,7 @@
 
 Measured 2026-10-30 against soa `origin/main`, ci-actions v2.50 (WF = `.github/workflows/deploy-ecs-api.yml`, ACT = `deploy-ecs-api/action.yml`), program-hub, rostering and iac. Rechecked on 2026-11-02 against soa `c32dd0ee`: no Vishnu infra changes on main, and ci-actions is now at v2.51 (not re-read).
 
-Confirmed directly: the undeclared template parameters, `IMMUTABLE` dev ECR, `id=npmrc` vs `codeartifact=`. The rest is from one research pass over the sources cited; recheck line numbers when implementing.
+Confirmed directly: the undeclared template parameters, `IMMUTABLE` dev ECR, the cache tag, `id=npmrc` vs `codeartifact=`, the filter and change-detection behaviour. The rest is from one research pass over the sources cited; recheck line numbers when implementing.
 
 ## What the workflow sends the service stack
 
@@ -26,9 +26,9 @@ Caller permissions: `id-token: write`, `contents: write`, `pull-requests: write`
 | Target-group path | Workflow default `/soa/infra/dev/<id>/…`; Vishnu writes `/soa/vishnu-api/infra/dev/<id>/…` | Pass explicitly |
 | Routing | No `routing` config-env; template uses `ListenerRulePriorityBase` | `use-external-routing: 'true'`; colour routing stacks stay manual |
 | ECR URI | Bootstrap writes no ECR SSM parameter | Add one for `ecr-ssm-name` |
-| Immutable ECR | `bootstrap-template.yaml:80`; both build paths reportedly overwrite `buildcache-dev*` (WF:2210-2213, ACT:425-426). A direct grep for `buildcache-dev` in WF at v2.50 returned no match, so **recheck the tag name** | Mutable dev, or exempt the prefix |
+| Immutable ECR | `bootstrap-template.yaml:80`; the native build overwrites `buildcache-${environment}-${arch}` on each run (WF@v2.51:2213-2214). Confirmed 2026-11-02 | Mutable dev, or exempt the prefix |
 | Health check | Without a header, the probe hits the live rule and false-passes (`deploy-programs-api.yml:90-93`) | `preview-header: <colour>` |
-| SPA not covered | CI runs turbo with one `pnpm-filter`; the SPA isn't a dependency of the API. `vishnu-api` also has no `lint` script | *(open)* filter expression or wrapper package |
+| SPA not in the deploy gate | The gate runs turbo with one `pnpm-filter` (WF@v2.51:1444-1456), and the SPA isn't a dependency of the API. It is not untested: `package-ci.yml` typechecks, tests and builds it on PRs touching `apps/web/vishnu/**`, and the image build runs `vite build`. Change detection doesn't skip SPA-only changes unless `DETECT_API_CHANGES` is set (WF@v2.51:879-890), and dispatches always build | See d2 |
 
 ## Already compatible
 

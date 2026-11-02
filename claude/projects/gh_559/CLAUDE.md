@@ -23,6 +23,7 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - `research/02-why-arm64-and-emulation.md` — why ARM, and how emulation came about
 - `plans/01-plan-of-record.md` — the phased plan
 - `decisions/d1-vishnu-sandbox-deploys.md` — RESOLVED: build sandbox and PR previews now
+- `decisions/d2-spa-in-deploy-gate.md` — PENDING
 
 ## Locked decisions
 
@@ -34,7 +35,7 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 ## Open (track, don't block)
 
 - Switchboard catalog entry and browser delivery of the preview header (I#561).
-- How to cover the SPA in CI (filter expression or wrapper package).
+- d2: should the deploy gate test the SPA as well as the API?
 - Sequencing with PR#556, which edits the same three infra files.
 
 ## Key reference paths

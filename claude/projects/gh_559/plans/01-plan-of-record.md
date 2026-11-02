@@ -5,7 +5,7 @@ Status lives on the issues. This is the shape and the reasoning.
 ## Phase 1: dev blue/green (I#560), one PR
 
 1. Dockerfile: `id=codeartifact` secret; `--platform=$BUILDPLATFORM` build stage.
-2. Bootstrap: ECR URI SSM parameter; ECR tag rule (recheck the cache tag name first).
+2. Bootstrap: ECR URI SSM parameter; ECR tag rule, so `buildcache-*` can be overwritten.
 3. Service template: declare the three missing parameters.
 4. Dev deploy role stack, deployed once by someone with AppInfra tier (`saga-infra-dev`).
 5. `.github/workflows/deploy-vishnu-api.yml`: colour and preview-tag inputs, full parameter JSON, native ARM build, external routing.

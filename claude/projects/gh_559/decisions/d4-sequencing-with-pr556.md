@@ -9,11 +9,11 @@ PR#556 (`gh_538-vishnu-sandbox`) is a draft and currently mergeable. It adds `Ev
 Two facts shape this:
 
 - GitHub only offers `workflow_dispatch` for a workflow whose file is on the default branch. Until the workflow is on main, it can't be dispatched against any branch, including PR#556's. *(GitHub behaviour, not tested in this repo.)*
-- CloudFormation rejects undeclared parameters, so the workflow can send `EventStatsPreviewTag` only where the template declares it.
+- The workflow can send `EventStatsPreviewTag` only where the template declares it. *(Corrected 2026-11-02: this doc said CloudFormation rejects undeclared parameters. SAM silently drops them, so the workflow must check for the declaration itself.)*
 
 ## Options
 
-**A. Land I#560 on main first, independently.** The workflow passes the preview tag only when the input is set. Setting it on a ref without PR#556 fails with a clear CloudFormation error. PR#556 then merges main and can be deployed by dispatch against its own branch.
+**A. Land I#560 on main first, independently.** The workflow passes the preview tag only when the input is set. Setting it on a ref without PR#556 is refused by a check in the workflow. PR#556 then merges main and can be deployed by dispatch against its own branch.
 - Cost: a small rebase on whichever lands second.
 - Limit: the d9 soak needs PR#556's branch to have merged main first.
 

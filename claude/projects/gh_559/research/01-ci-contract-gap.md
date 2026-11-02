@@ -4,6 +4,10 @@ Measured 2026-10-30 against soa `origin/main`, ci-actions v2.50 (WF = `.github/w
 
 Confirmed directly: the undeclared template parameters, `IMMUTABLE` dev ECR, the cache tag, `id=npmrc` vs `codeartifact=`, the filter and change-detection behaviour. The rest is from one research pass over the sources cited; recheck line numbers when implementing.
 
+## Blocker found in review (2026-11-02): see d5
+
+soa is public, ci-actions is private with `access_level: organization`, and program-hub (a working caller) is private. GitHub shares a private repo's workflows only with private repos in the org, so a soa workflow can't call `deploy-ecs-api.yml` or any composite in ci-actions. Visibility and access were read directly; the failure is predicted from GitHub's documented rules, as no dispatch has run. soa has never used ci-actions.
+
 ## What the workflow sends the service stack
 
 - Always `Identifier`, `ImageArn`, `DeploymentDatetime`, `TtlDays` (ACT:947-950), then the caller's JSON.
@@ -13,14 +17,14 @@ Confirmed directly: the undeclared template parameters, `IMMUTABLE` dev ECR, the
 
 **CI's `--parameter-overrides` replaces samconfig's list wholesale** (caller-contract.md:169-180). `OPS.md` warns of the same trap for manual deploys.
 
-Caller permissions: `id-token: write`, `contents: write`, `pull-requests: write`, `actions: read`, `deployments: write`; `secrets: inherit` for Slack webhooks.
+Caller permissions: `id-token: write`, `contents: read` (the contract doc says `write`, but at v2.51 only `deploy-tier: production` writes contents), `pull-requests: write`, `actions: read`, `deployments: write`; `secrets: inherit` for Slack webhooks.
 
 ## Gaps
 
 | Gap | Evidence | Fix |
 |---|---|---|
 | BuildKit secret name | Dockerfile:7 requires `id=npmrc`; WF:2203 passes `codeartifact=` | Fleet pattern: program-hub `apps/node/programs-api/Dockerfile:24-34` |
-| Undeclared parameters | `service-template.yaml` lacks `DeploymentDatetime`, `TtlDays`, `CpuArchitecture`; CloudFormation rejects unknown parameters | Declare them; use `CpuArchitecture` at line 47 |
+| Undeclared parameters | `service-template.yaml` lacks `DeploymentDatetime`, `TtlDays`, `CpuArchitecture`. SAM silently drops undeclared parameters (SAM 1.132.0 `deploy_context.py:326-336`, read, not exercised), so this wouldn't fail the deploy as first reported, but `EventStatsPreviewTag` would be dropped without an error | Declare them; use `CpuArchitecture` at line 47 |
 | `BuildRevision` | Line 7 has no default and the workflow doesn't send it | Caller passes `${{ github.sha }}` |
 | samconfig is ignored | `dev` and `dev-green` values dropped; `ExecEnv` and capacity provider default to prod | Caller JSON enumerates every value, as in `deploy-programs-api.yml:396` |
 | Target-group path | Workflow default `/soa/infra/dev/<id>/…`; Vishnu writes `/soa/vishnu-api/infra/dev/<id>/…` | Pass explicitly |

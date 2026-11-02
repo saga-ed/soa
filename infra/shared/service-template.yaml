@@ -1,10 +1,17 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: SOA hosted observation service; ECS colour lifecycle from saga-iac, no mutable upstream APIs.
+Metadata:
+  cfn-lint: {config: {ignore_checks: [W2001]}}
 Parameters:
   Identifier: {Type: String, AllowedValues: [blue, green]}
   ExecEnv: {Type: String, Default: prod, AllowedValues: [dev, prod]}
   ImageArn: {Type: String}
   BuildRevision: {Type: String}
+  # Always sent by ci-actions deploy-ecs-api; declared because SAM silently drops undeclared parameters.
+  # DeploymentDatetime and TtlDays stay unused, so a same-image redeploy causes no rollout (see W2001 above).
+  DeploymentDatetime: {Type: String, Default: time_not_supplied}
+  TtlDays: {Type: String, Default: '3'}
+  CpuArchitecture: {Type: String, Default: ARM64, AllowedValues: [ARM64, X86_64]}
   ClusterArnSSMParameter: {Type: 'AWS::SSM::Parameter::Value<String>'}
   SubnetIdsSSMParameter: {Type: 'AWS::SSM::Parameter::Value<CommaDelimitedList>'}
   SecurityGroupIdSSMParameter: {Type: 'AWS::SSM::Parameter::Value<String>'}
@@ -44,7 +51,7 @@ Resources:
       RequiresCompatibilities: [EC2]
       Cpu: '256'
       Memory: '512'
-      RuntimePlatform: {CpuArchitecture: ARM64, OperatingSystemFamily: LINUX}
+      RuntimePlatform: {CpuArchitecture: !Ref CpuArchitecture, OperatingSystemFamily: LINUX}
       ExecutionRoleArn: !Ref ExecutionRoleArnSSMParameter
       TaskRoleArn: !Ref TaskRoleArnSSMParameter
       ContainerDefinitions:

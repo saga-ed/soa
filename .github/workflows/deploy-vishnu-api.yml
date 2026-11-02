@@ -1,0 +1,188 @@
+name: Deploy Vishnu API
+
+# Thin caller of the fleet deploy-ecs-api pipeline. Dispatch only: nothing deploys
+# automatically. Deploys the idle dev colour; the flip, bootstrap and routing
+# stacks stay manual (infra/vishnu-api/OPS.md).
+
+on:
+  workflow_dispatch:
+    inputs:
+      colour:
+        description: 'Idle colour to deploy. The run refuses the colour the live rule is serving.'
+        required: true
+        type: choice
+        options:
+          - blue
+          - green
+      preview-tag:
+        description: >
+          sandbox-<name> for the colour to observe (gh_536 d9). Refused unless the stack has
+          VishnuMqEnabled=true and this ref's template declares EventStatsPreviewTag. Empty does
+          not clear an earlier tag, so it is refused on a colour not at main scope (see OPS.md).
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  # Nothing writes repo contents at deploy-tier canary; production's tag and Release would need write.
+  contents: read
+  pull-requests: write
+  actions: read
+  deployments: write
+
+concurrency:
+  group: deploy-vishnu-api-${{ inputs.colour }}
+  cancel-in-progress: false
+
+jobs:
+  # A `uses:` job can't bind an environment, so resolve the env-scoped role here.
+  config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: dev
+      deployment: false
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      deploy-role-arn: ${{ vars.SOA_DEPLOY_ROLE_ARN }}
+      colour: ${{ steps.validate.outputs.colour }}
+      preview-tag: ${{ steps.validate.outputs.preview-tag }}
+    steps:
+      - name: Validate dispatch inputs
+        id: validate
+        env:
+          COLOUR: ${{ inputs.colour }}
+          PREVIEW_TAG: ${{ inputs.preview-tag }}
+          DEPLOY_ROLE_ARN: ${{ vars.SOA_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -z "$DEPLOY_ROLE_ARN" ]; then
+            echo "::error::SOA_DEPLOY_ROLE_ARN is not set on the dev environment (infra/vishnu-api/OPS.md)"
+            exit 1
+          fi
+          if [ "$COLOUR" != "blue" ] && [ "$COLOUR" != "green" ]; then
+            echo "::error::colour must be blue or green"
+            exit 1
+          fi
+          if [ -n "$PREVIEW_TAG" ] && ! [[ "$PREVIEW_TAG" =~ ^sandbox-[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]]; then
+            echo "::error::preview-tag must be sandbox-<name>"
+            exit 1
+          fi
+          echo "colour=$COLOUR" >> "$GITHUB_OUTPUT"
+          echo "preview-tag=$PREVIEW_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.SOA_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-2
+
+      # No requested-color: an explicit colour wins without an AWS read, and the
+      # read is the point. Fails closed if the rule is missing, split or all zero.
+      - name: Read the live colour
+        id: live
+        uses: saga-ed/ci-actions/resolve-active-colour@v2.51
+        with:
+          environment: dev
+          alb-name: dev-account-alb
+          host: vishnu.wootops.org
+          live-priority: '4015'
+          tg-prefix: vishnu-api
+
+      # Never use "Re-run failed jobs" here: it keeps this job's first result, so a colour
+      # flipped live since then gets deployed over. Dispatch again or "Re-run all jobs".
+      - name: Refuse the live colour
+        env:
+          COLOUR: ${{ steps.validate.outputs.colour }}
+          LIVE: ${{ steps.live.outputs.identifier }}
+          IDLE: ${{ steps.live.outputs.idle-identifier }}
+        run: |
+          if [ "$COLOUR" != "$IDLE" ]; then
+            echo "::error::$COLOUR is not the idle colour (live=$LIVE, idle=$IDLE). Deploy the idle colour and flip."
+            exit 1
+          fi
+
+      - name: Check out the dispatched ref
+        if: steps.validate.outputs.preview-tag != ''
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # SAM drops parameters the template doesn't declare, sends UsePreviousValue for those it
+      # isn't given, and rejects `Key=`. /health can't see a wrong scope, so stop it here.
+      - name: Check the colour's event-stats scope
+        env:
+          COLOUR: ${{ steps.validate.outputs.colour }}
+          PREVIEW_TAG: ${{ steps.validate.outputs.preview-tag }}
+        run: |
+          STACK="soa-vishnu-api-$COLOUR"
+          if [ -n "$PREVIEW_TAG" ] && ! grep -Eq '^ +EventStatsPreviewTag:' infra/shared/service-template.yaml; then
+            echo "::error::This ref's service template does not declare EventStatsPreviewTag (PR#556), so SAM would drop the tag (infra/vishnu-api/OPS.md)"
+            exit 1
+          fi
+          if READ=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+            --query "Stacks[0].[Parameters[?ParameterKey=='EventStatsDeployment'].ParameterValue | [0], Parameters[?ParameterKey=='VishnuMqEnabled'].ParameterValue | [0]]" \
+            --output text 2>&1); then
+            read -r SCOPE MQ_ENABLED <<< "$READ"
+          elif [[ "$READ" == *"$STACK does not exist"* ]]; then
+            # A new stack takes the template defaults, which are main scope with MQ off.
+            SCOPE=main
+            MQ_ENABLED=false
+          else
+            echo "::error::Could not read $STACK: $READ"
+            exit 1
+          fi
+          if [ -n "$PREVIEW_TAG" ] && [ "$MQ_ENABLED" != "true" ]; then
+            echo "::error::$STACK has VishnuMqEnabled=$MQ_ENABLED, and preview-tag needs true (infra/vishnu-api/OPS.md)"
+            exit 1
+          fi
+          if [ -z "$PREVIEW_TAG" ] && [ "$SCOPE" != "main" ] && [ "$SCOPE" != "None" ]; then
+            echo "::error::$STACK is at EventStatsDeployment=$SCOPE, and an empty preview-tag would keep it. Pass the tag, or return the colour to main scope first (infra/vishnu-api/OPS.md)"
+            exit 1
+          fi
+
+  deploy:
+    needs: config
+    uses: saga-ed/ci-actions/.github/workflows/deploy-ecs-api.yml@v2.51
+    with:
+      ci-role-arn: ${{ vars.AWS_ROLE_ARN }}
+      deploy-role-arn: ${{ needs.config.outputs.deploy-role-arn }}
+      project-name: soa
+      service-name: vishnu-api
+      # Name glob, not `@saga-ed/vishnu-api...`: the image also holds the SPA, which isn't an API dependency (d2).
+      pnpm-filter: '@saga-ed/vishnu*...'
+      ssm-prefix: vishnu-api
+      host-headers: vishnu.wootops.org
+      health-url: https://vishnu.wootops.org/health
+      preview-url: https://vishnu.wootops.org
+      preview-header-name: x-saga-preview-vishnu-api
+      preview-header: ${{ needs.config.outputs.colour }}
+      dockerfile-path: apps/node/vishnu-api/Dockerfile
+      samconfig-path: infra/vishnu-api/samconfig.yaml
+      routing-template-path: infra/shared/routing-template.yaml
+      ecr-ssm-name: /soa/vishnu-api/infra/dev/ecr-repo-uri
+      use-external-routing: true
+      native-multiarch-build: 'true'
+      identifier: ${{ needs.config.outputs.colour }}
+      environment: dev
+      deploy-tier: canary
+      # Replaces samconfig's list: keep every dev/dev-green value here. The MQ
+      # parameters aren't in samconfig; existing stacks keep theirs by UsePreviousValue.
+      service-parameter-overrides-json: |
+        {
+          "ExecEnv": "dev",
+          "ClusterArnSSMParameter": "/dev/shared-arm/ecs-cluster-arn",
+          "SubnetIdsSSMParameter": "/shared/infra/dev/private-subnet-ids",
+          "SecurityGroupIdSSMParameter": "/soa/vishnu-api/infra/dev/sg-id",
+          "TargetGroupArnSSMParameter": "/soa/vishnu-api/infra/dev/${{ needs.config.outputs.colour }}/target-group-arn",
+          "ExecutionRoleArnSSMParameter": "/soa/vishnu-api/infra/dev/execution-role-arn",
+          "TaskRoleArnSSMParameter": "/soa/vishnu-api/infra/dev/task-role-arn",
+          "LogGroupSSMParameter": "/soa/vishnu-api/infra/dev/log-group",
+          "CapacityProviderName": "dev-shared-ec2-cluster-arm-capacity-provider",
+          "DatadogApiKeyArn": "arn:aws:secretsmanager:us-west-2:396913734878:secret:datadog/api-key/default-mj4116",
+          "DatadogAppKeyArn": "arn:aws:secretsmanager:us-west-2:396913734878:secret:soa/vishnu/dev/datadog-app-key-ilOgHK",
+          "DesiredCount": "1",
+          "BuildRevision": "${{ github.sha }}"${{ needs.config.outputs.preview-tag != '' && format(',"EventStatsPreviewTag": "{0}","EventStatsDeployment": "{0}"', needs.config.outputs.preview-tag) || '' }}
+        }
+    secrets: inherit

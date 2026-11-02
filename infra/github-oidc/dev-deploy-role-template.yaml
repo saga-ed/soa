@@ -1,0 +1,238 @@
+# GitHub Actions dev deploy role for soa.
+#
+# Deployed to the dev account (396). Used by deploy-vishnu-api for a blue/green
+# colour deploy with use-external-routing and native-multiarch-build. Routing
+# stacks, the bootstrap stack and the live listener rule stay manual, so this
+# role has no write access to them. See README.md.
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: soa GitHub Actions dev deploy role (dev account)
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: saga-ed
+    Description: GitHub organization name
+  GitHubRepo:
+    Type: String
+    Default: soa
+    Description: GitHub repository name
+  ClusterName:
+    Type: String
+    Default: dev-shared-arm
+    Description: ECS cluster the Vishnu colours run on (from /dev/shared-arm/ecs-cluster-arn)
+
+Resources:
+  DevDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SoaGithubActionDevDeployRole
+      Path: /github-actions-role/
+      PermissionsBoundary: !Sub arn:aws:iam::${AWS::AccountId}:policy/SagaGithubActionsMax
+      Description: Dev deploy role for soa - Vishnu blue/green colour deploys on the dev account.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Both are needed. On dev, deploy-ecs-api binds build-and-deploy
+                # to the environment but leaves build-image, merge-image,
+                # wait-stable and register-switchboard unbound, so those jobs
+                # present the branch subject.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:environment:dev
+                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/*
+      Policies:
+
+        # saga_js for the image build, saga_py for the saga-platform CLIs.
+        # The domain resource policy in the prod account (531) also has to admit us.
+        - PolicyName: CodeArtifactRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: codeartifact:GetAuthorizationToken
+                Resource: !Sub arn:aws:codeartifact:${AWS::Region}:531314149529:domain/saga
+              - Effect: Allow
+                Action: codeartifact:ReadFromRepository
+                Resource:
+                  - !Sub arn:aws:codeartifact:${AWS::Region}:531314149529:repository/saga/saga_js
+                  - !Sub arn:aws:codeartifact:${AWS::Region}:531314149529:repository/saga/saga_py
+              - Effect: Allow
+                Action: sts:GetServiceBearerToken
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    sts:AWSServiceName: codeartifact.amazonaws.com
+
+        - PolicyName: ECRPush
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:PutImage
+                Resource: !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/soa/vishnu-api
+
+        # The two colour stacks only: not -routing or -bootstrap-dev. sam deploy
+        # works through change sets, and with no S3 bucket configured it sends
+        # the template inline, so there is no S3 grant.
+        - PolicyName: CloudFormationDeploy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:ListChangeSets
+                Resource:
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/soa-vishnu-api-blue/*
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/soa-vishnu-api-green/*
+
+        # Exact shared paths rather than /shared/infra/dev/*, which also holds
+        # broker credentials. CloudFormation resolves the service template's
+        # SSM-typed parameters as this role.
+        - PolicyName: SSMRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/soa/vishnu-api/infra/dev/*
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/shared/infra/dev/private-subnet-ids
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dev/shared-arm/ecs-cluster-arn
+
+        # Service actions follow the handler permissions in the AWS::ECS::Service
+        # and AWS::ECS::TaskDefinition registry schemas. DeleteService is for
+        # CloudFormation rolling back a failed stack create.
+        - PolicyName: ECSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DeregisterTaskDefinition
+                  - ecs:DescribeTaskDefinition
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecs:TagResource
+                  - ecs:UntagResource
+                  - ecs:ListTagsForResource
+                Resource:
+                  - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/soa-vishnu-api-blue:*
+                  - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/soa-vishnu-api-green:*
+              - Effect: Allow
+                Action:
+                  - ecs:CreateService
+                  - ecs:UpdateService
+                  - ecs:DeleteService
+                  - ecs:DescribeServices
+                  - ecs:ListServiceDeployments
+                  - ecs:DescribeServiceDeployments
+                  - ecs:StopServiceDeployment
+                  - ecs:TagResource
+                  - ecs:UntagResource
+                  - ecs:ListTagsForResource
+                Resource:
+                  - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${ClusterName}/soa-vishnu-api-blue
+                  - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${ClusterName}/soa-vishnu-api-green
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeServiceDeployments
+                  - ecs:StopServiceDeployment
+                Resource:
+                  - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service-deployment/${ClusterName}/soa-vishnu-api-blue/*
+                  - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service-deployment/${ClusterName}/soa-vishnu-api-green/*
+              - Effect: Allow
+                Action: ecs:DescribeTasks
+                Resource: !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/${ClusterName}/*
+              - Effect: Allow
+                Action: ecs:ListTasks
+                Resource: '*'
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}
+
+        # Read only, for resolve-active-colour in the caller's config job. External
+        # routing means no target group or rule is written.
+        - PolicyName: ELBRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:DescribeRules
+                Resource: '*'
+
+        # register-switchboard: the API key, and the WAF bypass token its PUT needs.
+        - PolicyName: SwitchboardSecretsRead
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:switchboard/ci-api-key-*
+                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:shared/e2e-auth-bypass-token-*
+
+        - PolicyName: IAMPassRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/dev-soa-vishnu-api-task-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/dev-soa-vishnu-api-task-execution-role
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+              - Effect: Allow
+                Action: iam:GetRole
+                Resource:
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/dev-soa-vishnu-api-task-role
+                  - !Sub arn:aws:iam::${AWS::AccountId}:role/dev-soa-vishnu-api-task-execution-role
+
+      Tags:
+        - Key: Project
+          Value: soa
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Role
+          Value: dev-deploy
+
+Outputs:
+  DevDeployRoleArn:
+    Description: Set this as SOA_DEPLOY_ROLE_ARN in the "dev" GitHub environment
+    Value: !GetAtt DevDeployRole.Arn
+    Export:
+      Name: SoaDevDeployRoleArn

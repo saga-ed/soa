@@ -44,6 +44,12 @@ Scope: CodeArtifact read; ECR push on `soa/*`; CloudFormation on `soa-vishnu-api
 
 *(open)* Whether the CodeArtifact domain policy already admits a new dev-account role.
 
+## Can skelly make these changes?
+
+Yes, per `iam simulate-principal-policy` on the dev AppInfra role, 2026-11-02. Allowed: `ecr:PutImageTagMutability`, `ecr:PutImage` and `ecr:InitiateLayerUpload` on `soa/vishnu-api`; `cloudformation:UpdateStack`; `ssm:PutParameter` on `/soa/vishnu-api/infra/dev/*`; `iam:CreateRole` and `iam:PutRolePolicy` for `/github-actions-role/` with boundary `SagaGithubActionsMax`. CloudTrail shows skelly created the repo on 2026-10-23.
+
+Simulated, not exercised. Live state: the repo is `IMMUTABLE` with no exclusion filters.
+
 ## Sandbox flow, for I#561
 
 program-hub `sandbox-deploy.yml` is dispatched by switchboard's sandbox-api, `saga-sandbox create` or patch-party. It uses `identifier=sandbox-<name>`, `use-saga-deploy-routing: true` (per-sandbox target group and rule from `saga-init.yaml`), header `x-saga-preview-<svc>`, and a terminal callback. Health check is skipped for `sandbox-*` (WF:2805), and variants register in switchboard (WF:3122-3125). Patch-party lists soa as having no `sandbox-deploy.yml`.

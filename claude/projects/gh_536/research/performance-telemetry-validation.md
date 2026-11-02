@@ -90,6 +90,58 @@ The CLI telemetry configuration tests and existing launch/adoption tests passed:
 148 tests total; `pnpm check-types` passed for the stack CLI. No hosted deployment
 was performed as part of these checks.
 
+## Repeatable traffic profiles — 2026-11-02
+
+The driver now provides deterministic `baseline`, `burst`, and `mixed` profiles.
+Baseline and burst have equal shares of whoami, program list, program get, and
+schedule get; mixed sends 50% program list, 25% program get, and 12.5% each of
+whoami and schedule get. All requests are authenticated GETs to fixed loopback
+ports. No domain writes, reseeding, artificial latency, or service restarts were
+used. Profiles share a strict request budget across workers; two preflight reads
+count toward that budget and are reported separately from workload timings.
+
+Runs against the existing `turing` / `slot-3` stack:
+
+| Profile | Workload UTC start–end | Total requests, including preflight | Result |
+| --- | --- | ---: | --- |
+| baseline, duration 30 | 23:53:49.241–23:54:19.241 | 32 | All HTTP 200 |
+| burst, duration 30, request cap 502 | 23:54:23.747–23:54:36.873 | 502 | All HTTP 200; request cap reached |
+| mixed, duration 20, request cap 130 | 23:54:49.014–23:55:05.204 | 130 | All HTTP 200; request cap reached |
+| mixed, duration 75, request cap 602 | 23:55:56.204–23:57:11.205 | 588 | All HTTP 200; duration reached |
+
+Total: 1,252 requests, zero failures. The longer mixed workload sent 293 program
+list, 147 program get, 73 schedule get, and 73 whoami reads, plus two preflight
+reads. Its client p95 was 11, 6, 11, and 5 ms respectively. These client timings
+are driver diagnostics, not APM percentile estimates. All three service health
+checks remained healthy during the longer run.
+
+Datadog aggregate query:
+
+```text
+env:synthetic @synthetic.machine:turing @deployment.identifier:slot-3 @span.kind:server @http.path_group:/trpc/*
+```
+
+Grouped by `service` and `@http.path_group`, with count and `pc95(@duration)`,
+over the reported UTC windows. Retained spans confirmed all four driver paths
+plus IAM `/trpc/personas.getMyPermissions`. Responses reported
+`traffic_type=sampled`; retained counts were much smaller than sent counts, and
+the short mixed window initially returned no samples. The longer mixed run
+produced these retained `programs.list` trace examples:
+
+- `de89734d6526a1a01bf52d40ecc0c324` at 23:56:50.085 UTC.
+- `63b699d44c6cfc8c93c5537026aeebf2` at 23:56:42.127 UTC.
+- `a2c9faa0d508b9db33eb8a88fa0dfc39` at 23:56:33.677 UTC.
+
+Burst example: `4a1d73ac8ec2a83ad3bf6a2e0a7070ae` at 23:54:25.438 UTC.
+These prove real ingestion and provide trace retrieval candidates; they do not
+establish complete coverage, population throughput, or a latency regression.
+
+Seven driver unit tests passed: argument bounds, cookie filtering, concurrent
+request budget with GET/loopback allowlist, failure stop and output redaction,
+empty prepared data, interruption, and weighted endpoint mix. Prettier checks
+for both driver files and `git diff --check` passed. Reproduction commands and
+limits are in the [Vishnu README](../../../../apps/web/vishnu/README.md#generate-real-synthetic-traffic).
+
 ## Sources
 
 - [Trace retrieval API](https://docs.datadoghq.com/api/latest/apm-trace/)

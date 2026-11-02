@@ -1,6 +1,6 @@
 # Vishnu performance telemetry — collection and measurement ownership
 
-**Status: RESOLVED 2026-11-02 for collection, endpoint/caller measurements and fan-out investigation; a product fan-out implementation remains PENDING.**
+**Status: RESOLVED 2026-11-02 for collection, endpoint/caller measurements and bounded sampled fan-out rankings.**
 
 **Initiative:** [RabbitMQ event telemetry and Vishnu](../README.md)
 
@@ -39,7 +39,7 @@ User ruling: "Approve of additional endpoint-level statistics and caller-calleee
 Extend Vishnu's queries, read model and presentation with endpoint-level statistics
 and attributable caller→callee measurements in synthetic-dev and hosted environments.
 This approval resolves section 2. The subsequent implementation instruction also
-adopts the Agent approach in section 1; product fan-out analysis remains separate.
+adopts the Agent approach in section 1. The later path-inspector ruling below authorizes bounded sampled fan-out rankings.
 
 The user asked whether endpoint/connection measurements are already provided by
 Datadog, and whether the proposal implies custom latency timers in application APIs.
@@ -83,7 +83,7 @@ synthetic scopes cannot silently fall back to environment-wide hosted data.
 Hosted APM currently uses environment-wide scope while MQ can be sandbox-scoped;
 those are separate claims and must remain visible.
 
-### Fan-out feasibility — investigation approved, product implementation PENDING
+### Fan-out feasibility and subsequent path-inspector approval
 
 The user flagged that measured fan-out is difficult to obtain through the current
 Datadog APM API. The earlier proposal understated this dependency. Existing Vishnu
@@ -103,7 +103,8 @@ per-trace diagnostics, not population-wide fan-out percentiles. Do not derive
 per-request fan-out by dividing unrelated service traffic totals. Do not introduce
 a second trace collector/store as an implicit consequence of this proposal.
 Caller/callee measurements approved in section 2 remain subject to attribution
-availability and do not imply approval of a trace-reconstruction subsystem.
+availability. The subsequent ruling below authorizes bounded trace reconstruction
+for sampled path diagnostics; a separate trace collector/store remains out of scope.
 
 The user agreed to the feasibility investigation and explicitly requested checking
 trace retrieval in our account. The read-only check succeeded with both connector
@@ -111,6 +112,36 @@ access and Vishnu's own application key. A richer example returned three connect
 spans across programs and IAM, without response truncation or restricted spans.
 This demonstrates per-example retrieval, not complete population coverage or
 unbiased fan-out distributions. See the [validation record](../research/performance-telemetry-validation.md).
+
+## 4. Path offenders and persistent display settings
+
+**Status: RESOLVED 2026-11-02 — approved by skelly.**
+
+After the successful trace retrieval investigation, the user requested clicking a
+path with Slow, Hot or Fan-out selected to see the top N offending endpoint names.
+N must be configurable from a gear in the top right and persist across reloads.
+The user also requested repeatable real traffic in synthetic-dev and parallel work.
+
+- Rank only measurements attributable to the selected caller→callee pair. Never
+  substitute all endpoints of either service for path-specific evidence.
+- Slow ranks retained outgoing-client p95 duration; Hot ranks retained outgoing
+  span counts when unsampled path request-rate metrics are unavailable. These are
+  observed-window rankings, not claims about all requests or service saturation.
+- Fan-out ranks endpoint calls per sampled same-service parent server request on
+  the selected path. Show the parent endpoint and sample denominator explicitly.
+  Count connected spans with exact IDs; exclude truncated, restricted or structurally
+  unusable traces. Do not divide unrelated aggregate service counts.
+- Bound trace search/retrieval, cache results and report sample limitations. A small
+  recent trace sample cannot establish fleet-wide top offenders or population
+  percentiles. Missing data and incomplete coverage remain visible states.
+- Default N is 5, range 1–50. Store this display preference locally in the browser;
+  changing N changes the displayed ranking, not the telemetry collection budget.
+- Use authenticated bounded read-only requests against the existing synthetic
+  slot. Do not seed/reset domain data or inject fabricated timings to populate views.
+
+This extends the prior investigation-only approval to the bounded diagnostic
+feature above. Deployment remains the existing blue sandbox, followed by validation;
+the normal hosted route and production rollout remain outside this iteration.
 
 ## Related artifacts
 

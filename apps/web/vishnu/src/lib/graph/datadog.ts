@@ -36,6 +36,13 @@ export interface DatadogSnapshot {
   connectionStatus?: MeasurementStatus;
   endpointLimited?: boolean;
   connectionLimited?: boolean;
+  pathEndpoints?: DatadogPathEndpoint[];
+  pathEndpointStatus?: MeasurementStatus;
+  pathEndpointLimited?: boolean;
+  fanout?: DatadogFanout[];
+  fanoutStatus?: MeasurementStatus;
+  fanoutCoverage?: { requestedTraces: number; retrievedTraces: number; usableTraces: number; rejectedTraces: number; limited: true; basis: 'recent-retained-trace-sample'; observedAt: string };
+
 }
 export type MeasurementStatus = 'available' | 'partial' | 'unavailable' | 'unconfigured';
 export interface DatadogEndpoint {
@@ -54,6 +61,26 @@ export interface DatadogConnection {
   observedSpans: number;
   /** Duration percentile of those retained outgoing client spans, in milliseconds. */
   p95Ms: number | null;
+}
+export interface DatadogPathEndpoint {
+  source: string;
+  target: string;
+  resource: string;
+  /** Retained outgoing client spans, never total traffic. */
+  observedSpans: number;
+  p95Ms: number | null;
+}
+export interface DatadogFanout {
+  source: string;
+  target: string;
+  resource: string;
+  parentResource: string;
+  /** Sampled same-source server requests traversing this source→target path. */
+  sampledParents: number;
+  observedCalls: number;
+  maxCallsPerParent: number;
+  meanCallsPerParent: number;
+  traceIds: string[];
 }
 export function matchesMesh(data: DatadogSnapshot | null, mesh: MeshSnapshot | null): boolean {
   return (
@@ -99,6 +126,9 @@ export function serviceSignal(
     monitors.some(m => m.actionable !== false && m.status === 'Warn') ||
     (p95Ms != null && p95Ms >= data!.thresholds.warningP95Ms);
   return {
+    observed: fresh && !!source,
+    unavailable: failed || !!data && !['connected', 'partial'].includes(data.status),
+    stale: !!source && !failed && !!data && ['connected', 'partial'].includes(data.status) && !fresh,
     measurementSource: data?.measurementSource,
     rate,
     p95Ms,

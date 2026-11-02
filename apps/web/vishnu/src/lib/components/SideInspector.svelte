@@ -1,12 +1,17 @@
 <script lang="ts">
  import { signalNames, signalColor, signalDegree, type DemoSignal } from '$lib/fixtures/signals';
  import DatadogStats from './DatadogStats.svelte';
- import type { DatadogSnapshot } from '$lib/graph/datadog';
+ import EndpointOffenders from './EndpointOffenders.svelte';
+ import type { SignalView, DatadogSnapshot } from '$lib/graph/datadog';
  import MqStats from './MqStats.svelte';
- import type { MqViews } from '$lib/graph/event-stats';
+ import { numberLabel, type MqViews } from '$lib/graph/event-stats';
+ import { busParticipants, busBadge } from '$lib/graph/bus';
+ import { systemShape } from '$lib/graph/presentation';
+ import { nodeObservation } from '$lib/graph/node-observation';
+ import { serviceSignal } from '$lib/graph/datadog';
  import { connectionLabel } from '$lib/graph/presentation';
  import type { MeshSnapshot } from '$lib/graph/types';
- let { demoSignals = {}, datadog = null, datadogError = false, now = 0, snapshot, selected, onselect, mqViews = {} }: { demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; mqViews?: MqViews; snapshot: MeshSnapshot; selected: string | null; onselect: (id: string | null) => void } = $props();
+ let { signalView = 'overview', topN = 5, demoSignals = {}, datadog = null, datadogError = false, now = 0, snapshot, selected, onselect, mqViews = {} }: { signalView?: SignalView; topN?: number; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; mqViews?: MqViews; snapshot: MeshSnapshot; selected: string | null; onselect: (id: string | null) => void } = $props();
  let item = $derived(snapshot.systems.find(s => s.id === selected) ?? snapshot.relationships.find(r => r.id === selected));
  let relationships = $derived(snapshot.relationships.filter(r => r.source === selected || r.target === selected || (selected != null && r.via?.includes(selected))));
  let expanded = $state(false);
@@ -15,7 +20,12 @@
 <aside id="selection-inspector" class="inspector" aria-label="Selection inspector">
  <div class="inspector-heading"><span class="eyebrow">INSPECTOR</span>{#if item}<button aria-label="Clear selection" onclick={() => onselect(null)}>×</button>{/if}</div>
  {#if item}
-  <h2>{item.label}</h2><div class="status-pill {item.health}">{snapshot.mode === 'live' && item.health === 'healthy' ? 'reachable' : item.health} · {item.freshness}</div>
+  <h2>{item.label}</h2>
+  {#if !('source' in item)}{@const observation = nodeObservation(item, serviceSignal(datadog, item.id, now, datadogError), mqViews[item.id], snapshot.mode === 'live')}<div class="status-pill {observation.risk}">{observation.label}</div>{:else}<div class="status-pill {item.health}">{item.health} · {item.freshness}</div>{/if}
+  {#if !('source' in item) && systemShape(item) === 'bus'}
+   <h3>Event bus participants</h3><p>Reporting is evidence of telemetry liveness, not service health.</p>
+   <div class="relationship-list">{#each busParticipants(snapshot) as participant}<button onclick={() => onselect(participant.system.id)}><strong>{participant.system.label}</strong><small>{busBadge(participant)} · {mqViews[participant.system.id]?.status ?? 'No reports'} · {mqViews[participant.system.id]?.fresh.length ?? 0} fresh instances</small><small>Accepted: {participant.publishes ? numberLabel(mqViews[participant.system.id]?.rows[0]?.count ?? null) : 'Not declared'} · Deliveries: {participant.consumes ? numberLabel(mqViews[participant.system.id]?.rows[1]?.count ?? null) : 'Not declared'}</small></button>{/each}</div>
+  {/if}
   {#if 'source' in item && item.observation}<p class="connection-evidence"><strong>{item.declared ? 'Declared connection' : 'Observed connection'}</strong> · {item.observation === 'observed' ? 'Observed in APM window' : item.observation === 'not-observed' ? 'Not observed in APM window' : item.observation === 'stale' ? 'APM observation stale' : 'APM observation unavailable'}</p>{/if}
   {#if item && !('source' in item) && ((item.band === 'mesh' && !item.id.startsWith('infra:')) || item.eventBus || relationships.some(r => r.kind === 'event'))}
    <h3>MQ activity</h3>
@@ -23,6 +33,9 @@
    <MqStats view={mqViews[item.id]} />
    <div class="relationship-list">{#each relationships.filter(r => r.kind === 'event') as r}<button onclick={() => onselect(r.id)}><strong>{r.source === selected ? '↑ Publishes' : r.target === selected ? '↓ Consumes' : '↔ Routes'}: {r.label}</strong><small>{snapshot.systems.find(s => s.id === r.source)?.label} → {snapshot.systems.find(s => s.id === r.target)?.label}</small></button>{/each}</div>
    <p>Message consumption does not establish successful projection completion.</p>
+  {/if}
+  {#if snapshot.mode === 'live' && 'source' in item && ['slow', 'hot', 'fanout'].includes(signalView)}
+   <EndpointOffenders data={datadog} source={item.source} target={item.target} view={signalView} {topN} {now} failed={datadogError} supported={['http', 'dependency'].includes(item.kind)} />
   {/if}
   {#if snapshot.mode === 'live' && ('source' in item ? ['http', 'dependency'].includes(item.kind) : item.band !== 'data')}
    <DatadogStats data={datadog} failed={datadogError} {now} source={'source' in item ? item.source : item.id} target={'target' in item ? item.target : undefined} />

@@ -1,6 +1,8 @@
 import type { DatadogSnapshot, DatadogService, MetricPoint } from '../../../../web/vishnu/src/lib/graph/datadog';
 import { connectionGroupLimit, connectionMeasurements, endpointMeasurements, retainedEndpointMeasurements } from './datadog-performance';
 
+import { parseDatadogJson, pathEndpointMeasurements, pathGroupLimits, sampledFanout, traceSampleLimit } from './datadog-paths';
+
 type Env = Record<string, string | undefined>;
 const sites: Record<string, string> = {
   'datadoghq.com': 'https://app.datadoghq.com',
@@ -39,7 +41,7 @@ export function createDatadogReader(
   let cachedAt = 0;
   let pending: Promise<DatadogSnapshot> | undefined;
   let retryAt = 0;
-  const request = async (path: string, params: Record<string, string>, payload?: unknown) => {
+  const request = async (path: string, params: Record<string, string>, payload?: unknown, timeoutMs = 8000) => {
     const url = new URL(path, `https://api.${site}`);
     url.search = new URLSearchParams(params).toString();
     const response = await fetcher(url, {
@@ -50,7 +52,7 @@ export function createDatadogReader(
         Accept: 'application/json',
         ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(timeoutMs),
       redirect: 'error',
     });
     if (!response.ok) {
@@ -65,7 +67,7 @@ export function createDatadogReader(
     }
     const body = await response.text();
     if (body.length > 4_000_000) throw new Error('Response too large');
-    return JSON.parse(body);
+    return parseDatadogJson(body);
   };
   const collect = async (): Promise<DatadogSnapshot> => {
     const to = now();
@@ -76,7 +78,7 @@ export function createDatadogReader(
       message: 'Datadog runtime credentials are not configured.',
       observedAt: new Date(to).toISOString(),
       serverNow: to,
-      freshForMs: 180000,
+      freshForMs: 300000,
       scope,
       appUrl: sites[site] ?? sites['datadoghq.com'],
       window: { from, to },
@@ -89,6 +91,7 @@ export function createDatadogReader(
       endpointSource: scope.environment === 'synthetic' ? 'retained-spans' : 'apm-metrics',
       endpointStatus: 'unconfigured',
       connectionStatus: 'unconfigured',
+      pathEndpoints: [], pathEndpointStatus: 'unconfigured', fanout: [], fanoutStatus: 'unconfigured',
     };
     if (
       !sites[site] ||
@@ -101,12 +104,12 @@ export function createDatadogReader(
         ...base,
         status: 'unavailable',
         endpointStatus: 'unavailable',
-        connectionStatus: 'unavailable',
+        connectionStatus: 'unavailable', pathEndpointStatus: 'unavailable', fanoutStatus: 'unavailable',
         message: 'Invalid Datadog site, scope or thresholds.',
       };
     if (!env.DD_API_KEY || !env.DD_APP_KEY) return base;
     if (scope.environment === 'synthetic' && !scope.machine) return {
-      ...base, status: 'unavailable', endpointStatus: 'unavailable', connectionStatus: 'unavailable',
+      ...base, status: 'unavailable', endpointStatus: 'unavailable', connectionStatus: 'unavailable', pathEndpointStatus: 'unavailable', fanoutStatus: 'unavailable',
       message: 'Synthetic Datadog observations require an explicit machine and slot scope.',
     };
     const spanScope = `env:${scope.environment}${level === 'environment' ? '' : ` @${scope.deploymentTag}:${scope.deployment}`}${scope.machine ? ` @synthetic.machine:${scope.machine}` : ''}`;
@@ -119,6 +122,32 @@ export function createDatadogReader(
     });
     const serverSpanQuery = `${spanScope} @span.kind:server -@http.path_group:*/health*`;
     const connectionSpanQuery = `${spanScope} @span.kind:client @peer.service:* -@http.path_group:*/health*`;
+    const pathEvidence = (async () => {
+      const pathQuery = (ranking: 'count' | 'pc95') => request('/api/v2/spans/analytics/aggregate', {}, {
+        data: { type: 'aggregate_request', attributes: {
+          filter: { from: new Date(from).toISOString(), to: new Date(to).toISOString(), query: connectionSpanQuery },
+          compute: [{ aggregation: 'count', type: 'total' }, { aggregation: 'pc95', metric: '@duration', type: 'total' }],
+          group_by: ['service', '@peer.service', '@http.method', '@http.path_group'].map((facet, i) => ({ facet, limit: pathGroupLimits[i],
+            sort: { type: 'measure', aggregation: ranking, ...(ranking === 'pc95' ? { metric: '@duration' } : {}), order: 'desc' } })),
+        } },
+      }, 3000);
+      const evidence = await Promise.allSettled([
+        pathQuery('count'), pathQuery('pc95'),
+        request('/api/v2/spans/events/search', {}, { data: { type: 'search_request', attributes: {
+          filter: { from: new Date(from).toISOString(), to: new Date(to).toISOString(), query: connectionSpanQuery },
+          sort: '-timestamp', page: { limit: 20 },
+        } } }, 3000),
+      ]);
+      const paths = pathEndpointMeasurements(evidence.slice(0, 2));
+      const search = evidence[2];
+      if (search.status !== 'fulfilled' || !Array.isArray(search.value?.data) || search.value.errors) return {
+        ...paths, ...sampledFanout([], scope, base.observedAt), fanoutStatus: 'unavailable' as const,
+      };
+      const traceIds = [...new Set<string>(search.value.data.map((s: any) => s?.attributes?.trace_id)
+        .filter((value: unknown): value is string => typeof value === 'string' && /^([0-9a-f]{1,32}|[0-9]{1,39})$/.test(value)))].slice(0, traceSampleLimit);
+      const traces = await Promise.allSettled(traceIds.map(traceId => request(`/api/v2/trace/${traceId}`, {}, undefined, 3000)));
+      return { ...paths, ...sampledFanout(traces.map((result, i) => ({ traceId: traceIds[i], result })), scope, base.observedAt) };
+    })();
     // Standard APM metric dimensions do not establish machine + slot isolation.
     // Use exact-scoped retained-span analytics until metric dimensions are verified.
     if (scope.environment === 'synthetic') {
@@ -141,8 +170,9 @@ export function createDatadogReader(
           previousP95Ms: null, monitors: [] });
       }
       const partial = !serviceValid || (serviceResult.status === 'fulfilled' && (serviceResult.value.meta?.status !== 'done' || !!serviceResult.value.meta?.warnings?.length || services.length >= connectionGroupLimit)) || endpointData.endpointStatus !== 'available' || connectionData.connectionStatus !== 'available';
-      const unavailable = !serviceValid && endpointData.endpointStatus === 'unavailable' && connectionData.connectionStatus === 'unavailable';
-      return { ...base, ...endpointData, ...connectionData, services,
+      const pathData = await pathEvidence;
+      const unavailable = !serviceValid && endpointData.endpointStatus === 'unavailable' && connectionData.connectionStatus === 'unavailable' && pathData.pathEndpointStatus === 'unavailable' && pathData.fanoutStatus === 'unavailable';
+      return { ...base, ...endpointData, ...connectionData, ...pathData, services,
         dependencies: connectionData.connections.map(({source, target}) => ({source, target})),
         status: unavailable ? 'unavailable' : partial ? 'partial' : 'connected',
         message: 'Machine- and slot-scoped retained spans. Counts and latency describe retained observations; total request rates are unavailable.',
@@ -300,21 +330,23 @@ export function createDatadogReader(
     const endpointData = allMetricPaths ? metricEndpoints : retainedEndpointMeasurements(results[9], to);
     const endpointSource = allMetricPaths ? 'apm-metrics' as const : 'retained-spans' as const;
     const connectionData = connectionMeasurements(results[8]);
+    const pathData = await pathEvidence;
     const performancePartial = endpointData.endpointStatus !== 'available' || connectionData.connectionStatus !== 'available';
     return {
       ...base,
       ...endpointData,
       ...connectionData,
+      ...pathData,
       endpointSource,
       services: [...services.values()],
-      status: failures === 5 && endpointData.endpointStatus === 'unavailable' && connectionData.connectionStatus === 'unavailable' ? 'unavailable' : failures || performancePartial ? 'partial' : 'connected',
+      status: failures === 5 && endpointData.endpointStatus === 'unavailable' && connectionData.connectionStatus === 'unavailable' && pathData.pathEndpointStatus === 'unavailable' && pathData.fanoutStatus === 'unavailable' ? 'unavailable' : failures || performancePartial ? 'partial' : 'connected',
       message: failures || performancePartial
         ? 'Some Datadog queries are unavailable. Missing signals remain unknown.'
         : 'Datadog observations; metrics reflect the configured instrumentation and sampling.',
     };
   };
   return async () => {
-    if (cache && (now() - cachedAt < 120000 || now() < retryAt))
+    if (cache && (now() - cachedAt < 180000 || now() < retryAt))
       return { ...cache, serverNow: now() };
     pending ??= collect()
       .then(value => {

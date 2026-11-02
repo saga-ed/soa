@@ -128,6 +128,20 @@ export const declaredConnections: readonly Declaration[] = [
 ];
 /** Datadog service names that report under a different id than the declared node (d6, B2). */
 export const apmServiceAliases = new Map([['qboard_connectv3', 'connectv3']]);
+/** Source-declared RabbitMQ participation of the event-stats adopters (gh_536 d10 wave 1), so
+ * hosted views can badge MQ producers/consumers. Counts and rates still come only from reports. */
+export const declaredEventBus = new Map<string, { publishes: boolean; consumes: boolean }>([
+  ['iam-api', { publishes: true, consumes: false }],
+  ['programs-api', { publishes: true, consumes: true }],
+  ['scheduling-api', { publishes: true, consumes: true }],
+  ['sessions-api', { publishes: true, consumes: true }],
+  ['content-api', { publishes: true, consumes: false }],
+  ['chat-api', { publishes: true, consumes: false }],
+  ['insights-api', { publishes: true, consumes: false }],
+  // Its transcription.events consumer uses its own connection and doesn't report, so only the
+  // instrumented outbox side is declared; a consumer badge would show counts that never move.
+  ['transcripts-api', { publishes: true, consumes: false }],
+]);
 export const applicationLabels = new Map([
   ['coach', 'Coach'],
   ['connectv3', 'Connectv3'],

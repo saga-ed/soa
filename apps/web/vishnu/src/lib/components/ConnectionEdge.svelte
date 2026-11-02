@@ -1,14 +1,15 @@
 <script lang="ts">
+ import { pathColors, type PathSignal } from '$lib/graph/path-signals';
  import { signalColor, signalOpacity, signalDegree, signalNames, type DemoSignal } from '$lib/fixtures/signals';
  import { BaseEdge, type EdgeProps, type Edge } from '@xyflow/svelte';
  import type { Point, Relationship } from '$lib/graph/types';
  import { connectionLabel } from '$lib/graph/presentation';
  import { roundedPath } from '$lib/graph/geometry';
- let { id, data, selected }: EdgeProps<Edge<{ relationship: Relationship; demoSignal?: DemoSignal; demo?: boolean; points: Point[]; observed?: boolean; dimmed: boolean }>> = $props();
+ let { id, data, selected }: EdgeProps<Edge<{ relationship: Relationship; demoSignal?: DemoSignal; measuredSignal?: PathSignal; demo?: boolean; points: Point[]; observed?: boolean; dimmed: boolean }>> = $props();
  let path = $derived(roundedPath(data?.points ?? []));
- let width = $derived(data?.demoSignal ? 4 : data?.relationship.health === 'critical' ? 3 : data?.relationship.declared ? 1.8 : 1.2);
- let intensity = $derived(data?.demoSignal ? signalOpacity(data.demoSignal) : data?.relationship.health === 'critical' ? 1 : data?.relationship.declared ? .85 : .65);
- let color = $derived(data?.demoSignal ? signalColor(data.demoSignal) : data?.relationship.health === 'critical' ? 'var(--color-signal-error)' : data?.relationship.declared ? 'var(--color-text-secondary)' : 'var(--color-secondary)');
+ let width = $derived(data?.demoSignal || data?.measuredSignal ? 4 : data?.relationship.health === 'critical' ? 3 : data?.relationship.declared ? 1.8 : 1.2);
+ let intensity = $derived(data?.demoSignal ? signalOpacity(data.demoSignal) : data?.measuredSignal ? .9 : data?.relationship.health === 'critical' ? 1 : data?.relationship.declared ? .85 : .65);
+ let color = $derived(data?.demoSignal ? signalColor(data.demoSignal) : data?.measuredSignal ? pathColors[data.measuredSignal.kind] : data?.relationship.health === 'critical' ? 'var(--color-signal-error)' : data?.relationship.declared ? 'var(--color-text-secondary)' : 'var(--color-secondary)');
 </script>
 <defs><marker id={`arrow-${id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 10 5 L 0 10 z" fill={color} /></marker></defs>
 <g class:dimmed={data?.dimmed} class="mesh-edge" class:edge-selected={selected && !data?.demo}>

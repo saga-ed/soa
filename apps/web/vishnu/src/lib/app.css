@@ -689,3 +689,19 @@ dd {
 .path-label.protocol-only:hover { background:transparent; }
 .fanout-icon { display:inline-block; flex:none; vertical-align:middle; overflow:visible; }
 .path-label.compact .fanout-icon { width:14px; height:14px; }
+
+/* Keep the overview canvas primary; details appear on selection. */
+.app-nav { display: none; }
+.topbar { height: 44px; min-height: 44px; padding-inline: 16px; }
+.compact-brand { font-size: 20px; font-weight: 700; text-decoration: none; }
+.compact-brand span { font-size: 13px; font-weight: 400; }
+main { padding: 8px 16px 12px; position: relative; }
+.live-status, .datadog-status { margin: 0; padding: 4px 8px; font-size: 11px; border: 0; }
+.demo-entry { position: absolute; top: -32px; right: 80px; font-size: 11px; }
+.toolbar { padding-block: 8px; gap: 12px; }
+.workspace { min-height: 0; }
+.graph-canvas { min-height: 260px; }
+.graph-footer { font-size: 10px; padding: 4px 8px; }
+.node-status { white-space: normal; line-height: 1.3; font-size: 11px; }
+.bus-summary { font-size: 11px; padding: 2px 4px; margin-top: 4px; }
+@media (max-width: 700px) { .workspace { min-height: 440px; } .compact-brand span { display: none; } }

@@ -83,15 +83,42 @@ With IAM, programs, scheduling and Vishnu running in the chosen slot, mint a
 local session with `ss stack login --slot 3`, then from this app directory run:
 
 ```sh
-node scripts/synthetic-traffic.mjs --slot 3 --duration 60 --concurrency 2 --interval 500
+node scripts/synthetic-traffic.mjs --slot 3 --profile baseline --duration 60
+node scripts/synthetic-traffic.mjs --slot 3 --profile burst --duration 60 --requests 1200
+node scripts/synthetic-traffic.mjs --slot 3 --profile mixed --duration 60
 ```
 
 The bounded driver reads existing programs and sends authenticated GET requests
 to `auth.whoami`, `programs.list`, `programs.get` and `schedules.get`. It uses fixed
 loopback ports, stops on a failed request, and never seeds or changes domain data.
-The cookie jar is read in memory; output contains only counts, status codes and
-client timings. These client timings are driver diagnostics, not Vishnu APM data.
-Duration is 1–600 seconds, concurrency 1–8, interval 100–10000 ms per worker.
+The cookie jar is read in memory. JSON lines report a run ID, exact UTC windows,
+counts, status codes and mean/p95/max client timings, separating two preflight
+reads from workload traffic. These client timings are driver diagnostics, not
+Vishnu APM data. Request and program identifiers are not printed.
+
+| Profile | Workers | Pause after each request | Repeating endpoint mix |
+| --- | ---: | ---: | --- |
+| `baseline` (default) | 1 | 1000 ms | Equal shares of all four procedures |
+| `burst` | 4 | 100 ms | Same mix as baseline, with more concurrent reads |
+| `mixed` | 2 | 250 ms | 50% programs.list, 25% programs.get, 12.5% each scheduling and whoami |
+
+The deterministic mix is shared across workers. Program-list reads exercise existing
+IAM permission calls; the mixed profile puts more traffic on that path. Run
+baseline then burst to compare the same mix at different demand, or mixed to
+change which path is busiest. Use the reported `workloadStartedAt` / `endedAt`
+windows for separate Datadog comparisons; a dashboard window covering both runs
+will combine their measurements. Retained span counts can differ from sent
+request counts because ingestion, sampling and downstream spans differ.
+
+`--concurrency` and `--interval` override profile defaults. Duration is 1–600
+seconds, concurrency 1–8, interval 100–10000 ms per worker. `--requests` caps all
+requests including preflight (2–10000, default 2000); the first reached limit
+ends the run. The pause is added after each response, so these profiles do not
+promise a fixed requests-per-second rate. Requests time out after 10 seconds;
+in-flight requests can finish after the workload deadline. Ctrl-C aborts them.
+Any failed request stops new work and gives a nonzero exit status.
+Driver guardrails and scheduling are covered by
+`pnpm exec vitest run scripts/synthetic-traffic.unit.test.mjs` from this directory.
 
 Enable [ss Datadog telemetry](../../../packages/node/saga-stack-cli/docs/datadog-telemetry.md)
 first. Inspect Datadog/Vishnu in the exact synthetic machine and slot scope after

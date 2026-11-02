@@ -40,6 +40,8 @@ const value = () => ({
         ],
   endpoints: variant === 'empty' ? [] : [{service:'programs-api',resource:'GET /programs',rate:{at:now,value:12},p95Ms:{at:now,value:75},errorRate:{at:now,value:0},observedSpans:37}],
   endpointSource: variant === 'retained' ? 'retained-spans' : 'apm-metrics',
+  pathEndpoints: [{source:'programs-api',target:'scheduling-api',resource:'GET /schedules',observedSpans:24,p95Ms:125}],
+  pathEndpointStatus: 'available',
   endpointStatus: variant === 'partial' ? 'partial' : 'available',
   connections:variant === 'empty' ? [] : [{source:'programs-api',target:'scheduling-api',observedSpans:24,p95Ms:125}],
   connectionStatus:variant === 'partial' ? 'partial' : 'available',

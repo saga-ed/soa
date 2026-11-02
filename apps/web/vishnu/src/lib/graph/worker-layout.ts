@@ -24,11 +24,11 @@ export function createLayoutWorker() {
   );
 
   return {
-    layout(snapshot: MeshSnapshot): Promise<MeshLayout> {
+    layout(snapshot: MeshSnapshot, aspectRatio?: number): Promise<MeshLayout> {
       if (stopped) return Promise.reject(stopped);
       return new Promise((resolve, reject) => {
         pending.add(reject);
-        layoutMesh(snapshot, engine)
+        layoutMesh(snapshot, engine, aspectRatio)
           .then(resolve, reject)
           .finally(() => pending.delete(reject));
       });

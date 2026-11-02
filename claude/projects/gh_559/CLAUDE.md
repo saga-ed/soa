@@ -14,7 +14,7 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 1. CI builds and deploys Vishnu to dev blue/green on a native ARM runner (I#560).
 2. That workflow can set the preview tag, so an idle colour can observe a patch-party sandbox (PR#556, gh_536 d9).
 3. The manual build leaves `OPS.md`.
-4. Only if d1 calls for it: per-sandbox and PR-preview deploys of Vishnu itself (I#561).
+4. Per-sandbox and PR-preview deploys of Vishnu itself, so it joins patch party like other services (I#561, ruled in d1).
 
 ## Layout
 
@@ -22,17 +22,18 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - `research/01-ci-contract-gap.md` — what `deploy-ecs-api` expects vs what Vishnu has
 - `research/02-why-arm64-and-emulation.md` — why ARM, and how emulation came about
 - `plans/01-plan-of-record.md` — the phased plan
-- `decisions/d1-vishnu-sandbox-deploys.md` — PENDING
+- `decisions/d1-vishnu-sandbox-deploys.md` — RESOLVED: build sandbox and PR previews now
 
 ## Locked decisions
 
 - **Synthetic dev stays native Node** (skelly, 2026-10-30). `ss` keeps running `pnpm dev`; no image is built for it.
 - **Fewer PRs** (skelly, 2026-10-30, for Vishnu generally): "this is a new system so the fewer PRs to manage the better". Hence two sub-issues, not one per fix.
 - **No synthetic-dev slot.** The `project` skill defaults to claiming one, but nothing here runs in synthetic dev, and all slots are bound, so claiming one means displacing another set. Claim one if that changes.
+- **Vishnu gets its own sandbox and PR-preview deploys** (d1, skelly, 2026-11-02).
 
 ## Open (track, don't block)
 
-- d1: does Vishnu need its own sandbox deploys?
+- Switchboard catalog entry and browser delivery of the preview header (I#561).
 - How to cover the SPA in CI (filter expression or wrapper package).
 - Sequencing with PR#556, which edits the same three infra files.
 

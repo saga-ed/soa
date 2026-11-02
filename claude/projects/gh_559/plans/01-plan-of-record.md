@@ -18,6 +18,6 @@ Why one PR: these are useless separately, and skelly wants fewer Vishnu PRs. The
 
 **The `$BUILDPLATFORM` caveat:** the build stage runs `pnpm deploy --prod --ignore-scripts`, whose output goes straight into the arm64 runtime stage. Any native module would then carry x86 binaries. Audit the dependency tree before making this change, or install production dependencies in an arm64 stage.
 
-## Phase 2: per-sandbox and PR previews (I#561), only if d1 says so
+## Phase 2: per-sandbox and PR previews (I#561), ruled in by d1
 
-See I#561 and research/01.
+See I#561 and research/01. Answer the switchboard catalog and preview-header questions first; they decide whether a browser can use a Vishnu sandbox at all.

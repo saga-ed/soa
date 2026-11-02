@@ -1,6 +1,6 @@
 # d1 — Does Vishnu need its own sandbox deploys?
 
-**PENDING**
+**RESOLVED 2026-11-02: Option C** (skelly). Build per-sandbox and PR-preview deploys now, against the recommendation of B. I#561 is in scope.
 
 ## Context
 
@@ -26,7 +26,7 @@ PR#556 (design: gh_536 d9, itself PENDING) does something different: Vishnu stay
 
 **B.** No current need requires C, and the concrete need (PR#556) is met by I#560. Keeping I#561 open preserves the research if someone wants Vishnu in a patch party. Choose A if you'd rather not keep the issue around.
 
-If d9 is ruled against colour-based observation, reopen this decision.
+Option C doesn't depend on d9: the per-sandbox deploys go ahead however d9 is ruled.
 
 ## Related artifacts
 

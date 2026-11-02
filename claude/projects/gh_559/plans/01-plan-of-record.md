@@ -9,7 +9,7 @@ Status lives on the issues. This is the shape and the reasoning.
 3. Service template: declare the three missing parameters.
 4. Dev deploy role stack, deployed once by someone with AppInfra tier (`saga-infra-dev`).
 5. `.github/workflows/deploy-vishnu-api.yml`: colour and preview-tag inputs, full parameter JSON, native ARM build, external routing.
-6. SPA coverage in CI.
+6. `pnpm-filter: '@saga-ed/vishnu*...'` (d2), confirmed with a `--dry-run`.
 7. `OPS.md`: dispatch replaces steps 3 and 4. Bootstrap, routing stacks and the live rule stay manual.
 
 Why one PR: these are useless separately, and skelly wants fewer Vishnu PRs. The role stack has to be deployed before the workflow can run.

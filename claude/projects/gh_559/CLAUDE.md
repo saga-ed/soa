@@ -23,7 +23,8 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - `research/02-why-arm64-and-emulation.md` — why ARM, and how emulation came about
 - `plans/01-plan-of-record.md` — the phased plan
 - `decisions/d1-vishnu-sandbox-deploys.md` — RESOLVED: build sandbox and PR previews now
-- `decisions/d2-spa-in-deploy-gate.md` — PENDING
+- `decisions/d2-spa-in-deploy-gate.md` — RESOLVED: name-glob filter covers both packages
+- `decisions/d3-buildplatform-dockerfile-split.md` — PENDING
 
 ## Locked decisions
 
@@ -31,11 +32,11 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - **Fewer PRs** (skelly, 2026-10-30, for Vishnu generally): "this is a new system so the fewer PRs to manage the better". Hence two sub-issues, not one per fix.
 - **No synthetic-dev slot.** The `project` skill defaults to claiming one, but nothing here runs in synthetic dev, and all slots are bound, so claiming one means displacing another set. Claim one if that changes.
 - **Vishnu gets its own sandbox and PR-preview deploys** (d1, skelly, 2026-11-02).
+- **The deploy gate covers both packages** with `@saga-ed/vishnu*...` (d2, skelly, 2026-11-02).
 
 ## Open (track, don't block)
 
 - Switchboard catalog entry and browser delivery of the preview header (I#561).
-- d2: should the deploy gate test the SPA as well as the API?
 - Sequencing with PR#556, which edits the same three infra files.
 
 ## Key reference paths

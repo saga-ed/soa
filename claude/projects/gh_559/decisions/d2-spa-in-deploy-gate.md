@@ -1,6 +1,6 @@
 # d2 — Should the deploy gate test the SPA as well as the API?
 
-**PENDING**
+**RESOLVED 2026-11-02: Option B** (skelly). `pnpm-filter: '@saga-ed/vishnu*...'`. Confirm with a `--dry-run` during I#560; fall back to C if the glob doesn't match both packages.
 
 ## Context
 

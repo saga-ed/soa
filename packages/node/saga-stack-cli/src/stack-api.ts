@@ -1036,7 +1036,9 @@ export function makeStackApi(m: Manifest, runtime: Runtime): StackApi {
               // Guard the `alreadyUp` adoption on the service's contract keys (iam-api's
               // JWT_ISSUER) so a drifted/foreign already-up process is refused, not adopted
               // with a stale env the CLI's stamp never reached (soa#305).
-              adoptEnv: getService(id, manifest).adoptEnv,
+              adoptEnv: launchContext.telemetry && spec.env.OTEL_RESOURCE_ATTRIBUTES
+                ? [...(getService(id, manifest).adoptEnv ?? []), 'OTEL_RESOURCE_ATTRIBUTES', 'OTEL_EXPORTER_OTLP_ENDPOINT']
+                : getService(id, manifest).adoptEnv,
             });
           }),
         );

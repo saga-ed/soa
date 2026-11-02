@@ -15,7 +15,8 @@ you have to reverse-engineer.
 > to per-feature docs ([sub-stacks](./docs/sub-stacks-and-bundles.md) · [slots](./docs/slots.md) ·
 > [verify](./docs/verify.md) · [snapshots](./docs/snapshots.md) · [e2e](./docs/e2e.md) ·
 > [develop](./docs/develop.md) · [tunnel](./docs/tunnel.md) · [hydrate](./docs/hydrate.md) ·
-> [integration](./docs/integration.md) · [instrumentation](./docs/instrumentation.md)).
+> [integration](./docs/integration.md) · [instrumentation](./docs/instrumentation.md) ·
+> [Datadog telemetry](./docs/datadog-telemetry.md)).
 
 ```bash
 ss stack up --only scheduling-api,sessions-api   # boot just those + their deps

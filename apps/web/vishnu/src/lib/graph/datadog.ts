@@ -7,6 +7,8 @@ export interface MetricPoint {
 }
 export interface DatadogService {
   service: string;
+  /** Count of retained server spans; never a total request count. */
+  observedSpans?: number;
   rate: MetricPoint | null;
   p95Ms: MetricPoint | null;
   errorRate: MetricPoint | null;
@@ -20,12 +22,38 @@ export interface DatadogSnapshot {
   observedAt: string;
   serverNow: number;
   freshForMs: number;
-  scope: { level?: 'environment' | 'deployment'; environment: string; deployment: string; deploymentTag: string };
+  scope: { level?: 'environment' | 'deployment'; environment: string; deployment: string; deploymentTag: string; machine?: string };
   appUrl: string;
   window: { from: number; to: number };
   thresholds: { hotRate: number; warningP95Ms: number; criticalP95Ms: number };
   services: DatadogService[];
   dependencies: { source: string; target: string }[];
+  measurementSource?: 'apm-metrics' | 'retained-spans';
+  endpointSource?: 'apm-metrics' | 'retained-spans';
+  endpoints?: DatadogEndpoint[];
+  connections?: DatadogConnection[];
+  endpointStatus?: MeasurementStatus;
+  connectionStatus?: MeasurementStatus;
+  endpointLimited?: boolean;
+  connectionLimited?: boolean;
+}
+export type MeasurementStatus = 'available' | 'partial' | 'unavailable' | 'unconfigured';
+export interface DatadogEndpoint {
+  service: string;
+  resource: string;
+  observedSpans?: number;
+  rate: MetricPoint | null;
+  p95Ms: MetricPoint | null;
+  /** Errors per second, not an error percentage. */
+  errorRate: MetricPoint | null;
+}
+export interface DatadogConnection {
+  source: string;
+  target: string;
+  /** Retained client spans explicitly attributed by peer.service in snapshot.window; not total requests or requests/sec. */
+  observedSpans: number;
+  /** Duration percentile of those retained outgoing client spans, in milliseconds. */
+  p95Ms: number | null;
 }
 export function matchesMesh(data: DatadogSnapshot | null, mesh: MeshSnapshot | null): boolean {
   return (
@@ -74,6 +102,7 @@ export function serviceSignal(
     observed: fresh && !!source,
     unavailable: failed || !!data && !['connected', 'partial'].includes(data.status),
     stale: !!source && !failed && !!data && ['connected', 'partial'].includes(data.status) && !fresh,
+    measurementSource: data?.measurementSource,
     rate,
     p95Ms,
     errorRate,
@@ -94,9 +123,9 @@ export function emphasizes(view: SignalView, signal: ReturnType<typeof serviceSi
 /** Values are quoted for Datadog search, then URL encoded; no raw query interpolation. */
 export function traceLink(data: DatadogSnapshot, source?: string, target?: string): string {
   const quote = (v: string) => JSON.stringify(v);
-  const scope = `env:${quote(data.scope.environment)}${data.scope.level === 'environment' ? '' : ` @${data.scope.deploymentTag}:${quote(data.scope.deployment)}`}`;
+  const scope = `env:${quote(data.scope.environment)}${data.scope.level === 'environment' ? '' : ` @${data.scope.deploymentTag}:${quote(data.scope.deployment)}`}${data.scope.machine ? ` @synthetic.machine:${quote(data.scope.machine)}` : ''}`;
   // Search is a supported span-query landing page. The user can switch to Trace Queries / Flow Map there.
-  const query = `${scope}${target ? ` service:${quote(target)} @span.parent.service:${quote(source ?? '')}` : source ? ` service:${quote(source)}` : ''}`;
+  const query = `${scope}${target ? ` service:${quote(source ?? '')} @span.kind:client @peer.service:${quote(target)}` : source ? ` service:${quote(source)}` : ''}`;
   const url = new URL('/apm/traces', data.appUrl);
   url.search = new URLSearchParams({
     query,

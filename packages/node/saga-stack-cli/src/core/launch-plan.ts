@@ -31,6 +31,7 @@
  */
 
 import { launchOrder } from './launch-order.js';
+import { syntheticTelemetryEnv, type SyntheticTelemetry } from './telemetry.js';
 import { getDb, getMesh, getService, manifest } from './manifest/index.js';
 import type { Lane, Manifest, RepoKey, ServiceId } from './manifest/index.js';
 
@@ -290,6 +291,7 @@ export interface LaunchTokens {
  * runtime usually only supplies `repoRoots` + `vendorDir`.
  */
 export interface LaunchContext {
+  telemetry?: SyntheticTelemetry;
   /**
    * Resolved host port per service. Defaults to the manifest `port`; the
    * `check_ports` preflight confirms each is free (up.sh does not remap, so this
@@ -582,7 +584,13 @@ export function resolveLaunchEnv(
   // bind it. See core/inspector.ts and docs/instrumentation.md.
 
   // Lane overrides win (env last-wins, matching up.sh's trailing splat).
-  return { ...env, ...laneOverlay(service, lane, ctx) };
+  return {
+    ...env,
+    ...laneOverlay(service, lane, ctx),
+    ...(ctx.telemetry && (!def.isFrontend || service === 'vishnu')
+      ? syntheticTelemetryEnv(ctx.telemetry, ctx.tokens.VISHNU_SLOT, def.repo)
+      : {}),
+  };
 }
 
 /** Join a repo root + repo-relative subpath without depending on node:path (pure). */
@@ -645,6 +653,7 @@ export function launchPlan(
 
 /** Host-derived inputs the pure default-context builder still needs from the runtime. */
 export interface LaunchContextInputs {
+  telemetry?: SyntheticTelemetry;
   /** Absolute repo checkout roots keyed by manifest `RepoKey`. */
   repoRoots: Record<RepoKey, string>;
   /** The CLI's VENDORED-scripts dir (holds `rtsm-fleet-local.json`) — the runtime
@@ -849,5 +858,5 @@ export function defaultLaunchContext(inputs: LaunchContextInputs, m: Manifest = 
       : {}),
   };
 
-  return { ports, repoRoots: inputs.repoRoots, tokens };
+  return { ports, repoRoots: inputs.repoRoots, tokens, ...(inputs.telemetry ? { telemetry: inputs.telemetry } : {}) };
 }

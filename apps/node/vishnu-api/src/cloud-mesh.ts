@@ -10,6 +10,8 @@ export function canonicalApmServices(data: DatadogSnapshot): DatadogSnapshot {
   return {
     ...data,
     services: data.services.map(s => ({ ...s, service: id(s.service) })),
+    ...(data.endpoints ? { endpoints: data.endpoints.map(e => ({ ...e, service: id(e.service) })) } : {}),
+    ...(data.connections ? { connections: data.connections.map(c => ({ ...c, source: id(c.source), target: id(c.target) })) } : {}),
     dependencies: data.dependencies
       .map(d => ({ ...d, source: id(d.source), target: id(d.target) }))
       .filter(d => {

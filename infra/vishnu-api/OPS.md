@@ -62,6 +62,8 @@ command.
    python3 infra/vishnu-api/render-deploy-command.py bootstrap-dev
    ```
 
+   `sam validate --lint` reports E3510 on the bootstrap's optional `VishnuDatabaseUrlSecretArn` reference. It predates CI and doesn't affect deployment.
+
    Review and run the emitted bootstrap command. It creates ECR, logs, task roles,
    task security group and scoped SSM outputs; IAM roles use `SagaProdMax`.
 
@@ -86,16 +88,19 @@ command.
    ```
 
    `.github/workflows/deploy-vishnu-api.yml` runs check-types, lint and test, builds
-   the ARM64 image on a native ARM runner, tags it `<git-sha>`, deploys
-   `soa-vishnu-api-<colour>` with `DesiredCount=1` and probes `/health` through
-   `x-saga-preview-vishnu-api: <colour>`. Live traffic does not move. The workflow
-   reads rule 4015 first and refuses the colour that is serving; it fails closed if the
-   rule is missing, split or all zero. That guard holds only for a fresh dispatch or
-   "Re-run all jobs". Never use "Re-run failed jobs" on this workflow: it keeps the
-   first attempt's result, so it replaces the live tasks if that colour was flipped live
-   since. Dispatch again instead.
-   Do not flip while a run is in progress: the check runs only at the start.
+   the ARM64 image on a native ARM runner, tags it `<git-sha>` (skipping the build if
+   that tag exists, since the repository is immutable), deploys
+   `soa-vishnu-api-<colour>` with `DesiredCount=1` and checks through
+   `x-saga-preview-vishnu-api: <colour>` that `/health` reports this colour and sha.
+   Live traffic does not move. The workflow reads rule 4015 at the start and again
+   immediately before `sam deploy`, in the same job, so any rerun rechecks it. It refuses
+   the colour that is serving, and fails closed if the rule is missing, split or all zero.
+   Do not flip during the deploy job: nothing can recheck once `sam deploy` has started.
    Test the colour through the header rule before flipping.
+
+   If only the health step fails with a 403, the stack did deploy. `/health` has no
+   auth, so suspect the WAF blocked the runner's IP. Check the colour from your own
+   machine, then rerun the job.
 
    To redeploy the colour that is serving, deploy the idle colour and flip. The
    workflow has no override for this.
@@ -125,12 +130,8 @@ be on main for `gh workflow run` to find it.
 
 1. Deploy the role stack from `infra/github-oidc/dev-deploy-role-template.yaml`. It
    creates `/github-actions-role/SoaGithubActionDevDeployRole` with the
-   `SagaGithubActionsMax` boundary.
-2. Update the bootstrap with `python3 infra/vishnu-api/render-deploy-command.py bootstrap-dev`
-   and review the change set. It should only make the dev ECR repository mutable
-   (CI overwrites `buildcache-*`) and add `/soa/vishnu-api/infra/dev/ecr-repo-uri`.
-   Parameters the renderer omits keep their previous values.
-3. Create the GitHub environment and its variable:
+   `SagaGithubActionsMax` boundary. See `infra/github-oidc/README.md`.
+2. Create the GitHub environment and its variable:
 
    ```sh
    gh api -X PUT repos/saga-ed/soa/environments/dev
@@ -138,11 +139,11 @@ be on main for `gh workflow run` to find it.
      --body arn:aws:iam::396913734878:role/github-actions-role/SoaGithubActionDevDeployRole
    ```
 
-4. [Return the idle colour to `main` scope](#returning-a-colour-to-main-scope) if it isn't
-   there, or the dispatch refuses it. Read on 2026-11-02: blue (idle) has
-   `EventStatsDeployment=sandbox-gh537`; green is at `main`.
+The CodeArtifact token comes from the existing repository variable `AWS_ROLE_ARN`.
 
-The CI job uses the existing repository variable `AWS_ROLE_ARN`.
+A dispatch also refuses a colour that isn't at `main` scope. Read on 2026-11-02: blue (idle)
+has `EventStatsDeployment=sandbox-gh537`; green is at `main`. So until PR#556 is on the
+dispatched ref, [return blue to `main` scope](#returning-a-colour-to-main-scope) first.
 
 ## Observing a sandbox from CI
 

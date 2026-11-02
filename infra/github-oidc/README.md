@@ -4,7 +4,7 @@ Deploy roles for soa live here, with the code they deploy. The account's OIDC pr
 
 | Role | AWS account | Stack | GitHub variable | Scope |
 |------|-------------|-------|-----------------|-------|
-| CI | Prod (531) | not in this repo | `AWS_ROLE_ARN` (repo-level) | CodeArtifact read, for the `ci` job |
+| CI | Prod (531) | not in this repo | `AWS_ROLE_ARN` (repo-level) | CodeArtifact tokens for CI and for the Vishnu image build |
 | Dev deploy | Dev (396) | `soa-github-oidc-dev-deploy` | `SOA_DEPLOY_ROLE_ARN` (`dev` environment) | Vishnu blue/green colour deploys only |
 
 ## Deploy the dev deploy role
@@ -38,41 +38,35 @@ gh variable set SOA_DEPLOY_ROLE_ARN \
   --body 'arn:aws:iam::396913734878:role/github-actions-role/SoaGithubActionDevDeployRole'
 ```
 
-Add no required reviewers to `dev`. `build-and-deploy` binds to it, so a reviewer would pause every dispatch.
+Add no required reviewers to `dev`. The preflight, build and deploy jobs bind to it, so a reviewer would pause every dispatch three times. If dispatches ever need an approval, add it deliberately and expect that.
 
-`SOA_DEPLOY_ROLE_ARN` is environment-scoped, and a `uses:` job can't declare `environment:`. The caller therefore reads it in a small job bound to `dev` and passes it on as a job output, as program-hub's `deploy-programs-api.yml` does in its `config` job.
+The test job doesn't bind to `dev`. It runs dependency install scripts and tests, and binding it would let that code request a token this role trusts. It still gets its CodeArtifact token from `AWS_ROLE_ARN`, which is a repository variable.
 
 ## Trust
 
-The role trusts two subjects in `saga-ed/soa`:
-
-- `environment:dev`, for the jobs bound to the `dev` environment (`ci` and `build-and-deploy` in `deploy-ecs-api.yml`, and the caller's config job).
-- `ref:refs/heads/*`, for the jobs `deploy-ecs-api.yml` leaves unbound on dev (`build-image`, `merge-image`, `wait-stable`, `register-switchboard`). These present the branch subject, so a trust limited to `environment:dev` would fail the build. Any branch is allowed because a dispatch can run from any branch.
-
-`pull_request` and tag subjects are not trusted. PR previews would have to add them, along with the other grants they need.
+The role trusts one subject: `repo:saga-ed/soa:environment:dev`. soa is public, so a job has to bind the `dev` environment to assume it. `pull_request`, branch and tag subjects are not trusted.
 
 ## Scope
 
-The grants follow what `deploy-ecs-api.yml` and `deploy-ecs-api/action.yml` do for a colour deploy with `use-external-routing` and `native-multiarch-build`:
+The grants follow what `.github/workflows/deploy-vishnu-api.yml` and `.github/scripts/vishnu-deploy.sh` do:
 
 | Grant | Used by |
 |-------|---------|
-| ECR push and pull on `soa/vishnu-api` | `build-image`, `merge-image`, image checks |
-| CodeArtifact token and read on `saga_js`, `saga_py` | image build, `saga-platform` CLIs |
-| Change sets on `soa-vishnu-api-blue` and `-green` | `sam deploy`, and the scope check in the caller's config job |
-| SSM read on `/soa/vishnu-api/infra/dev/*` and the cluster and subnet parameters | ECR URI, and CloudFormation resolving the template's parameters |
-| ECS task definitions, and the two colour services | the service stack, `wait-stable` |
-| ELB describe on load balancers, listeners and rules | `resolve-active-colour` in the caller's config job; nothing is written |
-| `GetSecretValue` on the switchboard key and WAF bypass token | `register-switchboard` |
+| ECR push, pull and `DescribeImages` on `soa/vishnu-api` | the build job and its skip-if-built check |
+| Change sets on `soa-vishnu-api-blue` and `-green` | `sam deploy`, and the scope check in the guard |
+| SSM read on `/soa/vishnu-api/infra/dev/*` and the cluster and subnet parameters | CloudFormation resolving the template's parameters as this role |
+| ECS task definitions, and the two colour services | the service stack; the actions follow the `AWS::ECS::Service` and `AWS::ECS::TaskDefinition` registry handlers |
+| ELB describe on load balancers, listeners and rules | the live colour guard; nothing is written |
 | `PassRole` on the two Vishnu task roles, to `ecs-tasks` only | the task definition |
 
 Left out on purpose:
 
 - **Routing, bootstrap and the live rule.** These stay manual, as `infra/vishnu-api/OPS.md` describes. The role can't change a target group or listener rule, so it can't flip live traffic.
+- **CodeArtifact.** The workflow gets its token with `AWS_ROLE_ARN`, the same role soa's other workflows use, so this role needs no cross-account access.
 - **The SAM bucket.** `infra/vishnu-api/samconfig.yaml` sets none, and the template is small enough to send inline.
-- **Lambda invoke.** The ledger steps skip `blue` and `green`.
-- **`ecs:RunTask`.** The workflow doesn't enable migrations.
-- **Application Auto Scaling.** The workflow doesn't set `wake-before-deploy`, and the service template registers no scalable target. Turning wake on needs `DescribeScalableTargets`.
+- **WAF bypass and any other secret.** The health check is a plain `GET /health`; see `infra/vishnu-api/OPS.md`.
+- **`ecs:RunTask`.** The workflow runs no migrations.
+- **Application Auto Scaling.** The service template registers no scalable target.
 - **Sandbox and preview grants.** See I#561.
 
 `ecs:RegisterTaskDefinition` stays on `*`, as it does in program-hub. PassRole is what limits the task definitions this role can use.

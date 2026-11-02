@@ -1,9 +1,8 @@
 # GitHub Actions dev deploy role for soa.
 #
-# Deployed to the dev account (396). Used by deploy-vishnu-api for a blue/green
-# colour deploy with use-external-routing and native-multiarch-build. Routing
-# stacks, the bootstrap stack and the live listener rule stay manual, so this
-# role has no write access to them. See README.md.
+# Deployed to the dev account (396). Used by .github/workflows/deploy-vishnu-api.yml
+# for a blue/green colour deploy. Routing stacks, the bootstrap stack and the live
+# listener rule stay manual, so this role has no write access to them. See README.md.
 
 AWSTemplateFormatVersion: '2010-09-09'
 Description: soa GitHub Actions dev deploy role (dev account)
@@ -38,39 +37,13 @@ Resources:
               Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
+              # Only jobs bound to the dev environment. soa is public, so no branch subject.
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              StringLike:
-                # Both are needed. On dev, deploy-ecs-api binds build-and-deploy
-                # to the environment but leaves build-image, merge-image,
-                # wait-stable and register-switchboard unbound, so those jobs
-                # present the branch subject.
-                token.actions.githubusercontent.com:sub:
-                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:environment:dev
-                  - !Sub repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/*
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:environment:dev
       Policies:
 
-        # saga_js for the image build, saga_py for the saga-platform CLIs.
-        # The domain resource policy in the prod account (531) also has to admit us.
-        - PolicyName: CodeArtifactRead
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: codeartifact:GetAuthorizationToken
-                Resource: !Sub arn:aws:codeartifact:${AWS::Region}:531314149529:domain/saga
-              - Effect: Allow
-                Action: codeartifact:ReadFromRepository
-                Resource:
-                  - !Sub arn:aws:codeartifact:${AWS::Region}:531314149529:repository/saga/saga_js
-                  - !Sub arn:aws:codeartifact:${AWS::Region}:531314149529:repository/saga/saga_py
-              - Effect: Allow
-                Action: sts:GetServiceBearerToken
-                Resource: '*'
-                Condition:
-                  StringEquals:
-                    sts:AWSServiceName: codeartifact.amazonaws.com
-
+        # DescribeImages is the skip-if-built check. The repository is IMMUTABLE.
         - PolicyName: ECRPush
           PolicyDocument:
             Version: '2012-10-17'
@@ -80,6 +53,7 @@ Resources:
                 Resource: '*'
               - Effect: Allow
                 Action:
+                  - ecr:DescribeImages
                   - ecr:BatchCheckLayerAvailability
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchGetImage
@@ -170,18 +144,8 @@ Resources:
                 Resource:
                   - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service-deployment/${ClusterName}/soa-vishnu-api-blue/*
                   - !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service-deployment/${ClusterName}/soa-vishnu-api-green/*
-              - Effect: Allow
-                Action: ecs:DescribeTasks
-                Resource: !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/${ClusterName}/*
-              - Effect: Allow
-                Action: ecs:ListTasks
-                Resource: '*'
-                Condition:
-                  ArnEquals:
-                    ecs:cluster: !Sub arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterName}
 
-        # Read only, for resolve-active-colour in the caller's config job. External
-        # routing means no target group or rule is written.
+        # Read only, for the live colour guard. No target group or rule is written.
         - PolicyName: ELBRead
           PolicyDocument:
             Version: '2012-10-17'
@@ -192,17 +156,6 @@ Resources:
                   - elasticloadbalancing:DescribeListeners
                   - elasticloadbalancing:DescribeRules
                 Resource: '*'
-
-        # register-switchboard: the API key, and the WAF bypass token its PUT needs.
-        - PolicyName: SwitchboardSecretsRead
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource:
-                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:switchboard/ci-api-key-*
-                  - !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:shared/e2e-auth-bypass-token-*
 
         - PolicyName: IAMPassRole
           PolicyDocument:

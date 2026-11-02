@@ -77,8 +77,7 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: soa/vishnu-api
-      # Dev is mutable like the rest of the fleet: CI overwrites buildcache-<env>-<arch> and can re-push :<sha>.
-      ImageTagMutability: !If [IsProd, IMMUTABLE, MUTABLE]
+      ImageTagMutability: IMMUTABLE
       ImageScanningConfiguration: {ScanOnPush: true}
       LifecyclePolicy:
         LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Expire untagged images","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":7},"action":{"type":"expire"}}]}'
@@ -130,8 +129,5 @@ Resources:
   LogGroupParameter:
     Type: AWS::SSM::Parameter
     Properties: {Name: !Sub '/soa/vishnu-api/infra/${Environment}/log-group', Type: String, Value: !Ref LogGroup}
-  EcrRepoUriParameter:
-    Type: AWS::SSM::Parameter
-    Properties: {Name: !Sub '/soa/vishnu-api/infra/${Environment}/ecr-repo-uri', Type: String, Value: !GetAtt Repository.RepositoryUri}
 Outputs:
   ImageRepository: {Value: !GetAtt Repository.RepositoryUri}

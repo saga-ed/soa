@@ -1,8 +1,8 @@
 name: Deploy Vishnu API
 
-# Thin caller of the fleet deploy-ecs-api pipeline. Dispatch only: nothing deploys
-# automatically. Deploys the idle dev colour; the flip, bootstrap and routing
-# stacks stay manual (infra/vishnu-api/OPS.md).
+# Builds and deploys the idle dev colour. Dispatch only. Standalone on purpose: soa is
+# public, so it can't use the fleet's private pipeline and uses public actions only (gh_559 d5).
+# The flip, bootstrap and routing stacks stay manual (infra/vishnu-api/OPS.md).
 
 on:
   workflow_dispatch:
@@ -23,166 +23,240 @@ on:
         type: string
 
 permissions:
-  id-token: write
-  # Nothing writes repo contents at deploy-tier canary; production's tag and Release would need write.
   contents: read
-  pull-requests: write
-  actions: read
-  deployments: write
 
 concurrency:
   group: deploy-vishnu-api-${{ inputs.colour }}
   cancel-in-progress: false
 
+env:
+  AWS_REGION: us-west-2
+  IMAGE_REPOSITORY: 396913734878.dkr.ecr.us-west-2.amazonaws.com/soa/vishnu-api
+
 jobs:
-  # A `uses:` job can't bind an environment, so resolve the env-scoped role here.
-  config:
+  preflight:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    environment:
-      name: dev
-      deployment: false
+    environment: dev
     permissions:
-      id-token: write
       contents: read
-    outputs:
-      deploy-role-arn: ${{ vars.SOA_DEPLOY_ROLE_ARN }}
-      colour: ${{ steps.validate.outputs.colour }}
-      preview-tag: ${{ steps.validate.outputs.preview-tag }}
+      id-token: write
     steps:
-      - name: Validate dispatch inputs
-        id: validate
+      - name: Check out the dispatched ref
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check the deploy role is configured
         env:
-          COLOUR: ${{ inputs.colour }}
-          PREVIEW_TAG: ${{ inputs.preview-tag }}
           DEPLOY_ROLE_ARN: ${{ vars.SOA_DEPLOY_ROLE_ARN }}
         run: |
           if [ -z "$DEPLOY_ROLE_ARN" ]; then
             echo "::error::SOA_DEPLOY_ROLE_ARN is not set on the dev environment (infra/vishnu-api/OPS.md)"
             exit 1
           fi
-          if [ "$COLOUR" != "blue" ] && [ "$COLOUR" != "green" ]; then
-            echo "::error::colour must be blue or green"
-            exit 1
-          fi
-          if [ -n "$PREVIEW_TAG" ] && ! [[ "$PREVIEW_TAG" =~ ^sandbox-[a-zA-Z0-9][a-zA-Z0-9-]{0,39}$ ]]; then
-            echo "::error::preview-tag must be sandbox-<name>"
-            exit 1
-          fi
-          echo "colour=$COLOUR" >> "$GITHUB_OUTPUT"
-          echo "preview-tag=$PREVIEW_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Configure dev deploy credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ vars.SOA_DEPLOY_ROLE_ARN }}
-          aws-region: us-west-2
+          aws-region: ${{ env.AWS_REGION }}
 
-      # No requested-color: an explicit colour wins without an AWS read, and the
-      # read is the point. Fails closed if the rule is missing, split or all zero.
-      - name: Read the live colour
-        id: live
-        uses: saga-ed/ci-actions/resolve-active-colour@v2.51
-        with:
-          environment: dev
-          alb-name: dev-account-alb
-          host: vishnu.wootops.org
-          live-priority: '4015'
-          tg-prefix: vishnu-api
-
-      # Never use "Re-run failed jobs" here: it keeps this job's first result, so a colour
-      # flipped live since then gets deployed over. Dispatch again or "Re-run all jobs".
-      - name: Refuse the live colour
+      - name: Validate inputs, the live colour and the event-stats scope
         env:
-          COLOUR: ${{ steps.validate.outputs.colour }}
-          LIVE: ${{ steps.live.outputs.identifier }}
-          IDLE: ${{ steps.live.outputs.idle-identifier }}
-        run: |
-          if [ "$COLOUR" != "$IDLE" ]; then
-            echo "::error::$COLOUR is not the idle colour (live=$LIVE, idle=$IDLE). Deploy the idle colour and flip."
-            exit 1
-          fi
+          COLOUR: ${{ inputs.colour }}
+          PREVIEW_TAG: ${{ inputs.preview-tag }}
+        run: bash .github/scripts/vishnu-deploy.sh guard
 
+  test:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # No environment, on purpose. The dev deploy role trusts only the environment:dev subject,
+    # and this job runs install scripts and tests, which could mint a token for that subject.
+    # AWS_ROLE_ARN is a repository variable, so this job can still read it.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
       - name: Check out the dispatched ref
-        if: steps.validate.outputs.preview-tag != ''
         uses: actions/checkout@v5
         with:
           persist-credentials: false
 
-      # SAM drops parameters the template doesn't declare, sends UsePreviousValue for those it
-      # isn't given, and rejects `Key=`. /health can't see a wrong scope, so stop it here.
-      - name: Check the colour's event-stats scope
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          # Matches the image's node:24-bookworm-slim.
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 9.0.0
+
+      # Step outputs, not the environment: these role credentials reach one step, and never
+      # the tests. The registry token they fetch is removed after the install.
+      - name: Assume the CodeArtifact role
+        id: codeartifact-role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: true
+          output-env-credentials: false
+
+      - name: Configure CodeArtifact registry
         env:
-          COLOUR: ${{ steps.validate.outputs.colour }}
-          PREVIEW_TAG: ${{ steps.validate.outputs.preview-tag }}
+          AWS_ACCESS_KEY_ID: ${{ steps.codeartifact-role.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.codeartifact-role.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.codeartifact-role.outputs.aws-session-token }}
         run: |
-          STACK="soa-vishnu-api-$COLOUR"
-          if [ -n "$PREVIEW_TAG" ] && ! grep -Eq '^ +EventStatsPreviewTag:' infra/shared/service-template.yaml; then
-            echo "::error::This ref's service template does not declare EventStatsPreviewTag (PR#556), so SAM would drop the tag (infra/vishnu-api/OPS.md)"
-            exit 1
-          fi
-          if READ=$(aws cloudformation describe-stacks --stack-name "$STACK" \
-            --query "Stacks[0].[Parameters[?ParameterKey=='EventStatsDeployment'].ParameterValue | [0], Parameters[?ParameterKey=='VishnuMqEnabled'].ParameterValue | [0]]" \
-            --output text 2>&1); then
-            read -r SCOPE MQ_ENABLED <<< "$READ"
-          elif [[ "$READ" == *"$STACK does not exist"* ]]; then
-            # A new stack takes the template defaults, which are main scope with MQ off.
-            SCOPE=main
-            MQ_ENABLED=false
-          else
-            echo "::error::Could not read $STACK: $READ"
-            exit 1
-          fi
-          if [ -n "$PREVIEW_TAG" ] && [ "$MQ_ENABLED" != "true" ]; then
-            echo "::error::$STACK has VishnuMqEnabled=$MQ_ENABLED, and preview-tag needs true (infra/vishnu-api/OPS.md)"
-            exit 1
-          fi
-          if [ -z "$PREVIEW_TAG" ] && [ "$SCOPE" != "main" ] && [ "$SCOPE" != "None" ]; then
-            echo "::error::$STACK is at EventStatsDeployment=$SCOPE, and an empty preview-tag would keep it. Pass the tag, or return the colour to main scope first (infra/vishnu-api/OPS.md)"
-            exit 1
-          fi
+          TOKEN=$(aws codeartifact get-authorization-token --domain saga --domain-owner 531314149529 \
+            --duration-seconds 1800 --query authorizationToken --output text)
+          echo "::add-mask::$TOKEN"
+          pnpm config set //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken "$TOKEN"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The role can likely publish, and nothing after the install needs the registry.
+      - name: Remove the CodeArtifact token
+        run: pnpm config delete //saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken
+
+      # vishnu-api's backend tests import .ts files from apps/web/vishnu, whose tsconfig extends
+      # this generated file. Turbo doesn't order those tests after anything that creates it.
+      - name: Generate the SvelteKit tsconfig
+        run: pnpm --filter @saga-ed/vishnu exec svelte-kit sync
+
+      # Name glob, not `@saga-ed/vishnu-api...`: the image also holds the SPA, which isn't an API dependency (d2).
+      - name: Type check, lint and test
+        run: pnpm exec turbo run check-types lint test --filter='@saga-ed/vishnu*...'
+
+  build:
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the dispatched ref
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # Token first, then the dev role, so neither set of credentials overwrites the other.
+      - name: Assume the CodeArtifact role
+        id: codeartifact-role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: true
+          output-env-credentials: false
+
+      - name: Fetch the CodeArtifact token
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.codeartifact-role.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.codeartifact-role.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.codeartifact-role.outputs.aws-session-token }}
+        run: |
+          TOKEN=$(aws codeartifact get-authorization-token --domain saga --domain-owner 531314149529 \
+            --duration-seconds 1800 --query authorizationToken --output text)
+          echo "::add-mask::$TOKEN"
+          umask 077
+          printf '%s' "$TOKEN" > "$RUNNER_TEMP/codeartifact-token"
+
+      - name: Configure dev deploy credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.SOA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      # The repository is IMMUTABLE, so a rerun of a sha that already pushed must not push again.
+      - name: Check whether this sha is already built
+        id: image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: bash .github/scripts/vishnu-deploy.sh image-exists
+
+      - name: Set up Buildx
+        if: steps.image.outputs.exists != 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Native arm64, no QEMU. No layer cache: the install layer holds private CodeArtifact
+      # packages, and in a public repo fork PR runs can read this repo's Actions cache.
+      # Attestations off so the tag is a plain image, not an index the untagged-image
+      # lifecycle rule could break. Build records off so nothing is uploaded as an artifact.
+      - name: Build and push
+        if: steps.image.outputs.exists != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          DOCKER_BUILD_SUMMARY: 'false'
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: .
+          file: apps/node/vishnu-api/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+          provenance: false
+          sbom: false
+          secret-files: |
+            codeartifact=${{ runner.temp }}/codeartifact-token
 
   deploy:
-    needs: config
-    uses: saga-ed/ci-actions/.github/workflows/deploy-ecs-api.yml@v2.51
-    with:
-      ci-role-arn: ${{ vars.AWS_ROLE_ARN }}
-      deploy-role-arn: ${{ needs.config.outputs.deploy-role-arn }}
-      project-name: soa
-      service-name: vishnu-api
-      # Name glob, not `@saga-ed/vishnu-api...`: the image also holds the SPA, which isn't an API dependency (d2).
-      pnpm-filter: '@saga-ed/vishnu*...'
-      ssm-prefix: vishnu-api
-      host-headers: vishnu.wootops.org
-      health-url: https://vishnu.wootops.org/health
-      preview-url: https://vishnu.wootops.org
-      preview-header-name: x-saga-preview-vishnu-api
-      preview-header: ${{ needs.config.outputs.colour }}
-      dockerfile-path: apps/node/vishnu-api/Dockerfile
-      samconfig-path: infra/vishnu-api/samconfig.yaml
-      routing-template-path: infra/shared/routing-template.yaml
-      ecr-ssm-name: /soa/vishnu-api/infra/dev/ecr-repo-uri
-      use-external-routing: true
-      native-multiarch-build: 'true'
-      identifier: ${{ needs.config.outputs.colour }}
-      environment: dev
-      deploy-tier: canary
-      # Replaces samconfig's list: keep every dev/dev-green value here. The MQ
-      # parameters aren't in samconfig; existing stacks keep theirs by UsePreviousValue.
-      service-parameter-overrides-json: |
-        {
-          "ExecEnv": "dev",
-          "ClusterArnSSMParameter": "/dev/shared-arm/ecs-cluster-arn",
-          "SubnetIdsSSMParameter": "/shared/infra/dev/private-subnet-ids",
-          "SecurityGroupIdSSMParameter": "/soa/vishnu-api/infra/dev/sg-id",
-          "TargetGroupArnSSMParameter": "/soa/vishnu-api/infra/dev/${{ needs.config.outputs.colour }}/target-group-arn",
-          "ExecutionRoleArnSSMParameter": "/soa/vishnu-api/infra/dev/execution-role-arn",
-          "TaskRoleArnSSMParameter": "/soa/vishnu-api/infra/dev/task-role-arn",
-          "LogGroupSSMParameter": "/soa/vishnu-api/infra/dev/log-group",
-          "CapacityProviderName": "dev-shared-ec2-cluster-arm-capacity-provider",
-          "DatadogApiKeyArn": "arn:aws:secretsmanager:us-west-2:396913734878:secret:datadog/api-key/default-mj4116",
-          "DatadogAppKeyArn": "arn:aws:secretsmanager:us-west-2:396913734878:secret:soa/vishnu/dev/datadog-app-key-ilOgHK",
-          "DesiredCount": "1",
-          "BuildRevision": "${{ github.sha }}"${{ needs.config.outputs.preview-tag != '' && format(',"EventStatsPreviewTag": "{0}","EventStatsDeployment": "{0}"', needs.config.outputs.preview-tag) || '' }}
-        }
-    secrets: inherit
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the dispatched ref
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install SAM CLI
+        run: pip install --quiet aws-sam-cli==1.132.0
+
+      - name: Configure dev deploy credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.SOA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Same job as the deploy, so "Re-run failed jobs" can't reuse an old answer, and
+      # the build and test time since preflight can't leave a flipped colour unnoticed.
+      - name: Recheck the live colour and the event-stats scope
+        env:
+          COLOUR: ${{ inputs.colour }}
+          PREVIEW_TAG: ${{ inputs.preview-tag }}
+        run: bash .github/scripts/vishnu-deploy.sh guard
+
+      - name: Deploy the colour stack
+        env:
+          COLOUR: ${{ inputs.colour }}
+          PREVIEW_TAG: ${{ inputs.preview-tag }}
+          BUILD_REVISION: ${{ github.sha }}
+          SAM_CLI_TELEMETRY: '0'
+        run: bash .github/scripts/vishnu-deploy.sh sam-deploy
+
+      - name: Check health through the colour's preview header
+        env:
+          COLOUR: ${{ inputs.colour }}
+          BUILD_REVISION: ${{ github.sha }}
+        run: bash .github/scripts/vishnu-deploy.sh health

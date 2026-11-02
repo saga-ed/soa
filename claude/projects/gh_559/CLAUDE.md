@@ -11,7 +11,7 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 
 ## What this initiative is
 
-1. CI builds and deploys Vishnu to dev blue/green on a native ARM runner (I#560).
+1. A standalone workflow builds and deploys Vishnu to dev blue/green on a native ARM runner (I#560).
 2. That workflow can set the preview tag, so an idle colour can observe a patch-party sandbox (PR#556, gh_536 d9).
 3. The manual build leaves `OPS.md`.
 4. Deferred by d1: per-sandbox and PR-preview deploys of Vishnu itself (I#561).
@@ -19,12 +19,13 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 ## Layout
 
 - `sources/` — the originating ask and an issue snapshot
-- `research/01-ci-contract-gap.md` — what `deploy-ecs-api` expects vs what Vishnu has
+- `research/01-ci-contract-gap.md` — what `deploy-ecs-api` expects vs what Vishnu has; superseded by d5 except its blocker section
 - `research/02-why-arm64-and-emulation.md` — why ARM, and how emulation came about
 - `plans/01-plan-of-record.md` — the phased plan
 - `decisions/d1-vishnu-sandbox-deploys.md` — RESOLVED: defer I#561
 - `decisions/d4-sequencing-with-pr556.md` — RESOLVED: I#560 lands on main first
 - `decisions/d5-public-soa-private-ci-actions.md` — RESOLVED: standalone workflow using public actions
+- `decisions/d6-dev-environment-gate.md` — PENDING
 - `decisions/d2-spa-in-deploy-gate.md` — RESOLVED: name-glob filter covers both packages
 - `decisions/d3-buildplatform-dockerfile-split.md` — RESOLVED: dropped
 
@@ -51,9 +52,9 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 | Manual runbook | `/home/skelly/dev/soa/infra/vishnu-api/OPS.md` |
 | Service template | `/home/skelly/dev/soa/infra/shared/service-template.yaml` |
 | Image | `/home/skelly/dev/soa/apps/node/vishnu-api/Dockerfile` |
-| Closest caller to copy | `/home/skelly/dev/program-hub/.github/workflows/deploy-programs-api.yml` |
-| Deploy role to copy | `/home/skelly/dev/program-hub/infra/github-oidc/dev-deploy-role-template.yaml` |
-| Caller contract | `/home/skelly/.claude/plugins/cache/saga-tools/saga-iac/1.22.0/references/ci-actions-caller-contract.md` |
+| Deploy workflow | `/home/skelly/dev/soa/.github/workflows/deploy-vishnu-api.yml` |
+| Deploy steps and guard | `/home/skelly/dev/soa/.github/scripts/vishnu-deploy.sh` |
+| Deploy role | `/home/skelly/dev/soa/infra/github-oidc/dev-deploy-role-template.yaml` |
 | Sandbox observation design | `claude/projects/gh_536/decisions/d9-vishnu-sandbox-observation.md` on branch `gh_538-vishnu-sandbox` (PR#556) |
 
 *Last updated: 2026-11-02*

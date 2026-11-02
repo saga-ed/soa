@@ -1,4 +1,5 @@
 <script lang="ts">
+ import { pathSignal, pathEmphasized } from '$lib/graph/path-signals';
  import { nodeObservation } from '$lib/graph/node-observation';
  import { untrack, onDestroy } from 'svelte';
  import { focusLayout, layoutTween } from '$lib/graph/focus-layout';
@@ -24,24 +25,27 @@
  let frame = 0;
  let lastFocusRequest = '';
  let drawn = $derived(displayLayout ?? layout);
+ const rankedView = () => ['hot', 'slow', 'fanout'].includes(signalView);
  const matched = () => {
   const ids=new Set<string>();
   if(signalView === 'overview') return ids;
   for(const r of snapshot.relationships.filter(r=>r.kind==='http'||r.kind==='dependency')) {
    const demo=demoSignals[r.id];
-   const match=Object.keys(demoSignals).length ? demo && demoMatch(demo) : emphasizes(signalView,serviceSignal(datadog,r.source,now,datadogError)) || emphasizes(signalView,serviceSignal(datadog,r.target,now,datadogError));
+   const match=Object.keys(demoSignals).length ? demo && demoMatch(demo) : rankedView() ? pathEmphasized(pathSignal(datadog,r.source,r.target,signalView,now,datadogError)) : emphasizes(signalView,serviceSignal(datadog,r.source,now,datadogError)) || emphasizes(signalView,serviceSignal(datadog,r.target,now,datadogError));
    if(match){ids.add(r.source);ids.add(r.target);}
   }
   return ids;
  };
+ let highlightedIds = $derived.by(matched);
  $effect(()=>{
+  const measuredIds=highlightedIds;
   const base=layout, view=signalView, enabled=focusSignals, request=manualFocus, fit=fitRequest;
   untrack(()=>{
    const focusRequest = JSON.stringify([view, enabled, request, fit]);
    const refit = lastFocusRequest !== focusRequest;
    lastFocusRequest = focusRequest;
    cancelAnimationFrame(frame);
-   const ids=enabled && request?.view===view ? new Set(request.ids) : enabled ? matched() : new Set<string>();
+   const ids=enabled && request?.view===view ? new Set(request.ids) : enabled ? measuredIds : new Set<string>();
    const next=focusLayout(base,snapshot,ids);
    focusCount=ids.size;
    targetLayout=next;
@@ -72,16 +76,17 @@
  let nodes: Node[] = $derived(drawn.nodes.filter(n=>snapshot.systems.some(s=>s.id===n.id)).map(n => {
   const system = snapshot.systems.find(s => s.id === n.id)!;
   const signal = serviceSignal(datadog, system.id, now, datadogError);
-  return { id: n.id, type: 'system', position: { x: n.x, y: n.y }, width: n.width, height: n.height, selected: selected === n.id, ariaLabel: `${system.label}, ${nodeObservation(system, signal, mqViews[system.id], snapshot.mode === 'live').label}. Press Enter to inspect.`, data: { system, context: n.context, width:n.width, height:n.context ? n.height : system.kind === 'Shared broker' || system.id === 'infra:rabbitmq' ? 112 : n.height, signal, participants, onselect, mqViews, onpreview, live: snapshot.mode === 'live', dimmed: selected ? !relevant.has(n.id) : !(Object.keys(demoSignals).length ? snapshot.relationships.some(r => (r.source === n.id || r.target === n.id) && demoSignals[r.id] && demoMatch(demoSignals[r.id])) || signalView === 'overview' : emphasizes(signalView, signal)) } };
+  return { id: n.id, type: 'system', position: { x: n.x, y: n.y }, width: n.width, height: n.height, selected: selected === n.id, ariaLabel: `${system.label}, ${nodeObservation(system, signal, mqViews[system.id], snapshot.mode === 'live').label}. Press Enter to inspect.`, data: { system, context: n.context, width:n.width, height:n.context ? n.height : system.kind === 'Shared broker' || system.id === 'infra:rabbitmq' ? 112 : n.height, signal, participants, onselect, mqViews, onpreview, live: snapshot.mode === 'live', dimmed: selected ? !relevant.has(n.id) : !(Object.keys(demoSignals).length ? snapshot.relationships.some(r => (r.source === n.id || r.target === n.id) && demoSignals[r.id] && demoMatch(demoSignals[r.id])) || signalView === 'overview' : rankedView() ? highlightedIds.has(system.id) : emphasizes(signalView, signal)) } };
  }));
  let edges: Edge[] = $derived(drawn.edges.filter(e => snapshot.relationships.some(r => r.id === e.id && r.kind !== 'event')).map(e => {
   const r = snapshot.relationships.find(r => r.id === e.id)!;
   const sourceSignal = serviceSignal(datadog, r.source, now, datadogError);
   const targetSignal = serviceSignal(datadog, r.target, now, datadogError);
   const demoSignal = demoSignals[r.id];
-  const emphasized = Object.keys(demoSignals).length ? signalView === 'overview' || (demoSignal && demoMatch(demoSignal)) : emphasizes(signalView, sourceSignal) || emphasizes(signalView, targetSignal);
+  const measuredSignal = pathSignal(datadog, r.source, r.target, signalView, now, datadogError);
+  const emphasized = Object.keys(demoSignals).length ? signalView === 'overview' || (demoSignal && demoMatch(demoSignal)) : rankedView() ? pathEmphasized(measuredSignal) : emphasizes(signalView, sourceSignal) || emphasizes(signalView, targetSignal);
   const observed = !datadogError && datadog && ['connected','partial'].includes(datadog.status) && now - Date.parse(datadog.observedAt) <= datadog.freshForMs && (r.observation ? r.observation === 'observed' : datadog.dependencies.some(d => d.source === r.source && d.target === r.target));
-  return { id: e.id, source: r.source, target: r.target, type: 'routed', selected: selected === e.id, ariaLabel: `${r.label}, ${r.kind}, ${r.health}. Press Enter to inspect.`, data: { relationship: r, demoSignal, demo: Object.keys(demoSignals).length > 0, points: e.points, observed: !!observed, dimmed: selected ? !relevant.has(e.id) : !emphasized } };
+  return { id: e.id, source: r.source, target: r.target, type: 'routed', selected: selected === e.id, ariaLabel: `${r.label}, ${r.kind}, ${r.health}. Press Enter to inspect.`, data: { relationship: r, demoSignal, measuredSignal, demo: Object.keys(demoSignals).length > 0, points: e.points, observed: !!observed || !!measuredSignal, dimmed: selected ? !relevant.has(e.id) : !emphasized } };
  }));
  let selectedIds = $derived(snapshot.systems.some(s => s.id === selected) ? [selected!] : snapshot.relationships.filter(r => r.id === selected).flatMap(r => [r.source, r.target]));
 </script>

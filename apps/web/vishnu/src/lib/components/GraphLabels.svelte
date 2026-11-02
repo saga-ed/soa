@@ -1,4 +1,5 @@
 <script lang="ts">
+ import { pathColors, pathSignalLabel, type PathSignal } from '$lib/graph/path-signals';
  import FanoutIcon from './FanoutIcon.svelte';
  import { onMount } from 'svelte';
  import { useStore, type Edge } from '@xyflow/svelte';
@@ -30,9 +31,11 @@
  });
  let items = $derived(edges.map(edge=>{
   const r=edge.data!.relationship as Relationship;const signal=edge.data!.demoSignal as DemoSignal|undefined;
-  const text=signal?`${signalDegree(signal)>=.7?'▲ ':''}${signalNames[signal.kind]} · ${signal.value} ${signal.unit} · ${Math.round(signalDegree(signal)*100)}%`: `${connectionLabel(r)}${r.declared ? ' · declared' : ''}${edge.data!.observed?' · observed':''}${selected===r.id?` · ${r.label}`:''}`;
-  const title=`${snapshot.systems.find(s=>s.id===r.source)?.label} → ${snapshot.systems.find(s=>s.id===r.target)?.label}\n${text}\n${r.summary}`;
-  return {id:r.id,kind:signal?.kind,protocol:connectionLabel(r),text,title,points:layout.edges.find(e=>e.id===r.id)?.points??[],color:signal?signalColor(signal):r.health==='critical'?'var(--color-signal-error)':r.health==='warning'?'var(--color-attention)':'var(--color-text-secondary)',icon:signal?{hot:'↗',slow:'◷',fanout:'⑂',error:'!'}[signal.kind]:'i',signal:!!signal,dimmed:!!edge.data!.dimmed,priority:selected===r.id?100:signal?50:['http','dependency'].includes(r.kind)?20:0};
+  const measured=edge.data!.measuredSignal as PathSignal|undefined;
+  const kind=signal?.kind ?? measured?.kind;
+  const text=signal?`${signalDegree(signal)>=.7?'▲ ':''}${signalNames[signal.kind]} · ${signal.value} ${signal.unit} · ${Math.round(signalDegree(signal)*100)}%`: measured ? pathSignalLabel(measured) : `${connectionLabel(r)}${r.declared ? ' · declared' : ''}${edge.data!.observed?' · observed':''}${selected===r.id?` · ${r.label}`:''}`;
+  const title=`${snapshot.systems.find(s=>s.id===r.source)?.label} → ${snapshot.systems.find(s=>s.id===r.target)?.label}\n${text}\n${measured?.detail ?? r.summary}`;
+  return {id:r.id,kind,protocol:connectionLabel(r),text,title,points:layout.edges.find(e=>e.id===r.id)?.points??[],color:signal?signalColor(signal):measured?pathColors[measured.kind]:r.health==='critical'?'var(--color-signal-error)':r.health==='warning'?'var(--color-attention)':'var(--color-text-secondary)',icon:kind?{hot:'↗',slow:'◷',fanout:'⑂',error:'!'}[kind]:'i',signal:!!signal || !!measured,dimmed:!!edge.data!.dimmed,priority:selected===r.id?100:signal || measured?50:['http','dependency'].includes(r.kind)?20:0};
  }));
  let placements = $derived.by(()=>{
   fontVersion;

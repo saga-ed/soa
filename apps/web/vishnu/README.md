@@ -77,6 +77,28 @@ If the host has exhausted file watchers, run
 
 ## What to review
 
+### Generate real synthetic traffic
+
+With IAM, programs, scheduling and Vishnu running in the chosen slot, mint a
+local session with `ss stack login --slot 3`, then from this app directory run:
+
+```sh
+node scripts/synthetic-traffic.mjs --slot 3 --duration 60 --concurrency 2 --interval 500
+```
+
+The bounded driver reads existing programs and sends authenticated GET requests
+to `auth.whoami`, `programs.list`, `programs.get` and `schedules.get`. It uses fixed
+loopback ports, stops on a failed request, and never seeds or changes domain data.
+The cookie jar is read in memory; output contains only counts, status codes and
+client timings. These client timings are driver diagnostics, not Vishnu APM data.
+Duration is 1–600 seconds, concurrency 1–8, interval 100–10000 ms per worker.
+
+Enable [ss Datadog telemetry](../../../packages/node/saga-stack-cli/docs/datadog-telemetry.md)
+first. Inspect Datadog/Vishnu in the exact synthetic machine and slot scope after
+ingestion. This workload creates real reads, database work and existing upstream
+calls; it does not guarantee a latency threshold will be exceeded or generate
+domain MQ events. MQ reporting snapshots can be idle zero during read-only traffic.
+
 - Data systems, services, and applications in distinct left-to-right bands.
 - Rounded orthogonal routes with arrows indicating actual direction, including
   reciprocal program/scheduling events and right-to-left API requests.

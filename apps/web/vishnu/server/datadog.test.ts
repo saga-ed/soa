@@ -3,7 +3,7 @@ import { createDatadogReader } from './datadog';
 import { currentPoint, serviceSignal, matchesMesh, traceLink } from '../src/lib/graph/datadog';
 import { createFixture } from '../src/lib/fixtures/mesh';
 const time = 1800000000000;
-const env = { DD_API_KEY: 'test-api-secret', DD_APP_KEY: 'test-app-secret', VISHNU_SLOT: '3' };
+const env = { DD_API_KEY: 'test-api-secret', DD_APP_KEY: 'test-app-secret', VISHNU_SLOT: '3', VISHNU_DATADOG_ENV: 'dev' };
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 function backend() {
   return vi.fn(async (input: string | URL | Request) => {
@@ -23,6 +23,7 @@ function backend() {
         ],
       });
     }
+    if (url.pathname === '/api/v2/spans/analytics/aggregate') return ok({ data: [], meta: { status: 'done' } });
     if (url.pathname === '/api/v1/monitor')
       return ok([
         {
@@ -30,7 +31,7 @@ function backend() {
           name: 'wrong deployment',
           state: {
             groups: {
-              'env:synthetic,deployment.identifier:slot-0,service:programs-api': {
+              'env:dev,deployment.identifier:slot-0,service:programs-api': {
                 status: 'Alert',
               },
             },
@@ -41,7 +42,7 @@ function backend() {
           name: 'scoped warning',
           state: {
             groups: {
-              'env:synthetic,deployment.identifier:slot-3,service:programs-api': { status: 'Warn' },
+              'env:dev,deployment.identifier:slot-3,service:programs-api': { status: 'Warn' },
             },
           },
         },
@@ -55,7 +56,7 @@ describe('Datadog read adapter', () => {
     let clock = time;
     const read = createDatadogReader(env, fetcher as typeof fetch, () => clock);
     const [a, b] = await Promise.all([read(), read()]);
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(10);
     expect(a).toEqual(b);
     expect(a.services[0]).toMatchObject({
       rate: { value: 0 },
@@ -67,14 +68,14 @@ describe('Datadog read adapter', () => {
     expect(JSON.stringify(a)).not.toContain('secret');
     for (const [input] of fetcher.mock.calls.slice(0, 3))
       expect(new URL(String(input)).searchParams.get('query')).toContain(
-        'env:synthetic,deployment.identifier:slot-3'
+        'env:dev,deployment.identifier:slot-3'
       );
     clock += 30000;
     expect((await read()).serverNow).toBe(clock);
-    expect(fetcher).toHaveBeenCalledTimes(5);
-    clock += 31000;
-    await read();
     expect(fetcher).toHaveBeenCalledTimes(10);
+    clock += 91000;
+    await read();
+    expect(fetcher).toHaveBeenCalledTimes(20);
   });
   it('does not call Datadog when credentials are missing or scope/site is unsafe', async () => {
     const fetcher = backend();
@@ -116,14 +117,14 @@ describe('Datadog read adapter', () => {
     const a = await read();
     clock += 120000;
     const b = await read();
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(10);
     expect(b.observedAt).toBe(a.observedAt);
     expect(b.serverNow).toBe(clock);
   });
   it('keeps slot scope, stale data, failures and true zero distinct; creates scoped safe links', async () => {
     const data = await createDatadogReader(env, backend() as typeof fetch, () => time)();
-    expect(matchesMesh(data, { ...createFixture(), mode: 'live', slot: 3 })).toBe(true);
-    expect(matchesMesh(data, { ...createFixture(), mode: 'live', slot: 0 })).toBe(false);
+    expect(matchesMesh(data, { ...createFixture(), mode: 'live', scope: data.scope })).toBe(true);
+    expect(matchesMesh(data, { ...createFixture(), mode: 'live', scope: { ...data.scope, deployment: 'slot-0' } })).toBe(false);
     expect(serviceSignal(data, 'programs-api', time)).toMatchObject({
       rate: 0,
       slow: true,
@@ -135,7 +136,7 @@ describe('Datadog read adapter', () => {
     const url = new URL(traceLink(data, 'a', 'b'));
     expect(url.origin).toBe('https://app.datadoghq.com');
     expect(url.searchParams.get('query')).toBe(
-      'env:"synthetic" @deployment.identifier:"slot-3" service:"b" @span.parent.service:"a"'
+      'env:"dev" @deployment.identifier:"slot-3" service:"a" @span.kind:client @peer.service:"b"'
     );
   });
 });
@@ -162,7 +163,7 @@ describe('cloud environment scope', () => {
   });
   it('never allows environment-wide synthetic observations', async () => {
     const fetcher = backend();
-    expect((await createDatadogReader({ ...env, VISHNU_DATADOG_SCOPE: 'environment' }, fetcher as typeof fetch)()).status).toBe('unavailable');
+    expect((await createDatadogReader({ ...env, VISHNU_DATADOG_SCOPE: 'environment', VISHNU_DATADOG_ENV: 'synthetic' }, fetcher as typeof fetch)()).status).toBe('unavailable');
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

@@ -35,6 +35,7 @@
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { readSyntheticTelemetry } from './runtime/synthetic-telemetry.js';
 import { Command } from '@oclif/core';
 import type { Interfaces } from '@oclif/core';
 import { dirname, join } from 'node:path';
@@ -992,6 +993,7 @@ export abstract class BaseCommand extends Command {
     }
 
     const launchContext = defaultLaunchContext({
+      telemetry: readSyntheticTelemetry(repoRoots),
       stateDir,
       repoRoots,
       vendorDir,

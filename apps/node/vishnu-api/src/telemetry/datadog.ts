@@ -1,4 +1,5 @@
 import type { DatadogSnapshot, DatadogService, MetricPoint } from '../../../../web/vishnu/src/lib/graph/datadog';
+import { connectionGroupLimit, connectionMeasurements, endpointMeasurements, retainedEndpointMeasurements } from './datadog-performance';
 
 type Env = Record<string, string | undefined>;
 const sites: Record<string, string> = {
@@ -26,6 +27,7 @@ export function createDatadogReader(
     environment: env.VISHNU_DATADOG_ENV ?? 'synthetic',
     deployment: level === 'environment' ? 'all' : env.VISHNU_DATADOG_DEPLOYMENT ?? `slot-${env.VISHNU_SLOT ?? '0'}`,
     deploymentTag: env.VISHNU_DATADOG_DEPLOYMENT_TAG ?? 'deployment.identifier',
+    ...(env.VISHNU_DATADOG_MACHINE ? { machine: env.VISHNU_DATADOG_MACHINE } : {}),
   };
   const prefix = env.VISHNU_DATADOG_METRIC_PREFIX ?? 'trace.http.server.request';
   const thresholds = {
@@ -37,14 +39,16 @@ export function createDatadogReader(
   let cachedAt = 0;
   let pending: Promise<DatadogSnapshot> | undefined;
   let retryAt = 0;
-  const request = async (path: string, params: Record<string, string>) => {
+  const request = async (path: string, params: Record<string, string>, payload?: unknown) => {
     const url = new URL(path, `https://api.${site}`);
     url.search = new URLSearchParams(params).toString();
     const response = await fetcher(url, {
+      ...(payload === undefined ? {} : { method: 'POST', body: JSON.stringify(payload) }),
       headers: {
         'DD-API-KEY': env.DD_API_KEY!,
         'DD-APPLICATION-KEY': env.DD_APP_KEY!,
         Accept: 'application/json',
+        ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
       signal: AbortSignal.timeout(8000),
       redirect: 'error',
@@ -79,6 +83,12 @@ export function createDatadogReader(
       thresholds,
       services: [],
       dependencies: [],
+      endpoints: [],
+      connections: [],
+      measurementSource: scope.environment === 'synthetic' ? 'retained-spans' : 'apm-metrics',
+      endpointSource: scope.environment === 'synthetic' ? 'retained-spans' : 'apm-metrics',
+      endpointStatus: 'unconfigured',
+      connectionStatus: 'unconfigured',
     };
     if (
       !sites[site] ||
@@ -90,9 +100,54 @@ export function createDatadogReader(
       return {
         ...base,
         status: 'unavailable',
+        endpointStatus: 'unavailable',
+        connectionStatus: 'unavailable',
         message: 'Invalid Datadog site, scope or thresholds.',
       };
     if (!env.DD_API_KEY || !env.DD_APP_KEY) return base;
+    if (scope.environment === 'synthetic' && !scope.machine) return {
+      ...base, status: 'unavailable', endpointStatus: 'unavailable', connectionStatus: 'unavailable',
+      message: 'Synthetic Datadog observations require an explicit machine and slot scope.',
+    };
+    const spanScope = `env:${scope.environment}${level === 'environment' ? '' : ` @${scope.deploymentTag}:${scope.deployment}`}${scope.machine ? ` @synthetic.machine:${scope.machine}` : ''}`;
+    const aggregate = (query: string, facets: string[]) => request('/api/v2/spans/analytics/aggregate', {}, {
+      data: { type: 'aggregate_request', attributes: {
+        filter: { from: new Date(from).toISOString(), to: new Date(to).toISOString(), query },
+        compute: [{ aggregation: 'count', type: 'total' }, { aggregation: 'pc95', metric: '@duration', type: 'total' }],
+        group_by: facets.map(facet => ({ facet, limit: connectionGroupLimit, sort: { type: 'measure', aggregation: 'count', order: 'desc' } })),
+      } },
+    });
+    const serverSpanQuery = `${spanScope} @span.kind:server -@http.path_group:*/health*`;
+    const connectionSpanQuery = `${spanScope} @span.kind:client @peer.service:* -@http.path_group:*/health*`;
+    // Standard APM metric dimensions do not establish machine + slot isolation.
+    // Use exact-scoped retained-span analytics until metric dimensions are verified.
+    if (scope.environment === 'synthetic') {
+      const results = await Promise.allSettled([
+        aggregate(serverSpanQuery, ['service']),
+        aggregate(serverSpanQuery, ['service', '@http.method', '@http.path_group']),
+        aggregate(connectionSpanQuery, ['service', '@peer.service']),
+      ]);
+      const endpointData = retainedEndpointMeasurements(results[1], to);
+      const connectionData = connectionMeasurements(results[2]);
+      const services: DatadogService[] = [];
+      const serviceResult = results[0];
+      let serviceValid = serviceResult.status === 'fulfilled' && Array.isArray(serviceResult.value?.data) && !serviceResult.value.errors;
+      if (serviceValid && serviceResult.status === 'fulfilled') for (const bucket of serviceResult.value.data) {
+        const { by, compute } = bucket?.attributes ?? {};
+        const name = by?.service;
+        if (typeof name !== 'string' || !safeTag.test(name) || !Number.isFinite(compute?.c0) || compute.c0 < 0) { serviceValid = false; continue; }
+        services.push({ service: name, observedSpans: compute.c0, rate: null, errorRate: null,
+          p95Ms: Number.isFinite(compute.c1) && compute.c1 >= 0 ? { at: to, value: compute.c1 / 1_000_000 } : null,
+          previousP95Ms: null, monitors: [] });
+      }
+      const partial = !serviceValid || (serviceResult.status === 'fulfilled' && (serviceResult.value.meta?.status !== 'done' || !!serviceResult.value.meta?.warnings?.length || services.length >= connectionGroupLimit)) || endpointData.endpointStatus !== 'available' || connectionData.connectionStatus !== 'available';
+      const unavailable = !serviceValid && endpointData.endpointStatus === 'unavailable' && connectionData.connectionStatus === 'unavailable';
+      return { ...base, ...endpointData, ...connectionData, services,
+        dependencies: connectionData.connections.map(({source, target}) => ({source, target})),
+        status: unavailable ? 'unavailable' : partial ? 'partial' : 'connected',
+        message: 'Machine- and slot-scoped retained spans. Counts and latency describe retained observations; total request rates are unavailable.',
+      };
+    }
     const tags = `env:${scope.environment}${level === 'environment' ? '' : `,${scope.deploymentTag}:${scope.deployment}`}`;
     const metricQuery = (query: string) =>
       request('/api/v1/query', {
@@ -116,6 +171,25 @@ export function createDatadogReader(
         page_size: '100',
         page: '0',
       }),
+      metricQuery(`sum:${prefix}.hits{${tags}} by {service,resource_name}.as_rate()`),
+      metricQuery(`p95:${prefix}{${tags}} by {service,resource_name}`),
+      metricQuery(`sum:${prefix}.errors{${tags}} by {service,resource_name}.as_rate()`),
+      request('/api/v2/spans/analytics/aggregate', {}, {
+        data: {
+          type: 'aggregate_request',
+          attributes: {
+            filter: {
+              from: new Date(from).toISOString(), to: new Date(to).toISOString(),
+              query: connectionSpanQuery,
+            },
+            compute: [{ aggregation: 'count', type: 'total' }, { aggregation: 'pc95', metric: '@duration', type: 'total' }],
+            group_by: ['service', '@peer.service'].map(facet => ({
+              facet, limit: connectionGroupLimit, sort: { type: 'measure', aggregation: 'count', order: 'desc' },
+            })),
+          },
+        },
+      }),
+      aggregate(serverSpanQuery, ['service', '@http.method', '@http.path_group']),
     ]);
     const services = new Map<string, DatadogService>();
     const service = (name: string) => {
@@ -130,7 +204,7 @@ export function createDatadogReader(
         });
       return services.get(name)!;
     };
-    let failures = results.filter(r => r.status === 'rejected').length;
+    let failures = results.slice(0, 5).filter(r => r.status === 'rejected').length;
     for (const [i, field] of ['rate', 'p95Ms', 'errorRate'].entries()) {
       const result = results[i];
       if (result.status !== 'fulfilled') continue;
@@ -217,17 +291,30 @@ export function createDatadogReader(
         }
       }
     }
+    const metricEndpoints = endpointMeasurements(results.slice(5, 8), from, to);
+    // OTel resource_name can be just GET/POST. Those are operations, not endpoint
+    // identities; use normalized paths from retained spans when metrics lack them.
+    const allMetricPaths = metricEndpoints.endpoints.length > 0 && metricEndpoints.endpoints.every(e => e.resource.includes('/'));
+    // Keep one provenance for the entire endpoint table. A mixed fleet must not
+    // hide coarse-resource services just because another service has route names.
+    const endpointData = allMetricPaths ? metricEndpoints : retainedEndpointMeasurements(results[9], to);
+    const endpointSource = allMetricPaths ? 'apm-metrics' as const : 'retained-spans' as const;
+    const connectionData = connectionMeasurements(results[8]);
+    const performancePartial = endpointData.endpointStatus !== 'available' || connectionData.connectionStatus !== 'available';
     return {
       ...base,
+      ...endpointData,
+      ...connectionData,
+      endpointSource,
       services: [...services.values()],
-      status: failures === 5 ? 'unavailable' : failures ? 'partial' : 'connected',
-      message: failures
+      status: failures === 5 && endpointData.endpointStatus === 'unavailable' && connectionData.connectionStatus === 'unavailable' ? 'unavailable' : failures || performancePartial ? 'partial' : 'connected',
+      message: failures || performancePartial
         ? 'Some Datadog queries are unavailable. Missing signals remain unknown.'
         : 'Datadog observations; metrics reflect the configured instrumentation and sampling.',
     };
   };
   return async () => {
-    if (cache && (now() - cachedAt < 60000 || now() < retryAt))
+    if (cache && (now() - cachedAt < 120000 || now() < retryAt))
       return { ...cache, serverNow: now() };
     pending ??= collect()
       .then(value => {

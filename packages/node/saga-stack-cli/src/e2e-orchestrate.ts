@@ -31,6 +31,7 @@
  */
 
 import { dirname } from 'node:path';
+import { readSyntheticTelemetry } from './runtime/synthetic-telemetry.js';
 import { fileURLToPath } from 'node:url';
 import { composeSeedPlan } from './core/seed/compose-seed-plan.js';
 import { seedStepLabel } from './core/seed/datasets.js';
@@ -280,6 +281,7 @@ export function buildStackContext(
   // Thread the slot's port-override map + mesh offset (byte-identical base context
   // at slot 0 — `deriveInstance` guarantees slot-0 overrides resolve the defaults).
   const launchContext = defaultLaunchContext({
+    telemetry: readSyntheticTelemetry(repoRoots),
     stateDir: (flags['state-dir'] as string | undefined) ?? profile.stateDir,
     repoRoots,
     vendorDir,

@@ -16,6 +16,7 @@ Set `gh536` binds slot 3 to the child checkout. Use `SS_ACTOR=gh536` on mutating
 
 ## Decisions and evidence
 
+- [Vishnu performance telemetry](decisions/vishnu-performance-telemetry.md): Agent collection, endpoint statistics, caller→callee measurements and fan-out investigation approved; product fan-out implementation pending.
 - [Routing decision](decisions/d1-event-stats-routing.md): reuse existing publisher exchanges and telemetry-specific routing, with a wildcard-binding audit before enabling reports.
 - [Project location](decisions/d2-project-location.md): personal `claude/projects/` convention retained.
 - [Preparation record](research/01-worktree-preparation.md): baseline, recovery snapshot and slot restoration details.

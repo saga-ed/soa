@@ -668,10 +668,9 @@ dd {
 .focus-layout-toggle { font-size:12px; flex-direction:row !important; align-items:center; }
 .focus-layout-toggle input { width:auto; }
 
-/* Quiet structure leaves saturated strokes to the observations. */
-.system-node.healthy { --health:var(--color-border-hover); }
+/* Passing health probes retain the same green outline as healthy status. */
+.system-node.healthy { --health:var(--color-success-strong); }
 .system-node.healthy .node-status { color:var(--color-success-strong); }
-.system-node.healthy .node-silhouette { stroke:var(--color-border-strong); }
 .path-label:not(.compact) { border-left:3px solid currentColor; }
 
 .path-label.compact.quiet-marker { border:1px solid var(--color-secondary); background:var(--color-bg); box-shadow:none; color:var(--color-secondary); font-size:12px; font-weight:600; opacity:.45; }

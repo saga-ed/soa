@@ -17,6 +17,27 @@ links the entry.
 
 ---
 
+### 2026-11-02 — All 8 wave-1 services report to blue; sandbox open for development
+
+- **What changed:** sds is in the soak (d11 option 2). chat-api, insights-api and
+  transcripts-api run in `sandbox-gh537` and were added to `REPORTERS` and
+  `declaredEventBus`. Blue runs `e24c6937`. On 2026-11-02 at 15:41 UTC, `/api/event-stats` on
+  blue had a fresh report from all 8 services, and `/api/mesh` marked all 8 as bus participants.
+- **Where:** soa PR#556 (`gh_538-vishnu-sandbox` @ `e24c6937`, draft); blue task definition
+  rev 5. sds PR#869 @ `f04777d8` (adds `routing-oidc: 'true'` to its three sandbox jobs).
+- **Impact on functionality work:**
+  - Base Vishnu work on PR#556's branch. To see blue, send `x-saga-preview-vishnu-api: blue`.
+  - `sources` holds 15 entries for 8 services: Spot interruptions restart tasks often, and old
+    instances stay listed as `stale` for up to 24h. Treat a service as live if any of its
+    instances is fresh. Don't count sources as services.
+  - transcripts-api reports as producer only; its `transcription.events` consumer isn't
+    instrumented, and in a sandbox that exchange gets no pipeline traffic.
+  - sds sandbox routing pins with `X-Preview-<service>`, not `x-saga-preview-<service>`.
+  - Tasks can stop being replaceable: ECR lifecycle rules have expired images still in use on
+    this cluster (training, some sandboxes). All 8 `sandbox-gh537` images were present on 2026-11-02.
+- **Action for Astra:** check how the UI handles several instances of one service, stale ones
+  included. Blue image builds and change sets stay with Claude.
+
 ### 2026-10-30 — Hosted MQ badges, combined Vishnu PR, blue redeployed
 
 - **What changed:** hosted meshes never marked event-bus participants (only the synthetic

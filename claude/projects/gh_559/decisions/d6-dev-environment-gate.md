@@ -1,6 +1,6 @@
 # d6 — What gates the `dev` GitHub environment?
 
-**PENDING**
+**RESOLVED 2026-11-02: Option A** (skelly). No gate on the `dev` environment: write access to soa equals dev Vishnu deploy access. Revisit if the role's scope grows or Vishnu gets a prod path.
 
 ## Context
 

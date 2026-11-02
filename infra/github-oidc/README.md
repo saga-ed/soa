@@ -46,6 +46,8 @@ The test job doesn't bind to `dev`. It runs dependency install scripts and tests
 
 The role trusts one subject: `repo:saga-ed/soa:environment:dev`. soa is public, so a job has to bind the `dev` environment to assume it. `pull_request`, branch and tag subjects are not trusted.
 
+The `dev` environment has no reviewer or branch gate, on purpose (gh_559 d6), because deploys must run from any branch. So anyone with write access to soa can assume this role from a workflow on their own branch, skipping the live colour guard. Write access to soa equals deploy access to dev Vishnu. Forks can't do this. Revisit if this role's scope grows or Vishnu gets a prod path.
+
 ## Scope
 
 The grants follow what `.github/workflows/deploy-vishnu-api.yml` and `.github/scripts/vishnu-deploy.sh` do:

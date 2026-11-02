@@ -3,9 +3,14 @@ FROM node:24-bookworm-slim AS build
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 WORKDIR /workspace
 COPY . .
-# Private registry configuration is a BuildKit secret, never a layer or ARG.
-RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=true \
-    pnpm --filter @saga-ed/vishnu-api... --filter @saga-ed/vishnu install --frozen-lockfile --ignore-scripts
+# CodeArtifact token is a BuildKit secret, never a layer or ARG. .npmrc is
+# dockerignored, so it is written and deleted inside this RUN.
+RUN --mount=type=secret,id=codeartifact,required=true \
+    CODEARTIFACT_AUTH_TOKEN="$(cat /run/secrets/codeartifact)" && \
+    echo "@saga-ed:registry=https://saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/" > .npmrc && \
+    echo "//saga-531314149529.d.codeartifact.us-west-2.amazonaws.com/npm/saga_js/:_authToken=${CODEARTIFACT_AUTH_TOKEN}" >> .npmrc && \
+    pnpm --filter @saga-ed/vishnu-api... --filter @saga-ed/vishnu install --frozen-lockfile --ignore-scripts && \
+    rm -f .npmrc
 RUN pnpm exec turbo run build --filter=@saga-ed/vishnu-api^... \
     && pnpm --filter @saga-ed/vishnu-api build \
     && pnpm --filter @saga-ed/vishnu build \

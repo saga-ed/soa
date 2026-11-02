@@ -1,9 +1,20 @@
 # Vishnu dev deployment operations
 
-Dev was deployed on 2026-10-23 at https://vishnu.wootops.org. Blue serves one
-healthy task; green is standing infrastructure at zero tasks. All five stacks
+Dev was first deployed on 2026-10-23 at https://vishnu.wootops.org; all five stacks
 completed successfully. Production is out of scope. See
 [deployment evidence](../../claude/projects/gh_538/docs/dev-deployment-2026-10-23.md).
+
+The live colour changes with each flip, so read it rather than trusting a document.
+Live rule 4015 (`vishnu.wootops.org`) forwards to the target group with non-zero weight:
+
+```sh
+aws elbv2 describe-rules --profile saga-infra-dev --region us-west-2 \
+  --listener-arn "$(aws ssm get-parameter --profile saga-infra-dev --region us-west-2 \
+    --name /shared/infra/dev/app-alb-443-listener-arn --query Parameter.Value --output text)" \
+  --query "Rules[?Priority=='4015'].Actions[0].ForwardConfig.TargetGroups"
+```
+
+Read on 2026-11-02: green 100, blue 0, with both colour stacks at `DesiredCount=1`.
 
 ## Design and verified prerequisites
 
@@ -51,6 +62,8 @@ command.
    python3 infra/vishnu-api/render-deploy-command.py bootstrap-dev
    ```
 
+   `sam validate --lint` reports E3510 on the bootstrap's optional `VishnuDatabaseUrlSecretArn` reference. It predates CI and doesn't affect deployment.
+
    Review and run the emitted bootstrap command. It creates ECR, logs, task roles,
    task security group and scoped SSM outputs; IAM roles use `SagaProdMax`.
 
@@ -65,25 +78,37 @@ command.
    takeovers. They are header-gated and intentionally precede the live rule:
    retain both routing stacks; do not follow the generic warning to retire them.
 
-3. Build and push a commit-tagged ARM64 image to
-   `396913734878.dkr.ecr.us-west-2.amazonaws.com/soa/vishnu-api:<git-sha>` after ECR
-   exists. CodeArtifact authentication uses a BuildKit secret:
+3. Complete the one-time CI prerequisites below, once.
+
+4. Dispatch the build and deploy of the idle colour, from any branch once the
+   workflow is on main:
 
    ```sh
-   docker build --platform linux/arm64 --secret id=npmrc,src="$HOME/.npmrc" \
-     -f apps/node/vishnu-api/Dockerfile -t <dev-image-uri> .
+   gh workflow run deploy-vishnu-api.yml -R saga-ed/soa --ref <branch> -f colour=<idle-colour>
    ```
 
-   Use a current CodeArtifact token and ECR login. Never use build arguments for
-   credentials. The runtime is non-root and carries only deployed dependencies,
-   built backend and static frontend.
+   `.github/workflows/deploy-vishnu-api.yml` runs check-types, lint and test, builds
+   the ARM64 image on a native ARM runner, tags it `<git-sha>` (skipping the build if
+   that tag exists, since the repository is immutable), deploys
+   `soa-vishnu-api-<colour>` with `DesiredCount=1` and checks through
+   `x-saga-preview-vishnu-api: <colour>` that `/health` reports this colour and sha.
+   Live traffic does not move. The workflow reads rule 4015 at the start and again
+   immediately before `sam deploy`, in the same job, so any rerun rechecks it. It refuses
+   the colour that is serving, and fails closed if the rule is missing, split or all zero.
+   Do not flip during the deploy job: nothing can recheck once `sam deploy` has started.
+   Test the colour through the header rule before flipping.
 
-4. Render the full service command with
-   `python3 infra/vishnu-api/render-deploy-command.py dev ImageArn=<dev-image-uri> BuildRevision=<git-sha>`.
-   Review and run it; wait for healthy targets and verify build identity.
-   The image and task definition both use ARM64. Blue desired count is one;
-   `dev-green` creates the idle green service with desired count zero.
-   Test the blue header rule before exposing the live hostname.
+   If only the health step fails with a 403, the stack did deploy. `/health` has no
+   auth, so suspect the WAF blocked the runner's IP. Check the colour from your own
+   machine, then rerun the job.
+
+   To redeploy the colour that is serving, deploy the idle colour and flip. The
+   workflow has no override for this.
+
+   On a from-scratch bring-up the first colour can't use CI: the guard needs the rule
+   that step 5 creates, and step 5 routes to blue. Deploy blue with the
+   [break-glass build](#break-glass-local-build), do step 5, then dispatch green and
+   every later deploy.
 
 5. Create the dev live weighted rule through the current Saga blue/green tooling
    (inspect installed `create-rule --help` first), initially routing to blue.
@@ -98,11 +123,90 @@ command.
    dev scope and no credentials reach browser responses. Check task logs and the
    image's deployed revision. Check expired-session reauthentication.
 
+## One-time CI prerequisites
+
+Run once, with `saga-infra-dev`, before the first dispatch. The workflow must already
+be on main for `gh workflow run` to find it.
+
+1. Deploy the role stack from `infra/github-oidc/dev-deploy-role-template.yaml`. It
+   creates `/github-actions-role/SoaGithubActionDevDeployRole` with the
+   `SagaGithubActionsMax` boundary. See `infra/github-oidc/README.md`.
+2. Create the GitHub environment and its variable:
+
+   ```sh
+   gh api -X PUT repos/saga-ed/soa/environments/dev
+   gh variable set SOA_DEPLOY_ROLE_ARN -R saga-ed/soa --env dev \
+     --body arn:aws:iam::396913734878:role/github-actions-role/SoaGithubActionDevDeployRole
+   ```
+
+The CodeArtifact token comes from the existing repository variable `AWS_ROLE_ARN`.
+
+A dispatch also refuses a colour that isn't at `main` scope. Read on 2026-11-02: blue (idle)
+has `EventStatsDeployment=sandbox-gh537`; green is at `main`. So until PR#556 is on the
+dispatched ref, [return blue to `main` scope](#returning-a-colour-to-main-scope) first.
+
+## Observing a sandbox from CI
+
+Add `-f preview-tag=sandbox-<name>` to the dispatch to send `EventStatsPreviewTag` and
+`EventStatsDeployment`. The run refuses this unless the dispatched ref's template declares
+`EventStatsPreviewTag` (PR#556) and that colour's stack has `VishnuMqEnabled=true`. SAM
+silently drops a parameter the template doesn't declare, so without the check the colour would
+take the sandbox's queue and store scope but no sandbox bindings, and `/health` would still pass.
+
+An empty `preview-tag` does not clear an earlier one. SAM reuses the previous value of
+any parameter it isn't sent, and the workflow can't send an empty value, so the run refuses a
+colour whose `EventStatsDeployment` isn't `main`. Pass the tag again to keep observing, or
+return the colour to `main` scope.
+
+### Returning a colour to `main` scope
+
+Reset the idle colour only, and keep its current image so that only the scope changes. Read
+the image and revision, then render the command, here for blue:
+
+```sh
+aws cloudformation describe-stacks --profile saga-infra-dev --region us-west-2 \
+  --stack-name soa-vishnu-api-blue \
+  --query "Stacks[0].Parameters[?ParameterKey=='ImageArn' || ParameterKey=='BuildRevision']" --output table
+python3 infra/vishnu-api/render-deploy-command.py dev ImageArn=<image> BuildRevision=<sha> EventStatsDeployment=main
+```
+
+For green, render `dev-green` and add `DesiredCount=1`: samconfig sets it to 0, so leaving it out
+scales green to zero.
+
+If the checked-out template declares `EventStatsPreviewTag`, append this to the printed command,
+single quotes included:
+
+```sh
+'EventStatsPreviewTag=""'
+```
+
+The renderer refuses empty values, so this has to be added by hand. Without the single quotes the
+shell strips the double quotes and SAM rejects `EventStatsPreviewTag=`. Review the change set
+before executing it.
+
+## Break-glass local build
+
+If CI is down, a local build still works, and on x86 it runs under QEMU for minutes of
+heavy CPU. Use a current CodeArtifact token and ECR login, and never pass credentials as
+build arguments. The token goes in as the `codeartifact` BuildKit secret:
+
+```sh
+export CODEARTIFACT_AUTH_TOKEN="$(aws codeartifact get-authorization-token --profile <profile> \
+  --domain saga --domain-owner 531314149529 --query authorizationToken --output text)"
+docker build --platform linux/arm64 --secret id=codeartifact,env=CODEARTIFACT_AUTH_TOKEN \
+  -f apps/node/vishnu-api/Dockerfile -t <dev-image-uri> .
+```
+
+Push it, then render and review the service command:
+`python3 infra/vishnu-api/render-deploy-command.py dev ImageArn=<dev-image-uri> BuildRevision=<git-sha>`
+(`dev-green` for green, which also needs `DesiredCount=1`, because samconfig sets it to 0).
+
 ## Boundaries and remaining work
 
-This is a manual dev bring-up package. No GitHub deploy role/workflow has been
-created; do not attach the reduced service template to the generic ECS workflow
-without adding its required parameter contract and caller configuration. The existing event-statistics CI job also builds and tests the hosted backend
+The build and service deploy of a dev colour run from
+`.github/workflows/deploy-vishnu-api.yml`. Bootstrap, the routing stacks, the deploy role
+stack, DNS and the live rule stay manual. There is no push trigger, per-sandbox or
+PR-preview deploy (I#561, deferred). The existing event-statistics CI job also builds and tests the hosted backend
 and signed-session browser flow on Node 24; it performs no deployment. No production samconfig or credentials are provided.
 
 The first cloud view is explicitly environment-wide because measured trace

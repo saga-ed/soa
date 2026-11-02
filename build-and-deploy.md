@@ -177,8 +177,8 @@ pnpm --filter @saga-ed/vishnu build
 pnpm --filter @saga-ed/vishnu-api test:browser
 ```
 
-ARM64 Dockerfile: `apps/node/vishnu-api/Dockerfile`. CodeArtifact credentials use
-BuildKit `--secret id=npmrc,src=...`, never build arguments. ECS injects Datadog
+ARM64 Dockerfile: `apps/node/vishnu-api/Dockerfile`. The CodeArtifact token uses
+BuildKit `--secret id=codeartifact,...` (the raw token), never build arguments. ECS injects Datadog
 secret values through the execution role. Task role has no application AWS rights.
 
 `infra/vishnu-api/render-deploy-command.py` prints complete dev SAM commands;

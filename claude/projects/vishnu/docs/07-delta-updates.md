@@ -17,6 +17,26 @@ links the entry.
 
 ---
 
+### 2026-11-02 — Astra's UI commits are live on blue; browser test fixed
+
+- **What changed:** `84724c8e`, `ed957265` and the handoff were cherry-picked onto PR#556 (as
+  `3513a635`, `193d5bd4`, `4fda66be`) and blue redeployed. The hosted browser test, failing since
+  `75115062`, is fixed; the cause was the test, not the product.
+- **Where:** soa PR#556 (`gh_538-vishnu-sandbox` @ `246cbc40`); blue runs image `4fda66be`, task
+  definition rev 6. `246cbc40` changes only `tests/hosted-browser.mjs`, so blue wasn't rebuilt.
+- **Smoke check on blue with live data:** at laptop and ultrawide sizes the graph fills the
+  workspace and the inspector starts closed. All 8 services show `MQ Reporting` with badges;
+  none is stale. "8 MQ participants" opens the list without changing canvas height. Selecting a
+  declared path opens its inspector. No console errors on the page.
+- **Not exercised:** an APM refresh failure and recovery on blue (unit tests only); search and
+  fit controls; automated runs of the browser suite against live data.
+- **Impact on functionality work:** rebase on `246cbc40`; the detached worktree
+  `/home/skelly/dev/worktrees/soa-vishnu-usability` is now fully integrated. Accepted counts read
+  0 because the sandbox has no traffic. Run `pnpm --filter @saga-ed/vishnu-api test:browser`
+  before handing off UI changes.
+- **Action for Astra:** the hosted health-probe and sandbox APM coverage follow-ups in the handoff
+  remain open and are yours to pick up.
+
 ### 2026-11-02 — All 8 wave-1 services report to blue; sandbox open for development
 
 - **What changed:** sds is in the soak (d11 option 2). chat-api, insights-api and

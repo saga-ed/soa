@@ -45,7 +45,26 @@ try {
  const ids=await page.locator('.svelte-flow__edge').evaluateAll(es=>es.map(e=>e.getAttribute('data-id')));
  assert.ok(ids.includes('declared:coach:coach-api'));
  await page.screenshot({path:'/tmp/vishnu-declared-quiet.png',fullPage:true});
- await page.locator('.svelte-flow__edge[data-id="declared:coach:coach-api"]').click({force:true});
+ // The layout worker and fit view keep moving edges after they first render, so wait for this one
+ // to settle. Its bounding-box centre is rarely on the routed line and graph controls can cover
+ // parts of it, so click a real point on the line that the edge itself receives.
+ const declaredEdge=page.locator('.svelte-flow__edge[data-id="declared:coach:coach-api"]');
+ await page.waitForFunction(()=>{
+  const box=document.querySelector('.svelte-flow__edge[data-id="declared:coach:coach-api"]').getBoundingClientRect();
+  const now=[box.x,box.y,box.width,box.height].join();
+  const settled=window.__declaredEdgeBox===now;
+  window.__declaredEdgeBox=now;
+  return settled;
+ },null,{polling:1000});
+ const edgePoint=await declaredEdge.locator('.svelte-flow__edge-interaction').evaluate(path=>{
+  const edge=path.closest('.svelte-flow__edge'),total=path.getTotalLength(),ctm=path.getScreenCTM();
+  for(let step=1;step<100;step++){
+   const p=path.getPointAtLength(total*step/100).matrixTransform(ctm);
+   if(document.elementFromPoint(p.x,p.y)?.closest('.svelte-flow__edge')===edge) return {x:p.x,y:p.y};
+  }
+  throw new Error('No clickable point on the declared edge');
+ });
+ await page.mouse.click(edgePoint.x,edgePoint.y);
  await page.getByText('Declared connection',{exact:true}).waitFor();
  await page.getByText('Not observed in APM window',{exact:false}).first().waitFor();
  assert.match(await page.locator('.inspector').innerText(),/HTTP\/GraphQL/);

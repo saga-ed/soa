@@ -1,6 +1,6 @@
 # d3 — Keep the `$BUILDPLATFORM` Dockerfile split?
 
-**PENDING**
+**RESOLVED 2026-11-02: Option A** (skelly). Drop the split. The Dockerfile keeps one platform throughout, and a manual x86 build remains possible but slow.
 
 ## Context
 

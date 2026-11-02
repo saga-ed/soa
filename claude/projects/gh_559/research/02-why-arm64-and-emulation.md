@@ -13,7 +13,7 @@ Measured 2026-10-30.
 - `OPS.md` step 3 is a manual `docker build --platform linux/arm64`. On an x86 machine with only the default builder, that means QEMU.
 - ci-actions' default path also uses QEMU (ACT:381-400).
 - `native-multiarch-build: 'true'` opts into `ubuntu-24.04-arm`, non-prod only (ci-actions PR#12; measured the emulated leg at about 15 of a 19-minute build).
-- Prod always takes the emulated path, so `FROM --platform=$BUILDPLATFORM` is where prod would gain if Vishnu ever gets a prod workflow.
+- Prod builds take the emulated path, unless a caller opts into `promote-from-dev`, which copies the dev image without a rebuild.
 - ci-actions PR#101 dropped the amd64 leg in v2.24. saga-iac docs lag: saga-ed/claude-plugins#241.
 
 ## Synthetic dev involves no image

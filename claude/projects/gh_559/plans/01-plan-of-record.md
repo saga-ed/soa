@@ -16,6 +16,6 @@ Why one PR: these are useless separately, and skelly wants fewer Vishnu PRs. The
 
 **Sequencing with PR#556:** it edits `service-template.yaml`, `OPS.md` and `render-deploy-command.py`, and adds parameters the caller must pass (`EventStatsPreviewTag` and the MQ set). Rebase once it lands. If it stays open, base on its branch rather than duplicating its parameters.
 
-## Phase 2: per-sandbox and PR previews (I#561), depends on d1
+## Later: per-sandbox and PR previews (I#561), deferred by d1
 
 See I#561, research/01 and gh_536 d9 option (b). Beyond the workflows, this needs a per-sandbox Vishnu database, a JANUS host for a sandbox Vishnu and the dispatch allowlist. d9 estimated weeks of work.

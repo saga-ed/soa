@@ -14,7 +14,7 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 1. CI builds and deploys Vishnu to dev blue/green on a native ARM runner (I#560).
 2. That workflow can set the preview tag, so an idle colour can observe a patch-party sandbox (PR#556, gh_536 d9).
 3. The manual build leaves `OPS.md`.
-4. Depending on d1: per-sandbox and PR-preview deploys of Vishnu itself (I#561).
+4. Deferred by d1: per-sandbox and PR-preview deploys of Vishnu itself (I#561).
 
 ## Layout
 
@@ -22,7 +22,8 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 - `research/01-ci-contract-gap.md` — what `deploy-ecs-api` expects vs what Vishnu has
 - `research/02-why-arm64-and-emulation.md` — why ARM, and how emulation came about
 - `plans/01-plan-of-record.md` — the phased plan
-- `decisions/d1-vishnu-sandbox-deploys.md` — PENDING RECONFIRMATION: Option C was ruled on an understated cost
+- `decisions/d1-vishnu-sandbox-deploys.md` — RESOLVED: defer I#561
+- `decisions/d4-sequencing-with-pr556.md` — PENDING
 - `decisions/d2-spa-in-deploy-gate.md` — RESOLVED: name-glob filter covers both packages
 - `decisions/d3-buildplatform-dockerfile-split.md` — RESOLVED: dropped
 
@@ -37,10 +38,8 @@ Vishnu has no CI deploy path. Each cloud deploy begins with a manual `docker bui
 
 ## Open (track, don't block)
 
-- d1 reconfirmation.
+- d4: sequencing with PR#556.
 - Which colour is live: `OPS.md` on main says blue, d9 says green. The workflow must never deploy over the live colour by default.
-- Switchboard catalog entry and browser delivery of the preview header (I#561).
-- Sequencing with PR#556, which edits the same three infra files.
 
 ## Key reference paths
 

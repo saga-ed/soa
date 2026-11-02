@@ -1,6 +1,6 @@
 # d1 — Does Vishnu need its own sandbox deploys?
 
-**PENDING RECONFIRMATION.** skelly ruled Option C on 2026-11-02, but this doc then understated its cost and wrongly called gh_536 d9 pending. See Correction.
+**RESOLVED 2026-11-02: Option B** (skelly). Defer I#561 and keep it open. skelly first ruled C, then chose B after the correction below.
 
 ## Correction (2026-11-02)
 
@@ -8,7 +8,7 @@ d9 was **RESOLVED on 2026-10-29**: skelly chose option (a), an idle colour obser
 
 d9 also considered and did not choose option (b), "Vishnu as a real sandbox member", which is this doc's Option C. Its costed list includes items missing below: **a per-sandbox Vishnu database, a JANUS host for a sandbox Vishnu, and the dispatch allowlist. d9's estimate: "Weeks of work, and none of it is needed to watch three reporters."**
 
-So Option C reverses part of an earlier ruling at a higher cost than stated here. d9 (a) stands either way, and I#560's preview-tag input serves it.
+So Option C would have reversed part of an earlier ruling at a higher cost than stated here. d9 (a) stands, and I#560's preview-tag input serves it.
 
 ## Context
 
@@ -34,7 +34,7 @@ PR#556 (design: gh_536 d9, RESOLVED 2026-10-29) does something different: Vishnu
 
 **B.** No current need requires C, and the concrete need (PR#556) is met by I#560. Keeping I#561 open preserves the research if someone wants Vishnu in a patch party. Choose A if you'd rather not keep the issue around.
 
-The recommendation stands, more strongly now that d9 has been read.
+Reopen if a need appears that d9 didn't have, such as testing Vishnu's own changes inside a patch party.
 
 ## Related artifacts
 

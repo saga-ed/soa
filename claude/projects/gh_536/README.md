@@ -10,13 +10,18 @@ Provide service-originated producer/consumer statistics to Vishnu through the sh
 
 ## Branches and runtime
 
-Epic branch: `gh_536-event-telemetry` at `/home/skelly/dev/soa/.claude/worktrees/gh_536-event-telemetry`.
-Child branch: `gh_535-event-stats` at `/home/skelly/dev/worktrees/soa-gh_535-event-stats`; PR target is the epic branch.
-Set `gh536` binds slot 3 to the child checkout. Use `SS_ACTOR=gh536` on mutating ss commands and `--set gh536` for stack operations. Do not use slot 0 for this initiative. No services have been started for this set.
+The `gh_536-event-telemetry` branch is checked out at
+`/home/skelly/dev/worktrees/soa-gh_536-event-telemetry`. Set `gh536` binds slot 3
+to that SOA checkout and the existing rostering/program-hub adoption checkouts.
+Use `SS_ACTOR=gh536` and `--set gh536` for stack operations; do not use slot 0.
+The real synthetic Vishnu is `http://127.0.0.1:11930/`. Port 8935 was a simulated
+UI preview and is not evidence of synthetic-stack telemetry.
 
 ## Decisions and evidence
 
-- [Vishnu performance telemetry](decisions/vishnu-performance-telemetry.md): Agent collection, endpoint statistics, caller→callee measurements and fan-out investigation approved; product fan-out implementation pending.
+- [Path-inspector handoff](docs/path-offenders-handoff-2026-11-02.md): release references, real synthetic proof and sandbox validation.
+
+- [Vishnu performance telemetry](decisions/vishnu-performance-telemetry.md): Agent collection, endpoint/caller measurements and bounded sampled fan-out rankings approved.
 - [Routing decision](decisions/d1-event-stats-routing.md): reuse existing publisher exchanges and telemetry-specific routing, with a wildcard-binding audit before enabling reports.
 - [Project location](decisions/d2-project-location.md): personal `claude/projects/` convention retained.
 - [Preparation record](research/01-worktree-preparation.md): baseline, recovery snapshot and slot restoration details.

@@ -18,7 +18,7 @@
  {:else if ranking.state === 'empty'}
   <p>No {view === 'fanout' ? 'attributable sampled parent requests' : 'measured endpoints'} for this path in the observation window. This does not establish zero traffic.</p>
  {:else}
-  {#if ranking.state === 'partial'}<p>Partial coverage: some path measurements could not be retrieved.</p>{/if}
+  {#if ranking.state === 'partial'}<p>Partial coverage: limited to returned measurements and sampled traces.</p>{/if}
   <p>{view === 'fanout' ? 'Ranked by mean outgoing calls per sampled parent request traversing this path.' : view === 'slow' ? 'Ranked by retained outgoing client-span p95 duration.' : 'Ranked by retained outgoing client-span count, not total traffic or requests per second.'}</p>
   <ol>
    {#each ranking.rows as row}

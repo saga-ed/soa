@@ -1,6 +1,7 @@
 import type { DatadogSnapshot, DatadogService, MetricPoint } from '../../../../web/vishnu/src/lib/graph/datadog';
 import { connectionGroupLimit, connectionMeasurements, endpointMeasurements, retainedEndpointMeasurements } from './datadog-performance';
 
+import { createPathRateReader } from './datadog-rates';
 import { parseDatadogJson, pathEndpointMeasurements, pathGroupLimits, sampledFanout, traceSampleLimit } from './datadog-paths';
 
 type Env = Record<string, string | undefined>;
@@ -69,6 +70,12 @@ export function createDatadogReader(
     if (body.length > 4_000_000) throw new Error('Response too large');
     return parseDatadogJson(body);
   };
+  const readRates = createPathRateReader(scope, params => request('/api/v1/query', params, undefined, 5000), () => {
+    if (!sites[site] || (level === 'environment' && !['dev', 'prod'].includes(scope.environment)) || !Object.values(scope).every(v => safeTag.test(v)) || !safeTag.test(prefix) || thresholds.warningP95Ms >= thresholds.criticalP95Ms || (scope.environment === 'synthetic' && !scope.machine)) return 'unavailable';
+    if (!env.DD_API_KEY || !env.DD_APP_KEY) return 'unconfigured';
+    if (now() < retryAt) return 'unavailable';
+    return 'ready';
+  }, now);
   const collect = async (): Promise<DatadogSnapshot> => {
     const to = now();
     const from = to - 15 * 60000;
@@ -345,7 +352,7 @@ export function createDatadogReader(
         : 'Datadog observations; metrics reflect the configured instrumentation and sampling.',
     };
   };
-  return async () => {
+  const readSlow = async () => {
     if (cache && (now() - cachedAt < 180000 || now() < retryAt))
       return { ...cache, serverNow: now() };
     pending ??= collect()
@@ -358,5 +365,12 @@ export function createDatadogReader(
         pending = undefined;
       });
     return { ...(await pending), serverNow: now() };
+  };
+  return async () => {
+    const [snapshot, rates] = await Promise.all([readSlow(), readRates()]);
+    const independentRate = snapshot.status === 'unavailable' && rates.pathRates.length > 0;
+    return { ...snapshot, ...rates, serverNow: now(),
+      ...(independentRate ? { status: 'partial' as const, message: 'Application request counters are available; other Datadog observations are unavailable.' } : {}),
+    };
   };
 }

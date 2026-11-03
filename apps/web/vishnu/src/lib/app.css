@@ -610,7 +610,7 @@ dd {
 .bus-participant button { color: var(--color-primary); font-weight: var(--weight-semibold); padding: 0; margin-bottom: 8px; background: transparent; border: none; text-align: left; }
 .bus-participant > div { display: flex; justify-content: space-between; line-height: 22px; }
 .bus-panel footer { padding: 8px; font-size: 10px; }
-.bus-badge { position: absolute; top: -12px; right: 8px; background: var(--color-bg); color: var(--color-primary); border: 1px solid var(--color-primary); border-radius: var(--radius-full); padding: 2px 8px; font-size: 11px; }
+.bus-badge { max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; position: absolute; top: -12px; right: 8px; background: var(--color-bg); color: var(--color-primary); border: 1px solid var(--color-primary); border-radius: var(--radius-full); padding: 2px 8px; font-size: 11px; }
 .system-node { position: relative; }
 .bus-role { display: block; color: var(--color-primary); font-size: 10px; }
 .bus-participant button { margin-bottom: 2px; }
@@ -698,7 +698,8 @@ dd {
 /* Keep the overview canvas primary; details appear on selection. */
 .app-nav { display: none; }
 .topbar { height: 44px; min-height: 44px; padding-inline: 16px; }
-.compact-brand { font-size: 20px; font-weight: 700; text-decoration: none; }
+.compact-brand { display: flex; align-items: center; flex-shrink: 0; margin-right: 12px; text-decoration: none; }
+.compact-brand img { display: block; width: 108px; height: 36px; object-fit: contain; }
 .compact-brand span { font-size: 13px; font-weight: 400; }
 main { padding: 8px 16px 12px; position: relative; }
 .live-status, .datadog-status { margin: 0; padding: 4px 8px; font-size: 11px; border: 0; }

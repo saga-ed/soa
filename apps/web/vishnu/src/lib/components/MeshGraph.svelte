@@ -86,7 +86,7 @@
   const sourceSignal = serviceSignal(datadog, r.source, now, datadogError);
   const targetSignal = serviceSignal(datadog, r.target, now, datadogError);
   const demoSignal = demoSignals[r.id];
-  const measuredSignal = pathSignal(datadog, r.source, r.target, signalView, now, datadogError);
+  const measuredSignal = pathSignal(datadog, r.source, r.target, signalView === 'overview' && selected === r.id ? 'hot' : signalView, now, datadogError);
   const emphasized = Object.keys(demoSignals).length ? signalView === 'overview' || (demoSignal && demoMatch(demoSignal)) : rankedView() ? pathEmphasized(measuredSignal) : emphasizes(signalView, sourceSignal) || emphasizes(signalView, targetSignal);
   const observed = !datadogError && datadog && ['connected','partial'].includes(datadog.status) && now - Date.parse(datadog.observedAt) <= datadog.freshForMs && (r.observation ? r.observation === 'observed' : datadog.dependencies.some(d => d.source === r.source && d.target === r.target));
   return { id: e.id, source: r.source, target: r.target, type: 'routed', selected: selected === e.id, ariaLabel: `${r.label}, ${r.kind}, ${r.health}. Press Enter to inspect.`, data: { relationship: r, demoSignal, measuredSignal, demo: Object.keys(demoSignals).length > 0, points: e.points, observed: !!observed || !!measuredSignal, dimmed: selected ? !relevant.has(e.id) : !emphasized } };

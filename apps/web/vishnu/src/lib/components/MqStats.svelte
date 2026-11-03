@@ -7,12 +7,12 @@
  {#if view?.latestReceivedAt}<p class="mq-caption">Last report <time datetime={view.latestReceivedAt}>{new Date(view.latestReceivedAt).toLocaleTimeString()}</time></p>{/if}
  {#if view?.fresh.length}
  <table><thead><tr><th>Measurement</th><th>Count</th><th>/ sec</th></tr></thead><tbody>
- {#each compact ? view.rows.slice(0,5) : view.rows as row}<tr><th>{row.label}</th><td>{numberLabel(row.count)}</td><td>{numberLabel(row.rate,true)}</td></tr>{/each}
+ {#each compact ? view.rows.slice(0,5) : view.rows as row}<tr><th>{row.label}</th><td>{numberLabel(row.count)}</td><td>{numberLabel(row.rate,true)}{#if row.rateCoverage?.partial}*{/if}</td></tr>{/each}
  </tbody></table>
  <p class="mq-caption">{#if compact}Since process start · rates over the latest report interval.{:else}Counts since process start, summed across reporting instances. Rates use each instance’s latest measured interval.{/if}</p>
  {:else}<p>{view?.status === 'Unavailable' ? 'Statistics API unavailable. Retained reports are not treated as current.' : view?.status === 'Stale' ? 'Reports have expired. Current counts and rates are unknown.' : 'This service has not reported MQ statistics in this scope.'}</p>{/if}
  {#if view?.stale}<p class="mq-caption">{view.stale} stale instance{view.stale === 1 ? '' : 's'} excluded from totals.</p>{/if}
- <p class="mq-caption">— Unavailable · 0 Measured idle{#if !compact}<br/>Transport acceptance is not broker confirmation. Deliveries include duplicates; committed work excludes them. Fan-out counts are per subscription.{/if}</p>
+ <p class="mq-caption">* Partial reporting coverage; rates may exclude stale instances.<br/>— Unavailable · 0 Measured idle{#if !compact}<br/>Transport acceptance is not broker confirmation. Deliveries include duplicates; committed work excludes them. Fan-out counts are per subscription.{/if}</p>
  {#if !compact && view?.sources.length}
  <h4>Instances and streams</h4>
  {#each view.sources as source}

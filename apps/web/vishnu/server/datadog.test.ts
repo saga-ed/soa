@@ -56,7 +56,7 @@ describe('Datadog read adapter', () => {
     let clock = time;
     const read = createDatadogReader(env, fetcher as typeof fetch, () => clock);
     const [a, b] = await Promise.all([read(), read()]);
-    expect(fetcher).toHaveBeenCalledTimes(13);
+    expect(fetcher).toHaveBeenCalledTimes(15);
     expect(a).toEqual(b);
     expect(a.services[0]).toMatchObject({
       rate: { value: 0 },
@@ -66,16 +66,19 @@ describe('Datadog read adapter', () => {
     });
     expect(a.dependencies).toEqual([{ source: 'programs-api', target: 'scheduling-api' }]);
     expect(JSON.stringify(a)).not.toContain('secret');
-    for (const [input] of fetcher.mock.calls.filter(([input]) => new URL(String(input)).pathname === '/api/v1/query'))
+    for (const [input] of fetcher.mock.calls.filter(([input]) => new URL(String(input)).pathname === '/api/v1/query' && !new URL(String(input)).searchParams.get('query')?.includes('saga.http.client.')))
       expect(new URL(String(input)).searchParams.get('query')).toContain(
         'env:dev,deployment.identifier:slot-3'
       );
     clock += 30000;
-    expect((await read()).serverNow).toBe(clock);
-    expect(fetcher).toHaveBeenCalledTimes(13);
+    const refreshed = await read();
+    expect(refreshed.serverNow).toBe(clock);
+    expect(refreshed.observedAt).toBe(a.observedAt);
+    expect(refreshed.pathRateObservedAt).not.toBe(a.pathRateObservedAt);
+    expect(fetcher).toHaveBeenCalledTimes(17);
     clock += 151000;
     await read();
-    expect(fetcher).toHaveBeenCalledTimes(26);
+    expect(fetcher).toHaveBeenCalledTimes(32);
   });
   it('does not call Datadog when credentials are missing or scope/site is unsafe', async () => {
     const fetcher = backend();
@@ -117,7 +120,7 @@ describe('Datadog read adapter', () => {
     const a = await read();
     clock += 120000;
     const b = await read();
-    expect(fetcher).toHaveBeenCalledTimes(13);
+    expect(fetcher).toHaveBeenCalledTimes(15);
     expect(b.observedAt).toBe(a.observedAt);
     expect(b.serverNow).toBe(clock);
   });
@@ -158,7 +161,7 @@ describe('cloud environment scope', () => {
     expect(data.services[0].monitors.map(m => m.id)).toEqual([10, 11]);
     expect(serviceSignal(data, 'iam-api', time).flagged).toBe(false);
     expect(new URL(traceLink(data, 'iam-api')).searchParams.get('query')).toBe('env:"dev" service:"iam-api"');
-    for (const [input] of fetcher.mock.calls.filter(([input]) => new URL(String(input)).pathname === '/api/v1/query')) expect(new URL(String(input)).searchParams.get('query')).toContain('{env:dev}');
+    for (const [input] of fetcher.mock.calls.filter(([input]) => new URL(String(input)).pathname === '/api/v1/query' && !new URL(String(input)).searchParams.get('query')?.includes('saga.http.client.'))) expect(new URL(String(input)).searchParams.get('query')).toContain('{env:dev}');
     expect(new URL(String(fetcher.mock.calls.find(([input]) => new URL(String(input)).pathname === '/api/v1/service_dependencies')![0])).searchParams.has('primary_tag')).toBe(false);
   });
   it('never allows environment-wide synthetic observations', async () => {

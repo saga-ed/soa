@@ -16,6 +16,7 @@ import { SpanDroppingExporter } from './span-filter.js';
 import { recordSpanException } from './record-exception.js';
 import { mongoDbStatementSerializer } from './mongo-statement.js';
 import { isHealthCheckRequest } from './health-path.js';
+import { createHttpClientMetrics, resolveHttpMetricPeers } from './http-client-metrics.js';
 
 /**
  * Opaque handle to an initialized OTel SDK. Services don't need to import
@@ -54,8 +55,13 @@ export function initTracing(
     }
 
     const metricsUrl = resolveOtlpMetricsUrl();
+    const peers = metricsUrl ? resolveHttpMetricPeers() : undefined;
+    let httpClientMetrics: ReturnType<typeof createHttpClientMetrics> | undefined;
+    const metricInterval = resolveMetricExportInterval();
     const metricReader = metricsUrl
         ? new metrics.PeriodicExportingMetricReader({
+              exportIntervalMillis: metricInterval,
+              exportTimeoutMillis: Math.min(metricInterval, 30000),
               exporter: new OTLPMetricExporter({
                   url: metricsUrl,
                   // Datadog's OTLP intake expects DELTA for counters/histograms.
@@ -105,6 +111,8 @@ export function initTracing(
             getNodeAutoInstrumentations({
                 '@opentelemetry/instrumentation-http': {
                     ignoreIncomingRequestHook: isHealthCheckRequest,
+                    requestHook: (span, request) => httpClientMetrics?.trackNodeRequest(span, request),
+                    responseHook: (span, response) => httpClientMetrics?.trackNodeResponse(span, response),
                 },
                 '@opentelemetry/instrumentation-fs': { enabled: false },
                 '@opentelemetry/instrumentation-dns': { enabled: false },
@@ -120,6 +128,7 @@ export function initTracing(
 
     if (process.env.OTEL_TRACES_DISABLED !== 'true') {
         sdk.start();
+        if (peers) httpClientMetrics = createHttpClientMetrics(serviceName, peers);
         // Gated with sdk.start() (not unconditional) so tests that set
         // OTEL_TRACES_DISABLED=true — the existing convention for opting out
         // of OTel side effects — don't also get a real `process.exit(1)`
@@ -134,10 +143,18 @@ export function initTracing(
             try {
                 await metricReader?.forceFlush();
             } finally {
+                httpClientMetrics?.close();
                 await sdk.shutdown();
             }
         },
     };
+}
+
+/** Bound the standard interval override; malformed configuration keeps the existing 60s default. */
+export function resolveMetricExportInterval(value = process.env.OTEL_METRIC_EXPORT_INTERVAL): number {
+    if (!value) return 60000;
+    const interval = Number(value);
+    return Number.isInteger(interval) && interval >= 1000 && interval <= 60000 ? interval : 60000;
 }
 
 /**

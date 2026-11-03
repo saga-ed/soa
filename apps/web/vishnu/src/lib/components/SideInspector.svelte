@@ -4,6 +4,9 @@
  import EndpointOffenders from './EndpointOffenders.svelte';
  import type { SignalView, DatadogSnapshot } from '$lib/graph/datadog';
  import MqStats from './MqStats.svelte';
+ import EventRates from './EventRates.svelte';
+ import PathRateStats from './PathRateStats.svelte';
+ import { eventRateLabel } from '$lib/graph/event-rates';
  import { numberLabel, type MqViews } from '$lib/graph/event-stats';
  import { busParticipants, busBadge } from '$lib/graph/bus';
  import { systemShape } from '$lib/graph/presentation';
@@ -24,15 +27,24 @@
   {#if !('source' in item)}{@const observation = nodeObservation(item, serviceSignal(datadog, item.id, now, datadogError), mqViews[item.id], snapshot.mode === 'live')}<div class="status-pill {observation.risk}">{observation.label}</div>{:else}<div class="status-pill {item.health}">{item.health} · {item.freshness}</div>{/if}
   {#if !('source' in item) && systemShape(item) === 'bus'}
    <h3>Event bus participants</h3><p>Reporting is evidence of telemetry liveness, not service health.</p>
-   <div class="relationship-list">{#each busParticipants(snapshot) as participant}<button onclick={() => onselect(participant.system.id)}><strong>{participant.system.label}</strong><small>{busBadge(participant)} · {mqViews[participant.system.id]?.status ?? 'No reports'} · {mqViews[participant.system.id]?.fresh.length ?? 0} fresh instances</small><small>Accepted: {participant.publishes ? numberLabel(mqViews[participant.system.id]?.rows[0]?.count ?? null) : 'Not declared'} · Deliveries: {participant.consumes ? numberLabel(mqViews[participant.system.id]?.rows[1]?.count ?? null) : 'Not declared'}</small></button>{/each}</div>
+   <div class="relationship-list">{#each busParticipants(snapshot) as participant}<button onclick={() => onselect(participant.system.id)}><strong>{participant.system.label}</strong><small>{busBadge(participant)} · {mqViews[participant.system.id]?.status ?? 'No reports'} · {mqViews[participant.system.id]?.fresh.length ?? 0} fresh instances</small><small>{eventRateLabel(mqViews[participant.system.id],participant.publishes,participant.consumes)} · service totals</small></button>{/each}</div>
   {/if}
   {#if 'source' in item && item.observation}<p class="connection-evidence"><strong>{item.declared ? 'Declared connection' : 'Observed connection'}</strong> · {item.observation === 'observed' ? 'Observed in APM window' : item.observation === 'not-observed' ? 'Not observed in APM window' : item.observation === 'stale' ? 'APM observation stale' : 'APM observation unavailable'}</p>{/if}
   {#if item && !('source' in item) && ((item.band === 'mesh' && !item.id.startsWith('infra:')) || item.eventBus || relationships.some(r => r.kind === 'event'))}
    <h3>MQ activity</h3>
    {#if item.eventBus}<p>{item.eventBus.publishes ? 'MQ-P · Publishes events' : ''}{item.eventBus.publishes && item.eventBus.consumes ? ' · ' : ''}{item.eventBus.consumes ? 'MQ-C · Consumes events' : ''}</p>{/if}
+   <EventRates view={mqViews[item.id]} />
    <MqStats view={mqViews[item.id]} />
    <div class="relationship-list">{#each relationships.filter(r => r.kind === 'event') as r}<button onclick={() => onselect(r.id)}><strong>{r.source === selected ? '↑ Publishes' : r.target === selected ? '↓ Consumes' : '↔ Routes'}: {r.label}</strong><small>{snapshot.systems.find(s => s.id === r.source)?.label} → {snapshot.systems.find(s => s.id === r.target)?.label}</small></button>{/each}</div>
    <p>Message consumption does not establish successful projection completion.</p>
+  {/if}
+  {#if snapshot.mode === 'live' && 'source' in item && ['http','dependency'].includes(item.kind)}
+   <PathRateStats data={datadog} source={item.source} target={item.target} {now} failed={datadogError} />
+  {/if}
+  {#if snapshot.mode === 'live' && 'source' in item && item.kind === 'event'}
+   <h3>Publisher: {item.source}</h3><EventRates view={mqViews[item.source]} role="producer" />
+   <h3>Consumer: {item.target}</h3><EventRates view={mqViews[item.target]} role="consumer" />
+   <p>These service totals are not attributed to this specific publisher–consumer connection.</p>
   {/if}
   {#if snapshot.mode === 'live' && 'source' in item && ['slow', 'hot', 'fanout'].includes(signalView)}
    <EndpointOffenders data={datadog} source={item.source} target={item.target} view={signalView} {topN} {now} failed={datadogError} supported={['http', 'dependency'].includes(item.kind)} />

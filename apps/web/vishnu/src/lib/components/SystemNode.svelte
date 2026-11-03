@@ -1,5 +1,6 @@
 <script lang="ts">
  import type { serviceSignal } from '$lib/graph/datadog';
+ import {eventRateLabel} from '$lib/graph/event-rates';
  import {numberLabel, type MqViews} from '$lib/graph/event-stats';
  import { Handle, Position, type NodeProps, type Node } from '@xyflow/svelte';
  import { nodeObservation } from '$lib/graph/node-observation';
@@ -30,7 +31,7 @@
  <div class="node-status"><span>{observation.label}</span></div>
  {#if shape === 'bus' && !data.context}<button class="bus-summary nodrag nopan" onclick={(event) => { event.stopPropagation(); data.onselect(data.system.id); }}>{data.participants.length} MQ participants →</button>{/if}
  {#if participation && !data.context}
-  <button class="bus-badge nodrag nopan" aria-label={`Inspect event bus participation for ${data.system.label}`} onclick={(event) => { event.stopPropagation(); data.onselect(data.system.id); }} onmouseenter={(event) => data.onpreview(data.system.id, event.currentTarget.getBoundingClientRect())} onmouseleave={() => data.onpreview(null)} onfocus={(event) => data.onpreview(data.system.id, event.currentTarget.getBoundingClientRect())} onblur={() => data.onpreview(null)} aria-haspopup="dialog">{busBadge(participation)}</button>
+  <button class="bus-badge nodrag nopan" aria-label={`Inspect event bus participation for ${data.system.label}`} onclick={(event) => { event.stopPropagation(); data.onselect(data.system.id); }} onmouseenter={(event) => data.onpreview(data.system.id, event.currentTarget.getBoundingClientRect())} onmouseleave={() => data.onpreview(null)} onfocus={(event) => data.onpreview(data.system.id, event.currentTarget.getBoundingClientRect())} onblur={() => data.onpreview(null)} aria-haspopup="dialog">{busBadge(participation)}{#if selected} · {eventRateLabel(data.mqViews[data.system.id],participation.publishes,participation.consumes)}{/if}</button>
  {/if}
  {#if !data.context && (data.signal.p95Ms != null || data.signal.rate != null || data.signal.flagged)}
   <div class="apm-badge {data.signal.risk}">APM {data.signal.flagged ? '▲ ' : ''}{data.signal.p95Ms != null ? `${data.signal.measurementSource === 'retained-spans' ? 'sample ' : ''}p95 ${Math.round(data.signal.p95Ms)} ms` : 'latency —'}{#if data.signal.measurementSource !== 'retained-spans'} · {data.signal.rate != null ? `${numberLabel(data.signal.rate,true)}/s` : 'rate —'}{/if}</div>

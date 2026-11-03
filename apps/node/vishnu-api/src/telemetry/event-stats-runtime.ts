@@ -3,6 +3,9 @@ import { EventStatsStore, mqPreviewTag, reporterExchanges } from './event-stats-
 import { EventStatsReceiver } from './event-stats-receiver';
 
 export const SANDBOX_QUEUE_EXPIRES_MS = 86_400_000;
+// The local stack guarantees these publishers. Hosted fleets retain all eight;
+// absent optional SDS exchanges must not disconnect the synthetic receiver.
+export const SYNTHETIC_REPORTERS = ['iam-api', 'programs-api', 'scheduling-api'] as const;
 
 export function createEventStatsRuntime(env = process.env) {
   const required = (key: string) => {
@@ -33,10 +36,12 @@ export function createEventStatsRuntime(env = process.env) {
     url: required('RABBITMQ_URL'),
     queue: `vishnu.${scope.deployment}.event-stats.v1`,
     store,
+    exchanges: scope.environment === 'synthetic'
+      ? SYNTHETIC_REPORTERS.map(service => reporters[service])
+      : Object.values(reporters),
     ...(previewTag
       ? // Sandbox queues expire a day after their last consumer leaves, so nothing outlives the sandbox.
         {
-          exchanges: Object.values(reporters),
           queueArguments: { 'x-expires': SANDBOX_QUEUE_EXPIRES_MS },
         }
       : {}),

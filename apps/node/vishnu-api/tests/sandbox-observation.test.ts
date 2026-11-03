@@ -284,3 +284,33 @@ describe('runtime wiring (d9)', () => {
       await createEventStatsRuntime(env).close();
   });
 });
+
+
+describe('runtime reporter coverage', () => {
+  it('checks only the three guaranteed synthetic exchanges and preserves all hosted exchanges', async () => {
+    const init = vi.spyOn(EventStatsStore.prototype, 'init').mockResolvedValue();
+    const read = vi.spyOn(EventStatsStore.prototype, 'read').mockResolvedValue({} as Awaited<ReturnType<InstanceType<typeof EventStatsStore>['read']>>);
+    try {
+      for (const environment of ['synthetic', 'dev']) {
+        calls.checkExchange.length = 0;
+        calls.bindQueue.length = 0;
+        const runtime = createEventStatsRuntime({
+          VISHNU_DATABASE_URL: 'postgres://vishnu@127.0.0.1:1/vishnu',
+          RABBITMQ_URL: 'amqp://test',
+          EVENT_STATS_ENVIRONMENT: environment,
+          EVENT_STATS_DEPLOYMENT: environment === 'synthetic' ? 'slot-3' : 'main',
+          EVENT_STATS_BROKER: 'test', EVENT_STATS_VHOST: '/',
+        });
+        try {
+          await runtime.read();
+          await vi.waitFor(async () => expect((await runtime.read()).receiver.connected).toBe(true));
+          const expected = environment === 'synthetic'
+            ? ['iam.events', 'programs.events', 'scheduling.events']
+            : Object.values(REPORTERS);
+          expect(calls.checkExchange).toEqual(expected);
+          expect(calls.bindQueue.map(([, exchange]) => exchange)).toEqual(expected);
+        } finally { await runtime.close(); }
+      }
+    } finally { init.mockRestore(); read.mockRestore(); }
+  });
+});

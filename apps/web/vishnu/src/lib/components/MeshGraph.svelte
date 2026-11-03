@@ -36,7 +36,10 @@
   }
   return ids;
  };
- let highlightedIds = $derived.by(matched);
+ // Freshness ticks and telemetry polls may rebuild the set without changing
+ // membership. Only a changed membership should restart the layout animation.
+ let highlightedKey = $derived(JSON.stringify([...matched()].sort()));
+ let highlightedIds = $derived(new Set<string>(JSON.parse(highlightedKey)));
  $effect(()=>{
   const measuredIds=highlightedIds;
   const base=layout, view=signalView, enabled=focusSignals, request=manualFocus, fit=fitRequest;

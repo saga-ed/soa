@@ -7,12 +7,12 @@
  import { systemShape } from '$lib/graph/presentation';
  import { busBadge, type busParticipants } from '$lib/graph/bus';
  import type { System } from '$lib/graph/types';
- let { data, selected }: NodeProps<Node<{ context?:boolean; width?:number; height?:number; signal: ReturnType<typeof serviceSignal>; mqViews: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; system: System; dimmed: boolean; live: boolean; participants: ReturnType<typeof busParticipants>; onselect: (id: string) => void }>> = $props();
+ let { data, selected }: NodeProps<Node<{ resourcePressure?:boolean; context?:boolean; width?:number; height?:number; signal: ReturnType<typeof serviceSignal>; mqViews: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; system: System; dimmed: boolean; live: boolean; participants: ReturnType<typeof busParticipants>; onselect: (id: string) => void }>> = $props();
  let participation = $derived(data.participants.find(p => p.system.id === data.system.id));
  let shape = $derived(systemShape(data.system));
  let observation = $derived(nodeObservation(data.system, data.signal, data.mqViews[data.system.id], data.live));
 </script>
-<div class="system-node {observation.risk} shape-{shape}" style:width={`${data.width ?? 224}px`} style:height={`${data.height ?? 112}px`} class:context-node={data.context} class:chosen={selected} class:dimmed={data.dimmed}>
+<div class="system-node {observation.risk} shape-{shape}" style:width={`${data.width ?? 224}px`} style:height={`${data.height ?? 112}px`} class:context-node={data.context} class:chosen={selected} class:resource-pressure={data.resourcePressure} class:dimmed={data.dimmed}>
  {#if shape !== 'service' && !data.context}
   <svg class="node-silhouette" viewBox="0 0 224 112" aria-hidden="true">
    {#if shape === 'database'}
@@ -38,3 +38,7 @@
  {/if}
  <Handle type="source" position={Position.Right} />
 </div>
+
+<style>
+ .resource-pressure { outline: 4px solid #d28b17; outline-offset: 3px; }
+</style>

@@ -16,7 +16,9 @@
     "test:ux-recovery-browser": "node tests/ux-recovery-browser.mjs",
     "test:investigation-browser": "node tests/investigation-browser.mjs",
     "test:datadog-browser": "node tests/datadog-browser.mjs",
-    "test:mq-browser": "node tests/mq-browser.mjs"
+    "test:mq-browser": "node tests/mq-browser.mjs",
+    "test:assistant-browser": "node tests/assistant-browser.mjs",
+    "test:assistant-live": "node tests/assistant-live-browser.mjs"
   },
   "dependencies": {
     "@fontsource-variable/montserrat": "^5.2.8",

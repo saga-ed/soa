@@ -15,6 +15,43 @@
  import { initialInvestigation, selectInvestigation } from '$lib/graph/investigation';
  let investigation = $state(initialInvestigation());
  import DisplaySettings from '$lib/components/DisplaySettings.svelte';
+ import AssistantPanel from '$lib/components/AssistantPanel.svelte';
+ import ResourcesPanel from '$lib/components/ResourcesPanel.svelte';
+ import { applyView, viewKey, resourceRows, resourcePressure, type ViewState, type ViewAction, type ResourceSnapshot, type ResourceSort } from '$lib/graph/assistant';
+ let showAssistant = $state(false), showResources = $state(false);
+ let resources = $state<ResourceSnapshot | null>(null);
+ let resourceSystem = $state(''), resourceSort = $state<ResourceSort>('cpu');
+ let previousViews = $state<ViewState[]>([]);
+ let acceptedContext = '', appliedKey = '';
+ const copyView = () => JSON.parse(viewKey(currentView)) as ViewState;
+ function displayView(view: ViewState) {
+  selected = view.selected; signalView = view.signalView; investigation = view.investigation;
+  showInspector = view.showInspector; showResources = view.showResources;
+  resourceSystem = view.resourceSystem; resourceSort = view.resourceSort; hover = null;
+  fitRequest++;
+ }
+ function restoreView() {
+  const previous = previousViews.at(-1);
+  if (previous) { previousViews = previousViews.slice(0,-1); displayView(previous); }
+  acceptedContext = ''; appliedKey = '';
+ }
+ function navigate(action: ViewAction, context = viewKey(currentView)): boolean {
+  if (!snapshot) return false;
+  const key = viewKey(currentView);
+  if (context !== key && !(acceptedContext === context && appliedKey === key)) return false;
+  if (action.type === 'restore_view') { restoreView(); return true; }
+  try {
+   const next = applyView(copyView(), action, snapshot);
+   if (acceptedContext !== context) previousViews = [...previousViews.slice(-9), copyView()];
+   acceptedContext = context;
+   if (action.type === 'reset_view') void resetView(); else displayView(next);
+   appliedKey = viewKey(next);
+   return true;
+  } catch { return false; }
+ }
+ let resourceNow = $derived.by(() => { clock; return Date.now(); });
+ let resourceHighlights = $derived(showResources ? Object.fromEntries(resourceRows(resources, resourceSystem, resourceSort, resourceNow).filter(r => resourcePressure(r) >= 80).map(r => [r.system, true])) : {});
+
  let topN = $state(5);
  let datadog = $state<DatadogSnapshot | null>(null);
  let datadogError = $state(false);
@@ -69,6 +106,8 @@
  let search = $state('');
  let focused = $state(false);
  let showInspector = $state(false);
+ let currentView = $derived<ViewState>({ selected, signalView, investigation, showInspector, showResources, resourceSystem, resourceSort });
+
  let tableWasExpanded = false;
  $effect(() => {
   const expanded = showInspector && investigation.mode === 'table' && investigation.expanded;
@@ -79,6 +118,7 @@
  async function resetView() {
   selected = null; search = ''; hover = null; showInspector = false; showList = false;
   signalView = 'overview'; focusSignals = true; focused = false; investigation = initialInvestigation();
+  showResources = false; resourceSystem = ''; resourceSort = 'cpu';
   clearTimeout(hoverTimer); resetRequest++;
   await tick(); scheduleRelayout?.();
  }
@@ -93,6 +133,8 @@
   const requests = new Set<AbortController>();
   let statsTimer: ReturnType<typeof setTimeout>;
   let datadogTimer: ReturnType<typeof setTimeout>;
+  let resourceTimer: ReturnType<typeof setTimeout>;
+  const pollResources = async () => { try { resources = await fetchJson('/api/resources'); } catch { resources = null; } finally { if (active) resourceTimer = setTimeout(pollResources, 60000); } };
   const clockTimer = setInterval(() => clock = performance.now(), 1000);
   let apiUrl = '/api/mesh';
   let pollMs = 15000;
@@ -176,7 +218,8 @@
    }
   };
   void start();
-  return () => { active = false; clearTimeout(timer); clearTimeout(statsTimer); clearTimeout(datadogTimer); clearTimeout(hoverTimer); clearTimeout(relayoutTimer); clearInterval(clockTimer); for (const request of requests) request.abort(); worker.terminate(); };
+  void pollResources();
+  return () => { active = false; clearTimeout(timer); clearTimeout(statsTimer); clearTimeout(datadogTimer); clearTimeout(resourceTimer); clearTimeout(hoverTimer); clearTimeout(relayoutTimer); clearInterval(clockTimer); for (const request of requests) request.abort(); worker.terminate(); };
  });
 </script>
 <svelte:head><title>Vishnu · Saga mesh</title><meta name="description" content="Saga mesh topology, system health, and evidence." /></svelte:head>
@@ -189,11 +232,16 @@
  {#if snapshot}
  {#if mode === 'live'}<p class="datadog-status" role="status">Datadog: {datadogError ? 'unavailable; retrying' : datadog?.status ?? 'connecting'}{#if datadog} · {datadog.scope.environment} / {datadog.scope.deployment}{#if datadog.scope.machine} / {datadog.scope.machine}{/if}{#if !scopedDatadog} · separate scope; graph overlay disabled{/if}{/if}. Select a service or connection for endpoint and caller → callee measurements.</p>{/if}
  {#if demo}<div class="demo-banner"><strong>SIMULATED SIGNALS · stand-up demo</strong><span>Invented measurements and call chains. No live APIs or Datadog queries.</span><a href="/">Return to live view ↗</a></div>{:else}<span class="demo-entry"><a href="?mode=demo">Demo ↗</a></span>{/if}
- <div class="toolbar">{#if mode === 'live' || demo}<label>Signal view <select bind:value={signalView}><option value="overview">All paths · early warnings</option><option value="hot">Hot paths</option><option value="slow">Slow paths</option><option value="error">Errors</option><option value="attention">Warnings & alerts</option><option value="fanout">Fan-out</option></select></label><label class="focus-layout-toggle"><input type="checkbox" bind:checked={focusSignals} /> Reflow signal focus</label>{/if}{#if mode === 'fixture' && !demo}<label>Fixture scenario <select bind:value={scenario}><option value="overview">Healthy overview</option><option value="incident">Consumer incident</option><option value="missing">Missing telemetry</option></select></label>{/if}<div class="search"><label for="system-search">Find a system</label><input id="system-search" type="search" placeholder="Search systems…" bind:value={search} />{#if search}<div class="search-results">{#each matches as s}<button onclick={() => { selectItem(s.id); search = ''; }}>{s.label}</button>{:else}<p>No matching systems</p>{/each}</div>{/if}</div><div class="view-actions"><button onclick={resetView}>Reset view</button><button aria-pressed={focused} onclick={toggleFocus}>{focused ? 'Exit focus' : 'Focus canvas'}</button><button aria-expanded={showInspector} aria-controls="selection-inspector" onclick={() => showInspector = !showInspector}>{showInspector ? 'Hide inspector' : 'Show inspector'}</button><button aria-expanded={showList} aria-controls="mesh-list" onclick={() => showList = !showList}>{showList ? 'Hide list' : 'Browse as list'}</button></div><span class="summary-count">{snapshot.systems.length} systems · {snapshot.relationships.length} paths</span></div>
+ <div class="toolbar">{#if mode === 'live' || demo}<label>Signal view <select bind:value={signalView}><option value="overview">All paths · early warnings</option><option value="hot">Hot paths</option><option value="slow">Slow paths</option><option value="error">Errors</option><option value="attention">Warnings & alerts</option><option value="fanout">Fan-out</option></select></label><label class="focus-layout-toggle"><input type="checkbox" bind:checked={focusSignals} /> Reflow signal focus</label>{/if}{#if mode === 'fixture' && !demo}<label>Fixture scenario <select bind:value={scenario}><option value="overview">Healthy overview</option><option value="incident">Consumer incident</option><option value="missing">Missing telemetry</option></select></label>{/if}<div class="search"><label for="system-search">Find a system</label><input id="system-search" type="search" placeholder="Search systems…" bind:value={search} />{#if search}<div class="search-results">{#each matches as s}<button onclick={() => { selectItem(s.id); search = ''; }}>{s.label}</button>{:else}<p>No matching systems</p>{/each}</div>{/if}</div><div class="view-actions"><button aria-expanded={showAssistant} onclick={() => showAssistant = !showAssistant}>Ask Vishnu</button><button aria-pressed={showResources} onclick={() => { if (showResources) showResources = false; else navigate({ type: 'show_resources', system: snapshot?.systems.some(s => s.id === selected) ? selected! : '', sort: resourceSort }); }}>Resources</button><button onclick={resetView}>Reset view</button><button aria-pressed={focused} onclick={toggleFocus}>{focused ? 'Exit focus' : 'Focus canvas'}</button><button aria-expanded={showInspector} aria-controls="selection-inspector" onclick={() => showInspector = !showInspector}>{showInspector ? 'Hide inspector' : 'Show inspector'}</button><button aria-expanded={showList} aria-controls="mesh-list" onclick={() => showList = !showList}>{showList ? 'Hide list' : 'Browse as list'}</button></div><span class="summary-count">{snapshot.systems.length} systems · {snapshot.relationships.length} paths</span></div>
  {#if demo}<div class="signal-legend" aria-label="Signal legend"><span style="--signal-color:var(--color-attention-strong)">↗ Hot traffic</span><span style="--signal-color:var(--color-primary)">◷ Slow paths</span><span style="--signal-color:var(--chart-2)"><FanoutIcon /> Fan-out</span><span style="--signal-color:var(--color-signal-error)">! Errors / breached threshold</span><small>Intensity = budget used · 35–100% opacity · ▲ early warning from 70% · full connectivity stays visible</small></div>{/if}
  <p class="sr-only" role="status" aria-live="polite">Selected: {selectedLabel}. {showInspector ? 'Details are in the selection inspector.' : 'Use Show inspector for details.'}</p>
  {#if showList}<section class="mesh-list" id="mesh-list" aria-label="Mesh systems and relationships"><div><h3>Systems</h3><ul>{#each snapshot.systems as system}<li><button aria-pressed={selected === system.id} onclick={() => selectItem(system.id)}>{system.label}<small>{system.kind} · {nodeObservation(system, serviceSignal(scopedDatadog, system.id, datadogNow, datadogError), mqViews[system.id], mode === 'live').label}</small></button></li>{/each}</ul></div><div><h3>Relationships</h3><ul>{#each snapshot.relationships as relationship}<li><button aria-pressed={selected === relationship.id} onclick={() => selectItem(relationship.id)}>{relationship.label}<small>{snapshot?.systems.find(s => s.id === relationship.source)?.label} → {snapshot?.systems.find(s => s.id === relationship.target)?.label}<br/>{relationship.kind} · {relationship.health} · {relationship.freshness}</small></button></li>{/each}</ul></div></section>{/if}
- <div class="workspace" class:inspector-hidden={!showInspector} class:inspector-expanded={showInspector && investigation.mode === 'table' && investigation.expanded}><section class="graph-panel" aria-label="Interactive service mesh"><div class="band-labels"><span>DATA SYSTEMS</span><span>MESH SERVICES</span><span>APPLICATIONS</span></div><div class="graph-canvas" bind:clientWidth={canvasWidth} bind:clientHeight={canvasHeight}>{#if layout}<MeshGraph {resetRequest} {focusSignals} demoSignals={demo ? demoSignals : {}} datadog={scopedDatadog} {datadogError} now={datadogNow} {signalView} {snapshot} {layout} {selected} {mqViews} {fitRequest} onpreview={preview} onselect={selectItem}/>{:else if failure}<p role="alert">Could not lay out mesh: {failure}</p>{:else}<p role="status">Laying out the mesh…</p>{/if}</div><div class="graph-footer">Drag to pan · Scroll to zoom · Tab then Enter to select<span>Hover path markers for details · signal views reflow with context</span></div></section>{#if showInspector}<SideInspector bind:investigation oninspect={id => selected = id} onview={view => signalView = view} {signalView} {topN} demoSignals={demo ? demoSignals : {}} datadog={scopedDatadog} {datadogError} now={datadogNow} {snapshot} {selected} {mqViews} onselect={selectItem}/>{/if}</div>
+ <div class="assisted-workspace" class:with-assistant={showAssistant}>
+ {#if showAssistant}<aside class="assistant-rail"><AssistantPanel contextKey={viewKey(currentView)} onaction={navigate} onrestore={restoreView} canRestore={previousViews.length > 0}/></aside>{/if}
+ <div class="investigation-surface">
+ {#if showResources}<ResourcesPanel data={resources} mesh={snapshot} bind:system={resourceSystem} bind:sort={resourceSort} onselect={id => { selected = id; }} now={resourceNow}/>{/if}
+ <div class="workspace" class:inspector-hidden={!showInspector} class:inspector-expanded={showInspector && investigation.mode === 'table' && investigation.expanded}><section class="graph-panel" aria-label="Interactive service mesh"><div class="band-labels"><span>DATA SYSTEMS</span><span>MESH SERVICES</span><span>APPLICATIONS</span></div><div class="graph-canvas" bind:clientWidth={canvasWidth} bind:clientHeight={canvasHeight}>{#if layout}<MeshGraph {resourceHighlights} {resetRequest} {focusSignals} demoSignals={demo ? demoSignals : {}} datadog={scopedDatadog} {datadogError} now={datadogNow} {signalView} {snapshot} {layout} {selected} {mqViews} {fitRequest} onpreview={preview} onselect={selectItem}/>{:else if failure}<p role="alert">Could not lay out mesh: {failure}</p>{:else}<p role="status">Laying out the mesh…</p>{/if}</div><div class="graph-footer">Drag to pan · Scroll to zoom · Tab then Enter to select<span>Hover path markers for details · signal views reflow with context</span></div></section>{#if showInspector}<SideInspector bind:investigation oninspect={id => selected = id} onview={view => signalView = view} {signalView} {topN} demoSignals={demo ? demoSignals : {}} datadog={scopedDatadog} {datadogError} now={datadogNow} {snapshot} {selected} {mqViews} onselect={selectItem}/>{/if}</div>
+ </div></div>
  {:else}<p role="status">{disconnected || 'Connecting to the mesh…'}</p>{/if}
  </main></div>
 </div>
@@ -205,3 +253,14 @@
   <button class="details-button" onclick={() => { selectItem(hover!.id); showInspector = true; }}>Open inspector</button>
  </div>
 {/if}
+
+<style>
+ .assisted-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+ .assisted-workspace.with-assistant { grid-template-columns: 360px minmax(0, 1fr); }
+ .assistant-rail, .investigation-surface { min-width: 0; }
+ .assistant-rail { max-height: calc(100vh - 190px); overflow: auto; }
+ @media (max-width: 1050px) {
+  .assisted-workspace.with-assistant { grid-template-columns: minmax(0, 1fr); }
+  .assistant-rail { max-height: none; }
+ }
+</style>

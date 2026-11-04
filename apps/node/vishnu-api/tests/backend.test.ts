@@ -17,11 +17,11 @@ const config = loadConfig(env);
 let server: Server, keysServer: Server, folder: string, privateKey: Awaited<ReturnType<typeof generateKeyPair>>['privateKey'];
 const telemetry = { datadog: vi.fn(createDatadogReader(env)), eventStats: vi.fn(async () => ({ version: 1 })) };
 const portOf = (s: Server) => (s.address() as { port: number }).port;
-async function http(path: string, cookie?: string, extra: Record<string,string> = {}, method='GET') {
+async function http(path: string, cookie?: string, extra: Record<string,string> = {}, method='GET', body?: unknown) {
   return new Promise<{status: number; body: string; headers: Record<string,unknown>}>((resolve, reject) => {
     const req = request({host:'127.0.0.1', port:portOf(server), path, method, headers:{host:'vishnu.wootops.org', ...(cookie ? {cookie:`janus_session=${cookie}`} : {}), ...extra}}, res => {
       let body='';res.on('data',c=>body+=c);res.on('end',()=>resolve({status:res.statusCode!,body,headers:res.headers}));
-    }); req.on('error',reject);req.end();
+    }); req.on('error',reject);req.end(body === undefined ? undefined : JSON.stringify(body));
   });
 }
 async function token(permissions=['staff:support'], expired=false) {
@@ -68,6 +68,19 @@ describe('hosted staff boundary',()=>{
   expect((await http('/auth/login',undefined,{host:'evil.invalid'})).status).toBe(403);
   expect((await http('/trpc/telemetry.mesh',jwt,{},'POST')).status).toBe(405);
   expect((await http('/.env',jwt)).status).toBe(404);
+ });
+});
+describe('assistant request boundary',()=>{
+ it('requires staff identity and an exact same-origin POST before reading a prompt',async()=>{
+  const payload={prompt:'show slow calls',contextKey:'initial'};
+  const headers={origin:'https://vishnu.wootops.org','content-type':'application/json'};
+  expect((await http('/api/assistant/turn',undefined,headers,'POST',payload)).status).toBe(401);
+  const jwt=await token();
+  expect((await http('/api/assistant/turn',jwt,{'content-type':'application/json'},'POST',payload)).status).toBe(403);
+  expect((await http('/api/assistant/turn',jwt,{...headers,origin:'https://evil.invalid'},'POST',payload)).status).toBe(403);
+  expect((await http('/api/assistant/turn',jwt,headers,'POST',{...payload,target:'http://metadata'})).status).toBe(400);
+  expect((await http('/api/assistant/turn',jwt,headers,'POST',{...payload,prompt:'x'.repeat(5000)})).status).toBe(400);
+  expect((await http('/api/assistant/status',jwt)).status).toBe(200);
  });
 });
 describe('scope isolation',()=>{

@@ -11,9 +11,13 @@ import { createVerifier, readJanusCookie, type Verifier } from '@saga-ed/janus-c
 import { createExpressMiddleware } from '@trpc/server/adapters/express';
 import { appRouter, type TelemetryService } from './app-router.js';
 import type { Config } from './config.js';
+import { createAssistant, type AssistantService } from './assistant/service.js';
+import { assistantHttp } from './assistant/http.js';
+import { createResourceReader } from './telemetry/resources.js';
 
 export async function createApp(config: Config, telemetry: TelemetryService, options: {
   verifier?: Verifier; staticDir: string; ready?: () => Promise<boolean>; isDraining?: () => boolean;
+  assistant?: AssistantService; resources?: ReturnType<typeof createResourceReader>;
 }) {
   await access(resolve(options.staticDir, 'index.html'));
   const container = new Container();
@@ -26,6 +30,9 @@ export async function createApp(config: Config, telemetry: TelemetryService, opt
   container.bind<TelemetryService>('TelemetryService').toConstantValue(telemetry);
   const server = container.get(ExpressServer);
   const app = server.getApp();
+  const resources = options.resources ?? telemetry.resources ?? createResourceReader(process.env);
+  const caller = appRouter.createCaller({ staff: true, telemetry });
+  const assistant = options.assistant ?? createAssistant({ mesh: () => caller.telemetry.mesh(), datadog: () => caller.telemetry.datadog(), resources });
   app.disable('x-powered-by');
   app.use((_req, res, next) => {
     res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY',
@@ -40,7 +47,9 @@ export async function createApp(config: Config, telemetry: TelemetryService, opt
   // A fixed return URL cannot be changed through Host, Forwarded, Referer or query input.
   login.searchParams.set('next', config.origin + '/');
   app.use((req, res, next) => {
-    if (!['GET', 'HEAD'].includes(req.method)) { res.status(405).set('Allow', 'GET, HEAD').json({ error: 'Read-only service' }); return; }
+    const assistantPost = req.method === 'POST' && req.path === '/api/assistant/turn' && !req.url.includes('?');
+    if (!['GET', 'HEAD'].includes(req.method) && !assistantPost) { res.status(405).set('Allow', 'GET, HEAD').json({ error: 'Read-only service' }); return; }
+    if (assistantPost && req.headers.origin !== config.origin) { res.status(403).json({ error: 'Origin required' }); return; }
     if (req.headers.host !== new URL(config.origin).host || (req.headers.origin && req.headers.origin !== config.origin)) {
       res.status(403).json({ error: 'Origin not allowed' }); return;
     }
@@ -60,11 +69,21 @@ export async function createApp(config: Config, telemetry: TelemetryService, opt
         res.status(403).json({ error: 'Saga staff access required' }); return;
       }
       res.locals.staff = true;
+      res.locals.subject = result.claims.sub;
       next();
     } catch { res.status(503).json({ error: 'Authentication unavailable' }); }
   });
   // Match the SOA tRPC apps: health precedes the perimeter; framework routes follow it.
   await server.init(container, []);
+  app.get('/api/assistant/status', (_req, res) => res.json(assistant.status()));
+  app.post('/api/assistant/turn', express.json({ limit: '16kb' }), (req, res) => {
+    if (!res.locals.subject) { res.status(403).json({ error: 'Staff identity required' }); return; }
+    void assistantHttp(req, res, assistant, String(res.locals.subject));
+  });
+  app.get('/api/resources', async (req, res) => {
+    if (Object.keys(req.query).length) { res.status(400).json({ error: 'Query targets are not supported' }); return; }
+    res.json(await resources());
+  });
   const createContext = (staff: boolean) => ({ staff, telemetry: container.get<TelemetryService>('TelemetryService') });
   app.use('/trpc', createExpressMiddleware({ router: appRouter, createContext: ({ res }) => createContext(res.locals.staff === true) }));
   app.get('/config.json', (_req, res) => res.json({ mode: 'live', apiUrl: '/api/mesh', pollIntervalMs: 15000, environment: config.environment, mqEnabled: config.mqEnabled, mqDeployment: config.mqDeployment, ...(config.mqPreviewTag ? { mqPreviewTag: config.mqPreviewTag } : {}), datadogScope: config.datadogScope, transport: 'trpc' }));

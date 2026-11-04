@@ -5,6 +5,7 @@ import { loadConfig } from './config.js';
 import { createApp } from './app.js';
 import { createDatadogReader } from './telemetry/datadog.js';
 import { createEventStatsRuntime } from './telemetry/event-stats-runtime.js';
+import { createResourceReader } from './telemetry/resources.js';
 
 const config = loadConfig(process.env);
 const datadog = createDatadogReader(process.env);
@@ -13,6 +14,7 @@ let draining = false;
 const ready = async () => !runtime || (await runtime.read()).receiver.connected;
 const { server } = await createApp(config, {
   datadog,
+  resources: createResourceReader(process.env),
   eventStats: async () => {
     if (!runtime) throw new Error('MQ telemetry is not enabled');
     return runtime.read();

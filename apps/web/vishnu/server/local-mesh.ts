@@ -6,6 +6,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv, type Plugin } from 'vite';
 import type { MeshSnapshot } from '../src/lib/graph/types';
+import { createAssistant } from '../../../node/vishnu-api/src/assistant/service';
+import { assistantHttp } from '../../../node/vishnu-api/src/assistant/http';
+import { createResourceReader } from '../../../node/vishnu-api/src/telemetry/resources';
 
 type Collector = () => Promise<MeshSnapshot>;
 type CollectorFactory = (options: { slot: number; stateDir?: string }) => Collector;
@@ -46,10 +49,12 @@ export function localMeshMiddleware(
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.end(JSON.stringify(value));
   };
+  const resources = createResourceReader(env);
+  const assistant = createAssistant({ mesh: async () => (await getCollector())(), datadog: readDatadog, resources }, env);
   return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const path = req.url?.split('?')[0];
-    if (!['/config.json', '/api/mesh', '/api/health', '/api/event-stats', '/api/datadog'].includes(path ?? '')) return next();
-    if (req.method !== 'GET') return reply(res, 405, { error: 'Read-only endpoint' });
+    if (!['/config.json', '/api/mesh', '/api/health', '/api/event-stats', '/api/datadog', '/api/resources', '/api/assistant/status', '/api/assistant/turn'].includes(path ?? '')) return next();
+    if (req.method !== (path === '/api/assistant/turn' ? 'POST' : 'GET')) return reply(res, 405, { error: 'Method not allowed' });
     const remote = req.socket.remoteAddress;
     if (!remote || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) {
       return reply(res, 403, { error: 'Local synthetic-dev access only' });
@@ -59,6 +64,7 @@ export function localMeshMiddleware(
       if (!['127.0.0.1', 'localhost', '[::1]'].includes(host)) throw new Error('host');
       if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host)
         throw new Error('origin');
+      if (path === '/api/assistant/turn' && !req.headers.origin) throw new Error('origin');
     } catch {
       return reply(res, 403, { error: 'Local origin required' });
     }
@@ -76,6 +82,9 @@ export function localMeshMiddleware(
         error: 'Start Vishnu with ss --with vishnu to enable synthetic-dev observations',
       });
     try {
+      if (path === '/api/assistant/status') return reply(res, 200, assistant.status());
+      if (path === '/api/assistant/turn') return await assistantHttp(req, res, assistant, 'local-synthetic');
+      if (path === '/api/resources') return reply(res, 200, await resources());
       if (path === '/api/datadog') return reply(res, 200, await readDatadog());
       if (path === '/api/event-stats') {
         if (!readStats) return reply(res, 503, { error: 'Event statistics unavailable' });

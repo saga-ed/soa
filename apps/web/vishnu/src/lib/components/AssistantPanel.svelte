@@ -57,7 +57,27 @@
  {#if usage}<small>{usage.toolCalls} tool calls · {usage.inputTokens.toLocaleString()} input / {usage.outputTokens.toLocaleString()} output tokens</small>{/if}
 </section>
 <style>
- .assistant-panel { padding: .8rem; margin: 0; font-size: .85rem; border: 1px solid var(--color-border, #bac6d0); border-radius: .75rem; background: var(--color-bg-surface, white); }
- .assistant-heading,.assistant-heading>div:last-child,.assistant-suggestions,.assistant-input { display:flex; gap:.6rem; justify-content:space-between; flex-wrap:wrap; align-items:center; }
- h2 {margin:0;font-size:1.2rem;} .assistant-suggestions {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.3rem;margin:.7rem 0;} .assistant-suggestions button {font-size:.72rem;padding:.35rem .2rem;} .assistant-messages {max-height:40vh; overflow:auto;} article {padding:.4rem; border-bottom:1px solid #ddd;} article p {white-space:pre-wrap; margin:.4rem 0; line-height:1.55;} .assistant-input textarea {flex:1; min-width:10rem; width:100%; padding:.5rem; font:inherit;} form label {display:block;margin:.7rem 0;} .assistant-evidence {font-size:.75rem;margin:.7rem 0;} [role=alert] {color:#a4262c;} button {padding:.35rem .5rem;font:inherit;} small {display:block;margin-top:.4rem;font-size:.7rem;overflow-wrap:anywhere;}
+ .assistant-panel { padding: 16px; margin: 0; font-size: 13px; line-height: 1.5; border: 1px solid var(--color-border, #bac6d0); border-radius: 12px; background: var(--color-bg-surface, white); }
+ .assistant-heading { display: flex; flex-direction: column; gap: 12px; }
+ .assistant-heading>div:last-child, .assistant-input { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+ h2 { margin: 0; font-size: 16px; line-height: 1.5; font-weight: 600; }
+ p, label, button, textarea, small, summary { font-family: inherit; font-size: inherit; line-height: inherit; }
+ .assistant-suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 16px 0; }
+ .assistant-suggestions button { padding: 8px 6px; }
+ .assistant-messages { max-height: 45vh; overflow: auto; overflow-wrap: anywhere; }
+ article { padding: 12px 0; border-bottom: 1px solid var(--color-border, #bac6d0); }
+ article:first-child { padding-top: 0; }
+ article p { white-space: pre-wrap; margin: 6px 0 0; }
+ .assistant-input { align-items: stretch; }
+ .assistant-input textarea { flex: 1; min-width: 0; width: 100%; min-height: 72px; padding: 10px; resize: vertical; }
+ form label { display: block; margin: 16px 0 8px; font-weight: 600; }
+ .assistant-evidence { margin: 12px 0; overflow-wrap: anywhere; }
+ .assistant-evidence p { margin: 8px 0; }
+ [role=alert] { color: #a4262c; }
+ button { padding: 7px 10px; }
+ small { display: block; margin-top: 8px; color: var(--color-text-muted, #64748b); overflow-wrap: anywhere; }
+ @media (max-width: 480px) {
+  .assistant-panel { padding: 12px; }
+  .assistant-suggestions { grid-template-columns: 1fr; }
+ }
 </style>

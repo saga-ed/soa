@@ -256,10 +256,10 @@
 
 <style>
  .assisted-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
- .assisted-workspace.with-assistant { grid-template-columns: 360px minmax(0, 1fr); }
+ .assisted-workspace.with-assistant { grid-template-columns: clamp(420px, 32vw, 600px) minmax(0, 1fr); }
  .assistant-rail, .investigation-surface { min-width: 0; }
  .assistant-rail { max-height: calc(100vh - 190px); overflow: auto; }
- @media (max-width: 1050px) {
+ @media (max-width: 1200px) {
   .assisted-workspace.with-assistant { grid-template-columns: minmax(0, 1fr); }
   .assistant-rail { max-height: none; }
  }

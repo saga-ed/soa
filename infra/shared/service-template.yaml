@@ -28,7 +28,17 @@ Parameters:
   # Empty (default) adds nothing to the task definition. When set, it must equal
   # EventStatsDeployment, and the receiver binds the sandbox-tagged exchanges.
   EventStatsPreviewTag: {Type: String, Default: '', AllowedPattern: '^(|sandbox-[a-zA-Z0-9][a-zA-Z0-9-]{0,39})$'}
+  # Off by default: without these, the task definition doesn't change.
+  VishnuAgentEnabled: {Type: String, Default: 'false', AllowedValues: ['true', 'false']}
+  VishnuAgentModel: {Type: String, Default: ''}
 Rules:
+  AgentRequiresDevModel:
+    RuleCondition: !Equals [!Ref VishnuAgentEnabled, 'true']
+    Assertions:
+      - Assert: !Not [!Equals [!Ref VishnuAgentModel, '']]
+        AssertDescription: VishnuAgentEnabled=true needs VishnuAgentModel
+      - Assert: !Equals [!Ref ExecEnv, dev]
+        AssertDescription: The Vishnu assistant runs only in dev
   MqRequiresReceiverWiring:
     RuleCondition: !Equals [!Ref VishnuMqEnabled, 'true']
     Assertions:
@@ -49,6 +59,7 @@ Conditions:
   IsProd: !Equals [!Ref ExecEnv, prod]
   MqEnabled: !Equals [!Ref VishnuMqEnabled, 'true']
   MqSandbox: !And [!Condition MqEnabled, !Not [!Equals [!Ref EventStatsPreviewTag, '']]]
+  AgentEnabled: !Equals [!Ref VishnuAgentEnabled, 'true']
 Resources:
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -84,6 +95,9 @@ Resources:
             - !If [MqEnabled, {Name: EVENT_STATS_BROKER, Value: !Ref EventStatsBroker}, !Ref 'AWS::NoValue']
             - !If [MqEnabled, {Name: EVENT_STATS_VHOST, Value: !Ref EventStatsVhost}, !Ref 'AWS::NoValue']
             - !If [MqSandbox, {Name: VISHNU_MQ_PREVIEW_TAG, Value: !Ref EventStatsPreviewTag}, !Ref 'AWS::NoValue']
+            - !If [AgentEnabled, {Name: VISHNU_AGENT_ENABLED, Value: 'true'}, !Ref 'AWS::NoValue']
+            - !If [AgentEnabled, {Name: VISHNU_AGENT_MODEL, Value: !Ref VishnuAgentModel}, !Ref 'AWS::NoValue']
+            - !If [AgentEnabled, {Name: AWS_REGION, Value: !Ref 'AWS::Region'}, !Ref 'AWS::NoValue']
           Secrets:
             - {Name: DD_API_KEY, ValueFrom: !Ref DatadogApiKeyArn}
             - {Name: DD_APP_KEY, ValueFrom: !Ref DatadogAppKeyArn}

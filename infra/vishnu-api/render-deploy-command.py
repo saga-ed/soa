@@ -21,6 +21,9 @@ optional = (
           'EventStatsPreviewTag'}
     if args.stage in ['dev', 'dev-green'] else set()
 )
+# The assistant is blue-only until skelly approves otherwise (vishnu-assistant d1).
+if args.stage == 'dev':
+    optional |= {'VishnuAgentEnabled', 'VishnuAgentModel'}
 if args.stage == 'dev-green':
     optional.add('DesiredCount')  # only for an explicit cutover; green otherwise stays at 0
 for pair in args.overrides:

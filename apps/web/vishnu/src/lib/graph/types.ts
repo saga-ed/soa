@@ -8,7 +8,7 @@ export interface Evidence {
 }
 export interface System {
   observationSource?: 'apm' | 'declared';
-  runtimeState?: 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unknown';
+  runtimeState?: 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unsupported-in-slot' | 'unknown';
   eventBus?: { publishes: boolean; consumes: boolean };
   id: string;
   label: string;

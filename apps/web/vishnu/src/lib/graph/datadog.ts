@@ -36,6 +36,12 @@ export interface DatadogSnapshot {
   connectionStatus?: MeasurementStatus;
   endpointLimited?: boolean;
   connectionLimited?: boolean;
+  pathRates?: DatadogPathRate[];
+  pathRateStatus?: MeasurementStatus;
+  pathRateSource?: 'application-counter';
+  pathRateObservedAt?: string;
+  pathRateFreshForMs?: number;
+  pathRateWindow?: { from: number; to: number };
   pathEndpoints?: DatadogPathEndpoint[];
   pathEndpointStatus?: MeasurementStatus;
   pathEndpointLimited?: boolean;
@@ -61,6 +67,14 @@ export interface DatadogConnection {
   observedSpans: number;
   /** Duration percentile of those retained outgoing client spans, in milliseconds. */
   p95Ms: number | null;
+}
+export interface DatadogPathRate {
+  source: string;
+  target: string;
+  resource: string;
+  /** Completed physical HTTP attempts, including failed outcomes, in pathRateWindow. */
+  count: number;
+  rate: MetricPoint;
 }
 export interface DatadogPathEndpoint {
   source: string;

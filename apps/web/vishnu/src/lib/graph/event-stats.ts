@@ -48,8 +48,15 @@ export function serviceStats(
       Object.entries(snapshot!.scope).some(([k, v]) => identity[k as keyof typeof identity] !== v)
     )
       continue;
-    const key = JSON.stringify([identity, source.report.epoch]);
-    if (!unique.has(key) || unique.get(key)!.report.sequence < source.report.sequence)
+    // A delayed report from an older process epoch must not revive a second replica.
+    const key = identity.instance;
+    const previous = unique.get(key);
+    if (
+      !previous ||
+      (previous.report.epoch === source.report.epoch
+        ? previous.report.sequence < source.report.sequence
+        : Date.parse(previous.report.startedAt) < Date.parse(source.report.startedAt))
+    )
       unique.set(key, source);
   }
   const sources = [...unique.values()];
@@ -59,7 +66,9 @@ export function serviceStats(
     : sources.filter(
         s =>
           s.freshness === 'fresh' &&
-          observed + elapsedMs - Date.parse(s.receivedAt) <= snapshot!.staleAfterMs
+          observed + elapsedMs - Date.parse(s.receivedAt) <= snapshot!.staleAfterMs &&
+          observed + elapsedMs - Date.parse(s.report.observedAt) <= snapshot!.staleAfterMs &&
+          Date.parse(s.report.observedAt) <= observed + elapsedMs + 60_000
       );
   const metric = (key: Counter, role: 'producer' | 'consumer', rate = false) => {
     const capable = fresh.filter(s => s.report.capabilities.includes(role));
@@ -69,12 +78,43 @@ export function serviceStats(
         if (rate && (s.comparison?.status !== 'advanced' || !s.comparison.intervalMs)) return null;
         const rows = rate ? s.comparison!.streams : s.report.streams;
         const relevant = rows.filter(row => row.stream.role === role);
-        if (!relevant.length && key === 'publishConfirmed') return null;
+        if (!relevant.length) return null;
         return sum(relevant.map(row => ('counters' in row ? row.counters[key] : row.rates[key])));
       })
     );
   };
+  const rateCoverage = (role: 'producer' | 'consumer', key: Counter) => {
+    const capable = sources.filter(s => s.report.capabilities.includes(role));
+    const measured = fresh.filter(
+      s =>
+        s.report.capabilities.includes(role) &&
+        s.comparison?.status === 'advanced' &&
+        s.comparison.intervalMs != null &&
+        s.comparison.intervalMs > 0 &&
+        s.comparison.streams.filter(row => row.stream.role === role).length > 0 &&
+        s.comparison.streams
+          .filter(row => row.stream.role === role)
+          .every(row => row.rates[key] != null && Number.isFinite(row.rates[key]))
+    );
+    const windows = measured.map(s => ({
+      instance: s.report.identity.instance,
+      from: Date.parse(s.report.observedAt) - s.comparison!.intervalMs!,
+      to: Date.parse(s.report.observedAt),
+      intervalMs: s.comparison!.intervalMs!,
+    }));
+    return {
+      measuredInstances: measured.length,
+      totalInstances: capable.length,
+      partial: measured.length < capable.length,
+      windows,
+      aligned:
+        windows.length < 2 ||
+        windows.every(w => w.from === windows[0].from && w.to === windows[0].to),
+    };
+  };
   return {
+    scope: snapshot?.scope ?? null,
+    staleAfterMs: snapshot?.staleAfterMs ?? null,
     status: unavailable
       ? 'Unavailable'
       : !sources.length
@@ -92,6 +132,7 @@ export function serviceStats(
       ...m,
       count: metric(m.key, m.role),
       rate: metric(m.key, m.role, true),
+      rateCoverage: rateCoverage(m.role, m.key),
     })),
   };
 }

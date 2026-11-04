@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { eventRates, eventRateLabel } from './event-rates';
 import { EventStats, compareReports } from '@saga-ed/soa-event-stats';
 import {
   hostedMqLabel,
@@ -169,4 +170,70 @@ it('observes exactly one named sandbox and labels it apart from the environment-
   expect(scopedStats(stats('sandbox-gh537'), { mode: 'live' }, hosted)).not.toBeNull();
   expect(scopedStats(stats('main'), { mode: 'live' }, hosted)).toBeNull();
   expect(scopedStats(stats('sandbox-other'), { mode: 'live' }, hosted)).toBeNull();
+});
+it('uses the newest process epoch once even when an older report arrives later', () => {
+  const old = source('one', 99),
+    current = source('one', 2);
+  old.report.startedAt = new Date(Date.parse(now) - 60000).toISOString();
+  current.report.startedAt = new Date(Date.parse(now) - 1000).toISOString();
+  old.receivedAt = new Date(Date.parse(now) + 1000).toISOString();
+  old.report.sequence = 999;
+  const view = serviceStats(snapshot([current, old]), 'programs-api');
+  expect(view.sources).toHaveLength(1);
+  expect(metric(view)).toMatchObject({ count: 2, rate: 2 });
+  current.comparison = compareReports(old.report, current.report);
+  expect(metric(serviceStats(snapshot([old, current]), 'programs-api')).rate).toBeNull();
+});
+it('describes mixed instance intervals and partial coverage without converting missing data to zero', () => {
+  const a = source('one', 6, 2000),
+    b = source('two', 9, 3000);
+  const row = metric(serviceStats(snapshot([a, b]), 'programs-api'));
+  expect(row.rate).toBe(6);
+  expect(row.rateCoverage).toMatchObject({
+    measuredInstances: 2,
+    totalInstances: 2,
+    partial: false,
+    aligned: false,
+  });
+  expect(row.rateCoverage.windows.map(w => w.intervalMs)).toEqual([2000, 3000]);
+  b.comparison = null;
+  expect(metric(serviceStats(snapshot([a, b]), 'programs-api'))).toMatchObject({
+    rate: null,
+    rateCoverage: { partial: true, measuredInstances: 1, totalInstances: 2 },
+  });
+  b.freshness = 'stale';
+  expect(metric(serviceStats(snapshot([a, b]), 'programs-api'))).toMatchObject({
+    rate: 3,
+    rateCoverage: { partial: true, measuredInstances: 1, totalInstances: 2 },
+  });
+  a.report.streams = [];
+  a.comparison = { status: 'advanced', intervalMs: 1000, streams: [] };
+  expect(metric(serviceStats(snapshot([a]), 'programs-api')).rate).toBeNull();
+});
+it('does not renew stale counters just because their delivery was delayed', () => {
+  const delayed = source();
+  delayed.report.observedAt = new Date(Date.parse(now) - 90001).toISOString();
+  expect(serviceStats(snapshot([delayed]), 'programs-api').status).toBe('Stale');
+});
+
+it('labels independent event actions and preserves unknown confirmation', () => {
+  const view = serviceStats(snapshot([source('one', 4, 2000)]), 'programs-api');
+  expect(eventRates(view, 'producer').map(r => [r.key, r.value])).toEqual([
+    ['publishAccepted', 2],
+    ['publishConfirmed', null],
+  ]);
+  expect(eventRateLabel(view, true, false)).toBe('Accepted 2/s');
+  expect(eventRates(undefined, 'consumer').every(r => r.value === null)).toBe(true);
+});
+it('treats a decreased same-epoch counter as unknown instead of zero throughput', () => {
+  const original = source('one', 5);
+  const reset = structuredClone(original.report);
+  reset.sequence++;
+  reset.elapsedMs += 1000;
+  reset.streams[0].counters.publishAccepted = 0;
+  const comparison = compareReports(original.report, reset);
+  const view = serviceStats(snapshot([{ ...original, report: reset, comparison }]), 'programs-api');
+  expect(metric(view).count).toBe(0);
+  expect(metric(view).rate).toBeNull();
+  expect(metric(view).rateCoverage.partial).toBe(true);
 });

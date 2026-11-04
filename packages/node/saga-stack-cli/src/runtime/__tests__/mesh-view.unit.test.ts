@@ -3,8 +3,26 @@ import { createLocalMeshCollector } from '../mesh-view.js';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { makeRealProber } from '../health.js';
+import { manifest } from '../../core/manifest/index.js';
+import { slotExcludedServices } from '../../core/derive-instance.js';
 
 describe('Vishnu local mesh collector', () => {
+  it('represents every manifest API and webapp even when stopped, without probing excluded slot-0 ports', async () => {
+    const urls: string[] = [];
+    const snapshot = await createLocalMeshCollector({
+      slot: 3, processState: async () => 'absent',
+      prober: { probe: async url => { urls.push(url); return { ok: false }; } },
+      tcpProbe: async () => false,
+    })();
+    expect(snapshot.systems.filter(s => !s.id.startsWith('infra:')).map(s => s.id).sort())
+      .toEqual(Object.keys(manifest.services).sort());
+    for (const id of slotExcludedServices(3)) {
+      expect(snapshot.systems.find(s => s.id === id)).toMatchObject({ runtimeState: 'unsupported-in-slot', health: 'unknown' });
+      expect(urls.some(url => new URL(url).port === String(manifest.services[id].port))).toBe(false);
+    }
+    for (const id of ['staff-admin-console', 'staff-admin-bff', 'ap-api', 'ap-dash', 'ap-student', 'authz-sync'])
+      expect(snapshot.systems.find(s => s.id === id)).toMatchObject({ runtimeState: 'not-started', health: 'unknown' });
+  });
   it('uses the selected slot, declares real dependencies, and never invents measurements', async () => {
     const urls: string[] = [];
     const ports: number[] = [];

@@ -59,9 +59,9 @@ describe('endpoint and attributable connection measurements', () => {
     });
     const read = createDatadogReader({ DD_API_KEY: 'secret', DD_APP_KEY: 'secret', VISHNU_SLOT: '3', VISHNU_DATADOG_ENV: 'dev', VISHNU_DATADOG_DEPLOYMENT: 'turing-slot-3' }, fetcher as typeof fetch, () => to);
     const result = await read(); await read();
-    expect(calls).toHaveLength(13);
-    expect(calls.filter(c => c.url.pathname === '/api/v1/query')).toHaveLength(6);
-    for (const c of calls.filter(c => c.url.pathname === '/api/v1/query')) expect(c.url.searchParams.get('query')).toContain('env:dev,deployment.identifier:turing-slot-3');
+    expect(calls).toHaveLength(15);
+    expect(calls.filter(c => c.url.pathname === '/api/v1/query')).toHaveLength(8);
+    for (const c of calls.filter(c => c.url.pathname === '/api/v1/query' && !c.url.searchParams.get('query')?.includes('saga.http.client.'))) expect(c.url.searchParams.get('query')).toContain('env:dev,deployment.identifier:turing-slot-3');
     const connection = calls.find(c => c.url.pathname.includes('/spans/') && JSON.parse(String(c.init?.body)).data.attributes.group_by?.length === 2)!;
     expect(connection.init?.method).toBe('POST');
     const request = JSON.parse(String(connection.init?.body)).data.attributes;
@@ -86,8 +86,12 @@ describe('synthetic retained-span measurements', () => {
     expect(fetcher).not.toHaveBeenCalled();
     const read = createDatadogReader({ ...env, VISHNU_DATADOG_MACHINE: 'turing' }, fetcher as typeof fetch, () => to);
     const data = await read(); await read();
-    expect(fetcher).toHaveBeenCalledTimes(6);
+    expect(fetcher).toHaveBeenCalledTimes(8);
     for (const [input, init] of fetcher.mock.calls) {
+      if (String(input).includes('/api/v1/query')) {
+        expect(new URL(String(input)).searchParams.get('query')).toContain('deployment.identifier:slot-3,synthetic.machine:turing');
+        continue;
+      }
       expect(String(input)).toContain('/api/v2/spans/');
       const query = JSON.parse(String(init?.body)).data.attributes.filter.query;
       expect(query).toContain('env:synthetic @deployment.identifier:slot-3 @synthetic.machine:turing');

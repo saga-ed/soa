@@ -13,6 +13,8 @@
     "test:synthetic": "node tests/synthetic-smoke.mjs",
     "test:int": "vitest run --config vitest.int.config.ts",
     "test:reflow-browser": "node tests/reflow-browser.mjs && node tests/live-reflow-browser.mjs",
+    "test:ux-recovery-browser": "node tests/ux-recovery-browser.mjs",
+    "test:investigation-browser": "node tests/investigation-browser.mjs",
     "test:datadog-browser": "node tests/datadog-browser.mjs",
     "test:mq-browser": "node tests/mq-browser.mjs"
   },

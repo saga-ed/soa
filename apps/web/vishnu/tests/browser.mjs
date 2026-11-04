@@ -26,10 +26,10 @@ try {
     /Montserrat Variable/
   );
 
-  assert.equal(await page.locator('.bus-panel').count(), 1);
-  assert.equal(await page.locator('.bus-participant').count(), 3);
-  await page.locator('.bus-participant button').first().click();
-  await page.getByRole('heading', { name: 'MQ activity', exact: true }).waitFor();
+  assert.equal(await page.locator('.shape-bus').count(), 1);
+  assert.equal(await page.locator('.bus-badge').count(), 3);
+  await page.locator('.bus-summary').click();
+  await page.getByRole('heading', { name: 'RabbitMQ', exact: true }).waitFor();
   await page.locator('.bus-badge').first().click();
   await page.getByRole('heading', { name: 'MQ activity', exact: true }).waitFor();
   await page.getByLabel('Clear selection').click();
@@ -70,11 +70,13 @@ try {
 
   await page.getByLabel('Clear selection').click();
   await page.getByRole('button', { name: 'Fit mesh', exact: true }).click();
+  await page.waitForTimeout(650);
   const iam = page.locator('.svelte-flow__node[data-id="iam"]');
   await iam.focus();
   await page.keyboard.press('Enter');
   await page.getByRole('heading', { name: 'IAM API', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Fit mesh', exact: true }).click();
+  await page.waitForTimeout(650);
   const pathPoint = await page
     .locator('.svelte-flow__edge[data-id="iam-store"] .svelte-flow__edge-path')
     .evaluate(path => {

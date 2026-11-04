@@ -14,7 +14,7 @@ import type { ServiceId, MeshId } from '../core/manifest/index.js';
 import { makeRealProber, type HealthProber } from './health.js';
 
 export type ProcessState = 'running' | 'exited' | 'absent' | 'unverified';
-export type RuntimeState = 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unknown';
+export type RuntimeState = 'reachable' | 'unhealthy' | 'stopped' | 'not-started' | 'unsupported-in-slot' | 'unknown';
 
 type Health = 'healthy' | 'critical' | 'unknown';
 interface Evidence {
@@ -67,7 +67,7 @@ export interface MeshViewOptions {
   prober?: HealthProber;
   tcpProbe?: (port: number) => Promise<boolean>;
   processState?: (id: ServiceId) => Promise<ProcessState>;
-  /** Declared product surfaces remain visible even in a partial stack. */
+  /** Defaults to every manifest service; explicit roots allow a narrower inventory. */
   declaredRoots?: readonly ServiceId[];
   now?: () => Date;
 }
@@ -179,7 +179,7 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
         if (!retained.has(dep)) include(dep);
       }
     };
-    for (const id of options.declaredRoots ?? ['saga-dash', 'connect-web', 'coach-web']) include(id);
+    for (const id of options.declaredRoots ?? Object.keys(manifest.services) as ServiceId[]) include(id);
     for (const id of [...retained]) include(id);
     const visible = rows.filter(row => retained.has(row.service.id));
     const systems: System[] = visible.map(({ service, url, probe, process }) => {
@@ -219,7 +219,7 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
         summary: probe.ok
           ? 'Local HTTP probe succeeded. This establishes endpoint reachability, not request success rates or end-to-end business health. Process and checkout identity are not verified by this probe; use ss stack verify for that check.'
           : runtimeState === 'not-started'
-            ? 'Declared dependency has not been observed running in this viewer session. No active managed process was verified; this is not a confirmed outage.'
+            ? 'Declared service has not been observed running in this viewer session. No active managed process was verified; this is not a confirmed outage.'
             : runtimeState === 'stopped'
               ? 'The previously managed service has no launch PID record and is not responding. It remains visible as stopped.'
               : runtimeState === 'unknown'
@@ -383,6 +383,18 @@ export function createLocalMeshCollector(options: MeshViewOptions = {}) {
               ]
             : []),
         ],
+      });
+    }
+    // Inventory includes slot-0-only applications without probing their shared
+    // ports or attributing another slot's runtime to this one.
+    if (options.declaredRoots === undefined) for (const id of excluded) {
+      const service = manifest.services[id];
+      systems.push({
+        id, label: id, band: service.isFrontend ? 'application' : 'mesh',
+        kind: service.isFrontend ? 'Web application' : 'API service',
+        runtimeState: 'unsupported-in-slot', health: 'unknown', freshness: 'fresh', errors: null,
+        summary: `This service is declared in the stack manifest but cannot run in slot ${instance.slot}. Its current launch configuration is restricted to slot 0; no endpoint was probed.`,
+        evidence: [{ label: 'Declared slot restriction', description: `ss manifest: ${id}, repo ${service.repo}. Excluded by slotExcludedServices(${instance.slot}).` }],
       });
     }
     systems.sort((a, b) => a.id.localeCompare(b.id));

@@ -22,14 +22,18 @@ try {
   await page.getByRole('button', { name: 'Fit mesh', exact: true }).click();
   const initial = await transform();
   await page.setViewportSize({ width: 2560, height: 1440 });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1000);
   assert.notEqual(await transform(), initial);
   await expectFitted();
+  const expanded = await transform();
+  await page.getByRole('button', { name: 'Show inspector', exact: true }).click();
+  await page.waitForTimeout(600);
+  assert.equal(await transform(), expanded, 'Opening inspector preserves camera');
   await page.getByRole('button', { name: 'Hide inspector', exact: true }).click();
-  await page.waitForTimeout(500);
-  await expectFitted();
+  await page.waitForTimeout(600);
+  assert.equal(await transform(), expanded, 'Closing inspector preserves camera');
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1000);
   await expectFitted();
   console.log('Resize checks passed: fullscreen-size growth, inspector toggle, laptop-size shrink, centered visible mesh.');
 } finally {

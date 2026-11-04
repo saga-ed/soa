@@ -1,6 +1,7 @@
 import type { DatadogSnapshot, DatadogService, MetricPoint } from '../../../../web/vishnu/src/lib/graph/datadog';
 import { connectionGroupLimit, connectionMeasurements, endpointMeasurements, retainedEndpointMeasurements } from './datadog-performance';
 
+import { createPathRateReader } from './datadog-rates';
 import { parseDatadogJson, pathEndpointMeasurements, pathGroupLimits, sampledFanout, traceSampleLimit } from './datadog-paths';
 
 type Env = Record<string, string | undefined>;
@@ -20,7 +21,8 @@ const numeric = (value: string | undefined, fallback: number) =>
 export function createDatadogReader(
   env: Env = process.env,
   fetcher: typeof fetch = fetch,
-  now = Date.now
+  now = Date.now,
+  localPeerPorts: Record<string, string> = {}
 ) {
   const site = env.DD_SITE ?? 'datadoghq.com';
   const level = env.VISHNU_DATADOG_SCOPE === 'environment' ? 'environment' as const : 'deployment' as const;
@@ -32,6 +34,14 @@ export function createDatadogReader(
     ...(env.VISHNU_DATADOG_MACHINE ? { machine: env.VISHNU_DATADOG_MACHINE } : {}),
   };
   const prefix = env.VISHNU_DATADOG_METRIC_PREFIX ?? 'trace.http.server.request';
+  // Only the local adapter supplies manifest-derived ports. Hosted readers never
+  // infer identity from ports; synthetic attribution also requires loopback,
+  // exact machine and exact deployment scope in every query.
+  const localPeers = scope.environment === 'synthetic' && level === 'deployment' && scope.machine
+    ? Object.fromEntries(Object.entries(localPeerPorts).filter(([port, service]) =>
+      /^\d{1,5}$/.test(port) && Number(port) > 0 && Number(port) <= 65535 && /^[a-z][a-z0-9-]{0,63}$/.test(service)))
+    : {};
+  const localPorts = Object.keys(localPeers);
   const thresholds = {
     hotRate: numeric(env.VISHNU_DATADOG_HOT_RATE, 10),
     warningP95Ms: numeric(env.VISHNU_DATADOG_WARNING_P95_MS, 2500),
@@ -67,8 +77,22 @@ export function createDatadogReader(
     }
     const body = await response.text();
     if (body.length > 4_000_000) throw new Error('Response too large');
-    return parseDatadogJson(body);
+    const parsed = parseDatadogJson(body);
+    if (localPorts.length && path === '/api/v2/spans/analytics/aggregate') {
+      for (const bucket of Array.isArray(parsed.data) ? parsed.data : []) {
+        const by = bucket?.attributes?.by;
+        if (by && localPeers[String(by['@server.port'])])
+          by['@peer.service'] = localPeers[String(by['@server.port'])];
+      }
+    }
+    return parsed;
   };
+  const readRates = createPathRateReader(scope, params => request('/api/v1/query', params, undefined, 5000), () => {
+    if (!sites[site] || (level === 'environment' && !['dev', 'prod'].includes(scope.environment)) || !Object.values(scope).every(v => safeTag.test(v)) || !safeTag.test(prefix) || thresholds.warningP95Ms >= thresholds.criticalP95Ms || (scope.environment === 'synthetic' && !scope.machine)) return 'unavailable';
+    if (!env.DD_API_KEY || !env.DD_APP_KEY) return 'unconfigured';
+    if (now() < retryAt) return 'unavailable';
+    return 'ready';
+  }, now);
   const collect = async (): Promise<DatadogSnapshot> => {
     const to = now();
     const from = to - 15 * 60000;
@@ -121,13 +145,17 @@ export function createDatadogReader(
       } },
     });
     const serverSpanQuery = `${spanScope} @span.kind:server -@http.path_group:*/health*`;
-    const connectionSpanQuery = `${spanScope} @span.kind:client @peer.service:* -@http.path_group:*/health*`;
+    const peerFacet = localPorts.length ? '@server.port' : '@peer.service';
+    const peerFilter = localPorts.length
+      ? `@http.url_details.host:(localhost OR 127.0.0.1) @server.port:(${localPorts.join(' OR ')})`
+      : '@peer.service:*';
+    const connectionSpanQuery = `${spanScope} @span.kind:client ${peerFilter} -@http.path_group:*/health*`;
     const pathEvidence = (async () => {
       const pathQuery = (ranking: 'count' | 'pc95') => request('/api/v2/spans/analytics/aggregate', {}, {
         data: { type: 'aggregate_request', attributes: {
           filter: { from: new Date(from).toISOString(), to: new Date(to).toISOString(), query: connectionSpanQuery },
           compute: [{ aggregation: 'count', type: 'total' }, { aggregation: 'pc95', metric: '@duration', type: 'total' }],
-          group_by: ['service', '@peer.service', '@http.method', '@http.path_group'].map((facet, i) => ({ facet, limit: pathGroupLimits[i],
+          group_by: ['service', peerFacet, '@http.method', '@http.path_group'].map((facet, i) => ({ facet, limit: pathGroupLimits[i],
             sort: { type: 'measure', aggregation: ranking, ...(ranking === 'pc95' ? { metric: '@duration' } : {}), order: 'desc' } })),
         } },
       }, 3000);
@@ -154,7 +182,7 @@ export function createDatadogReader(
       const results = await Promise.allSettled([
         aggregate(serverSpanQuery, ['service']),
         aggregate(serverSpanQuery, ['service', '@http.method', '@http.path_group']),
-        aggregate(connectionSpanQuery, ['service', '@peer.service']),
+        aggregate(connectionSpanQuery, ['service', peerFacet]),
       ]);
       const endpointData = retainedEndpointMeasurements(results[1], to);
       const connectionData = connectionMeasurements(results[2]);
@@ -345,7 +373,7 @@ export function createDatadogReader(
         : 'Datadog observations; metrics reflect the configured instrumentation and sampling.',
     };
   };
-  return async () => {
+  const readSlow = async () => {
     if (cache && (now() - cachedAt < 180000 || now() < retryAt))
       return { ...cache, serverNow: now() };
     pending ??= collect()
@@ -358,5 +386,12 @@ export function createDatadogReader(
         pending = undefined;
       });
     return { ...(await pending), serverNow: now() };
+  };
+  return async () => {
+    const [snapshot, rates] = await Promise.all([readSlow(), readRates()]);
+    const independentRate = snapshot.status === 'unavailable' && rates.pathRates.length > 0;
+    return { ...snapshot, ...rates, serverNow: now(),
+      ...(independentRate ? { status: 'partial' as const, message: 'Application request counters are available; other Datadog observations are unavailable.' } : {}),
+    };
   };
 }

@@ -2,8 +2,13 @@
  import { signalNames, signalColor, signalDegree, type DemoSignal } from '$lib/fixtures/signals';
  import DatadogStats from './DatadogStats.svelte';
  import EndpointOffenders from './EndpointOffenders.svelte';
+ import InvestigationTable from './InvestigationTable.svelte';
+ import { initialInvestigation, type InvestigationState } from '$lib/graph/investigation';
  import type { SignalView, DatadogSnapshot } from '$lib/graph/datadog';
  import MqStats from './MqStats.svelte';
+ import EventRates from './EventRates.svelte';
+ import PathRateStats from './PathRateStats.svelte';
+ import { eventRateLabel } from '$lib/graph/event-rates';
  import { numberLabel, type MqViews } from '$lib/graph/event-stats';
  import { busParticipants, busBadge } from '$lib/graph/bus';
  import { systemShape } from '$lib/graph/presentation';
@@ -11,7 +16,7 @@
  import { serviceSignal } from '$lib/graph/datadog';
  import { connectionLabel } from '$lib/graph/presentation';
  import type { MeshSnapshot } from '$lib/graph/types';
- let { signalView = 'overview', topN = 5, demoSignals = {}, datadog = null, datadogError = false, now = 0, snapshot, selected, onselect, mqViews = {} }: { signalView?: SignalView; topN?: number; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; mqViews?: MqViews; snapshot: MeshSnapshot; selected: string | null; onselect: (id: string | null) => void } = $props();
+ let { investigation = $bindable(initialInvestigation()), oninspect, onview, signalView = 'overview', topN = 5, demoSignals = {}, datadog = null, datadogError = false, now = 0, snapshot, selected, onselect, mqViews = {} }: { investigation?: InvestigationState; oninspect: (id: string | null) => void; onview: (view: SignalView) => void; signalView?: SignalView; topN?: number; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; mqViews?: MqViews; snapshot: MeshSnapshot; selected: string | null; onselect: (id: string | null) => void } = $props();
  let item = $derived(snapshot.systems.find(s => s.id === selected) ?? snapshot.relationships.find(r => r.id === selected));
  let relationships = $derived(snapshot.relationships.filter(r => r.source === selected || r.target === selected || (selected != null && r.via?.includes(selected))));
  let expanded = $state(false);
@@ -19,20 +24,33 @@
 </script>
 <aside id="selection-inspector" class="inspector" aria-label="Selection inspector">
  <div class="inspector-heading"><span class="eyebrow">INSPECTOR</span>{#if item}<button aria-label="Clear selection" onclick={() => onselect(null)}>×</button>{/if}</div>
+ <div class="inspector-views" role="group" aria-label="Inspector view"><button aria-pressed={investigation.mode === 'details'} onclick={() => investigation = { ...investigation, mode: 'details' }}>Details</button><button aria-pressed={investigation.mode === 'table'} onclick={() => investigation = { ...investigation, mode: 'table' }}>Table</button></div>
+ {#if investigation.mode === 'table'}
+  <InvestigationTable bind:state={investigation} {snapshot} data={datadog} {signalView} {now} failed={datadogError} {demoSignals} {onselect} {oninspect} {onview} />
+ {:else}
  {#if item}
   <h2>{item.label}</h2>
   {#if !('source' in item)}{@const observation = nodeObservation(item, serviceSignal(datadog, item.id, now, datadogError), mqViews[item.id], snapshot.mode === 'live')}<div class="status-pill {observation.risk}">{observation.label}</div>{:else}<div class="status-pill {item.health}">{item.health} · {item.freshness}</div>{/if}
   {#if !('source' in item) && systemShape(item) === 'bus'}
    <h3>Event bus participants</h3><p>Reporting is evidence of telemetry liveness, not service health.</p>
-   <div class="relationship-list">{#each busParticipants(snapshot) as participant}<button onclick={() => onselect(participant.system.id)}><strong>{participant.system.label}</strong><small>{busBadge(participant)} · {mqViews[participant.system.id]?.status ?? 'No reports'} · {mqViews[participant.system.id]?.fresh.length ?? 0} fresh instances</small><small>Accepted: {participant.publishes ? numberLabel(mqViews[participant.system.id]?.rows[0]?.count ?? null) : 'Not declared'} · Deliveries: {participant.consumes ? numberLabel(mqViews[participant.system.id]?.rows[1]?.count ?? null) : 'Not declared'}</small></button>{/each}</div>
+   <div class="relationship-list">{#each busParticipants(snapshot) as participant}<button onclick={() => onselect(participant.system.id)}><strong>{participant.system.label}</strong><small>{busBadge(participant)} · {mqViews[participant.system.id]?.status ?? 'No reports'} · {mqViews[participant.system.id]?.fresh.length ?? 0} fresh instances</small><small>{eventRateLabel(mqViews[participant.system.id],participant.publishes,participant.consumes)} · service totals</small></button>{/each}</div>
   {/if}
   {#if 'source' in item && item.observation}<p class="connection-evidence"><strong>{item.declared ? 'Declared connection' : 'Observed connection'}</strong> · {item.observation === 'observed' ? 'Observed in APM window' : item.observation === 'not-observed' ? 'Not observed in APM window' : item.observation === 'stale' ? 'APM observation stale' : 'APM observation unavailable'}</p>{/if}
   {#if item && !('source' in item) && ((item.band === 'mesh' && !item.id.startsWith('infra:')) || item.eventBus || relationships.some(r => r.kind === 'event'))}
    <h3>MQ activity</h3>
    {#if item.eventBus}<p>{item.eventBus.publishes ? 'MQ-P · Publishes events' : ''}{item.eventBus.publishes && item.eventBus.consumes ? ' · ' : ''}{item.eventBus.consumes ? 'MQ-C · Consumes events' : ''}</p>{/if}
+   <EventRates view={mqViews[item.id]} />
    <MqStats view={mqViews[item.id]} />
    <div class="relationship-list">{#each relationships.filter(r => r.kind === 'event') as r}<button onclick={() => onselect(r.id)}><strong>{r.source === selected ? '↑ Publishes' : r.target === selected ? '↓ Consumes' : '↔ Routes'}: {r.label}</strong><small>{snapshot.systems.find(s => s.id === r.source)?.label} → {snapshot.systems.find(s => s.id === r.target)?.label}</small></button>{/each}</div>
    <p>Message consumption does not establish successful projection completion.</p>
+  {/if}
+  {#if snapshot.mode === 'live' && 'source' in item && ['http','dependency'].includes(item.kind)}
+   <PathRateStats data={datadog} source={item.source} target={item.target} {now} failed={datadogError} />
+  {/if}
+  {#if snapshot.mode === 'live' && 'source' in item && item.kind === 'event'}
+   <h3>Publisher: {item.source}</h3><EventRates view={mqViews[item.source]} role="producer" />
+   <h3>Consumer: {item.target}</h3><EventRates view={mqViews[item.target]} role="consumer" />
+   <p>These service totals are not attributed to this specific publisher–consumer connection.</p>
   {/if}
   {#if snapshot.mode === 'live' && 'source' in item && ['slow', 'hot', 'fanout'].includes(signalView)}
    <EndpointOffenders data={datadog} source={item.source} target={item.target} view={signalView} {topN} {now} failed={datadogError} supported={['http', 'dependency'].includes(item.kind)} />
@@ -61,4 +79,5 @@
  {/if}
  <p class="fixture-note">Observation: <time datetime={snapshot.observedAt}>{new Date(snapshot.observedAt).toISOString().replace('T', ' ').replace('.000Z', ' UTC')}</time><br/>{#if snapshot.mode === 'fixture'}Metrics and observed error counts cover the preceding {snapshot.observationWindowSeconds / 60} minutes.{:else if snapshot.scope}Cloud reachability is not probed. A declared connection is supported wiring, not proof of traffic or health.{:else}Health reflects local probes at this observation time. A successful probe does not establish end-to-end service health.{/if}</p>
  <p class="fixture-note">{#if snapshot.mode === 'fixture'}Invented fixture evidence. No live telemetry is connected.{:else if snapshot.scope}Declared connections come from reviewed client source, with conditional wiring noted in the inspector. They remain visible during quiet periods. Observed-only links come from the current APM window. No edge traffic or latency is inferred from service metrics.{:else}Declared relationships come from the local stack configuration. MQ statistics are reported by participating services. APM service observations are shown separately from local probes. Edge traffic and latency remain unknown without caller-specific evidence. Endpoint counts remain unknown.{/if}</p>
+ {/if}
 </aside>

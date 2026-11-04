@@ -13,7 +13,7 @@
  import SystemNode from './SystemNode.svelte';
  import ConnectionEdge from './ConnectionEdge.svelte';
  import GraphControls from './GraphControls.svelte';
- let { fitRequest = 0, focusSignals = true, demoSignals = {}, datadog = null, datadogError = false, now = 0, signalView = 'overview', snapshot, layout, selected, onselect, mqViews = {}, onpreview }: { fitRequest?: number; focusSignals?: boolean; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; signalView?: SignalView; mqViews?: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; snapshot: MeshSnapshot; layout: MeshLayout; selected: string | null; onselect: (id: string | null) => void } = $props();
+ let { resetRequest = 0, fitRequest = 0, focusSignals = true, demoSignals = {}, datadog = null, datadogError = false, now = 0, signalView = 'overview', snapshot, layout, selected, onselect, mqViews = {}, onpreview }: { resetRequest?: number; fitRequest?: number; focusSignals?: boolean; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; signalView?: SignalView; mqViews?: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; snapshot: MeshSnapshot; layout: MeshLayout; selected: string | null; onselect: (id: string | null) => void } = $props();
  let participants = $derived(busParticipants(snapshot));
  const demoMatch = (s: DemoSignal) => signalView === 'overview' || (signalView === 'attention' ? signalDegree(s) >= .7 : signalView === s.kind);
  let displayLayout = $state<MeshLayout|null>(null);
@@ -21,7 +21,13 @@
  let revision = $state(0);
  let moving = $state(false);
  let focusCount = $state(0);
- let manualFocus = $state<{view:SignalView;ids:string[]}|null>(null);
+ let manualFocus = $state<{view:SignalView;ids:string[];selection:string|null;action:number}|null>(null);
+ let focusAction = 0;
+ // Explicit focus lasts for this filter and selection, never a later revisit.
+ $effect(() => { signalView; focusSignals; resetRequest; untrack(() => manualFocus = null); });
+ $effect(() => { const current = selected; untrack(() => {
+  if (manualFocus?.selection && manualFocus.selection !== current) manualFocus = null;
+ }); });
  let frame = 0;
  let lastFocusRequest = '';
  let drawn = $derived(displayLayout ?? layout);
@@ -42,13 +48,13 @@
  let highlightedIds = $derived(new Set<string>(JSON.parse(highlightedKey)));
  $effect(()=>{
   const measuredIds=highlightedIds;
-  const base=layout, view=signalView, enabled=focusSignals, request=manualFocus, fit=fitRequest;
+  const base=layout, view=signalView, enabled=focusSignals, request=manualFocus, fit=fitRequest, reset=resetRequest;
   untrack(()=>{
-   const focusRequest = JSON.stringify([view, enabled, request, fit]);
+   const focusRequest = JSON.stringify([view, enabled, request, fit, reset]);
    const refit = lastFocusRequest !== focusRequest;
    lastFocusRequest = focusRequest;
    cancelAnimationFrame(frame);
-   const ids=enabled && request?.view===view ? new Set(request.ids) : enabled ? measuredIds : new Set<string>();
+   const ids=request?.view===view ? new Set(request.ids) : enabled ? measuredIds : new Set<string>();
    const next=focusLayout(base,snapshot,ids);
    focusCount=ids.size;
    targetLayout=next;
@@ -86,7 +92,7 @@
   const sourceSignal = serviceSignal(datadog, r.source, now, datadogError);
   const targetSignal = serviceSignal(datadog, r.target, now, datadogError);
   const demoSignal = demoSignals[r.id];
-  const measuredSignal = pathSignal(datadog, r.source, r.target, signalView, now, datadogError);
+  const measuredSignal = pathSignal(datadog, r.source, r.target, signalView === 'overview' && selected === r.id ? 'hot' : signalView, now, datadogError);
   const emphasized = Object.keys(demoSignals).length ? signalView === 'overview' || (demoSignal && demoMatch(demoSignal)) : rankedView() ? pathEmphasized(measuredSignal) : emphasizes(signalView, sourceSignal) || emphasizes(signalView, targetSignal);
   const observed = !datadogError && datadog && ['connected','partial'].includes(datadog.status) && now - Date.parse(datadog.observedAt) <= datadog.freshForMs && (r.observation ? r.observation === 'observed' : datadog.dependencies.some(d => d.source === r.source && d.target === r.target));
   return { id: e.id, source: r.source, target: r.target, type: 'routed', selected: selected === e.id, ariaLabel: `${r.label}, ${r.kind}, ${r.health}. Press Enter to inspect.`, data: { relationship: r, demoSignal, measuredSignal, demo: Object.keys(demoSignals).length > 0, points: e.points, observed: !!observed || !!measuredSignal, dimmed: selected ? !relevant.has(e.id) : !emphasized } };
@@ -95,7 +101,7 @@
 </script>
 <SvelteFlow {nodes} {edges} {nodeTypes} {edgeTypes} fitView minZoom={0.15} maxZoom={2} nodesDraggable={false} nodesConnectable={false} elementsSelectable deleteKey={null} onnodeclick={({ node }) => onselect(node.id)} onedgeclick={({ edge }) => onselect(edge.id)} onselectionchange={({ nodes: ns, edges: es }) => { const id = ns[0]?.id ?? es[0]?.id; if (id && id !== selected) onselect(id); }} onpaneclick={() => onselect(null)}>
  <Background />
- <GraphControls {selectedIds} {revision} targetLayout={targetLayout ?? layout} onFocusSelection={()=>manualFocus={view:signalView,ids:selectedIds}} onFullMesh={()=>manualFocus={view:signalView,ids:[]}} />
+ <GraphControls {selectedIds} {revision} targetLayout={targetLayout ?? layout} onFocusSelection={()=>manualFocus={view:signalView,ids:selectedIds,selection:selected,action:++focusAction}} onFullMesh={()=>manualFocus={view:signalView,ids:[],selection:null,action:++focusAction}} />
  <GraphLabels {edges} layout={drawn} {snapshot} {selected} {onselect} {moving} />
  {#if focusCount || moving}<div class="focus-context-caption" aria-live="polite">{moving ? 'Reflowing…' : `${focusCount} systems in focus · remaining mesh shown in miniature`}</div>{/if}
  <Controls showLock={false} />

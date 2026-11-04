@@ -1,6 +1,7 @@
 import { createDatadogReader } from './datadog';
 import { createEventStatsRuntime } from './event-stats-runtime';
 import { resolve } from 'node:path';
+import { stat } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv, type Plugin } from 'vite';
@@ -13,6 +14,8 @@ const loadCollector: Loader = async root => {
   const entry = pathToFileURL(
     resolve(root, 'packages/node/saga-stack-cli/dist/runtime/mesh-view.js')
   );
+  // Vite restarts in the same process; refresh a rebuilt native collector module.
+  entry.searchParams.set('build', String((await stat(entry)).mtimeMs));
   const module = await import(/* @vite-ignore */ entry.href);
   return module.createLocalMeshCollector;
 };
@@ -104,11 +107,24 @@ export function vishnuLocalPlugin(): Plugin {
   return {
     name: 'vishnu-synthetic-dev',
     apply: 'serve',
-    configureServer(server) {
+    async configureServer(server) {
       const env = { ...loadEnv(server.config.mode, server.config.envDir, ''), ...process.env };
+      let localPeerPorts: Record<string, string> = {};
+      if (env.VISHNU_MODE === 'synthetic') {
+        const root = env.VISHNU_SOA_ROOT ?? fileURLToPath(new URL('../../../../', import.meta.url));
+        const entry = pathToFileURL(resolve(root, 'packages/node/saga-stack-cli/dist/core/derive-instance.js'));
+        const { deriveInstance, slotExcludedServices } = await import(/* @vite-ignore */ entry.href);
+        const slot = Number(env.VISHNU_SLOT ?? '0');
+        const profile = deriveInstance({ slot });
+        const excluded = new Set(slotExcludedServices(slot));
+        localPeerPorts = Object.fromEntries(Object.entries(profile.portOverrides)
+          .filter(([service]) => !excluded.has(service))
+          .map(([service, port]) => [String(port), service]));
+      }
       const runtime = env.VISHNU_MODE === 'synthetic' ? createEventStatsRuntime(env) : undefined;
       if (runtime) void runtime.read().catch(() => console.warn('[vishnu-event-stats] startup unavailable; API access retries initialization'));
-      server.middlewares.use(localMeshMiddleware(env, loadCollector, runtime?.read));
+      server.middlewares.use(localMeshMiddleware(env, loadCollector, runtime?.read,
+        createDatadogReader(env, fetch, Date.now, localPeerPorts)));
       server.httpServer?.once('close', () => { void runtime?.close(); });
     },
   };

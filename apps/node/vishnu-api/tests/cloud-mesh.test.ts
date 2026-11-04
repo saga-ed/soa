@@ -107,4 +107,21 @@ describe('declared cloud connections', () => {
       mesh.relationships.filter(r => r.source === 'connectv3' && r.target === 'connectv3-api')
     ).toHaveLength(1);
   });
+  it('declares RabbitMQ participation for hosted MQ badges without inventing counts', async () => {
+    const mesh = cloudMesh(await empty());
+    const bus = Object.fromEntries(
+      mesh.systems.filter(s => s.eventBus).map(s => [s.id, s.eventBus])
+    );
+    expect(bus).toEqual({
+      'chat-api': { publishes: true, consumes: false },
+      'content-api': { publishes: true, consumes: false },
+      'iam-api': { publishes: true, consumes: false },
+      'insights-api': { publishes: true, consumes: false },
+      'programs-api': { publishes: true, consumes: true },
+      'scheduling-api': { publishes: true, consumes: true },
+      'sessions-api': { publishes: true, consumes: true },
+      'transcripts-api': { publishes: true, consumes: false },
+    });
+    expect(mesh.relationships.some(r => r.kind === 'event')).toBe(false);
+  });
 });

@@ -39,7 +39,7 @@
   if(measure)measure.font='600 12px "Montserrat Variable", sans-serif';
   const v=store.viewport;
   const obstacles=layout.nodes.map(n=>({x:n.x*v.zoom+v.x,y:n.y*v.zoom+v.y,width:n.width*v.zoom,height:n.height*v.zoom+(!n.context?20:0)}));
-  return placeLabels(items.map(item=>({id:item.id,priority:item.priority,compact:item.dimmed||moving,width:(measure?.measureText(item.text).width??item.text.length*8)+24+(item.kind==='fanout'?22:0),shortWidth:(measure?.measureText(item.protocol).width??item.protocol.length*8)+24+(item.kind==='fanout'?22:0),points:item.points.map(p=>({x:p.x*v.zoom+v.x,y:p.y*v.zoom+v.y}))})),[...obstacles,...reserved],{x:0,y:0,...bounds},v.zoom);
+  return placeLabels(items.map(item=>({id:item.id,priority:item.priority,compact:item.dimmed||moving||(!item.signal && selected !== item.id && v.zoom < 0.65),width:(measure?.measureText(item.text).width??item.text.length*8)+24+(item.kind==='fanout'?22:0),shortWidth:(measure?.measureText(item.protocol).width??item.protocol.length*8)+24+(item.kind==='fanout'?22:0),points:item.points.map(p=>({x:p.x*v.zoom+v.x,y:p.y*v.zoom+v.y}))})),[...obstacles,...reserved],{x:0,y:0,...bounds},v.zoom);
  });
  $effect(()=>{store.viewport; moving; hover=null; crowdedOpen=false;});
 </script>

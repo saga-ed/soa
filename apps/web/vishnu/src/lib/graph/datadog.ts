@@ -71,6 +71,9 @@ export function serviceSignal(
     monitors.some(m => m.actionable !== false && m.status === 'Warn') ||
     (p95Ms != null && p95Ms >= data!.thresholds.warningP95Ms);
   return {
+    observed: fresh && !!source,
+    unavailable: failed || !!data && !['connected', 'partial'].includes(data.status),
+    stale: !!source && !failed && !!data && ['connected', 'partial'].includes(data.status) && !fresh,
     rate,
     p95Ms,
     errorRate,

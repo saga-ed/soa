@@ -103,6 +103,32 @@ export const numberLabel = (value: number | null, rate = false) =>
 export interface HostedMqScope {
   environment: string;
   deployment: string;
+  /** d9: set only when this colour observes one patch-party sandbox (equals deployment). */
+  previewTag?: string;
+}
+/** Builds the hosted MQ scope from /config.json; a sandbox tag that disagrees is refused. */
+export function hostedMqScope(config: {
+  environment?: string;
+  mqDeployment?: string | null;
+  mqPreviewTag?: string;
+}): HostedMqScope | null {
+  if (!config.environment || !config.mqDeployment) return null;
+  if (config.mqPreviewTag === undefined)
+    return { environment: config.environment, deployment: config.mqDeployment };
+  return config.mqPreviewTag === config.mqDeployment
+    ? {
+        environment: config.environment,
+        deployment: config.mqDeployment,
+        previewTag: config.mqPreviewTag,
+      }
+    : null;
+}
+/** Status-line scope text; a sandbox is called out because the APM view stays environment-wide. */
+export function hostedMqLabel(hosted: HostedMqScope): string {
+  const scope = `${hosted.environment} / ${hosted.deployment}`;
+  return hosted.previewTag
+    ? `${scope} · patch-party sandbox; APM stays ${hosted.environment}-wide`
+    : scope;
 }
 /**
  * Stats are shown only when their scope is exactly the one this view describes:

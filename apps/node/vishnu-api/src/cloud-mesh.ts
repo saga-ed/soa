@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DatadogSnapshot } from '../../../web/vishnu/src/lib/graph/datadog';
 import type { MeshSnapshot, System, Relationship } from '../../../web/vishnu/src/lib/graph/types';
-import { apmServiceAliases, applicationLabels, declaredConnections } from './declared-topology.js';
+import { apmServiceAliases, applicationLabels, declaredConnections, declaredEventBus } from './declared-topology.js';
 
 /** Rename aliased APM services to their declared node id, so mesh edges and per-node signals agree. */
 export function canonicalApmServices(data: DatadogSnapshot): DatadogSnapshot {
@@ -84,6 +84,7 @@ export function cloudMesh(data: DatadogSnapshot): MeshSnapshot {
   relationships.sort((a, b) => a.id.localeCompare(b.id));
   const names = new Set([
     ...applicationLabels.keys(),
+    ...declaredEventBus.keys(),
     ...data.services.map(s => s.service),
     ...relationships.flatMap(r => [r.source, r.target]),
   ]);
@@ -107,6 +108,7 @@ export function cloudMesh(data: DatadogSnapshot): MeshSnapshot {
         'Source declarations describe supported wiring; APM supplies observations. Reachability and deployed client configuration are not probed.',
       errors: null,
       evidence: [],
+      ...(declaredEventBus.has(id) ? { eventBus: declaredEventBus.get(id) } : {}),
     }));
   return {
     topologyVersion: createHash('sha256')

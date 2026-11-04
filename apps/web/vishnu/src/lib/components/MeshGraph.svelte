@@ -1,4 +1,5 @@
 <script lang="ts">
+ import { nodeObservation } from '$lib/graph/node-observation';
  import { untrack, onDestroy } from 'svelte';
  import { focusLayout, layoutTween } from '$lib/graph/focus-layout';
  import GraphLabels from './GraphLabels.svelte';
@@ -11,7 +12,7 @@
  import SystemNode from './SystemNode.svelte';
  import ConnectionEdge from './ConnectionEdge.svelte';
  import GraphControls from './GraphControls.svelte';
- let { focusSignals = true, demoSignals = {}, datadog = null, datadogError = false, now = 0, signalView = 'overview', snapshot, layout, selected, onselect, mqViews = {}, onpreview }: { focusSignals?: boolean; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; signalView?: SignalView; mqViews?: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; snapshot: MeshSnapshot; layout: MeshLayout; selected: string | null; onselect: (id: string | null) => void } = $props();
+ let { fitRequest = 0, focusSignals = true, demoSignals = {}, datadog = null, datadogError = false, now = 0, signalView = 'overview', snapshot, layout, selected, onselect, mqViews = {}, onpreview }: { fitRequest?: number; focusSignals?: boolean; demoSignals?: Record<string, DemoSignal>; datadog?: DatadogSnapshot | null; datadogError?: boolean; now?: number; signalView?: SignalView; mqViews?: MqViews; onpreview: (id: string | null, rect?: DOMRect) => void; snapshot: MeshSnapshot; layout: MeshLayout; selected: string | null; onselect: (id: string | null) => void } = $props();
  let participants = $derived(busParticipants(snapshot));
  const demoMatch = (s: DemoSignal) => signalView === 'overview' || (signalView === 'attention' ? signalDegree(s) >= .7 : signalView === s.kind);
  let displayLayout = $state<MeshLayout|null>(null);
@@ -34,9 +35,9 @@
   return ids;
  };
  $effect(()=>{
-  const base=layout, view=signalView, enabled=focusSignals, request=manualFocus;
+  const base=layout, view=signalView, enabled=focusSignals, request=manualFocus, fit=fitRequest;
   untrack(()=>{
-   const focusRequest = JSON.stringify([view, enabled, request]);
+   const focusRequest = JSON.stringify([view, enabled, request, fit]);
    const refit = lastFocusRequest !== focusRequest;
    lastFocusRequest = focusRequest;
    cancelAnimationFrame(frame);
@@ -46,7 +47,8 @@
    targetLayout=next;
    const previous=displayLayout;
    if(!previous){displayLayout=next;return;}
-   // Background topology polls must not override the user's viewport.
+   // Background topology polls must not override the user's viewport; a
+   // relayout for a new canvas shape (fitRequest) does refit.
    if (refit) revision++;
    if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){displayLayout=next;moving=false;return;}
    const interpolate=layoutTween(previous,next);const start=performance.now();moving=true;
@@ -70,7 +72,7 @@
  let nodes: Node[] = $derived(drawn.nodes.filter(n=>snapshot.systems.some(s=>s.id===n.id)).map(n => {
   const system = snapshot.systems.find(s => s.id === n.id)!;
   const signal = serviceSignal(datadog, system.id, now, datadogError);
-  return { id: n.id, type: 'system', position: { x: n.x, y: n.y }, width: n.width, height: n.height, selected: selected === n.id, ariaLabel: `${system.label}, ${snapshot.mode === 'live' && system.health === 'healthy' ? 'reachable' : system.health}. Press Enter to inspect.`, data: { system, context: n.context, width:n.width, height:n.context ? n.height : system.kind === 'Shared broker' || system.id === 'infra:rabbitmq' ? 112 : n.height, signal, participants, onselect, mqViews, onpreview, live: snapshot.mode === 'live', dimmed: selected ? !relevant.has(n.id) : !(Object.keys(demoSignals).length ? snapshot.relationships.some(r => (r.source === n.id || r.target === n.id) && demoSignals[r.id] && demoMatch(demoSignals[r.id])) || signalView === 'overview' : emphasizes(signalView, signal)) } };
+  return { id: n.id, type: 'system', position: { x: n.x, y: n.y }, width: n.width, height: n.height, selected: selected === n.id, ariaLabel: `${system.label}, ${nodeObservation(system, signal, mqViews[system.id], snapshot.mode === 'live').label}. Press Enter to inspect.`, data: { system, context: n.context, width:n.width, height:n.context ? n.height : system.kind === 'Shared broker' || system.id === 'infra:rabbitmq' ? 112 : n.height, signal, participants, onselect, mqViews, onpreview, live: snapshot.mode === 'live', dimmed: selected ? !relevant.has(n.id) : !(Object.keys(demoSignals).length ? snapshot.relationships.some(r => (r.source === n.id || r.target === n.id) && demoSignals[r.id] && demoMatch(demoSignals[r.id])) || signalView === 'overview' : emphasizes(signalView, signal)) } };
  }));
  let edges: Edge[] = $derived(drawn.edges.filter(e => snapshot.relationships.some(r => r.id === e.id && r.kind !== 'event')).map(e => {
   const r = snapshot.relationships.find(r => r.id === e.id)!;

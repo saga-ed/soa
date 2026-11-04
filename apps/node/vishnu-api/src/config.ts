@@ -1,3 +1,4 @@
+import { mqPreviewTag } from './telemetry/event-stats-store.js';
 export type Env = Record<string, string | undefined>;
 export interface Config {
   environment: 'dev' | 'prod';
@@ -9,6 +10,8 @@ export interface Config {
   mqEnabled: boolean;
   /** Exact MQ telemetry deployment; null while MQ is off (d3). */
   mqDeployment: string | null;
+  /** d9: the one patch-party sandbox this colour observes; null for the untagged dev mesh. */
+  mqPreviewTag: string | null;
   datadogScope: 'environment' | 'deployment';
   deployment: string;
   deploymentTag: string;
@@ -41,6 +44,7 @@ export function loadConfig(env: Env): Config {
   // d3: environment-wide Datadog may pair with its own exact MQ scope; a
   // deployment-scoped Datadog view must still describe the same population.
   let mqDeployment: string | null = null;
+  let previewTag: string | null = null;
   if (mqEnabled) {
     if (env.EVENT_STATS_ENVIRONMENT !== environment)
       throw new Error('MQ and Datadog must use the same environment');
@@ -48,8 +52,13 @@ export function loadConfig(env: Env): Config {
     if (!/^[a-zA-Z0-9_.-]+$/.test(mqDeployment)) throw new Error('Explicit MQ deployment scope required');
     if (datadogScope === 'deployment' && mqDeployment !== deployment)
       throw new Error('MQ and deployment-scoped Datadog must use the same deployment');
+    // d9: a sandbox observer keeps the exact scope; its deployment IS the sandbox tag.
+    previewTag = mqPreviewTag(env.VISHNU_MQ_PREVIEW_TAG, mqDeployment) ?? null;
+    if (previewTag && environment !== 'dev') throw new Error('Sandbox observation is dev-only');
+  } else if (env.VISHNU_MQ_PREVIEW_TAG) {
+    throw new Error('VISHNU_MQ_PREVIEW_TAG requires VISHNU_MQ_ENABLED=true');
   }
   return { environment, origin, gateUrl, jwksUrl: `${gateUrl}/.well-known/jwks.json`, port,
     permissions: ['iam-admin', 'staff:super_admin', 'staff:support', 'staff:org_admin'],
-    mqEnabled, mqDeployment, datadogScope, deployment, deploymentTag };
+    mqEnabled, mqDeployment, mqPreviewTag: previewTag, datadogScope, deployment, deploymentTag };
 }

@@ -1,0 +1,29 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Task role for the Vishnu blue colour's Bedrock assistant; green keeps the shared task role.
+Parameters:
+  Environment: {Type: String, Default: dev, AllowedValues: [dev]}
+Resources:
+  BlueTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${Environment}-soa-vishnu-api-blue-task-role'
+      PermissionsBoundary: !Sub 'arn:aws:iam::${AWS::AccountId}:policy/SagaProdMax'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Allow, Principal: {Service: ecs-tasks.amazonaws.com}, Action: 'sts:AssumeRole'}]
+      Policies:
+        - PolicyName: vishnu-assistant-model
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: VishnuAssistantModel
+                Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource:
+                  - arn:aws:bedrock:us-west-2:396913734878:inference-profile/us.anthropic.claude-sonnet-5-5
+                  - arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-5-5
+                  - arn:aws:bedrock:us-east-2::foundation-model/anthropic.claude-sonnet-5-5
+                  - arn:aws:bedrock:us-west-2::foundation-model/anthropic.claude-sonnet-5-5
+  BlueTaskRoleArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties: {Name: !Sub '/soa/vishnu-api/infra/${Environment}/blue/task-role-arn', Type: String, Value: !GetAtt BlueTaskRole.Arn}

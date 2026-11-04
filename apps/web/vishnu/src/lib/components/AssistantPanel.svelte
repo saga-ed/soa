@@ -1,5 +1,6 @@
 <script lang="ts">
  import { onMount, onDestroy } from 'svelte';
+ import AssistantText from './AssistantText.svelte';
  import type { AssistantEvent, ViewAction } from '$lib/graph/assistant';
  let { contextKey, onaction, onrestore, canRestore }: { contextKey: string; onaction: (action: ViewAction, context: string) => boolean; onrestore: () => void; canRestore: boolean } = $props();
  let enabled = $state(false), model = $state(''), status = $state('Connecting…');
@@ -47,7 +48,7 @@
 <section class="assistant-panel" aria-label="Vishnu assistant">
  <div class="assistant-heading"><div><h2>Ask Vishnu</h2><small>Investigate the mesh · Amazon Bedrock</small></div><div><button disabled={!canRestore} onclick={onrestore}>Restore previous view</button><button disabled={busy} onclick={() => { messages = []; conversationId = undefined; evidence = []; error = ''; pending = []; }}>New conversation</button></div></div>
  <div class="assistant-suggestions"><button disabled={!enabled || busy} onclick={() => send('Show the slowest observed calls and explain the available evidence.')}>Find slow calls</button><button disabled={!enabled || busy} onclick={() => send('Show the highest fan-out calls. Distinguish sampled evidence from total traffic.')}>Find high fan-out</button><button disabled={!enabled || busy} onclick={() => send('Show systems with the highest CPU or memory pressure and explain any missing telemetry.')}>Check resources</button></div>
- {#if messages.length}<div class="assistant-messages" aria-live="polite">{#each messages as message}<article><strong>{message.role}</strong><p>{message.text || 'Investigating…'}</p></article>{/each}</div>{/if}
+ {#if messages.length}<div class="assistant-messages" aria-live="polite">{#each messages as message}<article><strong>{message.role}</strong><p>{#if message.role === 'Vishnu'}<AssistantText text={message.text || 'Investigating…'}/>{:else}{message.text}{/if}</p></article>{/each}</div>{/if}
  {#if evidence.length}<details class="assistant-evidence"><summary>Supporting evidence ({evidence.length})</summary>{#each evidence as item}<p><strong>{item.label.replaceAll('_',' ')}</strong> · {item.detail}</p>{/each}</details>{/if}
  {#if pending.length}<div role="status">Your view changed during the investigation. <button onclick={() => { for (const action of pending) onaction(action, contextKey); pending = []; }}>Apply suggested view</button></div>{/if}
  {#if error}<p role="alert">{error}</p>{/if}

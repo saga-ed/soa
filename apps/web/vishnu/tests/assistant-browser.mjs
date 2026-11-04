@@ -119,7 +119,7 @@ try {
           contextKey: request.contextKey,
           action: { type: 'show_calls', view: 'slow', system: 'iam-api', direction: 'to' },
         },
-        { type: 'text', text: 'Measured sample p95 is 900 ms.' },
+        { type: 'text', text: 'Measured sample p95 is 900 ms.\n**saga_dash → `POST /auth/refresh`**\n`<img src=x onerror=alert(1)>`\n<img src=x onerror=alert(1)>' },
         {
           type: 'done',
           model: 'test-double',
@@ -131,15 +131,29 @@ try {
     });
   });
   await page.goto(process.env.VISHNU_TEST_URL ?? 'http://127.0.0.1:11930');
+  const fillsViewport = async () => {
+    await page.waitForFunction(() => {
+      const canvas = document.querySelector('.graph-canvas')?.getBoundingClientRect();
+      return canvas && canvas.height > innerHeight * 0.6 && canvas.bottom > innerHeight - 100;
+    });
+  };
+  await page.setViewportSize({ width: 1708, height: 1209 });
+  await fillsViewport();
   await page.getByRole('button', { name: 'Ask Vishnu', exact: true }).click();
+  await fillsViewport();
   await page.getByRole('button', { name: 'Find slow calls' }).click();
-  await page.getByText('Measured sample p95 is 900 ms.', { exact: true }).waitFor();
+  await page.getByText('Measured sample p95 is 900 ms.', { exact: false }).waitFor();
+  const answer = page.locator('.assistant-messages article').last();
+  assert.equal(await answer.locator('strong code').innerText(), 'POST /auth/refresh');
+  assert.equal(await answer.locator('img,script,a').count(), 0, 'Assistant content must remain escaped text');
+  assert.ok((await answer.innerText()).includes('<img src=x onerror=alert(1)>'));
   assert.equal(await page.getByLabel('Signal view').inputValue(), 'slow');
   assert.equal(await page.getByLabel('Filter by system', { exact: true }).inputValue(), 'iam-api');
   assert.equal(await page.getByLabel('Call direction').inputValue(), 'to');
   await page.getByRole('button', { name: 'Restore previous view' }).click();
   assert.equal(await page.getByLabel('Signal view').inputValue(), 'overview');
   assert.equal(await page.locator('#selection-inspector').count(), 0);
+  await fillsViewport();
   delayed = true;
   await page.getByRole('button', { name: 'Find slow calls' }).click();
   await page.getByRole('button', { name: 'Stop', exact: true }).waitFor();

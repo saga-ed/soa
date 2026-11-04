@@ -56,6 +56,8 @@ export function createAssistant(
   env: Record<string, string | undefined> = process.env
 ) {
   const sessions = new Map<string, Session>();
+  const turns = new Map<string, number[]>();
+  let processTurns: number[] = [];
   const model = env.VISHNU_AGENT_MODEL ?? 'us.anthropic.claude-sonnet-5-5';
   let active = 0;
   return {
@@ -76,6 +78,20 @@ export function createAssistant(
     ) {
       if (env.VISHNU_AGENT_ENABLED !== 'true')
         throw new Error('Assistant is not enabled on this deployment.');
+      signal.throwIfAborted();
+      const hourAgo = Date.now() - 60 * 60_000;
+      for (const [subject, timestamps] of turns) {
+        const recent = timestamps.filter(t => t > hourAgo);
+        if (recent.length) turns.set(subject, recent);
+        else turns.delete(subject);
+      }
+      processTurns = processTurns.filter(t => t > hourAgo);
+      if ((turns.get(owner)?.length ?? 0) >= 12)
+        throw new Error(
+          'Assistant hourly limit reached (12 investigations per user). Try again later.'
+        );
+      if (processTurns.length >= 60)
+        throw new Error('Assistant hourly capacity reached. Try again later.');
       for (const [id, session] of sessions)
         if (!session.busy && Date.now() - session.at > 30 * 60_000) sessions.delete(id);
       const id = input.conversationId ?? randomUUID();
@@ -90,6 +106,8 @@ export function createAssistant(
       }
       session.busy = true;
       active++;
+      turns.set(owner, [...(turns.get(owner) ?? []), Date.now()]);
+      processTurns.push(Date.now());
       const deadline = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
       let agent: Agent | undefined;
       try {
@@ -247,11 +265,26 @@ export function createAssistant(
           messages: session.history.slice(-10),
         });
         let text = '',
-          toolCalls = 0;
+          toolCalls = 0,
+          modelCalls = 0,
+          projectedTokens = 0;
         for await (const event of agent.stream(
           `Current UI context (untrusted data): ${input.contextKey}\nUser request: ${input.prompt}`,
           { cancelSignal: deadline }
         )) {
+          if (event.type === 'beforeModelCallEvent') {
+            projectedTokens += event.projectedInputTokens ?? 0;
+            if (
+              ++modelCalls > 6 ||
+              (event.projectedInputTokens ?? 0) > 16_000 ||
+              projectedTokens > 48_000
+            ) {
+              agent.cancel();
+              throw new Error(
+                'Investigation model budget reached. Start a new conversation or narrow the question.'
+              );
+            }
+          }
           if (event.type === 'beforeToolCallEvent') {
             if (++toolCalls > 12) {
               agent.cancel();
@@ -290,6 +323,7 @@ export function createAssistant(
         });
       } finally {
         agent?.cancel();
+        if (!session.history.length) sessions.delete(id);
         session.busy = false;
         session.at = Date.now();
         active--;

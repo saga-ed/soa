@@ -89,7 +89,14 @@ Configuration:
 
 The runtime allows two simultaneous investigations and 50 conversations, with a
 90-second deadline, 12 tool calls and bounded prompt/output/history sizes.
-Cancellation propagates to Strands. Model usage is returned as token counts.
+Each staff subject can start 12 investigations per rolling hour; each API
+process permits 60 per rolling hour. Each turn permits six model invocations,
+with an estimated 16,000-input-token ceiling per call and 48,000 across the
+turn, checked before calls using Strands' token estimate. These are operational
+limits, not an account-wide monetary cap: counters are in memory and reset on
+restart, and multiple replicas each have their own process limit. The output
+limit is 1,800 tokens per model invocation. Cancellation propagates to Strands.
+Model usage is returned as token counts.
 A user changing the view during a response gets an explicit Apply action;
 otherwise the requested filters apply immediately. Restore recovers the view
 from before the investigation. Failed or unavailable measurements stay unknown.

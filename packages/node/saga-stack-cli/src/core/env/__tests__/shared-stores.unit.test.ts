@@ -9,6 +9,9 @@ import {
   mongoUrlTemplate,
   parseMongoHosts,
   pickMongoMember,
+  pickRabbitmqPort,
+  rabbitmqAmqpsCheckHint,
+  rabbitmqAmqpsUrlTemplate,
   rabbitmqCurlHint,
   rabbitmqHost,
   rabbitmqParamsFor,
@@ -75,6 +78,19 @@ describe('connection hints', () => {
     const curl = rabbitmqCurlHint(host, 15443);
     expect(curl).toContain(`--connect-to ${host}:443:127.0.0.1:15443`);
     expect(curl).toContain('${MQ_PW}');
+  });
+  it('rabbitmq remote port: 443 by default, 5671 on request, anything else refused', () => {
+    expect(pickRabbitmqPort(undefined)).toBe(443);
+    expect(pickRabbitmqPort(443)).toBe(443);
+    expect(pickRabbitmqPort(5671)).toBe(5671);
+    expect(() => pickRabbitmqPort(5672)).toThrow(/--remote-port 5672 is not a broker port/);
+  });
+  it('AMQPS hints carry a placeholder and the broker SNI, never a password', () => {
+    expect(rabbitmqAmqpsUrlTemplate(15671)).toBe('amqps://saga_ro:${MQ_PW}@127.0.0.1:15671/');
+    const check = rabbitmqAmqpsCheckHint('b-1234.mq.us-west-2.on.aws', 15671);
+    expect(check).toContain('port=15671');
+    expect(check).toContain('server_hostname="b-1234.mq.us-west-2.on.aws"');
+    expect(check).toContain('os.environ["MQ_PW"]');
   });
 });
 

@@ -91,8 +91,23 @@ export const MONGO_PROD_QUERY_HYGIENE = 'prod query hygiene: use indexed filters
 
 export const rabbitmqHost = (brokerId: string, region: string): string => `${brokerId}.mq.${region}.on.aws`;
 
+/** Management API (HTTPS); the default `--remote-port`. */
 export const RABBITMQ_PORT = 443;
+export const RABBITMQ_AMQPS_PORT = 5671;
+export const RABBITMQ_REMOTE_PORTS = [RABBITMQ_PORT, RABBITMQ_AMQPS_PORT] as const;
+export const RABBITMQ_AMQPS_LOCAL_PORT = 15671;
 export const RABBITMQ_RO_USER = 'saga_ro';
+
+/** Remote port for the broker tunnel: 443 unless asked; anything but 443/5671 is an error, never ignored. */
+export const pickRabbitmqPort = (requested: number | undefined): number => {
+  if (requested === undefined) return RABBITMQ_PORT;
+  if (!(RABBITMQ_REMOTE_PORTS as readonly number[]).includes(requested)) {
+    throw new Error(
+      `--remote-port ${requested} is not a broker port — use ${RABBITMQ_PORT} (management API) or ${RABBITMQ_AMQPS_PORT} (AMQPS).`,
+    );
+  }
+  return requested;
+};
 
 /** Shell snippet that sets `MQ_PW` from the ro secret at run time. */
 export const rabbitmqPasswordHint = (secretId: string, region: string, profile?: string): string =>
@@ -101,3 +116,11 @@ export const rabbitmqPasswordHint = (secretId: string, region: string, profile?:
 /** Management API call through the tunnel; --connect-to keeps TLS hostname verification valid. */
 export const rabbitmqCurlHint = (host: string, localPort: number): string =>
   `curl --connect-to ${host}:${RABBITMQ_PORT}:127.0.0.1:${localPort} -u "${RABBITMQ_RO_USER}:\${MQ_PW}" https://${host}/api/overview`;
+
+/** AMQPS URL through the tunnel, `${MQ_PW}` placeholder only. The client must send SNI = broker host. */
+export const rabbitmqAmqpsUrlTemplate = (localPort: number): string =>
+  `amqps://${RABBITMQ_RO_USER}:\${MQ_PW}@127.0.0.1:${localPort}/`;
+
+/** AMQPS smoke check: pika over the tunnel with TLS SNI + hostname verification against the broker cert. */
+export const rabbitmqAmqpsCheckHint = (host: string, localPort: number): string =>
+  `MQ_PW="$MQ_PW" python3 -c 'import os,ssl,pika;p=pika.ConnectionParameters(host="127.0.0.1",port=${localPort},credentials=pika.PlainCredentials("${RABBITMQ_RO_USER}",os.environ["MQ_PW"]),ssl_options=pika.SSLOptions(ssl.create_default_context(),server_hostname="${host}"));c=pika.BlockingConnection(p);print("AMQPS ok");c.close()'`;

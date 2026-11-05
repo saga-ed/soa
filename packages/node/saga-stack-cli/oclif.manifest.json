@@ -1190,7 +1190,8 @@
         "<%= config.bin %> <%= command.id %> iam --env prod --jump-host prod-db-jump-host",
         "<%= config.bin %> <%= command.id %> mongo --env prod --print-only",
         "<%= config.bin %> <%= command.id %> mongo --env prod --member 1",
-        "<%= config.bin %> <%= command.id %> rabbitmq --env dev"
+        "<%= config.bin %> <%= command.id %> rabbitmq --env dev",
+        "<%= config.bin %> <%= command.id %> rabbitmq --env prod --remote-port 5671 --print-only"
       ],
       "flags": {
         "coach": {
@@ -1252,7 +1253,7 @@
           "type": "option"
         },
         "local-port": {
-          "description": "local end of the tunnel (default: postgres 15432, mongo 27018, rabbitmq 15443)",
+          "description": "local end of the tunnel (default: postgres 15432, mongo 27018, rabbitmq 15443, rabbitmq AMQPS 15671)",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "local-port",
@@ -1306,8 +1307,7 @@
           "type": "option"
         },
         "remote-port": {
-          "default": 5432,
-          "description": "remote DB port (with --host)",
+          "description": "remote port: postgres with --host (default 5432); rabbitmq 443 (management API, default) | 5671 (AMQPS); not for mongo.",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "remote-port",

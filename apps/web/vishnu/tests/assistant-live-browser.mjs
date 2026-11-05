@@ -21,7 +21,7 @@ page.on('pageerror', e => errors.push(e.message));
 page.setDefaultTimeout(100_000);
 const ask = async prompt => {
   await page.getByLabel('What would you like to investigate?').fill(prompt);
-  await page.getByRole('button', { name: 'Investigate', exact: true }).click();
+  await page.getByLabel('What would you like to investigate?').press('Enter');
   await page.getByRole('button', { name: 'Stop', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Stop', exact: true }).waitFor({ state: 'hidden' });
   assert.equal(

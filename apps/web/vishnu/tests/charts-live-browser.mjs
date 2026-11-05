@@ -8,7 +8,7 @@ const page=await context.newPage();page.setDefaultTimeout(110000);const errors=[
 try{
  await page.goto(base);await page.getByRole('button',{name:'Ask Vishnu',exact:true}).click();
  await page.getByLabel('What would you like to investigate?').fill('Create three charts for iam-api: a line graph of average and maximum latency for the last week; a histogram of retained request durations for the last week; and a CPU versus memory scatter plot for the last 30 minutes. Display all three even if a data source is empty. Summarize actual availability in under 70 words.');
- await page.getByRole('button',{name:'Investigate',exact:true}).click();await page.getByRole('button',{name:'Stop',exact:true}).waitFor();await page.getByRole('button',{name:'Stop',exact:true}).waitFor({state:'hidden'});
+ await page.getByLabel('What would you like to investigate?').press('Enter');await page.getByRole('button',{name:'Stop',exact:true}).waitFor();await page.getByRole('button',{name:'Stop',exact:true}).waitFor({state:'hidden'});
  const message=await page.locator('.assistant-panel').innerText();
  assert.equal(await page.locator('.assistant-panel [role="alert"]').count(),0,message);
  assert.equal(await page.locator('.chart-card').count(),3,message);

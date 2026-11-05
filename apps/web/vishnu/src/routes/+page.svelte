@@ -270,10 +270,10 @@
  .workspace.mesh-minimized { flex: none; height: 180px; min-height: 180px; overflow: hidden; }
  .workspace.mesh-minimized :global(.graph-canvas) { min-height: 100px; }
  .investigation-surface { display: flex; flex-direction: column; min-height: 0; }
- .assistant-rail { max-height: calc(100vh - 190px); overflow: auto; }
+ .assistant-rail { position: sticky; top: 0; align-self: start; height: max(340px, calc(100dvh - 220px)); min-height: 0; }
  @media (max-width: 1200px) {
   .assisted-workspace.with-assistant { grid-template-columns: minmax(0, 1fr); }
   .assisted-workspace.with-assistant { grid-template-rows: auto minmax(440px, 1fr); }
-  .assistant-rail { max-height: none; }
+  .assistant-rail { position: static; height: clamp(340px, 65dvh, 600px); }
  }
 </style>

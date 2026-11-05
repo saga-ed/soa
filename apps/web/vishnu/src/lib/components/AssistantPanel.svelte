@@ -13,6 +13,16 @@
  let request: AbortController | undefined;
  onMount(() => { void fetch('/api/assistant/status').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(s => { enabled = s.enabled; model = s.model; status = s.message; }).catch(() => { status = 'Assistant unavailable on this deployment.'; }); });
  onDestroy(() => request?.abort());
+ function promptKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (event.altKey) {
+   const input = event.currentTarget as HTMLTextAreaElement;
+   if (input.value.length - (input.selectionEnd - input.selectionStart) >= input.maxLength) return;
+   input.setRangeText('\n', input.selectionStart, input.selectionEnd, 'end');
+   prompt = input.value;
+  } else if (!event.repeat) void send();
+ }
  async function send(text = prompt) {
   if (busy || !enabled || !text.trim()) return;
   const key = contextKey;
@@ -47,30 +57,36 @@
 </script>
 <section class="assistant-panel" aria-label="Vishnu assistant">
  <div class="assistant-heading"><div><h2>Ask Vishnu</h2><small>Investigate the mesh · Amazon Bedrock</small></div><div><button disabled={!canRestore} onclick={onrestore}>Restore previous view</button><button disabled={busy} onclick={() => { messages = []; conversationId = undefined; evidence = []; error = ''; pending = []; }}>New conversation</button></div></div>
+ <div class="assistant-history">
  <div class="assistant-suggestions"><button disabled={!enabled || busy} onclick={() => send('Show the slowest observed calls and explain the available evidence.')}>Find slow calls</button><button disabled={!enabled || busy} onclick={() => send('Show the highest fan-out calls. Distinguish sampled evidence from total traffic.')}>Find high fan-out</button><button disabled={!enabled || busy} onclick={() => send('Show systems with the highest CPU or memory pressure and explain any missing telemetry.')}>Check resources</button></div>
  {#if messages.length}<div class="assistant-messages" aria-live="polite">{#each messages as message}<article><strong>{message.role}</strong><p>{#if message.role === 'Vishnu'}<AssistantText text={message.text || 'Investigating…'}/>{:else}{message.text}{/if}</p></article>{/each}</div>{/if}
  {#if evidence.length}<details class="assistant-evidence"><summary>Supporting evidence ({evidence.length})</summary>{#each evidence as item}<p><strong>{item.label.replaceAll('_',' ')}</strong> · {item.detail}</p>{/each}</details>{/if}
  {#if pending.length}<div role="status">Your view changed during the investigation. <button onclick={() => { for (const action of pending) onaction(action, contextKey); pending = []; }}>Apply suggested view</button></div>{/if}
  {#if error}<p role="alert">{error}</p>{/if}
  {#if viewNotice}<p role="status">{viewNotice}</p>{/if}
- <form onsubmit={event => { event.preventDefault(); void send(); }}><label for="assistant-prompt">What would you like to investigate?</label><div class="assistant-input"><textarea id="assistant-prompt" bind:value={prompt} maxlength={4000} rows="2" placeholder="Show slow calls into IAM and check resource pressure…" disabled={!enabled}></textarea>{#if busy}<button type="button" onclick={() => request?.abort()}>Stop</button>{:else}<button type="submit" disabled={!enabled || !prompt.trim()}>Investigate</button>{/if}</div></form>
+ </div>
+ <div class="assistant-composer">
+ <form onsubmit={event => { event.preventDefault(); void send(); }}><label for="assistant-prompt">What would you like to investigate?</label><div class="assistant-input"><textarea id="assistant-prompt" bind:value={prompt} onkeydown={promptKeydown} aria-describedby="assistant-keyboard-help" aria-keyshortcuts="Enter Alt+Enter" maxlength={4000} rows="2" placeholder="Show slow calls into IAM and check resource pressure…" disabled={!enabled}></textarea>{#if busy}<button type="button" onclick={() => request?.abort()}>Stop</button>{/if}</div><small id="assistant-keyboard-help">Enter to investigate · Alt+Enter for a new line</small></form>
  <small role="status">{status}{#if enabled} · {model}{/if}</small>
  {#if usage}<small>{usage.toolCalls} tool calls · {usage.inputTokens.toLocaleString()} input / {usage.outputTokens.toLocaleString()} output tokens</small>{/if}
+ </div>
 </section>
 <style>
- .assistant-panel { padding: 16px; margin: 0; font-size:var(--vishnu-ui-font-size); line-height: 1.5; border: 1px solid var(--color-border, #bac6d0); border-radius: 12px; background: var(--color-bg-surface, white); }
- .assistant-heading { display: flex; flex-direction: column; gap: 12px; }
+ .assistant-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; box-sizing: border-box; overflow: hidden; padding: 16px; margin: 0; font-size:var(--vishnu-ui-font-size); line-height: 1.5; border: 1px solid var(--color-border, #bac6d0); border-radius: 12px; background: var(--color-bg-surface, white); }
+ .assistant-history { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding-right: 4px; }
+ .assistant-composer { flex: none; border-top: 1px solid var(--color-border, #bac6d0); padding-top: 4px; }
+ .assistant-heading { flex: none; display: flex; flex-direction: column; gap: 12px; }
  .assistant-heading>div:last-child, .assistant-input { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
  h2 { margin: 0; font-size:var(--vishnu-ui-font-size); line-height: 1.5; font-weight: 600; }
  p, label, button, textarea, small, summary { font-family: inherit; font-size: inherit; line-height: inherit; }
  .assistant-suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 16px 0; }
  .assistant-suggestions button { padding: 8px 6px; }
- .assistant-messages { max-height: 45vh; overflow: auto; overflow-wrap: anywhere; }
+ .assistant-messages { overflow-wrap: anywhere; }
  article { padding: 12px 0; border-bottom: 1px solid var(--color-border, #bac6d0); }
  article:first-child { padding-top: 0; }
  article p { white-space: pre-wrap; margin: 6px 0 0; }
  .assistant-input { align-items: stretch; }
- .assistant-input textarea { flex: 1; min-width: 0; width: 100%; min-height: 72px; padding: 10px; resize: vertical; }
+ .assistant-input textarea { flex: 1; min-width: 0; width: 100%; height: 72px; min-height: 56px; max-height: 120px; box-sizing: border-box; padding: 10px; resize: vertical; }
  form label { display: block; margin: 16px 0 8px; font-weight: 600; }
  .assistant-evidence { margin: 12px 0; overflow-wrap: anywhere; }
  .assistant-evidence p { margin: 8px 0; }

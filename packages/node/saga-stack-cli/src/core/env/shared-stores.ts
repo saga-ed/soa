@@ -12,11 +12,15 @@ export type SharedStoreKey = (typeof SHARED_STORE_KEYS)[number];
 
 export const isSharedStore = (key: string): key is SharedStoreKey => (SHARED_STORE_KEYS as readonly string[]).includes(key);
 
-export const DEFAULT_LOCAL_PORTS: Record<'postgres' | SharedStoreKey, number> = {
+export const DEFAULT_LOCAL_PORTS: Record<'postgres' | SharedStoreKey | 'rabbitmqAmqps', number> = {
   postgres: 15432,
   mongo: 27018,
   rabbitmq: 15443,
+  rabbitmqAmqps: 15671,
 };
+
+/** Remote port for `--host` when `--remote-port` is not given. */
+export const POSTGRES_REMOTE_PORT = 5432;
 
 export const defaultLocalPort = (store: string): number =>
   isSharedStore(store) ? DEFAULT_LOCAL_PORTS[store] : DEFAULT_LOCAL_PORTS.postgres;
@@ -95,7 +99,6 @@ export const rabbitmqHost = (brokerId: string, region: string): string => `${bro
 export const RABBITMQ_PORT = 443;
 export const RABBITMQ_AMQPS_PORT = 5671;
 export const RABBITMQ_REMOTE_PORTS = [RABBITMQ_PORT, RABBITMQ_AMQPS_PORT] as const;
-export const RABBITMQ_AMQPS_LOCAL_PORT = 15671;
 export const RABBITMQ_RO_USER = 'saga_ro';
 
 /** Remote port for the broker tunnel: 443 unless asked; anything but 443/5671 is an error, never ignored. */
@@ -107,6 +110,35 @@ export const pickRabbitmqPort = (requested: number | undefined): number => {
     );
   }
   return requested;
+};
+
+/**
+ * Flag/store mismatches, checked before any AWS call. Shared stores resolve their
+ * target and login from the registry, so target-override flags are refused, not ignored.
+ */
+export const connectFlagError = (
+  store: string,
+  f: { host?: string; username?: string; database?: string; remotePort?: number },
+): string | undefined => {
+  if (!isSharedStore(store)) {
+    return f.remotePort !== undefined && f.host === undefined
+      ? '--remote-port needs --host for a postgres store — the resolved target carries its own port.'
+      : undefined;
+  }
+  const bad = (['host', 'username', 'database'] as const).filter((k) => f[k] !== undefined).map((k) => `--${k}`);
+  if (store === 'mongo' && f.remotePort !== undefined) bad.push('--remote-port');
+  if (bad.length > 0) {
+    const why = store === 'mongo' ? ' (pick the member, and so the port, with --member)' : '';
+    return `${bad.join(', ')} ${bad.length === 1 ? 'does' : 'do'} not apply to ${store} — its target and read-only login come from the env registry${why}.`;
+  }
+  if (store === 'rabbitmq') {
+    try {
+      pickRabbitmqPort(f.remotePort);
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }
+  return undefined;
 };
 
 /** Shell snippet that sets `MQ_PW` from the ro secret at run time. */

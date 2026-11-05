@@ -671,11 +671,17 @@ describe('env connect — shared infra --remote-port', () => {
   it('rabbitmq defaults to the management API on 443', async () => {
     await EnvConnect.run(['rabbitmq', '--env', 'prod', '--print-only', '--output-json'], config);
     expect(jsonOut()).toMatchObject({ host: BROKER, port: 443 });
+    expect(jsonOut()).not.toHaveProperty('tlsServerName');
   });
 
   it('rabbitmq --remote-port 5671 tunnels AMQPS, with AMQPS next steps', async () => {
     await EnvConnect.run(['rabbitmq', '--env', 'prod', '--print-only', '--output-json', '--remote-port', '5671'], config);
-    expect(jsonOut()).toMatchObject({ host: BROKER, port: 5671, urlTemplate: 'amqps://saga_ro:${MQ_PW}@127.0.0.1:15671/' });
+    expect(jsonOut()).toMatchObject({
+      host: BROKER,
+      port: 5671,
+      urlTemplate: 'amqps://saga_ro:${MQ_PW}@127.0.0.1:15671/',
+      tlsServerName: BROKER,
+    });
 
     out = [];
     await EnvConnect.run(['rabbitmq', '--env', 'prod', '--remote-port', '5671'], config);
@@ -701,6 +707,19 @@ describe('env connect — shared infra --remote-port', () => {
     await expect(EnvConnect.run(['iam', '--env', 'prod', '--print-only', '--remote-port', '6543'], config)).rejects.toThrow(
       /--remote-port needs --host/,
     );
+  });
+
+  it('rabbitmq refuses --host instead of tunnelling to the registry broker', async () => {
+    await expect(
+      EnvConnect.run(['rabbitmq', '--env', 'prod', '--host', 'b-other.mq.us-west-2.on.aws', '--remote-port', '5671'], config),
+    ).rejects.toThrow(/--host does not apply to rabbitmq/);
+    expect(portForwards).toHaveLength(0);
+  });
+
+  it('flag errors fire before any AWS call (no sts, no PRODUCTION banner)', async () => {
+    await expect(EnvConnect.run(['mongo', '--env', 'prod', '--remote-port', '27017'], config)).rejects.toThrow(/does not apply to mongo/);
+    expect(awsCalls).toHaveLength(0);
+    expect(text()).not.toContain('PRODUCTION');
   });
 });
 

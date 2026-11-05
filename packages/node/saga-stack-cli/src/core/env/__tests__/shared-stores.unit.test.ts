@@ -9,6 +9,7 @@ import {
   mongoUrlTemplate,
   parseMongoHosts,
   pickMongoMember,
+  connectFlagError,
   pickRabbitmqPort,
   rabbitmqAmqpsCheckHint,
   rabbitmqAmqpsUrlTemplate,
@@ -84,6 +85,14 @@ describe('connection hints', () => {
     expect(pickRabbitmqPort(443)).toBe(443);
     expect(pickRabbitmqPort(5671)).toBe(5671);
     expect(() => pickRabbitmqPort(5672)).toThrow(/--remote-port 5672 is not a broker port/);
+  });
+  it('connectFlagError refuses flags a store cannot honour', () => {
+    expect(connectFlagError('rabbitmq', { remotePort: 5671 })).toBeUndefined();
+    expect(connectFlagError('rabbitmq', { remotePort: 5672 })).toMatch(/not a broker port/);
+    expect(connectFlagError('rabbitmq', { host: 'b-x', remotePort: 5671 })).toMatch(/^--host does not apply to rabbitmq/);
+    expect(connectFlagError('mongo', { username: 'admin', remotePort: 27017 })).toMatch(/^--username, --remote-port do not apply to mongo .*--member/);
+    expect(connectFlagError('iam', { remotePort: 6543 })).toMatch(/needs --host/);
+    expect(connectFlagError('iam', { host: 'h', remotePort: 6543 })).toBeUndefined();
   });
   it('AMQPS hints carry a placeholder and the broker SNI, never a password', () => {
     expect(rabbitmqAmqpsUrlTemplate(15671)).toBe('amqps://saga_ro:${MQ_PW}@127.0.0.1:15671/');

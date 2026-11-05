@@ -94,16 +94,18 @@ overrides the tag; `--print-only` never starts it (prints `stopped — will be
 started on connect`). If no db jump host exists, it falls back to the shared-ECS
 tag. Resolution is
 transparent (every candidate printed) and overridable: `--host`,
-`--remote-port` (only with `--host`), `--username`, `--database`. The tunnel holds in the
+`--remote-port` (with `--host`), `--username`, `--database`. The tunnel holds in the
 foreground — it dies with the command, never orphaned.
 
-Shared infra (`mongo`, `rabbitmq`) uses read-only logins and the db jump host.
-`mongo` tunnels to one replica-set member (`--member <n>`, `directConnection=true`)
-and refuses `--remote-port`. `rabbitmq` tunnels to the broker's management API on
-443 by default; `--remote-port 5671` tunnels AMQPS instead (local 15671) and prints
-an `amqps://` template plus a pika handshake check. The client must send TLS SNI =
-the broker host. Any other port is an error. `saga_ro` can't publish, consume or
-declare. If `psql`
+Shared infra (`mongo`, `rabbitmq`) uses read-only logins and the db jump host;
+both refuse `--host`/`--username`/`--database`. `mongo` tunnels to one
+replica-set member (`--member <n>`, `directConnection=true`) and refuses
+`--remote-port`. `rabbitmq` tunnels to the broker's management API on 443 by
+default; `--remote-port 5671` tunnels AMQPS instead (local 15671) and prints an
+`amqps://` template plus a pika handshake check (`--output-json` adds
+`tlsServerName`). The client must send TLS SNI = the broker host; most clients
+take SNI from the URL host unless told otherwise. Any other port is an error.
+`saga_ro` can't publish, consume or declare. If `psql`
 is not installed, queries fall back to `docker run --network host
 postgres:18-alpine psql` automatically.
 

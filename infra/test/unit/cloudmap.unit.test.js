@@ -225,3 +225,41 @@ describe('deregister', () => {
         expect(calls_to('delete-service')).toHaveLength(1);
     });
 });
+
+describe('AWS CLI spawn failures', () => {
+    // list-services returns the whole namespace, so its size tracks accumulated
+    // leaked entries: dev hit 1.7k services / ~1.1MB and overflowed spawnSync's
+    // 1MB default, which surfaces as status null + empty stderr, not a CLI error.
+    const enobufs = () => ({
+        status: null,
+        stdout: '',
+        stderr: '',
+        error: Object.assign(new Error('spawnSync aws ENOBUFS'), { code: 'ENOBUFS' }),
+    });
+
+    it('raises a spawn failure instead of parsing it as an AWS error', () => {
+        route({ 'list-services': enobufs });
+
+        const err = capture(() => register({
+            name: NAME, namespace_id: NS, region: REGION, ip: '10.0.0.1', port: 5432,
+        }));
+
+        expect(err.spawn_code).toBe('ENOBUFS');
+        // aws_code stays null: nothing came back from the CLI to classify, and
+        // reporting one would send the caller's triage down the wrong branch.
+        expect(err.aws_code).toBeUndefined();
+    });
+
+    it('asks for a buffer far above the response that broke the default', () => {
+        route({
+            'list-services': list_of(),
+            'create-service': ok(JSON.stringify({ Service: { Id: 'srv-1' } })),
+            'register-instance': ok(),
+        });
+
+        register({ name: NAME, namespace_id: NS, region: REGION, ip: '10.0.0.1', port: 5432 });
+
+        const [[, , options]] = calls_to('list-services');
+        expect(options.maxBuffer).toBeGreaterThan(2 * 1024 * 1024);
+    });
+});

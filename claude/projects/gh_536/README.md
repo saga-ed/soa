@@ -19,6 +19,7 @@ UI preview and is not evidence of synthetic-stack telemetry.
 
 ## Decisions and evidence
 
+- [Chat charts and saved views](decisions/vishnu-chat-chart-experience.md): first-release histogram/scatter support, persistent pinned chart sets, explicit scope switching; data architecture requires discussion.
 - [Path-inspector handoff](docs/path-offenders-handoff-2026-11-02.md): release references, real synthetic proof and sandbox validation.
 
 - [Vishnu performance telemetry](decisions/vishnu-performance-telemetry.md): Agent collection, endpoint/caller measurements and bounded sampled fan-out rankings approved.

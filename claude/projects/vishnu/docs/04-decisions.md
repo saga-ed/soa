@@ -15,6 +15,7 @@ All resolved. The full documents, with options and rationale, are in
 | [d8](../../gh_536/decisions/d8-event-stats-zod3-crash.md) | Zod 3 crash | event-stats 0.1.1 compatible with Zod 3 and 4; CI under Zod 3; boot smoke check in adopter CI. |
 | [d9](../../gh_536/decisions/d9-vishnu-sandbox-observation.md) | Sandbox observation | The idle colour (blue) observes one named sandbox, off by default. |
 | [d10](../../gh_536/decisions/d10-full-fleet-instrumentation.md) | Fleet scope | Two waves. Wave 1: sessions, content, chat, insights, transcripts. Wave 2 (coach, authz-api, authz-sync) waits on where consumer-only services report. |
+| [Chat charts](../../gh_536/decisions/vishnu-chat-chart-experience.md) | Chart experience | Histograms/scatter in first release; chart sets persist across sessions; mesh may minimize; scope switches explicit. Data architecture remains open. |
 
 **Open design question for wave 2:** where do consumer-only services report? (i) another
 team's exchange, (ii) a new shared `observability.events` exchange, or (iii) not yet. See d10.

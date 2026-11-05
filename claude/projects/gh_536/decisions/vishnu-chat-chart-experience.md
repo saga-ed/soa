@@ -22,9 +22,8 @@ requested a data-architecture conversation before implementation proceeds.
 2. **Charts may take priority over the mesh.** It is acceptable for the mesh to
    minimize while a chart investigation is active. Users must be able to pin a
    created set of charts and persist that view across sessions. Persistence is a
-   first-release requirement, not merely an in-memory chat feature. Storage and
-   live-relative versus fixed time-window semantics will
-   be settled in the architecture discussion.
+   first-release requirement, not merely an in-memory chat feature. Saved-view
+   storage remains to be settled in the architecture discussion.
 3. **Keep chart queries within the currently selected, authorized scope.** Chat
    must request an explicit scope switch before querying another environment or
    deployment. Do not silently broaden a query to obtain data. Existing sources
@@ -45,13 +44,20 @@ requested a data-architecture conversation before implementation proceeds.
    cross-user view access in the initial release. Reopening a saved view does not
    bypass the user's current telemetry authorization or the explicit scope-switch
    rule. Sharing may be considered separately later.
+6. **Saved time ranges are rolling by default, with an explicit fixed-window
+   option.** Skelly approved both modes. A saved "last 30 minutes" view resolves
+   against the current time when reopened. A fixed incident view preserves its
+   start/end timestamps and queries Datadog for that interval. Fixing the window
+   does not archive measurements or guarantee that they remain available beyond
+   Datadog retention. Persist the mode explicitly so reopening cannot silently
+   change a rolling view into a fixed one, or vice versa.
 
 ## Architecture discussion required
 
 Saga's mesh uses event-driven projections. Discuss how Vishnu should follow that
 pattern for mesh state and saved investigations while Datadog supplies historical
-measurements. Remaining choices include saved-view storage, time-window
-semantics, query caching and outage presentation, and how any missing MQ or other
+measurements. Remaining choices include saved-view storage, query caching and
+outage presentation, and how any missing MQ or other
 historical signals should reach Datadog. No new collector, event schema, broker
 topology or retention policy has been selected.
 

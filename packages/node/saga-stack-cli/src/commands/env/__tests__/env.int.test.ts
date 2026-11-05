@@ -648,6 +648,81 @@ describe('env connect — dedicated db jump host', () => {
   }, 30_000);
 });
 
+describe('env connect — shared infra --remote-port', () => {
+  const BROKER = 'b-abc.mq.us-west-2.on.aws';
+  const awsShared = (args: string[]): unknown => {
+    if (args[1] === 'get-parameter') {
+      const name = args[args.indexOf('--name') + 1];
+      if (name === '/prod/shared/rabbitmq-broker-id') return 'b-abc';
+      if (name === '/shared/infra/prod/mongodb-hosts') return 'm0.internal:27017,m1.internal:27017';
+      return 'PEM';
+    }
+    if (args[0] === 'ec2') return args.includes('Name=tag:Name,Values=prod-db-jump-host') ? [['i-0dbjump', 'running']] : [];
+    if (args[1] === 'describe-instance-information') return ['i-0dbjump'];
+    return null;
+  };
+  const jsonOut = (): Record<string, unknown> => JSON.parse(out.find((l) => l.trim().startsWith('{')) ?? '{}');
+
+  beforeEach(() => {
+    callerAccount = PROD_ACCOUNT;
+    installEnvAws(awsShared);
+  });
+
+  it('rabbitmq defaults to the management API on 443', async () => {
+    await EnvConnect.run(['rabbitmq', '--env', 'prod', '--print-only', '--output-json'], config);
+    expect(jsonOut()).toMatchObject({ host: BROKER, port: 443 });
+    expect(jsonOut()).not.toHaveProperty('tlsServerName');
+  });
+
+  it('rabbitmq --remote-port 5671 tunnels AMQPS, with AMQPS next steps', async () => {
+    await EnvConnect.run(['rabbitmq', '--env', 'prod', '--print-only', '--output-json', '--remote-port', '5671'], config);
+    expect(jsonOut()).toMatchObject({
+      host: BROKER,
+      port: 5671,
+      urlTemplate: 'amqps://saga_ro:${MQ_PW}@127.0.0.1:15671/',
+      tlsServerName: BROKER,
+    });
+
+    out = [];
+    await EnvConnect.run(['rabbitmq', '--env', 'prod', '--remote-port', '5671'], config);
+    expect(portForwards[0]).toMatchObject({ target: 'i-0dbjump', host: BROKER, remotePort: 5671, localPort: 15671 });
+    expect(text()).toContain(`server_hostname="${BROKER}"`);
+    expect(text()).not.toContain('/api/overview');
+  });
+
+  it('rabbitmq refuses a non-broker --remote-port instead of ignoring it', async () => {
+    await expect(EnvConnect.run(['rabbitmq', '--env', 'prod', '--print-only', '--remote-port', '5672'], config)).rejects.toThrow(
+      /--remote-port 5672 is not a broker port/,
+    );
+    expect(portForwards).toHaveLength(0);
+  });
+
+  it('mongo refuses --remote-port (the member list picks the port)', async () => {
+    await expect(EnvConnect.run(['mongo', '--env', 'prod', '--print-only', '--remote-port', '27017'], config)).rejects.toThrow(
+      /--remote-port does not apply to mongo/,
+    );
+  });
+
+  it('a postgres store refuses --remote-port without --host', async () => {
+    await expect(EnvConnect.run(['iam', '--env', 'prod', '--print-only', '--remote-port', '6543'], config)).rejects.toThrow(
+      /--remote-port needs --host/,
+    );
+  });
+
+  it('rabbitmq refuses --host instead of tunnelling to the registry broker', async () => {
+    await expect(
+      EnvConnect.run(['rabbitmq', '--env', 'prod', '--host', 'b-other.mq.us-west-2.on.aws', '--remote-port', '5671'], config),
+    ).rejects.toThrow(/--host does not apply to rabbitmq/);
+    expect(portForwards).toHaveLength(0);
+  });
+
+  it('flag errors fire before any AWS call (no sts, no PRODUCTION banner)', async () => {
+    await expect(EnvConnect.run(['mongo', '--env', 'prod', '--remote-port', '27017'], config)).rejects.toThrow(/does not apply to mongo/);
+    expect(awsCalls).toHaveLength(0);
+    expect(text()).not.toContain('PRODUCTION');
+  });
+});
+
 describe('env connect — blue/green service selection', () => {
   const awsWith = (rows: [string, number][]) => (args: string[]): unknown => {
     if (args[1] === 'describe-services') {

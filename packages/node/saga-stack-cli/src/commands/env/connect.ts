@@ -45,7 +45,9 @@
  * resolution: the env's registry names the SSM params (replica-set hosts,
  * broker id) and the READ-ONLY secrets. Tunnels go through the db jump host;
  * mongo dials `--member <n>` (directConnection, secondaryPreferred, CA fetched
- * from its public SSM param to ~/.saga-stack/mongo-ca-<env>.pem), rabbitmq dials the broker's management API on 443.
+ * from its public SSM param to ~/.saga-stack/mongo-ca-<env>.pem), rabbitmq dials the broker's management API
+ * on 443, or AMQPS with `--remote-port 5671`. Flags that don't apply to the store are refused before any
+ * AWS call (`connectFlagError`), never silently ignored.
  * Passwords are never fetched or printed — output carries shell hints that
  * substitute them at run time.
  */
@@ -63,7 +65,10 @@ import {
   ECS_SERVICE_ROW_QUERY,
   MONGO_MEMBER_CHECK_HINT,
   MONGO_PROD_QUERY_HYGIENE,
-  RABBITMQ_PORT,
+  DEFAULT_LOCAL_PORTS,
+  POSTGRES_REMOTE_PORT,
+  RABBITMQ_AMQPS_PORT,
+  connectFlagError,
   dataPlaneStyle,
   defaultLocalPort,
   extractDbTarget,
@@ -79,6 +84,9 @@ import {
   parseServiceRows,
   pickMongoMember,
   pickService,
+  pickRabbitmqPort,
+  rabbitmqAmqpsCheckHint,
+  rabbitmqAmqpsUrlTemplate,
   rabbitmqCurlHint,
   rabbitmqHost,
   rabbitmqParamsFor,
@@ -120,6 +128,7 @@ export default class EnvConnect extends BaseCommand {
     '<%= config.bin %> <%= command.id %> mongo --env prod --print-only',
     '<%= config.bin %> <%= command.id %> mongo --env prod --member 1',
     '<%= config.bin %> <%= command.id %> rabbitmq --env dev',
+    '<%= config.bin %> <%= command.id %> rabbitmq --env prod --remote-port 5671 --print-only',
   ];
 
   static args = {
@@ -134,8 +143,10 @@ export default class EnvConnect extends BaseCommand {
     env: Flags.string({ description: `target environment (${ENV_NAMES.join(' | ')})`, default: 'dev' }),
     profile: Flags.string({ description: 'AWS profile to use (defaults to the ambient credential chain).' }),
     host: Flags.string({ description: 'remote DB endpoint (skips task-definition resolution).' }),
-    'remote-port': Flags.integer({ description: 'remote DB port (with --host)', default: 5432 }),
-    'local-port': Flags.integer({ description: 'local end of the tunnel (default: postgres 15432, mongo 27018, rabbitmq 15443)' }),
+    'remote-port': Flags.integer({
+      description: 'remote port: postgres with --host (default 5432); rabbitmq 443 (management API, default) | 5671 (AMQPS); not for mongo.',
+    }),
+    'local-port': Flags.integer({ description: 'local end of the tunnel (default: postgres 15432, mongo 27018, rabbitmq 15443, rabbitmq AMQPS 15671)' }),
     member: Flags.integer({ description: 'mongo only: 0-based replica-set member to tunnel to (the full list is logged).', default: 0 }),
     username: Flags.string({ description: 'override the resolved user (URL carries no password then).' }),
     database: Flags.string({ description: 'override the resolved database name.' }),
@@ -156,6 +167,13 @@ export default class EnvConnect extends BaseCommand {
         `unknown store '${args.store}' — expected one of: ${STORES.map((s) => s.key).join(', ')}, mongo, rabbitmq (or pass --host)`,
       );
     }
+    const usage = connectFlagError(args.store, {
+      host: flags.host,
+      username: flags.username,
+      database: flags.database,
+      remotePort: flags['remote-port'],
+    });
+    if (usage !== undefined) this.error(usage);
     const opts = { profile: flags.profile, region: env.awsRegion };
 
     // ── account preflight (see env list): fail actionably on the wrong account ──
@@ -193,7 +211,7 @@ export default class EnvConnect extends BaseCommand {
     if (flags.host !== undefined) {
       target = {
         host: flags.host,
-        port: flags['remote-port'],
+        port: flags['remote-port'] ?? POSTGRES_REMOTE_PORT,
         database: flags.database ?? store?.database ?? args.store,
         username: flags.username,
         source: '--host',
@@ -302,6 +320,7 @@ export default class EnvConnect extends BaseCommand {
     env: DeployedEnv,
     flags: {
       member: number;
+      'remote-port'?: number;
       'local-port'?: number;
       'jump-host'?: string;
       'print-only': boolean;
@@ -312,7 +331,9 @@ export default class EnvConnect extends BaseCommand {
     opts: { profile?: string; region: string },
   ): Promise<void> {
     const printOnly = flags['print-only'];
-    const localPort = flags['local-port'] ?? defaultLocalPort(key);
+    const rabbitPort = key === 'rabbitmq' ? pickRabbitmqPort(flags['remote-port']) : undefined;
+    const amqps = rabbitPort === RABBITMQ_AMQPS_PORT;
+    const localPort = flags['local-port'] ?? (amqps ? DEFAULT_LOCAL_PORTS.rabbitmqAmqps : defaultLocalPort(key));
     const quiet = flags['output-json'] || flags.porcelain;
     let host: string;
     let port: number;
@@ -339,7 +360,7 @@ export default class EnvConnect extends BaseCommand {
       if (params === undefined) this.error(refusal!);
       readOnlySecret = params.readOnlySecret;
       host = rabbitmqHost(await this.fetchParam(params.brokerIdParam, opts), env.awsRegion);
-      port = RABBITMQ_PORT;
+      port = rabbitPort!;
     }
 
     const resolved = await this.resolveJumpRoute(env, flags['jump-host'], printOnly, opts);
@@ -357,13 +378,25 @@ export default class EnvConnect extends BaseCommand {
         if (env.productionDataPlane === true) notes.push(MONGO_PROD_QUERY_HYGIENE);
         return { heading, steps, notes };
       }
+      const passwordStep = {
+        label: 'Load the read-only password into your shell (nothing is printed):',
+        command: rabbitmqPasswordHint(readOnlySecret, env.awsRegion, flags.profile),
+      };
+      if (amqps) {
+        urlTemplate = rabbitmqAmqpsUrlTemplate(localPort);
+        return {
+          heading,
+          steps: [passwordStep, { label: 'Check the AMQPS handshake (pika):', command: rabbitmqAmqpsCheckHint(host, localPort) }],
+          notes: [
+            `AMQP clients: ${urlTemplate} with TLS SNI / server_hostname = ${host} — the broker cert does not cover 127.0.0.1, and most clients take SNI from the URL host unless told otherwise (amqplib: servername; pika: SSLOptions server_hostname).`,
+            'saga_ro is a stats-only login: publish, consume and declare are refused. Writes need the shared-<env>-mq login (AppInfra, iac#819).',
+          ],
+        };
+      }
       urlTemplate = rabbitmqCurlHint(host, localPort);
       return {
         heading,
-        steps: [
-          { label: 'Load the read-only password into your shell (nothing is printed):', command: rabbitmqPasswordHint(readOnlySecret, env.awsRegion, flags.profile) },
-          { label: 'Query the management API:', command: urlTemplate },
-        ],
+        steps: [passwordStep, { label: 'Query the management API:', command: urlTemplate }],
         notes: [
           'swap /api/overview for /api/queues (or /api/queues/<vhost>) to list queues.',
           'stats only: publish, consume and declare are refused for saga_ro.',
@@ -394,7 +427,7 @@ export default class EnvConnect extends BaseCommand {
       if (quiet) {
         this.emit(
           flags,
-          { env: env.name, store: key, host, port, ssmTarget: resolved.id, urlTemplate: urlTemplate! },
+          { env: env.name, store: key, host, port, ssmTarget: resolved.id, urlTemplate: urlTemplate!, ...(amqps ? { tlsServerName: host } : {}) },
           urlTemplate!,
         );
       } else {
@@ -558,7 +591,7 @@ export default class EnvConnect extends BaseCommand {
     const portRaw = await this.fetchParam(params.port, opts);
     const port = Number(portRaw);
     if (!Number.isInteger(port) || port <= 0) {
-      this.error(`SSM ${params.port} is not a port number ('${portRaw}') — pass --remote-port to override.`);
+      this.error(`SSM ${params.port} is not a port number ('${portRaw}') — pass --host/--remote-port to override.`);
     }
     return { host, port, source: `SSM ${params.endpoint}` };
   }

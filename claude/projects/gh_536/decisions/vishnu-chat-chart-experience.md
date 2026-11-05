@@ -1,6 +1,6 @@
 # Vishnu chat charts — first-release scope and saved views
 
-**Status: RESOLVED 2026-11-05 — chart experience and Datadog historical-source direction agreed; remaining architecture choices are open.**
+**Status: RESOLVED 2026-11-05 — chart experience, historical source, private saved views and architecture recommendations approved by skelly.**
 
 **Initiative:** [RabbitMQ event telemetry and Vishnu](../README.md).
 
@@ -23,7 +23,7 @@ requested a data-architecture conversation before implementation proceeds.
    minimize while a chart investigation is active. Users must be able to pin a
    created set of charts and persist that view across sessions. Persistence is a
    first-release requirement, not merely an in-memory chat feature. Saved-view
-   storage remains to be settled in the architecture discussion.
+   storage follows decision 7 below.
 3. **Keep chart queries within the currently selected, authorized scope.** Chat
    must request an explicit scope switch before querying another environment or
    deployment. Do not silently broaden a query to obtain data. Existing sources
@@ -51,20 +51,30 @@ requested a data-architecture conversation before implementation proceeds.
    does not archive measurements or guarantee that they remain available beyond
    Datadog retention. Persist the mode explicitly so reopening cannot silently
    change a rolling view into a fixed one, or vice versa.
+7. **Use the existing Vishnu Postgres database for saved investigations.** Skelly
+   accepted the remaining architecture recommendations. Store private chart
+   definitions, layout, scope and time settings as Vishnu-owned application data.
+   Saving a view is a normal database transaction; an event/outbox workflow is not
+   needed unless another service later needs to consume the change.
+8. **Keep mesh state in the existing event projections and query historical
+   measurements through the Vishnu backend.** Use a bounded, short-lived query
+   cache. Report stale cached measurements or unavailable data explicitly during
+   a Datadog outage. Saved definitions remain accessible independently of Datadog;
+   the cache is not a durable historical store or an offline-availability promise.
 
-## Architecture discussion required
+## Implementation boundaries
 
-Saga's mesh uses event-driven projections. Discuss how Vishnu should follow that
-pattern for mesh state and saved investigations while Datadog supplies historical
-measurements. Remaining choices include saved-view storage, query caching and
-outage presentation, and how any missing MQ or other
-historical signals should reach Datadog. No new collector, event schema, broker
-topology or retention policy has been selected.
+Saga's event-driven projections remain the mesh-state mechanism; Datadog supplies
+historical measurements. Implementation must verify actual metric coverage,
+permissions and scope tags, and choose bounded cache/query limits. Missing MQ or
+other historical signals require a collection-gap assessment before choosing how
+they should reach Datadog. No new collector, event schema, broker topology or
+retention policy is implicitly authorized by the saved-view architecture.
 
 The prior proposal was reusable chart components driven by a validated chart
 specification, rather than executable code generated at runtime. ECharts was a
-candidate library. Neither the library nor a specific persistence implementation
-is made binding by this decision.
+candidate library. Library selection and database schema details remain engineering
+choices within the approved architecture.
 
 The discussion should distinguish saved chart definitions from measurement history,
 current-state projections from historical time buckets/distributions, durable

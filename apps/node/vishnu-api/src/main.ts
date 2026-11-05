@@ -12,7 +12,7 @@ const datadog = createDatadogReader(process.env);
 const runtime = config.mqEnabled ? createEventStatsRuntime(process.env) : undefined;
 let draining = false;
 const ready = async () => !runtime || (await runtime.read()).receiver.connected;
-const { server } = await createApp(config, {
+const { server, closeCharts } = await createApp(config, {
   datadog,
   resources: createResourceReader(process.env),
   eventStats: async () => {
@@ -29,6 +29,7 @@ const stop = async () => {
   timeout.unref();
   server.stop();
   await runtime?.close();
+  await closeCharts();
 };
 process.once('SIGTERM', () => void stop());
 process.once('SIGINT', () => void stop());

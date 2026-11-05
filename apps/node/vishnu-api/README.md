@@ -72,8 +72,8 @@ and disabled MQ state. See [deployment operations](../../../infra/vishnu-api/OPS
 The assistant is a single TypeScript Strands agent. It reads the same mesh,
 call rankings and resource snapshots as the UI, and emits validated UI actions.
 It cannot run shell commands, arbitrary Datadog queries, deployments or mutations.
-The authenticated `/api/assistant/turn` POST streams NDJSON; all other write
-routes remain disabled. Requests require the exact configured Origin and a
+The authenticated `/api/assistant/turn` POST streams NDJSON. The chart routes
+below add bounded historical queries and personally owned saved-view writes. Requests require the exact configured Origin and a
 verified JANUS staff subject. Conversations are subject-bound, expire after
 30 minutes, and are held in process memory (a task restart expires them).
 
@@ -107,9 +107,9 @@ and reported limits are shown explicitly. Resource-only APIs/workers can enter
 the hosted mesh without invented HTTP edges. Generic container names such as
 `api` need an explicit identity map and are not guessed. Native synthetic
 processes do not yet publish these resource metrics; the local resource view
-explains that gap instead of assigning host totals to APIs. Historical baseline
-comparison, runtime heap/GC panels, throttling and automatic remediation are
-not included in this first demonstration.
+explains that gap instead of assigning host totals to APIs. Historical charts
+are described below. Runtime heap/GC panels, throttling and automatic remediation
+are not included.
 
 ## Assistant sandbox handoff
 
@@ -149,3 +149,76 @@ sandbox, set `VISHNU_TEST_URL=https://vishnu.wootops.org`,
 `VISHNU_TEST_BLUE=true`, and `VISHNU_TEST_STORAGE_STATE` to a local Playwright
 staff session file. The test sends the blue preview header. Credentials and
 browser storage state must never be committed.
+
+## Historical charts and private saved views
+
+`show_chart` lets the Strands agent emit a validated data-only chart definition;
+ECharts renders line, histogram and scatter plots. The model cannot supply query
+strings, executable chart code or another scope. `POST /api/charts/query` resolves
+canonical mesh system IDs against the server-selected Datadog scope. A chart has
+an explicit rolling window or fixed ISO dates. Queries cover 5 minutes–30 days
+within the past 31 days; older fixed definitions remain saved but cannot query
+outside that first-release bound. Datadog retention may be shorter.
+
+CPU and working-set memory use `container.cpu.usage` and
+`container.memory.working_set`, converted to cores and MiB. Replica identity
+includes task family and container ID. Service grouping means the average of
+reporting replicas, not a total or a percentage of capacity. Scatter pairs the
+same replica at the same timestamp; no forward filling. Native synthetic
+processes currently lack these metrics and show an explicit empty state.
+
+Latency uses Datadog's retained server-span analytics (`apm_read`), excluding
+health probes. It is labeled sampled, not all-request APM latency. Line charts
+support average, maximum and p95. Request-duration histograms use a bounded
+20-bin span aggregation after measuring the maximum; interval-statistic
+histograms instead bin average/max/p95 time buckets and label that distinction.
+Missing intervals break lines instead of becoming zero. Exact scope and resolved
+time range appear with every result. The latency drill-through opens scoped
+traces in Datadog. There is no mirrored time-series warehouse.
+
+Queries use existing server-only `DD_API_KEY`/`DD_APP_KEY` credentials; no new
+Bedrock API key or role grant is required. The history reader coalesces equivalent
+queries, caches at most 64 results for three minutes and admits four concurrent
+queries. It allows at most 100 upstream requests per process per hour, uses a
+12-second request timeout and a 4 MB response bound, and backs off on 429.
+These limits are process-local and separate from the mesh reader; Datadog's
+shared account limits still apply. Failed refreshes return unavailable, never
+unlabeled stale measurements. The UI shows the original query time on cached data.
+
+`GET /api/charts/catalog` reports the current scope. `/api/chart-views` supports
+owner-scoped GET/POST; `/api/chart-views/:id` supports PUT/DELETE. All hosted
+routes require JANUS staff identity; POST/PUT/DELETE also require exact Origin.
+Each view belongs to `claims.sub` and the current telemetry/mesh scope. Updates
+require the current revision. There are at most 50 saved views per owner and
+eight charts per view. The loopback synthetic adapter uses the local developer
+identity, not multiuser authentication.
+
+`VISHNU_DATABASE_URL` is the existing Vishnu Postgres connection. On first saved
+view access it creates the additive `vishnu_chart_view` table and owner/scope
+index. The table stores definitions, chart ordering, mesh minimization, time
+settings and revisions, never measurements. Existing MQ tables are untouched.
+The database principal needs CREATE/SELECT/INSERT/UPDATE/DELETE for this table.
+Rollback to older application code leaves the unused table in place; do not drop
+users' saved views. Saved definitions remain listable during a Datadog outage.
+
+Choose **Charts → Saved chart sets** to reopen a private pinned set. Rolling
+windows move when reopened; fixed windows retain their exact dates. Manual
+changes made during an assistant response require **Apply suggested view**.
+Restore previous view and Reset view work without reloading. Unsaved edits are
+not automatically persisted.
+
+Additional checks (from the repository root):
+
+```sh
+pnpm --filter @saga-ed/vishnu exec vitest run --config vitest.int.config.ts server/chart-views.int.test.ts
+pnpm --filter @saga-ed/vishnu test:charts-browser
+VISHNU_LIVE_AGENT=true pnpm --filter @saga-ed/vishnu test:charts-live
+```
+
+The integration test starts disposable Docker Postgres/RabbitMQ infrastructure;
+the chart browser test exercises local private saved views and deletes its test
+view. The live test consumes Bedrock tokens and uses real scoped Datadog history.
+For blue, use the same `VISHNU_TEST_URL`, `VISHNU_TEST_BLUE` and staff storage-state
+settings documented above. Deploy through the coordinator using the existing
+blue template, role, database and secrets; this branch's older infrastructure
+must not replace the sandbox template.

@@ -18,30 +18,33 @@
     "test:datadog-browser": "node tests/datadog-browser.mjs",
     "test:mq-browser": "node tests/mq-browser.mjs",
     "test:assistant-browser": "node tests/assistant-browser.mjs",
-    "test:assistant-live": "node tests/assistant-live-browser.mjs"
+    "test:assistant-live": "node tests/assistant-live-browser.mjs",
+    "test:charts-browser": "node tests/charts-browser.mjs",
+    "test:charts-live": "node tests/charts-live-browser.mjs"
   },
   "dependencies": {
     "@fontsource-variable/montserrat": "^5.2.8",
     "@saga-ed/product-style": "https://codeload.github.com/saga-ed/product-style/tar.gz/9b134187093f550a4d33cfda4d37c8ab02cdbfed",
-    "@xyflow/svelte": "^1.0.0",
-    "elkjs": "^0.11.0",
-    "@saga-ed/soa-event-stats": "workspace:*",
     "@saga-ed/soa-event-envelope": "workspace:*",
+    "@saga-ed/soa-event-stats": "workspace:*",
+    "@xyflow/svelte": "^1.0.0",
     "amqplib": "^0.10.4",
+    "echarts": "6",
+    "elkjs": "^0.11.0",
     "pg": "^8.13.0"
   },
   "devDependencies": {
+    "@saga-ed/soa-event-test-harness": "workspace:*",
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.55.0",
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "@types/amqplib": "^0.10.4",
+    "@types/node": "^24.0.3",
+    "@types/pg": "^8.11.10",
     "svelte": "^5.45.0",
     "svelte-check": "^4.3.0",
     "typescript": "^5.9.3",
     "vite": "^6.4.1",
-    "vitest": "^3.2.4",
-    "@types/amqplib": "^0.10.4",
-    "@types/pg": "^8.11.10",
-    "@types/node": "^24.0.3",
-    "@saga-ed/soa-event-test-harness": "workspace:*"
+    "vitest": "^3.2.4"
   }
 }

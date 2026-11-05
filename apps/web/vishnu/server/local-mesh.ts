@@ -8,6 +8,7 @@ import { loadEnv, type Plugin } from 'vite';
 import type { MeshSnapshot } from '../src/lib/graph/types';
 import { createAssistant } from '../../../node/vishnu-api/src/assistant/service';
 import { assistantHttp } from '../../../node/vishnu-api/src/assistant/http';
+import { createChartRuntime, chartPath, chartMethod } from '../../../node/vishnu-api/src/charts/runtime';
 import { createResourceReader } from '../../../node/vishnu-api/src/telemetry/resources';
 
 type Collector = () => Promise<MeshSnapshot>;
@@ -50,11 +51,12 @@ export function localMeshMiddleware(
     res.end(JSON.stringify(value));
   };
   const resources = createResourceReader(env);
-  const assistant = createAssistant({ mesh: async () => (await getCollector())(), datadog: readDatadog, resources }, env);
-  return async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
+  const charts = createChartRuntime(async () => (await getCollector())(), env);
+  const assistant = createAssistant({ mesh: async () => (await getCollector())(), datadog: readDatadog, resources, charts: charts.read }, env);
+  const middleware = async (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const path = req.url?.split('?')[0];
-    if (!['/config.json', '/api/mesh', '/api/health', '/api/event-stats', '/api/datadog', '/api/resources', '/api/assistant/status', '/api/assistant/turn'].includes(path ?? '')) return next();
-    if (req.method !== (path === '/api/assistant/turn' ? 'POST' : 'GET')) return reply(res, 405, { error: 'Method not allowed' });
+    if (!['/config.json', '/api/mesh', '/api/health', '/api/event-stats', '/api/datadog', '/api/resources', '/api/assistant/status', '/api/assistant/turn'].includes(path ?? '') && !chartPath(path ?? '')) return next();
+    if (chartPath(path ?? '') ? !chartMethod(path!, req.method ?? '') : req.method !== (path === '/api/assistant/turn' ? 'POST' : 'GET')) return reply(res, 405, { error: 'Method not allowed' });
     const remote = req.socket.remoteAddress;
     if (!remote || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) {
       return reply(res, 403, { error: 'Local synthetic-dev access only' });
@@ -64,7 +66,7 @@ export function localMeshMiddleware(
       if (!['127.0.0.1', 'localhost', '[::1]'].includes(host)) throw new Error('host');
       if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host)
         throw new Error('origin');
-      if (path === '/api/assistant/turn' && !req.headers.origin) throw new Error('origin');
+      if (req.method !== 'GET' && !req.headers.origin) throw new Error('origin');
     } catch {
       return reply(res, 403, { error: 'Local origin required' });
     }
@@ -82,6 +84,7 @@ export function localMeshMiddleware(
         error: 'Start Vishnu with ss --with vishnu to enable synthetic-dev observations',
       });
     try {
+      if (chartPath(path ?? '')) return await charts.handle(req, res, 'local-synthetic');
       if (path === '/api/assistant/status') return reply(res, 200, assistant.status());
       if (path === '/api/assistant/turn') return await assistantHttp(req, res, assistant, 'local-synthetic');
       if (path === '/api/resources') return reply(res, 200, await resources());
@@ -110,6 +113,7 @@ export function localMeshMiddleware(
       });
     }
   };
+  return Object.assign(middleware, { close: charts.close });
 }
 
 export function vishnuLocalPlugin(): Plugin {
@@ -132,9 +136,10 @@ export function vishnuLocalPlugin(): Plugin {
       }
       const runtime = env.VISHNU_MODE === 'synthetic' ? createEventStatsRuntime(env) : undefined;
       if (runtime) void runtime.read().catch(() => console.warn('[vishnu-event-stats] startup unavailable; API access retries initialization'));
-      server.middlewares.use(localMeshMiddleware(env, loadCollector, runtime?.read,
-        createDatadogReader(env, fetch, Date.now, localPeerPorts)));
-      server.httpServer?.once('close', () => { void runtime?.close(); });
+      const middleware = localMeshMiddleware(env, loadCollector, runtime?.read,
+        createDatadogReader(env, fetch, Date.now, localPeerPorts));
+      server.middlewares.use(middleware);
+      server.httpServer?.once('close', () => { void runtime?.close(); void middleware.close(); });
     },
   };
 }

@@ -47,3 +47,18 @@ describe('shared assistant and manual navigation', () => {
     expect(resourceRows(data, '', 'cpu')).toEqual([]);
   });
 });
+
+describe('historical chart navigation', () => {
+  it('adds and edits charts atomically, bounds the set, and restores the prior mesh', () => {
+    const mesh = createFixture('overview');
+    const chart = { id: '00000000-0000-4000-8000-000000000001', title: 'CPU', system: mesh.systems[0].id,
+      kind: 'line' as const, metric: 'cpu' as const, statistics: ['avg' as const], time: {mode:'rolling' as const, minutes:30}, group:'service' as const, population:'observations' as const };
+    const before = initialView();
+    const after = applyView(before, {type:'show_chart',chart}, mesh);
+    expect(after.meshCollapsed).toBe(true); expect(after.charts).toHaveLength(1);
+    const edited = applyView(after, {type:'show_chart',chart:{...chart,title:'Renamed'}}, mesh);
+    expect(edited.charts).toHaveLength(1); expect(edited.charts?.[0].title).toBe('Renamed');
+    expect(applyView(edited,{type:'restore_view'},mesh,before)).toEqual(before);
+    expect(()=>applyView({...after,charts:Array.from({length:8},(_,i)=>({...chart,id:String(i)}))},{type:'show_chart',chart},mesh)).toThrow('Chart limit');
+  });
+});

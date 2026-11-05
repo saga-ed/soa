@@ -105,3 +105,20 @@ describe('scope isolation',()=>{
   expect(matchesMesh(data,mesh)).toBe(true);expect(matchesMesh({...data,scope:{...data.scope,environment:'prod'}},mesh)).toBe(false);
  });
 });
+
+describe('historical chart perimeter',()=>{
+ it('requires staff and same-origin writes and rejects arbitrary query execution',async()=>{
+  const headers={origin:'https://vishnu.wootops.org','content-type':'application/json'};
+  expect((await http('/api/charts/catalog')).status).toBe(401);
+  expect((await http('/api/chart-views')).status).toBe(401);
+  expect((await http('/api/charts/query',undefined,headers,'POST',{})).status).toBe(401);
+  const jwt=await token();
+  for(const path of ['/api/charts/query','/api/chart-views']) {
+   expect((await http(path,jwt,{},'POST',{})).status).toBe(403);
+   expect((await http(path,jwt,{...headers,origin:'https://evil.invalid'},'POST',{})).status).toBe(403);
+  }
+  expect((await http('/api/charts/query',jwt,headers,'POST',{query:'*',scope:'prod'})).status).toBe(400);
+  expect((await http('/api/charts/catalog?scope=prod',jwt)).status).toBe(400);
+  expect((await http('/api/charts/catalog',jwt)).status).toBe(200);
+ });
+});

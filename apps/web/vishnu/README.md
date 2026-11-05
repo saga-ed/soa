@@ -316,3 +316,18 @@ The hosted [SOA/tRPC backend](../../node/vishnu-api/README.md) serves the built
 frontend behind JANUS staff authentication. See [deployment preparation](../../../infra/vishnu-api/OPS.md)
 for the dev container and infrastructure bring-up. This is separate from the
 synthetic Vite adapter above; cloud MQ adoption is not enabled by these templates.
+
+## Chat-generated historical charts
+
+Ask Vishnu to plot IAM CPU versus memory for the last 30 minutes, draw a latency
+line graph, or show a histogram of average and maximum latency over the last week.
+Line, histogram and scatter cards use validated definitions and the current
+Datadog scope. Native synthetic CPU/memory history is explicitly empty until
+per-process collection exists. Latency history is labeled retained/sampled.
+
+Use **Pin chart set** to persist a named private set, then **Charts → Saved chart
+sets** to reopen it in a later session. Choose rolling or fixed dates per chart.
+The mesh can minimize or expand independently. Unsaved changes stay in the current
+browser session; saving stores definitions in Postgres, not historical data.
+
+See the [historical chart contract and validation commands](../../node/vishnu-api/README.md#historical-charts-and-private-saved-views).

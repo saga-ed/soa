@@ -749,9 +749,9 @@ main { padding: 8px 16px 12px; position: relative; }
 @media (max-width: 850px) { .investigation-scroll { max-height: 60vh; } }
 
 /* These surfaces exclude the graph canvas, its labels, controls and previews. */
-.app-shell :is(.topbar, .toolbar, .inspector, .assistant-panel, .resources-panel,
+.app-shell :is(.topbar, .toolbar, .inspector, .assistant-panel, .chart-workspace, .resources-panel,
   .mesh-list, .live-status, .datadog-status, .demo-banner, .demo-entry, .signal-legend),
-.app-shell :is(.topbar, .toolbar, .inspector, .assistant-panel, .resources-panel,
+.app-shell :is(.topbar, .toolbar, .inspector, .assistant-panel, .chart-workspace, .resources-panel,
   .mesh-list, .live-status, .datadog-status, .demo-banner, .demo-entry, .signal-legend) :where(*),
 #mesh-main > p {
   font-size: var(--vishnu-ui-font-size);

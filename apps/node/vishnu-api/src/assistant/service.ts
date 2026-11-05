@@ -1,3 +1,5 @@
+import { Chart } from '../charts/schema';
+import type { ChartSpec, ChartResult } from '../../../../web/vishnu/src/lib/graph/charts';
 import { randomUUID } from 'node:crypto';
 import { Agent, BedrockModel, tool } from '@strands-agents/sdk';
 import { fromIni } from '@aws-sdk/credential-providers';
@@ -31,6 +33,7 @@ export interface AssistantSources {
   mesh(): Promise<MeshSnapshot>;
   datadog(): Promise<DatadogSnapshot>;
   resources(): Promise<ResourceSnapshot>;
+  charts?(spec: ChartSpec): Promise<ChartResult>;
 }
 type Session = {
   owner: string;
@@ -48,7 +51,8 @@ Call rank_calls before identifying worst call offenders. Call read_resources bef
 Use show_calls/show_resources to DISPLAY the relevant evidence when the user asks to show, find, investigate or navigate. Focus your answer on the findings; the UI itself reports whether the requested view was applied or deferred.
 Use restore_view when asked to go back, undo, or restore the previous view; use reset_view for a clean initial view.
 Resource measurements are 5-minute averages per container; preserve task-family deployment identity. Compare aligned scopes only. CPU reservations are not verified hard limits. Resource correlation does not prove latency causation.
-Suggest concrete optimization hypotheses and validation steps. You cannot change infrastructure/code or run arbitrary queries. Historical baseline comparisons and per-endpoint CPU profiling are not available; say so if needed.
+Suggest concrete optimization hypotheses and validation steps. You cannot change infrastructure/code or run arbitrary queries. Historical charts use show_chart: line, histogram, or CPU-versus-memory scatter. Only use the supplied catalog. Per-endpoint CPU profiling is unavailable.
+For historical plot requests, call show_chart to display the chart even when history is empty. Return its availability honestly. Use a new UUID to add a chart; reuse an existing chart ID from UI context to change that chart. Default rolling windows, service grouping and interval averages; CPU/memory use statistics [avg]. Scatter always pairs the same timestamp and replica. For latency histograms, population=observations means retained request durations; population=rollups means a histogram of interval avg/max/p95 values, not a request distribution. If the user asks for a histogram of max and average latency use rollups and statistics [avg,max]. Resource histograms count interval averages. Supported windows: 5 minutes through 30 days, fixed dates within the last 31 days. Saved views are private and saved by the user using Pin chart set; do not claim you saved them.
 Use plain text, normally under 150 words. Give the main finding, evidence, and one useful next step. Do not enumerate unrelated mesh relationships or describe internal UI validation. Cite tool evidence by its name and observation time. Do not expose credentials or unrelated personal data.`;
 
 export function createAssistant(
@@ -232,6 +236,24 @@ export function createAssistant(
             description: 'Display the resources table and select a system in the mesh.',
             inputSchema: z.object({ system, sort: z.enum(['cpu', 'memory']).default('cpu') }),
             callback: args => show({ type: 'show_resources', ...args }),
+          }),
+          tool({
+            name: 'show_chart',
+            description: 'Create or replace a historical line, histogram or CPU/memory scatter chart in this UI. Specify a UUID (reuse an existing ID to edit), system ID, title, metric, statistics, time window, group, and population. No executable code or raw queries. Returns scoped evidence and availability.',
+            inputSchema: Chart,
+            callback: async args => {
+              check();
+              const spec = Chart.parse(args);
+              applyView(initialView(), { type: 'show_chart', chart: spec }, mesh);
+              if (!sources.charts) return {status:'unavailable',message:'Historical charts are unavailable on this deployment.'};
+              const result = await sources.charts(spec);
+              evidence('show_chart', `${result.scope.environment} / ${result.scope.deployment}; ${result.observedAt}; ${result.status}. ${result.message}`);
+              emit({ type:'view', action:{type:'show_chart',chart:spec}, contextKey:input.contextKey });
+              return {status:result.status,scope:result.scope,window:result.window,message:result.message,
+                series:result.series.map(s=>({name:s.name,unit:s.unit,points:s.points.filter(p=>p[1] !== null).length})),
+                bins:result.bins?.map(s=>({name:s.name,unit:s.unit,count:s.buckets.reduce((n,b)=>n+b.count,0)})),pairs:result.pairs?.length,
+                chartId:spec.id,ui:'view_requested'};
+            },
           }),
           tool({
             name: 'restore_view',

@@ -1,9 +1,13 @@
+import type { ChartSpec } from './charts';
 import { initialInvestigation, type InvestigationState, type SortColumn } from './investigation';
 import type { SignalView } from './datadog';
 import type { MeshSnapshot } from './types';
 
 export type ResourceSort = 'cpu' | 'memory';
 export interface ViewState {
+  charts?: ChartSpec[];
+  showCharts?: boolean;
+  meshCollapsed?: boolean;
   selected: string | null;
   signalView: SignalView;
   investigation: InvestigationState;
@@ -22,9 +26,13 @@ export type ViewAction =
       sort?: SortColumn;
     }
   | { type: 'show_resources'; system: string; sort: ResourceSort }
+  | { type: 'show_chart'; chart: ChartSpec }
   | { type: 'reset_view' }
   | { type: 'restore_view' };
 export const initialView = (): ViewState => ({
+  charts: [],
+  showCharts: false,
+  meshCollapsed: false,
   selected: null,
   signalView: 'overview',
   investigation: initialInvestigation(),
@@ -44,6 +52,15 @@ export function applyView(
 ): ViewState {
   if (action.type === 'restore_view') return previous ? structuredClone(previous) : view;
   if (action.type === 'reset_view') return initialView();
+  if (action.type === 'show_chart') {
+    if (!mesh.systems.some(s => s.id === action.chart.system)) throw new Error('System is no longer in this mesh');
+    const charts = [...(view.charts ?? [])];
+    const index = charts.findIndex(c => c.id === action.chart.id);
+    if (index >= 0) charts[index] = action.chart;
+    else if (charts.length < 8) charts.push(action.chart);
+    else throw new Error('Chart limit reached (8). Remove a chart first.');
+    return { ...view, charts, showCharts: true, meshCollapsed: true, showResources: false, showInspector: false };
+  }
   if (action.system && !mesh.systems.some(s => s.id === action.system))
     throw new Error('System is no longer in this mesh');
   if (action.type === 'show_resources')

@@ -13,6 +13,7 @@ import { appRouter, type TelemetryService } from './app-router.js';
 import type { Config } from './config.js';
 import { createAssistant, type AssistantService } from './assistant/service.js';
 import { assistantHttp } from './assistant/http.js';
+import { createChartRuntime, chartPath, chartMethod } from './charts/runtime';
 import { createResourceReader } from './telemetry/resources.js';
 
 export async function createApp(config: Config, telemetry: TelemetryService, options: {
@@ -32,7 +33,8 @@ export async function createApp(config: Config, telemetry: TelemetryService, opt
   const app = server.getApp();
   const resources = options.resources ?? telemetry.resources ?? createResourceReader(process.env);
   const caller = appRouter.createCaller({ staff: true, telemetry });
-  const assistant = options.assistant ?? createAssistant({ mesh: () => caller.telemetry.mesh(), datadog: () => caller.telemetry.datadog(), resources });
+  const charts = createChartRuntime(() => caller.telemetry.mesh());
+  const assistant = options.assistant ?? createAssistant({ mesh: () => caller.telemetry.mesh(), datadog: () => caller.telemetry.datadog(), resources, charts: charts.read });
   app.disable('x-powered-by');
   app.use((_req, res, next) => {
     res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY',
@@ -48,8 +50,9 @@ export async function createApp(config: Config, telemetry: TelemetryService, opt
   login.searchParams.set('next', config.origin + '/');
   app.use((req, res, next) => {
     const assistantPost = req.method === 'POST' && req.path === '/api/assistant/turn' && !req.url.includes('?');
-    if (!['GET', 'HEAD'].includes(req.method) && !assistantPost) { res.status(405).set('Allow', 'GET, HEAD').json({ error: 'Read-only service' }); return; }
-    if (assistantPost && req.headers.origin !== config.origin) { res.status(403).json({ error: 'Origin required' }); return; }
+    const chartWrite = chartPath(req.path) && chartMethod(req.path, req.method) && !['GET','HEAD'].includes(req.method) && !req.url.includes('?');
+    if (!['GET', 'HEAD'].includes(req.method) && !assistantPost && !chartWrite) { res.status(405).set('Allow', 'GET, HEAD').json({ error: 'Read-only service' }); return; }
+    if ((assistantPost || chartWrite) && req.headers.origin !== config.origin) { res.status(403).json({ error: 'Origin required' }); return; }
     if (req.headers.host !== new URL(config.origin).host || (req.headers.origin && req.headers.origin !== config.origin)) {
       res.status(403).json({ error: 'Origin not allowed' }); return;
     }
@@ -75,6 +78,10 @@ export async function createApp(config: Config, telemetry: TelemetryService, opt
   });
   // Match the SOA tRPC apps: health precedes the perimeter; framework routes follow it.
   await server.init(container, []);
+  app.use((req, res, next) => {
+    if (!chartPath(req.path)) return next();
+    void charts.handle(req, res, String(res.locals.subject ?? ''));
+  });
   app.get('/api/assistant/status', (_req, res) => res.json(assistant.status()));
   app.post('/api/assistant/turn', express.json({ limit: '16kb' }), (req, res) => {
     if (!res.locals.subject) { res.status(403).json({ error: 'Staff identity required' }); return; }
@@ -98,5 +105,5 @@ export async function createApp(config: Config, telemetry: TelemetryService, opt
   app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
   const errors: ErrorRequestHandler = (_error, _req, res, _next) => { res.status(500).json({ error: 'Request failed' }); };
   app.use(errors);
-  return { app, server, container };
+  return { app, server, container, closeCharts: charts.close };
 }

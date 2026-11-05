@@ -1,6 +1,6 @@
 # Vishnu chat charts — first-release scope and saved views
 
-**Status: RESOLVED 2026-11-05 — chart experience approved by skelly; data architecture remains open.**
+**Status: RESOLVED 2026-11-05 — chart experience and Datadog historical-source direction agreed; remaining architecture choices are open.**
 
 **Initiative:** [RabbitMQ event telemetry and Vishnu](../README.md).
 
@@ -31,13 +31,22 @@ requested a data-architecture conversation before implementation proceeds.
    can have different declared scope granularity (for example environment-wide
    APM versus sandbox MQ); disclose that difference and do not present it as
    exact deployment attribution.
+4. **Rely on Datadog for historical measurements.** In the architecture discussion,
+   skelly stated: "I don't want to rebuild datadog locally" and chose reliance on
+   Datadog availability as the historical-source direction. Vishnu will not build
+   a parallel metrics warehouse or mirror Datadog history for offline availability
+   as part of this release. Historical chart coverage depends on what is collected,
+   retained, scoped and accessible in Datadog. Saved chart definitions remain
+   Vishnu-owned application data, distinct from measurement history.
 
 ## Architecture discussion required
 
 Saga's mesh uses event-driven projections. Discuss how Vishnu should follow that
-pattern before choosing the historical-data architecture. These product decisions
-do not choose a new collector, event schema, broker topology, historical store,
-retention policy, or Datadog mirroring strategy.
+pattern for mesh state and saved investigations while Datadog supplies historical
+measurements. Remaining choices include saved-view ownership/sharing, time-window
+semantics, query caching and outage presentation, and how any missing MQ or other
+historical signals should reach Datadog. No new collector, event schema, broker
+topology or retention policy has been selected.
 
 The prior proposal was reusable chart components driven by a validated chart
 specification, rather than executable code generated at runtime. ECharts was a

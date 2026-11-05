@@ -371,3 +371,56 @@ describe('amqp vhost (twin)', () => {
         expect(msg).not.toContain('mq.dev.internal');
     });
 });
+
+describe('ARN account', () => {
+    const kms = (acct: string) => `arn:aws:kms:us-west-2:${acct}:key/1234abcd-12ab-34cd-56ef-1234567890ab`;
+    const arnViolations = (env: Record<string, string | undefined>, o: object = { accountId: DEV }) =>
+        checkLaneSafety({ ...clean, ...env }, o).filter((x) => x.check === 'arn-account');
+
+    it('passes an ARN in the allowed account', () => {
+        expect(arnViolations({ JWT_SIGNINGKEYARN: kms(DEV) })).toEqual([]);
+    });
+
+    it('rejects an ARN in the prod account', () => {
+        expect(arnViolations({ JWT_SIGNINGKEYARN: kms(PROD) })).toHaveLength(1);
+    });
+
+    it('rejects partitioned ARNs and ARNs embedded in longer values', () => {
+        expect(arnViolations({ A: kms(PROD).replace('arn:aws:', 'arn:aws-us-gov:') })).toHaveLength(1);
+        expect(arnViolations({ B: `x=1,${kms(PROD)};y=2` })).toHaveLength(1);
+    });
+
+    it('fires once per offending ARN', () => {
+        expect(arnViolations({ A: kms(PROD), B: kms(DEV), C: kms('111111111111') })).toHaveLength(2);
+    });
+
+    it('ignores account-less ARNs', () => {
+        expect(arnViolations({ B: 'arn:aws:s3:::some-bucket/key', I: 'arn:aws:iam::aws:policy/ReadOnlyAccess' })).toEqual([]);
+    });
+
+    it('honors allowedAccountIds', () => {
+        expect(arnViolations({ A: kms('111111111111') }, { accountId: '111111111111', allowedAccountIds: ['111111111111'] })).toEqual([]);
+        expect(arnViolations({ A: kms(DEV) }, { accountId: '111111111111', allowedAccountIds: ['111111111111'] })).toHaveLength(1);
+    });
+
+    it('applies to LANE=mirror too', () => {
+        expect(checkLaneSafety({ ...clean, LANE: 'mirror', A: kms(PROD) }, { accountId: DEV }).map((x) => x.check)).toEqual(['arn-account']);
+    });
+
+    it('is a no-op without a lane', () => {
+        expect(checkLaneSafety({ LANE: 'none', A: kms(PROD) })).toEqual([]);
+        expect(checkLaneSafety({ A: kms(PROD) })).toEqual([]);
+    });
+
+    it('names the var, never the ARN or account id', () => {
+        let msg = '';
+        try {
+            assertLaneSafe({ ...clean, SVCCRED_SIGNINGKEYARN: kms(PROD) }, { accountId: DEV });
+        } catch (e) {
+            msg = (e as Error).message;
+        }
+        expect(msg).toContain('[arn-account] SVCCRED_SIGNINGKEYARN');
+        expect(msg).not.toContain(PROD);
+        expect(msg).not.toContain('1234abcd');
+    });
+});

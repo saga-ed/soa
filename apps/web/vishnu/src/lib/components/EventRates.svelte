@@ -15,5 +15,5 @@
  <p>— Unknown · 0 Measured idle. {view?.staleAfterMs ? `Reports expire after ${view.staleAfterMs/1000}s.` : ''}</p>
 </section>
 <style>
- .event-rates { padding:10px; border:1px solid var(--color-border); border-radius:4px; margin-block:10px; } p,summary {font-size:11px;line-height:1.5;margin-bottom:6px} div {display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12px;margin-bottom:8px} .scope {color:var(--color-text-secondary)} details p {overflow-wrap:anywhere}
+ .event-rates { padding:10px; border:1px solid var(--color-border); border-radius:4px; margin-block:10px; } p,summary {font-size:var(--vishnu-ui-font-size);line-height:1.5;margin-bottom:6px} div {display:flex;flex-wrap:wrap;gap:6px 12px;font-size:var(--vishnu-ui-font-size);margin-bottom:8px} .scope {color:var(--color-text-secondary)} details p {overflow-wrap:anywhere}
 </style>

@@ -35,7 +35,7 @@
 </section>
 <style>
  .offenders { margin-block:14px; padding:12px; background:var(--color-bg); border:1px solid var(--color-border-strong); border-radius:6px; }
- h3 { margin-top:0; } p, small { font-size:11px; line-height:1.5; } .path { overflow-wrap:anywhere; }
+ h3 { margin-top:0; } p, small { font-size:var(--vishnu-ui-font-size); line-height:1.5; } .path { overflow-wrap:anywhere; }
  ol { padding-left:20px; } li { padding:8px 0; border-bottom:1px solid var(--color-border); }
- strong, small, .rank-value { display:block; overflow-wrap:anywhere; } strong {font-size:12px;} .rank-value { font-size:14px; margin:4px 0; } .scope { opacity:.7; overflow-wrap:anywhere; }
+ strong, small, .rank-value { display:block; overflow-wrap:anywhere; } strong {font-size:var(--vishnu-ui-font-size);} .rank-value { font-size:var(--vishnu-ui-font-size); margin:4px 0; } .scope { opacity:.7; overflow-wrap:anywhere; }
 </style>

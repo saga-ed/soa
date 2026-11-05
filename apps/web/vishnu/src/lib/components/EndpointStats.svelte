@@ -56,7 +56,7 @@
 <style>
   .endpoint-stats { border-top: 1px solid var(--color-border); margin-top: var(--space-md); padding-top: var(--space-sm); }
   .measurement-table { overflow-x: auto; max-width: 100%; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
-  table { border-collapse: collapse; font-size: 11px; width: 100%; }
+  table { border-collapse: collapse; font-size:var(--vishnu-ui-font-size); width: 100%; }
   th, td { padding: 8px; text-align: right; vertical-align: top; border-bottom: 1px solid var(--color-border); }
   th:first-child { text-align: left; overflow-wrap: anywhere; min-width: 110px; }
   thead th { background: var(--color-bg-secondary); }

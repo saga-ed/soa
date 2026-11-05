@@ -58,10 +58,10 @@
  {#if usage}<small>{usage.toolCalls} tool calls · {usage.inputTokens.toLocaleString()} input / {usage.outputTokens.toLocaleString()} output tokens</small>{/if}
 </section>
 <style>
- .assistant-panel { padding: 16px; margin: 0; font-size: 13px; line-height: 1.5; border: 1px solid var(--color-border, #bac6d0); border-radius: 12px; background: var(--color-bg-surface, white); }
+ .assistant-panel { padding: 16px; margin: 0; font-size:var(--vishnu-ui-font-size); line-height: 1.5; border: 1px solid var(--color-border, #bac6d0); border-radius: 12px; background: var(--color-bg-surface, white); }
  .assistant-heading { display: flex; flex-direction: column; gap: 12px; }
  .assistant-heading>div:last-child, .assistant-input { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
- h2 { margin: 0; font-size: 16px; line-height: 1.5; font-weight: 600; }
+ h2 { margin: 0; font-size:var(--vishnu-ui-font-size); line-height: 1.5; font-weight: 600; }
  p, label, button, textarea, small, summary { font-family: inherit; font-size: inherit; line-height: inherit; }
  .assistant-suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 16px 0; }
  .assistant-suggestions button { padding: 8px 6px; }

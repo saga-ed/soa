@@ -32,11 +32,11 @@
 </div>
 <style>
  .display-settings { position: relative; margin-left: auto; }
- .gear { width: 32px; height: 32px; padding: 0; font-size: 21px; }
+ .gear { width: 32px; height: 32px; padding: 0; font-size:var(--vishnu-ui-font-size); }
  .settings-panel { position: absolute; top: 38px; right: 0; z-index: 100; width: 260px; padding: 14px; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-bg); color: var(--color-text); box-shadow: 0 8px 30px #0002; }
  .settings-heading { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
  .settings-heading button { padding: 2px 8px; }
- label { display:block; font-size:13px; margin-bottom:6px; }
+ label { display:block; font-size:var(--vishnu-ui-font-size); margin-bottom:6px; }
  input { width: 80px; }
- p { font-size:12px; line-height:1.5; color:var(--color-text-muted); margin-bottom:0; }
+ p { font-size:var(--vishnu-ui-font-size); line-height:1.5; color:var(--color-text-muted); margin-bottom:0; }
 </style>

@@ -1,3 +1,9 @@
+/* Product-style uses 15/17/19px roots. Keep UI copy at 11px while retaining
+   rem-based user text scaling and the mesh's independent typography. */
+:root { --vishnu-ui-font-size: calc(11rem / 15); }
+@media (min-width: 1400px) { :root { --vishnu-ui-font-size: calc(11rem / 17); } }
+@media (min-width: 1800px) { :root { --vishnu-ui-font-size: calc(11rem / 19); } }
+
 * {
   box-sizing: border-box;
 }
@@ -741,3 +747,12 @@ main { padding: 8px 16px 12px; position: relative; }
 .investigation-evidence dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; font-size: 12px; }
 .investigation-evidence dd { margin: 4px 0; font-weight: 600; }
 @media (max-width: 850px) { .investigation-scroll { max-height: 60vh; } }
+
+/* These surfaces exclude the graph canvas, its labels, controls and previews. */
+.app-shell :is(.topbar, .toolbar, .inspector, .assistant-panel, .resources-panel,
+  .mesh-list, .live-status, .datadog-status, .demo-banner, .demo-entry, .signal-legend),
+.app-shell :is(.topbar, .toolbar, .inspector, .assistant-panel, .resources-panel,
+  .mesh-list, .live-status, .datadog-status, .demo-banner, .demo-entry, .signal-legend) :where(*),
+#mesh-main > p {
+  font-size: var(--vishnu-ui-font-size);
+}

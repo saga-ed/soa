@@ -25,18 +25,18 @@ SELECT pg_temp.mirror_drop_unreviewed() AS n_dropped \gset
 SELECT pg_temp.mirror_audit() AS n_resid \gset
 SELECT (:dry = 1)::int AS is_dry, (:do_drop = 1 AND :n_resid > 0)::int AS must_rollback \gset
 \set post_n -1
-\if :is_dry
-\set status dry_run
-\set exit_code 40
-\i :report
-ROLLBACK;
-\echo MIRROR_SCRUB_DRYRUN :db :n_planned
-\elif :must_rollback
+\if :must_rollback
 \set status rolled_back
 \set exit_code 20
 \i :report
 ROLLBACK;
 \echo MIRROR_SCRUB_RESIDUE :db :n_resid
+\elif :is_dry
+\set status dry_run
+\set exit_code 40
+\i :report
+ROLLBACK;
+\echo MIRROR_SCRUB_DRYRUN :db :n_planned
 \else
 SELECT pg_temp.mirror_release();
 SELECT pg_temp.mirror_expect_db(:'db');

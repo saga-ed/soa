@@ -32,10 +32,12 @@ force IAM auth on the master, locking out its password logins.
 
    `run` **drops** every unreviewed table/view/matview (`DROP ... CASCADE`, whole relation, never
    nulling columns) inside the transaction, re-audits, and rolls back (exit 20) if anything unreviewed
-   remains (extension-owned relations, large objects). Every cascaded dependent is itemised in the
+   remains (extconfig tables of extensions, large objects). Every cascaded dependent is itemised in the
    report. **Referencing tables keep their rows**: foreign keys onto a dropped table are dropped, so
-   those rows hold dangling ids. Never touched: `_prisma_migrations`, `goose_db_version`, extension-owned
-   relations with reviewed columns, and the scrub's own `_real` tables and swap views.
+   those rows hold dangling ids. Never touched: `_prisma_migrations` / `goose_db_version` base tables in any schema whose columns match
+   the tool's exact shape (a look-alike with another column is audited), extension-owned relations (except
+   tables in `pg_extension.extconfig`, which stay audited), and the scrub's own swap views. An already
+   swapped `<t>_real` found on a re-run is re-owned and its grants revoked.
 
 `ss stack hydrate --source real` reads `t_real`; `--source scrubbed` reads the view.
 
@@ -108,6 +110,8 @@ A runner scrubbing many databases should run them all, then fail on any code oth
 (a 20 is a raw database and the mirror must not be handed out). Treat 12 as success **with a loud report**.
 
 `--dry-run` runs scrub, plan, drop and re-audit inside the transaction, writes the report, then rolls back.
+Exit 40 means a real run would succeed (0/12); exit 20 means it would roll back. The report lists everything
+under `would_drop`; `dropped` and `left_raw` stay empty. `check` ends with such a dry-run and fails on 20.
 
 `--on-unreviewed keep` (the escape hatch) restores the 0.1.x behavior: nothing is dropped and unreviewed
 items stay RAW (exit 10). It requires `--keep-until` (today or later, at most 14 days out) and

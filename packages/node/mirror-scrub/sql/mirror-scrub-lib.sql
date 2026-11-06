@@ -187,7 +187,9 @@ BEGIN
 END;
 $fn$;
 
-CREATE OR REPLACE FUNCTION pg_temp.mirror_swap(p_schema text, p_base text)
+-- Makes <base>_real master-owned with no table or column grants (PUBLIC included) and locks its dependents.
+-- p_move: first move each SELECT grant to the public view <base> (swap); a re-run just revokes.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_lock_real(p_schema text, p_base text, p_move boolean)
 RETURNS void LANGUAGE plpgsql AS $fn$
 DECLARE
   v_real oid;
@@ -195,11 +197,7 @@ DECLARE
 BEGIN
   SELECT c.oid INTO v_real
     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = p_schema AND c.relname = p_base AND c.relkind = 'r';
-  IF v_real IS NULL THEN RETURN; END IF;
-
-  EXECUTE format('ALTER TABLE %I.%I RENAME TO %I', p_schema, p_base, p_base || '_real');
-  EXECUTE format('ALTER VIEW %I.%I RENAME TO %I', p_schema, p_base || '_public', p_base);
+   WHERE n.nspname = p_schema AND c.relname = p_base || '_real' AND c.relkind = 'r';
 
   -- The service's owner role must not keep owner access to the real data either.
   IF (SELECT relowner FROM pg_class WHERE oid = v_real) <> (SELECT oid FROM pg_roles WHERE rolname = current_user) THEN
@@ -216,7 +214,7 @@ BEGIN
      WHERE c.oid = v_real AND (a.grantee = 0 OR r.rolname <> current_user)
      GROUP BY a.grantee, r.rolname
   LOOP
-    IF g.has_select THEN
+    IF p_move AND g.has_select THEN
       EXECUTE format('GRANT SELECT ON %I.%I TO %s', p_schema, p_base, g.who);
     END IF;
     EXECUTE format('REVOKE ALL ON %I.%I FROM %s', p_schema, p_base || '_real', g.who);
@@ -232,13 +230,32 @@ BEGIN
      WHERE at.attrelid = v_real AND at.attacl IS NOT NULL AND (a.grantee = 0 OR r.rolname <> current_user)
      GROUP BY at.attname, a.grantee, r.rolname
   LOOP
-    IF g.has_select THEN
+    IF p_move AND g.has_select THEN
       EXECUTE format('GRANT SELECT (%I) ON %I.%I TO %s', g.attname, p_schema, p_base, g.who);
     END IF;
     EXECUTE format('REVOKE ALL (%I) ON %I.%I FROM %s', g.attname, p_schema, p_base || '_real', g.who);
   END LOOP;
 
+  IF NOT pg_temp.mirror_locked(v_real) THEN
+    RAISE EXCEPTION 'mirror_lock_real: %.%_real still has an owner or grant other than %', p_schema, p_base, current_user;
+  END IF;
   PERFORM pg_temp.mirror_lock_dependents(v_real);
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_swap(p_schema text, p_base text)
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+  v_real oid;
+BEGIN
+  SELECT c.oid INTO v_real
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = p_schema AND c.relname = p_base AND c.relkind = 'r';
+  IF v_real IS NULL THEN RETURN; END IF;
+
+  EXECUTE format('ALTER TABLE %I.%I RENAME TO %I', p_schema, p_base, p_base || '_real');
+  EXECUTE format('ALTER VIEW %I.%I RENAME TO %I', p_schema, p_base || '_public', p_base);
+  PERFORM pg_temp.mirror_lock_real(p_schema, p_base, true);
 END;
 $fn$;
 
@@ -321,7 +338,9 @@ BEGIN
                  'mirror-scrub:' || coalesce((SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(p_overrides) k), ''));
   INSERT INTO pg_temp.mirror_created
     VALUES (format('%I.%I', p_schema, v_view)::regclass::oid) ON CONFLICT DO NOTHING;
-  IF NOT v_swapped THEN
+  IF v_swapped THEN
+    PERFORM pg_temp.mirror_lock_real(p_schema, p_table, false);
+  ELSE
     PERFORM pg_temp.mirror_swap(p_schema, p_table);
   END IF;
 END;
@@ -340,10 +359,39 @@ LANGUAGE sql AS $fn$
   SELECT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = p_rel AND d.deptype = 'e');
 $fn$;
 
--- Infra tables never touched: public base tables only, so a same-named table elsewhere is audited normally.
-CREATE OR REPLACE FUNCTION pg_temp.mirror_is_infra(p_kind "char", p_schema text, p_name text) RETURNS boolean
+-- Infra tables never touched: base tables in any schema, named like a migration tool's table AND with exactly
+-- that tool's column set and types. A look-alike with any other column is audited like any other table.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_is_infra(p_rel oid) RETURNS boolean
 LANGUAGE sql AS $fn$
-  SELECT p_kind = 'r' AND p_schema = 'public' AND p_name IN ('_prisma_migrations', 'goose_db_version');
+  WITH shape(tbl, col, types) AS (VALUES
+    ('_prisma_migrations', 'id', ARRAY['character varying']),
+    ('_prisma_migrations', 'checksum', ARRAY['character varying']),
+    ('_prisma_migrations', 'finished_at', ARRAY['timestamp with time zone']),
+    ('_prisma_migrations', 'migration_name', ARRAY['character varying']),
+    ('_prisma_migrations', 'logs', ARRAY['text']),
+    ('_prisma_migrations', 'rolled_back_at', ARRAY['timestamp with time zone']),
+    ('_prisma_migrations', 'started_at', ARRAY['timestamp with time zone']),
+    ('_prisma_migrations', 'applied_steps_count', ARRAY['integer']),
+    ('goose_db_version', 'id', ARRAY['integer', 'bigint']),
+    ('goose_db_version', 'version_id', ARRAY['bigint']),
+    ('goose_db_version', 'is_applied', ARRAY['boolean']),
+    ('goose_db_version', 'tstamp', ARRAY['timestamp without time zone', 'timestamp with time zone']))
+  SELECT c.relkind = 'r' AND c.relname IN ('_prisma_migrations', 'goose_db_version')
+     AND (SELECT count(*) FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped)
+         = (SELECT count(*) FROM shape s WHERE s.tbl = c.relname)
+     AND NOT EXISTS (SELECT 1 FROM pg_attribute a
+                      WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+                        AND NOT EXISTS (SELECT 1 FROM shape s
+                                         WHERE s.tbl = c.relname AND s.col = a.attname
+                                           AND format_type(a.atttypid, NULL) = ANY (s.types)))
+    FROM pg_class c WHERE c.oid = p_rel;
+$fn$;
+
+-- Extension relations are exempt from the audit unless the extension lists them in pg_extension.extconfig.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_ext_exempt(p_rel oid) RETURNS boolean
+LANGUAGE sql AS $fn$
+  SELECT pg_temp.mirror_is_ext(p_rel)
+     AND NOT EXISTS (SELECT 1 FROM pg_extension e WHERE p_rel = ANY (e.extconfig));
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_large_objects() RETURNS bigint
@@ -369,7 +417,8 @@ LANGUAGE sql AS $fn$
            AND v.oid IN (SELECT mc.oid FROM pg_temp.mirror_created mc)
      WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT c.relispartition
        AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname !~ '^pg_(toast|temp)'
-       AND NOT pg_temp.mirror_is_infra(c.relkind, n.nspname, c.relname)
+       AND NOT pg_temp.mirror_is_infra(c.oid)
+       AND NOT pg_temp.mirror_ext_exempt(c.oid)
        AND c.oid NOT IN (SELECT mc.oid FROM pg_temp.mirror_created mc)
   ), kn AS (
     SELECT b.*,
@@ -380,13 +429,13 @@ LANGUAGE sql AS $fn$
   ), on_real AS (
     SELECT oid FROM pg_temp.mirror_dependents(ARRAY(SELECT oid FROM base WHERE swapped))
   )
-  SELECT k.sch, k.logical, k.relkind, NULL::text, 'unreviewed_table', k.oid, false, false
+  SELECT k.sch, k.logical, k.relkind, NULL::text, 'unreviewed_table', k.oid, false, k.is_ext
     FROM kn k
-   WHERE k.relkind IN ('r', 'p', 'f') AND NOT k.is_known AND NOT k.is_ext
+   WHERE k.relkind IN ('r', 'p', 'f') AND NOT k.is_known
   UNION ALL
   SELECT k.sch, k.logical, k.relkind, NULL::text, 'unreviewed_matview', k.oid, false, false
     FROM kn k
-   WHERE k.relkind = 'm' AND k.relispopulated AND NOT k.is_known AND NOT k.is_ext
+   WHERE k.relkind = 'm' AND k.relispopulated AND NOT k.is_known
      AND k.oid NOT IN (SELECT oid FROM on_real)
   UNION ALL
   SELECT k.sch, k.logical, k.relkind, a.attname::text, 'unreviewed_column', k.oid, k.swapped, k.is_ext
@@ -398,6 +447,10 @@ LANGUAGE sql AS $fn$
      AND NOT EXISTS (SELECT 1 FROM pg_temp.mirror_allow m
                       WHERE m.db = current_database() AND m.tbl = k.logical AND m.col = a.attname
                         AND coalesce(m.sch, 'public') = k.sch)
+  UNION ALL
+  SELECT k.sch, k.logical, k.relkind, NULL::text, 'unlocked_real', k.oid, true, false
+    FROM kn k
+   WHERE k.relkind = 'r' AND k.swapped AND NOT pg_temp.mirror_locked(k.oid)
   UNION ALL
   SELECT k.sch, k.logical, k.relkind, NULL::text, 'unlocked_dependent', k.oid, false, k.is_ext
     FROM kn k
@@ -432,6 +485,9 @@ BEGIN
           current_database(), r.f_sch, r.f_logical;
       WHEN 'unreviewed_matview' THEN
         RAISE NOTICE 'UNREVIEWED MATVIEW % .%.%', current_database(), r.f_sch, r.f_logical;
+      WHEN 'unlocked_real' THEN
+        RAISE NOTICE 'UNLOCKED REAL TABLE % .%.%_real keeps an owner or grants besides the scrub role',
+          current_database(), r.f_sch, r.f_logical;
       WHEN 'unlocked_dependent' THEN
         RAISE NOTICE 'UNLOCKED DEPENDENT % .%.% reads a scrubbed table''s real data (not master-owned/ungranted/emptied)',
           current_database(), r.f_sch, r.f_logical;
@@ -574,7 +630,7 @@ BEGIN
      GROUP BY f_oid, f_sch, f_logical, f_relkind
      ORDER BY CASE f_relkind WHEN 'v' THEN 3 WHEN 'm' THEN 2 ELSE 1 END, f_sch, f_logical
   LOOP
-    IF p_exact AND r.f_relkind IN ('r', 'p', 'f', 'm') THEN
+    IF p_exact AND r.f_relkind IN ('r', 'p', 'm') THEN
       EXECUTE format('SELECT count(*) FROM %s', r.f_oid::regclass) INTO v_rows;
     ELSIF r.f_relkind = 'p' THEN
       SELECT sum(c.reltuples)::bigint INTO v_rows
@@ -634,8 +690,8 @@ BEGIN
     SELECT CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'f' THEN 'FOREIGN TABLE' ELSE 'TABLE' END
       INTO v_kw FROM pg_class c WHERE c.oid = r.oid;
     IF v_kw IS NULL THEN
-      UPDATE pg_temp.mirror_plan_t SET dropped = true WHERE seq = r.seq;
-      v_n := v_n + 1;
+      -- Already removed by an earlier entry's cascade: that entry's cascade list reports it.
+      DELETE FROM pg_temp.mirror_plan_t WHERE seq = r.seq;
       CONTINUE;
     END IF;
 
@@ -685,17 +741,17 @@ CREATE OR REPLACE FUNCTION pg_temp.mirror_report_json(
     'tool', jsonb_build_object('name', '@saga-ed/soa-mirror-scrub', 'version', p_version),
     'db', current_database(), 'mode', p_mode, 'dry_run', p_dry, 'status', p_status, 'exit_code', p_exit,
     'counts', jsonb_build_object(
-      'dropped', (SELECT count(*) FROM pg_temp.mirror_plan_t WHERE dropped),
-      'cascaded', (SELECT coalesce(sum(jsonb_array_length(cascade) - 1), 0) FROM pg_temp.mirror_plan_t WHERE dropped),
-      'left_raw', (SELECT count(*) FROM pg_temp.mirror_plan_t WHERE NOT dropped),
-      'estimated_rows_dropped', (SELECT coalesce(sum(rows_est), 0) FROM pg_temp.mirror_plan_t WHERE dropped)),
-    'dropped', (SELECT coalesce(jsonb_agg(pg_temp.mirror_plan_entry(t) ORDER BY seq), '[]') FROM pg_temp.mirror_plan_t t WHERE dropped),
-    'left_raw', (SELECT coalesce(jsonb_agg(pg_temp.mirror_plan_entry(t) ORDER BY seq), '[]') FROM pg_temp.mirror_plan_t t WHERE NOT dropped),
+      'dropped', (SELECT count(*) FROM pg_temp.mirror_plan_t WHERE dropped AND NOT p_dry),
+      'cascaded', (SELECT coalesce(sum(jsonb_array_length(cascade) - 1), 0) FROM pg_temp.mirror_plan_t WHERE dropped AND NOT p_dry),
+      'left_raw', (SELECT count(*) FROM pg_temp.mirror_plan_t WHERE NOT dropped AND NOT p_dry),
+      'estimated_rows_dropped', (SELECT coalesce(sum(rows_est), 0) FROM pg_temp.mirror_plan_t WHERE dropped AND NOT p_dry)),
+    'dropped', (SELECT coalesce(jsonb_agg(pg_temp.mirror_plan_entry(t) ORDER BY seq), '[]') FROM pg_temp.mirror_plan_t t WHERE dropped AND NOT p_dry),
+    'left_raw', (SELECT coalesce(jsonb_agg(pg_temp.mirror_plan_entry(t) ORDER BY seq), '[]') FROM pg_temp.mirror_plan_t t WHERE NOT dropped AND NOT p_dry),
     'would_drop', (SELECT coalesce(jsonb_agg(pg_temp.mirror_plan_entry(t) ORDER BY seq), '[]') FROM pg_temp.mirror_plan_t t
                     WHERE p_dry OR p_mode = 'keep'),
     'infra_allowlisted', (SELECT coalesce(jsonb_agg(n.nspname || '.' || c.relname ORDER BY n.nspname, c.relname), '[]')
                             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                           WHERE pg_temp.mirror_is_infra(c.relkind, n.nspname, c.relname)),
+                           WHERE pg_temp.mirror_is_infra(c.oid)),
     'inventory', jsonb_build_object(
       'relkinds', (SELECT coalesce(jsonb_object_agg(relkind::text, n), '{}') FROM (
                      SELECT c.relkind, count(*) AS n FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
@@ -724,7 +780,7 @@ CREATE OR REPLACE FUNCTION pg_temp.mirror_report_md(
       E'\n| Relation | Reason | Columns | Rows~ | State |\n|---|---|---|---|---|' || E'\n' ||
       (SELECT string_agg(format('| `%s.%s` | %s | %s | %s | %s |', sch, logical, array_to_string(reasons, ','),
                                 coalesce(array_to_string(cols, ','), ''), coalesce(rows_est::text, '?'),
-                                CASE WHEN dropped THEN 'DROPPED' WHEN undroppable THEN 'RAW (cannot drop)' WHEN p_mode = 'keep' THEN 'RAW (kept)' ELSE 'RAW' END),
+                                CASE WHEN dropped AND p_dry THEN 'WOULD DROP' WHEN dropped THEN 'DROPPED' WHEN undroppable THEN 'RAW (cannot drop)' WHEN p_mode = 'keep' THEN 'RAW (kept)' ELSE 'RAW' END),
                          E'\n' ORDER BY seq)
          FROM (SELECT * FROM pg_temp.mirror_plan_t ORDER BY seq LIMIT 100) t) ||
       CASE WHEN (SELECT count(*) FROM pg_temp.mirror_plan_t) > 100

@@ -252,6 +252,9 @@ DECLARE
   v_kind    "char";
   v_cols    text[] := '{}';
   v_missing text[];
+  v_real    oid;
+  v_view    text;
+  v_swapped boolean := false;
   r         record;
 BEGIN
   SELECT c.oid, c.relkind INTO v_oid, v_kind
@@ -266,20 +269,19 @@ BEGIN
     RETURN;
   END IF;
 
+  v_view := p_table || '_public';
   IF v_kind = 'v' THEN
-    IF EXISTS (
-      SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE n.nspname = p_schema AND c.relname = p_table || '_real' AND c.relkind = 'r'
-    ) THEN
-      INSERT INTO pg_temp.mirror_created
-        SELECT vc.oid FROM pg_class vc
-         WHERE vc.oid = v_oid AND vc.relowner = (SELECT ro.oid FROM pg_roles ro WHERE ro.rolname = current_user)
-           AND coalesce(obj_description(vc.oid, 'pg_class'), '') LIKE 'mirror-scrub:%'
-        ON CONFLICT DO NOTHING;
-      RAISE NOTICE 'mirror_scrub: %.% already swapped - skipped', p_schema, p_table;
-      RETURN;
+    -- Re-run on an already swapped table: rebuild the view from the _real table so nothing about it is trusted.
+    SELECT c.oid INTO v_real
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = p_schema AND c.relname = p_table || '_real' AND c.relkind = 'r';
+    IF v_real IS NULL THEN
+      RAISE EXCEPTION 'mirror_scrub: %.% is a view with no %_real table', p_schema, p_table, p_table;
     END IF;
-    RAISE EXCEPTION 'mirror_scrub: %.% is a view with no %_real table', p_schema, p_table, p_table;
+    RAISE NOTICE 'mirror_scrub: %.% already swapped - view rebuilt', p_schema, p_table;
+    v_oid := v_real;
+    v_view := p_table;
+    v_swapped := true;
   END IF;
 
   PERFORM pg_temp.mirror_adopt((SELECT relowner FROM pg_class WHERE oid = v_oid));
@@ -313,13 +315,15 @@ BEGIN
     END IF;
   END LOOP;
 
-  EXECUTE format('CREATE OR REPLACE VIEW %I.%I AS SELECT %s FROM %I.%I',
-                 p_schema, p_table || '_public', array_to_string(v_cols, ', '), p_schema, p_table);
-  EXECUTE format('COMMENT ON VIEW %I.%I IS %L', p_schema, p_table || '_public',
+  EXECUTE format('CREATE OR REPLACE VIEW %I.%I AS SELECT %s FROM %s',
+                 p_schema, v_view, array_to_string(v_cols, ', '), v_oid::regclass);
+  EXECUTE format('COMMENT ON VIEW %I.%I IS %L', p_schema, v_view,
                  'mirror-scrub:' || coalesce((SELECT string_agg(k, ',' ORDER BY k) FROM jsonb_object_keys(p_overrides) k), ''));
   INSERT INTO pg_temp.mirror_created
-    VALUES (format('%I.%I', p_schema, p_table || '_public')::regclass::oid) ON CONFLICT DO NOTHING;
-  PERFORM pg_temp.mirror_swap(p_schema, p_table);
+    VALUES (format('%I.%I', p_schema, v_view)::regclass::oid) ON CONFLICT DO NOTHING;
+  IF NOT v_swapped THEN
+    PERFORM pg_temp.mirror_swap(p_schema, p_table);
+  END IF;
 END;
 $fn$;
 

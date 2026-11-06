@@ -499,6 +499,22 @@ CREATE OR REPLACE FUNCTION pg_temp.mirror_large_objects() RETURNS bigint LANGUAG
         expect(r.report.left_raw[0].cascade.some((c: any) => c.kind === 'policy')).toBe(true);
     });
 
+    it('fails closed (exit 20) when the drop would remove a trigger on a retained table', () => {
+        const { db, allow } = ownedDb();
+        allowMore(allow, db, "(DB, 'kept2', '*')");
+        ownerObjs(
+            db,
+            `CREATE TABLE ghost3 (id uuid); CREATE TABLE kept2 (a uuid);
+             CREATE FUNCTION kept2_fn() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN RETURN NEW; END $f$;
+             CREATE CONSTRAINT TRIGGER kept2_t AFTER INSERT ON kept2 FROM ghost3 FOR EACH ROW EXECUTE FUNCTION kept2_fn();`,
+            ['ghost3', 'kept2'],
+        );
+        const r = runDrop(db, allow);
+        expect(r.code, r.out).toBe(20);
+        expect(relkind(db, 'ghost3')).toBe('r');
+        expect(r.report.left_raw.find((x: any) => x.table === 'ghost3').cascade.some((c: any) => c.kind === 'trigger')).toBe(true);
+    });
+
     it('a scrub error still leaves a minimal report that matches the exit (20, rolled_back)', () => {
         const { db, allow } = ownedDb();
         const bad = file(`${db}.err.sql`, "SELECT pg_temp.mirror_scrub('public', 'nope', '{}'::jsonb);\n");

@@ -336,6 +336,12 @@ LANGUAGE sql AS $fn$
   SELECT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = p_rel AND d.deptype = 'e');
 $fn$;
 
+-- Infra tables never touched: public base tables only, so a same-named table elsewhere is audited normally.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_is_infra(p_kind "char", p_schema text, p_name text) RETURNS boolean
+LANGUAGE sql AS $fn$
+  SELECT p_kind = 'r' AND p_schema = 'public' AND p_name IN ('_prisma_migrations', 'goose_db_version');
+$fn$;
+
 CREATE OR REPLACE FUNCTION pg_temp.mirror_large_objects() RETURNS bigint
 LANGUAGE sql AS $fn$ SELECT count(*) FROM pg_largeobject_metadata; $fn$;
 
@@ -359,7 +365,7 @@ LANGUAGE sql AS $fn$
            AND v.oid IN (SELECT mc.oid FROM pg_temp.mirror_created mc)
      WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT c.relispartition
        AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname !~ '^pg_(toast|temp)'
-       AND NOT (c.relkind = 'r' AND n.nspname = 'public' AND c.relname IN ('_prisma_migrations', 'goose_db_version'))
+       AND NOT pg_temp.mirror_is_infra(c.relkind, n.nspname, c.relname)
        AND c.oid NOT IN (SELECT mc.oid FROM pg_temp.mirror_created mc)
   ), kn AS (
     SELECT b.*,
@@ -521,7 +527,7 @@ $fn$;
 CREATE TEMP TABLE IF NOT EXISTS mirror_plan_t (
   seq serial, oid oid, sch text, logical text, relkind "char", swapped boolean,
   reasons text[], cols text[], undroppable boolean,
-  rows_est bigint, size_bytes bigint, cascade jsonb, owner oid,
+  rows_est bigint, size_bytes bigint, cascade jsonb, owner oid, closure text[],
   dropped boolean NOT NULL DEFAULT false
 );
 
@@ -554,17 +560,27 @@ BEGIN
     v_casc := pg_temp.mirror_cascade(r.f_oid);
     -- A policy, trigger or rule on a retained table would vanish silently: fail closed instead.
     INSERT INTO pg_temp.mirror_plan_t
-      (oid, sch, logical, relkind, swapped, reasons, cols, undroppable, rows_est, size_bytes, cascade, owner)
+      (oid, sch, logical, relkind, swapped, reasons, cols, undroppable, rows_est, size_bytes, cascade, owner, closure)
     SELECT r.f_oid, r.f_sch, r.f_logical, r.f_relkind, r.swapped, r.reasons, r.cols,
            r.undroppable OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_casc) e WHERE e ->> 'kind' IN ('policy', 'trigger', 'rule')),
            v_rows,
            CASE WHEN r.f_relkind = 'p' THEN (SELECT sum(pg_total_relation_size(t.relid))::bigint FROM pg_partition_tree(r.f_oid) t WHERE t.isleaf)
                 WHEN r.f_relkind IN ('v', 'f') THEN 0 ELSE pg_total_relation_size(r.f_oid) END,
            v_casc,
-           (SELECT relowner FROM pg_class WHERE oid = r.f_oid);
+           (SELECT relowner FROM pg_class WHERE oid = r.f_oid),
+           pg_temp.mirror_closure_keys(r.f_oid);
   END LOOP;
   RETURN (SELECT count(*) FROM pg_temp.mirror_plan_t);
 END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_closure_keys(p_oid oid) RETURNS text[]
+LANGUAGE sql AS $fn$
+  SELECT array_agg(CASE classid WHEN 'pg_class'::regclass THEN 'pg_class:' WHEN 'pg_constraint'::regclass THEN 'pg_constraint:'
+                                WHEN 'pg_trigger'::regclass THEN 'pg_trigger:' WHEN 'pg_policy'::regclass THEN 'pg_policy:'
+                                WHEN 'pg_rewrite'::regclass THEN 'pg_rewrite:' WHEN 'pg_attrdef'::regclass THEN 'pg_attrdef:'
+                                ELSE 'other:' END || objid)
+    FROM pg_temp.mirror_closure(p_oid);
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_catalog_keys() RETURNS text[]
@@ -605,11 +621,7 @@ BEGIN
     END IF;
 
     v_before := pg_temp.mirror_catalog_keys();
-    SELECT array_agg(CASE classid WHEN 'pg_class'::regclass THEN 'pg_class:' WHEN 'pg_constraint'::regclass THEN 'pg_constraint:'
-                                  WHEN 'pg_trigger'::regclass THEN 'pg_trigger:' WHEN 'pg_policy'::regclass THEN 'pg_policy:'
-                                  WHEN 'pg_rewrite'::regclass THEN 'pg_rewrite:' WHEN 'pg_attrdef'::regclass THEN 'pg_attrdef:'
-                                  ELSE 'other:' END || objid)
-      INTO v_closure FROM pg_temp.mirror_closure(r.oid);
+    v_closure := r.closure;
 
     EXECUTE format('DROP %s %s CASCADE', v_kw, r.oid::regclass);
 
@@ -641,7 +653,7 @@ LANGUAGE sql AS $fn$
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_report_json(
-  p_mode text, p_dry boolean, p_status text, p_exit integer, p_version text, p_until text, p_ref text
+  p_mode text, p_dry boolean, p_status text, p_exit integer, p_version text, p_until text, p_ref text, p_post integer
 ) RETURNS text LANGUAGE sql AS $fn$
   SELECT jsonb_pretty(jsonb_build_object(
     'schema_version', 1,
@@ -658,7 +670,7 @@ CREATE OR REPLACE FUNCTION pg_temp.mirror_report_json(
                     WHERE p_dry OR p_mode = 'keep'),
     'infra_allowlisted', (SELECT coalesce(jsonb_agg(n.nspname || '.' || c.relname ORDER BY n.nspname, c.relname), '[]')
                             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                           WHERE c.relkind = 'r' AND n.nspname = 'public' AND c.relname IN ('_prisma_migrations', 'goose_db_version')),
+                           WHERE pg_temp.mirror_is_infra(c.relkind, n.nspname, c.relname)),
     'inventory', jsonb_build_object(
       'relkinds', (SELECT coalesce(jsonb_object_agg(relkind::text, n), '{}') FROM (
                      SELECT c.relkind, count(*) AS n FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
@@ -673,14 +685,15 @@ CREATE OR REPLACE FUNCTION pg_temp.mirror_report_json(
       'non_public_schemas', (SELECT coalesce(jsonb_agg(nspname ORDER BY nspname), '[]') FROM pg_namespace
                               WHERE nspname NOT IN ('public', 'pg_catalog', 'information_schema') AND nspname !~ '^pg_(toast|temp)')),
     'escape_hatch', jsonb_build_object('active', p_mode = 'keep' AND p_until <> '', 'until', nullif(p_until, ''), 'ref', nullif(p_ref, ''))
-  ))::text;
+  ) || CASE WHEN p_post >= 0 THEN jsonb_build_object('post_commit_audit', jsonb_build_object('agrees', false, 'unreviewed', p_post)) ELSE '{}'::jsonb END)::text;
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_report_md(
-  p_mode text, p_dry boolean, p_status text, p_exit integer, p_until text, p_ref text
+  p_mode text, p_dry boolean, p_status text, p_exit integer, p_until text, p_ref text, p_post integer
 ) RETURNS text LANGUAGE sql AS $fn$
   SELECT concat_ws(E'\n',
     format('### mirror-scrub `%s`: %s (exit %s)%s', current_database(), p_status, p_exit, CASE WHEN p_dry THEN ' [dry-run, rolled back]' ELSE '' END),
+    CASE WHEN p_post >= 0 THEN format('**Post-commit audit disagreed:** %s unreviewed item(s) found after COMMIT.', p_post) END,
     CASE WHEN p_mode = 'keep' AND p_until <> '' THEN format('**ESCAPE HATCH ACTIVE** until %s (%s): unreviewed items are left RAW.', p_until, p_ref) END,
     CASE WHEN (SELECT count(*) FROM pg_temp.mirror_plan_t) = 0 THEN 'No unreviewed relations.' ELSE
       E'\n| Relation | Reason | Columns | Rows~ | State |\n|---|---|---|---|---|' || E'\n' ||

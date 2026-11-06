@@ -82,24 +82,39 @@ require_db_files() {
 }
 psql_() { psql -X -v ON_ERROR_STOP=1 "${PSQL_ARGS[@]}" "$@"; }
 
-# The report is written before COMMIT with the exit code the transaction predicts; when the
-# post-commit audit disagrees, rewrite it so status/exit_code match the process exit.
-amend_report() {  # <exit> <status> <unreviewed|null> <note>
-  [[ -n "$report_dir" && -f "$report_dir/$db.mirror-scrub.json" ]] || return 0
-  local f="$report_dir/$db.mirror-scrub.json" m="$report_dir/$db.mirror-scrub.md"
-  sed -i -e "s/^\( *\)\"exit_code\": .*/\1\"exit_code\": $1,\n\1\"post_commit_audit\": {\"agrees\": false, \"unreviewed\": $3, \"note\": \"$4\"},/" \
-         -e "s/^\( *\)\"status\": .*/\1\"status\": \"$2\",/" "$f"
-  [[ -f "$m" ]] && sed -i -e "0,/^### mirror-scrub .*/s//### mirror-scrub \`$db\`: $2 (exit $1)\n\n**Post-commit audit disagreed:** $4/" "$m"
-  return 0
+# SQL writes the report with the final verdict. When it never got that far (psql crash), write a
+# minimal report with the same schema so the consumer always finds a file that matches the exit.
+write_minimal_report() {  # <exit> <status> <note>
+  [[ -n "$report_dir" && ! -f "$report_dir/$db.mirror-scrub.json" ]] || return 0
+  local until_json="null" ref_json="null" active=false version
+  version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$SQL_DIR/../package.json" | head -1)"
+  [[ "$mode" == keep && -n "$keep_until" ]] && { until_json="\"$keep_until\""; ref_json="\"$keep_ref\""; active=true; }
+  cat > "$report_dir/$db.mirror-scrub.json" <<JSON
+{
+  "schema_version": 1,
+  "tool": {"name": "@saga-ed/soa-mirror-scrub", "version": "$version"},
+  "db": "$db", "mode": "$mode", "dry_run": $([[ $dry == 1 ]] && echo true || echo false),
+  "status": "$2", "exit_code": $1,
+  "counts": {"dropped": 0, "cascaded": 0, "left_raw": 0, "estimated_rows_dropped": 0},
+  "dropped": [], "left_raw": [], "would_drop": [], "infra_allowlisted": [],
+  "inventory": {"relkinds": {}, "extension_members": [], "large_objects": null, "non_public_schemas": []},
+  "escape_hatch": {"active": $active, "until": $until_json, "ref": $ref_json},
+  "post_commit_audit": {"agrees": false, "note": "$3"}
+}
+JSON
+  printf '### mirror-scrub `%s`: %s (exit %s)\n\n%s\n' "$db" "$2" "$1" "$3" > "$report_dir/$db.mirror-scrub.md"
 }
 
 run_db() {
-  local out rc committed n dropped version rj="" rm_=""
+  local out rc code version rj="" rm_=""
   version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$SQL_DIR/../package.json" | head -1)"
-  [[ -n "$report_dir" ]] && { rj="$report_dir/$db.mirror-scrub.json"; rm_="$report_dir/$db.mirror-scrub.md"; }
-  local rvars=(); [[ -n "$rj" ]] && rvars=(-v "report_json=$rj" -v "report_md=$rm_")
+  local rvars=()
+  if [[ -n "$report_dir" ]]; then
+    rj="$report_dir/$db.mirror-scrub.json"; rm_="$report_dir/$db.mirror-scrub.md"
+    rm -f "$rj" "$rm_"; rvars=(-v "report_json=$rj" -v "report_md=$rm_")
+  fi
   out="$(mktemp)"
-  psql_ -d "$maint" -v db="$db" -v lib="$SQL_DIR/mirror-scrub-lib.sql" -v allow="$allow" -v scrub="$scrub" \
+  psql_ -d "$maint" -v db="$db" -v lib="$SQL_DIR/mirror-scrub-lib.sql" -v report="$SQL_DIR/report-db.sql" -v allow="$allow" -v scrub="$scrub" \
     -v mode="$mode" -v dry="$dry" -v exact="$exact" -v version="$version" -v keep_until="$keep_until" -v keep_ref="$keep_ref" \
     "${rvars[@]}" -f "$SQL_DIR/run-db.sql" 2>&1 | tee "$out"
   rc=${PIPESTATUS[0]}
@@ -108,33 +123,26 @@ run_db() {
     if [[ $allow_absent == 1 ]]; then echo "mirror-scrub: $db absent - skipped"; return $EXIT_ABSENT; fi
     echo "mirror-scrub: $db does not exist (pass --allow-absent to skip)" >&2; return $EXIT_NOT_COMMITTED
   fi
-  if grep -qx "MIRROR_SCRUB_DRYRUN $db [0-9]*" "$out"; then
-    n="$(sed -n "s/^MIRROR_SCRUB_DRYRUN $db \([0-9][0-9]*\)$/\1/p" "$out")"; rm -f "$out"
-    echo "mirror-scrub: $db dry-run complete, rolled back; $n unreviewed relation(s) would be handled in $mode mode" >&2
-    return $EXIT_DRYRUN
-  fi
-  committed=0; grep -qx "MIRROR_SCRUB_COMMITTED $db" "$out" && committed=1
-  n="$(sed -n "s/^MIRROR_SCRUB_UNREVIEWED $db \([0-9][0-9]*\)$/\1/p" "$out")"
-  dropped="$(sed -n "s/^MIRROR_SCRUB_DROPPED $db \([0-9][0-9]*\)$/\1/p" "$out")"
-  if grep -qx "MIRROR_SCRUB_RESIDUE $db [0-9]*" "$out"; then
-    echo "mirror-scrub: $db NOT scrubbed: unreviewed items remain that cannot be dropped (see UNREVIEWED/LARGE OBJECTS notices); transaction rolled back" >&2
-  fi
+  code="$(sed -n "s/^MIRROR_SCRUB_EXIT $db \([0-9][0-9]*\)$/\1/p" "$out" | tail -1)"
+  local committed=0; grep -qx "MIRROR_SCRUB_COMMITTED $db" "$out" && committed=1
   rm -f "$out"
-  if [[ $committed == 0 ]]; then echo "mirror-scrub: $db NOT scrubbed (psql exit $rc; transaction rolled back)" >&2; return $EXIT_NOT_COMMITTED; fi
-  if [[ -z "$n" || $rc != 0 ]]; then
-    echo "mirror-scrub: $db scrubbed but the audit did not complete (psql exit $rc)" >&2
-    amend_report $EXIT_AUDIT_INCOMPLETE audit_incomplete null "post-commit audit did not complete (psql exit $rc)"
-    return $EXIT_AUDIT_INCOMPLETE
+  if [[ -z "$code" ]]; then
+    if [[ $committed == 1 ]]; then
+      echo "mirror-scrub: $db scrubbed but the audit did not complete (psql exit $rc)" >&2
+      write_minimal_report $EXIT_AUDIT_INCOMPLETE audit_incomplete "post-commit audit did not complete (psql exit $rc)"; return $EXIT_AUDIT_INCOMPLETE
+    fi
+    echo "mirror-scrub: $db NOT scrubbed (psql exit $rc; transaction rolled back)" >&2
+    write_minimal_report $EXIT_NOT_COMMITTED rolled_back "scrub did not complete (psql exit $rc)"; return $EXIT_NOT_COMMITTED
   fi
-  if [[ "$n" != 0 ]]; then
-    if [[ "$mode" == keep ]]; then echo "mirror-scrub: $db scrubbed; $n unreviewed item(s) left RAW - scrub or allow-list them" >&2; return $EXIT_UNREVIEWED; fi
-    echo "mirror-scrub: $db committed but the post-commit audit found $n unreviewed item(s)" >&2
-    amend_report $EXIT_AUDIT_INCOMPLETE audit_incomplete "$n" "post-commit audit found $n unreviewed item(s) after COMMIT"
-    return $EXIT_AUDIT_INCOMPLETE
-  fi
-  if [[ "${dropped:-0}" != 0 ]]; then echo "mirror-scrub: $db scrubbed; $dropped unreviewed relation(s) DROPPED, nothing raw remains"; return $EXIT_DROPPED; fi
-  echo "mirror-scrub: $db scrubbed, audit clean"
-  return $EXIT_CLEAN
+  case "$code" in
+    0) echo "mirror-scrub: $db scrubbed, audit clean" ;;
+    10) echo "mirror-scrub: $db scrubbed; unreviewed item(s) left RAW - scrub or allow-list them" >&2 ;;
+    11) echo "mirror-scrub: $db committed but the post-commit audit found unreviewed items" >&2 ;;
+    12) echo "mirror-scrub: $db scrubbed; unreviewed relation(s) DROPPED, nothing raw remains" ;;
+    20) echo "mirror-scrub: $db NOT scrubbed: unreviewed items remain that cannot be dropped (see notices); transaction rolled back" >&2 ;;
+    40) echo "mirror-scrub: $db dry-run complete, rolled back; report written" >&2 ;;
+  esac
+  return "$code"
 }
 
 check() {

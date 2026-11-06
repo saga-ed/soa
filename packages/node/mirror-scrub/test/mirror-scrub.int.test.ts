@@ -499,6 +499,16 @@ CREATE OR REPLACE FUNCTION pg_temp.mirror_large_objects() RETURNS bigint LANGUAG
         expect(r.report.left_raw[0].cascade.some((c: any) => c.kind === 'policy')).toBe(true);
     });
 
+    it('a scrub error still leaves a minimal report that matches the exit (20, rolled_back)', () => {
+        const { db, allow } = ownedDb();
+        const bad = file(`${db}.err.sql`, "SELECT pg_temp.mirror_scrub('public', 'nope', '{}'::jsonb);\n");
+        const dir = path.join(tmp, `${db}-err`);
+        const r = cliRun(['run', '--db', db, '--scrub', bad, '--allow', allow, '--report-dir', dir], asMaster);
+        expect(r.code, r.out).toBe(20);
+        const rep = JSON.parse(readFileSync(path.join(dir, `${db}.mirror-scrub.json`), 'utf8'));
+        expect(rep).toMatchObject({ schema_version: 1, db, status: 'rolled_back', exit_code: 20, dropped: [], left_raw: [] });
+    });
+
     it('a second run on an already-dropped database is a clean no-op when the rules do not name the dropped table', () => {
         const { db, allow } = ownedDb();
         ownerObjs(db, 'ALTER TABLE org ADD COLUMN contact_name text;', []);

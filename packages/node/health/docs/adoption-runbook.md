@@ -30,6 +30,7 @@ If the ALB check is plain `/health` (always 200) today, moving it to `/health/re
    - Custom probes return `{ ok: true }` or `{ ok: false, reason }` (closed `ProbeReason` enum). Use `boot: 'skip'` for anything that only starts after `listen()` (consumers, projection catch-up).
 3. In `main.ts`:
    - `createDeepReadiness({ manifest, bootTimeoutMs, onProbeError, identity })`, then `mountDeepReadiness(app, readiness)` BEFORE `mountHealthRoutes` (first route wins).
+   - Path-prefixed services (e.g. qboard): mount on an `express.Router()` and `app.use('<prefix>', r)`; see deep-readiness.md section 5.
    - `await readiness.boot()` before `listen()`; log `verdict`/`bootMode`; rethrow on failure so the circuit breaker rolls back.
    - `readiness.start()` after boot; `readiness.stop()` in shutdown.
    - Delete the old `/health/ready` handler and its probe helpers.

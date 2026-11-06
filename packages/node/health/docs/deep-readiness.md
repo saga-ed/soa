@@ -125,6 +125,24 @@ Fail-stale-safe: if the event loop is blocked, the cache stops refreshing and `s
 - Blue/green idle colour: smoke calls the idle colour (preview header) on `/health/deep` at `internal` detail and consumes the JSON. The idle colour is autoslept (ph#1003 wake), so `starting` is expected right after wake; smoke retries with backoff to a deadline. `build.colour` proves WHICH colour answered. The flip gate requires `ready` by default; `degraded` passes only if each non-ok dependency is on an explicit allow-list supplied to the flip.
 - Draining unchanged (`/ready` 503 `draining`, `/live` 200).
 
+### Path-prefixed services
+
+`mountDeepReadiness` registers `/health/live`, `/health/ready` and `/health/deep` relative to the router it is given, so a service whose ALB routes by path prefix (e.g. qboard: `/connectv3/v1`) mounts on a sub-router; no option is needed:
+
+```ts
+const r = express.Router();
+mountDeepReadiness(r, readiness);
+app.use('/connectv3/v1', r); // serves /connectv3/v1/health/{live,ready,deep}
+```
+
+For a router without `.use`, pass a `{ get }` wrapper that prepends the prefix:
+
+```ts
+mountDeepReadiness({ get: (p, h) => app.get('/connectv3/v1' + p, h) }, readiness);
+```
+
+Either way, mount BEFORE any auth perimeter, and point the TG `HealthCheckPath` at the prefixed `/ready` (e.g. `/connectv3/v1/health/ready`).
+
 ## 6. Machine-readable report
 
 One versioned document (`schema: 'saga.readiness/v1'`) from `report()` and `deepReport()`; HTTP status mirrors `verdict`. See `ReadinessReport` in the stubs. Fields: `verdict` (`ready|degraded|not_ready|starting|draining`), `httpStatus`, `build` (colour, version, environment, deployedAt, from existing `buildIdentity()`), `generatedAt`, `summary` counts, and at internal detail per-dependency `{ name, kind, criticality, state, reason, latencyMs, lastSuccessAgeMs, consecutiveFailures, level }`.

@@ -55,7 +55,7 @@ function relkind(db: string, rel: string) {
 }
 
 /** freshDb with every fixture table owned by mirror_check_owner, ready for `run` as mirror_check_master. */
-function ownedDb2() {
+function ownedDb() {
     const { db, allow } = freshDb();
     expect(
         psql(
@@ -166,20 +166,6 @@ describe('mirror-scrub run (exit-code contract)', () => {
         expect(cliRun(['check', '--db', db, '--scrub', scrubFile, '--allow', allow], { MIRROR_SCRUB_THROWAWAY: '1' }).code).toBe(0);
     });
 
-    function ownedDb() {
-        const { db, allow } = freshDb();
-        expect(
-            psql(
-                db,
-                `GRANT USAGE, CREATE ON SCHEMA public TO mirror_check_master;
-                 ALTER TABLE person OWNER TO mirror_check_owner; ALTER TABLE outbox_event OWNER TO mirror_check_owner;
-                 ALTER TABLE org OWNER TO mirror_check_owner; ALTER VIEW person_emails OWNER TO mirror_check_owner;
-                 ALTER MATERIALIZED VIEW person_counts OWNER TO mirror_check_owner;`,
-            ).code,
-        ).toBe(0);
-        return { db, allow };
-    }
-
     it('exits 0 and commits on a clean scrub', () => {
         const { db, allow } = ownedDb();
         const r = cliRun(['run', '--db', db, '--scrub', scrubFile, '--allow', allow], asMaster);
@@ -260,7 +246,7 @@ describe('mirror-scrub run: default drop', () => {
     };
 
     it('drops an unreviewed table whose columns are all exempt types (exit 12) and reports it', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         ownerObjs(db, "CREATE TABLE audit_log (id uuid DEFAULT gen_random_uuid(), n int); INSERT INTO audit_log (n) VALUES (1), (2);", ['audit_log']);
         const r = runDrop(db, allow);
         expect(r.code, r.out).toBe(12);
@@ -275,7 +261,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('an unreviewed column on a swapped table drops view and real table; dependents and FK are reported; referencing rows survive; no raw data remains', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         allowMore(allow, db, "(DB, 'enrollment', '*')");
         ownerObjs(
             db,
@@ -307,7 +293,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('an unreviewed column on an allow-listed unswapped table drops that table', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         ownerObjs(db, "ALTER TABLE org ADD COLUMN contact_name text; INSERT INTO org (code, contact_name) VALUES ('a', 'LEAK_name');", []);
         const r = runDrop(db, allow);
         expect(r.code, r.out).toBe(12);
@@ -317,7 +303,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('keeps infra tables and marked tables, drops unlisted migration-like tables and marked tables with unreviewed text', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         allowMore(allow, db, "(DB, 'tag_link', '*'), (DB, 'marked_text', '*')");
         ownerObjs(
             db,
@@ -338,7 +324,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('drops partitioned roots with children, unlogged tables, populated unknown matviews and unknown non-public tables, and spares the same name in public', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         ownerObjs(
             db,
             `CREATE TABLE ev (id uuid, at timestamptz) PARTITION BY RANGE (at);
@@ -363,7 +349,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('(a) CASCADE removes a dependent view owned by a role the master is not a member of', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         expect(psql('postgres', "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'foreign_owner') THEN CREATE ROLE foreign_owner NOLOGIN; END IF; END $$").code).toBe(0);
         ownerObjs(db, 'CREATE TABLE ghost (id uuid); CREATE VIEW ghost_v AS SELECT id FROM ghost; ALTER VIEW ghost_v OWNER TO foreign_owner;', ['ghost']);
         const r = runDrop(db, allow);
@@ -374,7 +360,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('(b) large objects fail closed: exit 20 and nothing is committed', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         expect(psql(db, 'SELECT lo_create(0)').code).toBe(0);
         const r = runDrop(db, allow);
         expect(r.code, r.out).toBe(20);
@@ -384,7 +370,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('an extension-owned relation with an unreviewed column cannot be dropped: exit 20, nothing dropped', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         ownerObjs(db, "CREATE EXTENSION IF NOT EXISTS hstore; CREATE TABLE ext_t (a uuid, note text); CREATE TABLE audit_log2 (id int);", ['ext_t', 'audit_log2']);
         const mark = psql(
             db,
@@ -398,7 +384,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('--dry-run exits 40, rolls back every change and still reports', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         ownerObjs(db, 'CREATE TABLE audit_log (id int);', ['audit_log']);
         const r = runDrop(db, allow, ['--dry-run']);
         expect(r.code, r.out).toBe(40);
@@ -410,7 +396,7 @@ describe('mirror-scrub run: default drop', () => {
     });
 
     it('--on-unreviewed keep needs a bounded, current escape hatch; with one it exits 10, drops nothing and says so', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         ownerObjs(db, 'CREATE TABLE audit_log (id int);', ['audit_log']);
         const day = (n: number) => new Date(Date.now() + n * 86400_000).toISOString().slice(0, 10);
         expect(runDrop(db, allow, ['--on-unreviewed', 'keep']).code).toBe(2);
@@ -436,8 +422,85 @@ describe('mirror-scrub run: default drop', () => {
         expect(relkind(db, 'audit_log')).toBe('r');
     });
 
+    it('rewrites the report to exit 11 when the post-commit audit disagrees with the in-transaction audit', () => {
+        const { db, allow } = ownedDb();
+        // Reports 0 large objects while the transaction holds an xid (in-txn audit) and 1 afterwards.
+        const flaky = file(
+            `${db}.flaky.sql`,
+            `${readFileSync(scrubFile, 'utf8')}
+CREATE OR REPLACE FUNCTION pg_temp.mirror_large_objects() RETURNS bigint LANGUAGE sql AS $f$
+  SELECT CASE WHEN txid_current_if_assigned() IS NULL THEN 1 ELSE 0 END $f$;\n`,
+        );
+        const dir = path.join(tmp, `${db}-flaky`);
+        const r = cliRun(['run', '--db', db, '--scrub', flaky, '--allow', allow, '--report-dir', dir], asMaster);
+        expect(r.code, r.out).toBe(11);
+        const rep = JSON.parse(readFileSync(path.join(dir, `${db}.mirror-scrub.json`), 'utf8'));
+        expect(rep.exit_code).toBe(11);
+        expect(rep.status).toBe('audit_incomplete');
+        expect(rep.post_commit_audit).toMatchObject({ agrees: false, unreviewed: 1 });
+        expect(readFileSync(path.join(dir, `${db}.mirror-scrub.md`), 'utf8')).toContain('exit 11');
+    });
+
+    it('does not trust prod-supplied "mirror-scrub:" comments: a commented base table with an unreviewed column is dropped', () => {
+        const { db, allow } = ownedDb();
+        allowMore(allow, db, "(DB, 'trap', '*')");
+        ownerObjs(db, "CREATE TABLE trap (a uuid, note text); COMMENT ON TABLE trap IS 'mirror-scrub:x'; CREATE TABLE trap2 (a int); COMMENT ON TABLE trap2 IS 'mirror-scrub:';", ['trap', 'trap2']);
+        const r = runDrop(db, allow);
+        expect(r.code, r.out).toBe(12);
+        expect(relkind(db, 'trap')).toBe('');
+        expect(relkind(db, 'trap2')).toBe('');
+    });
+
+    it('foreign tables: unknown ones drop, known ones with an unreviewed text column drop too', () => {
+        const { db, allow } = ownedDb();
+        allowMore(allow, db, "(DB, 'ft_known', '*')");
+        expect(
+            psql(db, `CREATE EXTENSION file_fdw; CREATE SERVER s FOREIGN DATA WRAPPER file_fdw;
+              CREATE FOREIGN TABLE ft_unknown (a int) SERVER s OPTIONS (filename '/etc/hostname');
+              CREATE FOREIGN TABLE ft_known (a int, note text) SERVER s OPTIONS (filename '/etc/hostname');
+              ALTER FOREIGN TABLE ft_unknown OWNER TO mirror_check_owner; ALTER FOREIGN TABLE ft_known OWNER TO mirror_check_owner;`).code,
+        ).toBe(0);
+        const r = runDrop(db, allow);
+        expect(r.code, r.out).toBe(12);
+        expect(relkind(db, 'ft_unknown')).toBe('');
+        expect(relkind(db, 'ft_known')).toBe('');
+        expect(r.report.dropped.find((x: any) => x.table === 'ft_known').reason).toBe('unreviewed_column');
+    });
+
+    it('the infra allowlist is public base tables only: other_schema._prisma_migrations with text is dropped', () => {
+        const { db, allow } = ownedDb();
+        ownerObjs(
+            db,
+            `CREATE TABLE _prisma_migrations (id text); CREATE SCHEMA other2; GRANT USAGE, CREATE ON SCHEMA other2 TO mirror_check_master;
+             CREATE TABLE other2._prisma_migrations (id text, logs text); ALTER TABLE other2._prisma_migrations OWNER TO mirror_check_owner;`,
+            ['_prisma_migrations'],
+        );
+        const r = runDrop(db, allow);
+        expect(r.code, r.out).toBe(12);
+        expect(relkind(db, '_prisma_migrations')).toBe('r');
+        expect(psql(db, "SELECT count(*) FROM pg_class WHERE relname = '_prisma_migrations' AND relnamespace = 'other2'::regnamespace").out).toBe('0');
+    });
+
+    it('fails closed (exit 20, nothing committed) when the drop would silently remove a policy or trigger on a retained table', () => {
+        const { db, allow } = ownedDb();
+        allowMore(allow, db, "(DB, 'kept', '*')");
+        ownerObjs(
+            db,
+            `CREATE TABLE ghost2 (id uuid); CREATE TABLE kept (a uuid);
+             ALTER TABLE kept ENABLE ROW LEVEL SECURITY;
+             CREATE POLICY p ON kept USING (EXISTS (SELECT 1 FROM ghost2 WHERE ghost2.id = kept.a));`,
+            ['ghost2', 'kept'],
+        );
+        const r = runDrop(db, allow);
+        expect(r.code, r.out).toBe(20);
+        expect(relkind(db, 'ghost2')).toBe('r');
+        expect(relkind(db, 'person')).toBe('r');
+        expect(r.report.left_raw.find((x: any) => x.table === 'ghost2').undroppable).toBe(true);
+        expect(r.report.left_raw[0].cascade.some((c: any) => c.kind === 'policy')).toBe(true);
+    });
+
     it('a second run on an already-dropped database is a clean no-op when the rules do not name the dropped table', () => {
-        const { db, allow } = ownedDb2();
+        const { db, allow } = ownedDb();
         ownerObjs(db, 'ALTER TABLE org ADD COLUMN contact_name text;', []);
         expect(runDrop(db, allow).code).toBe(12);
         const again = runDrop(db, allow);

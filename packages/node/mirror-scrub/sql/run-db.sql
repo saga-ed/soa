@@ -28,8 +28,9 @@ SELECT CASE WHEN :is_dry = 1 THEN 'dry_run' WHEN :must_rollback = 1 THEN 'rolled
        CASE WHEN :is_dry = 1 THEN 40 WHEN :must_rollback = 1 THEN 20 WHEN :do_drop = 0 AND :n_resid > 0 THEN 10
             WHEN :n_dropped > 0 THEN 12 ELSE 0 END AS exit_code \gset
 \echo MIRROR_SCRUB_REPORT_BEGIN :db
+SELECT pg_temp.mirror_report_md(:'mode', :is_dry = 1, :'status', :exit_code, :'keep_until', :'keep_ref') AS report_md_text \gset
 \o
-SELECT pg_temp.mirror_report_md(:'mode', :is_dry = 1, :'status', :exit_code, :'keep_until', :'keep_ref');
+\qecho :report_md_text
 \o /dev/null
 \echo MIRROR_SCRUB_REPORT_END :db
 \if :{?report_json}
@@ -38,7 +39,7 @@ SELECT pg_temp.mirror_report_md(:'mode', :is_dry = 1, :'status', :exit_code, :'k
 \o :report_json
 SELECT pg_temp.mirror_report_json(:'mode', :is_dry = 1, :'status', :exit_code, :'version', :'keep_until', :'keep_ref');
 \o :report_md
-SELECT pg_temp.mirror_report_md(:'mode', :is_dry = 1, :'status', :exit_code, :'keep_until', :'keep_ref');
+\qecho :report_md_text
 \o /dev/null
 \endif
 \if :is_dry

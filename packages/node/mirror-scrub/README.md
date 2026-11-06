@@ -118,8 +118,8 @@ items stay RAW (exit 10). It requires `--keep-until` (today or later, at most 14
 
 `--report-dir <dir>` writes `<db>.mirror-scrub.json` and `<db>.mirror-scrub.md`; the markdown block is
 also printed between `MIRROR_SCRUB_REPORT_BEGIN <db>` / `_END` lines. JSON: `schema_version`, `tool`,
-`db`, `mode`, `dry_run`, `status` (`clean|dropped|kept_raw|rolled_back|dry_run`), `exit_code` (predicted
-by the transaction; a post-commit audit disagreement surfaces as exit 11), `counts`, `dropped[]` (schema,
+`db`, `mode`, `dry_run`, `status` (`clean|dropped|kept_raw|rolled_back|dry_run|audit_incomplete`), `exit_code` (the
+process exit; if the post-commit audit disagrees with the transaction the file is rewritten to 11/`audit_incomplete` with a `post_commit_audit` object), `counts`, `dropped[]` (schema,
 table, relkind, swapped, reason, reasons, columns, rows_estimate from `pg_class.reltuples` or exact with
 `--exact-counts`, size_bytes, cascade[]), `left_raw[]`, `would_drop[]` (dry-run and keep mode),
 `infra_allowlisted`, `inventory`, `escape_hatch`. Cascade kinds: `fk_constraint` (referencing table and

@@ -82,6 +82,17 @@ require_db_files() {
 }
 psql_() { psql -X -v ON_ERROR_STOP=1 "${PSQL_ARGS[@]}" "$@"; }
 
+# The report is written before COMMIT with the exit code the transaction predicts; when the
+# post-commit audit disagrees, rewrite it so status/exit_code match the process exit.
+amend_report() {  # <exit> <status> <unreviewed|null> <note>
+  [[ -n "$report_dir" && -f "$report_dir/$db.mirror-scrub.json" ]] || return 0
+  local f="$report_dir/$db.mirror-scrub.json" m="$report_dir/$db.mirror-scrub.md"
+  sed -i -e "s/^\( *\)\"exit_code\": .*/\1\"exit_code\": $1,\n\1\"post_commit_audit\": {\"agrees\": false, \"unreviewed\": $3, \"note\": \"$4\"},/" \
+         -e "s/^\( *\)\"status\": .*/\1\"status\": \"$2\",/" "$f"
+  [[ -f "$m" ]] && sed -i -e "0,/^### mirror-scrub .*/s//### mirror-scrub \`$db\`: $2 (exit $1)\n\n**Post-commit audit disagreed:** $4/" "$m"
+  return 0
+}
+
 run_db() {
   local out rc committed n dropped version rj="" rm_=""
   version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$SQL_DIR/../package.json" | head -1)"
@@ -110,10 +121,16 @@ run_db() {
   fi
   rm -f "$out"
   if [[ $committed == 0 ]]; then echo "mirror-scrub: $db NOT scrubbed (psql exit $rc; transaction rolled back)" >&2; return $EXIT_NOT_COMMITTED; fi
-  if [[ -z "$n" || $rc != 0 ]]; then echo "mirror-scrub: $db scrubbed but the audit did not complete (psql exit $rc)" >&2; return $EXIT_AUDIT_INCOMPLETE; fi
+  if [[ -z "$n" || $rc != 0 ]]; then
+    echo "mirror-scrub: $db scrubbed but the audit did not complete (psql exit $rc)" >&2
+    amend_report $EXIT_AUDIT_INCOMPLETE audit_incomplete null "post-commit audit did not complete (psql exit $rc)"
+    return $EXIT_AUDIT_INCOMPLETE
+  fi
   if [[ "$n" != 0 ]]; then
     if [[ "$mode" == keep ]]; then echo "mirror-scrub: $db scrubbed; $n unreviewed item(s) left RAW - scrub or allow-list them" >&2; return $EXIT_UNREVIEWED; fi
-    echo "mirror-scrub: $db committed but the post-commit audit found $n unreviewed item(s)" >&2; return $EXIT_AUDIT_INCOMPLETE
+    echo "mirror-scrub: $db committed but the post-commit audit found $n unreviewed item(s)" >&2
+    amend_report $EXIT_AUDIT_INCOMPLETE audit_incomplete "$n" "post-commit audit found $n unreviewed item(s) after COMMIT"
+    return $EXIT_AUDIT_INCOMPLETE
   fi
   if [[ "${dropped:-0}" != 0 ]]; then echo "mirror-scrub: $db scrubbed; $dropped unreviewed relation(s) DROPPED, nothing raw remains"; return $EXIT_DROPPED; fi
   echo "mirror-scrub: $db scrubbed, audit clean"

@@ -1,13 +1,13 @@
 {
     "name": "@saga-ed/soa-mirror-scrub",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "private": false,
     "type": "module",
     "description": "View-swap PII scrub for the dev Postgres mirror: shared SQL lib, per-database runner with an exit-code contract, and a pre-merge check against a throwaway Postgres. Never run against prod.",
     "bin": {
         "mirror-scrub": "bin/mirror-scrub"
     },
-    "files": ["bin", "sql", "README.md"],
+    "files": ["bin", "sql", "README.md", "CHANGELOG.md"],
     "scripts": {
         "build": "true",
         "check-types": "tsc --noEmit",

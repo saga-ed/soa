@@ -11,6 +11,27 @@ const dependencies = fetchImpl => ({
 });
 
 describe('bounded synthetic traffic', () => {
+  it('exercises attendance through the same slot using a read-only SuperJSON request', async () => {
+    const calls = [];
+    const summary = await runTraffic(
+      optionsFrom({ slot: '3', profile: 'attendance', requests: '6' }),
+      dependencies(async (url, init) => {
+        calls.push({ url, init });
+        return response({ json: url.pathname.endsWith('programs.list')
+          ? { programs: [{ id: 'existing-program' }] } : {} });
+      })
+    );
+    expect(summary.errors).toEqual([]);
+    expect(calls).toHaveLength(6);
+    const attendance = calls.find(c => c.url.pathname === '/trpc/adm.getHistoricAttendanceByPrograms');
+    expect(attendance.url.origin).toBe('http://localhost:8005');
+    expect(attendance.init.method).toBe('GET');
+    expect(attendance.init.redirect).toBe('error');
+    expect(JSON.parse(attendance.url.searchParams.get('input'))).toEqual({
+      json: { programIds: ['existing-program'], dates: [summary.startedAt.slice(0, 10)] },
+    });
+  });
+
   it('rejects missing slots, unknown profiles and out-of-bounds load', () => {
     for (const options of [
       {},

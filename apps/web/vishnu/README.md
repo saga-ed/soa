@@ -86,6 +86,7 @@ local session with `ss stack login --slot 3`, then from this app directory run:
 node scripts/synthetic-traffic.mjs --slot 3 --profile baseline --duration 60
 node scripts/synthetic-traffic.mjs --slot 3 --profile burst --duration 60 --requests 1200
 node scripts/synthetic-traffic.mjs --slot 3 --profile mixed --duration 60
+node scripts/synthetic-traffic.mjs --slot 3 --profile attendance --duration 60
 ```
 
 The bounded driver reads existing programs and sends authenticated GET requests
@@ -101,6 +102,13 @@ Vishnu APM data. Request and program identifiers are not printed.
 | `baseline` (default) | 1 | 1000 ms | Equal shares of all four procedures |
 | `burst` | 4 | 100 ms | Same mix as baseline, with more concurrent reads |
 | `mixed` | 2 | 250 ms | 50% programs.list, 25% programs.get, 12.5% each scheduling and whoami |
+| `attendance` | 1 | 1000 ms | Equal shares of attendance read, programs.list, scheduling and whoami |
+
+The attendance profile also needs `ads-adm-api` and its dependencies in the same
+slot. It calls `adm.getHistoricAttendanceByPrograms` for one existing program and the
+current UTC date using SDS's SuperJSON envelope. This exercises IAM permission checks and stored attendance reads; an empty result
+is valid. The live attendance endpoint is deliberately excluded because its GET
+can materialize attendance rows. The driver never seeds or writes attendance.
 
 The deterministic mix is shared across workers. Program-list reads exercise existing
 IAM permission calls; the mixed profile puts more traffic on that path. Run

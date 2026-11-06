@@ -155,6 +155,8 @@ describe('syncDashLocalDefaults — M7 stack-lane slot config', () => {
     expect(parsed.localDefaults['program-hub']).toEqual({ type: 'url', url: 'http://localhost:4006' });
     expect(parsed.localDefaults['enrollment-api']).toEqual({ type: 'url', url: 'http://localhost:4006' });
     expect(parsed.localDefaults.connect).toEqual({ type: 'url', url: 'http://localhost:7106' });
+    expect(parsed.localDefaults['connectv3-api']).toEqual({ type: 'url', url: 'http://localhost:7106' });
+    expect(parsed.localDefaults.surveys).toEqual({ type: 'url', url: 'http://localhost:6005' });
     // ads-adm + transcripts-api MUST offset too (the browser dials them for real —
     // the split-brain BLOCKER). Base config.json ports (5005 / 6302 = slot 0) must
     // NOT leak through: slot 1 ⇒ 6005 / 7302.

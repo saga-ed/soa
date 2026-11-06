@@ -8,6 +8,11 @@ const balanced = ['auth.whoami', 'programs.list', 'programs.get', 'schedules.get
 export const profiles = {
   baseline: { concurrency: 1, interval: 1000, sequence: balanced },
   burst: { concurrency: 4, interval: 100, sequence: balanced },
+  attendance: {
+    concurrency: 1,
+    interval: 1000,
+    sequence: ['adm.getHistoricAttendanceByPrograms', 'programs.list', 'schedules.get', 'auth.whoami'],
+  },
   mixed: {
     concurrency: 2,
     interval: 250,
@@ -34,7 +39,7 @@ function integer(name, value, min, max) {
 export function optionsFrom(values) {
   const profile = values.profile ?? 'baseline';
   if (!Object.hasOwn(profiles, profile))
-    throw new Error('profile must be baseline, burst or mixed');
+    throw new Error('profile must be baseline, burst, mixed or attendance');
   return {
     profile,
     slot: integer('slot', values.slot, 0, 9),
@@ -95,6 +100,11 @@ export async function runTraffic(
       'programs.list': { port: 3006, input: { page: 1, limit: 5 } },
       'programs.get': { port: 3006, input: { id: programId } },
       'schedules.get': { port: 3008, input: { programId } },
+      'adm.getHistoricAttendanceByPrograms': {
+        port: 5005,
+        // SDS uses SuperJSON; read the current UTC day without creating fixtures.
+        input: { json: { programIds: [programId], dates: [startedAt.slice(0, 10)] } },
+      },
     }[procedure];
     if (!endpoint) throw new Error('Procedure is not in the read-only allowlist');
     const url = new URL(`/trpc/${procedure}`, `http://localhost:${endpoint.port + slot * 1000}`);
@@ -117,7 +127,7 @@ export async function runTraffic(
       const body = await response.json();
       if (body.error || !body.result) throw new Error('Invalid tRPC response');
       succeeded = true;
-      return body.result.data;
+      return body.result.data?.json ?? body.result.data;
     } catch {
       // Avoid logging response bodies, URLs with program identifiers, or session values.
       throw new Error(
@@ -237,7 +247,7 @@ async function main() {
   });
   if (values.help) {
     console.log(
-      'node scripts/synthetic-traffic.mjs --slot N [--profile baseline|burst|mixed] [--duration 60] [--requests 2000] [--concurrency N] [--interval MS] [--cookie-jar PATH]\nRun ss stack login --slot N first. Authenticated read-only loopback traffic. Duration is seconds; interval is pause per worker after each request. Request limit includes two preflight reads.'
+      'node scripts/synthetic-traffic.mjs --slot N [--profile baseline|burst|mixed|attendance] [--duration 60] [--requests 2000] [--concurrency N] [--interval MS] [--cookie-jar PATH]\nRun ss stack login --slot N first. Authenticated read-only loopback traffic. Attendance also requires ads-adm-api and its dependencies. Duration is seconds; interval is pause per worker after each request. Request limit includes two preflight reads.'
     );
     return;
   }

@@ -35,7 +35,7 @@ process.on('SIGTERM', () => drain.startDraining()); // then stop accepting work 
 
 ## Deep readiness (0.2.0, soa#517)
 
-Declare dependencies once; the same probe set drives boot self-test, `/health/ready` (cache only) and `/health/deep`. Design and semantics: [docs/deep-readiness.md](docs/deep-readiness.md).
+Declare dependencies once; the same probe set drives boot self-test, `/health/ready` (cache only) and `/health/deep`. Design and semantics: [docs/deep-readiness.md](docs/deep-readiness.md). Adopting in a service: [docs/adoption-runbook.md](docs/adoption-runbook.md).
 
 ```ts
 const dr = createDeepReadiness({

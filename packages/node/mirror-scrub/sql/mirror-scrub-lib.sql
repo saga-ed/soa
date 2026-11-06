@@ -450,23 +450,39 @@ $fn$;
 
 -- All objects DROP ... CASCADE of p_oid would remove, as (classid, objid), following pg_depend
 -- (rewrite rules are mapped to their view).
-CREATE OR REPLACE FUNCTION pg_temp.mirror_closure(p_oid oid)
-RETURNS TABLE (classid oid, objid oid) LANGUAGE sql AS $fn$
-  WITH RECURSIVE dep(classid, objid) AS (
-    SELECT 'pg_class'::regclass::oid, p_oid
+CREATE OR REPLACE FUNCTION pg_temp.mirror_closure_all(p_oid oid)
+RETURNS TABLE (classid oid, objid oid, objsubid integer) LANGUAGE sql AS $fn$
+  WITH RECURSIVE dep(classid, objid, objsubid) AS (
+    SELECT 'pg_class'::regclass::oid, p_oid, 0
     UNION
-    SELECT x.classid, x.objid
+    SELECT x.classid, x.objid, x.objsubid
       FROM dep
       JOIN pg_depend d ON d.refclassid = dep.classid AND d.refobjid = dep.objid AND d.deptype NOT IN ('p', 'e')
       CROSS JOIN LATERAL (
-        SELECT d.classid, d.objid
+        SELECT d.classid, d.objid, d.objsubid
         UNION ALL
-        SELECT 'pg_class'::regclass::oid, r.ev_class FROM pg_rewrite r
+        SELECT 'pg_class'::regclass::oid, r.ev_class, 0 FROM pg_rewrite r
          WHERE d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
            AND r.ev_class IN (SELECT c.oid FROM pg_class c WHERE c.relkind IN ('v', 'm'))
       ) x
+     WHERE dep.objsubid = 0
   )
-  SELECT dep.classid, dep.objid FROM dep;
+  SELECT dep.classid, dep.objid, dep.objsubid FROM dep;
+$fn$;
+
+-- Whole objects DROP ... CASCADE removes. A dependency on one column of another relation
+-- (for example a column typed as the dropped table's row type) is not a whole relation.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_closure(p_oid oid)
+RETURNS TABLE (classid oid, objid oid) LANGUAGE sql AS $fn$
+  SELECT a.classid, a.objid FROM pg_temp.mirror_closure_all(p_oid) a WHERE a.objsubid = 0;
+$fn$;
+
+-- Columns of relations outside the drop set that the cascade would drop.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_closure_columns(p_oid oid)
+RETURNS TABLE (objid oid, objsubid integer) LANGUAGE sql AS $fn$
+  SELECT a.objid, a.objsubid FROM pg_temp.mirror_closure_all(p_oid) a
+   WHERE a.classid = 'pg_class'::regclass AND a.objsubid <> 0
+     AND a.objid NOT IN (SELECT c.objid FROM pg_temp.mirror_closure(p_oid) c WHERE c.classid = 'pg_class'::regclass);
 $fn$;
 
 -- Itemised dependents (not the relation's own indexes/triggers/constraints) as a jsonb array.
@@ -497,6 +513,11 @@ LANGUAGE sql AS $fn$
       FROM cl JOIN pg_policy p ON cl.classid = 'pg_policy'::regclass AND p.oid = cl.objid
       JOIN pg_class t ON t.oid = p.polrelid JOIN pg_namespace n ON n.oid = t.relnamespace
      WHERE p.polrelid NOT IN (SELECT objid FROM rels)
+    UNION ALL
+    SELECT jsonb_build_object('kind', 'column', 'schema', n.nspname, 'table', t.relname, 'name', a.attname)
+      FROM pg_temp.mirror_closure_columns(p_oid) cc
+      JOIN pg_class t ON t.oid = cc.objid JOIN pg_namespace n ON n.oid = t.relnamespace
+      JOIN pg_attribute a ON a.attrelid = cc.objid AND a.attnum = cc.objsubid
     UNION ALL
     SELECT jsonb_build_object('kind', 'trigger', 'name', tr.tgname, 'schema', n.nspname, 'table', t.relname)
       FROM cl JOIN pg_trigger tr ON cl.classid = 'pg_trigger'::regclass AND tr.oid = cl.objid
@@ -566,7 +587,7 @@ BEGIN
     INSERT INTO pg_temp.mirror_plan_t
       (oid, sch, logical, relkind, swapped, reasons, cols, undroppable, rows_est, size_bytes, cascade, owner, closure)
     SELECT r.f_oid, r.f_sch, r.f_logical, r.f_relkind, r.swapped, r.reasons, r.cols,
-           r.undroppable OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_casc) e WHERE e ->> 'kind' IN ('policy', 'trigger', 'rule')),
+           r.undroppable OR EXISTS (SELECT 1 FROM jsonb_array_elements(v_casc) e WHERE e ->> 'kind' IN ('policy', 'trigger', 'rule', 'column')),
            v_rows,
            CASE WHEN r.f_relkind = 'p' THEN (SELECT sum(pg_total_relation_size(t.relid))::bigint FROM pg_partition_tree(r.f_oid) t WHERE t.isleaf)
                 WHEN r.f_relkind IN ('v', 'f') THEN 0 ELSE pg_total_relation_size(r.f_oid) END,
@@ -695,7 +716,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION pg_temp.mirror_report_md(
   p_mode text, p_dry boolean, p_status text, p_exit integer, p_until text, p_ref text, p_post integer
 ) RETURNS text LANGUAGE sql AS $fn$
-  SELECT concat_ws(E'\n',
+  SELECT regexp_replace(concat_ws(E'\n',
     format('### mirror-scrub `%s`: %s (exit %s)%s', current_database(), p_status, p_exit, CASE WHEN p_dry THEN ' [dry-run, rolled back]' ELSE '' END),
     CASE WHEN p_post >= 0 THEN format('**Post-commit audit disagreed:** %s unreviewed item(s) found after COMMIT.', p_post) END,
     CASE WHEN p_mode = 'keep' AND p_until <> '' THEN format('**ESCAPE HATCH ACTIVE** until %s (%s): unreviewed items are left RAW.', p_until, p_ref) END,
@@ -718,5 +739,5 @@ CREATE OR REPLACE FUNCTION pg_temp.mirror_report_md(
          THEN '> Dangling FKs: foreign keys referencing dropped tables were dropped with them. The referencing tables keep all their rows, and their FK columns now hold ids that no longer exist.' END,
     CASE WHEN (SELECT count(*) FROM pg_temp.mirror_plan_t) > 0
          THEN 'Fix: scrub the table in `<db>.scrub.sql`, or allow-list its reviewed columns / add a `''*''` marker row in `<db>.allow.sql`.' END
-  );
+  ), '(^|\n)(MIRROR_SCRUB_)', E'\\1 \\2', 'g');
 $fn$;

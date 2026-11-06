@@ -82,10 +82,10 @@ require_db_files() {
 }
 psql_() { psql -X -v ON_ERROR_STOP=1 "${PSQL_ARGS[@]}" "$@"; }
 
-# SQL writes the report with the final verdict. When it never got that far (psql crash), write a
-# minimal report with the same schema so the consumer always finds a file that matches the exit.
+# SQL writes the report with the final verdict. When psql failed, replace whatever report exists with a
+# minimal one of the same schema so the files always match the exit.
 write_minimal_report() {  # <exit> <status> <note>
-  [[ -n "$report_dir" && ! -f "$report_dir/$db.mirror-scrub.json" ]] || return 0
+  [[ -n "$report_dir" ]] || return 0
   local until_json="null" ref_json="null" active=false version
   version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$SQL_DIR/../package.json" | head -1)"
   [[ "$mode" == keep && -n "$keep_until" ]] && { until_json="\"$keep_until\""; ref_json="\"$keep_ref\""; active=true; }
@@ -116,15 +116,19 @@ run_db() {
   out="$(mktemp)"
   psql_ -d "$maint" -v db="$db" -v lib="$SQL_DIR/mirror-scrub-lib.sql" -v report="$SQL_DIR/report-db.sql" -v allow="$allow" -v scrub="$scrub" \
     -v mode="$mode" -v dry="$dry" -v exact="$exact" -v version="$version" -v keep_until="$keep_until" -v keep_ref="$keep_ref" \
-    "${rvars[@]}" -f "$SQL_DIR/run-db.sql" 2>&1 | tee "$out"
+    "${rvars[@]}" -f "$SQL_DIR/run-db.sql" 2> >(cat >&2) | tee "$out"
   rc=${PIPESTATUS[0]}
-  if grep -qx "MIRROR_SCRUB_ABSENT $db" "$out"; then
+  wait
+  if (( rc == 0 )) && grep -qx "MIRROR_SCRUB_ABSENT $db" "$out"; then
     rm -f "$out"
     if [[ $allow_absent == 1 ]]; then echo "mirror-scrub: $db absent - skipped"; return $EXIT_ABSENT; fi
     echo "mirror-scrub: $db does not exist (pass --allow-absent to skip)" >&2; return $EXIT_NOT_COMMITTED
   fi
-  code="$(sed -n "s/^MIRROR_SCRUB_EXIT $db \([0-9][0-9]*\)$/\1/p" "$out" | tail -1)"
-  local committed=0; grep -qx "MIRROR_SCRUB_COMMITTED $db" "$out" && committed=1
+  local last committed=0
+  last="$(tail -n 1 "$out")"
+  [[ "$last" =~ ^MIRROR_SCRUB_EXIT\ $db\ ([0-9]+)$ ]] && code="${BASH_REMATCH[1]}" || code=""
+  (( rc == 0 )) || code=""
+  grep -qx "MIRROR_SCRUB_COMMITTED $db" "$out" && committed=1
   rm -f "$out"
   if [[ -z "$code" ]]; then
     if [[ $committed == 1 ]]; then

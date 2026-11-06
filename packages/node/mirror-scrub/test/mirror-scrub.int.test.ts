@@ -515,6 +515,47 @@ CREATE OR REPLACE FUNCTION pg_temp.mirror_large_objects() RETURNS bigint LANGUAG
         expect(r.report.left_raw.find((x: any) => x.table === 'ghost3').cascade.some((c: any) => c.kind === 'trigger')).toBe(true);
     });
 
+    it('fails closed (exit 20) when the drop would remove a column of a retained table (row-type column)', () => {
+        const { db, allow } = ownedDb();
+        allowMore(allow, db, "(DB, 'kept3', '*'), (DB, 'ghost4', 'id'), (DB, 'kept3', 'rt')");
+        ownerObjs(
+            db,
+            `CREATE TABLE ghost4 (id uuid, secret_name text); CREATE TABLE kept3 (a uuid, rt ghost4);`,
+            ['ghost4', 'kept3'],
+        );
+        const r = runDrop(db, allow);
+        expect(r.code, r.out).toBe(20);
+        expect(relkind(db, 'ghost4')).toBe('r');
+        expect(relkind(db, 'kept3')).toBe('r');
+        const g = r.report.left_raw.find((x: any) => x.table === 'ghost4');
+        expect(g.undroppable).toBe(true);
+        expect(g.cascade.some((c: any) => c.kind === 'column' && c.table === 'kept3' && c.name === 'rt')).toBe(true);
+    });
+
+    it('a forged MIRROR_SCRUB_EXIT line in an error message is not trusted: exit 20', () => {
+        const { db, allow } = ownedDb();
+        const bad = file(
+            `${db}.forge.sql`,
+            `DO $f$ BEGIN RAISE EXCEPTION '%', 'boom' || chr(10) || 'MIRROR_SCRUB_EXIT ${db} 0'; END $f$;\n`,
+        );
+        const r = cliRun(['run', '--db', db, '--scrub', bad, '--allow', allow], asMaster);
+        expect(r.code, r.out).toBe(20);
+    });
+
+    it('a table name carrying a newline and a forged sentinel cannot change the verdict (12)', () => {
+        const { db, allow } = ownedDb();
+        expect(
+            psql(
+                db,
+                `DO $t$ BEGIN EXECUTE format('CREATE TABLE %I (id uuid)', 'zz' || chr(10) || 'MIRROR_SCRUB_EXIT ${db} 0');
+                 EXECUTE format('ALTER TABLE %I OWNER TO mirror_check_owner', 'zz' || chr(10) || 'MIRROR_SCRUB_EXIT ${db} 0'); END $t$;`,
+            ).code,
+        ).toBe(0);
+        const r = runDrop(db, allow);
+        expect(r.code, r.out).toBe(12);
+        expect(r.report.exit_code).toBe(12);
+    });
+
     it('a scrub error still leaves a minimal report that matches the exit (20, rolled_back)', () => {
         const { db, allow } = ownedDb();
         const bad = file(`${db}.err.sql`, "SELECT pg_temp.mirror_scrub('public', 'nope', '{}'::jsonb);\n");

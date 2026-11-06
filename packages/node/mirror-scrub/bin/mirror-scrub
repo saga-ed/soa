@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # mirror-scrub — view-swap PII scrub of one dev-mirror database, and its pre-merge check.
-#   mirror-scrub run   --db <name> --scrub <file> --allow <file> [--allow-absent] [-- <psql args>]
+#   mirror-scrub run   --db <name> --scrub <file> --allow <file> [--allow-absent] [--dry-run] [--report-dir <dir>]
+#                      [--exact-counts] [--on-unreviewed drop|keep --keep-until YYYY-MM-DD --keep-ref <ref>] [-- <psql args>]
 #   mirror-scrub check --db <name> --scrub <file> --allow <file> [--matrix <file>] [-- <psql args>]
 #   mirror-scrub lint  <file>...
 # Connection: PG* env vars and/or psql args after `--`; the first connection goes to
 # --maintenance-db (default postgres). Exit codes are the iac contract (README.md).
 set -uo pipefail
 
-EXIT_CLEAN=0 EXIT_USAGE=2 EXIT_UNREVIEWED=10 EXIT_AUDIT_INCOMPLETE=11 EXIT_NOT_COMMITTED=20 EXIT_ABSENT=30
+EXIT_CLEAN=0 EXIT_USAGE=2 EXIT_UNREVIEWED=10 EXIT_AUDIT_INCOMPLETE=11 EXIT_DROPPED=12 EXIT_NOT_COMMITTED=20 EXIT_ABSENT=30 EXIT_DRYRUN=40
 
 src="${BASH_SOURCE[0]}"
 while [[ -L "$src" ]]; do
@@ -16,7 +17,7 @@ done
 SQL_DIR="$(cd -P "$(dirname "$src")/../sql" && pwd)"
 
 die() { echo "mirror-scrub: $*" >&2; exit "$EXIT_USAGE"; }
-usage() { sed -n '2,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit "$EXIT_USAGE"; }
+usage() { sed -n '2,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit "$EXIT_USAGE"; }
 
 lint() {
   local f bad=0
@@ -34,6 +35,7 @@ lint() {
 }
 
 db="" scrub="" allow="" allow_absent=0 matrix="" maint="postgres"
+mode=drop dry=0 exact=0 report_dir="" keep_until="" keep_ref="" internal_keep=0
 parse() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -42,6 +44,12 @@ parse() {
       --allow) allow="${2:-}"; shift 2 ;;
       --allow-absent) allow_absent=1; shift ;;
       --matrix) matrix="${2:-}"; shift 2 ;;
+      --dry-run) dry=1; shift ;;
+      --exact-counts) exact=1; shift ;;
+      --report-dir) report_dir="${2:-}"; shift 2 ;;
+      --on-unreviewed) mode="${2:-}"; shift 2 ;;
+      --keep-until) keep_until="${2:-}"; shift 2 ;;
+      --keep-ref) keep_ref="${2:-}"; shift 2 ;;
       --maintenance-db) maint="${2:-}"; shift 2 ;;
       --) shift; PSQL_ARGS=("$@"); return ;;
       *) die "unknown argument: $1" ;;
@@ -55,26 +63,59 @@ require_db_files() {
   scrub="$(realpath "$scrub")" allow="$(realpath "$allow")"
   [[ "$scrub$allow" != *[[:space:]\'\"\`\$\\]* ]] || die "file paths must not contain whitespace, quotes, backticks, \$ or backslashes"
   lint "$scrub" "$allow" || exit "$EXIT_USAGE"
+  [[ "$mode" == drop || "$mode" == keep ]] || die "--on-unreviewed must be drop or keep"
+  if [[ "$mode" == keep && $internal_keep == 0 ]]; then
+    [[ "$keep_until" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ && "$keep_ref" =~ ^[A-Za-z0-9_./#:-]+$ ]] \
+      || die "--on-unreviewed keep leaves unreviewed data RAW: it requires --keep-until YYYY-MM-DD and --keep-ref <issue-ref>"
+    local today until_s today_s
+    today="$(date -u +%F)"; until_s="$(date -u -d "$keep_until" +%s 2>/dev/null)" || die "invalid --keep-until: $keep_until"
+    today_s="$(date -u -d "$today" +%s)"
+    (( until_s >= today_s )) || die "--keep-until $keep_until is in the past: the escape hatch has expired"
+    (( until_s - today_s <= 14 * 86400 )) || die "--keep-until must be within 14 days of today ($today)"
+    echo "mirror-scrub: ESCAPE HATCH ACTIVE until $keep_until ($keep_ref): unreviewed relations in $db will be left RAW" >&2
+  fi
+  if [[ -n "$report_dir" ]]; then
+    mkdir -p "$report_dir" || die "cannot create --report-dir"
+    report_dir="$(realpath "$report_dir")"
+    [[ "$report_dir" != *[[:space:]\'\"\`\$\\]* ]] || die "--report-dir must not contain whitespace, quotes, backticks, \$ or backslashes"
+  fi
 }
 psql_() { psql -X -v ON_ERROR_STOP=1 "${PSQL_ARGS[@]}" "$@"; }
 
 run_db() {
-  local out rc committed n
+  local out rc committed n dropped version rj="" rm_=""
+  version="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$SQL_DIR/../package.json" | head -1)"
+  [[ -n "$report_dir" ]] && { rj="$report_dir/$db.mirror-scrub.json"; rm_="$report_dir/$db.mirror-scrub.md"; }
+  local rvars=(); [[ -n "$rj" ]] && rvars=(-v "report_json=$rj" -v "report_md=$rm_")
   out="$(mktemp)"
   psql_ -d "$maint" -v db="$db" -v lib="$SQL_DIR/mirror-scrub-lib.sql" -v allow="$allow" -v scrub="$scrub" \
-    -f "$SQL_DIR/run-db.sql" 2>&1 | tee "$out"
+    -v mode="$mode" -v dry="$dry" -v exact="$exact" -v version="$version" -v keep_until="$keep_until" -v keep_ref="$keep_ref" \
+    "${rvars[@]}" -f "$SQL_DIR/run-db.sql" 2>&1 | tee "$out"
   rc=${PIPESTATUS[0]}
   if grep -qx "MIRROR_SCRUB_ABSENT $db" "$out"; then
     rm -f "$out"
     if [[ $allow_absent == 1 ]]; then echo "mirror-scrub: $db absent - skipped"; return $EXIT_ABSENT; fi
     echo "mirror-scrub: $db does not exist (pass --allow-absent to skip)" >&2; return $EXIT_NOT_COMMITTED
   fi
+  if grep -qx "MIRROR_SCRUB_DRYRUN $db [0-9]*" "$out"; then
+    n="$(sed -n "s/^MIRROR_SCRUB_DRYRUN $db \([0-9][0-9]*\)$/\1/p" "$out")"; rm -f "$out"
+    echo "mirror-scrub: $db dry-run complete, rolled back; $n unreviewed relation(s) would be handled in $mode mode" >&2
+    return $EXIT_DRYRUN
+  fi
   committed=0; grep -qx "MIRROR_SCRUB_COMMITTED $db" "$out" && committed=1
   n="$(sed -n "s/^MIRROR_SCRUB_UNREVIEWED $db \([0-9][0-9]*\)$/\1/p" "$out")"
+  dropped="$(sed -n "s/^MIRROR_SCRUB_DROPPED $db \([0-9][0-9]*\)$/\1/p" "$out")"
+  if grep -qx "MIRROR_SCRUB_RESIDUE $db [0-9]*" "$out"; then
+    echo "mirror-scrub: $db NOT scrubbed: unreviewed items remain that cannot be dropped (see UNREVIEWED/LARGE OBJECTS notices); transaction rolled back" >&2
+  fi
   rm -f "$out"
   if [[ $committed == 0 ]]; then echo "mirror-scrub: $db NOT scrubbed (psql exit $rc; transaction rolled back)" >&2; return $EXIT_NOT_COMMITTED; fi
   if [[ -z "$n" || $rc != 0 ]]; then echo "mirror-scrub: $db scrubbed but the audit did not complete (psql exit $rc)" >&2; return $EXIT_AUDIT_INCOMPLETE; fi
-  if [[ "$n" != 0 ]]; then echo "mirror-scrub: $db scrubbed; $n unreviewed column(s)/view(s) - scrub or allow-list them" >&2; return $EXIT_UNREVIEWED; fi
+  if [[ "$n" != 0 ]]; then
+    if [[ "$mode" == keep ]]; then echo "mirror-scrub: $db scrubbed; $n unreviewed item(s) left RAW - scrub or allow-list them" >&2; return $EXIT_UNREVIEWED; fi
+    echo "mirror-scrub: $db committed but the post-commit audit found $n unreviewed item(s)" >&2; return $EXIT_AUDIT_INCOMPLETE
+  fi
+  if [[ "${dropped:-0}" != 0 ]]; then echo "mirror-scrub: $db scrubbed; $dropped unreviewed relation(s) DROPPED, nothing raw remains"; return $EXIT_DROPPED; fi
   echo "mirror-scrub: $db scrubbed, audit clean"
   return $EXIT_CLEAN
 }
@@ -126,6 +167,7 @@ DO $o$ DECLARE c record; first_col record; BEGIN
 END $o$;
 SQL
 
+  mode=keep internal_keep=1 dry=0
   local run rc
   for run in 1 2; do
     echo "== mirror-scrub check: run $run (as mirror_check_master)"

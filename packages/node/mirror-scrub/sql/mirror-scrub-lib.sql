@@ -1,7 +1,8 @@
 -- mirror-scrub-lib.sql — view-swap scrub helpers for the dev Postgres mirror.
 --
 -- Loaded by run-db.sql after the \connect to each database (pg_temp is per-connection).
--- Function bodies are design-reviewed (rostering@bf110ac5); a body change needs re-review.
+-- Function bodies are design-reviewed (rostering@bf110ac5; 0.2.0 additions need their own review);
+-- a body change needs re-review.
 --
 -- pg_temp.mirror_scrub(schema, table, overrides jsonb, required bool)
 --   Builds {table}_public from the live catalog (pg_attribute, attnum order, so
@@ -19,13 +20,21 @@
 --   (PUBLIC included, current_user excluded) loses ALL on {base}_real and receives the
 --   same SELECT on the view; column-level SELECT grants move to the view's columns.
 --   Views/matviews over {base}_real are re-owned, ungranted and (matviews) emptied.
--- pg_temp.mirror_audit()
---   Counts (and NOTICEs) columns of base tables that are neither overridden nor
---   allow-listed by EXACT (db, table, column) match
---   (pg_temp.mirror_allow, filled by the service's <db>.allow.sql), plus views and
---   matviews that are not locked down. Fail-closed on type: only numeric, bool,
---   date/time, interval, enum, uuid and uuid/int arrays are exempt (domains follow
---   their base type); a text column named *_id is flagged like any other. Does not raise.
+-- pg_temp.mirror_findings() / mirror_audit()
+--   Every unreviewed item: tables that are not swapped, allow-listed on some column, or marked
+--   with a ('db', 'table', '*') allow row (a table-level marker; it never allows a column);
+--   non-exempt columns of reviewed tables that are neither overridden nor allow-listed by exact
+--   (db, table, column) (pg_temp.mirror_allow, filled by <db>.allow.sql; optional sch, NULL = public);
+--   populated non-scrub matviews; views and matviews that are not locked down. Fail-closed on
+--   type: only numeric, bool, date/time, interval, enum, uuid and uuid/int arrays are exempt
+--   (domains follow their base type). _prisma_migrations and goose_db_version are never touched.
+--   mirror_audit() counts (and NOTICEs) them plus large objects. Does not raise.
+-- pg_temp.mirror_plan(exact) / mirror_cascade(oid) / mirror_drop_unreviewed()
+--   Plan the drop of each unreviewed table/view (DROP ... CASCADE, dependents itemised from
+--   pg_depend and verified against a catalog diff), then execute it. Undroppable findings
+--   (extension-owned relations) are skipped and remain in the audit.
+-- pg_temp.mirror_report_json() / mirror_report_md()
+--   The per-database report (README).
 -- pg_temp.mirror_expect_db(name)
 --   RAISES unless current_database() = name.
 -- pg_temp.mirror_adopt(owner)
@@ -37,7 +46,7 @@
 --   Revokes every adopted grant; run-db.sql calls it before COMMIT so no grant outlives the
 --   transaction. On RDS an owner in rds_iam would otherwise force IAM auth on the master.
 
-CREATE TEMP TABLE IF NOT EXISTS mirror_allow (db text, tbl text, col text);
+CREATE TEMP TABLE IF NOT EXISTS mirror_allow (db text, tbl text, col text, sch text);
 CREATE TEMP TABLE IF NOT EXISTS mirror_adopted (role oid, n_before bigint);
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_adopt(p_owner oid)
@@ -305,74 +314,363 @@ BEGIN
 END;
 $fn$;
 
+-- Exempt column types (domains follow their base type): fail-closed, everything else needs a review.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_exempt_type(p_type oid) RETURNS boolean
+LANGUAGE sql AS $fn$
+  SELECT t.typcategory IN ('N', 'B', 'D', 'T', 'E')
+      OR t.oid IN ('uuid'::regtype, 'uuid[]'::regtype, 'int2[]'::regtype, 'int4[]'::regtype, 'int8[]'::regtype)
+    FROM pg_type t WHERE t.oid = p_type;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_large_objects() RETURNS bigint
+LANGUAGE sql AS $fn$ SELECT count(*) FROM pg_largeobject_metadata; $fn$;
+
+-- One row per unreviewed item. Logical tables (a swapped t_real counts as t; a partition family as
+-- its root) are "reviewed" when swapped, allow-listed on any column, or marked with col = '*'.
+-- f_oid is the relation a drop must target (t_real for swapped tables).
+CREATE OR REPLACE FUNCTION pg_temp.mirror_findings()
+RETURNS TABLE (f_sch text, f_logical text, f_relkind "char", f_col text, f_reason text,
+               f_oid oid, f_swapped boolean, f_undroppable boolean)
+LANGUAGE sql AS $fn$
+  WITH base AS (
+    SELECT c.oid, n.nspname AS sch, c.relname, c.relkind, c.relispopulated,
+           (v.oid IS NOT NULL) AS swapped,
+           CASE WHEN v.oid IS NOT NULL THEN v.relname ELSE c.relname END AS logical,
+           coalesce(string_to_array(substring(obj_description(v.oid, 'pg_class') FROM '^mirror-scrub:(.*)$'), ','), '{}') AS overridden,
+           EXISTS (SELECT 1 FROM pg_depend d
+                    WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e') AS is_ext
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      LEFT JOIN pg_class v ON v.relnamespace = c.relnamespace AND v.relkind = 'v'
+           AND c.relkind = 'r' AND c.relname LIKE '%\_real' AND v.relname = regexp_replace(c.relname, '_real$', '')
+           AND coalesce(obj_description(v.oid, 'pg_class'), '') LIKE 'mirror-scrub:%'
+     WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND NOT c.relispartition
+       AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname !~ '^pg_(toast|temp)'
+       AND c.relname NOT IN ('_prisma_migrations', 'goose_db_version')
+       AND coalesce(obj_description(c.oid, 'pg_class'), '') NOT LIKE 'mirror-scrub:%'
+  ), kn AS (
+    SELECT b.*,
+           (b.swapped OR EXISTS (SELECT 1 FROM pg_temp.mirror_allow m
+                                  WHERE m.db = current_database() AND m.tbl = b.logical
+                                    AND coalesce(m.sch, 'public') = b.sch)) AS is_known
+      FROM base b
+  ), on_real AS (
+    SELECT oid FROM pg_temp.mirror_dependents(ARRAY(SELECT oid FROM base WHERE swapped))
+  )
+  SELECT k.sch, k.logical, k.relkind, NULL::text, 'unreviewed_table', k.oid, false, false
+    FROM kn k
+   WHERE k.relkind IN ('r', 'p', 'f') AND NOT k.is_known AND NOT k.is_ext
+  UNION ALL
+  SELECT k.sch, k.logical, k.relkind, NULL::text, 'unreviewed_matview', k.oid, false, false
+    FROM kn k
+   WHERE k.relkind = 'm' AND k.relispopulated AND NOT k.is_known AND NOT k.is_ext
+     AND k.oid NOT IN (SELECT oid FROM on_real)
+  UNION ALL
+  SELECT k.sch, k.logical, k.relkind, a.attname::text, 'unreviewed_column', k.oid, k.swapped, k.is_ext
+    FROM kn k
+    JOIN pg_attribute a ON a.attrelid = k.oid AND a.attnum > 0 AND NOT a.attisdropped
+   WHERE k.relkind IN ('r', 'p') AND (k.is_known OR k.is_ext)
+     AND NOT pg_temp.mirror_exempt_type(a.atttypid)
+     AND NOT (a.attname = ANY (k.overridden))
+     AND NOT EXISTS (SELECT 1 FROM pg_temp.mirror_allow m
+                      WHERE m.db = current_database() AND m.tbl = k.logical AND m.col = a.attname
+                        AND coalesce(m.sch, 'public') = k.sch)
+  UNION ALL
+  SELECT k.sch, k.logical, k.relkind, NULL::text, 'unlocked_dependent', k.oid, false, k.is_ext
+    FROM kn k
+   WHERE k.relkind IN ('v', 'm') AND NOT pg_temp.mirror_locked(k.oid) AND k.oid IN (SELECT oid FROM on_real)
+  UNION ALL
+  SELECT k.sch, k.logical, k.relkind, a.attname::text, 'unreviewed_view_column', k.oid, false, k.is_ext
+    FROM kn k
+    JOIN pg_attribute a ON a.attrelid = k.oid AND a.attnum > 0 AND NOT a.attisdropped
+   WHERE k.relkind IN ('v', 'm') AND NOT pg_temp.mirror_locked(k.oid) AND k.oid NOT IN (SELECT oid FROM on_real)
+     AND NOT pg_temp.mirror_exempt_type(a.atttypid)
+     AND NOT EXISTS (SELECT 1 FROM pg_temp.mirror_allow m
+                      WHERE m.db = current_database() AND m.tbl = k.logical AND m.col = a.attname
+                        AND coalesce(m.sch, 'public') = k.sch);
+$fn$;
+
+-- Counts (and NOTICEs) every unreviewed item plus large objects. Does not raise.
 CREATE OR REPLACE FUNCTION pg_temp.mirror_audit() RETURNS integer
 LANGUAGE plpgsql AS $fn$
 DECLARE
   r record;
-  r2 record;
   n integer := 0;
+  v_lo bigint;
 BEGIN
-  FOR r IN
-    WITH cols AS (
-      SELECT n.nspname, c.relname, a.attname,
-             CASE WHEN c.relname LIKE '%\_real' AND v.oid IS NOT NULL
-                  THEN regexp_replace(c.relname, '_real$', '') ELSE c.relname END AS logical,
-             coalesce(string_to_array(substring(obj_description(v.oid, 'pg_class') FROM '^mirror-scrub:(.*)$'), ','), '{}') AS overridden
-        FROM pg_class c
-        JOIN pg_namespace n ON n.oid = c.relnamespace
-        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
-        JOIN pg_type t ON t.oid = a.atttypid
-        LEFT JOIN pg_class v ON v.relnamespace = c.relnamespace AND v.relkind = 'v'
-             AND c.relname LIKE '%\_real' AND v.relname = regexp_replace(c.relname, '_real$', '')
-       WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-         AND n.nspname !~ '^pg_(toast|temp)' AND c.relname <> '_prisma_migrations'
-         AND NOT (t.typcategory IN ('N', 'B', 'D', 'T', 'E') OR t.oid IN ('uuid'::regtype, 'uuid[]'::regtype, 'int2[]'::regtype, 'int4[]'::regtype, 'int8[]'::regtype))
-    )
-    SELECT * FROM cols
-     WHERE NOT (attname = ANY (overridden))
-       AND NOT EXISTS (
-         SELECT 1 FROM pg_temp.mirror_allow m
-          WHERE m.db = current_database() AND m.tbl = logical AND m.col = attname)
-     ORDER BY 1, 2, 3
-  LOOP
+  FOR r IN SELECT * FROM pg_temp.mirror_findings() ORDER BY f_sch, f_logical, f_col LOOP
     n := n + 1;
-    RAISE NOTICE 'UNREVIEWED COLUMN % .%.% (scrub it in <db>.scrub.sql or allow-list it in <db>.allow.sql)',
-      current_database(), r.logical, r.attname;
+    CASE r.f_reason
+      WHEN 'unreviewed_column' THEN
+        RAISE NOTICE 'UNREVIEWED COLUMN % .%.% (scrub it in <db>.scrub.sql or allow-list it in <db>.allow.sql)',
+          current_database(), r.f_logical, r.f_col;
+      WHEN 'unreviewed_table' THEN
+        RAISE NOTICE 'UNREVIEWED TABLE % .%.% (scrub it in <db>.scrub.sql, or allow-list a column / add a ''*'' marker in <db>.allow.sql)',
+          current_database(), r.f_sch, r.f_logical;
+      WHEN 'unreviewed_matview' THEN
+        RAISE NOTICE 'UNREVIEWED MATVIEW % .%.%', current_database(), r.f_sch, r.f_logical;
+      WHEN 'unlocked_dependent' THEN
+        RAISE NOTICE 'UNLOCKED DEPENDENT % .%.% reads a scrubbed table''s real data (not master-owned/ungranted/emptied)',
+          current_database(), r.f_sch, r.f_logical;
+      ELSE
+        RAISE NOTICE 'UNREVIEWED VIEW COLUMN % .%.%', current_database(), r.f_logical, r.f_col;
+    END CASE;
   END LOOP;
-  -- Views / materialized views that are not the scrub's own swap views.
-  FOR r IN
-    WITH reals AS (
-      SELECT t.oid FROM pg_class t JOIN pg_class v ON v.relnamespace = t.relnamespace
-         AND v.relname = regexp_replace(t.relname, '_real$', '') AND v.relkind = 'v'
-       WHERE t.relkind = 'r' AND t.relname LIKE '%\_real'
-         AND coalesce(obj_description(v.oid, 'pg_class'), '') LIKE 'mirror-scrub:%'
-    ), over_real AS (
-      SELECT oid FROM pg_temp.mirror_dependents(ARRAY(SELECT oid FROM reals))
-    )
-    SELECT c.oid, n.nspname, c.relname, c.relkind, (c.oid IN (SELECT oid FROM over_real)) AS on_real
-      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind IN ('v', 'm') AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-       AND n.nspname !~ '^pg_(toast|temp)'
-       AND coalesce(obj_description(c.oid, 'pg_class'), '') NOT LIKE 'mirror-scrub:%'
-       AND NOT pg_temp.mirror_locked(c.oid)
-  LOOP
-    IF r.on_real THEN
-      n := n + 1;
-      RAISE NOTICE 'UNLOCKED DEPENDENT % .%.% reads a scrubbed table''s real data (not master-owned/ungranted/emptied)',
-        current_database(), r.nspname, r.relname;
-    ELSE
-      FOR r2 IN
-        SELECT a.attname FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid
-         WHERE a.attrelid = r.oid AND a.attnum > 0 AND NOT a.attisdropped
-           AND NOT (t.typcategory IN ('N', 'B', 'D', 'T', 'E') OR t.oid IN ('uuid'::regtype, 'uuid[]'::regtype, 'int2[]'::regtype, 'int4[]'::regtype, 'int8[]'::regtype))
-           AND NOT EXISTS (SELECT 1 FROM pg_temp.mirror_allow m
-                            WHERE m.db = current_database() AND m.tbl = r.relname AND m.col = a.attname)
-      LOOP
-        n := n + 1;
-        RAISE NOTICE 'UNREVIEWED VIEW COLUMN % .%.%', current_database(), r.relname, r2.attname;
-      END LOOP;
-    END IF;
-  END LOOP;
+  v_lo := pg_temp.mirror_large_objects();
+  IF v_lo > 0 THEN
+    n := n + 1;
+    RAISE NOTICE 'LARGE OBJECTS % : % large object(s) present; they cannot be scrubbed or dropped per table', current_database(), v_lo;
+  END IF;
   RETURN n;
 END;
+$fn$;
+
+-- All objects DROP ... CASCADE of p_oid would remove, as (classid, objid), following pg_depend
+-- (rewrite rules are mapped to their view).
+CREATE OR REPLACE FUNCTION pg_temp.mirror_closure(p_oid oid)
+RETURNS TABLE (classid oid, objid oid) LANGUAGE sql AS $fn$
+  WITH RECURSIVE dep(classid, objid) AS (
+    SELECT 'pg_class'::regclass::oid, p_oid
+    UNION
+    SELECT x.classid, x.objid
+      FROM dep
+      JOIN pg_depend d ON d.refclassid = dep.classid AND d.refobjid = dep.objid AND d.deptype NOT IN ('p', 'e')
+      CROSS JOIN LATERAL (
+        SELECT d.classid, d.objid
+        UNION ALL
+        SELECT 'pg_class'::regclass::oid, r.ev_class FROM pg_rewrite r
+         WHERE d.classid = 'pg_rewrite'::regclass AND r.oid = d.objid
+      ) x
+  )
+  SELECT dep.classid, dep.objid FROM dep;
+$fn$;
+
+-- Itemised dependents (not the relation's own indexes/triggers/constraints) as a jsonb array.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_cascade(p_oid oid) RETURNS jsonb
+LANGUAGE sql AS $fn$
+  WITH cl AS (SELECT * FROM pg_temp.mirror_closure(p_oid)),
+  rels AS (SELECT objid FROM cl WHERE classid = 'pg_class'::regclass),
+  items AS (
+    SELECT jsonb_build_object('kind',
+             CASE WHEN c.relkind = 'v' THEN 'view' WHEN c.relkind = 'm' THEN 'matview'
+                  WHEN c.relkind = 'f' THEN 'foreign_table'
+                  WHEN c.relispartition THEN 'partition' ELSE 'inheritance_child' END,
+             'schema', n.nspname, 'name', c.relname) AS item
+      FROM cl JOIN pg_class c ON cl.classid = 'pg_class'::regclass AND c.oid = cl.objid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.oid <> p_oid AND c.relkind IN ('v', 'm', 'r', 'p', 'f')
+    UNION ALL
+    SELECT jsonb_build_object('kind', 'fk_constraint', 'name', k.conname, 'schema', n.nspname,
+             'table', t.relname,
+             'columns', (SELECT jsonb_agg(a.attname ORDER BY u.ord) FROM unnest(k.conkey) WITH ORDINALITY u(num, ord)
+                          JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = u.num),
+             'referencing_rows_estimate', CASE WHEN t.reltuples < 0 THEN NULL ELSE t.reltuples::bigint END)
+      FROM cl JOIN pg_constraint k ON cl.classid = 'pg_constraint'::regclass AND k.oid = cl.objid
+      JOIN pg_class t ON t.oid = k.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE k.contype = 'f' AND k.conrelid NOT IN (SELECT objid FROM rels)
+    UNION ALL
+    SELECT jsonb_build_object('kind', 'policy', 'name', p.polname, 'schema', n.nspname, 'table', t.relname)
+      FROM cl JOIN pg_policy p ON cl.classid = 'pg_policy'::regclass AND p.oid = cl.objid
+      JOIN pg_class t ON t.oid = p.polrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+     WHERE p.polrelid NOT IN (SELECT objid FROM rels)
+    UNION ALL
+    SELECT jsonb_build_object('kind', 'function', 'name', pr.proname, 'schema', n.nspname)
+      FROM cl JOIN pg_proc pr ON cl.classid = 'pg_proc'::regclass AND pr.oid = cl.objid
+      JOIN pg_namespace n ON n.oid = pr.pronamespace
+    UNION ALL
+    SELECT jsonb_build_object('kind', 'column_default', 'schema', n.nspname, 'table', t.relname, 'name', a.attname)
+      FROM cl JOIN pg_attrdef ad ON cl.classid = 'pg_attrdef'::regclass AND ad.oid = cl.objid
+      JOIN pg_class t ON t.oid = ad.adrelid JOIN pg_namespace n ON n.oid = t.relnamespace
+      JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+     WHERE ad.adrelid NOT IN (SELECT objid FROM rels)
+    UNION ALL
+    SELECT jsonb_build_object('kind', 'publication_member', 'name', pub.pubname)
+      FROM cl JOIN pg_publication_rel pr ON cl.classid = 'pg_publication_rel'::regclass AND pr.oid = cl.objid
+      JOIN pg_publication pub ON pub.oid = pr.prpubid
+  )
+  SELECT coalesce(jsonb_agg(item ORDER BY item ->> 'kind', item ->> 'schema', item ->> 'name', item ->> 'table'), '[]'::jsonb)
+         || jsonb_build_array(jsonb_build_object('kind', 'own_objects',
+              'count', (SELECT count(*) FROM cl) - 1 - (SELECT count(*) FROM items)))
+    FROM items;
+$fn$;
+
+CREATE TEMP TABLE IF NOT EXISTS mirror_plan_t (
+  seq serial, oid oid, sch text, logical text, relkind "char", swapped boolean,
+  reasons text[], cols text[], undroppable boolean,
+  rows_est bigint, size_bytes bigint, cascade jsonb, owner oid,
+  dropped boolean NOT NULL DEFAULT false, via_cascade boolean NOT NULL DEFAULT false
+);
+
+-- Fills mirror_plan_t from mirror_findings(), one row per drop target; changes nothing else.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_plan(p_exact boolean DEFAULT false) RETURNS integer
+LANGUAGE plpgsql AS $fn$
+DECLARE
+  r record;
+  v_rows bigint;
+BEGIN
+  DELETE FROM pg_temp.mirror_plan_t;
+  FOR r IN
+    SELECT f_oid, f_sch, f_logical, f_relkind, bool_or(f_swapped) AS swapped,
+           array_agg(DISTINCT f_reason ORDER BY f_reason) AS reasons,
+           coalesce(array_agg(f_col ORDER BY f_col) FILTER (WHERE f_col IS NOT NULL), '{}') AS cols,
+           bool_or(f_undroppable) AS undroppable
+      FROM pg_temp.mirror_findings()
+     GROUP BY f_oid, f_sch, f_logical, f_relkind
+     ORDER BY CASE f_relkind WHEN 'v' THEN 3 WHEN 'm' THEN 2 ELSE 1 END, f_sch, f_logical
+  LOOP
+    IF p_exact AND r.f_relkind IN ('r', 'p', 'f', 'm') THEN
+      EXECUTE format('SELECT count(*) FROM %s', r.f_oid::regclass) INTO v_rows;
+    ELSIF r.f_relkind = 'p' THEN
+      SELECT sum(c.reltuples)::bigint INTO v_rows
+        FROM pg_partition_tree(r.f_oid) t JOIN pg_class c ON c.oid = t.relid WHERE t.isleaf AND c.reltuples > 0;
+    ELSE
+      SELECT CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::bigint END INTO v_rows FROM pg_class c WHERE c.oid = r.f_oid;
+    END IF;
+    INSERT INTO pg_temp.mirror_plan_t
+      (oid, sch, logical, relkind, swapped, reasons, cols, undroppable, rows_est, size_bytes, cascade, owner)
+    SELECT r.f_oid, r.f_sch, r.f_logical, r.f_relkind, r.swapped, r.reasons, r.cols, r.undroppable, v_rows,
+           CASE WHEN r.f_relkind = 'p' THEN (SELECT sum(pg_total_relation_size(t.relid))::bigint FROM pg_partition_tree(r.f_oid) t WHERE t.isleaf)
+                WHEN r.f_relkind IN ('v', 'f') THEN 0 ELSE pg_total_relation_size(r.f_oid) END,
+           pg_temp.mirror_cascade(r.f_oid),
+           (SELECT relowner FROM pg_class WHERE oid = r.f_oid);
+  END LOOP;
+  RETURN (SELECT count(*) FROM pg_temp.mirror_plan_t);
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_catalog_keys() RETURNS text[]
+LANGUAGE sql AS $fn$
+  SELECT array_agg(k) FROM (
+    SELECT 'pg_class:' || oid FROM pg_class UNION ALL SELECT 'pg_constraint:' || oid FROM pg_constraint
+    UNION ALL SELECT 'pg_trigger:' || oid FROM pg_trigger UNION ALL SELECT 'pg_policy:' || oid FROM pg_policy
+    UNION ALL SELECT 'pg_rewrite:' || oid FROM pg_rewrite UNION ALL SELECT 'pg_attrdef:' || oid FROM pg_attrdef
+  ) s(k);
+$fn$;
+
+-- Drops every planned relation (CASCADE). Needs the adopted owner grants, so run it before mirror_release().
+-- Undroppable findings are skipped and stay in the audit. After each drop, every catalog object that
+-- vanished must be in the pg_depend closure computed beforehand; otherwise it raises.
+CREATE OR REPLACE FUNCTION pg_temp.mirror_drop_unreviewed() RETURNS integer
+LANGUAGE plpgsql AS $fn$
+DECLARE
+  r record;
+  v_kw text;
+  v_before text[];
+  v_closure text[];
+  v_unexpected text;
+  v_n integer := 0;
+BEGIN
+  FOR r IN SELECT * FROM pg_temp.mirror_plan_t WHERE NOT undroppable ORDER BY seq LOOP
+    SELECT CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'f' THEN 'FOREIGN TABLE' ELSE 'TABLE' END
+      INTO v_kw FROM pg_class c WHERE c.oid = r.oid;
+    IF v_kw IS NULL THEN
+      UPDATE pg_temp.mirror_plan_t SET dropped = true, via_cascade = true WHERE seq = r.seq;
+      v_n := v_n + 1;
+      CONTINUE;
+    END IF;
+
+    PERFORM pg_temp.mirror_adopt(r.owner);
+    IF NOT pg_has_role(current_user, r.owner, 'USAGE') OR NOT pg_has_role(current_user, r.owner, 'MEMBER') THEN
+      RAISE EXCEPTION 'mirror_drop: % cannot drop %.% (owner %): % must be a member of the owner role (GRANT % TO %)',
+        current_user, r.sch, r.logical, r.owner::regrole, current_user, r.owner::regrole, current_user;
+    END IF;
+
+    v_before := pg_temp.mirror_catalog_keys();
+    SELECT array_agg(CASE classid WHEN 'pg_class'::regclass THEN 'pg_class:' WHEN 'pg_constraint'::regclass THEN 'pg_constraint:'
+                                  WHEN 'pg_trigger'::regclass THEN 'pg_trigger:' WHEN 'pg_policy'::regclass THEN 'pg_policy:'
+                                  WHEN 'pg_rewrite'::regclass THEN 'pg_rewrite:' WHEN 'pg_attrdef'::regclass THEN 'pg_attrdef:'
+                                  ELSE 'other:' END || objid)
+      INTO v_closure FROM pg_temp.mirror_closure(r.oid);
+
+    EXECUTE format('DROP %s %s CASCADE', v_kw, r.oid::regclass);
+
+    SELECT string_agg(k, ', ') INTO v_unexpected FROM (
+      (SELECT k FROM unnest(v_before) k EXCEPT SELECT k FROM unnest(pg_temp.mirror_catalog_keys()) k)
+      EXCEPT SELECT k FROM unnest(v_closure) k) s;
+    IF v_unexpected IS NOT NULL THEN
+      RAISE EXCEPTION 'mirror_drop: dropping %.% also removed objects outside its dependency closure: %', r.sch, r.logical, v_unexpected;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_class WHERE oid = r.oid) THEN
+      RAISE EXCEPTION 'mirror_drop: %.% still exists after DROP', r.sch, r.logical;
+    END IF;
+    UPDATE pg_temp.mirror_plan_t SET dropped = true WHERE seq = r.seq;
+    v_n := v_n + 1;
+    RAISE NOTICE 'mirror: DROPPED %.% (%)', r.sch, r.logical, array_to_string(r.reasons, ',');
+  END LOOP;
+  RETURN v_n;
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_plan_entry(r pg_temp.mirror_plan_t) RETURNS jsonb
+LANGUAGE sql AS $fn$
+  SELECT jsonb_build_object(
+    'schema', r.sch, 'table', r.logical, 'relkind', r.relkind::text, 'swapped', r.swapped,
+    'reason', CASE WHEN 'unreviewed_table' = ANY (r.reasons) THEN 'unreviewed_table' ELSE r.reasons[1] END,
+    'reasons', to_jsonb(r.reasons), 'columns', to_jsonb(r.cols),
+    'rows_estimate', r.rows_est, 'size_bytes', r.size_bytes,
+    'undroppable', r.undroppable, 'via_cascade', r.via_cascade, 'cascade', r.cascade);
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_report_json(
+  p_mode text, p_dry boolean, p_status text, p_exit integer, p_version text, p_until text, p_ref text
+) RETURNS text LANGUAGE sql AS $fn$
+  SELECT jsonb_pretty(jsonb_build_object(
+    'schema_version', 1,
+    'tool', jsonb_build_object('name', '@saga-ed/soa-mirror-scrub', 'version', p_version),
+    'db', current_database(), 'mode', p_mode, 'dry_run', p_dry, 'status', p_status, 'exit_code', p_exit,
+    'counts', jsonb_build_object(
+      'dropped', (SELECT count(*) FROM pg_temp.mirror_plan_t WHERE dropped),
+      'cascaded', (SELECT coalesce(sum(jsonb_array_length(cascade) - 1), 0) FROM pg_temp.mirror_plan_t WHERE dropped),
+      'left_raw', (SELECT count(*) FROM pg_temp.mirror_plan_t WHERE NOT dropped),
+      'estimated_rows_dropped', (SELECT coalesce(sum(rows_est), 0) FROM pg_temp.mirror_plan_t WHERE dropped)),
+    'dropped', (SELECT coalesce(jsonb_agg(pg_temp.mirror_plan_entry(t) ORDER BY seq), '[]') FROM pg_temp.mirror_plan_t t WHERE dropped),
+    'left_raw', (SELECT coalesce(jsonb_agg(pg_temp.mirror_plan_entry(t) ORDER BY seq), '[]') FROM pg_temp.mirror_plan_t t WHERE NOT dropped),
+    'would_drop', (SELECT coalesce(jsonb_agg(pg_temp.mirror_plan_entry(t) ORDER BY seq), '[]') FROM pg_temp.mirror_plan_t t
+                    WHERE p_dry OR p_mode = 'keep'),
+    'infra_allowlisted', (SELECT coalesce(jsonb_agg(n.nspname || '.' || c.relname ORDER BY n.nspname, c.relname), '[]')
+                            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                           WHERE c.relkind IN ('r', 'p') AND c.relname IN ('_prisma_migrations', 'goose_db_version')),
+    'inventory', jsonb_build_object(
+      'relkinds', (SELECT coalesce(jsonb_object_agg(relkind::text, n), '{}') FROM (
+                     SELECT c.relkind, count(*) AS n FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+                      WHERE ns.nspname NOT IN ('pg_catalog', 'information_schema') AND ns.nspname !~ '^pg_(toast|temp)'
+                        AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') GROUP BY c.relkind) s),
+      'extension_members', (SELECT coalesce(jsonb_agg(n.nspname || '.' || c.relname ORDER BY n.nspname, c.relname), '[]')
+                              FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                             WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
+                               AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname !~ '^pg_(toast|temp)'
+                               AND EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')),
+      'large_objects', pg_temp.mirror_large_objects(),
+      'non_public_schemas', (SELECT coalesce(jsonb_agg(nspname ORDER BY nspname), '[]') FROM pg_namespace
+                              WHERE nspname NOT IN ('public', 'pg_catalog', 'information_schema') AND nspname !~ '^pg_(toast|temp)')),
+    'escape_hatch', jsonb_build_object('active', p_mode = 'keep' AND p_until <> '', 'until', nullif(p_until, ''), 'ref', nullif(p_ref, ''))
+  ))::text;
+$fn$;
+
+CREATE OR REPLACE FUNCTION pg_temp.mirror_report_md(
+  p_mode text, p_dry boolean, p_status text, p_exit integer, p_until text, p_ref text
+) RETURNS text LANGUAGE sql AS $fn$
+  SELECT concat_ws(E'\n',
+    format('### mirror-scrub `%s`: %s (exit %s)%s', current_database(), p_status, p_exit, CASE WHEN p_dry THEN ' [dry-run, rolled back]' ELSE '' END),
+    CASE WHEN p_mode = 'keep' AND p_until <> '' THEN format('**ESCAPE HATCH ACTIVE** until %s (%s): unreviewed items are left RAW.', p_until, p_ref) END,
+    CASE WHEN (SELECT count(*) FROM pg_temp.mirror_plan_t) = 0 THEN 'No unreviewed relations.' ELSE
+      E'\n| Relation | Reason | Columns | Rows~ | State |\n|---|---|---|---|---|' || E'\n' ||
+      (SELECT string_agg(format('| `%s.%s` | %s | %s | %s | %s |', sch, logical, array_to_string(reasons, ','),
+                                coalesce(array_to_string(cols, ','), ''), coalesce(rows_est::text, '?'),
+                                CASE WHEN dropped THEN 'DROPPED' WHEN undroppable THEN 'RAW (cannot drop)' WHEN p_mode = 'keep' THEN 'RAW (kept)' ELSE 'RAW' END),
+                         E'\n' ORDER BY seq)
+         FROM (SELECT * FROM pg_temp.mirror_plan_t ORDER BY seq LIMIT 100) t) ||
+      CASE WHEN (SELECT count(*) FROM pg_temp.mirror_plan_t) > 100
+           THEN format(E'\n+%s more in the JSON report', (SELECT count(*) FROM pg_temp.mirror_plan_t) - 100) ELSE '' END
+    END,
+    (SELECT string_agg(format('- `%s.%s` cascade: %s', t.sch, t.logical, c.s), E'\n' ORDER BY t.seq)
+       FROM pg_temp.mirror_plan_t t
+       CROSS JOIN LATERAL (SELECT string_agg(coalesce(e ->> 'schema' || '.', '') || coalesce(e ->> 'table' || '.', '') || coalesce(e ->> 'name', '') || ' (' || (e ->> 'kind') || ')', ', ') AS s
+                             FROM jsonb_array_elements(t.cascade) e WHERE e ->> 'kind' <> 'own_objects') c
+      WHERE c.s IS NOT NULL AND t.dropped),
+    CASE WHEN EXISTS (SELECT 1 FROM pg_temp.mirror_plan_t t, jsonb_array_elements(t.cascade) e WHERE t.dropped AND e ->> 'kind' = 'fk_constraint')
+         THEN '> Dangling FKs: foreign keys referencing dropped tables were dropped with them. The referencing tables keep all their rows, and their FK columns now hold ids that no longer exist.' END,
+    CASE WHEN (SELECT count(*) FROM pg_temp.mirror_plan_t) > 0
+         THEN 'Fix: scrub the table in `<db>.scrub.sql`, or allow-list its reviewed columns / add a `''*''` marker row in `<db>.allow.sql`.' END
+  );
 $fn$;

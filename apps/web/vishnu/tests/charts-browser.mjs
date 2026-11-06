@@ -34,6 +34,9 @@ try {
  assert.equal(prompts[0],'Show a line chart\nWith latency details');
  assert.equal(await page.getByRole('button',{name:'Investigate',exact:true}).count(),0);
 await page.locator('.historical-plot svg').waitFor();
+ // The average series has two isolated observations separated by a null bucket.
+ // With hidden markers it produced a blank graph despite reporting READY.
+ await page.waitForFunction(()=>document.querySelectorAll('.historical-plot svg path[fill="#65d6c6"]').length>=2);
  assert.equal(await page.locator('.workspace.mesh-minimized').count(),1);
  await ask('Add a histogram');await page.locator('.chart-card').nth(1).waitFor();
  await ask('Add a scatter');await page.locator('.chart-card').nth(2).waitFor();

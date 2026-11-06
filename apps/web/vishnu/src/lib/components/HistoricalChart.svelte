@@ -50,7 +50,8 @@
    option={...common,xAxis:{...axis,type:'value',nameGap:28,name:`Value (${bins[0]?.unit ?? ''})`},yAxis:{...axis,type:'value',name:spec.population==='observations' && spec.metric==='latency'?'Retained spans':'Interval buckets',minInterval:1},series:bins.map(s=>({name:s.name,type:'bar',data:s.buckets.map(b=>({value:[(b.from+b.to)/2,b.count],name:`${b.from.toPrecision(4)}–${b.to.toPrecision(4)} ${s.unit}`}))}))};
   } else {
    const units=[...new Set(data.series.map(s=>s.unit))];
-   option={...common,xAxis:{...axis,type:'time',nameGap:28,name:'Time'},yAxis:units.map((unit,i)=>({...axis,type:'value',name:unit,position:i===0?'left':'right'})),series:data.series.map(s=>({name:s.name,type:'line',yAxisIndex:units.indexOf(s.unit),showSymbol:false,connectNulls:false,data:s.points}))};
+   // Retained spans can leave isolated buckets: markers keep them visible without bridging missing data.
+   option={...common,xAxis:{...axis,type:'time',nameGap:28,name:'Time',min:data.window.from,max:data.window.to},yAxis:units.map((unit,i)=>({...axis,type:'value',name:unit,position:i===0?'left':'right'})),series:data.series.map(s=>({name:s.name,type:'line',yAxisIndex:units.indexOf(s.unit),showSymbol:true,symbol:'circle',symbolSize:5,connectNulls:false,data:s.points}))};
   }
   chart.setOption(option,true); chart.resize();
  });

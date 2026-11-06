@@ -103,7 +103,8 @@ Connection comes from `PG*` env vars and/or psql args after `--`; the first conn
 | 12 | Committed, N unreviewed relations DROPPED, nothing raw remains | scrubbed; relations missing |
 | 20 | Not committed (scrub error, undroppable residue, large objects, absent db without `--allow-absent`) | **raw** (rolled back) |
 | 30 | Database absent, `--allow-absent` given | n/a |
-| 40 | `--dry-run` finished; rolled back by design | unchanged |
+| 40 | `--dry-run` finished; rolled back by design; a real run would exit 0/12 | unchanged |
+| 20 (dry-run) | `--dry-run` found residue; a real run would roll back | unchanged |
 | 2 | Usage or lint error, nothing ran | untouched |
 
 A runner scrubbing many databases should run them all, then fail on any code other than 0, 12 and 30

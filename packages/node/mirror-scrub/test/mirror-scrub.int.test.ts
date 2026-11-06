@@ -369,23 +369,31 @@ describe('mirror-scrub run: default drop', () => {
         expect(relkind(db, 'person_real')).toBe('');
     });
 
-    it('an extension-owned relation with text columns is exempt from the audit (exit 0), but an extconfig table stays audited (exit 20)', () => {
+    it('only allowlisted extension relations are exempt: pg_stat_statements is, an app table added with ALTER EXTENSION ADD TABLE is not', () => {
         const { db, allow } = ownedDb();
-        ownerObjs(db, "CREATE EXTENSION IF NOT EXISTS hstore; CREATE TABLE ext_t (a uuid, note text);", ['ext_t']);
-        const dep = (t: string) =>
-            `INSERT INTO pg_depend VALUES ('pg_class'::regclass, '${t}'::regclass, 0, 'pg_extension'::regclass, (SELECT oid FROM pg_extension WHERE extname = 'hstore'), 0, 'e')`;
-        expect(psql(db, dep('ext_t')).err).toBe('');
+        expect(psql(db, 'CREATE EXTENSION pg_stat_statements').err).toBe('');
         const ok = runDrop(db, allow);
         expect(ok.code, ok.out).toBe(0);
-        expect(relkind(db, 'ext_t')).toBe('r');
+        expect(relkind(db, 'pg_stat_statements')).toBe('v');
+        expect(ok.report.inventory.extension_members).toContain('public.pg_stat_statements');
 
-        ownerObjs(db, 'CREATE TABLE ext_cfg (a uuid, note text); CREATE TABLE audit_log2 (id int);', ['ext_cfg', 'audit_log2']);
-        expect(psql(db, `${dep('ext_cfg')}; UPDATE pg_extension SET extconfig = ARRAY['ext_cfg'::regclass::oid] WHERE extname = 'hstore'`).err).toBe('');
+        ownerObjs(db, 'CREATE TABLE app_t (a uuid, note text);', ['app_t']);
+        expect(psql(db, 'ALTER EXTENSION pg_stat_statements ADD TABLE app_t').err).toBe('');
+        const r = runDrop(db, allow);
+        expect(r.code, r.out).toBe(20);
+        expect(relkind(db, 'app_t')).toBe('r');
+        expect(relkind(db, 'person_real')).toBe('r');
+    });
+
+    it('an extconfig table stays audited (exit 20)', () => {
+        const { db, allow } = ownedDb();
+        ownerObjs(db, "CREATE EXTENSION IF NOT EXISTS hstore; CREATE TABLE ext_cfg (a uuid, note text); CREATE TABLE audit_log2 (id int);", ['ext_cfg', 'audit_log2']);
+        const dep = `INSERT INTO pg_depend VALUES ('pg_class'::regclass, 'ext_cfg'::regclass, 0, 'pg_extension'::regclass, (SELECT oid FROM pg_extension WHERE extname = 'hstore'), 0, 'e')`;
+        expect(psql(db, `${dep}; UPDATE pg_extension SET extconfig = ARRAY['ext_cfg'::regclass::oid] WHERE extname = 'hstore'`).err).toBe('');
         const r = runDrop(db, allow);
         expect(r.code, r.out).toBe(20);
         expect(relkind(db, 'ext_cfg')).toBe('r');
         expect(relkind(db, 'audit_log2')).toBe('r');
-        expect(relkind(db, 'person_real')).toBe('r');
     });
 
     it('--dry-run exits 40, rolls back every change and still reports', () => {

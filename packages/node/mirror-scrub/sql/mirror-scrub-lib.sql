@@ -387,11 +387,23 @@ LANGUAGE sql AS $fn$
     FROM pg_class c WHERE c.oid = p_rel;
 $fn$;
 
--- Extension relations are exempt from the audit unless the extension lists them in pg_extension.extconfig.
+-- Extension relations exempt from the audit: a named allowlist of (extension, schema, relation) that is an
+-- actual extension member and not an extconfig table. Membership alone proves nothing: a table owner can
+-- run ALTER EXTENSION ... ADD TABLE. spatial_ref_sys is in extconfig, so PostGIS keeps it audited.
 CREATE OR REPLACE FUNCTION pg_temp.mirror_ext_exempt(p_rel oid) RETURNS boolean
 LANGUAGE sql AS $fn$
-  SELECT pg_temp.mirror_is_ext(p_rel)
-     AND NOT EXISTS (SELECT 1 FROM pg_extension e WHERE p_rel = ANY (e.extconfig));
+  SELECT EXISTS (
+    SELECT 1
+      FROM pg_depend d
+      JOIN pg_extension e ON d.refclassid = 'pg_extension'::regclass AND d.refobjid = e.oid
+      JOIN pg_class c ON c.oid = d.objid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE d.classid = 'pg_class'::regclass AND d.objid = p_rel AND d.deptype = 'e'
+       AND (e.extname, n.nspname, c.relname) IN (
+         ('postgis', 'public', 'geometry_columns'), ('postgis', 'public', 'geography_columns'),
+         ('postgis_raster', 'public', 'raster_columns'), ('postgis_raster', 'public', 'raster_overviews'),
+         ('pg_stat_statements', 'public', 'pg_stat_statements'), ('pg_stat_statements', 'public', 'pg_stat_statements_info'))
+  ) AND NOT EXISTS (SELECT 1 FROM pg_extension e WHERE p_rel = ANY (e.extconfig));
 $fn$;
 
 CREATE OR REPLACE FUNCTION pg_temp.mirror_large_objects() RETURNS bigint

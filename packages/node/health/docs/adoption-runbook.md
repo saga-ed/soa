@@ -31,6 +31,7 @@ If the ALB check is plain `/health` (always 200) today, moving it to `/health/re
 3. In `main.ts`:
    - `createDeepReadiness({ manifest, bootTimeoutMs, onProbeError, identity })`, then `mountDeepReadiness(app, readiness)` BEFORE `mountHealthRoutes` (first route wins).
    - Path-prefixed services (e.g. qboard): mount on an `express.Router()` and `app.use('<prefix>', r)`; see deep-readiness.md section 5.
+   - `/health/deep` stays unauthenticated-reachable (public level: verdict, build, summary counts only); do not put it behind Janus or another auth perimeter. Full per-dependency detail needs the internal bearer token (deep-readiness.md section 7).
    - `await readiness.boot()` before `listen()`; log `verdict`/`bootMode`; rethrow on failure so the circuit breaker rolls back.
    - `readiness.start()` after boot; `readiness.stop()` in shutdown.
    - Delete the old `/health/ready` handler and its probe helpers.

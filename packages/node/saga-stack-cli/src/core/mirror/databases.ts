@@ -55,6 +55,12 @@ export interface MirrorDbDef {
   scrubbed: boolean;
   /** The iac scrub project whose rules package owns this database. */
   scrubProject: ScrubProject;
+  /**
+   * Tables that land with their structure but none of their rows, in both source
+   * modes. Only for tables nothing reads to make a decision, and whose copy is
+   * too slow to fit in the tunnel's lifetime.
+   */
+  skipRows?: readonly string[];
   /** Included when `--db` is omitted. */
   inDefaultSet: boolean;
   /** Why it is (or is not) in the default set — surfaced in `--help` and the docs. */
@@ -71,7 +77,15 @@ export const MIRROR_DATABASES: readonly MirrorDbDef[] = [
   { mirror: 'sessions_api', local: 'sessions', scrubbed: true, scrubProject: 'program-hub', inDefaultSet: true },
   { mirror: 'iam_db', local: 'iam_local', scrubbed: true, scrubProject: 'rostering', inDefaultSet: true },
   { mirror: 'programs_api', local: 'programs', scrubbed: true, scrubProject: 'program-hub', inDefaultSet: true },
-  { mirror: 'authz_db', local: 'authz_local', scrubbed: true, scrubProject: 'rostering', inDefaultSet: true },
+  {
+    mirror: 'authz_db',
+    local: 'authz_local',
+    scrubbed: true,
+    scrubProject: 'rostering',
+    inDefaultSet: true,
+    skipRows: ['authz_decision_log'],
+    note: 'authz_decision_log lands empty: an audit history (30-day retention) that no permission check reads, and its copy outlasted the tunnel on 2026-11-09.',
+  },
   {
     mirror: 'openfga',
     local: 'openfga',

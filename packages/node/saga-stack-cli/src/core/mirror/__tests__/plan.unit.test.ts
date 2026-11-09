@@ -315,8 +315,46 @@ describe('--source scrubbed — no row of a _real table is ever copied', () => {
       ).dbs[0]!;
       const dump = p.steps.find((s) => s.id.endsWith(':transfer')) as TransferStep;
       for (const table of tables) expect(dump.sourceArgv).toContain(`--exclude-table-data=public."${table}_real"`);
-      expect(p.copiedTables.slice().sort()).toEqual(tables.slice().sort());
+      const copied = tables.filter((t) => !def.skipRows?.includes(t));
+      expect(p.copiedTables.slice().sort()).toEqual(copied.slice().sort());
     }
+  });
+});
+
+describe('authz_decision_log lands empty (an audit history no permission check reads)', () => {
+  const REAL = [
+    { table: 'authz_decision_log', columns: ['id', 'trace'] },
+    { table: 'iam_group_projection', columns: ['id'] },
+  ];
+  const plan = (mode: 'real' | 'scrubbed'): HydrateDbPlan =>
+    db({ mode, selection: [findByMirrorName('authz_db')!], localExists: {}, realTables: { authz_db: REAL } });
+
+  it('scrubbed: never copies its rows, still copies the others, still renames it into place', () => {
+    const p = plan('scrubbed');
+    expect(ids(p)).not.toContain('authz_local:copy:authz_decision_log');
+    expect(p.copiedTables).toEqual(['iam_group_projection']);
+    expect(ids(p)).toContain('authz_local:view-swap:authz_decision_log');
+    expect(p.skippedRowTables).toEqual(['authz_decision_log']);
+  });
+
+  it('scrubbed: its _real rows stay excluded from the dump', () => {
+    expect(transferOf(plan('scrubbed'), 'authz_local:transfer').sourceArgv).toContain(
+      '--exclude-table-data=public."authz_decision_log_real"',
+    );
+  });
+
+  it('real: excludes only that table, keeps the structure, and renames it', () => {
+    const p = plan('real');
+    const argv = transferOf(p, 'authz_local:transfer').sourceArgv;
+    expect(argv).toContain('--exclude-table-data=public."authz_decision_log_real"');
+    expect(argv).not.toContain('--exclude-table-data=public."iam_group_projection_real"');
+    expect(ids(p)).toContain('authz_local:view-swap:authz_decision_log');
+  });
+
+  it('is the only table anywhere that skips its rows', () => {
+    expect(MIRROR_DATABASES.filter((d) => d.skipRows !== undefined).map((d) => [d.mirror, d.skipRows])).toEqual([
+      ['authz_db', ['authz_decision_log']],
+    ]);
   });
 });
 

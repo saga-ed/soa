@@ -717,7 +717,8 @@ export default class StackHydrate extends BaseCommand {
     for (const db of plan.dbs) {
       lines.push(
         `      ${db.mirrorName.padEnd(18)} → ${db.localName.padEnd(18)} owner ${db.ownerRole}` +
-          (db.scrubbed ? `  [scrubbed: ${db.renamedTables.length} table(s) ${db.copiedTables.length > 0 ? 'materialised from the view' : 'taken from *_real'}]` : ''),
+          (db.scrubbed ? `  [scrubbed: ${db.renamedTables.length} table(s) ${db.copiedTables.length > 0 ? 'materialised from the view' : 'taken from *_real'}]` : '') +
+          (db.skippedRowTables.length > 0 ? `  [empty on purpose: ${db.skippedRowTables.join(', ')}]` : ''),
       );
     }
     for (const note of NO_MIRROR_SOURCE) lines.push(`    skipped:   ${note.local} — ${note.why}`);

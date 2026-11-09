@@ -218,6 +218,8 @@ export interface HydrateDbPlan {
   renamedTables: string[];
   /** Tables whose SCRAMBLED rows are copied from the mirror (scrubbed mode only). */
   copiedTables: string[];
+  /** Tables that land empty on purpose (`MirrorDbDef.skipRows`). */
+  skippedRowTables: string[];
   steps: HydrateStep[];
 }
 
@@ -405,6 +407,7 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
   const container = input.pgContainer;
 
   const real = def.scrubbed ? (input.realTables?.[def.mirror] ?? []) : [];
+  const skipRows = new Set(def.skipRows ?? []);
   const materialise = def.scrubbed && input.mode === 'scrubbed';
 
   const steps: HydrateStep[] = [];
@@ -441,7 +444,7 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
     mirrorPort: input.mirrorLocalPort,
     user,
     database: def.mirror,
-    excludeData: materialise ? real.map((r) => r.table) : [],
+    excludeData: materialise ? real.map((r) => r.table) : real.map((r) => r.table).filter((t) => skipRows.has(t)),
     excludeAllReal: materialise,
     // Scrubbed mode holds back indexes, foreign keys and triggers until the
     // scrambled rows are in (step 4): a table that carries data and references a
@@ -485,7 +488,7 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
   // ahead of it. The post-data restore then validates every foreign key against
   // populated parents, including those from tables that kept their own data.
   const { ordered: copyOrder, cyclic } = orderByForeignKeys(
-    real.map((r) => r.table),
+    real.map((r) => r.table).filter((t) => !skipRows.has(t)),
     input.realTableFks?.[def.mirror] ?? [],
   );
   if (materialise) {
@@ -626,6 +629,7 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
     localExisted,
     renamedTables: real.map((r) => r.table),
     copiedTables: materialise ? copyOrder : [],
+    skippedRowTables: real.map((r) => r.table).filter((t) => skipRows.has(t)),
     steps,
   };
 }

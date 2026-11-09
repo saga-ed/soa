@@ -116,8 +116,11 @@ those required encrypted values are NULL on the mirror's scrubbed copy.
 Materialized views over `_real` tables arrive unpopulated, because the scrub empties them on the
 mirror. Selecting from one errors until you run `REFRESH MATERIALIZED VIEW` locally.
 
-`authz_db` is the slow one: its decision log took 82 minutes on 2026-11-09 and the tunnel dropped,
-failing every database after it. Hydrate it on its own with `--db authz_db`, or leave it out.
+`authz_decision_log` in `authz_db` lands empty, in both source modes. It is an audit history that
+no permission check reads, and copying it outlasted the tunnel on 2026-11-09 (82 minutes, then
+every later database failed). New decisions are logged locally as usual; `explain` and the audit
+view return nothing for decisions made before the hydrate.
+
 `transcription_db` needs the `vector` extension, which the local Postgres image doesn't have.
 
 ---

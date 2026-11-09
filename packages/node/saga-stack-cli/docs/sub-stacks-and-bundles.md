@@ -150,7 +150,12 @@ stack, use `ss stack up --with vishnu --no-seed`. The viewer adds PostgreSQL, Ra
 seeding data. It reads the declared `ss` topology and local health probes. Its
 server ingests event statistics from IAM/programs/scheduling at `/api/event-stats`;
 the graph statistics UX and Datadog integration remain separate. See the
-[Vishnu README](../../../../apps/web/vishnu/README.md) for receiver scope and bounds.
+[Vishnu README](https://github.com/saga-ed/vishnu/blob/main/apps/web/vishnu/README.md) for receiver scope and bounds.
+
+Vishnu lives in the private `saga-ed/vishnu` repository. `ss` runs it from `$DEV/vishnu`
+by default; point it at another checkout or worktree with `--vishnu <path>` or `VISHNU=<path>`.
+Its server still loads this CLI's built collector from the soa checkout (`VISHNU_SOA_ROOT`),
+so prep builds `saga-stack-cli` in soa before launching it.
 
 The normal `--slot N` option offsets the viewer port by `N × 1000` and pins its
 observations to that slot. `--state-dir` is passed to its server adapter too.

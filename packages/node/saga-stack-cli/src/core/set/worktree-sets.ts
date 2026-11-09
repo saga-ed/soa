@@ -45,6 +45,7 @@ export const SET_REPO_KEYS = [
   'fleek',
   'janus',
   'wootmath',
+  'vishnu',
 ] as const;
 
 export type SetRepoKey = (typeof SET_REPO_KEYS)[number];

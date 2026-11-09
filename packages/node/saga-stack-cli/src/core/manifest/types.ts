@@ -54,7 +54,8 @@ export type RepoKey =
   | 'RTSM'
   | 'FLEEK'
   | 'JANUS'
-  | 'WOOTMATH';
+  | 'WOOTMATH'
+  | 'VISHNU';
 
 /** The three URL lanes a service can be addressed on. */
 export type Lane = 'stack' | 'sandbox' | 'tunnel';

@@ -570,6 +570,7 @@ const AUTO_PULL_REPO_ORDER: RepoKey[] = [
   'QBOARD',
   'RTSM',
   'WOOTMATH',
+  'VISHNU',
 ];
 
 /**

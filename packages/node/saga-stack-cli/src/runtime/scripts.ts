@@ -58,6 +58,7 @@ export const REPO_DEFAULT_DIR: Record<RepoKey, string> = {
   FLEEK: 'fleek',
   JANUS: 'janus',
   WOOTMATH: 'wootmath-adaptive-practice',
+  VISHNU: 'vishnu',
 };
 
 /** The sibling-repo workspace root: `--dev` → `$DEV` → `$HOME/dev`. */

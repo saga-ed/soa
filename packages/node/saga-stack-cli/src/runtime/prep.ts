@@ -94,7 +94,7 @@ export const FATAL_BUILD_REPOS: ReadonlySet<RepoKey> = new Set<RepoKey>([
   'WOOTMATH',
 ]);
 
-/** Canonical prep order; SOA builds only the local viewer adapter. */
+/** Canonical prep order; SOA builds only the CLI collector Vishnu imports. */
 const PREP_REPO_ORDER: readonly RepoKey[] = [
   'SOA',
   'ROSTERING',
@@ -105,6 +105,7 @@ const PREP_REPO_ORDER: readonly RepoKey[] = [
   'RTSM',
   'COACH',
   'WOOTMATH',
+  'VISHNU',
 ];
 
 /** Inputs to the R1 prep pass. */
@@ -252,6 +253,9 @@ export async function prepClosure(ctx: PrepContext): Promise<PrepResult> {
   // Distinct closure repos, ordered by up.sh's canonical prep order.
   const closureRepos = new Set<RepoKey>();
   for (const id of ctx.services) closureRepos.add(getService(id, m).repo);
+  // Vishnu's server imports the CLI collector from <SOA>/packages/node/saga-stack-cli/dist
+  // (VISHNU_SOA_ROOT), so a Vishnu closure still needs SOA's targeted collector build.
+  if (closureRepos.has('VISHNU')) closureRepos.add('SOA');
   const repos = PREP_REPO_ORDER.filter((r) => closureRepos.has(r));
 
   const steps: PrepStep[] = [];
@@ -317,10 +321,9 @@ async function prepOneRepo(
   warnings: PrepStep[],
 ): Promise<PrepStep | null> {
   if (repo === 'SOA') {
-    // The viewer runs from source and imports the CLI collector's dist output.
-    // Do not build unrelated SOA docs/examples or stamp this as a full repo prep.
-    const argv = ['--filter', '@saga-ed/vishnu...', '--filter', '@saga-ed/saga-stack-cli...',
-      'install', '--frozen-lockfile'];
+    // Vishnu (repo VISHNU) runs from source and imports this CLI's dist collector
+    // through VISHNU_SOA_ROOT. Build only saga-stack-cli; never stamp SOA as a full prep.
+    const argv = ['--filter', '@saga-ed/saga-stack-cli...', 'install', '--frozen-lockfile'];
     const installStep: PrepStep = { repo, kind: 'install', cwd: root, argv };
     steps.push(installStep);
     let installed = await ctx.runner.run({
@@ -336,7 +339,7 @@ async function prepOneRepo(
     if (installed.code !== 0) return installStep;
     const build: PrepStep = {
       repo, kind: 'build', cwd: root,
-      argv: ['--filter', '@saga-ed/soa-event-stats...', '--filter', '@saga-ed/saga-stack-cli...', '-r', 'build'],
+      argv: ['--filter', '@saga-ed/saga-stack-cli...', '-r', 'build'],
     };
     return await run(build) ? null : build;
   }

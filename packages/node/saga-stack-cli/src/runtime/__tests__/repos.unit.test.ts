@@ -23,6 +23,7 @@ describe('REPO_ENV_VAR', () => {
       fleek: 'FLEEK',
       janus: 'JANUS',
       wootmath: 'WOOTMATH',
+      vishnu: 'VISHNU',
     });
   });
 });

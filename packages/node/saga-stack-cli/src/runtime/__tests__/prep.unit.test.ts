@@ -23,6 +23,7 @@ const REPO_ROOTS = {
   RTSM: '/dev/rtsm',
   FLEEK: '/dev/fleek',
   JANUS: '/dev/janus',
+  VISHNU: '/dev/vishnu',
 } as Record<RepoKey, string>;
 
 function fakeRunner(failCwd?: string): { runner: Runner; calls: ScriptInvocation[] } {
@@ -51,21 +52,39 @@ function runnerFailingWhen(fail: (spec: ScriptInvocation) => boolean): { runner:
 const NEVER_FRESH = (): boolean => false;
 
 describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => {
-  it('prepares Vishnu and its CLI collector without building unrelated SOA workspaces', async () => {
+  it('builds only the SOA CLI collector, then preps the Vishnu repo (fresh ⇒ skipped)', async () => {
     const { runner, calls } = fakeRunner();
     const res = await prepClosure({
       services: ['vishnu'], dbs: [], repoRoots: REPO_ROOTS, runner,
-      // A whole-repo freshness marker does not establish the new app is installed.
       isFresh: () => true,
       dbGenerateScan: () => { throw new Error('Vishnu has no Prisma dependencies'); },
-      writeStamp: () => { throw new Error('Targeted prep must not stamp the whole repo'); },
+      writeStamp: () => { throw new Error('a fresh-skipped repo must not be re-stamped'); },
     });
     expect(res.ok).toBe(true);
-    expect(calls.map((call) => call.args)).toEqual([
-      ['--filter', '@saga-ed/vishnu...', '--filter', '@saga-ed/saga-stack-cli...',
-        'install', '--frozen-lockfile'],
-      ['--filter', '@saga-ed/soa-event-stats...', '--filter', '@saga-ed/saga-stack-cli...', '-r', 'build'],
+    expect(res.freshRepos).toEqual(['VISHNU']);
+    expect(calls.map((call) => [call.cwd, call.args])).toEqual([
+      ['/dev/soa', ['--filter', '@saga-ed/saga-stack-cli...', 'install', '--frozen-lockfile']],
+      ['/dev/soa', ['--filter', '@saga-ed/saga-stack-cli...', '-r', 'build']],
     ]);
+  });
+
+  it('installs and builds a stale Vishnu checkout in its own repo', async () => {
+    const { runner, calls } = fakeRunner();
+    const stamped: string[] = [];
+    const res = await prepClosure({
+      services: ['vishnu'], dbs: [], repoRoots: REPO_ROOTS, runner,
+      isFresh: NEVER_FRESH,
+      dbGenerateScan: () => [],
+      writeStamp: (root) => { stamped.push(root); },
+    });
+    expect(res.ok).toBe(true);
+    expect(calls.map((call) => [call.cwd, call.args?.join(' ')])).toEqual([
+      ['/dev/soa', '--filter @saga-ed/saga-stack-cli... install --frozen-lockfile'],
+      ['/dev/soa', '--filter @saga-ed/saga-stack-cli... -r build'],
+      ['/dev/vishnu', 'install'],
+      ['/dev/vishnu', 'build'],
+    ]);
+    expect(stamped).toEqual(['/dev/vishnu']);
   });
 
   it('fails the viewer prep when its runtime collector fails to build', async () => {

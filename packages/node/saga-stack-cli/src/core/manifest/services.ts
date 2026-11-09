@@ -600,7 +600,7 @@ export const SERVICES: Readonly<Record<ServiceId, ServiceDef>> = {
   },
   vishnu: {
     id: 'vishnu',
-    repo: 'SOA',
+    repo: 'VISHNU',
     subpath: 'apps/web/vishnu',
     port: 8930,
     portEnvVar: null,

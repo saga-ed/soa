@@ -124,10 +124,11 @@ assert "dry-run: nothing on disk" "$(ls -A "$D")" ""
 D="$TMP/optional"; mkdir -p "$D"
 run "$D" --with-optional --dry-run
 assert "with-optional: exit 0" "$RC" 0
-assert_contains "with-optional: 11 repos" "$o" "11 to clone"
+assert_contains "with-optional: 12 repos" "$o" "12 to clone"
 assert_contains "with-optional: includes coach" "$o" "coach"
 assert_contains "with-optional: includes fleek" "$o" "fleek"
 assert_contains "with-optional: includes Woot Math" "$o" "wootmath-adaptive-practice"
+assert_contains "with-optional: includes vishnu" "$o" "vishnu"
 
 # ── 9. --help works when $0 is NOT a readable file (the `| bash -s --` pipe) ──
 out="$(PATH="$FAKE_BIN:$PATH" bash -s -- --help < "$SCRIPT" 2>&1)"; RC=$?

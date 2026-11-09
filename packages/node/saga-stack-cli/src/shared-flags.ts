@@ -81,6 +81,10 @@ export const repoFlags = {
     description: 'override path to the janus repo checkout',
     default: process.env.JANUS,
   }),
+  vishnu: Flags.string({
+    description: 'override path to the vishnu repo checkout',
+    default: process.env.VISHNU,
+  }),
 };
 
 /**

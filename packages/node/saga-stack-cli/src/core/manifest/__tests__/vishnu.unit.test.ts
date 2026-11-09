@@ -6,7 +6,7 @@ import { defaultLaunchContext, resolveLaunchEnv, launchPlan } from '../../launch
 import { manifest, type RepoKey, type ServiceId } from '../index.js';
 
 const roots = Object.fromEntries(
-  ['SOA', 'ROSTERING', 'PROGRAM_HUB', 'SAGA_DASH', 'COACH', 'SDS', 'QBOARD', 'RTSM', 'FLEEK']
+  ['SOA', 'ROSTERING', 'PROGRAM_HUB', 'SAGA_DASH', 'COACH', 'SDS', 'QBOARD', 'RTSM', 'FLEEK', 'VISHNU']
     .map((key) => [key, `/workspace/${key}`]),
 ) as Record<RepoKey, string>;
 
@@ -41,6 +41,7 @@ describe('Vishnu synthetic-dev integration', () => {
       meshOffset: profile.meshOffset,
       stateDir: `/custom/state-${slot}`,
     });
+    expect(launchPlan(manifest, ['vishnu'], 'stack', context)[0]!.cwd).toBe('/workspace/VISHNU/apps/web/vishnu');
     expect(launchPlan(manifest, ['vishnu'], 'stack', context)[0]!.healthUrl).toBe(`http://localhost:${8930 + slot * 1000}/api/health`);
     const env = resolveLaunchEnv('vishnu', 'stack', context);
     expect(env).toMatchObject({

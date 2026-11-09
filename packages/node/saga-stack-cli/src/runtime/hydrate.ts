@@ -34,7 +34,7 @@
 
 import { spawn } from 'node:child_process';
 import { FIELD_SEP } from '../core/mirror/index.js';
-import type { RealTableFk, RealTableInfo } from '../core/mirror/index.js';
+import type { RealTableInfo } from '../core/mirror/index.js';
 
 export interface HydrateExecResult {
   /** `null` when the child was killed by a signal. */
@@ -79,15 +79,15 @@ export function parseRealTableRows(stdout: string): RealTableInfo[] {
   return [...byTable.entries()].map(([table, columns]) => ({ table, columns }));
 }
 
-/** Parse the mirror-side foreign-key read: `child<US>parent` rows. PURE. */
-export function parseRealTableFkRows(stdout: string): RealTableFk[] {
-  const fks: RealTableFk[] = [];
+/** Parse a two-column mirror-side read (`a<US>b` rows). PURE. */
+export function parseFieldPairs(stdout: string): [string, string][] {
+  const pairs: [string, string][] = [];
   for (const line of stdout.split('\n')) {
     if (line.trim() === '') continue;
-    const [child, parent] = line.split(FIELD_SEP);
-    if (child !== undefined && parent !== undefined) fks.push({ child, parent });
+    const [first, second] = line.split(FIELD_SEP);
+    if (first !== undefined && second !== undefined) pairs.push([first, second]);
   }
-  return fks;
+  return pairs;
 }
 
 /** True iff a container of EXACTLY this name is running (docker ps name filter). */

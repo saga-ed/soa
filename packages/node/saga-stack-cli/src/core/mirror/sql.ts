@@ -256,6 +256,29 @@ export function realTableFkQuerySql(): string {
 }
 
 /**
+ * NOT NULL columns of `_real` tables that the scramble view sets to a literal
+ * NULL: `(base, column)` rows. The scrub does this to encrypted PII such as
+ * `user_pii.name_first_encrypted`, so those rows cannot be copied until the
+ * constraint is relaxed. Read from the view definition, because scanning every
+ * view for NULLs would cost as much as the copy itself.
+ */
+export function scrubNulledColumnsSql(): string {
+  return (
+    "SELECT v.relname, a.attname FROM pg_class r JOIN pg_namespace n ON n.oid = r.relnamespace " +
+    "JOIN pg_class v ON v.relnamespace = r.relnamespace AND v.relname = left(r.relname, length(r.relname) - 5) AND v.relkind = 'v' " +
+    'JOIN pg_attribute a ON a.attrelid = r.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attnotnull ' +
+    "WHERE n.nspname = 'public' AND r.relkind = 'r' AND r.relname LIKE '%\\_real' " +
+    "AND pg_get_viewdef(v.oid) ~ ('NULL::[a-z ]+(\\([0-9,]+\\))?(\\)::[a-z ]+(\\([0-9,]+\\))?)? AS \"?' || a.attname || '\"?(,|\\s*$|\\s+FROM)') " +
+    'ORDER BY 1, 2'
+  );
+}
+
+/** Let a scrub-nulled column accept the view's NULLs, on the still-`_real` local table. */
+export function dropNotNullSql(table: string, column: string): string {
+  return `ALTER TABLE public.${qi(`${table}_real`)} ALTER COLUMN ${qi(column)} DROP NOT NULL`;
+}
+
+/**
  * Which of these tables stand on the mirror as ORDINARY tables? The scrub renames
  * a table it covers, so any row here is a table it no longer covers: raw data
  * under the app's name, which the `_real` exclusions cannot see.

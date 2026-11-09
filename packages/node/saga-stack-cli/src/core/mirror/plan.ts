@@ -42,6 +42,7 @@ import {
   copyOutSql,
   createDatabaseSql,
   dropDatabaseSql,
+  dropNotNullSql,
   ensureRoleSql,
   grantSql,
   noRealTablesCheckSql,
@@ -143,6 +144,8 @@ export interface HydratePlanInput {
   realTables?: Readonly<Record<string, readonly RealTableInfo[]>>;
   /** Foreign keys between `_real` tables per MIRROR database name (absent in a preview). */
   realTableFks?: Readonly<Record<string, readonly RealTableFk[]>>;
+  /** NOT NULL columns the scramble view sets to NULL, per MIRROR database (absent in a preview). */
+  scrubNulledColumns?: Readonly<Record<string, readonly { table: string; column: string }[]>>;
   /** Timestamp token for the displaced database's name (`<db>__pre_hydrate_<stamp>`). */
   stamp: string;
   /** Keep the displaced database instead of dropping it (one-command rollback). */
@@ -486,6 +489,14 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
     input.realTableFks?.[def.mirror] ?? [],
   );
   if (materialise) {
+    for (const { table, column } of input.scrubNulledColumns?.[def.mirror] ?? []) {
+      sql(
+        `relax-not-null:${table}.${column}`,
+        `allow NULL in ${table}.${column}, which the scrub blanks`,
+        staging,
+        dropNotNullSql(table, column),
+      );
+    }
     const byName = new Map(real.map((r) => [r.table, r.columns]));
     for (const table of copyOrder) {
       const columns = byName.get(table) ?? [];

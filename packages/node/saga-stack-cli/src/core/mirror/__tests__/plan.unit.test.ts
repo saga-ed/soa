@@ -367,6 +367,18 @@ describe('foreign-key order for the materialising COPY', () => {
     expect(order.indexOf('iam_local:copy:users')).toBeLessThan(order.indexOf('iam_local:copy:groups'));
   });
 
+  it('relaxes NOT NULL only on the columns the scrub blanks, before the copy', () => {
+    const relaxed = db({
+      mode: 'scrubbed',
+      scrubNulledColumns: { iam_db: [{ table: 'users', column: 'email' }] },
+    });
+    const id = 'iam_local:relax-not-null:users.email';
+    expect(sqlOf(relaxed, id).sql).toBe('ALTER TABLE public."users_real" ALTER COLUMN "email" DROP NOT NULL');
+    const order = ids(relaxed);
+    expect(order.indexOf(id)).toBeLessThan(order.indexOf('iam_local:copy:users'));
+    expect(order.filter((i) => i.includes('relax-not-null'))).toHaveLength(1);
+  });
+
   it('leaves generated columns out of the enumeration (COPY refuses them)', () => {
     expect(realTableQuerySql()).toContain(`a.attgenerated = ''`);
   });

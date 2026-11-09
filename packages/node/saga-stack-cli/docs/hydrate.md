@@ -108,6 +108,17 @@ The column list comes from the **`_real` table's `attnum` order**, enumerated li
 `COPY` is column-exact rather than trusting that the scramble view presents columns in the
 same order. Generated columns are left out, and the server recomputes them.
 
+A scrubbed copy differs from prod's schema in one way: NOT NULL is dropped from the columns the
+scrub blanks to NULL (encrypted PII in `iam_pii_db.user_pii`, for example). Those columns are read
+from the view definitions at run time.
+
+Materialized views over `_real` tables arrive unpopulated, because the scrub empties them on the
+mirror. Selecting from one errors until you run `REFRESH MATERIALIZED VIEW` locally.
+
+`authz_db` is the slow one: its decision log took 82 minutes on 2026-11-09 and the tunnel dropped,
+failing every database after it. Hydrate it on its own with `--db authz_db`, or leave it out.
+`transcription_db` needs the `vector` extension, which the local Postgres image doesn't have.
+
 ---
 
 ## Database mapping

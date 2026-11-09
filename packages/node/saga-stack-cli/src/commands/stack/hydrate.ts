@@ -66,6 +66,7 @@ import {
   CONFIRMED_REAL_TABLES,
   DEFAULT_CLIENT_IMAGE,
   realTableFkQuerySql,
+  scrubNulledColumnsSql,
   unscrubbedTablesSql,
   DEFAULT_LOCAL_PORT,
   MIRROR_ADMIN_USER,
@@ -86,7 +87,7 @@ import type {
   SourceMode,
 } from '../../core/mirror/index.js';
 import {
-  parseRealTableFkRows,
+  parseFieldPairs,
   parseRealTableRows,
   pgRestoreFailed,
   postgresContainer,
@@ -535,6 +536,7 @@ export default class StackHydrate extends BaseCommand {
     // ── discovery, through the tunnel: the scrub's `_real` tables + column order ──
     const realTables: Record<string, RealTableInfo[]> = {};
     const realTableFks: Record<string, RealTableFk[]> = {};
+    const scrubNulledColumns: Record<string, { table: string; column: string }[]> = {};
     for (const def of ctx.selection) {
       const readMirror = async (sql: string): Promise<string> => {
         const argv = mirrorDiscoveryArgv({
@@ -592,7 +594,13 @@ export default class StackHydrate extends BaseCommand {
             );
           }
         }
-        realTableFks[def.mirror] = parseRealTableFkRows(await readMirror(realTableFkQuerySql()));
+        realTableFks[def.mirror] = parseFieldPairs(await readMirror(realTableFkQuerySql())).map(([child, parent]) => ({
+          child,
+          parent,
+        }));
+        scrubNulledColumns[def.mirror] = parseFieldPairs(await readMirror(scrubNulledColumnsSql())).map(
+          ([table, column]) => ({ table, column }),
+        );
       }
       if (ctx.human) {
         this.log(`  ${dim('scrub:')}    ${def.mirror} — ${discovered.length} _real table(s) enumerated live`);
@@ -618,6 +626,7 @@ export default class StackHydrate extends BaseCommand {
       localExists,
       realTables,
       realTableFks,
+      scrubNulledColumns,
       stamp: stampNow(),
       keepPrevious: flags['keep-previous'],
       clientImage: flags['client-image'],

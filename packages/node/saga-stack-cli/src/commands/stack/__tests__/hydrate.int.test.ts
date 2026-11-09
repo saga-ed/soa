@@ -494,6 +494,15 @@ describe('--source scrubbed — materialises the view, never leaves one', () => 
     expect(copies[1]).toContain('FROM public."users"');
   });
 
+  it('relaxes the NOT NULL columns the mirror reports the scrub blanks', async () => {
+    execScript = [
+      { match: 'left(c.relname', result: { stdout: rows([['users', 'id'], ['users', 'email']]) } },
+      { match: 'pg_get_viewdef', result: { stdout: rows([['users', 'email']]) } },
+    ];
+    await StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--execute', '--yes', ...WS], config);
+    expect(allArgv()).toContain('ALTER TABLE public."users_real" ALTER COLUMN "email" DROP NOT NULL');
+  });
+
   it('refuses when a table known to be scrubbed stands as an ordinary table on the mirror', async () => {
     execScript = [
       { match: 'left(c.relname', result: { stdout: rows([['users', 'id']]) } },

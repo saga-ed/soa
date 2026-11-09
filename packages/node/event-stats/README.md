@@ -1,10 +1,10 @@
 # Event statistics
 
-`@saga-ed/soa-event-stats` supplies cumulative process telemetry for the Saga event mesh (I#535). Service wiring belongs to I#537; Vishnu ingestion, storage, freshness and UI belong to I#538. These reports are best-effort operational measurements, not an audit ledger.
+`@saga-ed/soa-event-stats` supplies cumulative process telemetry for the Saga event mesh (I#535). Service wiring belongs to I#537; Vishnu ingestion, storage, freshness and UI belong to I#538 and now live in [saga-ed/vishnu](https://github.com/saga-ed/vishnu). These reports are best-effort operational measurements, not an audit ledger.
 
 ## Contract and counting boundaries
 
-Publish `observability.event_stats.reported`, envelope version 1, on the service's **existing environment/slot publisher exchange**. Vishnu owns telemetry queues and bindings. Audit existing `#` bindings before adoption: exclusion from statistics prevents recursion but does not stop a business consumer receiving an unsupported telemetry event. No new broker user or shared telemetry exchange is required.
+Publish `observability.event_stats.reported`, envelope version 1, on the service's **existing environment/slot publisher exchange**. Vishnu ([saga-ed/vishnu](https://github.com/saga-ed/vishnu)) owns telemetry queues and bindings. Audit existing `#` bindings before adoption: exclusion from statistics prevents recursion but does not stop a business consumer receiving an unsupported telemetry event. No new broker user or shared telemetry exchange is required.
 
 The strict runtime `ReportSchema` and checked-in `contracts/event-stats.v1.json` describe the payload. Once published, incompatible changes require a new version. Zod additionally enforces that consumer streams name both queue and consumer. I#538 must pin this contract and validate envelopes and payloads at ingress.
 

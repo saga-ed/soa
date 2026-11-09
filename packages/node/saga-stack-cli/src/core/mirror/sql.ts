@@ -84,6 +84,11 @@ export function viewSwapSql(table: string): string {
  * already makes `pg_database_owner` resolve to the role, which is the PG15+
  * idiom. Other schemas (a prod dump may carry them) ARE re-owned, or the role
  * could not create in them.
+ *
+ * Sequences go last: Postgres refuses `ALTER SEQUENCE … OWNER` on a sequence
+ * linked to a table whose owner differs, and re-owning the table carries its
+ * linked sequences along. Without the ORDER BY the outcome depends on physical
+ * row order in `pg_class`, which the view swap's renames disturb.
  */
 export function ownershipSweepSql(role: string): string {
   const r = ql(role);
@@ -91,7 +96,7 @@ export function ownershipSweepSql(role: string): string {
     'DO $hydrate$',
     'DECLARE r record;',
     'BEGIN',
-    "  FOR r IN SELECT c.relkind AS kind, n.nspname AS ns, c.relname AS rel FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f') LOOP",
+    "  FOR r IN SELECT c.relkind AS kind, n.nspname AS ns, c.relname AS rel FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f') ORDER BY c.relkind = 'S', c.oid LOOP",
     `    IF r.kind = 'S' THEN EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO %I', r.ns, r.rel, ${r});`,
     `    ELSIF r.kind = 'v' THEN EXECUTE format('ALTER VIEW %I.%I OWNER TO %I', r.ns, r.rel, ${r});`,
     `    ELSIF r.kind = 'm' THEN EXECUTE format('ALTER MATERIALIZED VIEW %I.%I OWNER TO %I', r.ns, r.rel, ${r});`,

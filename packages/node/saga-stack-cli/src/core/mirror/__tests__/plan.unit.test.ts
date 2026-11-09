@@ -384,6 +384,10 @@ describe('ownership + grants — the named silent failure', () => {
     expect(sqlOf(plan, 'iam_local:own').sql).toContain('ALTER SEQUENCE %I.%I OWNER TO %I');
   });
 
+  it('re-owns sequences after tables (a sequence linked to a table cannot be re-owned first)', () => {
+    expect(sqlOf(db(), 'iam_local:own').sql).toContain("ORDER BY c.relkind = 'S', c.oid LOOP");
+  });
+
   it('grants tables AND sequences AND functions AND default privileges to the local owner role', () => {
     const grants = sqlOf(db(), 'iam_local:grant').sql;
     expect(grants).toContain('GRANT ALL ON ALL TABLES IN SCHEMA public TO "iam";');

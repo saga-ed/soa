@@ -27,7 +27,6 @@ import { restoreEnv, saveEnv } from '../../../__tests__/helpers/env.js';
 import { spySetStore, spySlotActive } from '../../../__tests__/helpers/set-fakes.js';
 import { BaseCommand } from '../../../base-command.js';
 import { INSTANCE_ENV_KEYS } from '../../../core/derive-instance.js';
-import { DEFAULT_LOCAL_PORT, findByMirrorName, planHydrate } from '../../../core/mirror/index.js';
 import type {
   ClaimReadResult,
   ClaimWriteInput,
@@ -73,6 +72,8 @@ let execScript: { match: string; result: Partial<HydrateExecResult> }[];
  * the service role, and no app-named relation is still a view.
  */
 function healthyAnswer(joined: string): string {
+  if (joined.includes('left(c.relname')) return 'users\u001fid\n'; // discovery: one scrubbed table
+  if (joined.includes(`relkind IN ('r', 'p', 'f', 'm')`)) return '0'; // verify-no-real
   if (joined.includes('(count(*) > 0)')) return 't'; // verify-restored
   if (joined.includes('has_table_privilege')) return '0'; // verify-writable
   if (joined.includes("relkind NOT IN ('r', 'p')")) return '0'; // verify-tables
@@ -446,8 +447,9 @@ describe('--source real — the _real table becomes the app-named table', () => 
         },
       },
     ];
-    await StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--execute', '--yes', ...WS], config);
+    await StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--source', 'real', '--execute', '--yes', ...WS], config);
 
+    expect(warnings.join('\n')).toMatch(/RAW STUDENT DATA/);
     const joined = allArgv();
     expect(joined).toContain('DROP VIEW IF EXISTS public."users" CASCADE; ALTER TABLE public."users_real" RENAME TO "users";');
     expect(joined).toContain('ALTER TABLE public."groups_real" RENAME TO "groups"');
@@ -472,43 +474,48 @@ describe('--source scrubbed — materialises the view, never leaves one', () => 
     ];
   });
 
-  // The scrubbed PATH is built and unit-tested at the planner level, but the
-  // command refuses to RUN it: review confirmed two defects unique to this mode
-  // — emptying the `_real` tables breaks incoming FKs from tables that do carry
-  // data, and the materialising COPY steps are emitted alphabetically rather
-  // than FK-topologically. Both abort inside the staging database (the live copy
-  // is never at risk), but an operator should not have to discover that.
-  // Delete this refusal, and re-enable the three behavioural tests below it,
-  // once the ordering is fixed — required before public release.
-  it('REFUSES to run, naming both defects and pointing at --source real', async () => {
-    await expect(
-      StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--source', 'scrubbed', '--execute', '--yes', ...WS], config),
-    ).rejects.toMatchObject({ oclif: { exit: 2 } });
-  });
-
-  it('refuses BEFORE doing any work — no tunnel, no docker, nothing spawned', async () => {
-    await expect(
-      StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--source', 'scrubbed', '--execute', '--yes', ...WS], config),
-    ).rejects.toBeTruthy();
-    expect(allArgv()).toBe('');
-  });
-
-  it('the planner still models the mode correctly (kept alive for when the gate lifts)', () => {
-    const plan = planHydrate({
-      slot: 2,
-      mode: 'scrubbed',
-      selection: [findByMirrorName('iam_db')!],
-      pgContainer: 'soa-s2-postgres-1',
-      localPort: 7432,
-      mirrorLocalPort: DEFAULT_LOCAL_PORT,
-      localExists: { iam_local: true },
-      realTables: { iam_db: [{ table: 'users', columns: ['id', 'email'] }] },
-      stamp: '20260806T133000Z',
-    });
-    const joined = JSON.stringify(plan);
+  it('is the default, and runs without being asked for', async () => {
+    await StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--execute', '--yes', ...WS], config);
+    const joined = allArgv();
     expect(joined).toContain('--exclude-table-data=public.users_real');
-    expect(joined).toContain('ALTER TABLE public.\\"users_real\\" RENAME TO \\"users\\"');
-    expect(joined).toContain('relkind NOT IN');
+    expect(joined).toContain('COPY public."users_real"');
+    expect(joined).toContain('ALTER TABLE public."users_real" RENAME TO "users"');
+    expect(warnings.join('\n')).not.toMatch(/RAW STUDENT DATA/);
+  });
+
+  it('copies parents first using the foreign keys read from the mirror', async () => {
+    execScript = [
+      { match: 'left(c.relname', result: { stdout: rows([['users', 'id'], ['groups', 'id']]) } },
+      { match: 'contype', result: { stdout: rows([['users', 'groups']]) } },
+    ];
+    await StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--execute', '--yes', ...WS], config);
+    const copies = execs.map((e) => e.argv.join(' ')).filter((a) => a.includes('TO STDOUT'));
+    expect(copies[0]).toContain('FROM public."groups"');
+    expect(copies[1]).toContain('FROM public."users"');
+  });
+
+  it('refuses when a table known to be scrubbed stands as an ordinary table on the mirror', async () => {
+    execScript = [
+      { match: 'left(c.relname', result: { stdout: rows([['users', 'id']]) } },
+      { match: `relkind IN ('r', 'p') AND c.relname IN`, result: { stdout: 'groups\n' } },
+    ];
+    await expect(
+      StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--execute', '--yes', ...WS], config),
+    ).rejects.toThrow(/groups should be scrubbed/);
+    expect(allArgv()).not.toContain('pg_dump');
+  });
+
+  it('refuses a database the map calls unscrubbed when the mirror has _real tables in it', async () => {
+    await expect(
+      StackHydrate.run(['--slot', '2', '--db', 'openfga', '--execute', '--yes', ...WS], config),
+    ).rejects.toThrow(/marks it not scrubbed/);
+    expect(allArgv()).not.toContain('pg_dump');
+  });
+
+  it('still hydrates openfga when the mirror agrees it has no _real tables', async () => {
+    execScript = [{ match: 'left(c.relname', result: { stdout: '' } }];
+    await StackHydrate.run(['--slot', '2', '--db', 'openfga', '--execute', '--yes', ...WS], config);
+    expect(allArgv()).toContain('pg_dump');
   });
 });
 
@@ -548,7 +555,7 @@ describe('reporting', () => {
     const text = out.join('\n');
     const json = JSON.parse(text.slice(text.indexOf('{'))) as Record<string, unknown>;
     expect(json.slot).toBe(2);
-    expect(json.mode).toBe('real');
+    expect(json.mode).toBe('scrubbed');
     expect(json.failed).toBe('coach_api');
     expect(JSON.stringify(json.databases)).toMatch(/NOT writable by coach_api_app/);
   });

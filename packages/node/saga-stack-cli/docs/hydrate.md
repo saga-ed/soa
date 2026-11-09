@@ -8,7 +8,6 @@ per-store sync code and no fixture maintenance.
 ss stack hydrate --slot 2                      # PREVIEW (default) — prints the plan, changes nothing
 ss stack hydrate --slot 2 --execute            # prompt, then hydrate the default database set
 ss stack hydrate --slot 2 --db coach_api --execute --yes
-ss stack hydrate --slot 2 --source scrubbed --execute --yes
 ss stack hydrate --set my-set --execute --yes --keep-previous
 ```
 
@@ -56,16 +55,20 @@ session and a hydrate cannot collide.
 
 ## The view swap — the central structural fact
 
-Only the **rostering** project is scrubbed by the daily cron, so only **`iam_db`** and
-**`iam_pii_db`** are affected. **Every other database in the mirror is raw prod data
-already, in both source modes.**
+The daily cron scrubs the projects in iac's `SCHEDULED_SCRUB_PROJECTS`: rostering,
+program-hub, student-data-system and coach. Every mapped database is view-swapped except
+`openfga`, whose rules swap no table (checked against the mirror's catalog 2026-11-09).
+**The `_real` tables hold raw data about real district students.**
 
 In a scrubbed database the real table is renamed `{table}_real` and a **scrambled VIEW**
 takes the original name. That means *both* source modes need a rename step, in opposite
 directions — and either way the local result must be ordinary **writable tables** under the
 names the app expects.
 
-### `--source real` (the default)
+### `--source real`
+
+**Lands raw student data on your machine. Not recommended.** Use `scrubbed` unless you have an
+explicit reason to handle that data.
 
 ```
 dump everything  →  staging
@@ -77,42 +80,33 @@ The `_real` table carries the data *and* its own PK, FKs, indexes, defaults and 
 ownership, so the renamed result is a complete, writable table. (Index and constraint
 *names* keep their `…_real…` spelling — functionally irrelevant, cosmetically visible.)
 
-### `--source scrubbed`
+### `--source scrubbed` (the default)
 
 ```
-dump with --exclude-table-data=public.users_real  →  staging   (structure only for the real tables)
-DROP VIEW public.users CASCADE;
-ALTER TABLE public.users_real RENAME TO users;                  (now an EMPTY real-shaped table)
+dump pre-data + data, --exclude-table-data for every *_real  →  staging   (real tables arrive EMPTY)
 psql <mirror> -c 'COPY (SELECT "id","email" FROM public."users") TO STDOUT'
-  | psql <staging> -c 'COPY public."users" ("id","email") FROM STDIN'
+  | psql <staging> -c 'COPY public."users_real" ("id","email") FROM STDIN'   (parents first by FK)
+dump post-data  →  staging                                       (indexes, FKs, triggers)
+DROP VIEW public.users CASCADE;
+ALTER TABLE public.users_real RENAME TO users;
+<verify no *_real relation survived>
 ```
 
-Two things worth noticing:
+Things worth noticing:
 
 1. **The unscrubbed rows never touch the local disk.** `--exclude-table-data` brings the
-   `_real` *structure* across with zero rows.
-2. **The rename is what preserves the constraints.** The obvious implementation —
-   `CREATE TABLE … AS SELECT * FROM <view>` — loses PKs, FKs, indexes, defaults and sequence
-   ownership, and produces a schema the app cannot really write to. Renaming the emptied
-   `_real` table into place and then `COPY`-ing rows in avoids that entirely.
+   `_real` *structure* across with zero rows, listed table by table and again as a wildcard over
+   every schema. The rows that land come only from the mirror's scramble views.
+2. **Constraints come after the rows.** Tables with their own data hold foreign keys into
+   `_real` tables, and those cannot be added while the parent is empty. Holding post-data back
+   until the copy is done is what lets the restore finish, and it validates every foreign key
+   against the rows that actually landed.
+3. **The rename is what preserves the constraints.** `CREATE TABLE … AS SELECT * FROM <view>`
+   would lose PKs, FKs, indexes, defaults and sequence ownership.
 
 The column list comes from the **`_real` table's `attnum` order**, enumerated live, so the
 `COPY` is column-exact rather than trusting that the scramble view presents columns in the
-same order.
-
-### Why `real` is the default
-
-Prod is **pre-release**. Every user in it is a Saga employee, so there is no real end-user
-PII today (consistent with the standing Legal determination that tutor responses are not
-PII). The scramble makes a poor reporting fixture — a known district cannot be found in the
-mirror by `display_name` or `source_id` at all.
-
-**This flips at public release.** When prod holds real end-user data, `scrubbed` becomes the
-default and `real` needs a much harder gate. The scrubbed path exists today precisely so
-that flip is a one-line change rather than a new feature.
-
-And note again: `--source scrubbed` does **not** make a hydrate free of prod data. Only
-rostering is scrubbed upstream.
+same order. Generated columns are left out, and the server recomputes them.
 
 ---
 
@@ -127,14 +121,14 @@ over another service's database.
 | --- | --- | --- | --- |
 | `scheduling_api` | `scheduling` | `saga_user` | ✓ |
 | `sessions_api` | `sessions` | `saga_user` | ✓ |
-| `iam_db` | `iam_local` | `iam` | ✓ (scrubbed) |
+| `iam_db` | `iam_local` | `iam` | ✓ |
 | `programs_api` | `programs` | `saga_user` | ✓ |
 | `authz_db` | `authz_local` | `authz` | ✓ |
 | `openfga` | `openfga` | `postgres_admin` | — opt-in: the local schema is owned by the `openfga_migrate` sidecar |
 | `coach_api` | `coach_api` | `coach_api_app` | ✓ |
 | `transcription_db` | `transcripts_local` | `transcripts_app` | — opt-in: mapping **unverified**, and playback-only |
 | `authz_sync` | `authz_sync_local` | `authz_sync` | ✓ |
-| `iam_pii_db` | `iam_pii_local` | `iam_pii` | ✓ (scrubbed) |
+| `iam_pii_db` | `iam_pii_local` | `iam_pii` | ✓ |
 | `sis_db` | `sis_db` | `sis` | ✓ |
 | `ads_adm` | `ads_adm_local` | `ads_adm` | ✓ |
 | `ledger_api` | `ledger_local` | **`ledger`** (not `ads_adm`) | ✓ |
@@ -159,12 +153,13 @@ docker run --rm --network host -e PGPASSWORD postgres:18 bash -o pipefail -c \
   'pg_dump --host 127.0.0.1 --port 15532 … --format custom | pg_restore --host 127.0.0.1 --port <slot> … --no-owner --no-privileges --single-transaction'
 
 <verify staging is non-empty>
+<scrubbed mode only: COPY the scrambled rows, then restore post-data>
 <view swap, per scrubbed table>
-<COPY the scrambled rows, scrubbed mode only>
 <ownership sweep to <owner>>
 <grants + default privileges to <owner>>
 <verify <owner> can INSERT into every table>
 <verify no app-named relation is still a VIEW>
+<scrubbed mode only: verify no *_real relation survived>
 
 ALTER DATABASE <db> WITH ALLOW_CONNECTIONS false
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='<db>' AND pid<>pg_backend_pid()
@@ -229,6 +224,8 @@ That failure surfaces days later as a 500. So hydrate then:
 | slot's postgres container not running | none | `ss stack up --slot N` |
 | wrong AWS account | none | a profile resolving to the dev account (`396913734878`) — `dev_admin` is an example name, not an issued profile |
 | a scrubbed database enumerates zero `_real` tables (the daily scrub has not landed yet) | none | wait ~30 min and re-run — see [The scrub gap](#the-scrub-gap) |
+| a database the map calls unscrubbed has `_real` tables on the mirror | none | update `src/core/mirror/databases.ts` |
+| `--source scrubbed`: a table known to be scrubbed stands on the mirror as an ordinary table | none | find out why the daily scrub no longer covers it |
 | another driver's live claim on the slot | `--yes` | wait, or `ss stack slots` |
 | destructive confirm | `--yes` | — |
 

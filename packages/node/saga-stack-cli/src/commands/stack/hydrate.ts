@@ -53,7 +53,6 @@
  *   ss stack hydrate --slot 2                          # preview (default) — changes nothing
  *   ss stack hydrate --slot 2 --execute                # prompt, then hydrate the default DB set
  *   ss stack hydrate --slot 2 --db coach_api --execute --yes
- *   ss stack hydrate --slot 2 --source scrubbed --execute --yes
  *   ss stack hydrate --set my-set --execute --yes --keep-previous
  */
 
@@ -66,6 +65,8 @@ import { accountMismatchError, resolveEnv } from '../../core/env/index.js';
 import {
   CONFIRMED_REAL_TABLES,
   DEFAULT_CLIENT_IMAGE,
+  realTableFkQuerySql,
+  unscrubbedTablesSql,
   DEFAULT_LOCAL_PORT,
   MIRROR_ADMIN_USER,
   NO_MIRROR_SOURCE,
@@ -76,8 +77,16 @@ import {
   realTableQuerySql,
   resolveSelection,
 } from '../../core/mirror/index.js';
-import type { HydrateDbPlan, HydrateStep, MirrorDbDef, RealTableInfo, SourceMode } from '../../core/mirror/index.js';
+import type {
+  HydrateDbPlan,
+  HydrateStep,
+  MirrorDbDef,
+  RealTableFk,
+  RealTableInfo,
+  SourceMode,
+} from '../../core/mirror/index.js';
 import {
+  parseRealTableFkRows,
   parseRealTableRows,
   pgRestoreFailed,
   postgresContainer,
@@ -123,7 +132,6 @@ export default class StackHydrate extends BaseCommand {
     '<%= config.bin %> <%= command.id %> --slot 2',
     '<%= config.bin %> <%= command.id %> --slot 2 --execute',
     '<%= config.bin %> <%= command.id %> --slot 2 --db coach_api,iam_db --execute --yes',
-    '<%= config.bin %> <%= command.id %> --slot 2 --source scrubbed --execute --yes',
     '<%= config.bin %> <%= command.id %> --set my-set --execute --yes --keep-previous',
   ];
 
@@ -131,15 +139,12 @@ export default class StackHydrate extends BaseCommand {
     ...BaseCommand.baseFlags,
     source: Flags.string({
       options: ['real', 'scrubbed'],
-      default: 'real',
+      default: 'scrubbed',
       description:
-        "which copy of the two SCRUBBED databases (iam_db, iam_pii_db) to land. 'real' (DEFAULT) lands the " +
-        'unscrambled tables — prod is PRE-RELEASE and every user in it is a Saga employee, so there is no real ' +
-        'end-user PII today, and the scramble makes a poor reporting fixture (a known district cannot be found by ' +
-        "display_name or source_id at all). 'scrubbed' lands the scrambled view materialised into a real writable " +
-        'table instead. NOTE: only the rostering project is scrubbed upstream — every OTHER database is raw prod ' +
-        'data in BOTH modes, so --source scrubbed does NOT make a hydrate free of prod data. This default FLIPS at ' +
-        'public release, when prod holds real end-user data.',
+        "which copy of each scrubbed database to land. 'scrubbed' (DEFAULT) materialises the mirror's scrambled views " +
+        "into real writable tables; no row of a *_real table is copied. 'real' lands the *_real tables, which are " +
+        'RAW STUDENT DATA from real districts, on this machine. Do not use it without an explicit reason to handle ' +
+        'that data.',
     }),
     db: Flags.string({
       multiple: true,
@@ -287,21 +292,6 @@ export default class StackHydrate extends BaseCommand {
     }
     if (selection.length === 0) this.error('--db selected nothing — drop the flag for the default set, or pass `all`.');
     const mode = flags.source as SourceMode;
-    // `--source scrubbed` is NOT safe yet and refuses rather than aborting
-    // confusingly mid-restore. Two confirmed defects, both in this path only:
-    // emptying the `_real` tables breaks incoming FKs from tables that DO carry
-    // data, and the per-table COPY steps are emitted alphabetically rather than
-    // in FK-topological order. Both abort inside the staging database, so the
-    // live copy is never at risk — but there is no reason to let an operator
-    // discover that the hard way. `real` is the default and the mode that
-    // matters until public release, which is when this must be fixed.
-    if (mode === 'scrubbed') {
-      this.error(
-        '--source scrubbed is not usable yet: emptied _real tables break incoming foreign keys, and the ' +
-          'materialising COPY steps are not ordered FK-topologically, so the restore aborts. Use --source real ' +
-          '(the default) — prod is pre-release and carries no end-user PII. This must be fixed before public release.'
-      );
-    }
 
     // ── GUARD: live prior claim (another driver is running this slot) ──
     const stateDir = flags['state-dir'] ?? profile.stateDir;
@@ -317,8 +307,8 @@ export default class StackHydrate extends BaseCommand {
 
     // ── the enumeration: identical for the preview, the confirm header and --yes ──
     // Built with the CONFIRMED `_real` set; an executing run re-enumerates it from
-    // the live mirror before planning for real (only rostering is scrubbed, and
-    // that project's scrubbed table set moves with its schema).
+    // the live mirror before planning for real (the scrubbed table set moves with
+    // each project's schema).
     const previewReal = previewRealTables(selection);
     const preview = planHydrate({
       slot,
@@ -347,6 +337,10 @@ export default class StackHydrate extends BaseCommand {
       this.log(dim('    (the _real table set above is the CONFIRMED one; an --execute run enumerates it live from the mirror)'));
       this.log(`${green('✓')} preview complete — no AWS call, no tunnel, no changes.`);
       return;
+    }
+
+    if (mode === 'real') {
+      this.warn('--source real copies RAW STUDENT DATA from the *_real tables onto this machine.');
     }
 
     if (!flags.yes) {
@@ -540,19 +534,34 @@ export default class StackHydrate extends BaseCommand {
 
     // ── discovery, through the tunnel: the scrub's `_real` tables + column order ──
     const realTables: Record<string, RealTableInfo[]> = {};
-    for (const def of ctx.selection.filter((d) => d.scrubbed)) {
-      const argv = mirrorDiscoveryArgv({
-        image: flags['client-image'],
-        mirrorPort: flags['local-port'],
-        user: ctx.mirrorUser,
-        database: def.mirror,
-        sql: realTableQuerySql(),
-      });
-      const res = await ctx.io.exec(argv, { secret: ctx.secret });
-      if (res.code !== 0) {
-        throw new Error(`could not enumerate ${def.mirror}'s scrubbed tables (exit=${res.code}): ${res.stderr.trim().slice(-400)}`);
+    const realTableFks: Record<string, RealTableFk[]> = {};
+    for (const def of ctx.selection) {
+      const readMirror = async (sql: string): Promise<string> => {
+        const argv = mirrorDiscoveryArgv({
+          image: flags['client-image'],
+          mirrorPort: flags['local-port'],
+          user: ctx.mirrorUser,
+          database: def.mirror,
+          sql,
+        });
+        const res = await ctx.io.exec(argv, { secret: ctx.secret });
+        if (res.code !== 0) {
+          throw new Error(`could not enumerate ${def.mirror}'s scrubbed tables (exit=${res.code}): ${res.stderr.trim().slice(-400)}`);
+        }
+        return res.stdout;
+      };
+      const discovered = parseRealTableRows(await readMirror(realTableQuerySql()));
+      // The map says this database has no swapped tables and the catalog says it
+      // does: the map is stale, and copying it as-is would land raw `_real` rows.
+      if (!def.scrubbed) {
+        if (discovered.length > 0) {
+          throw new Error(
+            `${def.mirror} has ${discovered.length} _real table(s) on the mirror, but core/mirror/databases.ts marks it ` +
+              'not scrubbed. Refusing: mark it scrubbed before hydrating it.',
+          );
+        }
+        continue;
       }
-      const discovered = parseRealTableRows(res.stdout);
       // A SOFT-empty enumeration — exit 0, zero rows — is the dangerous case, and
       // exit code alone cannot see it. `def.scrubbed` means we KNOW this database
       // carries the view swap, so zero `_real` tables means the query stopped
@@ -572,6 +581,19 @@ export default class StackHydrate extends BaseCommand {
         );
       }
       realTables[def.mirror] = discovered;
+      if (ctx.mode === 'scrubbed') {
+        const confirmed = CONFIRMED_REAL_TABLES[def.mirror] ?? [];
+        if (confirmed.length > 0) {
+          const raw = (await readMirror(unscrubbedTablesSql(confirmed))).split('\n').filter((l) => l.trim() !== '');
+          if (raw.length > 0) {
+            throw new Error(
+              `${def.mirror}: ${raw.join(', ')} should be scrubbed but stand on the mirror as ordinary tables, so their ` +
+                'rows are raw. Refusing. Check that the daily scrub still covers them.',
+            );
+          }
+        }
+        realTableFks[def.mirror] = parseRealTableFkRows(await readMirror(realTableFkQuerySql()));
+      }
       if (ctx.human) {
         this.log(`  ${dim('scrub:')}    ${def.mirror} — ${discovered.length} _real table(s) enumerated live`);
       }
@@ -595,6 +617,7 @@ export default class StackHydrate extends BaseCommand {
       mirrorUser: ctx.mirrorUser,
       localExists,
       realTables,
+      realTableFks,
       stamp: stampNow(),
       keepPrevious: flags['keep-previous'],
       clientImage: flags['client-image'],
@@ -677,8 +700,8 @@ export default class StackHydrate extends BaseCommand {
       `    source:    prod mirror via SSM tunnel 127.0.0.1:${tunnelPort} (resolved at run time, ${MIRROR_ADMIN_USER})`,
       `    mode:      --source ${mode}` +
         (mode === 'real'
-          ? ' — unscrambled rostering tables (prod is pre-release; this flips at public release)'
-          : ' — scrambled rostering views materialised into real writable tables'),
+          ? ' — RAW STUDENT DATA from the *_real tables'
+          : ' — scrambled views materialised into real writable tables; no *_real rows copied'),
       `    previous:  ${plan.keepPrevious ? 'KEPT as <db>__pre_hydrate_<stamp>' : 'DROPPED after the swap (pass --keep-previous to keep them)'}`,
       '    replaces:',
     ];

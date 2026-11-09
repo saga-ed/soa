@@ -220,20 +220,59 @@ export function databaseExistsSql(db: string): string {
  * Enumerate the scrub's `_real` tables AND their column order, in ONE round
  * trip: `(base_table, column)` rows ordered by table then `attnum`.
  *
- * Enumerated at RUN TIME rather than hardcoded — only the `rostering` project is
- * scrubbed and its table set changes with its schema, so a hardcoded list would
- * silently skip a newly-scrubbed table and leave an un-writable view standing in
- * the app's place. The COLUMN order comes from the `_real` table (the target
- * shape), which is what makes the scrubbed-mode `COPY` column-exact instead of
- * trusting that the view happens to present columns in the same order.
+ * Enumerated at RUN TIME rather than hardcoded — the scrubbed table set changes
+ * with each project's schema, so a hardcoded list would silently skip a
+ * newly-scrubbed table and leave an un-writable view standing in the app's
+ * place. The COLUMN order comes from the `_real` table (the target shape), which
+ * is what makes the scrubbed-mode `COPY` column-exact instead of trusting that
+ * the view happens to present columns in the same order. GENERATED columns are
+ * left out: `COPY … FROM` refuses them, and the server recomputes them anyway.
  */
 export function realTableQuerySql(): string {
   return (
     "SELECT left(c.relname, length(c.relname) - 5) AS base, a.attname FROM pg_class c " +
     'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
-    'JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped ' +
+    "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attgenerated = '' " +
     "WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE '%\\_real' " +
     'ORDER BY c.relname, a.attnum'
+  );
+}
+
+/** Foreign keys between two `_real` tables: `(child_base, parent_base)` rows. */
+export function realTableFkQuerySql(): string {
+  return (
+    "SELECT regexp_replace(c.relname, '_real$', ''), regexp_replace(f.relname, '_real$', '') FROM pg_constraint con " +
+    'JOIN pg_class c ON c.oid = con.conrelid ' +
+    'JOIN pg_class f ON f.oid = con.confrelid ' +
+    'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+    "WHERE con.contype = 'f' AND n.nspname = 'public' AND c.relname LIKE '%\\_real' AND f.relname LIKE '%\\_real' " +
+    'ORDER BY 1, 2'
+  );
+}
+
+/**
+ * Which of these tables stand on the mirror as ORDINARY tables? The scrub renames
+ * a table it covers, so any row here is a table it no longer covers: raw data
+ * under the app's name, which the `_real` exclusions cannot see.
+ */
+export function unscrubbedTablesSql(tables: readonly string[]): string {
+  return (
+    'SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+    `WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname IN (${tables.map(ql).join(', ')}) ORDER BY 1`
+  );
+}
+
+/**
+ * ASSERT no `*_real` relation survived, in any schema. Must be `0`. It is the
+ * backstop for a shape the enumeration cannot see (a partitioned or non-`public`
+ * `_real` table): the dump's wildcard keeps such a table's rows out, and this
+ * stops the database when one appears, so a scrubbed copy never ships with one.
+ */
+export function noRealTablesCheckSql(): string {
+  return (
+    'SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+    "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_%' " +
+    "AND c.relkind IN ('r', 'p', 'f', 'm') AND c.relname LIKE '%\\_real'"
   );
 }
 

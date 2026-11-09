@@ -296,7 +296,9 @@ export function pgDumpArgv(opts: {
 }): string[] {
   const argv = ['pg_dump', ...mirrorConnArgs(opts.mirrorPort, opts.user, opts.database), '--format', 'custom'];
   for (const section of opts.sections ?? []) argv.push(`--section=${section}`);
-  for (const table of opts.excludeData ?? []) argv.push(`--exclude-table-data=public.${table}_real`);
+  // Quoted because pg_dump folds an unquoted pattern to lower case, which would
+  // silently match nothing for a mixed-case table such as `Program_real`.
+  for (const table of opts.excludeData ?? []) argv.push(`--exclude-table-data=public."${table}_real"`);
   if (opts.excludeAllReal === true) argv.push('--exclude-table-data=*.*_real');
   return argv;
 }
@@ -530,7 +532,9 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
       sourceArgv: postDumpArgv,
       sinkArgv: restoreArgv,
       needsSecret: true,
-      classify: 'pg_restore',
+      // --single-transaction implies --exit-on-error, so a non-zero exit here is
+      // never benign, and no later step would notice constraints that never landed.
+      classify: 'psql',
     });
   }
 

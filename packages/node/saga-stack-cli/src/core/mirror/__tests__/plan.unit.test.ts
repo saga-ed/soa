@@ -192,8 +192,8 @@ describe('--source scrubbed — the view is MATERIALISED, never left as a view',
 
   it('excludes the unscrubbed DATA but keeps the _real STRUCTURE (constraints, indexes, defaults)', () => {
     const transfer = transferOf(plan(), 'iam_local:transfer');
-    expect(transfer.sourceArgv).toContain('--exclude-table-data=public.users_real');
-    expect(transfer.sourceArgv).toContain('--exclude-table-data=public.groups_real');
+    expect(transfer.sourceArgv).toContain('--exclude-table-data=public."users_real"');
+    expect(transfer.sourceArgv).toContain('--exclude-table-data=public."groups_real"');
     // Structure still crosses — this is what makes the result a real writable
     // table rather than a constraint-less CTAS.
     expect(transfer.sourceArgv).not.toContain('--schema-only');
@@ -228,7 +228,8 @@ describe('--source scrubbed — the view is MATERIALISED, never left as a view',
     const post = transferOf(plan(), 'iam_local:post-data');
     expect(post.sourceArgv).toContain('--section=post-data');
     expect(post.sourceArgv).not.toContain('--section=data');
-    expect(post.classify).toBe('pg_restore');
+    // A killed client exits non-zero with empty stderr; that must not read as success.
+    expect(post.classify).toBe('psql');
     expect(post.sinkArgv).toContain('--single-transaction');
   });
 
@@ -261,8 +262,16 @@ describe('--source scrubbed — no row of a _real table is ever copied', () => {
     );
     expect(dumps).toHaveLength(1);
     for (const { table } of IAM_REAL) {
-      expect(dumps[0]!.sourceArgv).toContain(`--exclude-table-data=public.${table}_real`);
+      expect(dumps[0]!.sourceArgv).toContain(`--exclude-table-data=public."${table}_real"`);
     }
+  });
+
+  it('quotes the exclusion so a mixed-case table is matched (pg_dump folds unquoted patterns)', () => {
+    const argv = transferOf(
+      db({ mode: 'scrubbed', realTables: { iam_db: [{ table: 'Program', columns: ['id'] }] } }),
+      'iam_local:transfer',
+    ).sourceArgv;
+    expect(argv).toContain('--exclude-table-data=public."Program_real"');
   });
 
   it('excludes *_real by wildcard too, so a table the enumeration missed cannot bring its rows', () => {
@@ -305,7 +314,7 @@ describe('--source scrubbed — no row of a _real table is ever copied', () => {
         }),
       ).dbs[0]!;
       const dump = p.steps.find((s) => s.id.endsWith(':transfer')) as TransferStep;
-      for (const table of tables) expect(dump.sourceArgv).toContain(`--exclude-table-data=public.${table}_real`);
+      for (const table of tables) expect(dump.sourceArgv).toContain(`--exclude-table-data=public."${table}_real"`);
       expect(p.copiedTables.slice().sort()).toEqual(tables.slice().sort());
     }
   });

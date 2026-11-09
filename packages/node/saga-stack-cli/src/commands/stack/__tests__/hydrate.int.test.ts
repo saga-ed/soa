@@ -477,7 +477,7 @@ describe('--source scrubbed — materialises the view, never leaves one', () => 
   it('is the default, and runs without being asked for', async () => {
     await StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--execute', '--yes', ...WS], config);
     const joined = allArgv();
-    expect(joined).toContain('--exclude-table-data=public.users_real');
+    expect(joined).toContain('--exclude-table-data=public."users_real"');
     expect(joined).toContain('COPY public."users_real"');
     expect(joined).toContain('ALTER TABLE public."users_real" RENAME TO "users"');
     expect(warnings.join('\n')).not.toMatch(/RAW STUDENT DATA/);

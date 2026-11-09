@@ -110,7 +110,8 @@ same order. Generated columns are left out, and the server recomputes them.
 
 A scrubbed copy differs from prod's schema in one way: NOT NULL is dropped from the columns the
 scrub blanks to NULL (encrypted PII in `iam_pii_db.user_pii`, for example). Those columns are read
-from the view definitions at run time.
+from the view definitions at run time. Local iam-pii reads of `user_pii` will likely error, because
+those required encrypted values are NULL on the mirror's scrubbed copy.
 
 Materialized views over `_real` tables arrive unpopulated, because the scrub empties them on the
 mirror. Selecting from one errors until you run `REFRESH MATERIALIZED VIEW` locally.

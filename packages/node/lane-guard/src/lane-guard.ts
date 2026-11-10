@@ -3,7 +3,7 @@ import type { EnvIdentity } from '@saga-ed/soa-env';
 export type Env = Record<string, string | undefined>;
 
 export interface LaneViolation {
-    check: 'lane-identity' | 'dd-env' | 'prod-secret-path' | 'prod-host' | 'ses' | 'partner-egress' | 'aws-account' | 'amqp-vhost';
+    check: 'lane-identity' | 'dd-env' | 'prod-secret-path' | 'prod-host' | 'ses' | 'partner-egress' | 'aws-account' | 'amqp-vhost' | 'arn-account';
     message: string;
 }
 
@@ -31,6 +31,9 @@ const OTEL_ENV_RE = /(?:^|,)\s*deployment\.environment(?:\.name)?\s*=\s*([^,]*)/
 const URL_RE = /\b(amqps?|rediss?|mongodb(?:\+srv)?|postgres(?:ql)?):\/\/([^\s/?#]*)/gi;
 const HOST_VAR_RE = /^(PGHOST|(POSTGRES|PG|REDIS|MONGO|MONGODB|RABBITMQ|AMQP)_?[A-Z0-9_]*HOST)$/i;
 const PARTNER_VAR_RES = [/^CLEVER_/i, /PARTNER.*WEBHOOK|WEBHOOK.*URL/i];
+
+// Account-less ARNs (arn:aws:s3:::bucket) carry no account id and are not checked.
+const ARN_ACCOUNT_RE = /\barn:aws[a-z-]*:[a-z0-9-]+:[a-z0-9-]*:(\d{12}):/gi;
 
 const AMQP_URL_RE = /\bamqps?:\/\/[^\s]*/gi;
 
@@ -152,6 +155,12 @@ export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViol
                 if (isProdHost(host)) {
                     v.push({ check: 'prod-host', message: `${name} has a ${m[1]!.toLowerCase()}:// URL with prod-matching host "${host}"` });
                 }
+            }
+        }
+
+        for (const m of value.matchAll(ARN_ACCOUNT_RE)) {
+            if (!allowed.includes(m[1]!)) {
+                v.push({ check: 'arn-account', message: `${name} has an ARN in an account that is not in the allowed set for LANE=${lane}` });
             }
         }
 

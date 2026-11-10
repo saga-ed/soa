@@ -27,6 +27,7 @@ import { restoreEnv, saveEnv } from '../../../__tests__/helpers/env.js';
 import { spySetStore, spySlotActive } from '../../../__tests__/helpers/set-fakes.js';
 import { BaseCommand } from '../../../base-command.js';
 import { INSTANCE_ENV_KEYS } from '../../../core/derive-instance.js';
+import { RAW_SOURCE_CONFIRM_PHRASE } from '../../../core/mirror/index.js';
 import type {
   ClaimReadResult,
   ClaimWriteInput,
@@ -45,6 +46,7 @@ StackHydrate.id = 'stack:hydrate';
 
 const PKG_ROOT = process.cwd();
 const WS = ['--dev', '/fixed/dev'];
+const CONFIRM_RAW = ['--confirm-raw-student-data', RAW_SOURCE_CONFIRM_PHRASE];
 const STATE_S2 = '/tmp/sds-synthetic-s2';
 
 /** The mirror master password — must never reach argv or stdout. */
@@ -149,12 +151,16 @@ function installPgProbe(existing: string[]): void {
   vi.spyOn(BaseCommand.prototype as unknown as { getPgProbe: () => PgProbe }, 'getPgProbe').mockReturnValue(probe);
 }
 
-function installConfirm(answer: boolean): void {
+function installConfirm(answer: boolean, typed?: string): void {
   const confirm: ConfirmSeam = {
     isTTY: () => true,
     async prompt(question: string): Promise<boolean> {
       prompts.push(question);
       return answer;
+    },
+    async ask(question: string): Promise<string> {
+      prompts.push(question);
+      return typed ?? '';
     },
   };
   vi.spyOn(BaseCommand.prototype as unknown as { getConfirm: () => ConfirmSeam }, 'getConfirm').mockReturnValue(confirm);
@@ -447,7 +453,10 @@ describe('--source real — the _real table becomes the app-named table', () => 
         },
       },
     ];
-    await StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--source', 'real', '--execute', '--yes', ...WS], config);
+    await StackHydrate.run(
+      ['--slot', '2', '--db', 'iam_db', '--source', 'real', '--execute', '--yes', ...CONFIRM_RAW, ...WS],
+      config,
+    );
 
     expect(warnings.join('\n')).toMatch(/RAW STUDENT DATA/);
     const joined = allArgv();
@@ -456,6 +465,46 @@ describe('--source real — the _real table becomes the app-named table', () => 
     // real mode takes the data as-is: no exclusion, no COPY of the scrambled view.
     expect(joined).not.toContain('--exclude-table-data');
     expect(joined).not.toContain('TO STDOUT');
+  });
+});
+
+describe('--source real — refused without the typed raw-student-data confirmation', () => {
+  const REAL = ['--slot', '2', '--db', 'iam_db', '--source', 'real', '--execute'];
+
+  it('refuses with --yes alone, before any mirror call', async () => {
+    await expect(StackHydrate.run([...REAL, '--yes', ...WS], config)).rejects.toThrow(/--confirm-raw-student-data/);
+    expect(execs).toHaveLength(0);
+    expect(portForwards).toHaveLength(0);
+  });
+
+  it('refuses a wrong phrase', async () => {
+    await expect(
+      StackHydrate.run([...REAL, '--yes', '--confirm-raw-student-data', 'yes', ...WS], config),
+    ).rejects.toThrow(/did not match/);
+    expect(execs).toHaveLength(0);
+  });
+
+  it('refuses interactively when the typed answer is not the phrase', async () => {
+    installConfirm(true, 'y');
+    await expect(StackHydrate.run([...REAL, ...WS], config)).rejects.toThrow(/--confirm-raw-student-data/);
+    expect(prompts.some((q) => q.includes(RAW_SOURCE_CONFIRM_PHRASE))).toBe(true);
+    expect(execs).toHaveLength(0);
+  });
+
+  it('proceeds with the exact phrase on the flag', async () => {
+    await StackHydrate.run([...REAL, '--yes', ...CONFIRM_RAW, ...WS], config);
+    expect(allArgv()).toContain('ALTER TABLE public."users_real" RENAME TO "users"');
+  });
+
+  it('proceeds when the phrase is typed at the interactive prompt', async () => {
+    installConfirm(true, RAW_SOURCE_CONFIRM_PHRASE);
+    await StackHydrate.run([...REAL, ...WS], config);
+    expect(allArgv()).toContain('ALTER TABLE public."users_real" RENAME TO "users"');
+  });
+
+  it('does not gate a preview', async () => {
+    await StackHydrate.run(['--slot', '2', '--db', 'iam_db', '--source', 'real', ...WS], config);
+    expect(out.join('\n')).toMatch(/preview complete/);
   });
 });
 

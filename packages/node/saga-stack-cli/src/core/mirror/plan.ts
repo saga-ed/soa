@@ -54,7 +54,7 @@ import {
   viewSwapSql,
   writabilityCheckSql,
 } from './sql.js';
-import { localTarget } from './databases.js';
+import { CONFIRMED_REAL_TABLES, localTarget } from './databases.js';
 import type { MirrorDbDef, SourceMode } from './databases.js';
 import type { DbId, Manifest } from '../manifest/index.js';
 
@@ -296,6 +296,8 @@ export function pgDumpArgv(opts: {
   user: string;
   database: string;
   excludeData?: readonly string[];
+  /** Tables (exact app-facing names, no `_real` suffix) whose rows are also kept out. */
+  excludeDataExact?: readonly string[];
   excludeAllReal?: boolean;
   sections?: readonly ('pre-data' | 'data' | 'post-data')[];
 }): string[] {
@@ -304,6 +306,7 @@ export function pgDumpArgv(opts: {
   // Quoted because pg_dump folds an unquoted pattern to lower case, which would
   // silently match nothing for a mixed-case table such as `Program_real`.
   for (const table of opts.excludeData ?? []) argv.push(`--exclude-table-data=public."${table}_real"`);
+  for (const table of opts.excludeDataExact ?? []) argv.push(`--exclude-table-data=public."${table}"`);
   if (opts.excludeAllReal === true) argv.push('--exclude-table-data=*.*_real');
   return argv;
 }
@@ -440,11 +443,21 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
   );
 
   // ── 2. the transfer: mirror pg_dump piped straight into a local pg_restore ──
+  // The bulk dump never carries rows for a table the scrub names, under EITHER
+  // name: in scrubbed mode that is every enumerated `_real` table, every table
+  // on the confirmed list (so a table the scrub stops view-swapping lands empty
+  // rather than raw, even before the command's own refusal), and every
+  // `skipRows` table. In real mode it is the `skipRows` tables only. Excluding a
+  // name that is a view, or does not exist, is a no-op for pg_dump.
+  const rowless = materialise
+    ? [...new Set([...real.map((r) => r.table), ...(CONFIRMED_REAL_TABLES[def.mirror] ?? []), ...skipRows])].sort()
+    : [...skipRows].sort();
   const dumpArgv = pgDumpArgv({
     mirrorPort: input.mirrorLocalPort,
     user,
     database: def.mirror,
     excludeData: materialise ? real.map((r) => r.table) : real.map((r) => r.table).filter((t) => skipRows.has(t)),
+    excludeDataExact: rowless,
     excludeAllReal: materialise,
     // Scrubbed mode holds back indexes, foreign keys and triggers until the
     // scrambled rows are in (step 4): a table that carries data and references a
@@ -694,4 +707,28 @@ export function localTargetRefusal(target: {
     );
   }
   return null;
+}
+
+/**
+ * The exact phrase `--source real --execute` requires, via
+ * `--confirm-raw-student-data "<phrase>"` or typed at an interactive prompt.
+ * `--yes` never satisfies it: `--yes` skips the routine destructive prompt,
+ * whereas this copies raw student records from real districts onto this machine.
+ */
+export const RAW_SOURCE_CONFIRM_PHRASE = 'copy raw student data';
+
+/**
+ * THE RAW-SOURCE REFUSAL. Returns a refusal string, or null when the run may
+ * proceed: anything but an executing `--source real` run is unaffected, and an
+ * executing one needs the exact phrase (trimmed; case and inner spacing exact).
+ */
+export function rawSourceRefusal(opts: { mode: SourceMode; execute: boolean; confirmation: string | undefined }): string | null {
+  if (opts.mode !== 'real' || !opts.execute) return null;
+  if (opts.confirmation?.trim() === RAW_SOURCE_CONFIRM_PHRASE) return null;
+  return (
+    '--source real copies RAW STUDENT DATA from real districts onto this machine, and needs an explicit ' +
+    `confirmation: pass --confirm-raw-student-data "${RAW_SOURCE_CONFIRM_PHRASE}"` +
+    (opts.confirmation === undefined ? ' (or type it at the prompt, interactively without --yes)' : ' (the phrase given did not match)') +
+    '. --yes does not satisfy this. Drop --source real for the scrubbed default.'
+  );
 }

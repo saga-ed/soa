@@ -70,6 +70,10 @@ names the app expects.
 **Lands raw student data on your machine. Not recommended.** Use `scrubbed` unless you have an
 explicit reason to handle that data.
 
+An executing run **refuses** unless you confirm with the exact phrase:
+`--confirm-raw-student-data "copy raw student data"`, or by typing it at the prompt when
+running interactively without `--yes`. `--yes` alone never satisfies it. A preview is not gated.
+
 ```
 dump everything  →  staging
 DROP VIEW public.users CASCADE;
@@ -241,6 +245,7 @@ That failure surfaces days later as a 500. So hydrate then:
 | a scrubbed database enumerates zero `_real` tables (the daily scrub has not landed yet) | none | wait ~30 min and re-run — see [The scrub gap](#the-scrub-gap) |
 | a database the map calls unscrubbed has `_real` tables on the mirror | none | update `src/core/mirror/databases.ts` |
 | `--source scrubbed`: a table known to be scrubbed stands on the mirror as an ordinary table | none | find out why the daily scrub no longer covers it |
+| `--source real --execute` without the typed phrase | none (`--yes` does not count) | `--confirm-raw-student-data "copy raw student data"`, or drop `--source real` |
 | another driver's live claim on the slot | `--yes` | wait, or `ss stack slots` |
 | destructive confirm | `--yes` | — |
 

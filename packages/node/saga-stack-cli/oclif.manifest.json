@@ -3951,6 +3951,13 @@
           "name": "coach",
           "type": "option"
         },
+        "confirm-raw-student-data": {
+          "description": "required with --source real --execute: the exact phrase \"copy raw student data\", confirming you intend to copy raw student data from real districts onto this machine. Ignored for --source scrubbed.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "confirm-raw-student-data",
+          "type": "option"
+        },
         "db": {
           "description": "databases to hydrate: mirror or local names (comma- or flag-repeatable), plus 'default' and 'all'. DEFAULT (when omitted) is every mapping with a verified name pair and a slot-provisioned local home: scheduling, sessions, iam_local, programs, authz_local, coach_api, authz_sync_local, iam_pii_local, sis_db, ads_adm_local, ledger_local, content. Opt-in extras: openfga (its local schema is sidecar-owned), transcripts_local (mapping unverified + playback-only), chat_local (playback-only).",
           "hasDynamicHelp": false,
@@ -4092,7 +4099,7 @@
         },
         "source": {
           "default": "scrubbed",
-          "description": "which copy of each scrubbed database to land. 'scrubbed' (DEFAULT) materialises the mirror's scrambled views into real writable tables; no row of a *_real table is copied. 'real' lands the *_real tables, which are RAW STUDENT DATA from real districts, on this machine. Do not use it without an explicit reason to handle that data.",
+          "description": "which copy of each scrubbed database to land. 'scrubbed' (DEFAULT) materialises the mirror's scrambled views into real writable tables; no row of a *_real table is copied. 'real' lands the *_real tables, which are RAW STUDENT DATA from real districts, on this machine. Do not use it without an explicit reason to handle that data. An executing --source real run REFUSES unless --confirm-raw-student-data carries the exact phrase \"copy raw student data\" (or it is typed at the prompt, interactively without --yes); --yes alone does not satisfy it.",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "source",

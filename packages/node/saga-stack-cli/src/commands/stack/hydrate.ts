@@ -40,6 +40,9 @@
  *   - AWS account preflight: the mirror lives in the DEV account.
  *   - live-claim refusal (another driver is running this slot); `--yes` overrides.
  *     Captured BEFORE the central claim hook overwrites `claim.json`.
+ *   - an executing `--source real` run is REFUSED without the typed phrase
+ *     (`--confirm-raw-student-data`, or typed at an interactive prompt);
+ *     `--yes` does not satisfy it (`rawSourceRefusal`).
  *   - a declined prompt is an ABORT — exit 0, nothing changed. The structural
  *     refusals above are `this.error` — exit 2.
  *
@@ -72,6 +75,8 @@ import {
   MIRROR_ADMIN_USER,
   NO_MIRROR_SOURCE,
   localTargetRefusal,
+  RAW_SOURCE_CONFIRM_PHRASE,
+  rawSourceRefusal,
   localTarget,
   mirrorDiscoveryArgv,
   planHydrate,
@@ -145,7 +150,14 @@ export default class StackHydrate extends BaseCommand {
         "which copy of each scrubbed database to land. 'scrubbed' (DEFAULT) materialises the mirror's scrambled views " +
         "into real writable tables; no row of a *_real table is copied. 'real' lands the *_real tables, which are " +
         'RAW STUDENT DATA from real districts, on this machine. Do not use it without an explicit reason to handle ' +
-        'that data.',
+        'that data. An executing --source real run REFUSES unless --confirm-raw-student-data carries the exact ' +
+        `phrase "${RAW_SOURCE_CONFIRM_PHRASE}" (or it is typed at the prompt, interactively without --yes); --yes ` +
+        'alone does not satisfy it.',
+    }),
+    'confirm-raw-student-data': Flags.string({
+      description:
+        `required with --source real --execute: the exact phrase "${RAW_SOURCE_CONFIRM_PHRASE}", confirming you ` +
+        'intend to copy raw student data from real districts onto this machine. Ignored for --source scrubbed.',
     }),
     db: Flags.string({
       multiple: true,
@@ -342,6 +354,17 @@ export default class StackHydrate extends BaseCommand {
 
     if (mode === 'real') {
       this.warn('--source real copies RAW STUDENT DATA from the *_real tables onto this machine.');
+      // ── GUARD: typed confirmation for raw data. --yes never satisfies it; an
+      // interactive run without --yes may type the phrase instead of passing it.
+      let confirmation = flags['confirm-raw-student-data'];
+      const confirm = this.getConfirm();
+      if (confirmation === undefined && !flags.yes && confirm.isTTY() && confirm.ask !== undefined) {
+        confirmation = await confirm.ask(
+          `\n  Type "${RAW_SOURCE_CONFIRM_PHRASE}" to copy raw student data onto this machine: `,
+        );
+      }
+      const rawRefusal = rawSourceRefusal({ mode, execute, confirmation });
+      if (rawRefusal !== null) this.error(rawRefusal);
     }
 
     if (!flags.yes) {

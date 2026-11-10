@@ -32,6 +32,8 @@ import {
   mirrorDiscoveryArgv,
   orderByForeignKeys,
   planHydrate,
+  RAW_SOURCE_CONFIRM_PHRASE,
+  rawSourceRefusal,
   realTableQuerySql,
   resolveSelection,
   shQuote,
@@ -321,6 +323,49 @@ describe('--source scrubbed — no row of a _real table is ever copied', () => {
   });
 });
 
+describe('--source scrubbed — the bulk dump carries no rows for any table the scrub names', () => {
+  it('excludes the app-facing name of every enumerated and every confirmed table, for every scrubbed database', () => {
+    for (const def of MIRROR_DATABASES.filter((d) => d.scrubbed)) {
+      const confirmed = CONFIRMED_REAL_TABLES[def.mirror]!;
+      // The scrub has stopped view-swapping the first confirmed table: the live
+      // enumeration no longer lists it, so it stands on the mirror as raw rows.
+      const discovered = confirmed.slice(1).map((table) => ({ table, columns: ['id'] }));
+      const p = planHydrate(
+        input({ mode: 'scrubbed', selection: [def], localExists: {}, realTables: { [def.mirror]: discovered } }),
+      ).dbs[0]!;
+      const dump = p.steps.find((s) => s.id.endsWith(':transfer')) as TransferStep;
+      for (const table of confirmed) {
+        expect(dump.sourceArgv, `${def.mirror}.${table}`).toContain(`--exclude-table-data=public."${table}"`);
+      }
+      expect(p.copiedTables, def.mirror).not.toContain(confirmed[0]);
+    }
+  });
+});
+
+describe('the raw-source refusal — --source real needs the typed phrase', () => {
+  it('refuses an executing real run with no confirmation', () => {
+    expect(rawSourceRefusal({ mode: 'real', execute: true, confirmation: undefined })).toMatch(
+      /--confirm-raw-student-data/,
+    );
+  });
+
+  it('refuses a wrong or partial phrase', () => {
+    for (const c of ['', 'y', 'yes', 'copy raw', 'COPY RAW STUDENT DATA']) {
+      expect(rawSourceRefusal({ mode: 'real', execute: true, confirmation: c }), c).toMatch(/did not match/);
+    }
+  });
+
+  it('allows the exact phrase (surrounding whitespace trimmed)', () => {
+    expect(rawSourceRefusal({ mode: 'real', execute: true, confirmation: RAW_SOURCE_CONFIRM_PHRASE })).toBeNull();
+    expect(rawSourceRefusal({ mode: 'real', execute: true, confirmation: `  ${RAW_SOURCE_CONFIRM_PHRASE}\n` })).toBeNull();
+  });
+
+  it('leaves scrubbed runs and previews alone', () => {
+    expect(rawSourceRefusal({ mode: 'scrubbed', execute: true, confirmation: undefined })).toBeNull();
+    expect(rawSourceRefusal({ mode: 'real', execute: false, confirmation: undefined })).toBeNull();
+  });
+});
+
 describe('authz_decision_log lands empty (an audit history no permission check reads)', () => {
   const REAL = [
     { table: 'authz_decision_log', columns: ['id', 'trace'] },
@@ -349,6 +394,23 @@ describe('authz_decision_log lands empty (an audit history no permission check r
     expect(argv).toContain('--exclude-table-data=public."authz_decision_log_real"');
     expect(argv).not.toContain('--exclude-table-data=public."iam_group_projection_real"');
     expect(ids(p)).toContain('authz_local:view-swap:authz_decision_log');
+  });
+
+  it('scrubbed: still lands empty if the scrub stops view-swapping it (it stands as an ordinary table)', () => {
+    const p = db({
+      mode: 'scrubbed',
+      selection: [findByMirrorName('authz_db')!],
+      localExists: {},
+      realTables: { authz_db: [{ table: 'iam_group_projection', columns: ['id'] }] },
+    });
+    const argv = transferOf(p, 'authz_local:transfer').sourceArgv;
+    expect(argv).toContain('--exclude-table-data=public."authz_decision_log"');
+    expect(ids(p)).not.toContain('authz_local:copy:authz_decision_log');
+  });
+
+  it('real: still lands empty if the scrub stops view-swapping it', () => {
+    const p = db({ mode: 'real', selection: [findByMirrorName('authz_db')!], localExists: {}, realTables: { authz_db: [] } });
+    expect(transferOf(p, 'authz_local:transfer').sourceArgv).toContain('--exclude-table-data=public."authz_decision_log"');
   });
 
   it('is the only table anywhere that skips its rows', () => {

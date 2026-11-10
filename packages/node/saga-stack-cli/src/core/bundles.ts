@@ -19,6 +19,7 @@ import type { ServiceId } from './manifest/index.js';
 
 /** The named features a `--with` value may select (services, a seed add-on, or both). */
 export type BundleName =
+  | 'vishnu'
   | 'dash'
   | 'connect'
   | 'coach'
@@ -54,6 +55,10 @@ export const BUNDLES: Readonly<Record<BundleName, BundleDef>> = {
     services: ['ap-api', 'ap-dash', 'ap-student'],
     seedAddOn: 'wootmath',
     description: 'Woot Math student app + teacher dashboard + AP API (synthetic Founders identity, PostgreSQL and RabbitMQ only).',
+  },
+  vishnu: {
+    services: ['vishnu'],
+    description: 'Live synthetic-dev mesh viewer (:8930); combine with --with dash to boot its mesh.',
   },
   dash: {
     services: ['saga-dash'],
@@ -243,6 +248,7 @@ export function effectiveWithJanusMock(withBundles: string[] | undefined): boole
 export const WOOTMATH_IDS: readonly ServiceId[] = BUNDLES.wootmath.services;
 export const PLAYBACK_IDS: readonly ServiceId[] = BUNDLES.playback.services;
 export const AUTHZ_IDS: readonly ServiceId[] = BUNDLES.authz.services;
+export const VISHNU_IDS: readonly ServiceId[] = BUNDLES.vishnu.services;
 export const STAFF_ADMIN_IDS: readonly ServiceId[] = BUNDLES['staff-admin'].services;
 export const JANUS_MOCK_IDS: readonly ServiceId[] = BUNDLES['janus-mock'].services;
 
@@ -257,7 +263,7 @@ export const JANUS_MOCK_IDS: readonly ServiceId[] = BUNDLES['janus-mock'].servic
  * of every signature that spells the shape out.
  */
 export type ResolvedClosureOpts = Required<
-  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin' | 'withJanusMock' | 'withWootmath'>
+  Pick<ClosureOpts, 'withPlayback' | 'withAuthz' | 'withStaffAdmin' | 'withJanusMock' | 'withWootmath' | 'withVishnu'>
 >;
 
 /**
@@ -274,6 +280,7 @@ export type ResolvedClosureOpts = Required<
  */
 export function closureOptsFor(
   withBundles: string[] | undefined,
+  only?: string,
 ): ResolvedClosureOpts {
   return {
     withWootmath: (withBundles ?? []).includes('wootmath'),
@@ -281,6 +288,9 @@ export function closureOptsFor(
     withAuthz: effectiveWithAuthz(withBundles),
     withStaffAdmin: effectiveWithStaffAdmin(withBundles),
     withJanusMock: effectiveWithJanusMock(withBundles),
+    // Naming the local viewer explicitly is sufficient; other optional families
+    // retain their bundle gates because those flags also configure their runtime.
+    withVishnu: (withBundles ?? []).includes('vishnu') || parseOnly(only).includes('vishnu'),
   };
 }
 
@@ -300,6 +310,7 @@ export function closureOptsForIds(
     withAuthz: has(AUTHZ_IDS),
     withStaffAdmin: has(STAFF_ADMIN_IDS),
     withJanusMock: has(JANUS_MOCK_IDS),
+    withVishnu: has(VISHNU_IDS),
   };
 }
 

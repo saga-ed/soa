@@ -28,7 +28,7 @@
  * would wrongly resolve transcripts-api), so the gate dispatches per service id.
  */
 
-import { WOOTMATH_IDS, AUTHZ_IDS, JANUS_MOCK_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS } from './bundles.js';
+import { WOOTMATH_IDS, AUTHZ_IDS, JANUS_MOCK_IDS, PLAYBACK_IDS, STAFF_ADMIN_IDS, VISHNU_IDS } from './bundles.js';
 import { launchOrder } from './launch-order.js';
 import type { DbId, Manifest, MeshId, ServiceId } from './manifest/index.js';
 
@@ -54,6 +54,8 @@ export interface ClosureOpts {
   withStaffAdmin?: boolean;
   /** Keep the `optional:true` `janus-mock-signer` service. */
   withJanusMock?: boolean;
+  /** Keep the optional local synthetic mesh viewer. */
+  withVishnu?: boolean;
   /**
    * Whether to traverse `depKind: 'browser'` edges (default `true`).
    *
@@ -104,6 +106,7 @@ export function computeClosure(
     if (AUTHZ_IDS.includes(id)) return withAuthz;
     if (STAFF_ADMIN_IDS.includes(id)) return withStaffAdmin;
     if (JANUS_MOCK_IDS.includes(id)) return withJanusMock;
+    if (VISHNU_IDS.includes(id)) return opts.withVishnu ?? false;
     throw new Error(
       `closure: optional service '${id}' has no opt-in flag — add it to a BUNDLES entry ` +
         `(and its *_IDS export), or it will silently resolve an empty closure.`,

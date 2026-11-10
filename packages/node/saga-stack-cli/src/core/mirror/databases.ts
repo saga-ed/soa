@@ -14,11 +14,16 @@
  * duplicated here. A unit test asserts every `local` resolves.
  *
  * THE SCRUB (`scrubbed: true`) — the central structural fact. The daily cron
- * scrubs ONLY the `rostering` project, so ONLY `iam_db` and `iam_pii_db` are
- * affected; every other database in the mirror is RAW PROD DATA in both source
- * modes. In a scrubbed database the real table is renamed `{table}_real` and a
- * scrambled VIEW takes the original name, which is why both source modes need a
- * rename step (see `core/mirror/plan.ts`).
+ * scrubs the projects in hipponot/iac `postgres_mirror_to_dev.yml`
+ * `SCHEDULED_SCRUB_PROJECTS` (rostering, program-hub, student-data-system,
+ * coach as of 2026-11-09). In a scrubbed database the real table is renamed
+ * `{table}_real` and a scrambled VIEW takes the original name, which is why both
+ * source modes need a rename step (see `core/mirror/plan.ts`).
+ *
+ * `scrubbed` was checked against each database's catalog on 2026-11-09, not
+ * inferred from the project list: `openfga` has rules but no swapped table, so
+ * it is the one mapping with `scrubbed: false`. An executing hydrate re-checks
+ * this against the live catalog and refuses if the two disagree.
  */
 
 import { getDb } from '../manifest/index.js';
@@ -27,19 +32,15 @@ import type { DbId, Manifest } from '../manifest/index.js';
 /**
  * Which copy of a scrubbed database's data to land locally.
  *
- * DEFAULT IS `real` — and that default is a DATA-CLASSIFICATION decision, not a
- * convenience. Prod is PRE-RELEASE: every user in it is a Saga employee, so
- * there is no real end-user PII today (consistent with the standing Legal
- * determination that tutor responses are not PII). The daily scrub scrambles
- * names and identifiers, which makes a poor reporting fixture — a known district
- * cannot be found in the mirror by display_name or source_id at all. So the real
- * tables are the USEFUL thing and hydrating them is preferred.
- *
- * THIS FLIPS AT PUBLIC RELEASE. When prod holds real end-user data the default
- * must become `scrubbed` and `real` must grow a much harder gate. The scrubbed
- * path exists today so that flip is a one-line change rather than a new feature.
+ * DEFAULT IS `scrubbed` — a DATA-CLASSIFICATION decision, not a convenience.
+ * Prod holds real district students, so `{t}_real` is raw student data. `real`
+ * lands exactly that on a developer machine and is never the recommended mode.
  */
 export type SourceMode = 'real' | 'scrubbed';
+
+/** iac's `SCHEDULED_SCRUB_PROJECTS` (`postgres_mirror_to_dev.yml`), as of 2026-11-09. */
+export const SCRUB_PROJECTS = ['rostering', 'program-hub', 'student-data-system', 'coach'] as const;
+export type ScrubProject = (typeof SCRUB_PROJECTS)[number];
 
 /** One mirror database and where it lands in a local slot. */
 export interface MirrorDbDef {
@@ -48,11 +49,18 @@ export interface MirrorDbDef {
   /** Local manifest database id (the local name + owner role come from the manifest). */
   local: DbId;
   /**
-   * Is this database view-swapped by the daily rostering scrub (real tables
-   * renamed `{t}_real`, a scrambled VIEW at `{t}`)? True for exactly the two
-   * rostering databases.
+   * Is this database view-swapped by the daily scrub (real tables renamed
+   * `{t}_real`, a scrambled VIEW at `{t}`)? Measured from the mirror's catalog.
    */
   scrubbed: boolean;
+  /** The iac scrub project whose rules package owns this database. */
+  scrubProject: ScrubProject;
+  /**
+   * Tables that land with their structure but none of their rows, in both source
+   * modes. Only for tables nothing reads to make a decision, and whose copy is
+   * too slow to fit in the tunnel's lifetime.
+   */
+  skipRows?: readonly string[];
   /** Included when `--db` is omitted. */
   inDefaultSet: boolean;
   /** Why it is (or is not) in the default set — surfaced in `--help` and the docs. */
@@ -65,48 +73,47 @@ export interface MirrorDbDef {
  * are RDS admin DBs (`postgres`, `rdsadmin`) and are never targets.
  */
 export const MIRROR_DATABASES: readonly MirrorDbDef[] = [
-  { mirror: 'scheduling_api', local: 'scheduling', scrubbed: false, inDefaultSet: true },
-  { mirror: 'sessions_api', local: 'sessions', scrubbed: false, inDefaultSet: true },
+  { mirror: 'scheduling_api', local: 'scheduling', scrubbed: true, scrubProject: 'program-hub', inDefaultSet: true },
+  { mirror: 'sessions_api', local: 'sessions', scrubbed: true, scrubProject: 'program-hub', inDefaultSet: true },
+  { mirror: 'iam_db', local: 'iam_local', scrubbed: true, scrubProject: 'rostering', inDefaultSet: true },
+  { mirror: 'programs_api', local: 'programs', scrubbed: true, scrubProject: 'program-hub', inDefaultSet: true },
   {
-    mirror: 'iam_db',
-    local: 'iam_local',
+    mirror: 'authz_db',
+    local: 'authz_local',
     scrubbed: true,
+    scrubProject: 'rostering',
     inDefaultSet: true,
-    note: 'view-swapped by the daily rostering scrub — see --source.',
+    skipRows: ['authz_decision_log'],
+    note: 'authz_decision_log lands empty: an audit history (30-day retention) that no permission check reads, and its copy outlasted the tunnel on 2026-11-09.',
   },
-  { mirror: 'programs_api', local: 'programs', scrubbed: false, inDefaultSet: true },
-  { mirror: 'authz_db', local: 'authz_local', scrubbed: false, inDefaultSet: true },
   {
     mirror: 'openfga',
     local: 'openfga',
     scrubbed: false,
+    scrubProject: 'rostering',
     inDefaultSet: false,
     note: "opt-in: local openfga's schema is owned by the openfga_migrate sidecar and has ZERO tables here; a whole-database restore makes it prod-dump-managed instead.",
   },
-  { mirror: 'coach_api', local: 'coach_api', scrubbed: false, inDefaultSet: true },
+  { mirror: 'coach_api', local: 'coach_api', scrubbed: true, scrubProject: 'coach', inDefaultSet: true },
   {
     mirror: 'transcription_db',
     local: 'transcripts_local',
-    scrubbed: false,
+    scrubbed: true,
+    scrubProject: 'student-data-system',
     inDefaultSet: false,
     note: 'opt-in: the ONE mapping not mechanically verified (transcription vs transcripts), and transcripts_local is playback-only (`--with playback`), absent from a default slot.',
   },
-  { mirror: 'authz_sync', local: 'authz_sync_local', scrubbed: false, inDefaultSet: true },
-  {
-    mirror: 'iam_pii_db',
-    local: 'iam_pii_local',
-    scrubbed: true,
-    inDefaultSet: true,
-    note: 'view-swapped by the daily rostering scrub (user_pii) — see --source.',
-  },
-  { mirror: 'sis_db', local: 'sis_db', scrubbed: false, inDefaultSet: true },
-  { mirror: 'ads_adm', local: 'ads_adm_local', scrubbed: false, inDefaultSet: true },
-  { mirror: 'ledger_api', local: 'ledger_local', scrubbed: false, inDefaultSet: true },
-  { mirror: 'content_api', local: 'content', scrubbed: false, inDefaultSet: true },
+  { mirror: 'authz_sync', local: 'authz_sync_local', scrubbed: true, scrubProject: 'rostering', inDefaultSet: true },
+  { mirror: 'iam_pii_db', local: 'iam_pii_local', scrubbed: true, scrubProject: 'rostering', inDefaultSet: true },
+  { mirror: 'sis_db', local: 'sis_db', scrubbed: true, scrubProject: 'rostering', inDefaultSet: true },
+  { mirror: 'ads_adm', local: 'ads_adm_local', scrubbed: true, scrubProject: 'student-data-system', inDefaultSet: true },
+  { mirror: 'ledger_api', local: 'ledger_local', scrubbed: true, scrubProject: 'student-data-system', inDefaultSet: true },
+  { mirror: 'content_api', local: 'content', scrubbed: true, scrubProject: 'program-hub', inDefaultSet: true },
   {
     mirror: 'chat',
     local: 'chat_local',
-    scrubbed: false,
+    scrubbed: true,
+    scrubProject: 'student-data-system',
     inDefaultSet: false,
     note: 'opt-in: chat_local is playback-only (`--with playback`) and absent from a default slot.',
   },
@@ -130,30 +137,77 @@ export const NO_MIRROR_SOURCE: readonly { local: DbId; why: string }[] = [
 ];
 
 /**
- * The confirmed `_real` tables per scrubbed database, as measured 2026-08-06.
+ * The confirmed `_real` tables per scrubbed database, as measured 2026-11-09.
  *
- * USED ONLY BY `--dry-run`'s preview: an executing run ENUMERATES the `_real`
- * set from `pg_class` on the live mirror (`realTableQuery`), because only the
- * `rostering` project is scrubbed and that project's table set changes with its
- * schema. Hardcoding it for execution would silently skip a newly-scrubbed
- * table and leave an un-writable view in the app's place.
+ * Two uses, neither of which decides what gets copied: the preview's table
+ * counts, and the executing run's refusal when a table on this list stands on
+ * the mirror as an ordinary table (it was scrubbed and now is not, so its rows
+ * are raw). The set actually materialised is ENUMERATED from `pg_class` on the
+ * live mirror, because hardcoding it would silently skip a newly-scrubbed table.
  */
 export const CONFIRMED_REAL_TABLES: Readonly<Record<string, readonly string[]>> = {
+  ads_adm: ['adm_attendance', 'adm_tracking_mode', 'snapshot_metadata'],
+  authz_db: ['authz_decision_log', 'iam_group_projection'],
+  authz_sync: ['iam_group_binding'],
+  chat: ['chat_message', 'outbox_event', 'outbox_event_archive'],
+  coach_api: ['content_instance', 'content_release', 'content_release_poll', 'module_answer'],
+  content_api: ['outbox_event'],
   iam_db: [
-    'auth_associations',
+    'api_key',
     'audit_logs',
+    'auth_associations',
+    'derived_evaluation_queue',
+    'derived_evaluation_queue_dead',
     'event_outbox',
     'group_attributes',
     'group_auth_config',
     'groups',
     'login_profiles',
     'outbox_event',
+    'outbox_event_archive',
     'snapshot_metadata',
+    'user_external_identifiers',
     'user_policies',
     'user_profiles',
     'users',
   ],
   iam_pii_db: ['user_pii'],
+  ledger_api: [
+    'assessment_response',
+    'assessment_submission',
+    'ingestion_batch',
+    'outbox_event',
+    'roster_export_run',
+    'section_dim',
+    'staged_ingestion_row',
+    'star_result_detail',
+    'student_correlation',
+    'student_identity_ref',
+    'tutor_dim',
+  ],
+  programs_api: [
+    'iam_group_binding',
+    'outbox_event',
+    'pod_assignment_override',
+    'Program',
+    'ProgramFile',
+    'ProgramLink',
+    'snapshot_metadata',
+    'Subsection',
+  ],
+  scheduling_api: ['outbox_event', 'SlotOccurrenceCancellation', 'snapshot_metadata'],
+  sessions_api: [
+    'occurrence_cancellation_ref',
+    'outbox_event',
+    'pod_assignment_override_projection',
+    'qtf_evaluation',
+    'scheduling_holiday_ref',
+    'session_observation_note',
+    'slot_occurrence_cancellation_ref',
+    'tutoring_session',
+  ],
+  sis_db: ['district_sync_config', 'sync_records'],
+  transcription_db: ['segment_embeddings', 'transcription_jobs', 'transcripts', 'transcript_segments'],
 };
 
 /** Look up by mirror database name. */

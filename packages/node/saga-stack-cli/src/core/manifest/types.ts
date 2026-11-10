@@ -21,6 +21,7 @@ export type ServiceId =
   | 'sessions-api'
   | 'content-api'
   | 'ads-adm-api'
+  | 'vishnu' // optional synthetic mesh viewer
   | 'saga-dash'
   | 'connect-api'
   | 'connect-web'
@@ -53,7 +54,8 @@ export type RepoKey =
   | 'RTSM'
   | 'FLEEK'
   | 'JANUS'
-  | 'WOOTMATH';
+  | 'WOOTMATH'
+  | 'VISHNU';
 
 /** The three URL lanes a service can be addressed on. */
 export type Lane = 'stack' | 'sandbox' | 'tunnel';
@@ -69,6 +71,7 @@ export type Engine = 'postgres' | 'mongo';
  * the postgres/mongo database name). `connectv3` is mongo; the rest are postgres.
  */
 export type DbId =
+  | 'vishnu'
   | 'iam_local'
   | 'iam_pii_local'
   | 'programs'

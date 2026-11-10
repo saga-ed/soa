@@ -15,6 +15,7 @@ import {
   PLAYBACK_IDS,
   WOOTMATH_IDS,
   STAFF_ADMIN_IDS,
+  VISHNU_IDS,
   closureOptsFor,
   closureOptsForIds,
 } from '../../bundles.js';
@@ -141,6 +142,7 @@ describe('staff-admin closure admission', () => {
   it('is not cross-admitted by, and does not cross-admit, other optionals', () => {
     const c = computeClosure(manifest, ['authz-sync', ...ids], {
       withStaffAdmin: true,
+      withVishnu: false,
     });
     expect(c.services).not.toContain('authz-sync');
   });
@@ -170,6 +172,7 @@ describe('optional-service id sets (derived from BUNDLES)', () => {
     // flag mapping silently resolves to an EMPTY closure at every caller.
     const mapped = new Set<string>([
       ...PLAYBACK_IDS,
+      ...VISHNU_IDS,
       ...WOOTMATH_IDS,
       ...AUTHZ_IDS,
       ...STAFF_ADMIN_IDS,
@@ -190,6 +193,7 @@ describe('closureOptsFor / closureOptsForIds', () => {
       withAuthz: false,
       withStaffAdmin: true,
       withJanusMock: true,
+      withVishnu: false,
     });
     expect(closureOptsFor(undefined)).toEqual({
       withPlayback: false,
@@ -197,6 +201,7 @@ describe('closureOptsFor / closureOptsForIds', () => {
       withAuthz: false,
       withStaffAdmin: false,
       withJanusMock: false,
+      withVishnu: false,
     });
   });
 
@@ -207,6 +212,7 @@ describe('closureOptsFor / closureOptsForIds', () => {
       withAuthz: false,
       withStaffAdmin: true,
       withJanusMock: false,
+      withVishnu: false,
     });
     expect(closureOptsForIds(['iam-api'])).toEqual({
       withPlayback: false,
@@ -214,6 +220,7 @@ describe('closureOptsFor / closureOptsForIds', () => {
       withAuthz: false,
       withStaffAdmin: false,
       withJanusMock: false,
+      withVishnu: false,
     });
   });
 

@@ -385,7 +385,11 @@ export function buildSeedRegistry(m: Manifest = manifest): Record<SeedStepId, Se
       databases: ['authz_local'],
       cwd: getService('iam-api', m).subpath,
       command: ['npx', 'tsx', 'src/scripts/backfill-outbox-reemit.ts'],
-      env: inlineDatabaseUrl(getDb('iam_local', m)),
+      // local slot: a full live re-emit is intended (rostering#1869 gate)
+      env: {
+        kind: 'inline',
+        vars: { DATABASE_URL: pgUrl(getDb('iam_local', m)), IAM_REEMIT_ALLOW_FANOUT: '1' },
+      },
       requiresServiceUp: ['iam-api', 'authz-api'],
       // fatal: without a warm projection every sessions read 408s, so a silent
       // failure here reproduces exactly the bug soa#402 is about.

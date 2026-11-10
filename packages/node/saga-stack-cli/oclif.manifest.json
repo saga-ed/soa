@@ -169,6 +169,13 @@
           "name": "tunnel",
           "type": "boolean"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -379,6 +386,13 @@
           "name": "tunnel",
           "type": "boolean"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -578,6 +592,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -729,6 +750,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -986,6 +1014,13 @@
           "name": "tunnel",
           "type": "boolean"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -1146,6 +1181,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -1190,7 +1232,8 @@
         "<%= config.bin %> <%= command.id %> iam --env prod --jump-host prod-db-jump-host",
         "<%= config.bin %> <%= command.id %> mongo --env prod --print-only",
         "<%= config.bin %> <%= command.id %> mongo --env prod --member 1",
-        "<%= config.bin %> <%= command.id %> rabbitmq --env dev"
+        "<%= config.bin %> <%= command.id %> rabbitmq --env dev",
+        "<%= config.bin %> <%= command.id %> rabbitmq --env prod --remote-port 5671 --print-only"
       ],
       "flags": {
         "coach": {
@@ -1252,7 +1295,7 @@
           "type": "option"
         },
         "local-port": {
-          "description": "local end of the tunnel (default: postgres 15432, mongo 27018, rabbitmq 15443)",
+          "description": "local end of the tunnel (default: postgres 15432, mongo 27018, rabbitmq 15443, rabbitmq AMQPS 15671)",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "local-port",
@@ -1306,8 +1349,7 @@
           "type": "option"
         },
         "remote-port": {
-          "default": 5432,
-          "description": "remote DB port (with --host)",
+          "description": "remote port: postgres with --host (default 5432); rabbitmq 443 (management API, default) | 5671 (AMQPS); not for mongo.",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "remote-port",
@@ -1375,6 +1417,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "username",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -1546,6 +1595,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -1697,6 +1753,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -1895,6 +1958,13 @@
           "name": "url",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -2067,6 +2137,13 @@
           "hasDynamicHelp": false,
           "multiple": true,
           "name": "url",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -2260,6 +2337,13 @@
           "name": "url",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -2411,6 +2495,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -2557,7 +2648,8 @@
             "rtsm",
             "fleek",
             "janus",
-            "wootmath"
+            "wootmath",
+            "vishnu"
           ],
           "required": true,
           "type": "option"
@@ -2617,6 +2709,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -2763,6 +2862,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -2929,6 +3035,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -3090,6 +3203,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -3257,6 +3377,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -3407,6 +3534,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -3594,6 +3728,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -3752,6 +3893,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -3785,7 +3933,6 @@
         "<%= config.bin %> <%= command.id %> --slot 2",
         "<%= config.bin %> <%= command.id %> --slot 2 --execute",
         "<%= config.bin %> <%= command.id %> --slot 2 --db coach_api,iam_db --execute --yes",
-        "<%= config.bin %> <%= command.id %> --slot 2 --source scrubbed --execute --yes",
         "<%= config.bin %> <%= command.id %> --set my-set --execute --yes --keep-previous"
       ],
       "flags": {
@@ -3802,6 +3949,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "coach",
+          "type": "option"
+        },
+        "confirm-raw-student-data": {
+          "description": "required with --source real --execute: the exact phrase \"copy raw student data\", confirming you intend to copy raw student data from real districts onto this machine. Ignored for --source scrubbed.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "confirm-raw-student-data",
           "type": "option"
         },
         "db": {
@@ -3944,8 +4098,8 @@
           "type": "option"
         },
         "source": {
-          "default": "real",
-          "description": "which copy of the two SCRUBBED databases (iam_db, iam_pii_db) to land. 'real' (DEFAULT) lands the unscrambled tables — prod is PRE-RELEASE and every user in it is a Saga employee, so there is no real end-user PII today, and the scramble makes a poor reporting fixture (a known district cannot be found by display_name or source_id at all). 'scrubbed' lands the scrambled view materialised into a real writable table instead. NOTE: only the rostering project is scrubbed upstream — every OTHER database is raw prod data in BOTH modes, so --source scrubbed does NOT make a hydrate free of prod data. This default FLIPS at public release, when prod holds real end-user data.",
+          "default": "scrubbed",
+          "description": "which copy of each scrubbed database to land. 'scrubbed' (DEFAULT) materialises the mirror's scrambled views into real writable tables; no row of a *_real table is copied. 'real' lands the *_real tables, which are RAW STUDENT DATA from real districts, on this machine. Do not use it without an explicit reason to handle that data. An executing --source real run REFUSES unless --confirm-raw-student-data carries the exact phrase \"copy raw student data\" (or it is typed at the prompt, interactively without --yes); --yes alone does not satisfy it.",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "source",
@@ -3960,6 +4114,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -4163,6 +4324,13 @@
           "name": "url",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -4358,6 +4526,13 @@
           "name": "ttl-hours",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -4547,6 +4722,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -4693,6 +4875,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "with": {
           "description": "convenience bundle(s) whose DBs join the reset set — sugar shared with `stack up`. `--with playback` also truncates the opt-in playback DBs (transcripts, insights, chat = the old --with-playback); `--with authz` also truncates the opt-in authz DBs (openfga, authz_sync_local); every other bundle's DBs are already reset by default. Repeatable: --with playback --with authz.",
           "hasDynamicHelp": false,
@@ -4700,6 +4889,7 @@
           "name": "with",
           "options": [
             "wootmath",
+            "vishnu",
             "dash",
             "connect",
             "coach",
@@ -4854,6 +5044,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -5035,6 +5232,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "with": {
           "description": "convenience bundle(s) whose seed ADD-ON is layered onto the seed plan — sugar shared with `stack up`. Repeatable: --with playback --with qtf --with authz. `--with playback` seeds the playback DBs (== the old --with-playback); `--with qtf` seeds the QTF demo; `--with authz` runs the fga-bootstrap step (OpenFGA store/model bootstrap). Bundles with no seed add-on (dash/coach/connect) are a no-op here.",
           "hasDynamicHelp": false,
@@ -5042,6 +5246,7 @@
           "name": "with",
           "options": [
             "wootmath",
+            "vishnu",
             "dash",
             "connect",
             "coach",
@@ -5200,6 +5405,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -5349,6 +5561,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -5505,6 +5724,13 @@
           "description": "list each DB and its migration head under every snapshot",
           "name": "verbose",
           "type": "boolean"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
         },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
@@ -5677,6 +5903,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {
@@ -5856,6 +6089,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "with": {
           "description": "convenience bundle(s) whose DBs join the dump — sugar shared with `stack up`. Repeatable: --with coach --with playback. `--with playback` also dumps the optional playback DBs (transcripts, insights, chat = the old --with-playback). With `--only`, a bundle's services union into the scoped closure (e.g. `--only iam-api --with coach` adds coach_api); without `--only`, non-playback bundles are no-ops (their DBs are already in the default full dump).",
           "hasDynamicHelp": false,
@@ -5863,6 +6103,7 @@
           "name": "with",
           "options": [
             "wootmath",
+            "vishnu",
             "dash",
             "connect",
             "coach",
@@ -6033,6 +6274,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -6194,6 +6442,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "with": {
           "description": "convenience bundle(s) to include — sugar over --only (unions the bundle's services into the closure). Repeatable/composable: --with dash --with coach. Bundles: dash, connect, coach, playback.",
           "hasDynamicHelp": false,
@@ -6201,6 +6456,7 @@
           "name": "with",
           "options": [
             "wootmath",
+            "vishnu",
             "dash",
             "connect",
             "coach",
@@ -6371,6 +6627,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "vms-base": {
@@ -6628,6 +6891,13 @@
           "name": "tunnel",
           "type": "boolean"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "with": {
           "description": "convenience bundle(s) to include — sugar over --only (unions the bundle's services into the closure). Repeatable/composable: --with dash --with coach. `--with playback` includes the optional playback services (transcripts, insights, chat). Bundles: dash, connect, coach, playback.",
           "hasDynamicHelp": false,
@@ -6635,6 +6905,7 @@
           "name": "with",
           "options": [
             "wootmath",
+            "vishnu",
             "dash",
             "connect",
             "coach",
@@ -6840,6 +7111,13 @@
           "name": "tolerate",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "with": {
           "description": "convenience bundle(s) to include — sugar over --only (unions the bundle's services into the closure). Repeatable/composable: --with dash --with coach. Bundles: dash, connect, coach, playback.",
           "hasDynamicHelp": false,
@@ -6847,6 +7125,7 @@
           "name": "with",
           "options": [
             "wootmath",
+            "vishnu",
             "dash",
             "connect",
             "coach",
@@ -7020,6 +7299,13 @@
           "name": "state-dir",
           "type": "option"
         },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
+          "type": "option"
+        },
         "wootmath": {
           "description": "override path to the wootmath-adaptive-practice repo checkout",
           "hasDynamicHelp": false,
@@ -7171,6 +7457,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "state-dir",
+          "type": "option"
+        },
+        "vishnu": {
+          "description": "override path to the vishnu repo checkout",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "vishnu",
           "type": "option"
         },
         "wootmath": {

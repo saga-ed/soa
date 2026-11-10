@@ -1,0 +1,204 @@
+Captured local verification output — 2026-10-22
+
+
+--- gh535-tests.log ---
+Scope: 3 of 53 workspace projects
+packages/node/event-consumer test$ vitest run --passWithNoTests
+packages/node/event-outbox test$ vitest run --passWithNoTests
+packages/node/event-outbox test:  RUN  v1.6.1 /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-outbox
+packages/node/event-consumer test:  RUN  v1.6.1 /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-consumer
+packages/node/event-outbox test:  ✓ src/__tests__/pg.unit.test.ts  (3 tests) 4ms
+packages/node/event-outbox test:  ✓ src/__tests__/create-pool.unit.test.ts  (20 tests) 7ms
+packages/node/event-outbox test:  ✓ src/__tests__/assert-index-health.unit.test.ts  (15 tests) 7ms
+packages/node/event-outbox test:  ✓ src/__tests__/retention.unit.test.ts  (11 tests) 8ms
+packages/node/event-consumer test:  ✓ src/__tests__/consumed-events-retention.unit.test.ts  (8 tests) 6ms
+packages/node/event-consumer test:  ✓ src/__tests__/handler-map.unit.test.ts  (6 tests) 3ms
+packages/node/event-consumer test:  ✓ src/__tests__/dispatch-envelope.unit.test.ts  (3 tests) 6ms
+packages/node/event-consumer test:  ✓ src/__tests__/consumer-observation.unit.test.ts  (10 tests) 11ms
+packages/node/event-outbox test:  ✓ src/__tests__/relay-idle-exempt.unit.test.ts  (2 tests) 4ms
+packages/node/event-outbox test:  ✓ src/__tests__/retention-timer-leader-gate.unit.test.ts  (3 tests) 4ms
+packages/node/event-outbox test:  ✓ src/__tests__/relay-observation.unit.test.ts  (5 tests) 8ms
+packages/node/event-consumer test:  ✓ src/__tests__/dlq-replay.unit.test.ts  (35 tests) 25ms
+packages/node/event-outbox test:  ✓ src/__tests__/relay-leader-election.unit.test.ts  (8 tests) 11ms
+packages/node/event-outbox test:  ✓ src/__tests__/relay-gate.unit.test.ts  (6 tests) 11ms
+packages/node/event-consumer test:  ✓ src/__tests__/dlq-replay-cli.unit.test.ts  (10 tests) 12ms
+packages/node/event-outbox test:  ✓ src/__tests__/relay-channel-recovery.unit.test.ts  (9 tests) 12ms
+packages/node/event-outbox test:  ✓ src/__tests__/relay-leader-watchdog.unit.test.ts  (9 tests) 15ms
+packages/node/event-outbox test:  Test Files  11 passed (11)
+packages/node/event-outbox test:       Tests  91 passed (91)
+packages/node/event-outbox test:    Start at  13:12:04
+packages/node/event-outbox test:    Duration  647ms (transform 670ms, setup 2ms, collect 2.06s, tests 91ms, environment 2ms, prepare 1.38s)
+packages/node/event-consumer test:  ✓ src/__tests__/dlq-replay-runner.unit.test.ts  (39 tests) 49ms
+packages/node/event-consumer test:  ✓ src/__tests__/consumer-channel-recovery.unit.test.ts  (9 tests) 71ms
+packages/node/event-outbox test: Done
+packages/node/event-consumer test:  ✓ src/__tests__/consumer-gate.unit.test.ts  (11 tests) 290ms
+packages/node/event-consumer test:  Test Files  9 passed (9)
+packages/node/event-consumer test:       Tests  131 passed (131)
+packages/node/event-consumer test:    Start at  13:12:04
+packages/node/event-consumer test:    Duration  899ms (transform 513ms, setup 0ms, collect 1.72s, tests 473ms, environment 1ms, prepare 1.15s)
+packages/node/event-consumer test: Done
+packages/node/event-stats test$ vitest run --passWithNoTests
+packages/node/event-stats test:  RUN  v1.6.1 /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-stats
+packages/node/event-stats test:  ✓ src/__tests__/contract.unit.test.ts  (2 tests) 3ms
+packages/node/event-stats test:  ✓ src/__tests__/compare.unit.test.ts  (4 tests) 6ms
+packages/node/event-stats test:  ✓ src/__tests__/stats.unit.test.ts  (13 tests) 19ms
+packages/node/event-stats test:  ✓ src/__tests__/transport.unit.test.ts  (2 tests) 53ms
+packages/node/event-stats test:  Test Files  4 passed (4)
+packages/node/event-stats test:       Tests  21 passed (21)
+packages/node/event-stats test:    Start at  13:12:05
+packages/node/event-stats test:    Duration  379ms (transform 100ms, setup 0ms, collect 273ms, tests 81ms, environment 0ms, prepare 146ms)
+packages/node/event-stats test: Done
+
+--- gh535-integration.log ---
+
+> @saga-ed/soa-event-stats@0.1.0 test:int /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-stats
+> vitest run --config vitest.int.config.ts
+
+
+ RUN  v1.6.1 /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-stats
+
+ ✓ src/__tests__/pipeline.int.test.ts  (1 test) 3859ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  13:12:00
+   Duration  4.18s (transform 88ms, setup 0ms, collect 237ms, tests 3.86s, environment 0ms, prepare 28ms)
+
+
+--- gh535-build.log ---
+Scope: 9 of 53 workspace projects
+packages/node/event-test-harness build$ tsup
+packages/node/event-envelope build$ tsup
+packages/node/logger build$ tsup
+packages/node/logger build: CLI Building entry: src/index.ts, src/mocks/mock-logger.ts
+packages/node/logger build: CLI Using tsconfig: tsconfig.json
+packages/node/logger build: CLI tsup v8.5.1
+packages/node/logger build: CLI Using tsup config: /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/logger/tsup.config.ts
+packages/node/event-test-harness build: CLI Building entry: src/index.ts, src/uuid.ts
+packages/node/event-test-harness build: CLI Using tsconfig: tsconfig.json
+packages/node/event-test-harness build: CLI tsup v8.5.1
+packages/node/event-test-harness build: CLI Using tsup config: /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-test-harness/tsup.config.ts
+packages/node/logger build: CLI Target: node22
+packages/node/event-test-harness build: CLI Target: es2022
+packages/node/logger build: CLI Cleaning output folder
+packages/node/logger build: ESM Build start
+packages/node/event-test-harness build: CLI Cleaning output folder
+packages/node/event-test-harness build: ESM Build start
+packages/node/event-envelope build: CLI Building entry: src/index.ts
+packages/node/event-envelope build: CLI Using tsconfig: tsconfig.json
+packages/node/event-envelope build: CLI tsup v8.5.1
+packages/node/event-envelope build: CLI Using tsup config: /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-envelope/tsup.config.ts
+packages/node/event-envelope build: CLI Target: es2022
+packages/node/event-envelope build: CLI Cleaning output folder
+packages/node/event-envelope build: ESM Build start
+packages/node/event-test-harness build: ESM dist/chunk-ZJJFPTCY.js     470.00 B
+packages/node/event-test-harness build: ESM dist/uuid.js               93.00 B
+packages/node/event-test-harness build: ESM dist/index.js              2.16 KB
+packages/node/event-test-harness build: ESM dist/chunk-ZJJFPTCY.js.map 1.06 KB
+packages/node/event-test-harness build: ESM dist/uuid.js.map           71.00 B
+packages/node/event-test-harness build: ESM dist/index.js.map          6.07 KB
+packages/node/event-test-harness build: ESM ⚡️ Build success in 11ms
+packages/node/logger build: ESM dist/mocks/mock-logger.js     1.42 KB
+packages/node/logger build: ESM dist/index.js                 9.50 KB
+packages/node/logger build: ESM dist/mocks/mock-logger.js.map 1.50 KB
+packages/node/logger build: ESM dist/index.js.map             20.16 KB
+packages/node/logger build: ESM ⚡️ Build success in 15ms
+packages/node/event-envelope build: ESM dist/index.js     1.95 KB
+packages/node/event-envelope build: ESM dist/index.js.map 6.24 KB
+packages/node/event-envelope build: ESM ⚡️ Build success in 12ms
+packages/node/event-test-harness build: DTS Build start
+packages/node/logger build: DTS Build start
+packages/node/event-envelope build: DTS Build start
+packages/node/event-envelope build: DTS ⚡️ Build success in 512ms
+packages/node/event-envelope build: DTS dist/index.d.ts 2.86 KB
+packages/node/event-envelope build: Done
+packages/node/event-test-harness build: DTS ⚡️ Build success in 664ms
+packages/node/event-test-harness build: DTS dist/index.d.ts 1.51 KB
+packages/node/event-test-harness build: DTS dist/uuid.d.ts  419.00 B
+packages/node/event-test-harness build: Done
+packages/node/logger build: DTS ⚡️ Build success in 789ms
+packages/node/logger build: DTS dist/index.d.ts                2.20 KB
+packages/node/logger build: DTS dist/mocks/mock-logger.d.ts    62.00 B
+packages/node/logger build: DTS dist/mock-logger-DXKKiJZD.d.ts 754.00 B
+packages/node/logger build: Done
+packages/node/rabbitmq build$ tsup
+packages/node/rabbitmq build: CLI Building entry: src/index.ts
+packages/node/rabbitmq build: CLI Using tsconfig: tsconfig.json
+packages/node/rabbitmq build: CLI tsup v8.5.1
+packages/node/rabbitmq build: CLI Using tsup config: /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/rabbitmq/tsup.config.ts
+packages/node/rabbitmq build: CLI Target: node20
+packages/node/rabbitmq build: CLI Cleaning output folder
+packages/node/rabbitmq build: ESM Build start
+packages/node/rabbitmq build: ESM dist/index.js     18.52 KB
+packages/node/rabbitmq build: ESM dist/index.js.map 32.93 KB
+packages/node/rabbitmq build: ESM ⚡️ Build success in 14ms
+packages/node/rabbitmq build: DTS Build start
+packages/node/rabbitmq build: DTS ⚡️ Build success in 352ms
+packages/node/rabbitmq build: DTS dist/index.d.ts 9.13 KB
+packages/node/rabbitmq build: Done
+packages/node/event-consumer build$ tsup
+packages/node/event-outbox build$ tsup
+packages/node/event-consumer build: CLI Building entry: src/index.ts
+packages/node/event-consumer build: CLI Using tsconfig: tsconfig.json
+packages/node/event-consumer build: CLI tsup v8.5.1
+packages/node/event-consumer build: CLI Using tsup config: /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-consumer/tsup.config.ts
+packages/node/event-consumer build: CLI Target: es2022
+packages/node/event-outbox build: CLI Building entry: src/index.ts, src/pg.ts
+packages/node/event-consumer build: CLI Cleaning output folder
+packages/node/event-outbox build: CLI Using tsconfig: tsconfig.json
+packages/node/event-outbox build: CLI tsup v8.5.1
+packages/node/event-outbox build: CLI Using tsup config: /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-outbox/tsup.config.ts
+packages/node/event-consumer build: ESM Build start
+packages/node/event-outbox build: CLI Target: es2022
+packages/node/event-outbox build: CLI Cleaning output folder
+packages/node/event-outbox build: ESM Build start
+packages/node/event-consumer build: ESM dist/index.js     55.99 KB
+packages/node/event-consumer build: ESM dist/index.js.map 168.37 KB
+packages/node/event-consumer build: ESM ⚡️ Build success in 21ms
+packages/node/event-outbox build: ESM dist/pg.js                 734.00 B
+packages/node/event-outbox build: ESM dist/chunk-7QVYU63E.js     193.00 B
+packages/node/event-outbox build: ESM dist/index.js              36.83 KB
+packages/node/event-outbox build: ESM dist/pg.js.map             2.07 KB
+packages/node/event-outbox build: ESM dist/chunk-7QVYU63E.js.map 71.00 B
+packages/node/event-outbox build: ESM dist/index.js.map          101.16 KB
+packages/node/event-outbox build: ESM ⚡️ Build success in 21ms
+packages/node/event-consumer build: DTS Build start
+packages/node/event-outbox build: DTS Build start
+packages/node/event-consumer build: DTS ⚡️ Build success in 593ms
+packages/node/event-consumer build: DTS dist/index.d.ts 36.52 KB
+packages/node/event-consumer build: Done
+packages/node/event-outbox build: DTS ⚡️ Build success in 808ms
+packages/node/event-outbox build: DTS dist/index.d.ts 24.52 KB
+packages/node/event-outbox build: DTS dist/pg.d.ts    996.00 B
+packages/node/event-outbox build: Done
+packages/node/event-stats build$ tsup
+packages/node/event-stats build: CLI Building entry: src/index.ts
+packages/node/event-stats build: CLI Using tsconfig: tsconfig.json
+packages/node/event-stats build: CLI tsup v8.5.1
+packages/node/event-stats build: CLI Using tsup config: /home/skelly/dev/worktrees/soa-gh_535-event-stats/packages/node/event-stats/tsup.config.ts
+packages/node/event-stats build: CLI Target: es2022
+packages/node/event-stats build: CLI Cleaning output folder
+packages/node/event-stats build: ESM Build start
+packages/node/event-stats build: ESM dist/index.js     16.58 KB
+packages/node/event-stats build: ESM dist/index.js.map 35.90 KB
+packages/node/event-stats build: ESM ⚡️ Build success in 13ms
+packages/node/event-stats build: DTS Build start
+packages/node/event-stats build: DTS ⚡️ Build success in 540ms
+packages/node/event-stats build: DTS dist/index.d.ts 8.14 KB
+packages/node/event-stats build: Done
+
+--- gh535-frozen.log ---
+Scope: 9 of 53 workspace projects
+Lockfile is up to date, resolution step is skipped
+Progress: resolved 1, reused 0, downloaded 0, added 0
+.                                        |   +8 +
+Progress: resolved 8, reused 8, downloaded 0, added 7, done
+Done in 644ms
+
+--- gh535-no-cpu-features.cjs ---
+const Module = require('node:module');
+const original = Module._load;
+Module._load = function(name, ...args) {
+  if (name === 'cpu-features' || name.endsWith('sshcrypto.node')) throw new Error('Optional native CPU detection disabled for local test run');
+  return original.call(this, name, ...args);
+};

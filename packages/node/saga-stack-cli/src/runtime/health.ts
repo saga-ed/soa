@@ -54,6 +54,8 @@ export interface HealthProber {
 export interface RealProberOptions {
   /** Per-probe timeout in ms before the request is aborted and counted as down. Default 2000. */
   timeoutMs?: number;
+  /** Local diagnostic callers reject redirects so probes cannot leave loopback. */
+  followRedirects?: boolean;
 }
 
 /**
@@ -68,7 +70,10 @@ export function makeRealProber(opts: RealProberOptions = {}): HealthProber {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const res = await fetch(url, { method: 'GET', signal: controller.signal });
+        const res = await fetch(url, {
+          method: 'GET', signal: controller.signal,
+          redirect: opts.followRedirects === false ? 'error' : 'follow',
+        });
         let body: string | undefined;
         try {
           body = (await res.text()).slice(0, BODY_LIMIT);

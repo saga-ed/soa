@@ -37,7 +37,7 @@ export const GITHUB_ORG = 'saga-ed';
  * Repos EXCLUDED from bootstrap's required set (bootstrap.sh's step-1 loop lists 7 of the
  * 10 manifest repos — coach, fleek, and janus are optional and not provisioned here).
  */
-const EXCLUDED_FROM_BOOTSTRAP: readonly RepoKey[] = ['COACH', 'FLEEK', 'JANUS', 'WOOTMATH'];
+const EXCLUDED_FROM_BOOTSTRAP: readonly RepoKey[] = ['COACH', 'FLEEK', 'JANUS', 'WOOTMATH', 'VISHNU'];
 
 /**
  * The 7 REQUIRED bootstrap repos, derived from the manifest repo set MINUS coach/fleek —
@@ -85,6 +85,8 @@ export interface ConfirmSeam {
   isTTY(): boolean;
   /** Prompt `question` and resolve true iff the answer starts with `y`/`Y` (bootstrap.sh `[yY]*`). */
   prompt(question: string): Promise<boolean>;
+  /** Prompt `question` and resolve the typed answer verbatim (typed-phrase confirmations). Optional for test seams. */
+  ask?(question: string): Promise<string>;
 }
 
 /**
@@ -101,6 +103,14 @@ export function makeRealConfirm(): ConfirmSeam {
       try {
         const answer = await rl.question(question);
         return /^[yY]/.test(answer.trim());
+      } finally {
+        rl.close();
+      }
+    },
+    async ask(question: string): Promise<string> {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        return await rl.question(question);
       } finally {
         rl.close();
       }

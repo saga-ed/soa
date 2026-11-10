@@ -29,9 +29,10 @@ const throwFail = (msg: string): never => {
 };
 
 describe('bundle registry', () => {
-  it('exposes the nine bundle names in registry order', () => {
+  it('exposes the bundle names in registry order', () => {
     expect(BUNDLE_NAMES).toEqual([
       'wootmath',
+      'vishnu',
       'dash',
       'connect',
       'coach',

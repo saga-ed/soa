@@ -34,6 +34,7 @@ export const CURRENT_SNAPSHOT_SCHEMA_VERSION = 1 as const;
  * the compile guard below (mirrors `flow/types.ts`).
  */
 const DB_IDS = [
+  'vishnu',
   'iam_local',
   'iam_pii_local',
   'programs',
@@ -83,6 +84,7 @@ const SERVICE_IDS = [
   'ap-api',
   'ap-dash',
   'ap-student',
+  'vishnu',
 ] as const;
 const _serviceIdsAreServiceIds: readonly ServiceId[] = SERVICE_IDS;
 void _serviceIdsAreServiceIds;

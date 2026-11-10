@@ -94,8 +94,9 @@ export const FATAL_BUILD_REPOS: ReadonlySet<RepoKey> = new Set<RepoKey>([
   'WOOTMATH',
 ]);
 
-/** up.sh's canonical prep order. Non-built repos (SOA/FLEEK) omitted. */
+/** Canonical prep order; SOA builds only the CLI collector Vishnu imports. */
 const PREP_REPO_ORDER: readonly RepoKey[] = [
+  'SOA',
   'ROSTERING',
   'PROGRAM_HUB',
   'SDS',
@@ -104,6 +105,7 @@ const PREP_REPO_ORDER: readonly RepoKey[] = [
   'RTSM',
   'COACH',
   'WOOTMATH',
+  'VISHNU',
 ];
 
 /** Inputs to the R1 prep pass. */
@@ -251,6 +253,9 @@ export async function prepClosure(ctx: PrepContext): Promise<PrepResult> {
   // Distinct closure repos, ordered by up.sh's canonical prep order.
   const closureRepos = new Set<RepoKey>();
   for (const id of ctx.services) closureRepos.add(getService(id, m).repo);
+  // Vishnu's server imports the CLI collector from <SOA>/packages/node/saga-stack-cli/dist
+  // (VISHNU_SOA_ROOT), so a Vishnu closure still needs SOA's targeted collector build.
+  if (closureRepos.has('VISHNU')) closureRepos.add('SOA');
   const repos = PREP_REPO_ORDER.filter((r) => closureRepos.has(r));
 
   const steps: PrepStep[] = [];
@@ -273,7 +278,7 @@ export async function prepClosure(ctx: PrepContext): Promise<PrepResult> {
     const root = ctx.repoRoots[repo];
     // Fresh-skip: an already-built repo (node_modules + dist) is a no-op.
     // (Deliberately BEFORE the lock: sharing pre-built checkouts stays legal.)
-    if (ctx.isFresh?.(root)) {
+    if (repo !== 'SOA' && ctx.isFresh?.(root)) {
       freshRepos.push(repo);
       continue;
     }
@@ -315,6 +320,29 @@ async function prepOneRepo(
   steps: PrepStep[],
   warnings: PrepStep[],
 ): Promise<PrepStep | null> {
+  if (repo === 'SOA') {
+    // Vishnu (repo VISHNU) runs from source and imports this CLI's dist collector
+    // through VISHNU_SOA_ROOT. Build only saga-stack-cli; never stamp SOA as a full prep.
+    const argv = ['--filter', '@saga-ed/saga-stack-cli...', 'install', '--frozen-lockfile'];
+    const installStep: PrepStep = { repo, kind: 'install', cwd: root, argv };
+    steps.push(installStep);
+    let installed = await ctx.runner.run({
+      cwd: root, command: 'pnpm', args: argv, env: {}, stdio: 'inherit', detectUnauthorized: true,
+    });
+    if (installed.code !== 0 && installed.unauthorized) {
+      await run({ repo, kind: 'co:login', cwd: root, argv: ['co:login'] });
+      steps.push(installStep);
+      installed = await ctx.runner.run({
+        cwd: root, command: 'pnpm', args: argv, env: {}, stdio: 'inherit', detectUnauthorized: true,
+      });
+    }
+    if (installed.code !== 0) return installStep;
+    const build: PrepStep = {
+      repo, kind: 'build', cwd: root,
+      argv: ['--filter', '@saga-ed/saga-stack-cli...', '-r', 'build'],
+    };
+    return await run(build) ? null : build;
+  }
   {
     // 1. install (idempotent) — FATAL (up.sh's `pnpm_install` aborts on failure).
     //    FLIP 4: on a CodeArtifact 401 (expired token), refresh via `pnpm co:login`

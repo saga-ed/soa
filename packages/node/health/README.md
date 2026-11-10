@@ -35,7 +35,7 @@ process.on('SIGTERM', () => drain.startDraining()); // then stop accepting work 
 
 ## Deep readiness (0.2.0, soa#517)
 
-Declare dependencies once; the same probe set drives boot self-test, `/health/ready` (cache only) and `/health/deep`. Design and semantics: [docs/deep-readiness.md](docs/deep-readiness.md).
+Declare dependencies once; the same probe set drives boot self-test, `/health/ready` (cache only) and `/health/deep`. Design and semantics: [docs/deep-readiness.md](docs/deep-readiness.md). Adopting in a service: [docs/adoption-runbook.md](docs/adoption-runbook.md).
 
 ```ts
 const dr = createDeepReadiness({
@@ -53,6 +53,10 @@ mountDeepReadiness(app, dr);
 await dr.boot(); // READINESS_BOOT=block|warn|open
 dr.start();
 ```
+
+### 0.4.0 (soa#504) — fresh-connection probe
+
+- `DependencyDeclaration` gains `freshProbe(signal)` and `freshIntervalMs` (default 300000): a slower, independent probe that opens a NEW connection, so credential/token expiry that pooled probes miss (SQLSTATE 28000 / PAM) fails readiness like any active-probe failure. A pooled or `observe()` success never clears it; boot needs a fresh success too. `pgFreshProbe(() => new Client(...))` builds one for `pg` (structural `PgClientLike`, no `pg` dependency). Semantics: [docs/deep-readiness.md](docs/deep-readiness.md) section 4.
 
 ### 0.3.0 (soa#515) — breaking: deep seam
 

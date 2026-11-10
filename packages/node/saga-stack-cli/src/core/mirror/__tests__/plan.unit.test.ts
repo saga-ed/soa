@@ -26,10 +26,15 @@ import {
   DEFAULT_CLIENT_IMAGE,
   DEFAULT_LOCAL_PORT,
   MIRROR_DATABASES,
+  SCRUB_PROJECTS,
   findByMirrorName,
   localTargetRefusal,
   mirrorDiscoveryArgv,
+  orderByForeignKeys,
   planHydrate,
+  RAW_SOURCE_CONFIRM_PHRASE,
+  rawSourceRefusal,
+  realTableQuerySql,
   resolveSelection,
   shQuote,
 } from '../index.js';
@@ -75,9 +80,31 @@ describe('the mirror → local map', () => {
     expect(same.sort()).toEqual(['coach_api', 'openfga', 'sis_db']);
   });
 
-  it('marks exactly the two rostering databases as scrubbed', () => {
-    expect(MIRROR_DATABASES.filter((d) => d.scrubbed).map((d) => d.mirror)).toEqual(['iam_db', 'iam_pii_db']);
-    expect(Object.keys(CONFIRMED_REAL_TABLES).sort()).toEqual(['iam_db', 'iam_pii_db']);
+  it('marks every mapped database scrubbed except openfga (mirror catalog, 2026-11-09)', () => {
+    expect(MIRROR_DATABASES.filter((d) => !d.scrubbed).map((d) => d.mirror)).toEqual(['openfga']);
+    expect(MIRROR_DATABASES.filter((d) => d.scrubbed)).toHaveLength(14);
+  });
+
+  it('holds a confirmed _real list for exactly the scrubbed databases', () => {
+    expect(Object.keys(CONFIRMED_REAL_TABLES).sort()).toEqual(
+      MIRROR_DATABASES.filter((d) => d.scrubbed)
+        .map((d) => d.mirror)
+        .sort(),
+    );
+    expect(CONFIRMED_REAL_TABLES.ads_adm).toContain('adm_attendance');
+    expect(CONFIRMED_REAL_TABLES.iam_db).toHaveLength(17);
+  });
+
+  it('assigns each database to one of the iac scrub projects, by the rules package that ships it', () => {
+    const owned = (project: string): string[] =>
+      MIRROR_DATABASES.filter((d) => d.scrubProject === project)
+        .map((d) => d.mirror)
+        .sort();
+    expect(SCRUB_PROJECTS).toEqual(['rostering', 'program-hub', 'student-data-system', 'coach']);
+    expect(owned('rostering')).toEqual(['authz_db', 'authz_sync', 'iam_db', 'iam_pii_db', 'openfga', 'sis_db']);
+    expect(owned('program-hub')).toEqual(['content_api', 'programs_api', 'scheduling_api', 'sessions_api']);
+    expect(owned('student-data-system')).toEqual(['ads_adm', 'chat', 'ledger_api', 'transcription_db']);
+    expect(owned('coach')).toEqual(['coach_api']);
   });
 
   it('maps ledger_api to the `ledger` owner, NOT ads_adm (the standing snapshot invariant)', () => {
@@ -167,8 +194,8 @@ describe('--source scrubbed — the view is MATERIALISED, never left as a view',
 
   it('excludes the unscrubbed DATA but keeps the _real STRUCTURE (constraints, indexes, defaults)', () => {
     const transfer = transferOf(plan(), 'iam_local:transfer');
-    expect(transfer.sourceArgv).toContain('--exclude-table-data=public.users_real');
-    expect(transfer.sourceArgv).toContain('--exclude-table-data=public.groups_real');
+    expect(transfer.sourceArgv).toContain('--exclude-table-data=public."users_real"');
+    expect(transfer.sourceArgv).toContain('--exclude-table-data=public."groups_real"');
     // Structure still crosses — this is what makes the result a real writable
     // table rather than a constraint-less CTAS.
     expect(transfer.sourceArgv).not.toContain('--schema-only');
@@ -181,25 +208,279 @@ describe('--source scrubbed — the view is MATERIALISED, never left as a view',
   it('copies the SCRAMBLED rows from the mirror view, column-exact in the real table order', () => {
     const copy = transferOf(plan(), 'iam_local:copy:users');
     expect(copy.sourceArgv).toContain('COPY (SELECT "id", "email", "created_at" FROM public."users") TO STDOUT');
-    expect(copy.sinkArgv).toContain('COPY public."users" ("id", "email", "created_at") FROM STDIN');
+    expect(copy.sinkArgv).toContain('COPY public."users_real" ("id", "email", "created_at") FROM STDIN');
     expect(copy.classify).toBe('psql');
-    expect(plan().copiedTables).toEqual(['users', 'groups']);
   });
 
-  it('runs the COPY AFTER the rename (the view is gone by then; the rows come from the mirror)', () => {
+  it('copies, then adds constraints, then renames (FKs from data-carrying tables need populated parents)', () => {
     const order = ids(plan());
-    expect(order.indexOf('iam_local:view-swap:users')).toBeLessThan(order.indexOf('iam_local:copy:users'));
+    const at = (id: string): number => order.indexOf(`iam_local:${id}`);
+    expect(at('transfer')).toBeLessThan(at('copy:users'));
+    expect(at('copy:users')).toBeLessThan(at('post-data'));
+    expect(at('copy:groups')).toBeLessThan(at('post-data'));
+    expect(at('post-data')).toBeLessThan(at('view-swap:users'));
+    expect(at('post-data')).toBeLessThan(at('view-swap:groups'));
+  });
+
+  it('splits the dump: rows without post-data first, then post-data alone', () => {
+    const first = transferOf(plan(), 'iam_local:transfer').sourceArgv;
+    expect(first).toContain('--section=pre-data');
+    expect(first).toContain('--section=data');
+    expect(first).not.toContain('--section=post-data');
+    const post = transferOf(plan(), 'iam_local:post-data');
+    expect(post.sourceArgv).toContain('--section=post-data');
+    expect(post.sourceArgv).not.toContain('--section=data');
+    // A killed client exits non-zero with empty stderr; that must not read as success.
+    expect(post.classify).toBe('psql');
+    expect(post.sinkArgv).toContain('--single-transaction');
   });
 
   it('still asserts nothing is a view when it is done', () => {
     expect(sqlOf(plan(), 'iam_local:verify-tables').expect).toBe('0');
   });
 
-  it('does NOT change anything for a non-scrubbed database — only rostering is scrubbed upstream', () => {
-    const args = { selection: [findByMirrorName('coach_api')!], localExists: { coach_api: true }, realTables: {} };
+  it('leaves real mode as one whole-database restore', () => {
+    const real = db({ mode: 'real' });
+    expect(transferOf(real, 'iam_local:transfer').sourceArgv.some((a) => a.startsWith('--section'))).toBe(false);
+    expect(ids(real)).not.toContain('iam_local:post-data');
+    expect(ids(real)).not.toContain('iam_local:verify-no-real');
+  });
+
+  it('does NOT change anything for a database the scrub swaps no table in (openfga)', () => {
+    const args = { selection: [findByMirrorName('openfga')!], localExists: { openfga: true }, realTables: {} };
     const asReal = JSON.stringify(planHydrate(input({ ...args, mode: 'real' })).dbs[0]!.steps);
     const asScrubbed = JSON.stringify(planHydrate(input({ ...args, mode: 'scrubbed' })).dbs[0]!.steps);
     expect(asScrubbed).toBe(asReal);
+  });
+});
+
+describe('--source scrubbed — no row of a _real table is ever copied', () => {
+  const plan = (): HydrateDbPlan => db({ mode: 'scrubbed' });
+  const transfers = (p: HydrateDbPlan): TransferStep[] => p.steps.filter((s): s is TransferStep => s.kind === 'transfer');
+
+  it('excludes every enumerated _real table from every dump that can carry data', () => {
+    const dumps = transfers(plan()).filter(
+      (t) => t.sourceArgv[0] === 'pg_dump' && !t.sourceArgv.includes('--section=post-data'),
+    );
+    expect(dumps).toHaveLength(1);
+    for (const { table } of IAM_REAL) {
+      expect(dumps[0]!.sourceArgv).toContain(`--exclude-table-data=public."${table}_real"`);
+    }
+  });
+
+  it('quotes the exclusion so a mixed-case table is matched (pg_dump folds unquoted patterns)', () => {
+    const argv = transferOf(
+      db({ mode: 'scrubbed', realTables: { iam_db: [{ table: 'Program', columns: ['id'] }] } }),
+      'iam_local:transfer',
+    ).sourceArgv;
+    expect(argv).toContain('--exclude-table-data=public."Program_real"');
+  });
+
+  it('excludes *_real by wildcard too, so a table the enumeration missed cannot bring its rows', () => {
+    expect(transferOf(plan(), 'iam_local:transfer').sourceArgv).toContain('--exclude-table-data=*.*_real');
+  });
+
+  it('never reads a _real table: every COPY source selects from the scramble view', () => {
+    const copies = transfers(plan()).filter((t) => t.sourceArgv[0] === 'psql');
+    expect(copies).toHaveLength(IAM_REAL.length);
+    for (const copy of copies) expect(copy.sourceArgv.join(' ')).not.toMatch(/_real/);
+  });
+
+  it('every mirror-side step is one of the three vetted shapes (a new route must be added here on purpose)', () => {
+    for (const t of transfers(plan())) {
+      const argv = t.sourceArgv;
+      const isDataDump = argv[0] === 'pg_dump' && argv.includes('--exclude-table-data=*.*_real');
+      const isPostData = argv[0] === 'pg_dump' && argv.includes('--section=post-data') && !argv.includes('--section=data');
+      const isViewCopy = argv[0] === 'psql' && !argv.join(' ').includes('_real');
+      expect(isDataDump || isPostData || isViewCopy, t.id).toBe(true);
+    }
+  });
+
+  it('fails the database if any *_real relation survives, before the live database is touched', () => {
+    const order = ids(plan());
+    const check = sqlOf(plan(), 'iam_local:verify-no-real');
+    expect(check.expect).toBe('0');
+    expect(check.sql).toContain(`LIKE '%\\_real'`);
+    expect(order.indexOf('iam_local:verify-no-real')).toBeLessThan(order.indexOf('iam_local:swap-block'));
+  });
+
+  it('holds across every scrubbed database with its confirmed table set', () => {
+    for (const def of MIRROR_DATABASES.filter((d) => d.scrubbed)) {
+      const tables = CONFIRMED_REAL_TABLES[def.mirror]!;
+      const p = planHydrate(
+        input({
+          mode: 'scrubbed',
+          selection: [def],
+          localExists: {},
+          realTables: { [def.mirror]: tables.map((table) => ({ table, columns: ['id'] })) },
+        }),
+      ).dbs[0]!;
+      const dump = p.steps.find((s) => s.id.endsWith(':transfer')) as TransferStep;
+      for (const table of tables) expect(dump.sourceArgv).toContain(`--exclude-table-data=public."${table}_real"`);
+      const copied = tables.filter((t) => !def.skipRows?.includes(t));
+      expect(p.copiedTables.slice().sort()).toEqual(copied.slice().sort());
+    }
+  });
+});
+
+describe('--source scrubbed — the bulk dump carries no rows for any table the scrub names', () => {
+  it('excludes the app-facing name of every enumerated and every confirmed table, for every scrubbed database', () => {
+    for (const def of MIRROR_DATABASES.filter((d) => d.scrubbed)) {
+      const confirmed = CONFIRMED_REAL_TABLES[def.mirror]!;
+      // The scrub has stopped view-swapping the first confirmed table: the live
+      // enumeration no longer lists it, so it stands on the mirror as raw rows.
+      const discovered = confirmed.slice(1).map((table) => ({ table, columns: ['id'] }));
+      const p = planHydrate(
+        input({ mode: 'scrubbed', selection: [def], localExists: {}, realTables: { [def.mirror]: discovered } }),
+      ).dbs[0]!;
+      const dump = p.steps.find((s) => s.id.endsWith(':transfer')) as TransferStep;
+      for (const table of confirmed) {
+        expect(dump.sourceArgv, `${def.mirror}.${table}`).toContain(`--exclude-table-data=public."${table}"`);
+      }
+      expect(p.copiedTables, def.mirror).not.toContain(confirmed[0]);
+    }
+  });
+});
+
+describe('the raw-source refusal — --source real needs the typed phrase', () => {
+  it('refuses an executing real run with no confirmation', () => {
+    expect(rawSourceRefusal({ mode: 'real', execute: true, confirmation: undefined })).toMatch(
+      /--confirm-raw-student-data/,
+    );
+  });
+
+  it('refuses a wrong or partial phrase', () => {
+    for (const c of ['', 'y', 'yes', 'copy raw', 'COPY RAW STUDENT DATA']) {
+      expect(rawSourceRefusal({ mode: 'real', execute: true, confirmation: c }), c).toMatch(/did not match/);
+    }
+  });
+
+  it('allows the exact phrase (surrounding whitespace trimmed)', () => {
+    expect(rawSourceRefusal({ mode: 'real', execute: true, confirmation: RAW_SOURCE_CONFIRM_PHRASE })).toBeNull();
+    expect(rawSourceRefusal({ mode: 'real', execute: true, confirmation: `  ${RAW_SOURCE_CONFIRM_PHRASE}\n` })).toBeNull();
+  });
+
+  it('leaves scrubbed runs and previews alone', () => {
+    expect(rawSourceRefusal({ mode: 'scrubbed', execute: true, confirmation: undefined })).toBeNull();
+    expect(rawSourceRefusal({ mode: 'real', execute: false, confirmation: undefined })).toBeNull();
+  });
+});
+
+describe('authz_decision_log lands empty (an audit history no permission check reads)', () => {
+  const REAL = [
+    { table: 'authz_decision_log', columns: ['id', 'trace'] },
+    { table: 'iam_group_projection', columns: ['id'] },
+  ];
+  const plan = (mode: 'real' | 'scrubbed'): HydrateDbPlan =>
+    db({ mode, selection: [findByMirrorName('authz_db')!], localExists: {}, realTables: { authz_db: REAL } });
+
+  it('scrubbed: never copies its rows, still copies the others, still renames it into place', () => {
+    const p = plan('scrubbed');
+    expect(ids(p)).not.toContain('authz_local:copy:authz_decision_log');
+    expect(p.copiedTables).toEqual(['iam_group_projection']);
+    expect(ids(p)).toContain('authz_local:view-swap:authz_decision_log');
+    expect(p.skippedRowTables).toEqual(['authz_decision_log']);
+  });
+
+  it('scrubbed: its _real rows stay excluded from the dump', () => {
+    expect(transferOf(plan('scrubbed'), 'authz_local:transfer').sourceArgv).toContain(
+      '--exclude-table-data=public."authz_decision_log_real"',
+    );
+  });
+
+  it('real: excludes only that table, keeps the structure, and renames it', () => {
+    const p = plan('real');
+    const argv = transferOf(p, 'authz_local:transfer').sourceArgv;
+    expect(argv).toContain('--exclude-table-data=public."authz_decision_log_real"');
+    expect(argv).not.toContain('--exclude-table-data=public."iam_group_projection_real"');
+    expect(ids(p)).toContain('authz_local:view-swap:authz_decision_log');
+  });
+
+  it('scrubbed: still lands empty if the scrub stops view-swapping it (it stands as an ordinary table)', () => {
+    const p = db({
+      mode: 'scrubbed',
+      selection: [findByMirrorName('authz_db')!],
+      localExists: {},
+      realTables: { authz_db: [{ table: 'iam_group_projection', columns: ['id'] }] },
+    });
+    const argv = transferOf(p, 'authz_local:transfer').sourceArgv;
+    expect(argv).toContain('--exclude-table-data=public."authz_decision_log"');
+    expect(ids(p)).not.toContain('authz_local:copy:authz_decision_log');
+  });
+
+  it('real: still lands empty if the scrub stops view-swapping it', () => {
+    const p = db({ mode: 'real', selection: [findByMirrorName('authz_db')!], localExists: {}, realTables: { authz_db: [] } });
+    expect(transferOf(p, 'authz_local:transfer').sourceArgv).toContain('--exclude-table-data=public."authz_decision_log"');
+  });
+
+  it('is the only table anywhere that skips its rows', () => {
+    expect(MIRROR_DATABASES.filter((d) => d.skipRows !== undefined).map((d) => [d.mirror, d.skipRows])).toEqual([
+      ['authz_db', ['authz_decision_log']],
+    ]);
+  });
+});
+
+describe('foreign-key order for the materialising COPY', () => {
+  it('puts parents before children, ties by name', () => {
+    const { ordered, cyclic } = orderByForeignKeys(
+      ['c', 'b', 'a', 'd'],
+      [
+        { child: 'a', parent: 'b' },
+        { child: 'b', parent: 'c' },
+      ],
+    );
+    expect(ordered).toEqual(['c', 'b', 'a', 'd']);
+    expect(cyclic).toEqual([]);
+  });
+
+  it('ignores self-references (groups.parent_group_id is one)', () => {
+    expect(orderByForeignKeys(['groups', 'users'], [{ child: 'groups', parent: 'groups' }])).toEqual({
+      ordered: ['groups', 'users'],
+      cyclic: [],
+    });
+  });
+
+  it('keeps every table when there is a cycle, and names the cycle', () => {
+    const { ordered, cyclic } = orderByForeignKeys(
+      ['a', 'b', 'x', 'kid'],
+      [
+        { child: 'a', parent: 'b' },
+        { child: 'b', parent: 'a' },
+        { child: 'kid', parent: 'x' },
+      ],
+    );
+    expect(ordered).toEqual(['x', 'kid', 'a', 'b']);
+    expect(cyclic).toEqual(['a', 'b']);
+  });
+
+  it('ignores an edge to a table outside the set', () => {
+    expect(orderByForeignKeys(['a'], [{ child: 'a', parent: 'gone' }]).ordered).toEqual(['a']);
+  });
+
+  it('drives the plan: parents are copied first, not alphabetically', () => {
+    const ordered = db({
+      mode: 'scrubbed',
+      realTableFks: { iam_db: [{ child: 'groups', parent: 'users' }] },
+    });
+    expect(ordered.copiedTables).toEqual(['users', 'groups']);
+    const order = ids(ordered);
+    expect(order.indexOf('iam_local:copy:users')).toBeLessThan(order.indexOf('iam_local:copy:groups'));
+  });
+
+  it('relaxes NOT NULL only on the columns the scrub blanks, before the copy', () => {
+    const relaxed = db({
+      mode: 'scrubbed',
+      scrubNulledColumns: { iam_db: [{ table: 'users', column: 'email' }] },
+    });
+    const id = 'iam_local:relax-not-null:users.email';
+    expect(sqlOf(relaxed, id).sql).toBe('ALTER TABLE public."users_real" ALTER COLUMN "email" DROP NOT NULL');
+    const order = ids(relaxed);
+    expect(order.indexOf(id)).toBeLessThan(order.indexOf('iam_local:copy:users'));
+    expect(order.filter((i) => i.includes('relax-not-null'))).toHaveLength(1);
+  });
+
+  it('leaves generated columns out of the enumeration (COPY refuses them)', () => {
+    expect(realTableQuerySql()).toContain(`a.attgenerated = ''`);
   });
 });
 
@@ -213,6 +494,10 @@ describe('ownership + grants — the named silent failure', () => {
     expect(sqlOf(plan, 'iam_local:own').sql).toContain("'iam'");
     expect(sqlOf(plan, 'iam_local:own').sql).toContain('ALTER TABLE %I.%I OWNER TO %I');
     expect(sqlOf(plan, 'iam_local:own').sql).toContain('ALTER SEQUENCE %I.%I OWNER TO %I');
+  });
+
+  it('re-owns sequences after tables (a sequence linked to a table cannot be re-owned first)', () => {
+    expect(sqlOf(db(), 'iam_local:own').sql).toContain("ORDER BY c.relkind = 'S', c.oid LOOP");
   });
 
   it('grants tables AND sequences AND functions AND default privileges to the local owner role', () => {

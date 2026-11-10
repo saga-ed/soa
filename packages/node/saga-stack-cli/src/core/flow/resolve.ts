@@ -319,6 +319,7 @@ export function resolveFlow(
     withPlayback,
     withAuthz,
     withStaffAdmin,
+    withVishnu: implied.withVishnu,
     followBrowserEdges: false,
   });
 

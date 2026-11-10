@@ -11,7 +11,8 @@ export interface LaneViolation {
         | 'prod-public-host'
         | 'ses'
         | 'partner-egress'
-        | 'aws-account';
+        | 'aws-account'
+        | 'amqp-vhost';
     message: string;
 }
 
@@ -30,6 +31,8 @@ export interface LaneGuardOptions {
     allowedHostSuffixes?: string[];
     /** Env var names whose values are inbound or identity strings, not egress. Replaces the default. */
     nonEgressVarPatterns?: RegExp[];
+    /** LANE=twin only: replaces the default vhost rule (decoded vhost contains the lane name as a delimited token). Never read from env. */
+    amqpVhostPattern?: RegExp;
 }
 
 export const DEV_ACCOUNT_ID = '396913734878';
@@ -60,6 +63,8 @@ const HOST_VAR_RE = /^(PGHOST|(POSTGRES|PG|REDIS|MONGO|MONGODB|RABBITMQ|AMQP)_?[
 const ANY_URL_RE = /\b[a-z][a-z0-9+.-]*:\/\/((?:(?![a-z][a-z0-9+.-]*:\/\/)[^\s/?#"'`<>\\])*)/gi;
 const BARE_HOST_VAR_RE = /(HOST|HOSTNAME|DOMAIN|ENDPOINT)$/i;
 const PARTNER_VAR_RES = [/^CLEVER_/i, /PARTNER.*WEBHOOK|WEBHOOK.*URL/i];
+
+const AMQP_URL_RE = /\bamqps?:\/\/[^\s]*/gi;
 
 const isSet = (v: string | undefined): v is string => v !== undefined && v.trim() !== '';
 
@@ -99,6 +104,28 @@ function egressHosts(name: string, value: string): string[] {
 
 const normalizeDomains = (list: string[]): string[] => list.map((d) => d.trim().replace(/^\.+|\.+$/g, '').toLowerCase()).filter(Boolean);
 const underDomain = (host: string, domain: string): boolean => host === domain || host.endsWith(`.${domain}`);
+
+/** AMQP vhost per the amqp-uri spec: no path = default "/", otherwise the percent-decoded path after the first "/". undefined = undecodable. */
+function amqpVhost(url: string): string | undefined {
+    const rest = url.slice(url.indexOf('://') + 3);
+    const slash = rest.search(/[/?#]/);
+    if (slash === -1 || rest[slash] !== '/') return '/';
+    const path = rest.slice(slash + 1).split(/[?#]/, 1)[0] ?? '';
+    try {
+        return decodeURIComponent(path);
+    } catch {
+        return undefined;
+    }
+}
+
+function vhostAllowed(vhost: string, lane: Lane, pattern: RegExp | undefined): boolean {
+    if (vhost === '' || vhost === '/') return false;
+    if (pattern) {
+        pattern.lastIndex = 0;
+        return pattern.test(vhost);
+    }
+    return new RegExp(`(^|[^a-z0-9])${lane}([^a-z0-9]|$)`, 'i').test(vhost);
+}
 
 export interface LaneResolution {
     /** `invalid` = LANE set to an unknown value, or contradicting EXEC_ENV. */
@@ -196,6 +223,15 @@ export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViol
             for (const host of hostsOfAuthority(m[2] ?? '')) {
                 if (isProdHost(host)) {
                     v.push({ check: 'prod-host', message: `${name} has a ${m[1]!.toLowerCase()}:// URL with prod-matching host "${host}"` });
+                }
+            }
+        }
+
+        if (lane === 'twin') {
+            for (const m of value.matchAll(AMQP_URL_RE)) {
+                const vhost = amqpVhost(m[0]);
+                if (vhost === undefined || !vhostAllowed(vhost, lane, opts.amqpVhostPattern)) {
+                    v.push({ check: 'amqp-vhost', message: `${name} has an amqp(s):// URL whose vhost is not lane-scoped; LANE=${lane} requires a dedicated vhost (default rule: contains "${lane}" as a delimited token)` });
                 }
             }
         }

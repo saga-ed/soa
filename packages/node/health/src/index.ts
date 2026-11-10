@@ -60,4 +60,4 @@ export type {
   ReadinessReport,
   ReadinessVerdict,
 } from './deep/types.js';
-export type { ProbeFetchLike } from './deep/adapters.js';
+export { pgFreshProbe, type PgClientLike, type ProbeFetchLike } from './deep/adapters.js';

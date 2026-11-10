@@ -280,6 +280,7 @@ export function buildStackContext(
   // Thread the slot's port-override map + mesh offset (byte-identical base context
   // at slot 0 — `deriveInstance` guarantees slot-0 overrides resolve the defaults).
   const launchContext = defaultLaunchContext({
+    stateDir: (flags['state-dir'] as string | undefined) ?? profile.stateDir,
     repoRoots,
     vendorDir,
     portOverrides: profile.portOverrides,

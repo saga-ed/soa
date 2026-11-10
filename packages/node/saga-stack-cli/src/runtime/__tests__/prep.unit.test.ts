@@ -23,6 +23,7 @@ const REPO_ROOTS = {
   RTSM: '/dev/rtsm',
   FLEEK: '/dev/fleek',
   JANUS: '/dev/janus',
+  VISHNU: '/dev/vishnu',
 } as Record<RepoKey, string>;
 
 function fakeRunner(failCwd?: string): { runner: Runner; calls: ScriptInvocation[] } {
@@ -51,6 +52,50 @@ function runnerFailingWhen(fail: (spec: ScriptInvocation) => boolean): { runner:
 const NEVER_FRESH = (): boolean => false;
 
 describe('prepClosure — closure-scoped install/build/db:generate (R1)', () => {
+  it('builds only the SOA CLI collector, then preps the Vishnu repo (fresh ⇒ skipped)', async () => {
+    const { runner, calls } = fakeRunner();
+    const res = await prepClosure({
+      services: ['vishnu'], dbs: [], repoRoots: REPO_ROOTS, runner,
+      isFresh: () => true,
+      dbGenerateScan: () => { throw new Error('Vishnu has no Prisma dependencies'); },
+      writeStamp: () => { throw new Error('a fresh-skipped repo must not be re-stamped'); },
+    });
+    expect(res.ok).toBe(true);
+    expect(res.freshRepos).toEqual(['VISHNU']);
+    expect(calls.map((call) => [call.cwd, call.args])).toEqual([
+      ['/dev/soa', ['--filter', '@saga-ed/saga-stack-cli...', 'install', '--frozen-lockfile']],
+      ['/dev/soa', ['--filter', '@saga-ed/saga-stack-cli...', '-r', 'build']],
+    ]);
+  });
+
+  it('installs and builds a stale Vishnu checkout in its own repo', async () => {
+    const { runner, calls } = fakeRunner();
+    const stamped: string[] = [];
+    const res = await prepClosure({
+      services: ['vishnu'], dbs: [], repoRoots: REPO_ROOTS, runner,
+      isFresh: NEVER_FRESH,
+      dbGenerateScan: () => [],
+      writeStamp: (root) => { stamped.push(root); },
+    });
+    expect(res.ok).toBe(true);
+    expect(calls.map((call) => [call.cwd, call.args?.join(' ')])).toEqual([
+      ['/dev/soa', '--filter @saga-ed/saga-stack-cli... install --frozen-lockfile'],
+      ['/dev/soa', '--filter @saga-ed/saga-stack-cli... -r build'],
+      ['/dev/vishnu', 'install'],
+      ['/dev/vishnu', 'build'],
+    ]);
+    expect(stamped).toEqual(['/dev/vishnu']);
+  });
+
+  it('fails the viewer prep when its runtime collector fails to build', async () => {
+    const { runner } = runnerFailingWhen((call) => call.args?.includes('build') ?? false);
+    const res = await prepClosure({
+      services: ['vishnu'], dbs: [], repoRoots: REPO_ROOTS, runner,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.failed?.kind).toBe('build');
+  });
+
   it('per repo: install → db:generate (its *-db pkgs) → build, in canonical repo order', async () => {
     const { runner } = fakeRunner();
     const res = await prepClosure({

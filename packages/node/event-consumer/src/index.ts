@@ -62,6 +62,7 @@ export {
     type DlqConfig,
     type EventHandler,
     type ConsumerMetrics,
+    type ConsumerObservation,
     type EventKey,
     type HandlerMap,
     type ActivityGate,

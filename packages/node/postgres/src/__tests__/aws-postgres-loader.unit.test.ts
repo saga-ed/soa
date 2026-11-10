@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { amazonTrustRoots } from '../amazon-trust-roots.js';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
   GetSecretValueCommand,
@@ -339,7 +340,7 @@ describe('loadPostgresConfigFromAws — capability form', () => {
     expect(config.ssl).toBe(false);
   });
 
-  it('tls with caBundlePath yields a pinned ca object (iam-token)', async () => {
+  it('tls with caBundlePath yields RDS bundle + Amazon roots (iam-token)', async () => {
     ssmMock.on(GetParameterCommand).resolves({ Parameter: { Value: '5432' } });
     const ca = caFile();
     const config = await loadPostgresConfigFromAws({
@@ -349,10 +350,13 @@ describe('loadPostgresConfigFromAws — capability form', () => {
       service: 'chat-api',
       instanceName: 'i',
     });
-    expect(config.ssl).toEqual({ ca: ca.pem, rejectUnauthorized: true });
+    expect(config.ssl).toEqual({
+      ca: [ca.pem, ...amazonTrustRoots],
+      rejectUnauthorized: true,
+    });
   });
 
-  it('tls with caBundlePath yields a pinned ca object (static)', async () => {
+  it('tls with caBundlePath yields RDS bundle + Amazon roots (static)', async () => {
     smMock.on(GetSecretValueCommand).resolves(devSecret);
     const ca = caFile();
     const config = await loadPostgresConfigFromAws({
@@ -361,7 +365,10 @@ describe('loadPostgresConfigFromAws — capability form', () => {
       service: 'chat-api',
       instanceName: 'i',
     });
-    expect(config.ssl).toEqual({ ca: ca.pem, rejectUnauthorized: true });
+    expect(config.ssl).toEqual({
+      ca: [ca.pem, ...amazonTrustRoots],
+      rejectUnauthorized: true,
+    });
   });
 
   it('tls required without CA -> true; not required -> false (both branches)', async () => {

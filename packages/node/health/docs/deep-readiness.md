@@ -70,7 +70,7 @@ CI guard: `assertManifestComplete(manifest, { discover })` in a service unit tes
 - `starting`: 503, a `critical` dependency has not yet had its first success.
 - `draining`: 503, SIGTERM received.
 
-### Gating rule (pending Seth confirmation)
+### Gating rule (confirmed: owner, 2026-10-25)
 
 1. Until a critical dependency's FIRST success (boot, or `starting` verdict), it gates readiness: no success, no traffic.
 2. After first success, EVERY failure is treated as `shared` by default, `auth`/`tls`/`dns` included: `degraded`/200 plus a metric, because pulling every task cannot help and, per section 5, causes replacement storms. Exactly two cases yield 503: (a) a stale cache, i.e. a blocked event loop that stopped refreshing within `staleAfterMs`; (b) a dependency explicitly declared `scope: 'task'` (opt-in, for dependencies that are genuinely per-task, e.g. a local sidecar). Peer-divergence detection (this task fails while its peers pass) is out of scope.
@@ -81,7 +81,7 @@ Never counted toward 503 (neutral, degrade + metric only): pool-acquire timeouts
 
 `criticality` is REQUIRED on every declaration (no per-kind default; the earlier "default critical for postgres" is dropped as contradictory). `scope` is required for `critical` declarations.
 
-Per-dependency state machine: `starting` -> `ok` -> `failing` (>= `failureThreshold`, default 2) -> `ok`; `stale` (no success within `staleAfterMs`, catches expired RDS IAM tokens); `skipped`.
+Per-dependency state machine: `starting` -> `ok` -> `failing` (>= `failureThreshold`, default 2) -> `ok`; `stale` (no probe completion or traffic success within `staleAfterMs`: a blocked loop, not a dependency fault; a pooled ping keeps a warm connection and does NOT catch expired RDS IAM tokens, use `freshProbe`, section 4); `skipped`.
 
 ### Boot override for shipping a fix during an outage
 
@@ -100,6 +100,17 @@ Invariants, all enforced by the runner so adopters cannot violate them:
 7. Jitter the background interval (+-20%) so a fleet restarted together does not probe in lockstep.
 8. Probes must be cheap and side-effect free (reads only; no writes; no queue publishes; no token-minting calls that have cost or quota).
 
+### `freshProbe` (soa#504)
+
+Pooled probes reuse a warm connection, so they cannot see credential expiry that only affects NEW connections (RDS IAM token cliff: SQLSTATE 28000 / "PAM authentication failed", ads-adm-api prod, 2026-08-05). Declare `freshProbe` to open a new connection with current credentials, run a trivial query and close it; `pgFreshProbe(() => new Client(...))` does this for `pg`. The factory must mint the token/password at call time.
+
+- Cadence: `freshIntervalMs` (default 300000, +-20% jitter), independent of `intervalMs`; one in flight per dependency; same per-probe timeout; no traffic suppression. While the latest fresh outcome is a failure it re-probes at `min(freshIntervalMs, intervalMs)` so `failureThreshold` confirms and recovery lands promptly.
+- State: a fresh failure is an active-probe failure (classified like any probe error, so 28000 / PAM / password failures are `auth`); it adds to the dependency's failure count against `failureThreshold`. Before first success it gates; after, it degrades (200) unless `scope: 'task'` (503).
+- A pooled-probe success or `observe()` success never clears a fresh failure; only the next fresh success does. Fresh failures are tracked apart from pooled ones and the report sums both in `consecutiveFailures`.
+- Boot: with `freshProbe` declared, first success needs both a pooled and a fresh success (blocking per the dependency's boot mode).
+- `/health/deep` runs it too, subject to the deep cache, coalescing and `minProbeGapMs` (at most one fresh connection per gap).
+- Cost: one extra connection per task per `freshIntervalMs`, held for one `SELECT 1`.
+
 Fail-stale-safe: if the event loop is blocked, the cache stops refreshing and `staleAfterMs` turns the verdict `not_ready`; this keeps the old `createDbReadiness` property.
 
 ## 5. TG health path, ECS and blue/green
@@ -113,6 +124,24 @@ Fail-stale-safe: if the event loop is blocked, the cache stops refreshing and `s
 - Steady state: TG `UnhealthyThresholdCount: 5` x 5s plus `failureThreshold: 2` x 15s probe gives roughly 30-55s from a task-local failure to TG removal.
 - Blue/green idle colour: smoke calls the idle colour (preview header) on `/health/deep` at `internal` detail and consumes the JSON. The idle colour is autoslept (ph#1003 wake), so `starting` is expected right after wake; smoke retries with backoff to a deadline. `build.colour` proves WHICH colour answered. The flip gate requires `ready` by default; `degraded` passes only if each non-ok dependency is on an explicit allow-list supplied to the flip.
 - Draining unchanged (`/ready` 503 `draining`, `/live` 200).
+
+### Path-prefixed services
+
+`mountDeepReadiness` registers `/health/live`, `/health/ready` and `/health/deep` relative to the router it is given, so a service whose ALB routes by path prefix (e.g. qboard: `/connectv3/v1`) mounts on a sub-router; no option is needed:
+
+```ts
+const r = express.Router();
+mountDeepReadiness(r, readiness);
+app.use('/connectv3/v1', r); // serves /connectv3/v1/health/{live,ready,deep}
+```
+
+For a router without `.use`, pass a `{ get }` wrapper that prepends the prefix:
+
+```ts
+mountDeepReadiness({ get: (p, h) => app.get('/connectv3/v1' + p, h) }, readiness);
+```
+
+Either way, mount BEFORE any auth perimeter, and point the TG `HealthCheckPath` at the prefixed `/ready` (e.g. `/connectv3/v1/health/ready`).
 
 ## 6. Machine-readable report
 
@@ -132,6 +161,8 @@ Consumers read the same shape: `ss` verify (stage S, local deps), the twin (stag
 
 ## 8. Migration path
 
+Per-service steps: [adoption-runbook.md](adoption-runbook.md).
+
 1. Ship `createDeepReadiness`/`mountDeepReadiness` additively in soa-health 0.2.0. Every 0.1.x export (`mountReadinessRoutes`, `mountHealthRoutes`, `createDbReadiness`, `awaitDbAtBoot`, `createDrainSignal`, `buildIdentity`) keeps its source and behaviour byte-identical (iam/sis run them in prod); the new code lives in new files and is not reimplemented on top of them or vice versa. A unit test pins the 0.1.x response bodies. Deprecation, if any, is a later major.
 2. Pilot: authz-api (client-non-null today; evidence `authz-api/src/main.ts:205`). Manifest: authz-db (postgres, critical, schema probe), openfga (critical), Redis if used (optional). Boot self-test fails closed. Prod TG moves `/health` -> `/health/ready` and container check -> `/health/live`, dev first, then a prod blue/green deploy with idle-colour smoke (per the deploy-wave rules).
 3. iam/sis (1684) migrate by replacing `mountIamHealth` with a manifest: iamDb/piiDb (postgres), redis (PING, not `isReady`), kms (aws-kms/custom, `getJwks`). Legacy `checks` is emitted at the internal level only for one release. Public/internal split lands here, with smoke scripts updated to send the bearer token.
@@ -142,16 +173,15 @@ Consumers read the same shape: `ss` verify (stage S, local deps), the twin (stag
 ## 9. Trade-offs considered
 
 - Background active probes + cache (chosen) vs probing per request: per-request is the "ALB overloads dependency" failure and makes readiness latency depend on the dependency. Cost of the chosen approach: up to ~15s staleness; mitigated by `observe()` and the deep path for smoke.
-- Failing readiness on a shared-dependency outage: harmful (ECS replaces every task, section 5). So shared failures degrade after first success; the cost is that a genuinely broken-for-everyone task keeps serving errors until alerts fire. Gating before first success still catches C3/C5/C6/C11 deltas on a new colour. Pending Seth confirmation.
-- Probing through the real client vs a parallel connection: the real client can be healthy while a fresh connection fails (and vice versa); we want the former because it is what serves traffic. Cost: a probe may queue behind a saturated pool; a pool-acquire timeout is `pool_exhausted`, which is neutral (degrades, never 503), because failing readiness on load sheds capacity when it is needed.
+- Failing readiness on a shared-dependency outage: harmful (ECS replaces every task, section 5). So shared failures degrade after first success; the cost is that a genuinely broken-for-everyone task keeps serving errors until alerts fire. Gating before first success still catches C3/C5/C6/C11 deltas on a new colour. Confirmed by the owner, 2026-10-25.
+- Probing through the real client vs a parallel connection: the real client can be healthy while a fresh connection fails (and vice versa); we want the former because it is what serves traffic. Cost: a probe may queue behind a saturated pool; a pool-acquire timeout is `pool_exhausted`, which is neutral (degrades, never 503), because failing readiness on load sheds capacity when it is needed.  The pooled probe cannot see new-connection failures (token expiry); `freshProbe` (section 4) covers that.
 
 ## 10. Decisions from review round 1 and remaining questions
 
-Decided: Q1 gating rule (section 3, pending Seth confirmation); Q2 structural adapters for pg/prisma/redis/mongo/http/rabbit in the package, `/aws` and `/openfga` as sub-path exports with optional peer deps; Q3 hand-kept discover list for the pilot, registry diff fleet-wide; Q4 soa-health owns the schema, sub-path export, no Zod; Q5 grace period derived (section 5); Q6 SSM bearer, constant-time compare; Q7 flip requires `ready`, allow-list for `degraded`.
+Decided: Q1 gating rule (section 3, confirmed by the owner, 2026-10-25); Q2 structural adapters for pg/prisma/redis/mongo/http/rabbit in the package, `/aws` and `/openfga` as sub-path exports with optional peer deps; Q3 hand-kept discover list for the pilot, registry diff fleet-wide; Q4 soa-health owns the schema, sub-path export, no Zod; Q5 grace period derived (section 5); Q6 SSM bearer, constant-time compare; Q7 flip requires `ready`, allow-list for `degraded`.
 
 Remaining:
-1. Seth to confirm the shared-dependency semantics (section 3) before promotion.
-2. Bind the LANE field/contract once hipponot/iac#898 lands.
+1. Bind the LANE field/contract once hipponot/iac#898 lands.
 
 ## 11. Implementation notes (0.2.0)
 

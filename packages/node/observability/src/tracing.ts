@@ -15,6 +15,7 @@ import { PiiSanitizingSpanExporter } from './span-sanitizer.js';
 import { SpanDroppingExporter } from './span-filter.js';
 import { recordSpanException } from './record-exception.js';
 import { mongoDbStatementSerializer } from './mongo-statement.js';
+import { isHealthCheckRequest } from './health-path.js';
 
 /**
  * Opaque handle to an initialized OTel SDK. Services don't need to import
@@ -98,8 +99,13 @@ export function initTracing(
         //
         // pg requireParentSpan drops parentless background churn; in-request
         // connect spans are dropped by SpanDroppingExporter instead.
+        //
+        // /health* gets no server span; see hipponot/iac#938.
         instrumentations: [
             getNodeAutoInstrumentations({
+                '@opentelemetry/instrumentation-http': {
+                    ignoreIncomingRequestHook: isHealthCheckRequest,
+                },
                 '@opentelemetry/instrumentation-fs': { enabled: false },
                 '@opentelemetry/instrumentation-dns': { enabled: false },
                 '@opentelemetry/instrumentation-net': { enabled: false },

@@ -42,8 +42,10 @@ import {
   copyOutSql,
   createDatabaseSql,
   dropDatabaseSql,
+  dropNotNullSql,
   ensureRoleSql,
   grantSql,
+  noRealTablesCheckSql,
   noViewsCheckSql,
   ownershipSweepSql,
   renameDatabaseSql,
@@ -52,7 +54,7 @@ import {
   viewSwapSql,
   writabilityCheckSql,
 } from './sql.js';
-import { localTarget } from './databases.js';
+import { CONFIRMED_REAL_TABLES, localTarget } from './databases.js';
 import type { MirrorDbDef, SourceMode } from './databases.js';
 import type { DbId, Manifest } from '../manifest/index.js';
 
@@ -89,6 +91,40 @@ export interface RealTableInfo {
   columns: string[];
 }
 
+/** A foreign key between two scrubbed tables, by app-facing name. */
+export interface RealTableFk {
+  child: string;
+  parent: string;
+}
+
+/**
+ * Sort tables parents-first by foreign key (Kahn), ties by name so a plan is
+ * deterministic. Self-references never constrain the order. Tables on a cycle
+ * have no valid order: they follow the rest, by name, and are returned in
+ * `cyclic`. That is safe because foreign keys are added after the copy.
+ */
+export function orderByForeignKeys(
+  tables: readonly string[],
+  fks: readonly RealTableFk[],
+): { ordered: string[]; cyclic: string[] } {
+  const known = new Set(tables);
+  const parents = new Map(tables.map((t) => [t, new Set<string>()]));
+  for (const { child, parent } of fks) {
+    if (child !== parent && known.has(child) && known.has(parent)) parents.get(child)!.add(parent);
+  }
+  const ordered: string[] = [];
+  const remaining = new Set(tables);
+  for (;;) {
+    const ready = [...remaining].filter((t) => [...parents.get(t)!].every((p) => !remaining.has(p))).sort();
+    const next = ready[0];
+    if (next === undefined) break;
+    ordered.push(next);
+    remaining.delete(next);
+  }
+  const cyclic = [...remaining].sort();
+  return { ordered: [...ordered, ...cyclic], cyclic };
+}
+
 export interface HydratePlanInput {
   slot: number;
   mode: SourceMode;
@@ -106,6 +142,10 @@ export interface HydratePlanInput {
   localExists: Readonly<Record<string, boolean>>;
   /** `_real` tables per MIRROR database name — discovered live, or the confirmed set in a preview. */
   realTables?: Readonly<Record<string, readonly RealTableInfo[]>>;
+  /** Foreign keys between `_real` tables per MIRROR database name (absent in a preview). */
+  realTableFks?: Readonly<Record<string, readonly RealTableFk[]>>;
+  /** NOT NULL columns the scramble view sets to NULL, per MIRROR database (absent in a preview). */
+  scrubNulledColumns?: Readonly<Record<string, readonly { table: string; column: string }[]>>;
   /** Timestamp token for the displaced database's name (`<db>__pre_hydrate_<stamp>`). */
   stamp: string;
   /** Keep the displaced database instead of dropping it (one-command rollback). */
@@ -178,6 +218,8 @@ export interface HydrateDbPlan {
   renamedTables: string[];
   /** Tables whose SCRAMBLED rows are copied from the mirror (scrubbed mode only). */
   copiedTables: string[];
+  /** Tables that land empty on purpose (`MirrorDbDef.skipRows`). */
+  skippedRowTables: string[];
   steps: HydrateStep[];
 }
 
@@ -245,16 +287,27 @@ function localConnArgs(port: number, database: string): string[] {
  * `excludeData` carries the scrub's `_real` tables in SCRUBBED mode: their
  * STRUCTURE crosses (PK, FKs, indexes, defaults, sequence ownership — which is
  * what makes the materialised table a real writable table instead of a
- * constraint-less CTAS), but not one row of unscrubbed data.
+ * constraint-less CTAS), but not one row of unscrubbed data. `excludeAllReal`
+ * adds a wildcard over every schema, so a `_real` table the enumeration did not
+ * list still cannot bring its rows along.
  */
 export function pgDumpArgv(opts: {
   mirrorPort: number;
   user: string;
   database: string;
   excludeData?: readonly string[];
+  /** Tables (exact app-facing names, no `_real` suffix) whose rows are also kept out. */
+  excludeDataExact?: readonly string[];
+  excludeAllReal?: boolean;
+  sections?: readonly ('pre-data' | 'data' | 'post-data')[];
 }): string[] {
   const argv = ['pg_dump', ...mirrorConnArgs(opts.mirrorPort, opts.user, opts.database), '--format', 'custom'];
-  for (const table of opts.excludeData ?? []) argv.push(`--exclude-table-data=public.${table}_real`);
+  for (const section of opts.sections ?? []) argv.push(`--section=${section}`);
+  // Quoted because pg_dump folds an unquoted pattern to lower case, which would
+  // silently match nothing for a mixed-case table such as `Program_real`.
+  for (const table of opts.excludeData ?? []) argv.push(`--exclude-table-data=public."${table}_real"`);
+  for (const table of opts.excludeDataExact ?? []) argv.push(`--exclude-table-data=public."${table}"`);
+  if (opts.excludeAllReal === true) argv.push('--exclude-table-data=*.*_real');
   return argv;
 }
 
@@ -356,10 +409,8 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
   const localExisted = input.localExists[localName] === true;
   const container = input.pgContainer;
 
-  // The scrub only touches the two rostering databases; everywhere else BOTH
-  // source modes land identical raw prod data. Say so via the plan shape rather
-  // than letting a reader infer that `--source scrubbed` sanitises the run.
   const real = def.scrubbed ? (input.realTables?.[def.mirror] ?? []) : [];
+  const skipRows = new Set(def.skipRows ?? []);
   const materialise = def.scrubbed && input.mode === 'scrubbed';
 
   const steps: HydrateStep[] = [];
@@ -392,11 +443,26 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
   );
 
   // ── 2. the transfer: mirror pg_dump piped straight into a local pg_restore ──
+  // The bulk dump never carries rows for a table the scrub names, under EITHER
+  // name: in scrubbed mode that is every enumerated `_real` table, every table
+  // on the confirmed list (so a table the scrub stops view-swapping lands empty
+  // rather than raw, even before the command's own refusal), and every
+  // `skipRows` table. In real mode it is the `skipRows` tables only. Excluding a
+  // name that is a view, or does not exist, is a no-op for pg_dump.
+  const rowless = materialise
+    ? [...new Set([...real.map((r) => r.table), ...(CONFIRMED_REAL_TABLES[def.mirror] ?? []), ...skipRows])].sort()
+    : [...skipRows].sort();
   const dumpArgv = pgDumpArgv({
     mirrorPort: input.mirrorLocalPort,
     user,
     database: def.mirror,
-    excludeData: materialise ? real.map((r) => r.table) : [],
+    excludeData: materialise ? real.map((r) => r.table) : real.map((r) => r.table).filter((t) => skipRows.has(t)),
+    excludeDataExact: rowless,
+    excludeAllReal: materialise,
+    // Scrubbed mode holds back indexes, foreign keys and triggers until the
+    // scrambled rows are in (step 4): a table that carries data and references a
+    // `_real` table cannot gain its foreign key while that parent is empty.
+    sections: materialise ? ['pre-data', 'data'] : [],
   });
   const restoreArgv = pgRestoreArgv({ localPort: input.localPort, staging });
   const pipeline = `${dumpArgv.map(shQuote).join(' ')} | ${restoreArgv.map(shQuote).join(' ')}`;
@@ -427,25 +493,29 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
     },
   );
 
-  // ── 3. the view swap — BOTH modes, opposite meanings, same statement ──
-  // real mode:     the `_real` table carries the data; drop the scramble view
-  //                and rename the table into the app's expected name.
-  // scrubbed mode: the `_real` table arrived EMPTY (its data was excluded), so
-  //                the same rename yields a real-shaped, constraint-complete,
-  //                WRITABLE table which step 4 then fills from the view.
-  // Either way the local result is an ordinary writable table under the app's name.
-  for (const { table } of real) {
-    sql(
-      `view-swap:${table}`,
-      `materialise ${table}: drop the scramble view, rename ${table}_real → ${table}`,
-      staging,
-      viewSwapSql(table),
-    );
-  }
-
-  // ── 4. scrubbed mode only: COPY the scrambled rows across, column-exact ──
+  // ── 3. scrubbed mode only: fill the emptied `_real` tables, then add constraints ──
+  // The rows come from the mirror's scramble VIEW and land in the local `{t}_real`,
+  // which still has that name because post-data refers to it. No foreign key
+  // exists yet, so the parents-first order (gh_851 D68) is not what lets the copy
+  // pass; it keeps the order deterministic and correct if constraints ever move
+  // ahead of it. The post-data restore then validates every foreign key against
+  // populated parents, including those from tables that kept their own data.
+  const { ordered: copyOrder, cyclic } = orderByForeignKeys(
+    real.map((r) => r.table).filter((t) => !skipRows.has(t)),
+    input.realTableFks?.[def.mirror] ?? [],
+  );
   if (materialise) {
-    for (const { table, columns } of real) {
+    for (const { table, column } of input.scrubNulledColumns?.[def.mirror] ?? []) {
+      sql(
+        `relax-not-null:${table}.${column}`,
+        `allow NULL in ${table}.${column}, which the scrub blanks`,
+        staging,
+        dropNotNullSql(table, column),
+      );
+    }
+    const byName = new Map(real.map((r) => [r.table, r.columns]));
+    for (const table of copyOrder) {
+      const columns = byName.get(table) ?? [];
       const src = mirrorPsqlArgv({
         mirrorPort: input.mirrorLocalPort,
         user,
@@ -455,13 +525,15 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
       const sink = localTcpPsqlArgv({
         localPort: input.localPort,
         database: staging,
-        sql: copyInSql(table, columns),
+        sql: copyInSql(`${table}_real`, columns),
       });
       const copyPipeline = `${src.map(shQuote).join(' ')} | ${sink.map(shQuote).join(' ')}`;
       steps.push({
         kind: 'transfer',
         id: `${localName}:copy:${table}`,
-        label: `copy scrambled rows for ${table} (${columns.length} column(s))`,
+        label:
+          `copy scrambled rows for ${table} (${columns.length} column(s))` +
+          (cyclic.includes(table) ? ' [foreign-key cycle]' : ''),
         dockerArgv: clientRunArgv(image, copyPipeline),
         shell: copyPipeline,
         sourceArgv: src,
@@ -470,6 +542,42 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
         classify: 'psql',
       });
     }
+
+    const postDumpArgv = pgDumpArgv({
+      mirrorPort: input.mirrorLocalPort,
+      user,
+      database: def.mirror,
+      sections: ['post-data'],
+    });
+    const postPipeline = `${postDumpArgv.map(shQuote).join(' ')} | ${restoreArgv.map(shQuote).join(' ')}`;
+    steps.push({
+      kind: 'transfer',
+      id: `${localName}:post-data`,
+      label: `add indexes, foreign keys and triggers to ${staging}, now that the rows are in`,
+      dockerArgv: clientRunArgv(image, postPipeline),
+      shell: postPipeline,
+      sourceArgv: postDumpArgv,
+      sinkArgv: restoreArgv,
+      needsSecret: true,
+      // --single-transaction implies --exit-on-error, so a non-zero exit here is
+      // never benign, and no later step would notice constraints that never landed.
+      classify: 'psql',
+    });
+  }
+
+  // ── 4. the view swap — BOTH modes, opposite meanings, same statement ──
+  // real mode:     the `_real` table carries the raw data; drop the scramble view
+  //                and rename the table into the app's expected name.
+  // scrubbed mode: the `_real` table now holds the SCRAMBLED rows from step 3,
+  //                so the same rename yields a constraint-complete writable table.
+  // Either way the local result is an ordinary writable table under the app's name.
+  for (const { table } of real) {
+    sql(
+      `view-swap:${table}`,
+      `materialise ${table}: drop the scramble view, rename ${table}_real → ${table}`,
+      staging,
+      viewSwapSql(table),
+    );
   }
 
   // ── 5. ownership + grants, then ASSERT both ──
@@ -494,6 +602,14 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
           "'cannot insert into view'. Live database untouched.",
       },
     );
+  }
+  if (materialise) {
+    sql('verify-no-real', 'verify no *_real relation survived into the scrubbed copy', staging, noRealTablesCheckSql(), {
+      expect: '0',
+      expectMessage:
+        `%s *_real relation(s) remain in ${staging}: the mirror has a scrubbed table the enumeration did not ` +
+        'cover, so this copy cannot be trusted as scrubbed. Live database untouched.',
+    });
   }
 
   // ── 6. the swap — connected to `postgres`, never to either side ──
@@ -525,7 +641,8 @@ function planDb(def: MirrorDbDef, input: HydratePlanInput): HydrateDbPlan {
     retiredName: retired,
     localExisted,
     renamedTables: real.map((r) => r.table),
-    copiedTables: materialise ? real.map((r) => r.table) : [],
+    copiedTables: materialise ? copyOrder : [],
+    skippedRowTables: real.map((r) => r.table).filter((t) => skipRows.has(t)),
     steps,
   };
 }
@@ -590,4 +707,28 @@ export function localTargetRefusal(target: {
     );
   }
   return null;
+}
+
+/**
+ * The exact phrase `--source real --execute` requires, via
+ * `--confirm-raw-student-data "<phrase>"` or typed at an interactive prompt.
+ * `--yes` never satisfies it: `--yes` skips the routine destructive prompt,
+ * whereas this copies raw student records from real districts onto this machine.
+ */
+export const RAW_SOURCE_CONFIRM_PHRASE = 'copy raw student data';
+
+/**
+ * THE RAW-SOURCE REFUSAL. Returns a refusal string, or null when the run may
+ * proceed: anything but an executing `--source real` run is unaffected, and an
+ * executing one needs the exact phrase (trimmed; case and inner spacing exact).
+ */
+export function rawSourceRefusal(opts: { mode: SourceMode; execute: boolean; confirmation: string | undefined }): string | null {
+  if (opts.mode !== 'real' || !opts.execute) return null;
+  if (opts.confirmation?.trim() === RAW_SOURCE_CONFIRM_PHRASE) return null;
+  return (
+    '--source real copies RAW STUDENT DATA from real districts onto this machine, and needs an explicit ' +
+    `confirmation: pass --confirm-raw-student-data "${RAW_SOURCE_CONFIRM_PHRASE}"` +
+    (opts.confirmation === undefined ? ' (or type it at the prompt, interactively without --yes)' : ' (the phrase given did not match)') +
+    '. --yes does not satisfy this. Drop --source real for the scrubbed default.'
+  );
 }

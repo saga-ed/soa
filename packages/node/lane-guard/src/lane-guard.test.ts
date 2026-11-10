@@ -18,7 +18,7 @@ const clean = {
     EXEC_ENV: 'prod',
     DD_ENV: 'mirror',
     DATABASE_URL: 'postgres://u:pw@mirror-pg.dev.internal:5432/db',
-    AMQP_URL: 'amqps://u:pw@mq.dev.internal:5671',
+    AMQP_URL: 'amqps://u:pw@mq.dev.internal:5671/twin',
     REDIS_URL: 'redis://cache.dev.internal:6379',
     MAIL_PROVIDER: 'stub',
 };
@@ -168,8 +168,8 @@ describe('prod hosts', () => {
     it.each([
         'postgres://u:p@db.prod.example.com:5432/x',
         'postgresql://u:p@prod-pg.example.com/x',
-        'amqp://u:p@mq-prod.internal',
-        'amqps://u:p@mq.production.internal',
+        'amqp://u:p@mq-prod.internal/twin',
+        'amqps://u:p@mq.production.internal/twin',
         'redis://cache.prod.internal:6379',
         'rediss://cache-prod.internal',
         'mongodb://u:p@a.dev.internal,b.prod.internal/db',
@@ -525,5 +525,69 @@ describe('prod public hosts', () => {
     it('reports only prod-public-host for a prod https URL, nothing for clean values', () => {
         expect(checks({ IAM_API_URL: 'https://iam.wootdev.com', REDIS_URL: 'redis://cache.dev.internal:6379' })).toEqual([]);
         expect(checks({ IAM_API_URL: 'https://iam.saga.org' })).toEqual(['prod-public-host']);
+    });
+});
+
+describe('amqp vhost (twin)', () => {
+    const opts = { accountId: DEV };
+    const url = (tail: string) => ({ AMQP_URL: `amqps://u:secretpw@mq.dev.internal:5671${tail}` });
+    const vhostViolations = (env: Record<string, string>, o: object = opts) =>
+        checkLaneSafety({ ...clean, ...env }, o).filter((x) => x.check === 'amqp-vhost');
+
+    it.each(['/twin', '/authz-twin', '/twin-authz', '/authz_twin_v2', '/TWIN', '/%2Ftwin', '/twin?heartbeat=30'])(
+        'passes lane-scoped vhost %s',
+        (tail) => {
+            expect(vhostViolations(url(tail))).toEqual([]);
+        },
+    );
+
+    it.each(['', '/', '//', '/%2F', '/dev', '/saga-dev', '/shared', '/twinkle', '/untwined', '/%2F?heartbeat=30', '/%ZZ'])(
+        'fails vhost %j',
+        (tail) => {
+            expect(vhostViolations(url(tail))).toHaveLength(1);
+        },
+    );
+
+    it('decodes URL-encoded vhost before matching', () => {
+        expect(vhostViolations(url('/authz%2Dtwin'))).toEqual([]);
+        expect(vhostViolations(url('/tw%69n-x'))).toEqual([]);
+    });
+
+    it('checks amqp:// and amqps:// alike, in any env var', () => {
+        expect(vhostViolations({ RABBITMQ_URL: 'amqp://u:p@mq.dev.internal:5672/dev' })).toHaveLength(1);
+        expect(vhostViolations({ X: 'amqp://u:p@mq.dev.internal:5672/twin' })).toEqual([]);
+    });
+
+    it('passes when no AMQP URL is configured', () => {
+        const { AMQP_URL: _omit, ...noMq } = clean;
+        expect(checkLaneSafety(noMq, opts)).toEqual([]);
+    });
+
+    it('fails once per offending URL', () => {
+        expect(vhostViolations({ ...url('/'), RABBITMQ_URL: 'amqp://u:p@mq.dev.internal/dev' })).toHaveLength(2);
+    });
+
+    it('does not apply to LANE=mirror', () => {
+        expect(checkLaneSafety({ ...clean, LANE: 'mirror', ...url('/') }, opts)).toEqual([]);
+    });
+
+    it('honours an explicit amqpVhostPattern override only', () => {
+        const amqpVhostPattern = /^\/?lane-a$/;
+        expect(vhostViolations(url('/lane-a'), { ...opts, amqpVhostPattern })).toEqual([]);
+        expect(vhostViolations(url('/twin'), { ...opts, amqpVhostPattern })).toHaveLength(1);
+        expect(vhostViolations(url('/'), { ...opts, amqpVhostPattern: /.*/ })).toHaveLength(1);
+        expect(vhostViolations({ ...url('/dev'), LANE_AMQP_VHOST_PATTERN: '.*' })).toHaveLength(1);
+    });
+
+    it('never prints credentials or the URL', () => {
+        let msg = '';
+        try {
+            assertLaneSafe({ ...clean, ...url('/dev') }, opts);
+        } catch (e) {
+            msg = (e as Error).message;
+        }
+        expect(msg).toContain('[amqp-vhost] AMQP_URL');
+        expect(msg).not.toContain('secretpw');
+        expect(msg).not.toContain('mq.dev.internal');
     });
 });

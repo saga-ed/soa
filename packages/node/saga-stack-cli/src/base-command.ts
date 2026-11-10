@@ -992,6 +992,7 @@ export abstract class BaseCommand extends Command {
     }
 
     const launchContext = defaultLaunchContext({
+      stateDir,
       repoRoots,
       vendorDir,
       portOverrides: profile.portOverrides,

@@ -209,3 +209,25 @@ and (3) directly from it, instead of hand-copying columns across three
 files. [`compareRegistryToDbtSources`](./src/drift.ts) (the pure comparison
 machinery `drift.ts` exposes) can be wired into a CI check on the consuming
 repo to catch drift between (1) and (2) before it reaches Athena.
+
+## Incremental export job kit
+
+`src/job/` holds the building blocks for an hourly incremental export driven by a
+service's transactional outbox. It has no `pg`/`prisma` dependency; a `pg` `Pool` /
+`PoolClient` satisfies the structural `PgPoolLike` / `SqlLike` interfaces.
+
+- `tryAcquireAdvisoryLock` / `hourLockKey` — session-level `pg_try_advisory_lock` on one
+  checked-out client, so two colours firing in the same hour don't double-export.
+- `deterministicRunId(label, now)` — UUIDv5 of `label:<UTC hour>`; a same-hour rerun
+  overwrites the same S3 keys.
+- `ExportCursorStore` — `PgExportCursorStore` (upsert into `lake_export_state`) and
+  `InMemoryExportCursorStore` for tests. State lives in the service DB because lake S3 IAM
+  is write-only.
+- `collectOutboxAggregateIds` — distinct aggregate ids from `outbox_event` plus
+  `outbox_event_archive` in a `(since, until]` window. Defaults match the SDS Prisma
+  schema (`aggregate_type`, `aggregate_id`, `occurred_at`); identifiers are validated.
+- `runIncrementalExport` — `until = now - lag`, `since = (watermark | initialSince) - overlap`;
+  collects keys, exports them, and advances the cursor only after the export resolves.
+
+Add `LAKE_EXPORT_STATE_DDL` to the service's own migration. The schedule
+(EventBridge / RunTask) and the colour gate stay in the service's infra and entrypoint.

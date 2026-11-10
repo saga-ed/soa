@@ -39,11 +39,13 @@ assertLaneSafe(process.env, { accountId });
 | `prod-secret-path` | env value referencing a `/prod/` or `/shared/infra/prod/` SSM path while the account is not a verified allowed account. Allowed in the dev account; the guard cannot verify the value points at lane resources. |
 | `prod-host` | `amqp(s)://`, `redis(s)://`, `mongodb(+srv)://`, `postgres(ql)://` URL (any host in the list), or `PGHOST`/`*_HOST` var for postgres/redis/mongo/rabbit, matching `prodHostPatterns` (default: a `prod`/`production` label segment) |
 | `prod-public-host` | any host equal to or under a prod public apex (default `saga.org`, `sagaops.org`) in a URL of any scheme in any env value, or in a bare-host value of a var named `*HOST`, `*HOSTNAME`, `*DOMAIN` or `*ENDPOINT`. See [Prod public hosts](#prod-public-hosts-030). |
+| `amqp-vhost` | `LANE=twin` only: any `amqp(s)://` URL in env whose percent-decoded vhost is empty, `/`, undecodable, or lacks the lane name (`twin`) as a delimited token (case-insensitive; `/twin`, `/authz-twin` pass; `/dev`, `/twinkle` fail). No path = default vhost `/` = fail. Override only via `opts.amqpVhostPattern` (never env); `/` and empty always fail. No AMQP URL = pass. |
 | `ses` | `MAIL_PROVIDER=ses` or any non-empty `MAIL_SES_*` (no sandbox signal is defined yet) |
 | `partner-egress` | non-empty `CLEVER_*`, `*PARTNER*WEBHOOK*`, or `*WEBHOOK*URL*` |
 
 ### 0.3.0
 
+- Includes 0.2.2: `amqp-vhost` check (twin only), see below.
 - New check `prod-public-host`; configs that passed 0.2.x can now be rejected (e.g. `IAM_API_URL=https://iam.saga.org`). TypeScript consumers with an exhaustive `switch` on `LaneViolation['check']` need a new case.
 
 ### Prod public hosts (0.3.0)
@@ -61,6 +63,10 @@ A twin is a prod-config copy running in the dev account; a prod service URL it f
 | `nonEgressVarPatterns` | `DEFAULT_NON_EGRESS_VAR_PATTERNS`: `*CORS_ORIGIN(S)`, `*ALLOWED_ORIGIN(S)`, `*ISSUER`, `SAML_SP_ENTITY_ID`. Issuers are compared with the token `iss` claim and CORS origins are inbound; cookie domains are not exempt (a twin cookie on a prod apex shares browser scope with prod sessions); JWKS and API URLs are separate vars and stay checked. |
 
 Not covered: values the guard cannot see (schema defaults in app code when the var is absent, SSM/Secrets Manager-resolved values), and a bare host inside a JSON value with no URL scheme.
+
+### 0.2.2
+
+- `amqp-vhost` check (twin only): the twin must not bind a shared vhost. Twins whose RabbitMQ vhost lacks `twin` now fail boot.
 
 ### 0.2.1
 

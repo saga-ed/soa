@@ -100,7 +100,10 @@ Things worth noticing:
 
 1. **The unscrubbed rows never touch the local disk.** `--exclude-table-data` brings the
    `_real` *structure* across with zero rows, listed table by table and again as a wildcard over
-   every schema. The rows that land come only from the mirror's scramble views.
+   every schema. The rows that land come only from the mirror's scramble views. The dump also
+   excludes the rows of every table the scrub names under its *app-facing* name (enumerated,
+   confirmed in `CONFIRMED_REAL_TABLES`, or `skipRows`), so a table the scrub stops
+   view-swapping lands empty rather than raw, even before the ordinary-table refusal fires.
 2. **Constraints come after the rows.** Tables with their own data hold foreign keys into
    `_real` tables, and those cannot be added while the parent is empty. Holding post-data back
    until the copy is done is what lets the restore finish, and it validates every foreign key

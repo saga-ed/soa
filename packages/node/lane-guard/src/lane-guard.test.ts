@@ -358,6 +358,18 @@ describe('prod public hosts', () => {
         expect(hostViolations({ UPSTREAM_HOST: 'ok.wootdev.com' })).toEqual([]);
     });
 
+    it('strips trailing punctuation from hosts', () => {
+        for (const tail of [';', ')', '|', '}']) {
+            expect(hostViolations({ UPSTREAM_URL: `https://iam.saga.org${tail}` })).toHaveLength(1);
+            expect(hostViolations({ UPSTREAM_HOST: `iam.saga.org${tail}` })).toHaveLength(1);
+        }
+    });
+
+    it('scans bare tokens in a host var that also holds a URL', () => {
+        expect(hostViolations({ UPSTREAM_HOST: 'https://ok.wootdev.com iam.saga.org' })).toHaveLength(1);
+        expect(hostViolations({ UPSTREAM_HOST: 'https://ok.wootdev.com, ok2.wootdev.com' })).toEqual([]);
+    });
+
     it('ignores a bare prod host in a var whose name is not host-like', () => {
         expect(hostViolations({ SOME_LABEL: 'login.saga.org' })).toEqual([]);
     });

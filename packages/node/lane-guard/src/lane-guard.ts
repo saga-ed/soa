@@ -68,18 +68,11 @@ const AMQP_URL_RE = /\bamqps?:\/\/[^\s]*/gi;
 
 const isSet = (v: string | undefined): v is string => v !== undefined && v.trim() !== '';
 
-function hostsOfAuthority(authority: string): string[] {
-    const hostPart = authority.slice(authority.lastIndexOf('@') + 1);
-    return hostPart
-        .split(',')
-        .map((h) => h.trim().replace(/^\[|\]$/g, '').replace(/:\d*$/, ''))
-        .filter(Boolean);
-}
-
 function normalizeHost(piece: string): string {
     return piece
         .slice(piece.lastIndexOf('@') + 1)
         .trim()
+        .replace(/[;)|}>]+$/, '')
         .replace(/^\[|\]$/g, '')
         .replace(/:\d*$/, '')
         .replace(/^(\*?\.)+/, '')
@@ -87,15 +80,34 @@ function normalizeHost(piece: string): string {
         .toLowerCase();
 }
 
+function hostsOfAuthority(authority: string): string[] {
+    return authority
+        .slice(authority.lastIndexOf('@') + 1)
+        .split(',')
+        .map(normalizeHost)
+        .filter(Boolean);
+}
+
+/** Global/sticky regexes keep lastIndex between calls; reset so repeated tests are stable. */
+function testAny(patterns: RegExp[], value: string): boolean {
+    return patterns.some((p) => {
+        p.lastIndex = 0;
+        return p.test(value);
+    });
+}
+
 /** Hosts of every URL in the value (any scheme), plus the value itself when the var name marks it as a bare host. */
 function egressHosts(name: string, value: string): string[] {
     const hosts: string[] = [];
-    for (const m of value.matchAll(ANY_URL_RE)) {
-        for (const piece of (m[1] ?? '').split(',')) hosts.push(normalizeHost(piece));
+    const hasUrl = value.includes('://');
+    if (hasUrl) {
+        for (const m of value.matchAll(ANY_URL_RE)) {
+            for (const piece of (m[1] ?? '').split(',')) hosts.push(normalizeHost(piece));
+        }
     }
-    if (!value.includes('://') && BARE_HOST_VAR_RE.test(name)) {
+    if (BARE_HOST_VAR_RE.test(name)) {
         for (const token of value.split(/[\s,;]+/)) {
-            if (token.includes('@')) continue;
+            if (token.includes('@') || token.includes('://')) continue;
             hosts.push(normalizeHost(token.split('/')[0] ?? ''));
         }
     }
@@ -120,10 +132,7 @@ function amqpVhost(url: string): string | undefined {
 
 function vhostAllowed(vhost: string, lane: Lane, pattern: RegExp | undefined): boolean {
     if (vhost === '' || vhost === '/') return false;
-    if (pattern) {
-        pattern.lastIndex = 0;
-        return pattern.test(vhost);
-    }
+    if (pattern) return testAny([pattern], vhost);
     return new RegExp(`(^|[^a-z0-9])${lane}([^a-z0-9]|$)`, 'i').test(vhost);
 }
 
@@ -193,20 +202,12 @@ export function checkLaneSafety(env: Env, opts: LaneGuardOptions = {}): LaneViol
     const allowed = opts.allowedAccountIds ?? [DEV_ACCOUNT_ID];
     const accountOk = accountId !== undefined && allowed.includes(accountId);
     const patterns = opts.prodHostPatterns ?? DEFAULT_PROD_HOST_PATTERNS;
-    const isProdHost = (host: string): boolean =>
-        patterns.some((p) => {
-            p.lastIndex = 0;
-            return p.test(host);
-        });
+    const isProdHost = (host: string): boolean => testAny(patterns, host);
 
     const apexes = normalizeDomains(opts.prodPublicApexes ?? DEFAULT_PROD_PUBLIC_APEXES);
     const allowedSuffixes = normalizeDomains(opts.allowedHostSuffixes ?? DEFAULT_ALLOWED_HOST_SUFFIXES);
     const nonEgress = opts.nonEgressVarPatterns ?? DEFAULT_NON_EGRESS_VAR_PATTERNS;
-    const isNonEgressVar = (name: string): boolean =>
-        nonEgress.some((p) => {
-            p.lastIndex = 0;
-            return p.test(name);
-        });
+    const isNonEgressVar = (name: string): boolean => testAny(nonEgress, name);
     const isProdPublicHost = (host: string): boolean =>
         apexes.some((a) => underDomain(host, a)) && !allowedSuffixes.some((a) => underDomain(host, a));
 

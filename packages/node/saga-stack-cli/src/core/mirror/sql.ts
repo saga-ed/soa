@@ -84,6 +84,11 @@ export function viewSwapSql(table: string): string {
  * already makes `pg_database_owner` resolve to the role, which is the PG15+
  * idiom. Other schemas (a prod dump may carry them) ARE re-owned, or the role
  * could not create in them.
+ *
+ * Sequences go last: Postgres refuses `ALTER SEQUENCE … OWNER` on a sequence
+ * linked to a table whose owner differs, and re-owning the table carries its
+ * linked sequences along. Without the ORDER BY the outcome depends on physical
+ * row order in `pg_class`, which the view swap's renames disturb.
  */
 export function ownershipSweepSql(role: string): string {
   const r = ql(role);
@@ -91,7 +96,7 @@ export function ownershipSweepSql(role: string): string {
     'DO $hydrate$',
     'DECLARE r record;',
     'BEGIN',
-    "  FOR r IN SELECT c.relkind AS kind, n.nspname AS ns, c.relname AS rel FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f') LOOP",
+    "  FOR r IN SELECT c.relkind AS kind, n.nspname AS ns, c.relname AS rel FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_toast%' AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f') ORDER BY c.relkind = 'S', c.oid LOOP",
     `    IF r.kind = 'S' THEN EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO %I', r.ns, r.rel, ${r});`,
     `    ELSIF r.kind = 'v' THEN EXECUTE format('ALTER VIEW %I.%I OWNER TO %I', r.ns, r.rel, ${r});`,
     `    ELSIF r.kind = 'm' THEN EXECUTE format('ALTER MATERIALIZED VIEW %I.%I OWNER TO %I', r.ns, r.rel, ${r});`,
@@ -220,20 +225,82 @@ export function databaseExistsSql(db: string): string {
  * Enumerate the scrub's `_real` tables AND their column order, in ONE round
  * trip: `(base_table, column)` rows ordered by table then `attnum`.
  *
- * Enumerated at RUN TIME rather than hardcoded — only the `rostering` project is
- * scrubbed and its table set changes with its schema, so a hardcoded list would
- * silently skip a newly-scrubbed table and leave an un-writable view standing in
- * the app's place. The COLUMN order comes from the `_real` table (the target
- * shape), which is what makes the scrubbed-mode `COPY` column-exact instead of
- * trusting that the view happens to present columns in the same order.
+ * Enumerated at RUN TIME rather than hardcoded — the scrubbed table set changes
+ * with each project's schema, so a hardcoded list would silently skip a
+ * newly-scrubbed table and leave an un-writable view standing in the app's
+ * place. The COLUMN order comes from the `_real` table (the target shape), which
+ * is what makes the scrubbed-mode `COPY` column-exact instead of trusting that
+ * the view happens to present columns in the same order. GENERATED columns are
+ * left out: `COPY … FROM` refuses them, and the server recomputes them anyway.
  */
 export function realTableQuerySql(): string {
   return (
     "SELECT left(c.relname, length(c.relname) - 5) AS base, a.attname FROM pg_class c " +
     'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
-    'JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped ' +
+    "JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attgenerated = '' " +
     "WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname LIKE '%\\_real' " +
     'ORDER BY c.relname, a.attnum'
+  );
+}
+
+/** Foreign keys between two `_real` tables: `(child_base, parent_base)` rows. */
+export function realTableFkQuerySql(): string {
+  return (
+    "SELECT regexp_replace(c.relname, '_real$', ''), regexp_replace(f.relname, '_real$', '') FROM pg_constraint con " +
+    'JOIN pg_class c ON c.oid = con.conrelid ' +
+    'JOIN pg_class f ON f.oid = con.confrelid ' +
+    'JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+    "WHERE con.contype = 'f' AND n.nspname = 'public' AND c.relname LIKE '%\\_real' AND f.relname LIKE '%\\_real' " +
+    'ORDER BY 1, 2'
+  );
+}
+
+/**
+ * NOT NULL columns of `_real` tables that the scramble view sets to a literal
+ * NULL: `(base, column)` rows. The scrub does this to encrypted PII such as
+ * `user_pii.name_first_encrypted`, so those rows cannot be copied until the
+ * constraint is relaxed. Read from the view definition, because scanning every
+ * view for NULLs would cost as much as the copy itself.
+ */
+export function scrubNulledColumnsSql(): string {
+  return (
+    "SELECT v.relname, a.attname FROM pg_class r JOIN pg_namespace n ON n.oid = r.relnamespace " +
+    "JOIN pg_class v ON v.relnamespace = r.relnamespace AND v.relname = left(r.relname, length(r.relname) - 5) AND v.relkind = 'v' " +
+    'JOIN pg_attribute a ON a.attrelid = r.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attnotnull ' +
+    "WHERE n.nspname = 'public' AND r.relkind = 'r' AND r.relname LIKE '%\\_real' " +
+    "AND pg_get_viewdef(v.oid) ~ ('NULL::[a-z ]+(\\([0-9,]+\\))?(\\)::[a-z ]+(\\([0-9,]+\\))?)? AS \"?' || a.attname || '\"?(,|\\s*$|\\s+FROM)') " +
+    'ORDER BY 1, 2'
+  );
+}
+
+/** Let a scrub-nulled column accept the view's NULLs, on the still-`_real` local table. */
+export function dropNotNullSql(table: string, column: string): string {
+  return `ALTER TABLE public.${qi(`${table}_real`)} ALTER COLUMN ${qi(column)} DROP NOT NULL`;
+}
+
+/**
+ * Which of these tables stand on the mirror as ORDINARY tables? The scrub renames
+ * a table it covers, so any row here is a table it no longer covers: raw data
+ * under the app's name, which the `_real` exclusions cannot see.
+ */
+export function unscrubbedTablesSql(tables: readonly string[]): string {
+  return (
+    'SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+    `WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname IN (${tables.map(ql).join(', ')}) ORDER BY 1`
+  );
+}
+
+/**
+ * ASSERT no `*_real` relation survived, in any schema. Must be `0`. It is the
+ * backstop for a shape the enumeration cannot see (a partitioned or non-`public`
+ * `_real` table): the dump's wildcard keeps such a table's rows out, and this
+ * stops the database when one appears, so a scrubbed copy never ships with one.
+ */
+export function noRealTablesCheckSql(): string {
+  return (
+    'SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace ' +
+    "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_%' " +
+    "AND c.relkind IN ('r', 'p', 'f', 'm') AND c.relname LIKE '%\\_real'"
   );
 }
 

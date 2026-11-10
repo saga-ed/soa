@@ -79,6 +79,17 @@ export function parseRealTableRows(stdout: string): RealTableInfo[] {
   return [...byTable.entries()].map(([table, columns]) => ({ table, columns }));
 }
 
+/** Parse a two-column mirror-side read (`a<US>b` rows). PURE. */
+export function parseFieldPairs(stdout: string): [string, string][] {
+  const pairs: [string, string][] = [];
+  for (const line of stdout.split('\n')) {
+    if (line.trim() === '') continue;
+    const [first, second] = line.split(FIELD_SEP);
+    if (first !== undefined && second !== undefined) pairs.push([first, second]);
+  }
+  return pairs;
+}
+
 /** True iff a container of EXACTLY this name is running (docker ps name filter). */
 async function isContainerRunning(container: string): Promise<boolean> {
   try {

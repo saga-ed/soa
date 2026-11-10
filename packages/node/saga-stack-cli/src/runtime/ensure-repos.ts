@@ -85,6 +85,8 @@ export interface ConfirmSeam {
   isTTY(): boolean;
   /** Prompt `question` and resolve true iff the answer starts with `y`/`Y` (bootstrap.sh `[yY]*`). */
   prompt(question: string): Promise<boolean>;
+  /** Prompt `question` and resolve the typed answer verbatim (typed-phrase confirmations). Optional for test seams. */
+  ask?(question: string): Promise<string>;
 }
 
 /**
@@ -101,6 +103,14 @@ export function makeRealConfirm(): ConfirmSeam {
       try {
         const answer = await rl.question(question);
         return /^[yY]/.test(answer.trim());
+      } finally {
+        rl.close();
+      }
+    },
+    async ask(question: string): Promise<string> {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      try {
+        return await rl.question(question);
       } finally {
         rl.close();
       }

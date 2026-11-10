@@ -3933,7 +3933,6 @@
         "<%= config.bin %> <%= command.id %> --slot 2",
         "<%= config.bin %> <%= command.id %> --slot 2 --execute",
         "<%= config.bin %> <%= command.id %> --slot 2 --db coach_api,iam_db --execute --yes",
-        "<%= config.bin %> <%= command.id %> --slot 2 --source scrubbed --execute --yes",
         "<%= config.bin %> <%= command.id %> --set my-set --execute --yes --keep-previous"
       ],
       "flags": {
@@ -3950,6 +3949,13 @@
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "coach",
+          "type": "option"
+        },
+        "confirm-raw-student-data": {
+          "description": "required with --source real --execute: the exact phrase \"copy raw student data\", confirming you intend to copy raw student data from real districts onto this machine. Ignored for --source scrubbed.",
+          "hasDynamicHelp": false,
+          "multiple": false,
+          "name": "confirm-raw-student-data",
           "type": "option"
         },
         "db": {
@@ -4092,8 +4098,8 @@
           "type": "option"
         },
         "source": {
-          "default": "real",
-          "description": "which copy of the two SCRUBBED databases (iam_db, iam_pii_db) to land. 'real' (DEFAULT) lands the unscrambled tables — prod is PRE-RELEASE and every user in it is a Saga employee, so there is no real end-user PII today, and the scramble makes a poor reporting fixture (a known district cannot be found by display_name or source_id at all). 'scrubbed' lands the scrambled view materialised into a real writable table instead. NOTE: only the rostering project is scrubbed upstream — every OTHER database is raw prod data in BOTH modes, so --source scrubbed does NOT make a hydrate free of prod data. This default FLIPS at public release, when prod holds real end-user data.",
+          "default": "scrubbed",
+          "description": "which copy of each scrubbed database to land. 'scrubbed' (DEFAULT) materialises the mirror's scrambled views into real writable tables; no row of a *_real table is copied. 'real' lands the *_real tables, which are RAW STUDENT DATA from real districts, on this machine. Do not use it without an explicit reason to handle that data. An executing --source real run REFUSES unless --confirm-raw-student-data carries the exact phrase \"copy raw student data\" (or it is typed at the prompt, interactively without --yes); --yes alone does not satisfy it.",
           "hasDynamicHelp": false,
           "multiple": false,
           "name": "source",

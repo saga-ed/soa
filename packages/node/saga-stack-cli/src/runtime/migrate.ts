@@ -15,7 +15,9 @@
  *     - `cmd: 'prisma db push'`        → `pnpm prisma db push`        (iam-pii-db)
  *
  *   THREE-WAY BRANCH (up.sh's `migrate_db`, for the `cmd: 'db:deploy'` targets —
- *   programs/scheduling/sessions/content/coach/sis), probing `_prisma_migrations`:
+ *   programs/scheduling/sessions/content/coach/sis/authz, and surveys-db, which
+ *   up.sh ran as a fixed `db_step`; native routes it through the branch so a
+ *   history-less DB is replayed instead of failing P3005), probing `_prisma_migrations`:
  *     - migration-managed (has `_prisma_migrations`)   → `pnpm db:deploy`   (apply pending)
  *     - empty (no public tables)                       → `pnpm db:deploy`   (replay full history)
  *     - unmanaged (tables, no `_prisma_migrations`)    → `pnpm prisma migrate reset --force`
@@ -24,7 +26,8 @@
  *   - The `cmd` field discriminates a `migrate_db` (branch) target from a fixed
  *     `db_step` target — exactly matching up.sh's chain, where iam-db/ads-adm-db
  *     use `pnpm prisma migrate deploy` and iam-pii-db uses `pnpm prisma db push`,
- *     while the program-hub apps + coach + sis go through the branch.
+ *     while the program-hub apps + coach + sis go through the branch. ONE deliberate
+ *     divergence: surveys-db is a branch target here (up.sh: fixed `db_step`).
  *   - `iam-pii db push` is preserved as its own step, in its manifest order slot.
  *   - `databaseUrlOverride:true` (programs/scheduling/sessions/content/coach_api)
  *     forces `DATABASE_URL` at the mesh postgres (port = 5432 + meshOffset), since
@@ -44,7 +47,8 @@
  * OPTIONAL PACKAGE (`MigrateSpec.optionalPackage`): a DB whose owning package may be
  * ABSENT from the checkout (surveys-db until student-data-system#495 is overlaid) is
  * SKIPPED with a note when its `migrate.dir` is not on disk — up.sh's `[[ -d $dir ]]`
- * guard around the surveys-db db_step. Only flagged DBs get this tolerance: a missing
+ * guard around the surveys-db step. The skip runs BEFORE the branch probe, so an
+ * absent package is never probed or migrated. Only flagged DBs get this tolerance: a missing
  * iam-db/ads-adm-db dir is a broken checkout and still fails loudly.
  *
  * PER-PACKAGE DEDUP: a general guard for two DBs sharing one owning `(repo, dir)`

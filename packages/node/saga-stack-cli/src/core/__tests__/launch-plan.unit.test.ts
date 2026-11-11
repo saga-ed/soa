@@ -334,11 +334,12 @@ describe('resolveLaunchEnv — faithful to up.sh services_up (stack lane)', () =
     expect(manifest.services['ads-adm-api'].databases).toContain('surveys_api_local');
     // The migrate injects the var surveys-db's prisma.config.ts reads FIRST
     // (SURVEYS_DATABASE_URL — never DATABASE_URL, which its .env-baked value would
-    // not out-rank), and tolerates the package being absent from the checkout.
+    // not out-rank), tolerates the package being absent from the checkout, and goes
+    // through the three-way branch (`db:deploy`) so a history-less DB is replayed.
     const spec = manifest.databases['surveys_api_local'].migrate;
     expect(spec).toMatchObject({
       dir: 'packages/node/surveys-db',
-      cmd: 'prisma migrate deploy',
+      cmd: 'db:deploy',
       migrateEnvVar: 'SURVEYS_DATABASE_URL',
       optionalPackage: true,
     });

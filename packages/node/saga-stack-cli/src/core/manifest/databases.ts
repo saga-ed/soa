@@ -145,12 +145,20 @@ export const DATABASES: Readonly<Record<DbId, DatabaseDef>> = {
     // base-port localhost SURVEYS_DATABASE_URL (`import 'dotenv/config'` never
     // overrides a pre-set var). Injecting SURVEYS_DATABASE_URL (slot-offset pgUrl)
     // is byte-identical to the .env value at slot 0 and slot-correct above it.
-    // Fixed db_step (`prisma migrate deploy`) right after ads-adm-db, like up.sh.
+    // Runs right after ads-adm-db through the THREE-WAY BRANCH (`db:deploy`, which
+    // surveys-db's package.json maps to `prisma migrate deploy`), NOT a fixed step:
+    // a DB with the surveys tables but no `_prisma_migrations` (an older snapshot,
+    // a stray `db:push`) used to hit P3005 under a fixed `migrate deploy` and abort
+    // the whole `up`/`restart` with every service stopped. The branch drops and
+    // replays it (`prisma migrate reset --force`) like the program-hub/coach/sis
+    // DBs; the question bank comes back with it, since a data migration seeds it
+    // (no `migrations.seed` is configured, so reset runs no seed script).
     // The package may be ABSENT from an SDS checkout (PR not overlaid, or the
-    // sector extracted later): R3 skips the migrate with a note (optionalPackage).
+    // sector extracted later): R3 skips the migrate with a note (optionalPackage),
+    // before any probe.
     migrate: {
       dir: 'packages/node/surveys-db',
-      cmd: 'prisma migrate deploy',
+      cmd: 'db:deploy',
       migrateEnvVar: 'SURVEYS_DATABASE_URL',
       optionalPackage: true,
     },

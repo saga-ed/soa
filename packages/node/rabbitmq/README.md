@@ -29,7 +29,7 @@ new ConnectionManager(logger, {
 });
 ```
 
-## Riding out a broker outage (1.4.0-dev.5, soa#578)
+## Riding out a broker outage (1.4.0, soa#578)
 
 The initial `connect()` is capped by `reconnect.maxRetries`. After an
 established connection is lost, the manager keeps reconnecting for

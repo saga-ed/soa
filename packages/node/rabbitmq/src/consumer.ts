@@ -1,5 +1,5 @@
 import { injectable, inject } from 'inversify';
-import type { ConnectionManager } from './connection-manager.js';
+import { ConnectionManagerClosedError, type ConnectionManager } from './connection-manager.js';
 import { Channel, ConsumeMessage, Replies } from 'amqplib';
 
 type Handler = (msg: ConsumeMessage) => Promise<boolean>;
@@ -41,7 +41,9 @@ export class MessageConsumer {
 
     const res = await this.subscribe(channel, queueName, consumer);
     const subs = this.subscriptions.get(channelName) ?? [];
-    subs.push({ queueName, consumer });
+    if (!subs.some((s) => s.queueName === queueName && s.consumer === consumer)) {
+      subs.push({ queueName, consumer });
+    }
     this.subscriptions.set(channelName, subs);
     return res;
   }
@@ -58,13 +60,17 @@ export class MessageConsumer {
     return channel.consume(queueName, async (msg: ConsumeMessage | null) => {
       if (!msg) return;
 
-      consumer(msg).then((success: boolean) => {
-        if (success) {
-          channel.ack(msg);
-        } else {
-          channel.nack(msg, false, true);
-        }
-      });
+      consumer(msg)
+        .then((success: boolean) => {
+          if (success) {
+            channel.ack(msg);
+          } else {
+            channel.nack(msg, false, true);
+          }
+        })
+        .catch(() => {
+          // Channel died mid-handler: the broker redelivers the unacked message.
+        });
     });
   }
 
@@ -87,7 +93,10 @@ export class MessageConsumer {
     const delay = Math.min(RESUBSCRIBE_MAX_DELAY_MS, RESUBSCRIBE_INITIAL_DELAY_MS * 2 ** attempt);
     const timer = setTimeout(() => {
       this.resubscribeTimers.delete(channelName);
-      this.resubscribe(channelName).catch(() => this.scheduleResubscribe(channelName, attempt + 1));
+      this.resubscribe(channelName).catch((err: unknown) => {
+        if (err instanceof ConnectionManagerClosedError) return; // shutting down
+        this.scheduleResubscribe(channelName, attempt + 1);
+      });
     }, delay);
     this.resubscribeTimers.set(channelName, timer);
   }
@@ -96,10 +105,15 @@ export class MessageConsumer {
     if (this.stopped) return;
     await this.connectionManager.ensureConnected();
     const channel = await this.connectionManager.newChannel();
+    let closedDuringSetup = false;
+    channel.on?.('close', () => {
+      closedDuringSetup = true;
+    });
     try {
       for (const sub of this.subscriptions.get(channelName) ?? []) {
         await this.subscribe(channel, sub.queueName, sub.consumer);
       }
+      if (closedDuringSetup) throw new Error('channel closed during resubscribe');
     } catch (err) {
       void Promise.resolve().then(() => channel.close()).catch(() => {});
       throw err;

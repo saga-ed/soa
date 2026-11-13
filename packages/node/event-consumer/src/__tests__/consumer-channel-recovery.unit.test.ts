@@ -100,6 +100,32 @@ describe('EventConsumer channel recovery', () => {
         expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('re-subscribed'));
     });
 
+    it('rides out an outage longer than the old ~3.5 min cap, then re-asserts topology and resubscribes', async () => {
+        vi.useFakeTimers();
+        const ch1 = makeChannel();
+        const ch2 = makeChannel();
+        const newChannel = vi.fn().mockResolvedValueOnce(ch1).mockResolvedValue(ch2);
+        const { consumer, connectionManager } = makeConsumer(newChannel);
+
+        await consumer.start();
+        let down = true;
+        connectionManager.ensureConnected.mockImplementation(async () => {
+            if (down) throw new Error('RabbitMQ reconnecting');
+        });
+        ch1.emit('close');
+
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(connectionManager.ensureConnected.mock.calls.length).toBeGreaterThan(10);
+        expect(ch2.consume).not.toHaveBeenCalled();
+
+        down = false;
+        await vi.advanceTimersByTimeAsync(31_000);
+
+        expect(ch2.assertQueue).toHaveBeenCalledWith('test.queue', expect.anything());
+        expect(ch2.bindQueue).toHaveBeenCalledWith('test.queue', 'test.events', '#');
+        expect(ch2.consume).toHaveBeenCalledTimes(1);
+    });
+
     it("stop() does not trigger a re-subscribe when the channel then closes", async () => {
         vi.useFakeTimers();
         const ch1 = makeChannel();

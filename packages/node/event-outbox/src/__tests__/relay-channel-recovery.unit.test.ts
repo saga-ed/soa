@@ -179,6 +179,30 @@ describe('OutboxRelay channel recovery', () => {
     });
 });
 
+describe('OutboxRelay across a long broker outage', () => {
+    it('stays running through many ensureConnected failures and publishes once the broker returns', async () => {
+        vi.useFakeTimers();
+        const ch1 = makeChannel();
+        const newChannel = vi.fn().mockResolvedValue(ch1);
+        const { relay, connectionManager } = makeRelay(newChannel);
+        const failures = 40; // well past the old 10-attempt / ~3.5 min cap
+        for (let i = 0; i < failures; i++) {
+            connectionManager.ensureConnected.mockRejectedValueOnce(
+                new Error('RabbitMQ reconnecting'),
+            );
+        }
+
+        for (let i = 0; i < failures; i++) await tick(relay);
+        const state = relay as unknown as { running: boolean; isLeader: boolean };
+        expect(state.running).toBe(true);
+        expect(ch1.publish).not.toHaveBeenCalled();
+
+        await tick(relay);
+        expect(ch1.publish).toHaveBeenCalledTimes(1);
+        expect(state.running).toBe(true);
+    });
+});
+
 describe('OutboxRelay failure-log throttling', () => {
     it('logs the first consecutive failure, then goes quiet until the heartbeat', async () => {
         vi.useFakeTimers();

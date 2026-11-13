@@ -54,6 +54,13 @@ await dr.boot(); // READINESS_BOOT=block|warn|open
 dr.start();
 ```
 
+### 0.5.0 (soa#578) — broker outage helper
+
+- `rabbitDependency({ connection, isConsuming?, budgetMs?, now?, name?, boot? })` returns two declarations for `createDeepReadiness`, structurally typed against soa-rabbitmq's `ConnectionManager` (`isConnected`, `disconnectedSince`, `reconnectGaveUp`, optional `reconnectBudgetMs`):
+  - `rabbitmq` (`scope: 'shared'`): fails while the broker is down. After first success that is `degraded` (200).
+  - `rabbitmq-task` (`scope: 'task'`): fails when the reconnect gave up, the outage exceeded the budget (default: the manager's, else 15 min), or the broker is up but `isConsuming()` is false: `not_ready` (503).
+  - Before the first successful probe any failure is still 503 (`starting`). Additive; 0.4.x exports are unchanged.
+
 ### 0.4.0 (soa#504) — fresh-connection probe
 
 - `DependencyDeclaration` gains `freshProbe(signal)` and `freshIntervalMs` (default 300000): a slower, independent probe that opens a NEW connection, so credential/token expiry that pooled probes miss (SQLSTATE 28000 / PAM) fails readiness like any active-probe failure. A pooled or `observe()` success never clears it; boot needs a fresh success too. `pgFreshProbe(() => new Client(...))` builds one for `pg` (structural `PgClientLike`, no `pg` dependency). Semantics: [docs/deep-readiness.md](docs/deep-readiness.md) section 4.

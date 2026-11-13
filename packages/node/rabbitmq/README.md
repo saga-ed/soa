@@ -29,6 +29,33 @@ new ConnectionManager(logger, {
 });
 ```
 
+## Riding out a broker outage (1.4.0, soa#578)
+
+The initial `connect()` is capped by `reconnect.maxRetries`. After an
+established connection is lost, the manager keeps reconnecting for
+`reconnect.budgetMs` (default 15 min, longer than a single-instance broker's
+~8 min maintenance reboot) with the same capped backoff, then gives up.
+
+**Behaviour change:** callers that set only `maxRetries` now get the 15 min
+budget for reconnects after a loss (previously ~10 attempts, ~3.5 min). Pass
+`reconnect: { budgetMs: 0 }` to keep the count cap for reconnects.
+
+| Accessor | Meaning |
+| --- | --- |
+| `isConnected()` | READY or DEGRADED |
+| `disconnectedSince()` | epoch ms the live connection was lost; `undefined` while connected or never connected |
+| `reconnectGaveUp()` | the manager stopped retrying (state `CIRCUIT_OPEN`); distinct from `CLOSED`, and a later `connect()`/`ensureConnected()` still tries and clears it on success |
+| `reconnectBudgetMs()` | configured budget |
+
+- `ensureConnected()` throws immediately while a background reconnect is in
+  progress (channel holders retry on their own cadence); `newChannel()` names the
+  outage (`disconnected since <iso>; reconnect in progress|gave up`).
+- `MessageConsumer` re-creates its channel and re-subscribes after a channel
+  loss (backoff 1s to 30s, until `stop()`); `MessagePublisher` evicts dead channels.
+  `EventConsumer` and `OutboxRelay` already re-assert topology / re-acquire a
+  channel on their own retry loops; no change needed there.
+- Health: `rabbitDependency()` in `@saga-ed/soa-health` 0.5.0 reads these accessors.
+
 ## Shutting down — `close()`
 
 Services hold their connection for their whole lifetime and never need

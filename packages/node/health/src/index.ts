@@ -61,3 +61,9 @@ export type {
   ReadinessVerdict,
 } from './deep/types.js';
 export { pgFreshProbe, type PgClientLike, type ProbeFetchLike } from './deep/adapters.js';
+export {
+  rabbitDependency,
+  DEFAULT_BROKER_BUDGET_MS,
+  type BrokerConnectionLike,
+  type RabbitDependencyOptions,
+} from './deep/rabbit-dependency.js';

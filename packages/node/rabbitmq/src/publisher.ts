@@ -16,6 +16,13 @@ export class MessagePublisher {
 
     const channel = await this.connectionManager.newChannel();
     this.channels.set(channelName, channel);
+    // A channel dies with its connection; evict it so requestChannel() can re-create it.
+    channel.on?.('error', () => {
+      // 'close' follows; this only keeps 'error' from crashing the process.
+    });
+    channel.on?.('close', () => {
+      if (this.channels.get(channelName) === channel) this.channels.delete(channelName);
+    });
     return true;
   }
 

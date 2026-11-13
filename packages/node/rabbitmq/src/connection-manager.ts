@@ -87,10 +87,19 @@ export function resetFailFastFallbackWarning(): void {
 
 export interface ReconnectConfig {
   enabled: boolean;
+  /** Attempt cap for the initial connect(). A reconnect after a live connection is governed by `budgetMs`. */
   maxRetries?: number;
   initialDelay?: number; // ms
   maxDelay?: number; // ms
+  /**
+   * How long to keep reconnecting after an established connection is lost
+   * (default 15 min). `0` opts out: reconnects are capped by `maxRetries` alone.
+   */
+  budgetMs?: number;
 }
+
+/** Longer than a single-instance broker's maintenance reboot (~8 min). */
+export const DEFAULT_RECONNECT_BUDGET_MS = 15 * 60_000;
 
 /**
  * Thrown by `connect()`/`ensureConnected()` on a manager that has been
@@ -137,6 +146,7 @@ const DEFAULT_CONNECTION_CONFIG: Required<Omit<RabbitMQConfig, 'url' | 'failureM
     maxRetries: 10,
     initialDelay: 1000, // 1 second
     maxDelay: 30000, // 30 seconds
+    budgetMs: DEFAULT_RECONNECT_BUDGET_MS,
   },
   heartbeat: 60,
 };
@@ -175,6 +185,12 @@ export class ConnectionManager {
    */
   private cancelRetryWait: (() => void) | null = null;
 
+  /** Epoch ms an established connection was lost; cleared only when READY again. */
+  private disconnectedAt: number | undefined;
+
+  /** True once the reconnect loop stopped retrying. Not terminal: a later connect() can clear it; CLOSED cannot. */
+  private reconnectStopped = false;
+
   // Circuit breaker prameters
   private failureCount = 0;
   private circuitOpen = false;
@@ -198,6 +214,31 @@ export class ConnectionManager {
 
   state() {
     return this.currentState;
+  }
+
+  /** True while the connection is usable (READY, or DEGRADED = connected but flow-blocked). */
+  isConnected(): boolean {
+    return this.currentState === "READY" || this.currentState === "DEGRADED";
+  }
+
+  /** Epoch ms an established connection was lost; undefined while connected or if it never connected. */
+  disconnectedSince(): number | undefined {
+    return this.isConnected() ? undefined : this.disconnectedAt;
+  }
+
+  /**
+   * True once the manager stopped retrying (budget spent after a loss, or the
+   * initial connect exhausted `maxRetries`). Distinct from `state() === 'CLOSED'`
+   * (deliberate `close()`); a later `connect()`/`ensureConnected()` still tries
+   * and clears it on success.
+   */
+  reconnectGaveUp(): boolean {
+    return !this.closed && this.reconnectStopped;
+  }
+
+  /** The configured reconnect budget in ms (0 = count-capped by `maxRetries`). */
+  reconnectBudgetMs(): number {
+    return this.config.reconnect.budgetMs;
   }
 
   private setState(state: ConnectionState) {
@@ -260,6 +301,13 @@ export class ConnectionManager {
   async ensureConnected(): Promise<void> {
     if (this.currentState === "READY" || this.currentState === "DEGRADED") {
       return;
+    }
+    // A background reconnect can run for the whole budget; callers retry on
+    // their own cadence rather than parking behind it.
+    if (this.connectPromise && this.disconnectedAt !== undefined && !this.closed) {
+      throw new Error(
+        `RabbitMQ reconnecting (disconnected since ${new Date(this.disconnectedAt).toISOString()})`,
+      );
     }
     await this.connect();
     const state = this.state();
@@ -338,7 +386,7 @@ export class ConnectionManager {
     }
 
     this.setState("CONNECTING");
-    while (this.failureCount < this.config.reconnect.maxRetries) {
+    for (;;) {
       try {
         const connectionOptions = {
           heartbeat: this.config.heartbeat,
@@ -359,6 +407,8 @@ export class ConnectionManager {
 
         // Mark ready and reset failure count
         this.failureCount = 0;
+        this.disconnectedAt = undefined;
+        this.reconnectStopped = false;
         this.setState("READY");
         return;
       } catch (error) {
@@ -372,6 +422,7 @@ export class ConnectionManager {
         // close() itself pending behind `await inFlight` — the exact hang a
         // one-shot CLI calls close() to avoid.
         if (this.closed) return;
+        if (!this.mayRetry()) break;
 
         const delay = this.backoff(this.failureCount);
         this.logger.warn(`[MQConnectionManager] Retry in ${Math.round(delay)}ms`);
@@ -386,6 +437,18 @@ export class ConnectionManager {
 
     // If connection attempts have failed, open the circuit breaker
     this.tripCircuitBreaker();
+  }
+
+  /**
+   * After a live connection was lost, retry until the budget is spent; the
+   * initial connect (and `budgetMs: 0`) is capped by `maxRetries`.
+   */
+  private mayRetry(): boolean {
+    const { budgetMs, maxRetries } = this.config.reconnect;
+    if (this.disconnectedAt !== undefined && budgetMs > 0) {
+      return Date.now() - this.disconnectedAt < budgetMs;
+    }
+    return this.failureCount < maxRetries;
   }
 
   /**
@@ -404,9 +467,19 @@ export class ConnectionManager {
     });
   }
 
+  private notConnectedError(): Error {
+    if (this.disconnectedAt === undefined) {
+      return new Error('Channel model not initialized - ensure connection is established');
+    }
+    const since = new Date(this.disconnectedAt).toISOString();
+    return new Error(
+      `RabbitMQ disconnected since ${since}; ${this.reconnectGaveUp() ? 'reconnect gave up' : 'reconnect in progress'}`,
+    );
+  }
+
   async newChannel(): Promise<Channel> {
     if (!this.channelModel) {
-      throw new Error('Channel model not initialized - ensure connection is established');
+      throw this.notConnectedError();
     }
 
     return this.channelModel.createChannel();
@@ -432,7 +505,7 @@ export class ConnectionManager {
    */
   async newConfirmChannel(): Promise<ConfirmChannel> {
     if (!this.channelModel) {
-      throw new Error('Channel model not initialized - ensure connection is established');
+      throw this.notConnectedError();
     }
 
     return this.channelModel.createConfirmChannel();
@@ -466,6 +539,10 @@ export class ConnectionManager {
       // close() closed it on purpose; this event is the confirmation, not a
       // failure. Reconnecting here would defeat the whole point of close().
       if (this.closed) return;
+      // A superseded model's late event must not clobber the live connection.
+      if (this.channelModel !== model) return;
+      this.channelModel = null;
+      this.disconnectedAt ??= Date.now();
       this.setState("DISCONNECTED");
       this.logger.warn("[MQConnectionManager] Connection closed – attempting reconnect");
       this.handleReconnection();
@@ -496,7 +573,10 @@ export class ConnectionManager {
     // this one is on the only line that actually reconnects, so a future
     // second trigger cannot reintroduce the bug by forgetting to check.
     if (this.closed) return;
-    if (!this.config.reconnect.enabled) return;
+    if (!this.config.reconnect.enabled) {
+      this.reconnectStopped = true;
+      return;
+    }
     this.logger.warn("[MQConnectionManager] Attempting automatic reconnection...");
     try {
       await this.connect();
@@ -525,6 +605,7 @@ export class ConnectionManager {
   private tripCircuitBreaker() {
     this.circuitOpenTimestamp = Date.now();
     this.circuitOpen = true;
+    this.reconnectStopped = true;
     this.setState("CIRCUIT_OPEN");
     const mode = this.resolveFailureMode();
     const message = "RabbitMQ connection failed: circuit breaker opened";

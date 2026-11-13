@@ -56,6 +56,23 @@ budget for reconnects after a loss (previously ~10 attempts, ~3.5 min). Pass
   channel on their own retry loops; no change needed there.
 - Health: `rabbitDependency()` in `@saga-ed/soa-health` 0.5.0 reads these accessors.
 
+## `MessageConsumer` options (1.4.1, soa#578)
+
+`consumeFromQueue(channel, queue, handler, options?)` takes optional, backwards-compatible `options`; omitting them behaves exactly as in 1.4.0.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `queue` | bare `assertQueue(name)` | `{ args }`: `assertQueue(name, args)` on every (re)subscribe, so a queue with `x-queue-type: quorum`, `x-delivery-limit`, `x-dead-letter-exchange` does not 406 (inequivalent args). `{ passive: true }`: `checkQueue(name)` only |
+| `ackMode` | `'auto'` | `'auto'`: handler returns `Promise<boolean>`; true acks, false nacks with requeue. `'manual'`: handler is `(msg, channel) => Promise<void>`, `channel` is the one the message arrived on, and **the handler owns ack/nack** |
+| `prefetch` | none | `channel.prefetch(n)` on each (re)subscribe channel. It is channel-wide, so with several subscriptions on one named channel the last one wins |
+| `onError` | `console.error` | Called when a `'manual'` handler throws |
+
+Manual mode: MessageConsumer never acks or nacks, including when the handler throws. The error goes to `onError` and the message stays unacked; the broker redelivers it when the channel closes (a quorum queue counts each delivery toward `x-delivery-limit`). Poison messages are the handler's call: `channel.nack(msg, false, false)` dead-letters to the DLX.
+
+Resubscribe failures (for example a 406 from the queue declare) back off 1s to 30s and never hot-loop. `consumer.state()` returns per named channel `{ status: 'subscribed' | 'resubscribing', attempts, lastError? }`, and `consumer.isConsuming()` is false while any channel is resubscribing or after `stop()`. Pass it to soa-health: `rabbitDependency({ connection: () => cm, isConsuming: () => consumer.isConsuming() })`.
+
+Real-broker tests: `RABBITMQ_TEST_CONTAINER=<name> pnpm --filter @saga-ed/soa-rabbitmq test:int` against a local `rabbitmq:3-management` on `:45672` (they are not part of `pnpm test`).
+
 ## Shutting down — `close()`
 
 Services hold their connection for their whole lifetime and never need

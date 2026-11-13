@@ -64,12 +64,12 @@ budget for reconnects after a loss (previously ~10 attempts, ~3.5 min). Pass
 | --- | --- | --- |
 | `queue` | bare `assertQueue(name)` | `{ args }`: `assertQueue(name, args)` on every (re)subscribe, so a queue with `x-queue-type: quorum`, `x-delivery-limit`, `x-dead-letter-exchange` does not 406 (inequivalent args). `{ passive: true }`: `checkQueue(name)` only |
 | `ackMode` | `'auto'` | `'auto'`: handler returns `Promise<boolean>`; true acks, false nacks with requeue. `'manual'`: handler is `(msg, channel) => Promise<void>`, `channel` is the one the message arrived on, and **the handler owns ack/nack** |
-| `prefetch` | none | `channel.prefetch(n)` on each (re)subscribe channel. It is channel-wide, so with several subscriptions on one named channel the last one wins |
-| `onError` | `console.error` | Called when a `'manual'` handler throws |
+| `prefetch` | none | `channel.prefetch(n)` (non-global) before each consume on every (re)subscribe channel, so each consumer gets its own limit of n unacked messages. In `'manual'` mode a handler that throws without acking keeps one of those slots until the channel closes, so nack or close in `onError` |
+| `onError` | `console.error` (manual only) | Called when a handler throws or rejects; in `'auto'` mode only when provided |
 
 Manual mode: MessageConsumer never acks or nacks, including when the handler throws. The error goes to `onError` and the message stays unacked; the broker redelivers it when the channel closes (a quorum queue counts each delivery toward `x-delivery-limit`). Poison messages are the handler's call: `channel.nack(msg, false, false)` dead-letters to the DLX.
 
-Resubscribe failures (for example a 406 from the queue declare) back off 1s to 30s and never hot-loop. `consumer.state()` returns per named channel `{ status: 'subscribed' | 'resubscribing', attempts, lastError? }`, and `consumer.isConsuming()` is false while any channel is resubscribing or after `stop()`. Pass it to soa-health: `rabbitDependency({ connection: () => cm, isConsuming: () => consumer.isConsuming() })`.
+Resubscribe failures (for example a 406 from the queue declare) back off 1s to 30s and never hot-loop. `consumer.state()` returns per named channel `{ status: 'subscribed' | 'resubscribing', attempts, lastError? }`, and `consumer.isConsuming()` is false while any channel is resubscribing, before any subscription exists, or after `stop()`. Pass it to soa-health: `rabbitDependency({ connection: () => cm, isConsuming: () => consumer.isConsuming() })`.
 
 Real-broker tests: `RABBITMQ_TEST_CONTAINER=<name> pnpm --filter @saga-ed/soa-rabbitmq test:int` against a local `rabbitmq:3-management` on `:45672` (they are not part of `pnpm test`).
 

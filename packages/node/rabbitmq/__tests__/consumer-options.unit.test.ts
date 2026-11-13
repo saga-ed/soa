@@ -201,3 +201,66 @@ describe('resubscribe failure surfaces and backs off', () => {
         expect(consumer.isConsuming()).toBe(false);
     });
 });
+
+describe('review hardening', () => {
+    it('a synchronous throw, or a throwing onError, is contained (no unhandled rejection)', async () => {
+        const ch = makeChannel();
+        const { consumer } = await setup([ch]);
+        const sync = vi.fn(() => {
+            throw new Error('sync');
+        });
+        const unhandled = vi.fn();
+        process.on('unhandledRejection', unhandled);
+        await consumer.consumeFromQueue('c', 'q', sync as never, {
+            ackMode: 'manual',
+            onError: () => {
+                throw new Error('onError itself throws');
+            },
+        });
+        await deliver(ch, { n: 1 });
+        await vi.advanceTimersByTimeAsync(10);
+        process.off('unhandledRejection', unhandled);
+        expect(unhandled).not.toHaveBeenCalled();
+        expect(ch.ack).not.toHaveBeenCalled();
+        expect(ch.nack).not.toHaveBeenCalled();
+    });
+
+    it("'auto' reports a rejecting handler to a provided onError and leaves the message alone", async () => {
+        const ch = makeChannel();
+        const { consumer } = await setup([ch]);
+        const onError = vi.fn();
+        await consumer.consumeFromQueue('c', 'q', async () => Promise.reject(new Error('x')), { onError });
+        await deliver(ch, { n: 1 });
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(ch.ack).not.toHaveBeenCalled();
+        expect(ch.nack).not.toHaveBeenCalled();
+    });
+
+    it('isConsuming is false before any subscription exists', async () => {
+        const ch = makeChannel();
+        const { consumer } = await setup([ch]);
+        expect(consumer.isConsuming()).toBe(false);
+    });
+
+    it('same queue and handler with different options registers both, and both are replayed', async () => {
+        const ch1 = makeChannel();
+        const ch2 = makeChannel();
+        const { consumer } = await setup([ch1, ch2]);
+        const h = vi.fn();
+        await consumer.consumeFromQueue('c', 'q', h, { prefetch: 1 });
+        await consumer.consumeFromQueue('c', 'q', h, { prefetch: 9 });
+        ch1.emit('close');
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(ch2.consume).toHaveBeenCalledTimes(2);
+        expect(ch2.prefetch).toHaveBeenCalledWith(1);
+        expect(ch2.prefetch).toHaveBeenCalledWith(9);
+    });
+
+    it('accepts a union-typed ackMode (type check)', async () => {
+        const ch = makeChannel();
+        const { consumer } = await setup([ch]);
+        const cfg: { ackMode: 'auto' | 'manual' } = { ackMode: 'manual' };
+        await consumer.consumeFromQueue('c', 'q', (async () => undefined) as never, { ackMode: cfg.ackMode });
+        expect(ch.consume).toHaveBeenCalled();
+    });
+});

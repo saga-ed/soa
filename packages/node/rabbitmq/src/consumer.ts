@@ -23,9 +23,16 @@ export interface ConsumeOptions {
    * when the handler throws (the message stays unacked and is redelivered when the channel closes).
    */
   ackMode?: 'auto' | 'manual';
-  /** `channel.prefetch(n)` on each (re)subscribe channel. Channel-wide: the last subscription wins. */
+  /**
+   * `channel.prefetch(n)` (non-global) before each consume, on every (re)subscribe channel: each
+   * consumer gets its own limit of n unacked messages. In 'manual' mode a handler that throws
+   * without acking holds one of those slots until the channel closes; use `onError` to nack or close.
+   */
   prefetch?: number;
-  /** Called when a handler throws. Default: console.error. */
+  /**
+   * Called when a handler throws or rejects. Default in 'manual' mode: console.error. In 'auto'
+   * mode it is only called when provided (the message stays unacked, as before).
+   */
   onError?: (err: unknown, msg: ConsumeMessage) => void;
 }
 
@@ -44,6 +51,7 @@ interface Subscription {
   options: ConsumeOptions;
 }
 
+const NO_OPTIONS: ConsumeOptions = {};
 const RESUBSCRIBE_INITIAL_DELAY_MS = 1_000;
 const RESUBSCRIBE_MAX_DELAY_MS = 30_000;
 
@@ -86,7 +94,13 @@ export class MessageConsumer {
     channelName: string,
     queueName: string,
     consumer: Handler,
-    options: ConsumeOptions = {},
+    options: ConsumeOptions,
+  ): Promise<Replies.Consume>;
+  async consumeFromQueue(
+    channelName: string,
+    queueName: string,
+    consumer: Handler,
+    options: ConsumeOptions = NO_OPTIONS,
   ): Promise<Replies.Consume> {
     const channel = this.channels.get(channelName);
     if (!channel) {
@@ -95,7 +109,7 @@ export class MessageConsumer {
 
     const res = await this.subscribe(channel, queueName, consumer, options);
     const subs = this.subscriptions.get(channelName) ?? [];
-    if (!subs.some((s) => s.queueName === queueName && s.consumer === consumer)) {
+    if (!subs.some((s) => s.queueName === queueName && s.consumer === consumer && s.options === options)) {
       subs.push({ queueName, consumer, options });
     }
     this.subscriptions.set(channelName, subs);
@@ -125,7 +139,7 @@ export class MessageConsumer {
 
   /** True when every channel with subscriptions is live. Suitable for soa-health `isConsuming`. */
   isConsuming(): boolean {
-    return !this.stopped && this.state().every((s) => s.status === 'subscribed');
+    return !this.stopped && this.subscriptions.size > 0 && this.state().every((s) => s.status === 'subscribed');
   }
 
   private async subscribe(
@@ -144,31 +158,37 @@ export class MessageConsumer {
     }
     if (options.prefetch !== undefined) await channel.prefetch(options.prefetch);
     const manual = options.ackMode === 'manual';
-    const onError =
-      options.onError ??
-      ((err: unknown) => {
-        // eslint-disable-next-line no-console
-        console.error(`[MessageConsumer] handler for ${queueName} threw`, err);
-      });
+    const report = (err: unknown, msg: ConsumeMessage): void => {
+      try {
+        if (options.onError) options.onError(err, msg);
+        else if (manual) console.error(`[MessageConsumer] handler for ${queueName} threw`, err); // eslint-disable-line no-console
+      } catch {
+        // a throwing onError must not become an unhandled rejection
+      }
+    };
     return channel.consume(queueName, async (msg: ConsumeMessage | null) => {
       if (!msg) return;
 
       if (manual) {
         // The handler owns ack/nack. A throw leaves the message unacked (redelivered on channel close).
-        (consumer as ManualHandler)(msg, channel).catch((err: unknown) => onError(err, msg));
+        try {
+          await (consumer as ManualHandler)(msg, channel);
+        } catch (err) {
+          report(err, msg);
+        }
         return;
       }
-      (consumer as AutoHandler)(msg)
-        .then((success: boolean) => {
-          if (success) {
-            channel.ack(msg);
-          } else {
-            channel.nack(msg, false, true);
-          }
-        })
-        .catch(() => {
-          // Channel died mid-handler: the broker redelivers the unacked message.
-        });
+      try {
+        const success = await (consumer as AutoHandler)(msg);
+        if (success) {
+          channel.ack(msg);
+        } else {
+          channel.nack(msg, false, true);
+        }
+      } catch (err) {
+        // Handler threw, or the channel died mid-handler: unacked, so the broker redelivers.
+        report(err, msg);
+      }
     });
   }
 

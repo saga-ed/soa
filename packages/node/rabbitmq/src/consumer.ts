@@ -242,7 +242,6 @@ export class MessageConsumer {
   private runResubscribe(channelName: string, attempt: number): void {
     if (this.stopped || this.resubscribing.has(channelName)) return;
     this.resubscribing.add(channelName);
-    this.readyDuringResubscribe.delete(channelName);
     this.resubscribe(channelName)
       .then(() => {
         this.resubscribing.delete(channelName);

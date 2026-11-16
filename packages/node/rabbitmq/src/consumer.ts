@@ -53,7 +53,7 @@ interface Subscription {
 
 const NO_OPTIONS: ConsumeOptions = {};
 const isTransientCloseError = (err: unknown): boolean =>
-  err instanceof Error && /reconnecting|unavailable|closed/i.test(err.message);
+  err instanceof Error && /reconnecting|unavailable|closed|ended|disconnected/i.test(err.message);
 const RESUBSCRIBE_INITIAL_DELAY_MS = 1_000;
 const RESUBSCRIBE_MAX_DELAY_MS = 30_000;
 
@@ -245,8 +245,9 @@ export class MessageConsumer {
   private runResubscribe(channelName: string, attempt: number): void {
     if (this.stopped || this.resubscribing.has(channelName)) return;
     this.resubscribing.add(channelName);
-    const reconnectsAtStart = this.reconnects;
-    this.resubscribe(channelName)
+    // Advanced past the attempt's own ensureConnected(), whose reconnect must not trigger an immediate retry.
+    const seen = { reconnects: this.reconnects };
+    this.resubscribe(channelName, seen)
       .then(() => {
         this.resubscribing.delete(channelName);
       })
@@ -260,14 +261,15 @@ export class MessageConsumer {
         });
         // A reconnect landed during this attempt and the failure is a closed connection/channel:
         // retry on the fresh connection now. Anything else keeps the backoff.
-        if (this.reconnects > reconnectsAtStart && isTransientCloseError(err)) this.runResubscribe(channelName, attempt + 1);
+        if (this.reconnects > seen.reconnects && isTransientCloseError(err)) this.runResubscribe(channelName, attempt + 1);
         else this.scheduleResubscribe(channelName, attempt + 1);
       });
   }
 
-  private async resubscribe(channelName: string): Promise<void> {
+  private async resubscribe(channelName: string, seen: { reconnects: number }): Promise<void> {
     if (this.stopped) return;
     await this.connectionManager.ensureConnected();
+    seen.reconnects = this.reconnects;
     const channel = await this.connectionManager.newChannel();
     let closedDuringSetup = false;
     channel.on?.('close', () => {

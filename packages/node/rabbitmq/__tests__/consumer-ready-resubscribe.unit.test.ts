@@ -137,6 +137,19 @@ describe('MessageConsumer resubscribe on reconnect', () => {
         expect(consumer.state()[0]!.attempts).toBe(1);
     });
 
+    it('keeps the backoff when its own ensureConnected() reconnects and the channel then closes', async () => {
+        const { cm, fireReconnected } = makeManager();
+        cm.ensureConnected.mockImplementation(async () => fireReconnected());
+        const { consumer } = await lostChannel(cm);
+        cm.newChannel.mockRejectedValue(new Error('Channel closed'));
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(cm.newChannel).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(500);
+        expect(cm.newChannel).toHaveBeenCalledTimes(2);
+        expect(consumer.state()[0]!.attempts).toBe(1);
+    });
+
     it('a ConnectionManagerClosedError exit clears the in-flight guard', async () => {
         const { cm, fireReconnected } = makeManager();
         cm.ensureConnected.mockRejectedValueOnce(new ConnectionManagerClosedError()).mockResolvedValue(undefined);

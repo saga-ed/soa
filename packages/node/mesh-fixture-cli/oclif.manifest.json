@@ -147,7 +147,7 @@
           "type": "option"
         },
         "user": {
-          "description": "user (username or UUID)",
+          "description": "user (email or UUID)",
           "name": "user",
           "required": true,
           "hasDynamicHelp": false,
@@ -318,7 +318,7 @@
     "iam:create-user": {
       "aliases": [],
       "args": {},
-      "description": "Create a user — dedup by username (via users.search).",
+      "description": "Create a user — dedup by email (via auth.devLogin; dev stacks only).",
       "flags": {
         "porcelain": {
           "description": "machine-readable output; no color, minimal noise",
@@ -372,16 +372,8 @@
           "multiple": false,
           "type": "option"
         },
-        "username": {
-          "description": "unique username (dedup key)",
-          "name": "username",
-          "required": true,
-          "hasDynamicHelp": false,
-          "multiple": false,
-          "type": "option"
-        },
         "email": {
-          "description": "email",
+          "description": "email (dedup key)",
           "name": "email",
           "required": true,
           "hasDynamicHelp": false,
@@ -404,7 +396,7 @@
           "type": "option"
         },
         "screen-name": {
-          "description": "screen name (defaults to username)",
+          "description": "screen name (defaults to the email local part)",
           "name": "screen-name",
           "hasDynamicHelp": false,
           "multiple": false,

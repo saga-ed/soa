@@ -35,7 +35,7 @@ node ~/dev/soa/packages/node/mesh-fixture-cli/bin/run.js snapshot:list
 | `snapshot:show <fixture-id>` | ✅ | Merged view of fixture.registry rows across iam/programs/scheduling/ads-adm |
 | `snapshot:validate <fixture-id>` | ✅ | Verify every registry artifact id still resolves (exits 1 if any missing) |
 | `iam:create-org` | ✅ | rostering group creation (dedup by sourceId) + writes registry row |
-| `iam:create-user` | ✅ | rostering user creation (dedup by username) |
+| `iam:create-user` | ✅ | rostering user creation (dedup by email; IAM username is retired) |
 | `iam:add-membership` | ✅ | parent-ordered membership (dedup by "already member") |
 | `pgm:create-program` | ✅ | program-hub program creation (dedup by org+name) |
 | `pgm:create-period` | ✅ | period under a program (dedup by program+name) |

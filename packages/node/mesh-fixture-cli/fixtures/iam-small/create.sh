@@ -64,38 +64,38 @@ cli iam:create-org --fixture-id "$FIXTURE_ID" --slug iam-small-south-a --kind se
 # ─── 2. Users (+ PII) ───────────────────────────────────────────────────────
 # All seed at the default UserRole (USER) — the --role flag arrives with #667.
 echo "==> iam: users"
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username iam-small-admin-1 --email iam-small-admin-1@fixture.test --name-first Ada --name-last Min
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username iam-small-tutor-1 --email iam-small-tutor-1@fixture.test --name-first Tess --name-last Tutor
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username iam-small-tutor-2 --email iam-small-tutor-2@fixture.test --name-first Ted --name-last Tutor
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username iam-small-student-1 --email iam-small-student-1@fixture.test --name-first Stu --name-last One
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username iam-small-student-2 --email iam-small-student-2@fixture.test --name-first Stu --name-last Two
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username iam-small-student-3 --email iam-small-student-3@fixture.test --name-first Stu --name-last Three
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username iam-small-student-4 --email iam-small-student-4@fixture.test --name-first Stu --name-last Four
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email iam-small-admin-1@fixture.test --name-first Ada --name-last Min
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email iam-small-tutor-1@fixture.test --name-first Tess --name-last Tutor
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email iam-small-tutor-2@fixture.test --name-first Ted --name-last Tutor
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email iam-small-student-1@fixture.test --name-first Stu --name-last One
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email iam-small-student-2@fixture.test --name-first Stu --name-last Two
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email iam-small-student-3@fixture.test --name-first Stu --name-last Three
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email iam-small-student-4@fixture.test --name-first Stu --name-last Four
 
 # ─── 3. Memberships ─────────────────────────────────────────────────────────
 # Parent-first (district → school → section). Admin at the district; each tutor
 # at the district + a school; each student at the district + one school + one
 # section (member at every tier so roster tree-walks resolve them).
 echo "==> iam: memberships"
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-admin-1 --group iam-small-district
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-admin-1@fixture.test --group iam-small-district
 
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-tutor-1 --group iam-small-district
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-tutor-1 --group iam-small-north
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-tutor-2 --group iam-small-district
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-tutor-2 --group iam-small-south
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-tutor-1@fixture.test --group iam-small-district
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-tutor-1@fixture.test --group iam-small-north
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-tutor-2@fixture.test --group iam-small-district
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-tutor-2@fixture.test --group iam-small-south
 
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-1 --group iam-small-district
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-1 --group iam-small-north
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-1 --group iam-small-north-a
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-2 --group iam-small-district
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-2 --group iam-small-north
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-2 --group iam-small-north-b
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-3 --group iam-small-district
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-3 --group iam-small-south
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-3 --group iam-small-south-a
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-4 --group iam-small-district
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-4 --group iam-small-south
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-4 --group iam-small-south-a
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-1@fixture.test --group iam-small-district
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-1@fixture.test --group iam-small-north
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-1@fixture.test --group iam-small-north-a
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-2@fixture.test --group iam-small-district
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-2@fixture.test --group iam-small-north
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-2@fixture.test --group iam-small-north-b
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-3@fixture.test --group iam-small-district
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-3@fixture.test --group iam-small-south
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-3@fixture.test --group iam-small-south-a
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-4@fixture.test --group iam-small-district
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-4@fixture.test --group iam-small-south
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user iam-small-student-4@fixture.test --group iam-small-south-a
 
 echo
 echo "✓ fixture '$FIXTURE_ID' authored. Snapshot with:"

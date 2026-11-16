@@ -11,7 +11,7 @@ import { asFlag, fixtureIdFlag, sourceFlag } from '../../shared-flags.js';
 import { TrpcClient, TrpcCallError } from '../../lib/http.js';
 import {
   findGroupBySourceId,
-  findUserByUsername,
+  findUserIdByEmail,
   looksLikeUuid,
 } from '../../iam-helpers.js';
 import { appendArtifact, recordCommand, sanitizeArgs } from '../../lib/registry.js';
@@ -24,7 +24,7 @@ export default class IamAddMembership extends BaseCommand {
     ...BaseCommand.baseFlags,
     'fixture-id': fixtureIdFlag,
     user: Flags.string({
-      description: 'user (username or UUID)',
+      description: 'user (email or UUID)',
       required: true,
     }),
     group: Flags.string({
@@ -39,14 +39,14 @@ export default class IamAddMembership extends BaseCommand {
     const { flags } = await this.parse(IamAddMembership);
     const client = new TrpcClient({ baseUrl: flags['iam-url'] });
 
-    // Resolve user (accept either UUID or username).
+    // Resolve user (accept either UUID or email; IAM `username` is retired).
     let userId: string;
     if (looksLikeUuid(flags.user)) {
       userId = flags.user;
     } else {
-      const user = await findUserByUsername(client, flags.user);
-      if (!user) throw new Error(`user '${flags.user}' not found (by username).`);
-      userId = user.id;
+      const found = await findUserIdByEmail(client, flags.user);
+      if (!found) throw new Error(`user '${flags.user}' not found (by email).`);
+      userId = found;
     }
 
     // Resolve group (accept either UUID or slug).

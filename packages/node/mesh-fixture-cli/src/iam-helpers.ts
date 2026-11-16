@@ -6,11 +6,11 @@
  * separate CLI invocations. These helpers wrap the two primary lookup paths:
  *
  *   findGroupBySourceId — groups.findBySourceBulk (returns null if absent)
- *   findUserByUsername  — users.search (returns null if absent)
+ *   findUserIdByEmail   — auth.devLogin (returns null if absent)
  *   resolveGroupId      — accept slug or UUID, throw if slug is unknown
  */
 
-import type { TrpcClient } from './lib/http.js';
+import { TrpcCallError, type TrpcClient } from './lib/http.js';
 
 export interface Group {
   id: string;
@@ -22,7 +22,6 @@ export interface Group {
 
 export interface User {
   id: string;
-  username: string;
 }
 
 const UUID_PREFIX_RE = /^[0-9a-f]{8}-/;
@@ -43,15 +42,34 @@ export async function findGroupBySourceId(
   return groups.find((g) => g.sourceId === sourceId) ?? null;
 }
 
-export async function findUserByUsername(
+/**
+ * The id of the user with this email, or null when there is none.
+ *
+ * IAM `username` is retired and dropped (rostering
+ * docs/iam/identity_fields_cleanup.md), so users are found by email. Email
+ * lives encrypted in iam-pii and `users.search` cannot match it;
+ * `users.resolveIdsByEmail` needs the `can_view_user_pii` staff capability,
+ * which a local stack does not grant. `auth.devLogin` looks the email up by
+ * its hash and returns the id, so this works wherever dev login is enabled
+ * (local / dev stacks — where this CLI runs) and throws FORBIDDEN elsewhere.
+ * Side effect: each lookup mints a throwaway session and a dev-login audit row.
+ * An unknown (or inactive) email is UNAUTHORIZED, which reads as "absent".
+ */
+export async function findUserIdByEmail(
   iamClient: TrpcClient,
-  username: string,
-): Promise<User | null> {
-  const result = await iamClient.query<{ items: User[]; total: number }>(
-    'users.search',
-    { username, limit: 1 },
-  );
-  return result.items.find((u) => u.username === username) ?? null;
+  email: string,
+): Promise<string | null> {
+  try {
+    const res = await iamClient.mutation<{ userId: string }>('auth.devLogin', {
+      identifier: email,
+    });
+    return res.userId;
+  } catch (err) {
+    if (err instanceof TrpcCallError && err.trpcError?.data?.code === 'UNAUTHORIZED') {
+      return null;
+    }
+    throw err;
+  }
 }
 
 export async function resolveGroupId(

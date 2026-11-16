@@ -34,7 +34,24 @@ let adminCh: Channel;
 const managers: ConnectionManager[] = [];
 const queues: string[] = [];
 
+// The stop/start tests kill the admin connection; re-open it for tests that run afterwards.
+async function ensureAdmin(): Promise<void> {
+  try {
+    const probe = await admin.createChannel();
+    probe.on('error', () => {});
+    await probe.close();
+    return;
+  } catch {
+    // fall through to reconnect
+  }
+  admin = await connect(URL_);
+  admin.on('error', () => {});
+  adminCh = await admin.createChannel();
+  adminCh.on('error', () => {});
+}
+
 async function newQueue(name: string): Promise<string> {
+  await ensureAdmin();
   const q = `${name}.${id}`;
   queues.push(q);
   await adminCh.assertQueue(q, queueArgs(q));
@@ -42,7 +59,7 @@ async function newQueue(name: string): Promise<string> {
   return q;
 }
 
-async function newConsumer() {
+async function newConsumer(beforeConsumer?: (cm: ConnectionManager) => void) {
   const cm = new ConnectionManager(NOOP as never, {
     url: URL_,
     failureMode: 'log-and-continue',
@@ -50,6 +67,7 @@ async function newConsumer() {
     reconnect: { enabled: true, maxRetries: 10, initialDelay: 500, maxDelay: 5_000 },
   } as never);
   managers.push(cm);
+  beforeConsumer?.(cm);
   await cm.connect();
   const consumer = new MessageConsumer(cm);
   await consumer.requestChannel('c');
@@ -205,6 +223,38 @@ describe('MessageConsumer options against a real broker', () => {
       // No 406 loop: recovery needed few attempts and left no error behind.
       expect(consumer.state()).toEqual([{ channelName: 'c', status: 'subscribed', attempts: 0 }]);
       await publisher!.close();
+    },
+    240_000,
+  );
+
+  it.skipIf(!CONTAINER)(
+    'a >35s outage: isConsuming() is true within 5s of the reconnect (no wait on the 30s backoff)',
+    async () => {
+      const q = await newQueue('long-blip');
+      let reconnectedAt = 0;
+      let connects = 0;
+      const { consumer } = await newConsumer((cm) =>
+        cm.onReconnected(() => {
+          connects++;
+          if (connects > 1) reconnectedAt = Date.now();
+        }),
+      );
+      await consumer.consumeFromQueue('c', q, async (msg: ConsumeMessage, ch: Channel) => ch.ack(msg), {
+        ackMode: 'manual',
+        queue: { args: queueArgs(q) },
+      });
+
+      execFileSync('docker', ['stop', CONTAINER!]);
+      // 1+2+4+8+16s of failed attempts: the next timer is at the 30s cap.
+      await until(() => (consumer.state()[0]?.attempts ?? 0) >= 5, 90_000);
+      expect(consumer.isConsuming()).toBe(false);
+      execFileSync('docker', ['start', CONTAINER!]);
+
+      await until(() => reconnectedAt > 0, 90_000);
+      await until(() => consumer.isConsuming(), 5_000);
+      const latencyMs = Date.now() - reconnectedAt;
+      console.info(`reconnect -> isConsuming() latency: ${latencyMs}ms`); // eslint-disable-line no-console
+      expect(latencyMs).toBeLessThan(5_000);
     },
     240_000,
   );

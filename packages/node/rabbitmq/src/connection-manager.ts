@@ -158,6 +158,8 @@ export class ConnectionManager {
 
   private currentState: ConnectionState = "DISCONNECTED";
 
+  private readonly reconnectListeners = new Set<() => void>();
+
   /**
    * Single-flight guard: concurrent connect()/ensureConnected() callers all
    * await the same underlying attempt instead of racing parallel connection
@@ -249,6 +251,24 @@ export class ConnectionManager {
     if (state === this.currentState) return;
     this.currentState = state;
     this.logger.info(`[MQConnectionManager] State: ${state}`);
+  }
+
+  /** Calls `listener` each time a new connection is established (connect or reconnect), after the state is READY. Not called for a DEGRADED -> READY unblock. Returns an unsubscribe function. */
+  onReconnected(listener: () => void): () => void {
+    this.reconnectListeners.add(listener);
+    return () => {
+      this.reconnectListeners.delete(listener);
+    };
+  }
+
+  private notifyReconnected() {
+    for (const listener of [...this.reconnectListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        this.logger.warn(`[MQConnectionManager] onReconnected listener threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 
   /**
@@ -410,6 +430,7 @@ export class ConnectionManager {
         this.disconnectedAt = undefined;
         this.reconnectStopped = false;
         this.setState("READY");
+        if (!this.closed) this.notifyReconnected();
         return;
       } catch (error) {
         this.failureCount++;

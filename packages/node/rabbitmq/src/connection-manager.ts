@@ -249,20 +249,36 @@ export class ConnectionManager {
     // must not report the manager as live again.
     if (this.closed && state !== "CLOSED") return;
     if (state === this.currentState) return;
+    if (state === "READY") {
+      // DEGRADED -> READY is a flow-control unblock on a live connection, not a reconnect.
+      const reconnected = this.currentState !== "DEGRADED";
+      this.applyState(state);
+      if (reconnected) this.notifyReady();
+      return;
+    }
+    this.applyState(state);
+  }
+
+  private applyState(state: ConnectionState) {
     this.currentState = state;
     this.logger.info(`[MQConnectionManager] State: ${state}`);
-    if (state === "READY") {
-      for (const listener of [...this.readyListeners]) {
+  }
+
+  // Deferred so listener work never runs inside the connect path.
+  private notifyReady() {
+    for (const listener of [...this.readyListeners]) {
+      queueMicrotask(() => {
+        if (!this.readyListeners.has(listener)) return;
         try {
           listener();
         } catch (err) {
           this.logger.warn(`[MQConnectionManager] onReady listener threw: ${err instanceof Error ? err.message : String(err)}`);
         }
-      }
+      });
     }
   }
 
-  /** Calls `listener` on every transition into READY. Returns an unsubscribe function. */
+  /** Calls `listener` (on a microtask) each time the connection becomes READY after a connect or reconnect, not after a DEGRADED unblock. Returns an unsubscribe function. */
   onReady(listener: () => void): () => void {
     this.readyListeners.add(listener);
     return () => {

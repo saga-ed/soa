@@ -105,6 +105,50 @@ describe('MessageConsumer resubscribe on READY', () => {
         expect(consumer.isConsuming()).toBe(true);
     });
 
+    it('keeps the backoff when the READY came from this attempt\'s own ensureConnected()', async () => {
+        const ch1 = makeChannel();
+        const { cm, fireReady } = makeManager();
+        cm.ensureConnected.mockImplementation(async () => {
+            fireReady(); // READY lands as ensureConnected resolves
+        });
+        cm.newChannel.mockResolvedValueOnce(ch1).mockRejectedValue(new Error('channel boom'));
+        const consumer = new MessageConsumer(cm as never);
+        await consumer.requestChannel('c');
+        await consumer.consumeFromQueue('c', 'q', vi.fn());
+
+        ch1.emit('close');
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(cm.newChannel).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(500); // would be a hot retry without the guard
+        expect(cm.newChannel).toHaveBeenCalledTimes(2);
+        expect(consumer.state()[0]!.attempts).toBe(1);
+    });
+
+    it('closes the channel of an in-flight resubscribe that completes after stop()', async () => {
+        const ch1 = makeChannel();
+        const ch2 = makeChannel();
+        const { cm } = makeManager();
+        let release!: () => void;
+        cm.ensureConnected.mockReturnValue(new Promise<void>((r) => (release = r)));
+        cm.newChannel.mockResolvedValueOnce(ch1).mockResolvedValueOnce(ch2);
+        const consumer = new MessageConsumer(cm as never);
+        await consumer.requestChannel('c');
+        await consumer.consumeFromQueue('c', 'q', vi.fn());
+
+        ch1.emit('close');
+        await vi.advanceTimersByTimeAsync(1_000);
+        consumer.stop();
+        release();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(ch2.close).toHaveBeenCalledTimes(1);
+        expect(consumer.isConsuming()).toBe(false);
+    });
+
+    it('tolerates a connection manager without onReady', () => {
+        const consumer = new MessageConsumer({ ensureConnected: vi.fn(), newChannel: vi.fn() } as never);
+        expect(() => consumer.stop()).not.toThrow();
+    });
+
     it('ignores READY once stopped, and stop() unsubscribes', async () => {
         const ch1 = makeChannel();
         const { cm, fireReady, unsubscribe, listeners } = makeManager();
@@ -129,7 +173,9 @@ describe('ConnectionManager.onReady', () => {
     const make = () => new ConnectionManager(logger as never, { url: 'amqp://x' } as never);
     const setState = (cm: ConnectionManager, s: string) => (cm as never as { setState(s: string): void }).setState(s);
 
-    it('fires on each transition into READY, not on other states or repeats', () => {
+    const flush = () => Promise.resolve();
+
+    it('fires on each transition into READY, not on other states or repeats', async () => {
         const cm = make();
         const l = vi.fn();
         cm.onReady(l);
@@ -137,13 +183,27 @@ describe('ConnectionManager.onReady', () => {
         expect(l).not.toHaveBeenCalled();
         setState(cm, 'READY');
         setState(cm, 'READY');
+        await flush();
         expect(l).toHaveBeenCalledTimes(1);
         setState(cm, 'RECONNECTING');
         setState(cm, 'READY');
+        await flush();
         expect(l).toHaveBeenCalledTimes(2);
     });
 
-    it('unsubscribe stops delivery; a throwing listener does not break setState or other listeners', () => {
+    it('does not fire on DEGRADED -> READY (flow-control unblock)', async () => {
+        const cm = make();
+        const l = vi.fn();
+        cm.onReady(l);
+        setState(cm, 'READY');
+        await flush();
+        setState(cm, 'DEGRADED');
+        setState(cm, 'READY');
+        await flush();
+        expect(l).toHaveBeenCalledTimes(1);
+    });
+
+    it('unsubscribe stops delivery; a throwing listener does not break setState or other listeners', async () => {
         const cm = make();
         const bad = vi.fn(() => {
             throw new Error('boom');
@@ -153,10 +213,12 @@ describe('ConnectionManager.onReady', () => {
         cm.onReady(good);
         setState(cm, 'READY');
         expect(cm.state()).toBe('READY');
+        await flush();
         expect(good).toHaveBeenCalledTimes(1);
         off();
         setState(cm, 'RECONNECTING');
         setState(cm, 'READY');
+        await flush();
         expect(bad).toHaveBeenCalledTimes(1);
         expect(good).toHaveBeenCalledTimes(2);
     });

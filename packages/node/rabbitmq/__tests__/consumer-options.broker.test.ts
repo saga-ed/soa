@@ -34,7 +34,24 @@ let adminCh: Channel;
 const managers: ConnectionManager[] = [];
 const queues: string[] = [];
 
+// The stop/start tests kill the admin connection; re-open it for tests that run afterwards.
+async function ensureAdmin(): Promise<void> {
+  try {
+    const probe = await admin.createChannel();
+    probe.on('error', () => {});
+    await probe.close();
+    return;
+  } catch {
+    // fall through to reconnect
+  }
+  admin = await connect(URL_);
+  admin.on('error', () => {});
+  adminCh = await admin.createChannel();
+  adminCh.on('error', () => {});
+}
+
 async function newQueue(name: string): Promise<string> {
+  await ensureAdmin();
   const q = `${name}.${id}`;
   queues.push(q);
   await adminCh.assertQueue(q, queueArgs(q));
@@ -230,7 +247,9 @@ describe('MessageConsumer options against a real broker', () => {
 
       await until(() => readyAt > 0, 90_000);
       await until(() => consumer.isConsuming(), 3_000);
-      expect(Date.now() - readyAt).toBeLessThan(3_500);
+      const latencyMs = Date.now() - readyAt;
+      console.info(`READY -> isConsuming() latency: ${latencyMs}ms`); // eslint-disable-line no-console
+      expect(latencyMs).toBeLessThan(3_500);
     },
     240_000,
   );

@@ -69,7 +69,10 @@ export class MessageConsumer {
   constructor(
     @inject('ConnectionManager') private connectionManager: ConnectionManager
   ) {
-    this.unsubscribeReady = connectionManager.onReady(() => this.onConnectionReady());
+    this.unsubscribeReady =
+      typeof connectionManager.onReady === 'function'
+        ? connectionManager.onReady(() => this.onConnectionReady())
+        : () => {};
   }
 
   async requestChannel(channelName: string): Promise<boolean> {
@@ -125,6 +128,8 @@ export class MessageConsumer {
   stop(): void {
     this.stopped = true;
     this.unsubscribeReady();
+    this.resubscribing.clear();
+    this.readyDuringResubscribe.clear();
     for (const timer of this.resubscribeTimers.values()) clearTimeout(timer);
     this.resubscribeTimers.clear();
   }
@@ -242,7 +247,8 @@ export class MessageConsumer {
   private runResubscribe(channelName: string, attempt: number): void {
     if (this.stopped || this.resubscribing.has(channelName)) return;
     this.resubscribing.add(channelName);
-    this.resubscribe(channelName)
+    const progress = { connected: false };
+    this.resubscribe(channelName, progress)
       .then(() => {
         this.resubscribing.delete(channelName);
         this.readyDuringResubscribe.delete(channelName);
@@ -250,8 +256,9 @@ export class MessageConsumer {
       .catch((err: unknown) => {
         this.resubscribing.delete(channelName);
         if (err instanceof ConnectionManagerClosedError) return; // shutting down
-        // READY fired mid-attempt: the failure predates it, so retry now rather than back off.
-        const readyMeanwhile = this.readyDuringResubscribe.delete(channelName);
+        // READY fired while ensureConnected() was still failing: that failure predates it, so retry now.
+        // A READY after ensureConnected() resolved is this attempt's own; keep the backoff.
+        const readyMeanwhile = this.readyDuringResubscribe.delete(channelName) && !progress.connected;
         // Includes non-retryable declare errors (406 inequivalent args): back off and surface via state().
         this.resubscribeState.set(channelName, {
           attempts: attempt + 1,
@@ -262,9 +269,10 @@ export class MessageConsumer {
       });
   }
 
-  private async resubscribe(channelName: string): Promise<void> {
+  private async resubscribe(channelName: string, progress: { connected: boolean }): Promise<void> {
     if (this.stopped) return;
     await this.connectionManager.ensureConnected();
+    progress.connected = true;
     const channel = await this.connectionManager.newChannel();
     let closedDuringSetup = false;
     channel.on?.('close', () => {
@@ -278,6 +286,10 @@ export class MessageConsumer {
     } catch (err) {
       void Promise.resolve().then(() => channel.close()).catch(() => {});
       throw err;
+    }
+    if (this.stopped) {
+      void Promise.resolve().then(() => channel.close()).catch(() => {});
+      return;
     }
     this.resubscribeState.delete(channelName);
     this.adopt(channelName, channel);

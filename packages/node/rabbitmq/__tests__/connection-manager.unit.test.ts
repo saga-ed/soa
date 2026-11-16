@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 // Unit tests for ConnectionManager.newConfirmChannel.
 //
 // Mocks the underlying ChannelModel (returned by amqplib's connect()) so we
@@ -34,7 +35,7 @@ function makeManager(channelModel: Partial<ChannelModel> | null) {
 
 describe('ConnectionManager.newChannel', () => {
     it('delegates to channelModel.createChannel', async () => {
-        const fakeChannel = { id: 'plain' };
+        const fakeChannel = Object.assign(new EventEmitter(), { id: 'plain' });
         const createChannel = vi.fn().mockResolvedValue(fakeChannel);
         const cm = makeManager({ createChannel } as Partial<ChannelModel>);
         const ch = await cm.newChannel();
@@ -64,12 +65,12 @@ describe('ConnectionManager.newConfirmChannel', () => {
     });
 
     it('does not interfere with newChannel — both can be called on the same manager', async () => {
-        const createChannel = vi.fn().mockResolvedValue({ kind: 'plain' });
+        const createChannel = vi.fn().mockResolvedValue(Object.assign(new EventEmitter(), { kind: 'plain' }));
         const createConfirmChannel = vi.fn().mockResolvedValue({ kind: 'confirm' });
         const cm = makeManager({ createChannel, createConfirmChannel } as Partial<ChannelModel>);
         const plain = await cm.newChannel();
         const confirm = await cm.newConfirmChannel();
-        expect(plain).toEqual({ kind: 'plain' });
+        expect(plain).toMatchObject({ kind: 'plain' });
         expect(confirm).toEqual({ kind: 'confirm' });
         expect(createChannel).toHaveBeenCalledOnce();
         expect(createConfirmChannel).toHaveBeenCalledOnce();

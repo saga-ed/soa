@@ -503,7 +503,13 @@ export class ConnectionManager {
       throw this.notConnectedError();
     }
 
-    return this.channelModel.createChannel();
+    const channel = await this.channelModel.createChannel();
+    // A broker-refused declare (403/404/406) emits 'error' on the channel; unhandled, it crashes the process.
+    // 'close' follows and is left to callers.
+    channel.on('error', err => {
+      this.logger.warn(`[MQConnectionManager] Channel error: ${describeError(err)}`);
+    });
+    return channel;
   }
 
   /**

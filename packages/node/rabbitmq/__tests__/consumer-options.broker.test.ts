@@ -259,3 +259,21 @@ describe('MessageConsumer options against a real broker', () => {
     240_000,
   );
 });
+
+describe('newChannel() error handling against a real broker', () => {
+  it('survives a mismatched-args queue assert on a newChannel() channel', async () => {
+    const cm = new ConnectionManager(NOOP as never, { url: URL_, failureMode: 'log-and-continue' } as never);
+    await cm.connect();
+    const name = `mismatch.${id}`;
+    try {
+      const a = await cm.newChannel();
+      await a.assertQueue(name, { durable: true });
+      const b = await cm.newChannel();
+      await expect(b.assertQueue(name, { durable: false })).rejects.toThrow();
+    } finally {
+      const c = await cm.newChannel();
+      await c.deleteQueue(name).catch(() => {});
+      await cm.close();
+    }
+  });
+});

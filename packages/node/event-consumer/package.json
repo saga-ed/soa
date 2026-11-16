@@ -29,7 +29,7 @@
         "zod": "^4.4.3"
     },
     "peerDependencies": {
-        "@saga-ed/soa-rabbitmq": "^1.4.0 || ^1.5.0"
+        "@saga-ed/soa-rabbitmq": ">=1.4.0-0 <2"
     },
     "devDependencies": {
         "@saga-ed/soa-rabbitmq": "workspace:*",

@@ -158,7 +158,7 @@ export class ConnectionManager {
 
   private currentState: ConnectionState = "DISCONNECTED";
 
-  private readonly readyListeners = new Set<() => void>();
+  private readonly reconnectListeners = new Set<() => void>();
 
   /**
    * Single-flight guard: concurrent connect()/ensureConnected() callers all
@@ -249,41 +249,26 @@ export class ConnectionManager {
     // must not report the manager as live again.
     if (this.closed && state !== "CLOSED") return;
     if (state === this.currentState) return;
-    if (state === "READY") {
-      // DEGRADED -> READY is a flow-control unblock on a live connection, not a reconnect.
-      const reconnected = this.currentState !== "DEGRADED";
-      this.applyState(state);
-      if (reconnected) this.notifyReady();
-      return;
-    }
-    this.applyState(state);
-  }
-
-  private applyState(state: ConnectionState) {
     this.currentState = state;
     this.logger.info(`[MQConnectionManager] State: ${state}`);
   }
 
-  // Deferred so listener work never runs inside the connect path.
-  private notifyReady() {
-    for (const listener of [...this.readyListeners]) {
-      queueMicrotask(() => {
-        if (!this.readyListeners.has(listener)) return;
-        try {
-          listener();
-        } catch (err) {
-          this.logger.warn(`[MQConnectionManager] onReady listener threw: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      });
-    }
+  /** Calls `listener` each time a new connection is established (connect or reconnect), after the state is READY. Not called for a DEGRADED -> READY unblock. Returns an unsubscribe function. */
+  onReconnected(listener: () => void): () => void {
+    this.reconnectListeners.add(listener);
+    return () => {
+      this.reconnectListeners.delete(listener);
+    };
   }
 
-  /** Calls `listener` (on a microtask) each time the connection becomes READY after a connect or reconnect, not after a DEGRADED unblock. Returns an unsubscribe function. */
-  onReady(listener: () => void): () => void {
-    this.readyListeners.add(listener);
-    return () => {
-      this.readyListeners.delete(listener);
-    };
+  private notifyReconnected() {
+    for (const listener of [...this.reconnectListeners]) {
+      try {
+        listener();
+      } catch (err) {
+        this.logger.warn(`[MQConnectionManager] onReconnected listener threw: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 
   /**
@@ -445,6 +430,7 @@ export class ConnectionManager {
         this.disconnectedAt = undefined;
         this.reconnectStopped = false;
         this.setState("READY");
+        if (!this.closed) this.notifyReconnected();
         return;
       } catch (error) {
         this.failureCount++;

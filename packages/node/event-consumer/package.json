@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-event-consumer",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -23,13 +23,16 @@
     "dependencies": {
         "@saga-ed/soa-event-envelope": "workspace:*",
         "@saga-ed/soa-logger": "workspace:*",
-        "@saga-ed/soa-rabbitmq": "workspace:*",
         "@opentelemetry/api": "^1.9.0",
         "amqplib": "^0.10.4",
         "pg": "^8.13.0",
         "zod": "^4.4.3"
     },
+    "peerDependencies": {
+        "@saga-ed/soa-rabbitmq": "^1.4.0 || ^1.5.0"
+    },
     "devDependencies": {
+        "@saga-ed/soa-rabbitmq": "workspace:*",
         "@saga-ed/soa-typescript-config": "workspace:*",
         "@types/amqplib": "^0.10.4",
         "@types/node": "^24.0.3",

@@ -61,11 +61,16 @@ export class MessageConsumer {
   private subscriptions: Map<string, Subscription[]> = new Map();
   private resubscribeTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private resubscribeState: Map<string, { attempts: number; lastError?: string }> = new Map();
+  private resubscribing: Set<string> = new Set();
+  private readyDuringResubscribe: Set<string> = new Set();
   private stopped = false;
+  private unsubscribeReady: () => void;
 
   constructor(
     @inject('ConnectionManager') private connectionManager: ConnectionManager
-  ) {}
+  ) {
+    this.unsubscribeReady = connectionManager.onReady(() => this.onConnectionReady());
+  }
 
   async requestChannel(channelName: string): Promise<boolean> {
     if (this.channels.has(channelName)) {
@@ -119,6 +124,7 @@ export class MessageConsumer {
   /** Stops resubscribing; does not close channels. */
   stop(): void {
     this.stopped = true;
+    this.unsubscribeReady();
     for (const timer of this.resubscribeTimers.values()) clearTimeout(timer);
     this.resubscribeTimers.clear();
   }
@@ -206,22 +212,55 @@ export class MessageConsumer {
     });
   }
 
+  // Resubscribe lost channels now instead of waiting out their backoff timer.
+  private onConnectionReady(): void {
+    if (this.stopped) return;
+    for (const channelName of this.subscriptions.keys()) {
+      if (this.channels.has(channelName)) continue;
+      if (this.resubscribing.has(channelName)) {
+        this.readyDuringResubscribe.add(channelName);
+        continue;
+      }
+      const timer = this.resubscribeTimers.get(channelName);
+      if (timer) clearTimeout(timer);
+      this.resubscribeTimers.delete(channelName);
+      this.resubscribeState.delete(channelName);
+      this.runResubscribe(channelName, 0);
+    }
+  }
+
   private scheduleResubscribe(channelName: string, attempt: number): void {
     if (this.stopped || this.resubscribeTimers.has(channelName)) return;
     const delay = Math.min(RESUBSCRIBE_MAX_DELAY_MS, RESUBSCRIBE_INITIAL_DELAY_MS * 2 ** attempt);
     const timer = setTimeout(() => {
       this.resubscribeTimers.delete(channelName);
-      this.resubscribe(channelName).catch((err: unknown) => {
+      this.runResubscribe(channelName, attempt);
+    }, delay);
+    this.resubscribeTimers.set(channelName, timer);
+  }
+
+  private runResubscribe(channelName: string, attempt: number): void {
+    if (this.stopped || this.resubscribing.has(channelName)) return;
+    this.resubscribing.add(channelName);
+    this.readyDuringResubscribe.delete(channelName);
+    this.resubscribe(channelName)
+      .then(() => {
+        this.resubscribing.delete(channelName);
+        this.readyDuringResubscribe.delete(channelName);
+      })
+      .catch((err: unknown) => {
+        this.resubscribing.delete(channelName);
         if (err instanceof ConnectionManagerClosedError) return; // shutting down
+        // READY fired mid-attempt: the failure predates it, so retry now rather than back off.
+        const readyMeanwhile = this.readyDuringResubscribe.delete(channelName);
         // Includes non-retryable declare errors (406 inequivalent args): back off and surface via state().
         this.resubscribeState.set(channelName, {
           attempts: attempt + 1,
           lastError: err instanceof Error ? err.message : String(err),
         });
-        this.scheduleResubscribe(channelName, attempt + 1);
+        if (readyMeanwhile && !this.stopped) this.runResubscribe(channelName, 0);
+        else this.scheduleResubscribe(channelName, attempt + 1);
       });
-    }, delay);
-    this.resubscribeTimers.set(channelName, timer);
   }
 
   private async resubscribe(channelName: string): Promise<void> {

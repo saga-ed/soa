@@ -71,6 +71,8 @@ Manual mode: MessageConsumer never acks or nacks, including when the handler thr
 
 Resubscribe failures (for example a 406 from the queue declare) back off 1s to 30s and never hot-loop. `consumer.state()` returns per named channel `{ status: 'subscribed' | 'resubscribing', attempts, lastError? }`, and `consumer.isConsuming()` is false while any channel is resubscribing, before any subscription exists, or after `stop()`. Pass it to soa-health: `rabbitDependency({ connection: () => cm, isConsuming: () => consumer.isConsuming() })`.
 
+`ConnectionManager.onReady(listener)` (1.5.0) calls `listener` on every transition into READY and returns an unsubscribe function; a throwing listener is logged and does not affect state. `MessageConsumer` uses it to resubscribe lost channels the moment the connection is READY instead of waiting out the 1s-30s backoff timer, so `isConsuming()` recovers immediately after a long outage. `stop()` unsubscribes.
+
 Real-broker tests: `RABBITMQ_TEST_CONTAINER=<name> pnpm --filter @saga-ed/soa-rabbitmq test:int` against a local `rabbitmq:3-management` on `:45672` (they are not part of `pnpm test`).
 
 ## Shutting down — `close()`

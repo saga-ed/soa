@@ -4,6 +4,8 @@ import { MessageConsumer } from '../src/consumer.js';
 import { MessagePublisher } from '../src/publisher.js';
 import { ConnectionManagerClosedError } from '../src/connection-manager.js';
 
+const NO_READY = { onReady: () => () => {} };
+
 function makeChannel() {
     const ch = new EventEmitter() as EventEmitter & Record<string, ReturnType<typeof vi.fn>>;
     ch.assertQueue = vi.fn().mockResolvedValue({});
@@ -24,7 +26,7 @@ describe('MessageConsumer resubscribe after channel loss', () => {
             .mockRejectedValueOnce(new Error('RabbitMQ reconnecting'))
             .mockResolvedValue(undefined);
         const newChannel = vi.fn().mockResolvedValueOnce(ch1).mockResolvedValueOnce(ch2);
-        const cm = { ensureConnected, newChannel };
+        const cm = { ...NO_READY, ensureConnected, newChannel };
         const consumer = new MessageConsumer(cm as never);
         const handler = vi.fn().mockResolvedValue(true);
 
@@ -53,7 +55,7 @@ describe('MessageConsumer resubscribe after channel loss', () => {
     it('keeps retrying beyond many failed attempts and stops on stop()', async () => {
         const ch1 = makeChannel();
         const ensureConnected = vi.fn().mockRejectedValue(new Error('down'));
-        const cm = { ensureConnected, newChannel: vi.fn().mockResolvedValue(ch1) };
+        const cm = { ...NO_READY, ensureConnected, newChannel: vi.fn().mockResolvedValue(ch1) };
         const consumer = new MessageConsumer(cm as never);
         await consumer.requestChannel('c');
         await consumer.consumeFromQueue('c', 'q', vi.fn());
@@ -73,7 +75,7 @@ describe('MessageConsumer resubscribe edge cases', () => {
     it('stops retrying once the connection manager is closed', async () => {
         const ch1 = makeChannel();
         const ensureConnected = vi.fn().mockRejectedValue(new ConnectionManagerClosedError());
-        const consumer = new MessageConsumer({ ensureConnected, newChannel: vi.fn().mockResolvedValue(ch1) } as never);
+        const consumer = new MessageConsumer({ ...NO_READY, ensureConnected, newChannel: vi.fn().mockResolvedValue(ch1) } as never);
         await consumer.requestChannel('c');
         await consumer.consumeFromQueue('c', 'q', vi.fn());
         ch1.emit('close');
@@ -90,7 +92,7 @@ describe('MessageConsumer resubscribe edge cases', () => {
             return { consumerTag: 't' };
         });
         const newChannel = vi.fn().mockResolvedValueOnce(ch1).mockResolvedValueOnce(ch2).mockResolvedValueOnce(ch3);
-        const consumer = new MessageConsumer({ ensureConnected: vi.fn().mockResolvedValue(undefined), newChannel } as never);
+        const consumer = new MessageConsumer({ ...NO_READY, ensureConnected: vi.fn().mockResolvedValue(undefined), newChannel } as never);
         await consumer.requestChannel('c');
         await consumer.consumeFromQueue('c', 'q', vi.fn());
         ch1.emit('close');
@@ -102,7 +104,7 @@ describe('MessageConsumer resubscribe edge cases', () => {
         const ch1 = makeChannel();
         const ch2 = makeChannel();
         const newChannel = vi.fn().mockResolvedValueOnce(ch1).mockResolvedValueOnce(ch2);
-        const consumer = new MessageConsumer({ ensureConnected: vi.fn().mockResolvedValue(undefined), newChannel } as never);
+        const consumer = new MessageConsumer({ ...NO_READY, ensureConnected: vi.fn().mockResolvedValue(undefined), newChannel } as never);
         const h = vi.fn();
         await consumer.requestChannel('c');
         await consumer.consumeFromQueue('c', 'q', h);

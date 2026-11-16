@@ -208,4 +208,30 @@ describe('MessageConsumer options against a real broker', () => {
     },
     240_000,
   );
+
+  it.skipIf(!CONTAINER)(
+    'a >35s outage: isConsuming() is true within 3s of the connection turning READY (no wait on the 30s backoff)',
+    async () => {
+      const q = await newQueue('long-blip');
+      const { cm, consumer } = await newConsumer();
+      await consumer.consumeFromQueue('c', q, async (msg: ConsumeMessage, ch: Channel) => ch.ack(msg), {
+        ackMode: 'manual',
+        queue: { args: queueArgs(q) },
+      });
+
+      let readyAt = 0;
+      cm.onReady(() => {
+        readyAt = Date.now();
+      });
+      execFileSync('docker', ['stop', CONTAINER!]);
+      await new Promise((r) => setTimeout(r, 36_000)); // attempts reach the 30s cap
+      expect(consumer.isConsuming()).toBe(false);
+      execFileSync('docker', ['start', CONTAINER!]);
+
+      await until(() => readyAt > 0, 90_000);
+      await until(() => consumer.isConsuming(), 3_000);
+      expect(Date.now() - readyAt).toBeLessThan(3_500);
+    },
+    240_000,
+  );
 });

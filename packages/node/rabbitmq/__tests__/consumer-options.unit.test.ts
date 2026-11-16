@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { MessageConsumer } from '../src/consumer.js';
 
+const NO_READY = { onReady: () => () => {} };
+
 function makeChannel() {
     const ch = new EventEmitter() as EventEmitter & Record<string, ReturnType<typeof vi.fn>>;
     ch.assertQueue = vi.fn().mockResolvedValue({});
@@ -20,7 +22,7 @@ afterEach(() => vi.useRealTimers());
 async function setup(channels: ReturnType<typeof makeChannel>[]) {
     const newChannel = vi.fn();
     for (const c of channels) newChannel.mockResolvedValueOnce(c);
-    const cm = { ensureConnected: vi.fn().mockResolvedValue(undefined), newChannel };
+    const cm = { ...NO_READY, ensureConnected: vi.fn().mockResolvedValue(undefined), newChannel };
     const consumer = new MessageConsumer(cm as never);
     await consumer.requestChannel('c');
     return { consumer, cm };
@@ -160,7 +162,7 @@ describe('resubscribe failure surfaces and backs off', () => {
             return c;
         };
         const newChannel = vi.fn().mockResolvedValueOnce(ch1).mockImplementation(async () => bad());
-        const cm = { ensureConnected: vi.fn().mockResolvedValue(undefined), newChannel };
+        const cm = { ...NO_READY, ensureConnected: vi.fn().mockResolvedValue(undefined), newChannel };
         const consumer = new MessageConsumer(cm as never);
         await consumer.requestChannel('c');
         await consumer.consumeFromQueue('c', 'q', async () => true);

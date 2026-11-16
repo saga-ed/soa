@@ -57,18 +57,18 @@ cli iam:create-org --fixture-id "$FIXTURE_ID" --slug demo-small-scholars --kind 
 # demo-tutor doubles as the fixture-admin — pgm:* commands devLogin as this
 # email to get a session cookie for programs-api.
 echo "==> iam: users"
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username demo-tutor --email "$ADMIN_EMAIL" --name-last Tutor
-cli iam:create-user --fixture-id "$FIXTURE_ID" --username demo-scholar-1 --email demo-scholar-1@fixture.test --name-last Scholar
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email "$ADMIN_EMAIL" --name-last Tutor
+cli iam:create-user --fixture-id "$FIXTURE_ID" --email demo-scholar-1@fixture.test --name-last Scholar
 
 # ─── 3. Memberships ─────────────────────────────────────────────────────────
 # iam enforces parent-first ordering (district → school → section). Tutor
 # lives at the district; scholar lives at every tier so enrollment tree
 # walks resolve them under the section.
 echo "==> iam: memberships"
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user demo-tutor --group demo-small-org
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user demo-scholar-1 --group demo-small-org
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user demo-scholar-1 --group demo-small-site
-cli iam:add-membership --fixture-id "$FIXTURE_ID" --user demo-scholar-1 --group demo-small-scholars
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user "$ADMIN_EMAIL" --group demo-small-org
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user demo-scholar-1@fixture.test --group demo-small-org
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user demo-scholar-1@fixture.test --group demo-small-site
+cli iam:add-membership --fixture-id "$FIXTURE_ID" --user demo-scholar-1@fixture.test --group demo-small-scholars
 
 # ─── 4. Program + period ────────────────────────────────────────────────────
 echo "==> pgm: program + period"

@@ -504,12 +504,18 @@ export class ConnectionManager {
     }
 
     const channel = await this.channelModel.createChannel();
-    // A broker-refused declare (403/404/406) emits 'error' on the channel; unhandled, it crashes the process.
-    // 'close' follows and is left to callers.
-    channel.on('error', err => {
-      this.logger.warn(`[MQConnectionManager] Channel error: ${describeError(err)}`);
-    });
+    this.attachDefaultErrorListener(channel, 'channel');
     return channel;
+  }
+
+  // A broker-refused declare (403/404/406) emits 'error' on the channel; unhandled, it crashes the process.
+  // Stays quiet when a caller listener is also attached (it reports). 'close' is left to callers.
+  private attachDefaultErrorListener(channel: Channel | ConfirmChannel, kind: string): void {
+    channel.on('error', err => {
+      if (channel.listenerCount('error') > 1) return;
+      const num = (channel as unknown as { ch?: number }).ch;
+      this.logger.error(`[MQConnectionManager] ${kind} ${num ?? '?'} error: ${describeError(err)}`);
+    });
   }
 
   /**
@@ -535,16 +541,21 @@ export class ConnectionManager {
       throw this.notConnectedError();
     }
 
-    return this.channelModel.createConfirmChannel();
+    const channel = await this.channelModel.createConfirmChannel();
+    this.attachDefaultErrorListener(channel, 'confirm channel');
+    return channel;
   }
 
   async assertQueues(queueDefinitions: QueueDefinition[]): Promise<void> {
     const channel = await this.newChannel();
-    // Assert all queues in parallel
-    await Promise.all(queueDefinitions.map(async (definition) => {
-      await channel.assertQueue(definition.name, definition.options);
-    }));
-    await channel.close();
+    try {
+      // Assert all queues in parallel
+      await Promise.all(queueDefinitions.map(async (definition) => {
+        await channel.assertQueue(definition.name, definition.options);
+      }));
+    } finally {
+      await channel.close().catch(() => {}); // already closed after a refused declare
+    }
   }
 
   private handleChannelModelEvents(model: ChannelModel) {

@@ -1042,9 +1042,6 @@ importers:
       '@saga-ed/soa-logger':
         specifier: workspace:*
         version: link:../logger
-      '@saga-ed/soa-rabbitmq':
-        specifier: workspace:*
-        version: link:../rabbitmq
       amqplib:
         specifier: ^0.10.4
         version: 0.10.9
@@ -1055,6 +1052,9 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@saga-ed/soa-rabbitmq':
+        specifier: workspace:*
+        version: link:../rabbitmq
       '@saga-ed/soa-typescript-config':
         specifier: workspace:*
         version: link:../../core/typescript-config

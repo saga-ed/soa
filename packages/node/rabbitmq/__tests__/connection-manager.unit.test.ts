@@ -1,9 +1,11 @@
-// Unit tests for ConnectionManager.newConfirmChannel.
+// Unit tests for ConnectionManager.newChannel / newConfirmChannel.
 //
 // Mocks the underlying ChannelModel (returned by amqplib's connect()) so we
 // can verify the manager delegates to createConfirmChannel() and surfaces
-// the same not-initialized error contract as newChannel().
+// the same not-initialized error contract as newChannel(). Fake channels are
+// EventEmitters because both factories attach a default 'error' listener.
 
+import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChannelModel } from 'amqplib';
 import { ConnectionManager } from '../src/connection-manager.js';
@@ -34,7 +36,7 @@ function makeManager(channelModel: Partial<ChannelModel> | null) {
 
 describe('ConnectionManager.newChannel', () => {
     it('delegates to channelModel.createChannel', async () => {
-        const fakeChannel = { id: 'plain' };
+        const fakeChannel = Object.assign(new EventEmitter(), { id: 'plain' });
         const createChannel = vi.fn().mockResolvedValue(fakeChannel);
         const cm = makeManager({ createChannel } as Partial<ChannelModel>);
         const ch = await cm.newChannel();
@@ -50,7 +52,7 @@ describe('ConnectionManager.newChannel', () => {
 
 describe('ConnectionManager.newConfirmChannel', () => {
     it('delegates to channelModel.createConfirmChannel', async () => {
-        const fakeConfirm = { id: 'confirm', waitForConfirms: vi.fn() };
+        const fakeConfirm = Object.assign(new EventEmitter(), { id: 'confirm', waitForConfirms: vi.fn() });
         const createConfirmChannel = vi.fn().mockResolvedValue(fakeConfirm);
         const cm = makeManager({ createConfirmChannel } as Partial<ChannelModel>);
         const ch = await cm.newConfirmChannel();
@@ -64,13 +66,15 @@ describe('ConnectionManager.newConfirmChannel', () => {
     });
 
     it('does not interfere with newChannel — both can be called on the same manager', async () => {
-        const createChannel = vi.fn().mockResolvedValue({ kind: 'plain' });
-        const createConfirmChannel = vi.fn().mockResolvedValue({ kind: 'confirm' });
+        const fakePlain = Object.assign(new EventEmitter(), { kind: 'plain' });
+        const fakeConfirm = Object.assign(new EventEmitter(), { kind: 'confirm' });
+        const createChannel = vi.fn().mockResolvedValue(fakePlain);
+        const createConfirmChannel = vi.fn().mockResolvedValue(fakeConfirm);
         const cm = makeManager({ createChannel, createConfirmChannel } as Partial<ChannelModel>);
         const plain = await cm.newChannel();
         const confirm = await cm.newConfirmChannel();
-        expect(plain).toEqual({ kind: 'plain' });
-        expect(confirm).toEqual({ kind: 'confirm' });
+        expect(plain).toBe(fakePlain);
+        expect(confirm).toBe(fakeConfirm);
         expect(createChannel).toHaveBeenCalledOnce();
         expect(createConfirmChannel).toHaveBeenCalledOnce();
     });

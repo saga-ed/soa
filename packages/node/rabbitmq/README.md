@@ -75,6 +75,10 @@ Resubscribe failures (for example a 406 from the queue declare) back off 1s to 3
 
 Real-broker tests: `RABBITMQ_TEST_CONTAINER=<name> pnpm --filter @saga-ed/soa-rabbitmq test:int` against a local `rabbitmq:3-management` on `:45672` (they are not part of `pnpm test`).
 
+## Channel errors (1.5.1)
+
+`newChannel()` and `newConfirmChannel()` attach a default `error` listener that logs `channel <n> error: ...` at error level. Behavior change: a broker-refused declare/publish (403/404/406) on such a channel used to throw an unhandled `error` (crashing the process, or killing the whole connection); it is now logged and the channel closes. The default listener stays quiet when you attach your own `error` listener. It does not handle `close`: a caller holding a channel must still react to `close` (`MessageConsumer` does; `MessagePublisher` does not yet).
+
 ## Shutting down — `close()`
 
 Services hold their connection for their whole lifetime and never need

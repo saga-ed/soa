@@ -7,7 +7,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { connect, type Channel, type ChannelModel, type ConsumeMessage } from 'amqplib';
 import { ConnectionManager } from '../src/connection-manager.js';
 import { MessageConsumer } from '../src/consumer.js';
@@ -258,4 +258,32 @@ describe('MessageConsumer options against a real broker', () => {
     },
     240_000,
   );
+});
+
+describe('newChannel() error handling against a real broker', () => {
+  it('survives a mismatched-args queue assert on a newChannel() channel', async () => {
+    const uncaught = vi.fn();
+    process.on('uncaughtException', uncaught);
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const cm = new ConnectionManager(logger as never, { url: URL_, failureMode: 'log-and-continue' } as never);
+    await cm.connect();
+    const name = `mismatch.${id}`;
+    try {
+      const a = await cm.newChannel();
+      await a.assertQueue(name, { durable: true });
+      const b = await cm.newChannel();
+      await expect(b.assertQueue(name, { durable: false })).rejects.toThrow();
+      await new Promise(r => setTimeout(r, 200));
+      expect(uncaught).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(expect.stringMatching(/channel \d+ error: .*PRECONDITION_FAILED/));
+      // Unhandled, amqplib's throw kills the whole connection instead of just the channel.
+      expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('Connection error'));
+      await (await cm.newChannel()).checkQueue(name);
+    } finally {
+      process.off('uncaughtException', uncaught);
+      const c = await cm.newChannel();
+      await c.deleteQueue(name).catch(() => {});
+      await cm.close();
+    }
+  });
 });

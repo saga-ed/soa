@@ -292,6 +292,8 @@ describe('end-to-end: iam_group_rostering write/read round-trip with null validi
     try {
       const runId = 'run-iamgroup-1';
       const ingestedAt = new Date('2026-09-13T00:00:00.000Z');
+      const validFrom = new Date('2026-08-01T00:00:00.000Z');
+      const validUntil = new Date('2026-12-31T00:00:00.000Z');
       const rows: IamGroupRosteringRow[] = [
         {
           school_year: 'SY25-26',
@@ -308,6 +310,25 @@ describe('end-to-end: iam_group_rostering write/read round-trip with null validi
           updated_at: ingestedAt,
           valid_from: null,
           valid_until: null,
+          snapshot_at: ingestedAt,
+          ingest_run_id: runId,
+          ingested_at: ingestedAt,
+        },
+        {
+          school_year: 'SY25-26',
+          source_system: 'rostering',
+          group_id: 'group-2',
+          parent_group_id: 'group-1',
+          org_id: 'group-1',
+          kind: 'school',
+          display_name: 'Example School',
+          status: 'ACTIVE',
+          source: null,
+          source_id: null,
+          created_at: ingestedAt,
+          updated_at: ingestedAt,
+          valid_from: validFrom,
+          valid_until: validUntil,
           snapshot_at: ingestedAt,
           ingest_run_id: runId,
           ingested_at: ingestedAt,
@@ -329,10 +350,13 @@ describe('end-to-end: iam_group_rostering write/read round-trip with null validi
       while ((record = await cursor.next())) read.push(record);
       await reader.close();
 
-      expect(read).toHaveLength(1);
-      expect(read[0]?.group_id).toBe('group-1');
-      expect(read[0]?.valid_from ?? null).toBeNull();
-      expect(read[0]?.valid_until ?? null).toBeNull();
+      expect(read).toHaveLength(2);
+      const nullRow = read.find(r => r.group_id === 'group-1');
+      const stampedRow = read.find(r => r.group_id === 'group-2');
+      expect(nullRow?.valid_from ?? null).toBeNull();
+      expect(nullRow?.valid_until ?? null).toBeNull();
+      expect(stampedRow?.valid_from).toEqual(validFrom);
+      expect(stampedRow?.valid_until).toEqual(validUntil);
     } finally {
       await rm(rootDir, { recursive: true, force: true });
     }

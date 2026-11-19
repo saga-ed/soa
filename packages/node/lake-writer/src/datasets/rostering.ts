@@ -116,7 +116,7 @@ export const iamGroupRosteringDataset: LandingDataset<IamGroupRosteringRow> =
         type: 'timestamp',
         optional: true,
         description:
-          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row).',
+          'Instant this attribute state stopped being effective; null while current. Group has no deleted_at, so dbt derives it from snapshot_at ordering.',
       },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },

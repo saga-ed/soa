@@ -11,8 +11,8 @@
 // and semantics; this file owns only the `LandingDataset` mechanics.
 // Edit the catalog first for a column change, then mirror it here.
 //
-// Seven datasets (do not add an eighth): program, program_school_mapping,
-// program_period, program_pod, pod_membership, session_occurrence,
+// Eight datasets: program, program_school_mapping,
+// program_period, program_pod, cohort, pod_membership, session_occurrence,
 // session_participant. Entity ids (program/period/pod/organization) stay
 // raw — organisational, not personal (d217.1 2A). Names land in the
 // clear under the same gate, EXCEPT pod/cohort names, which are dropped
@@ -39,6 +39,8 @@ export type ProgramProgramhubRow = {
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
   snapshot_at: Date;
   ingest_run_id: string;
   ingested_at: Date;
@@ -113,6 +115,20 @@ export const programProgramhubDataset: LandingDataset<ProgramProgramhubRow> =
       },
       { name: 'created_at', type: 'timestamp', description: 'Program creation instant.' },
       { name: 'updated_at', type: 'timestamp', description: 'Program last-updated instant.' },
+      {
+        name: 'valid_from',
+        type: 'timestamp',
+        optional: true,
+        description:
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
+      },
+      {
+        name: 'valid_until',
+        type: 'timestamp',
+        optional: true,
+        description:
+          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row or deleted_at).',
+      },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },
       { name: 'ingested_at', type: 'timestamp', description: 'Export run instant.' },
@@ -185,10 +201,14 @@ export type ProgramPeriodProgramhubRow = {
   student_tutor_ratio: number;
   is_ad_hoc_bucket: boolean;
   cohort_count: number;
+  block_id?: string | null;
+  color_key: string;
   version: number;
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
   snapshot_at: Date;
   ingest_run_id: string;
   ingested_at: Date;
@@ -246,6 +266,17 @@ export const programPeriodProgramhubDataset: LandingDataset<ProgramPeriodProgram
         description: 'Number of cohorts configured for this period.',
       },
       {
+        name: 'block_id',
+        type: 'string',
+        optional: true,
+        description: 'Scheduling block id, raw, when the period is tied to one.',
+      },
+      {
+        name: 'color_key',
+        type: 'string',
+        description: 'Display colour key (cosmetic).',
+      },
+      {
         name: 'version',
         type: 'int64',
         description: 'Optimistic-concurrency version of the period row.',
@@ -258,6 +289,20 @@ export const programPeriodProgramhubDataset: LandingDataset<ProgramPeriodProgram
       },
       { name: 'created_at', type: 'timestamp', description: 'Period creation instant.' },
       { name: 'updated_at', type: 'timestamp', description: 'Period last-updated instant.' },
+      {
+        name: 'valid_from',
+        type: 'timestamp',
+        optional: true,
+        description:
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
+      },
+      {
+        name: 'valid_until',
+        type: 'timestamp',
+        optional: true,
+        description:
+          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row or deleted_at).',
+      },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },
       { name: 'ingested_at', type: 'timestamp', description: 'Export run instant.' },
@@ -280,6 +325,8 @@ export type ProgramPodProgramhubRow = {
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
   snapshot_at: Date;
   ingest_run_id: string;
   ingested_at: Date;
@@ -346,11 +393,96 @@ export const programPodProgramhubDataset: LandingDataset<ProgramPodProgramhubRow
       },
       { name: 'created_at', type: 'timestamp', description: 'Pod creation instant.' },
       { name: 'updated_at', type: 'timestamp', description: 'Pod last-updated instant.' },
+      {
+        name: 'valid_from',
+        type: 'timestamp',
+        optional: true,
+        description:
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
+      },
+      {
+        name: 'valid_until',
+        type: 'timestamp',
+        optional: true,
+        description:
+          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row or deleted_at).',
+      },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },
       { name: 'ingested_at', type: 'timestamp', description: 'Export run instant.' },
     ],
     fingerprint: ['treatment_kind', 'no_tutor_required', 'is_ad_hoc'],
+  });
+
+export type CohortProgramhubRow = {
+  school_year: string;
+  source_system: 'programhub';
+  cohort_id: string;
+  period_id: string;
+  program_id: string;
+  version: number;
+  deleted_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
+  snapshot_at: Date;
+  ingest_run_id: string;
+  ingested_at: Date;
+};
+
+/** One row per cohort overlapping the school year. No student_year_hash; `name` dropped like pod names (small cells). */
+export const cohortProgramhubDataset: LandingDataset<CohortProgramhubRow> =
+  defineLandingDataset<CohortProgramhubRow>({
+    name: 'cohort_programhub',
+    dataset: 'cohort',
+    sourceSystem: 'programhub',
+    columns: [
+      {
+        name: 'school_year',
+        type: 'string',
+        description: 'SYxx-yy snapshot school year (Aug-1 UTC rule).',
+      },
+      {
+        name: 'source_system',
+        type: 'string',
+        description: "Provenance literal — always 'programhub' for this leg.",
+      },
+      { name: 'cohort_id', type: 'string', description: 'Cohort id, raw.' },
+      { name: 'period_id', type: 'string', description: 'Period id, raw.' },
+      { name: 'program_id', type: 'string', description: 'Program id, raw.' },
+      {
+        name: 'version',
+        type: 'int64',
+        description: 'Optimistic-concurrency version of the cohort row.',
+      },
+      {
+        name: 'deleted_at',
+        type: 'timestamp',
+        optional: true,
+        description: 'Soft-delete instant, if deleted.',
+      },
+      { name: 'created_at', type: 'timestamp', description: 'Cohort creation instant.' },
+      { name: 'updated_at', type: 'timestamp', description: 'Cohort last-updated instant.' },
+      {
+        name: 'valid_from',
+        type: 'timestamp',
+        optional: true,
+        description:
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
+      },
+      {
+        name: 'valid_until',
+        type: 'timestamp',
+        optional: true,
+        description:
+          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row or deleted_at).',
+      },
+      { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
+      { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },
+      { name: 'ingested_at', type: 'timestamp', description: 'Export run instant.' },
+    ],
+    fingerprint: ['cohort_id', 'period_id'],
   });
 
 export type PodMembershipProgramhubRow = {

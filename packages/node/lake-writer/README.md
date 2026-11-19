@@ -128,11 +128,14 @@ lockstep.
 | `iam_group_membership_rostering` | `program_school_mapping_programhub` |
 | `identity_crosswalk_rostering`   | `program_period_programhub`         |
 | `district_sync_config_rostering` | `program_pod_programhub`            |
+|                                  | `cohort_programhub`                 |
 |                                  | `pod_membership_programhub`         |
 |                                  | `session_occurrence_programhub`     |
 |                                  | `session_participant_programhub`    |
 
 `externalDatasets` is both merged, keyed by registry name (`${dataset}_${sourceSystem}`).
+
+`valid_from` / `valid_until` mean different things by dataset: on `pod_membership_programhub` they bound the membership interval; on the entity datasets (`program`, `program_period`, `program_pod`, `cohort`) they bound the effective span of that row's attribute state, are nullable, and may be derived downstream (dbt SCD2).
 
 Mapping a Prisma row to the identity crosswalk — the district-id bridge —
 looks like:

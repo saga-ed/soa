@@ -19,6 +19,7 @@ import {
   programSchoolMappingProgramhubDataset,
   sessionOccurrenceProgramhubDataset,
   sessionParticipantProgramhubDataset,
+  cohortProgramhubDataset,
 } from './programhub.js';
 
 export * from './rostering.js';
@@ -38,6 +39,7 @@ export const programhubDatasets = {
   program_school_mapping_programhub: programSchoolMappingProgramhubDataset,
   program_period_programhub: programPeriodProgramhubDataset,
   program_pod_programhub: programPodProgramhubDataset,
+  cohort_programhub: cohortProgramhubDataset,
   pod_membership_programhub: podMembershipProgramhubDataset,
   session_occurrence_programhub: sessionOccurrenceProgramhubDataset,
   session_participant_programhub: sessionParticipantProgramhubDataset,

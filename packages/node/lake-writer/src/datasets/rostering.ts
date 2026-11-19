@@ -39,6 +39,8 @@ export type IamGroupRosteringRow = {
   source_id: string | null;
   created_at: Date;
   updated_at: Date;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
   snapshot_at: Date;
   ingest_run_id: string;
   ingested_at: Date;
@@ -102,6 +104,20 @@ export const iamGroupRosteringDataset: LandingDataset<IamGroupRosteringRow> =
       },
       { name: 'created_at', type: 'timestamp', description: 'Group creation instant.' },
       { name: 'updated_at', type: 'timestamp', description: 'Group last-updated instant.' },
+      {
+        name: 'valid_from',
+        type: 'timestamp',
+        optional: true,
+        description:
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
+      },
+      {
+        name: 'valid_until',
+        type: 'timestamp',
+        optional: true,
+        description:
+          'Instant this attribute state stopped being effective; null while current. Group has no deleted_at, so dbt derives it from snapshot_at ordering.',
+      },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },
       { name: 'ingested_at', type: 'timestamp', description: 'Export run instant.' },

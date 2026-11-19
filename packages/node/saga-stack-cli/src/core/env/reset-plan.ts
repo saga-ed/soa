@@ -39,10 +39,10 @@
  *
  * Deliberately NEVER touched, in every store: `outbox_event`,
  * `consumed_events`, `snapshot_metadata`, `audit_logs` (DB-rule append-only),
- * sessions' `projection_readiness` + `authz_persona_definition`, coach's
- * authored-content tables + `persona_definition`, programs' `content_item`
- * (global catalog), and the whole content-api database (no org-reachable
- * column anywhere).
+ * sessions' `projection_readiness`, coach's authored-content tables +
+ * `persona_definition`, programs' `content_item` (global catalog), and the
+ * whole content-api database (no org-reachable column anywhere). Sessions'
+ * former authz mirror tables are gone entirely (program-hub#454 cutover).
  */
 
 import { assertUuids } from './footprint.js';
@@ -400,34 +400,12 @@ export const RESET_STORES: ResetStoreDef[] = [
         note: 'prisma model is named PodAssignmentOverride; the TABLE is pod_assignment_override_projection',
         where: guarded((ids) => inSet('slot_id', ids.slotIds)),
       },
-      {
-        // The admin's org membership survives in iam — its mirror survives too.
-        table: 'authz_group_membership',
-        projection: true,
-        where: guarded(
-          (ids) => `group_id IN (${lit(ids.groupIds)}) AND iam_row_id IS DISTINCT FROM '${ids.adminMembershipId}'`,
-        ),
-      },
-      {
-        // The org group row survives in iam — keep its hierarchy mirror.
-        table: 'authz_group_hierarchy',
-        projection: true,
-        where: guarded((ids) => `child_group_id IN (${lit(ids.groupIds)}) AND child_group_id <> '${ids.orgId}'`),
-      },
-      {
-        // Two sweeps in one predicate: assignments OF deleted users anywhere in
-        // the org, plus assignments scoped to dying child groups (surviving
-        // users' org-row assignments — the admin's — are kept).
-        table: 'authz_persona_assignment',
-        projection: true,
-        where: guarded((ids) => {
-          const parts: string[] = [];
-          const u = inSet('user_id', ids.userDelIds);
-          if (u !== null) parts.push(u);
-          parts.push(`(group_id IN (${lit(ids.groupIds)}) AND group_id <> '${ids.orgId}')`);
-          return parts.join(' OR ');
-        }),
-      },
+      // NOTE (authz cutover, program-hub#454): the sessions-store authz mirror
+      // tables (authz_group_membership / authz_group_hierarchy /
+      // authz_persona_assignment / authz_persona_definition) are DROPPED —
+      // sessions-api now reads authz-api's capabilities per request instead of
+      // projecting grants locally. No sweep entries for them; sweeping a
+      // dropped relation aborts the whole sessions-store transaction.
       {
         // userDelIds, NOT the raw reachable set: a multi-org user's iam row
         // survives, so its mirror must too (a deleted mirror never self-heals).
@@ -548,7 +526,7 @@ export const RESET_STORES: ResetStoreDef[] = [
         // The admin's org-row assignment mirrors the KEPT iam membership row
         // (iam_row_id = adminMembershipId) — coach projections never re-emit
         // for unchanged iam rows, so deleting it would break the admin's coach
-        // persona permanently. Same protection as sessions' authz mirrors.
+        // persona permanently.
         table: 'persona_assignment',
         projection: true,
         where: guarded((ids) => {

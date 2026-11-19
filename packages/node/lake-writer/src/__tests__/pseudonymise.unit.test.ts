@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+  HashNamespace,
   districtStudentIdHash,
   hmacHex,
   looksLikeNumericDistrictId,
@@ -54,6 +55,15 @@ describe('namespacedHash', () => {
     expect(namespacedHash(SALT, 'sf_user', undefined)).toBeNull();
     expect(namespacedHash(SALT, 'sf_user', '')).toBeNull();
     expect(namespacedHash(SALT, 'sf_user', '  ')).toBeNull();
+  });
+});
+
+describe('HashNamespace.ledger_math_grade', () => {
+  it('registers the literal already hashed by ledger-api', () => {
+    expect(HashNamespace.ledger_math_grade).toBe('ledger_math_grade');
+    expect(namespacedHash(SALT, HashNamespace.ledger_math_grade, 'g-1')).toBe(
+      expectedHash('ledger_math_grade:g-1')
+    );
   });
 });
 

@@ -262,6 +262,7 @@ export const HashNamespace = {
   sis_org: 'sis_org',
   sis_enrollment: 'sis_enrollment',
   ledger_assessment: 'ledger_assessment',
+  ledger_math_grade: 'ledger_math_grade',
 } as const;
 
 export type HashNamespace = (typeof HashNamespace)[keyof typeof HashNamespace];

@@ -135,7 +135,7 @@ lockstep.
 
 `externalDatasets` is both merged, keyed by registry name (`${dataset}_${sourceSystem}`).
 
-`valid_from` / `valid_until` mean different things by dataset: on `pod_membership_programhub` they bound the membership interval; on the entity datasets (`program`, `program_period`, `program_pod`, `cohort`) they bound the effective span of that row's attribute state, are nullable, and may be derived downstream (dbt SCD2).
+`valid_from` / `valid_until` mean different things by dataset: on `pod_membership_programhub` they bound the membership interval; on the entity datasets (`iam_group`, `program`, `program_period`, `program_pod`, `cohort`) they bound the effective span of that row's attribute state, are nullable, and may be derived downstream (dbt SCD2).
 
 Mapping a Prisma row to the identity crosswalk — the district-id bridge —
 looks like:

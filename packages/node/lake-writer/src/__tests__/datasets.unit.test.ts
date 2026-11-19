@@ -10,10 +10,12 @@ import { renderDbtSourceTable, renderStageOneStanza } from '../dbt-render.js';
 import {
   externalDatasets,
   cohortProgramhubDataset,
+  iamGroupRosteringDataset,
   identityCrosswalkRosteringDataset,
   programhubDatasets,
   rosteringDatasets,
   type CohortProgramhubRow,
+  type IamGroupRosteringRow,
   type IdentityCrosswalkRosteringRow,
 } from '../datasets/index.js';
 import { runSnapshotExport } from '../export.js';
@@ -197,8 +199,9 @@ describe('end-to-end: runSnapshotExport of identity_crosswalk_rostering into a L
   });
 });
 
-describe('point-in-time validity columns on the entity-state programhub datasets', () => {
+describe('point-in-time validity columns on the entity-state datasets', () => {
   const validityDatasets = [
+    'iam_group_rostering',
     'program_programhub',
     'program_period_programhub',
     'program_pod_programhub',
@@ -275,6 +278,59 @@ describe('end-to-end: cohort_programhub write/read round-trip with null validity
 
       expect(read).toHaveLength(1);
       expect(read[0]?.cohort_id).toBe('cohort-1');
+      expect(read[0]?.valid_from ?? null).toBeNull();
+      expect(read[0]?.valid_until ?? null).toBeNull();
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('end-to-end: iam_group_rostering write/read round-trip with null validity', () => {
+  it('lands a row with null valid_from / valid_until and reads it back', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'lake-writer-iamgroup-test-'));
+    try {
+      const runId = 'run-iamgroup-1';
+      const ingestedAt = new Date('2026-09-13T00:00:00.000Z');
+      const rows: IamGroupRosteringRow[] = [
+        {
+          school_year: 'SY25-26',
+          source_system: 'rostering',
+          group_id: 'group-1',
+          parent_group_id: null,
+          org_id: 'group-1',
+          kind: 'district',
+          display_name: 'Example District',
+          status: 'ACTIVE',
+          source: null,
+          source_id: null,
+          created_at: ingestedAt,
+          updated_at: ingestedAt,
+          valid_from: null,
+          valid_until: null,
+          snapshot_at: ingestedAt,
+          ingest_run_id: runId,
+          ingested_at: ingestedAt,
+        },
+      ];
+      const result = await runSnapshotExport<IamGroupRosteringRow>({
+        dataset: iamGroupRosteringDataset,
+        rows,
+        sink: new LocalLandingSink(rootDir),
+        runId,
+        ingestedAt,
+      });
+      expect(result.partitions).toHaveLength(1);
+
+      const reader = await parquet.ParquetReader.openFile(join(rootDir, result.partitions[0]!.key));
+      const cursor = reader.getCursor();
+      const read: Array<Record<string, unknown>> = [];
+      let record: Record<string, unknown> | null;
+      while ((record = await cursor.next())) read.push(record);
+      await reader.close();
+
+      expect(read).toHaveLength(1);
+      expect(read[0]?.group_id).toBe('group-1');
       expect(read[0]?.valid_from ?? null).toBeNull();
       expect(read[0]?.valid_until ?? null).toBeNull();
     } finally {

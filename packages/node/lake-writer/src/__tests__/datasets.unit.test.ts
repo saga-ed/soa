@@ -20,17 +20,17 @@ import { LocalLandingSink } from '../sink.js';
 const entries = Object.entries(externalDatasets);
 
 describe('externalDatasets registry', () => {
-  it('defines every descriptor without throwing, and the registry has exactly the expected 11 entries', () => {
-    expect(entries).toHaveLength(11);
+  it('defines every descriptor without throwing, and the registry has exactly the expected 12 entries', () => {
+    expect(entries).toHaveLength(12);
     for (const [, dataset] of entries) {
       expect(dataset.schema).toBeDefined();
       expect(dataset.columnNames.length).toBeGreaterThan(0);
     }
   });
 
-  it('splits into 4 rostering + 7 programhub datasets', () => {
+  it('splits into 4 rostering + 8 programhub datasets', () => {
     expect(Object.keys(rosteringDatasets)).toHaveLength(4);
-    expect(Object.keys(programhubDatasets)).toHaveLength(7);
+    expect(Object.keys(programhubDatasets)).toHaveLength(8);
   });
 
   it('registry keys equal `${dataset}_${sourceSystem}` for every entry', () => {
@@ -191,5 +191,41 @@ describe('end-to-end: runSnapshotExport of identity_crosswalk_rostering into a L
     expect(manifest.runId).toBe(runId);
     expect(manifest.dataset).toBe('identity_crosswalk_rostering');
     expect(manifest.sourceSystem).toBe('rostering');
+  });
+});
+
+describe('point-in-time validity columns on the entity-state programhub datasets', () => {
+  const validityDatasets = [
+    'program_programhub',
+    'program_period_programhub',
+    'program_pod_programhub',
+    'cohort_programhub',
+  ] as const;
+
+  for (const key of validityDatasets) {
+    it(`${key}: valid_from / valid_until are optional timestamps outside the fingerprint`, () => {
+      const dataset = externalDatasets[key];
+      expect(dataset.columnNames).toEqual(expect.arrayContaining(['valid_from', 'valid_until']));
+      for (const col of ['valid_from', 'valid_until']) {
+        const field = dataset.schema.fields[col];
+        expect(field, `${key}.${col}`).toBeDefined();
+        expect(field?.repetitionType, `${key}.${col} optional`).toBe('OPTIONAL');
+        expect(field?.originalType, `${key}.${col} type`).toBe('TIMESTAMP_MILLIS');
+      }
+      expect(dataset.fingerprint).not.toContain('valid_from');
+      expect(dataset.fingerprint).not.toContain('valid_until');
+    });
+  }
+
+  it('reports drift when sources.yml drops a validity column the registry declares', () => {
+    const dataset = externalDatasets.program_programhub;
+    const yaml = `sources:\n  - name: landing\n    tables:\n${renderDbtSourceTable(dataset)}`;
+    const sources = parseYaml(yaml) as DbtSourcesFile;
+    const table = sources.sources[0]?.tables[0];
+    if (!table?.columns) throw new Error('rendered table has no columns');
+    table.columns = table.columns.filter(c => c.name !== 'valid_until');
+
+    const { problems } = compareRegistryToDbtSources({ program_programhub: dataset }, sources);
+    expect(problems.some(p => p.includes('valid_until'))).toBe(true);
   });
 });

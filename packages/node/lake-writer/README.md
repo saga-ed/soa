@@ -128,6 +128,7 @@ lockstep.
 | `iam_group_membership_rostering` | `program_school_mapping_programhub` |
 | `identity_crosswalk_rostering`   | `program_period_programhub`         |
 | `district_sync_config_rostering` | `program_pod_programhub`            |
+|                                  | `cohort_programhub`                 |
 |                                  | `pod_membership_programhub`         |
 |                                  | `session_occurrence_programhub`     |
 |                                  | `session_participant_programhub`    |

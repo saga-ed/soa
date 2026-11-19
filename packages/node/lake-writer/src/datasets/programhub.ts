@@ -35,15 +35,12 @@ export type ProgramProgramhubRow = {
   schedule_end_date: string | null;
   max_student_enrollment: number | null;
   max_tutor_allocation: number | null;
-  city: string | null;
-  state: string | null;
-  zip: string | null;
   version: number;
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
-  valid_from: Date | null;
-  valid_until: Date | null;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
   snapshot_at: Date;
   ingest_run_id: string;
   ingested_at: Date;
@@ -106,25 +103,6 @@ export const programProgramhubDataset: LandingDataset<ProgramProgramhubRow> =
         description: 'Configured tutor allocation cap.',
       },
       {
-        name: 'city',
-        type: 'string',
-        optional: true,
-        description:
-          'Program site city, in the clear (organisational location, same gate as name).',
-      },
-      {
-        name: 'state',
-        type: 'string',
-        optional: true,
-        description: 'Program site state, in the clear.',
-      },
-      {
-        name: 'zip',
-        type: 'string',
-        optional: true,
-        description: 'Program site postal code, in the clear.',
-      },
-      {
         name: 'version',
         type: 'int64',
         description: 'Optimistic-concurrency version of the program row.',
@@ -142,14 +120,14 @@ export const programProgramhubDataset: LandingDataset<ProgramProgramhubRow> =
         type: 'timestamp',
         optional: true,
         description:
-          "Instant this row's attribute state became effective (producer-stamped; falls back to updated_at).",
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
       },
       {
         name: 'valid_until',
         type: 'timestamp',
         optional: true,
         description:
-          'Instant this attribute state stopped being effective; null while current, deleted_at when soft-deleted.',
+          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row or deleted_at).',
       },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },
@@ -223,14 +201,14 @@ export type ProgramPeriodProgramhubRow = {
   student_tutor_ratio: number;
   is_ad_hoc_bucket: boolean;
   cohort_count: number;
-  block_id: string | null;
+  block_id?: string | null;
   color_key: string;
   version: number;
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
-  valid_from: Date | null;
-  valid_until: Date | null;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
   snapshot_at: Date;
   ingest_run_id: string;
   ingested_at: Date;
@@ -316,14 +294,14 @@ export const programPeriodProgramhubDataset: LandingDataset<ProgramPeriodProgram
         type: 'timestamp',
         optional: true,
         description:
-          "Instant this row's attribute state became effective (producer-stamped; falls back to updated_at).",
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
       },
       {
         name: 'valid_until',
         type: 'timestamp',
         optional: true,
         description:
-          'Instant this attribute state stopped being effective; null while current, deleted_at when soft-deleted.',
+          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row or deleted_at).',
       },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },
@@ -343,14 +321,12 @@ export type ProgramPodProgramhubRow = {
   treatment_kind: string | null;
   no_tutor_required: boolean;
   is_ad_hoc: boolean;
-  classroom_id: string | null;
-  activity_type: string | null;
   version: number;
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
-  valid_from: Date | null;
-  valid_until: Date | null;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
   snapshot_at: Date;
   ingest_run_id: string;
   ingested_at: Date;
@@ -358,8 +334,8 @@ export type ProgramPodProgramhubRow = {
 
 /**
  * One row per pod overlapping the school year. No student_year_hash —
- * pod-level, not personal. Dropped: `name`, `idempotency_key`, rostering
- * group ids.
+ * pod-level, not personal. Dropped: `name`, `activity_type`, classroom,
+ * `idempotency_key`, rostering group ids.
  */
 export const programPodProgramhubDataset: LandingDataset<ProgramPodProgramhubRow> =
   defineLandingDataset<ProgramPodProgramhubRow>({
@@ -405,18 +381,6 @@ export const programPodProgramhubDataset: LandingDataset<ProgramPodProgramhubRow
       },
       { name: 'is_ad_hoc', type: 'boolean', description: 'Whether this pod was created ad hoc.' },
       {
-        name: 'classroom_id',
-        type: 'string',
-        optional: true,
-        description: 'Classroom id, raw, when assigned.',
-      },
-      {
-        name: 'activity_type',
-        type: 'string',
-        optional: true,
-        description: 'Split-period activity label.',
-      },
-      {
         name: 'version',
         type: 'int64',
         description: 'Optimistic-concurrency version of the pod row.',
@@ -434,14 +398,14 @@ export const programPodProgramhubDataset: LandingDataset<ProgramPodProgramhubRow
         type: 'timestamp',
         optional: true,
         description:
-          "Instant this row's attribute state became effective (producer-stamped; falls back to updated_at).",
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
       },
       {
         name: 'valid_until',
         type: 'timestamp',
         optional: true,
         description:
-          'Instant this attribute state stopped being effective; null while current, deleted_at when soft-deleted.',
+          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row or deleted_at).',
       },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },
@@ -460,8 +424,8 @@ export type CohortProgramhubRow = {
   deleted_at: Date | null;
   created_at: Date;
   updated_at: Date;
-  valid_from: Date | null;
-  valid_until: Date | null;
+  valid_from?: Date | null;
+  valid_until?: Date | null;
   snapshot_at: Date;
   ingest_run_id: string;
   ingested_at: Date;
@@ -505,14 +469,14 @@ export const cohortProgramhubDataset: LandingDataset<CohortProgramhubRow> =
         type: 'timestamp',
         optional: true,
         description:
-          "Instant this row's attribute state became effective (producer-stamped; falls back to updated_at).",
+          "Instant this row's attribute state became effective; null when the producer did not stamp it (dbt may derive).",
       },
       {
         name: 'valid_until',
         type: 'timestamp',
         optional: true,
         description:
-          'Instant this attribute state stopped being effective; null while current, deleted_at when soft-deleted.',
+          'Instant this attribute state stopped being effective; null while current (dbt may derive from the next row or deleted_at).',
       },
       { name: 'snapshot_at', type: 'timestamp', description: 'Instant this snapshot was taken.' },
       { name: 'ingest_run_id', type: 'string', description: 'Export run id.' },

@@ -1,3 +1,4 @@
+import parquet from '@dsnp/parquetjs';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,9 +9,11 @@ import { compareRegistryToDbtSources, type DbtSourcesFile } from '../drift.js';
 import { renderDbtSourceTable, renderStageOneStanza } from '../dbt-render.js';
 import {
   externalDatasets,
+  cohortProgramhubDataset,
   identityCrosswalkRosteringDataset,
   programhubDatasets,
   rosteringDatasets,
+  type CohortProgramhubRow,
   type IdentityCrosswalkRosteringRow,
 } from '../datasets/index.js';
 import { runSnapshotExport } from '../export.js';
@@ -227,5 +230,55 @@ describe('point-in-time validity columns on the entity-state programhub datasets
 
     const { problems } = compareRegistryToDbtSources({ program_programhub: dataset }, sources);
     expect(problems.some(p => p.includes('valid_until'))).toBe(true);
+  });
+});
+
+describe('end-to-end: cohort_programhub write/read round-trip with null validity', () => {
+  it('lands a row with null valid_from / valid_until and reads it back', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'lake-writer-cohort-test-'));
+    try {
+      const runId = 'run-cohort-1';
+      const ingestedAt = new Date('2026-09-13T00:00:00.000Z');
+      const rows: CohortProgramhubRow[] = [
+        {
+          school_year: 'SY25-26',
+          source_system: 'programhub',
+          cohort_id: 'cohort-1',
+          period_id: 'period-1',
+          program_id: 'program-1',
+          version: 1,
+          deleted_at: null,
+          created_at: ingestedAt,
+          updated_at: ingestedAt,
+          valid_from: null,
+          valid_until: null,
+          snapshot_at: ingestedAt,
+          ingest_run_id: runId,
+          ingested_at: ingestedAt,
+        },
+      ];
+      const result = await runSnapshotExport<CohortProgramhubRow>({
+        dataset: cohortProgramhubDataset,
+        rows,
+        sink: new LocalLandingSink(rootDir),
+        runId,
+        ingestedAt,
+      });
+      expect(result.partitions).toHaveLength(1);
+
+      const reader = await parquet.ParquetReader.openFile(join(rootDir, result.partitions[0]!.key));
+      const cursor = reader.getCursor();
+      const read: Array<Record<string, unknown>> = [];
+      let record: Record<string, unknown> | null;
+      while ((record = await cursor.next())) read.push(record);
+      await reader.close();
+
+      expect(read).toHaveLength(1);
+      expect(read[0]?.cohort_id).toBe('cohort-1');
+      expect(read[0]?.valid_from ?? null).toBeNull();
+      expect(read[0]?.valid_until ?? null).toBeNull();
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 });

@@ -74,7 +74,7 @@ Invariants are keyed on ACCOUNT x LANE, not on behaviour profile. Profile is a d
 |---|---|---|---|---|
 | R1 prod | prod | none | `failFast`, `credentialSource=iam-token`, tls with CA, `mailSink=ses` (only when the service's declaration lists mail), `outbound.* = live` per declaration, `telemetryEnv=prod`, `devPerimeter=off` | `permissiveAuthz`, `capture`/`stub` mail, sinks, dev origins |
 | R2 lane | dev | twin or mirror | `failFast`, `credentialSource=iam-token`, tls, `devPerimeter=off`, `telemetryEnv != prod`, `mailSink=capture`, every `outbound.* in {sink, off}` | `permissiveAuthz`, `mailSink=ses`, `live` outbound, prod-named SSM values that do not resolve to lane resources (guard) |
-| R3 dev overlay | dev | none | `devPerimeter in {on, off}` (default on; only R1 and R2 force off), `telemetryEnv=dev`, dev bindings (`credentialSource` per service SSM; `static` allowed), `mailSink in {stub, capture}`; `failFast` follows the legacy NODE_ENV branch until the service flips | `permissiveAuthz`, `mailSink=ses` to real recipients, prod secret paths |
+| R3 dev overlay | dev | none | `devPerimeter in {on, off}` (default on; only R1 and R2 force off), `telemetryEnv in {dev, dev-sandbox}` (`dev-sandbox` for saga-sandbox, iac#1025), dev bindings (`credentialSource` per service SSM; `static` allowed), `mailSink in {stub, capture}`; `failFast` follows the legacy NODE_ENV branch until the service flips | `permissiveAuthz`, `mailSink=ses` to real recipients, prod secret paths |
 | R4 local | local | none | `credentialSource=static`, `mailSink in {stub, capture}`, `outbound.* in {off, sink}` | prod secret paths, `LANE != none` |
 | - | prod | twin or mirror | boot fails (lane in the prod account) | everything |
 | - | any | invalid | boot fails | everything |
@@ -92,7 +92,7 @@ Every current environment maps to exactly one row (values marked [assumed] are f
 | dev-main | dev (-> prod after flip) | development (-> production) | none | dev | R3 |
 | container-per-PR preview | dev (verified for rostering; [assumed] for program-hub, sds, coach) | development (same) | none | dev | R3 |
 | training | dev (verified for rostering; [assumed] elsewhere) | development (same) | none | dev | R3 |
-| saga-sandbox | dev (verified for rostering; [assumed] elsewhere) | development (same) | none | dev | R3 |
+| saga-sandbox | dev (verified for rostering; [assumed] elsewhere) | development (same) | none | dev-sandbox | R3 |
 | /ss (saga-stack-cli) | unset | development | none | local (`SAGA_LOCAL=1`) | R4 |
 | CI unit/integration tests | unset | test | none | local (`SAGA_LOCAL=1` via test setup) | R4 |
 

@@ -102,6 +102,10 @@ describe('createEnv: valid configuration per row', () => {
     expect(withRegex.corsOrigins[0]).toBe('https://a.example.org');
     expect(withRegex.corsOrigins[1]).toBeInstanceOf(RegExp);
   });
+
+  it('R3 accepts the dev-sandbox telemetry env', () => {
+    expect(violationsOf('R3-dev-overlay', { TELEMETRY: 'dev-sandbox' })).toEqual([]);
+  });
 });
 
 describe('createEnv: invariant table', () => {
@@ -129,6 +133,7 @@ describe('createEnv: invariant table', () => {
     ['R2-lane', 'live outbound', { OUTBOUND: 'clever=live,lake-export=off' }],
     ['R2-lane', 'permissiveAuthz', { PERMISSIVE: 'true' }],
     ['R3-dev-overlay', 'telemetryEnv', { TELEMETRY: 'prod' }],
+    ['R3-dev-overlay', 'telemetryEnv twin', { TELEMETRY: 'twin' }],
     ['R3-dev-overlay', 'mailSink ses', { MAIL: 'ses' }],
     ['R3-dev-overlay', 'permissiveAuthz', { PERMISSIVE: 'true' }],
     ['R4-local', 'credentialSource', { CRED: 'iam-token' }],

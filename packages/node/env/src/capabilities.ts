@@ -266,8 +266,8 @@ export function createEnv(
       break;
     case 'R3-dev-overlay':
       need(
-        defined(telemetryEnv, v => v === 'dev'),
-        'telemetryEnv must be dev'
+        defined(telemetryEnv, v => v === 'dev' || v === 'dev-sandbox'),
+        'telemetryEnv must be dev or dev-sandbox'
       );
       need(
         defined(mailSink, v => v === 'stub' || v === 'capture'),

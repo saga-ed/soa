@@ -533,7 +533,9 @@ describe('env connect --env dev — the db-host style is untouched by the prod w
   });
 });
 
-describe('env connect — dedicated db jump host', () => {
+const realSetTimeout = globalThis.setTimeout;
+
+describe('env connect — dedicated db jump host', { timeout: 30_000 }, () => {
   const RDS = 'prod-shared-pg.cluster-abc123.us-west-2.rds.amazonaws.com';
   let state = 'running';
   let online = true;
@@ -571,7 +573,12 @@ describe('env connect — dedicated db jump host', () => {
       const run = EnvConnect.run(argv, config);
       let done = false;
       const settled = run.then(() => undefined, (e: unknown) => e).finally(() => (done = true));
-      for (let i = 0; i < 100 && !done; i++) await vi.advanceTimersByTimeAsync(5_000);
+      // Advance fake time only while the command waits on a fake timer; otherwise yield real
+      // time, so real async before the first poll can't exhaust the advances and hang the test.
+      while (!done) {
+        if (vi.getTimerCount() > 0) await vi.advanceTimersByTimeAsync(5_000);
+        else await new Promise<void>((r) => realSetTimeout(r, 1));
+      }
       const err = await settled;
       if (err !== undefined) throw err;
     } finally {
@@ -581,7 +588,6 @@ describe('env connect — dedicated db jump host', () => {
   const startCalls = (): string[][] => awsCalls.filter((c) => c.args[1] === 'start-instances').map((c) => c.args);
 
   beforeEach(() => {
-    vi.setConfig({ testTimeout: 30_000 });
     callerAccount = PROD_ACCOUNT;
     state = 'running';
     online = true;

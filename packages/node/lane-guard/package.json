@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-lane-guard",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "private": false,
     "type": "module",
     "description": "Boot-time fail-closed guard: refuses to start a service on a twin or mirror lane (infra-set LANE) when its env points at prod resources or prod side-effect channels.",
@@ -20,10 +20,16 @@
         "lint": "eslint src/",
         "clean": "rm -rf dist"
     },
-    "dependencies": {
-        "@saga-ed/soa-env": "workspace:*"
+    "peerDependencies": {
+        "@saga-ed/soa-env": ">=0.2.0 <0.3.0"
+    },
+    "peerDependenciesMeta": {
+        "@saga-ed/soa-env": {
+            "optional": true
+        }
     },
     "devDependencies": {
+        "@saga-ed/soa-env": "workspace:*",
         "@saga-ed/soa-typescript-config": "workspace:*",
         "@types/node": "^24.0.3",
         "tsup": "^8.5.0",

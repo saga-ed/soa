@@ -1,6 +1,6 @@
 {
     "name": "@saga-ed/soa-health",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "private": false,
     "type": "module",
     "main": "dist/index.js",
@@ -31,10 +31,16 @@
         "lint": "eslint src/",
         "clean": "rm -rf dist"
     },
-    "dependencies": {
-        "@saga-ed/soa-env": "workspace:*"
+    "peerDependencies": {
+        "@saga-ed/soa-env": ">=0.2.0 <0.3.0"
+    },
+    "peerDependenciesMeta": {
+        "@saga-ed/soa-env": {
+            "optional": true
+        }
     },
     "devDependencies": {
+        "@saga-ed/soa-env": "workspace:*",
         "@saga-ed/soa-typescript-config": "workspace:*",
         "@types/node": "^24.0.3",
         "tsup": "^8.5.0",

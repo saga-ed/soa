@@ -1,9 +1,9 @@
 {
   "fixtureId": "adm-combined",
   "schemaVersion": 1,
-  "description": "Real prod-derived adm fixture: Chicago Public Schools (LVLHS, Simeon) + NMPED (Pecos), SY 2025-26. Anchor for Phase 4 cross-repo coherence work between rostering, program-hub, and ads-adm.",
+  "description": "Prod-mirror-shaped adm fixture: two districts, three programs, SY 2025-26. Anchor for Phase 4 cross-repo coherence work between rostering, program-hub, and ads-adm.",
   "prodMirrorSource": {
-    "mongoUri": "mongodb://mongo5.mirror.internal:27017",
+    "mongoUri": "mongodb://localhost:27017",
     "sagaDbName": "saga_blank",
     "arsDbName": "ars"
   },
@@ -14,19 +14,19 @@
   "orgs": [
     {
       "id": "85d438b5-78b0-fa96-fbda-f7eae119251e",
-      "displayName": "Chicago Public Schools",
+      "displayName": "District A",
       "timezone": "America/Chicago",
       "programs": [
-        { "id": "c2a01e8a-985f-dca8-0756-9143645c39bf", "displayName": "LVLHS INF/WL" },
-        { "id": "4525e730-8cc4-bc4b-e287-3ea82cf81eb2", "displayName": "Simeon" }
+        { "id": "c2a01e8a-985f-dca8-0756-9143645c39bf", "displayName": "Program A1" },
+        { "id": "4525e730-8cc4-bc4b-e287-3ea82cf81eb2", "displayName": "Program A2" }
       ]
     },
     {
       "id": "dec6b72c-2139-72d6-c421-90e63937998b",
-      "displayName": "NMPED",
+      "displayName": "District B",
       "timezone": "America/Denver",
       "programs": [
-        { "id": "c3f3556d-d7c9-8523-83eb-4cf4e17ac074", "displayName": "Pecos Cyber Academy 6th" }
+        { "id": "c3f3556d-d7c9-8523-83eb-4cf4e17ac074", "displayName": "Program B1" }
       ]
     }
   ]

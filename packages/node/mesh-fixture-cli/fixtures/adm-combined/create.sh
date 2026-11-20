@@ -3,8 +3,8 @@
 # create.sh — author the `adm-combined` fixture on a running saga-mesh.
 #
 # Composes the three idempotent prod-mirror→postgres seed pipelines into a
-# coherent fixture against three target programs (Chicago LVLHS + Simeon +
-# Pecos-6th). Each step writes caller-specified UUIDs that round-trip
+# coherent fixture against three target programs (two in district A,
+# one in district B). Each step writes caller-specified UUIDs that round-trip
 # across the iam-api / programs-api / ads-adm-api boundaries:
 #
 #   1. iam:seed-from-prod-mirror   — iam_local + iam_pii_local
@@ -29,7 +29,7 @@
 #
 # Prereqs (user runs these first):
 #   1. saga-mesh.sh doctor && saga-mesh.sh setup
-#   2. VPN connected (mongo5.mirror.internal access)
+#   2. VPN connected (prod-mirror mongo access; set prodMirrorSource.mongoUri in definition.json)
 #   3. iam-api / programs-api / ads-adm-api running
 #   4. All three seed packages built:
 #        pnpm -C ~/dev/rostering/packages/node/iam-seed build

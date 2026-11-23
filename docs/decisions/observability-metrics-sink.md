@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 ---
 
 # Where soa-observability domain metrics land
@@ -49,7 +49,9 @@ What already exists:
 | D | ADOT / OTel collector sidecar to CloudWatch | Standard. | A sidecar on every task is more moving parts and cost than A. |
 | E | #535 MQ stats reports only | Feeds Vishnu. | Shares RabbitMQ's outage domain. #535 itself asks for an independent local signal. |
 
-## Decision (proposed)
+## Decision
+
+Accepted 2026-11-23.
 
 **A, with the split below.** Queue depth and DLQ growth are broker facts, not
 app facts.
@@ -60,7 +62,8 @@ app facts.
      (`registry.getMetricsAsJSON()`) and doesn't mint competing counters (the #535
      constraint). It writes one EMF line per interval through the service logger.
    - Namespace: `SagaSoa/Events` (fleet convention `Saga<Area>/<Component>`).
-   - Dimensions: `[Environment, Service]`. Consumer metrics also take `Consumer`.
+   - Dimensions: `[Environment, Service]`. A registry holds at most one consumer
+     (`addConsumer` registers fixed metric names), so `Service` identifies it.
      - `Environment` is the telemetry env, `dev` or `prod`, never NODE_ENV and never
        a preview or slot tag. `SagaAuthz/Projection` already shows `twin` and
        `dev-sandbox` values creating extra series.

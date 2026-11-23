@@ -65,6 +65,40 @@ instrument, tagged with the trace resource (`service.name`, `service.version`,
 Don't register a second global `MeterProvider` in the service; it competes
 with this one.
 
+## EMF metrics reporter (opt-in)
+
+`startEmfReporter()` emits the registry's domain metrics as CloudWatch
+Embedded Metric Format log lines (namespace `SagaSoa/Events`, dimensions
+`Environment` + `Service`). The awslogs driver ships stdout to CloudWatch,
+which mints the metrics; nothing needs to scrape `/metrics`.
+
+```typescript
+import { createObservability, startEmfReporter } from '@saga-ed/soa-observability';
+
+const obs = createObservability('iam-api', logger);
+// ...obs.addOutbox(pool) / obs.addConsumer(pool, name)
+const emf = startEmfReporter(obs.registry, {
+    service: 'iam-api',
+    environment: 'prod', // telemetry env 'dev' | 'prod', never NODE_ENV or a preview tag
+    logger,
+});
+// on shutdown: await emf.stop();  // one final counter flush
+```
+
+- Counters (`EventsPublished`, `EventsPublishFailed`, `EventsProcessed`,
+  `EventsFailed`, `EventsDuplicate`, `GaugeCollectFailures`) are per-interval
+  deltas summed across label sets, every `counterIntervalMs` (60s). The first
+  delta is relative to values at start. The per-`event_type@version` split is a
+  root `breakdown` property, not a dimension.
+- Gauges (`OutboxUnpublishedCount`, and `ConsumedEventsCount` with
+  `includeConsumedEventsCount: true`) are read every `gaugeIntervalMs` (300s).
+  They run a `count(*)` in `collect()`, so counters are read per-metric and
+  never via `registry.metrics()`.
+- Only metrics registered in the registry are emitted. Default process metrics
+  are not.
+- `EventsProcessed` also counts duplicate skips (existing
+  `events_processed_total` semantics); subtract `EventsDuplicate` for net-new.
+
 ## See also
 
 - `@saga-ed/soa-eslint-config` — the `saga-soa/init-tracing-first` lint

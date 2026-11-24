@@ -171,14 +171,16 @@ describe('buildResetPlan — order, skeleton predicates, empty-set skips', () =>
     expect(sql('group_auth_config')).toContain(`group_id <> '${ORG.orgId}'`);
   });
 
-  it('sessions authz mirrors keep the admin membership + org hierarchy rows', () => {
+  it('sessions store has NO authz mirror sweeps (tables dropped by program-hub#454)', () => {
     const plan = buildResetPlan(fullIds());
     const sessions = plan.find((s) => s.store === 'sessions')!;
-    const sql = (table: string): string => sessions.tables.find((t) => t.table === table)!.deleteSql!;
-    expect(sql('authz_group_membership')).toContain(`iam_row_id IS DISTINCT FROM '${ORG.adminMembershipId}'`);
-    expect(sql('authz_group_hierarchy')).toContain(`child_group_id <> '${ORG.orgId}'`);
-    expect(sql('authz_persona_assignment')).toContain(`user_id IN ('${USER}')`);
-    expect(sql('authz_persona_assignment')).toContain(`group_id <> '${ORG.orgId}'`);
+    const tables = sessions.tables.map((t) => t.table);
+    // Sweeping a dropped relation aborts the whole sessions-store transaction —
+    // the cutover deleted these tables, so the plan must not reference them.
+    expect(tables).not.toContain('authz_group_membership');
+    expect(tables).not.toContain('authz_group_hierarchy');
+    expect(tables).not.toContain('authz_persona_assignment');
+    expect(tables).not.toContain('authz_persona_definition');
   });
 
   it('every user-keyed sweep uses userDelIds (multi-org survivors keep mirrors/PII/progress)', () => {

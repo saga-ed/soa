@@ -13,6 +13,12 @@ export {
     type ConsumerMetrics,
     type OutboxMetrics,
 } from './metrics.js';
+export {
+    startEmfReporter,
+    EMF_NAMESPACE,
+    type EmfReporter,
+    type EmfReporterOptions,
+} from './emf-reporter.js';
 export { structuredErrorMiddleware } from './error-middleware.js';
 export { recordSpanException } from './record-exception.js';
 export {
